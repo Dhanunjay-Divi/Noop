@@ -175,17 +175,6 @@
     "zh-Hans": "此评估基于一个当前恢复信号。",
     "zh-Hant": "此評估基於一個目前恢復訊號。"
   },
-  "appwide.readiness.limitation.recent_load": {
-    "de": "Das Verhältnis der letzten Belastung ist beschreibend und beeinflusst die Bereitschaft nicht.",
-    "en": "The recent-load ratio is descriptive and does not affect readiness.",
-    "es": "La proporción de carga reciente es descriptiva y no afecta a la preparación.",
-    "fr": "Le ratio de charge récente est descriptif et n’influence pas la préparation.",
-    "it": "Il rapporto del carico recente è descrittivo e non influisce sulla preparazione.",
-    "pt-PT": "O rácio de carga recente é descritivo e não afeta a prontidão.",
-    "ru": "Соотношение недавней нагрузки носит описательный характер и не влияет на готовность.",
-    "zh-Hans": "近期负荷比仅用于描述，不影响准备度。",
-    "zh-Hant": "近期負荷比僅用於描述，不影響準備度。"
-  },
   "appwide.readiness.primed.headline": {
     "de": "Im Einklang",
     "en": "Aligned",
@@ -2110,6 +2099,17 @@
     "ru": "Обновления, непрочитанных: %1$d",
     "zh-Hans": "更新，%1$d 条未读",
     "zh-Hant": "更新，%1$d 則未讀"
+  },
+  "appwide.sleep.edit_conflict": {
+    "de": "Diese Nacht wurde geändert, bevor die Bearbeitung gespeichert werden konnte. Die neuesten Daten wurden wiederhergestellt.",
+    "en": "This night changed before the edit could be saved. Latest data restored.",
+    "es": "Esta noche cambió antes de que se pudiera guardar la edición. Se restauraron los datos más recientes.",
+    "fr": "Cette nuit a changé avant que la modification puisse être enregistrée. Les données les plus récentes ont été restaurées.",
+    "it": "Questa notte è cambiata prima che la modifica potesse essere salvata. Sono stati ripristinati i dati più recenti.",
+    "pt-PT": "Esta noite foi alterada antes de ser possível guardar a edição. Os dados mais recentes foram repostos.",
+    "ru": "Данные этой ночи изменились до сохранения правки. Восстановлены последние данные.",
+    "zh-Hans": "编辑保存前，这一晚的数据已发生变化。已恢复最新数据。",
+    "zh-Hant": "編輯儲存前，這一晚的資料已變更。已還原最新資料。"
   },
   "appwide.sleep.recovery.added_format": {
     "de": "Die jüngste Bilanz fügt heute Nacht %1$s hinzu. Das ist auf 1 Stunde begrenzt und senkt dein Ziel nie.",

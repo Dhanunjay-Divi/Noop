@@ -13,8 +13,7 @@ final class CoachEvidenceEnvelopeTests: XCTestCase {
                 .init(key: "hrv", label: "HRV", detail: "within range", flag: .neutral),
                 .init(key: "rhr", label: "RHR", detail: "within range", flag: .neutral),
             ],
-            acwr: nil,
-            monotony: nil,
+            effortVariety: nil,
             asOfDay: "2026-08-24",
             confidence: .solid,
             baselineDays: 20

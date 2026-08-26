@@ -79,6 +79,95 @@ final class EditMergePrecedenceTests: XCTestCase {
         XCTAssertEqual(days, [expectedDay])
     }
 
+    func testUserEditedDaysBridgesBeforeAssigningWakeDay() {
+        let midnight = 1_783_641_600
+        let first = CachedSleepSession(
+            startTs: midnight - 90 * 60,
+            endTs: midnight - 5 * 60,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: true)
+        let continuation = CachedSleepSession(
+            startTs: midnight + 5 * 60,
+            endTs: midnight + 2 * 3_600,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil)
+        let offset = TimeZone.current.secondsFromGMT(
+            for: Date(timeIntervalSince1970: TimeInterval(continuation.endTs)))
+        let wakeDay = AnalyticsEngine.dayString(
+            continuation.endTs,
+            offsetSec: offset)
+
+        XCTAssertEqual(
+            Repository.userEditedDays([first, continuation]),
+            [wakeDay])
+    }
+
+    func testUserEditedDaysDoesNotBridgeAcrossSources() {
+        let midnight = 1_783_641_600
+        let editedBeforeMidnight = CachedSleepSession(
+            startTs: midnight - 90 * 60,
+            endTs: midnight - 5 * 60,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: true)
+        let otherSourceAfterMidnight = CachedSleepSession(
+            startTs: midnight + 5 * 60,
+            endTs: midnight + 2 * 3_600,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil)
+        let offset = TimeZone.current.secondsFromGMT(
+            for: Date(timeIntervalSince1970: TimeInterval(editedBeforeMidnight.endTs)))
+        let editedWakeDay = AnalyticsEngine.dayString(
+            editedBeforeMidnight.endTs,
+            offsetSec: offset)
+
+        XCTAssertEqual(
+            Repository.userEditedDays([
+                "source-a": [editedBeforeMidnight],
+                "source-b": [otherSourceAfterMidnight],
+            ]),
+            [editedWakeDay])
+    }
+
+    func testEditedRowsForDayUsesBridgedFinalWake() {
+        let midnight = 1_783_641_600
+        let first = CachedSleepSession(
+            startTs: midnight - 90 * 60,
+            endTs: midnight - 5 * 60,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: true)
+        let continuation = CachedSleepSession(
+            startTs: midnight + 5 * 60,
+            endTs: midnight + 2 * 3_600,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil)
+        let wakeDay = AnalyticsEngine.dayString(
+            continuation.endTs,
+            offsetSec: 0)
+
+        XCTAssertEqual(
+            IntelligenceEngine.editedRowsForDay(
+                [first],
+                day: wakeDay,
+                tzOffsetSeconds: 0,
+                sourceTimeline: [first, continuation]),
+            [first])
+    }
+
     // MARK: - sleep_performance daily-column derivation (#614)
     //
     // The resolver derives the Rest composite from a banked DailyMetric's sleep totals when no

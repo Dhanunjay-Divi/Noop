@@ -11,12 +11,13 @@ enum TemporaryDatabase {
         return url
     }
 
-    static func seeded() throws -> URL {
+    static func seeded(customize: ((Database) throws -> Void)? = nil) throws -> URL {
         let url = try emptyFileURL()
         let dbQueue = try DatabaseQueue(path: url.path)
         try dbQueue.write { db in
             try createSchema(db)
             try seed(db)
+            try customize?(db)
         }
         return url
     }
@@ -58,7 +59,9 @@ enum TemporaryDatabase {
         try db.execute(sql: """
             CREATE TABLE sleepSession(
                 deviceId TEXT NOT NULL, startTs INTEGER NOT NULL, endTs INTEGER NOT NULL,
+                startTsAdjusted INTEGER,
                 efficiency DOUBLE, restingHr INTEGER, avgHrv DOUBLE, stagesJSON TEXT,
+                rrEligibleWindowCount INTEGER, rrValidWindowCount INTEGER,
                 PRIMARY KEY(deviceId, startTs)
             )
             """)

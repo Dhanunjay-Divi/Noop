@@ -1,6 +1,6 @@
 # Deployability review + metric accuracy audit
 
-**Date:** 2026-08-25 · **Reviewed:** the parallel agent's work through `ac66de4b` plus 141 uncommitted files
+**Date:** 2026-08-26 · **Reviewed:** the Round 22 working tree based on `8b733c15`
 **Audited against:** Task Force of the ESC/NASPE 1996 (HRV) · Impellizzeri 2020 / BJSM 2019 (ACWR) ·
 Foster 1998 (monotony) · Banister/Coggan impulse-response (ATL/CTL/TSB) · Walch 2019 (sleep staging ceiling)
 
@@ -18,14 +18,16 @@ regulatory evidence.
 
 | Gate | Result |
 |---|---|
-| Engines | 1,383 tests, 0 failures (8 opt-in skips) |
-| macOS app | 1,435 tests, 0 failures |
+| StrandAnalytics | 1,402 tests, 0 failures (7 opt-in skips) |
+| macOS app | 1,490 tests, 0 failures (1 opt-in skip) |
+| Android Full + Demo | 3,775 tests per variant, 0 failures (7 opt-in skips each) |
+| iOS pull-to-sync UI | 1 focused simulator test, 0 failures |
 | Legal inventory | 152 runtime components verified |
 | i18n strict | PASS |
-| Health-claims scan | clear, 1,059 files |
+| Health-claims scan | clear, 1,066 files |
 
-Caveat on that: **141 files are uncommitted and the tree was being written during this review** (newest
-write 19:48, one minute before I looked). Those numbers have a shelf life measured in minutes.
+The complete local evidence and the remaining external gates are recorded in
+`docs/ops/rounds/2026-08-26-metric-evidence-boundaries.md`.
 
 ---
 
@@ -66,10 +68,13 @@ user is not scored against a baseline that does not exist yet.
 
 ### What remains from my earlier review
 
-* **The anchor is still open.** `logisticZ0 = −0.20` and `populationMean = 58.0` are unchanged, and residual
-  bias is −3.4 to −9.7 — still negative for every wearer. This is now the single largest remaining
-  calibration gap, and `PersonalCalibrationModel` in `WhoopReferenceCalibration.swift` still exists unused
-  for it.
+* **The mapping terminology is resolved without changing calibration.** The unused
+  population-mean fallback symbol was removed, while the fixed logistic parameters
+  remain `slope = 1.6` and `midpoint z = −0.20`. They map a personal-baseline
+  composite onto the display scale; they are not a population statistic or a
+  cold-start fallback. Residual reference bias of −3.4 to −9.7 remains a validation
+  observation, not a production fitting target. `PersonalCalibrationModel` remains
+  isolated to comparison tooling under D-025.
 * **My earlier pushback on the "Complete calibration" commit stands**, but is now partly answered: that
   commit moved no constant, whereas *this* work did. The naming was ahead of the substance; the substance
   has since arrived.
@@ -104,9 +109,11 @@ Two things here are better than typical consumer implementations:
 
 The Kubios/Lipponen–Tarvainen substitution is disclosed honestly in the header rather than hidden.
 
-**Minor:** `WatchRecovery.swift` drives its baseline from `sdnnHistory`/`todaySDNN` while the phone uses
-RMSSD. If the watch's usable window varies night to night, watch and phone can disagree for a reason that is
-purely methodological. Worth either aligning on RMSSD or documenting why the watch differs.
+**Resolved method boundary:** Apple Health supplies SDNN while the strap path computes RMSSD. They remain
+separate because they are different statistics. `WatchRecovery.HRVSample` now carries source and method,
+baseline construction accepts only exact provenance matches, the result exposes that provenance, and the
+Apple Watch explanation names the difference. A source or method switch starts a fresh baseline instead of
+mixing numerically plausible millisecond values.
 
 ### Training load — **correct, and it dodged a trap the industry fell into** ✅
 
@@ -122,42 +129,30 @@ plainly that the values *"do not directly measure fatigue, fitness, readiness, i
 train"*, and it warns that a bounded nonlinear score **must not be summed as impulse load** — a subtlety most
 implementations miss.
 
-`ReadinessEngine` does compute an ACWR, and handles it about as well as it can be handled:
+`ReadinessEngine` no longer computes or publishes ACWR. It also no longer treats bounded nonlinear Effort
+as additive load. A calendar-bounded weekly mean/SD can surface only as an **Effort variety** observation;
+it is excluded from readiness synthesis and framed as an association, never an injury or overtraining
+inference. `TrainingLoadModel` is now the only ATL/CTL/TSB path and accepts explicit additive entries such
+as session-RPE minutes, TRIMP, or MET-minutes.
 
-```swift
-// This ratio has no validated universal "good", "bad", or injury-risk bands. Keep the legacy
-// Signal/Flag API shape, but always emit `.neutral` … `synthesize` also excludes this key so the
-// number cannot change readiness or prescribe training.
-```
+### Sleep staging — **the remaining accuracy gap** ⚠️
 
-Always `.neutral`, excluded from the score, disclosed as a limitation, and no bands. That is the correct
-posture for a discredited metric that users still expect to see.
-
-**Two defects remain:**
-
-1. **The ratio is coupled.** `acuteWindow = 7`, `chronicWindow = 28`, both ending on the same day — so the
-   acute window is a *subset* of the chronic window. This is precisely the mathematical coupling BJSM
-   identified as the source of spurious correlation; the literature's fix is the **uncoupled** form
-   (chronic computed over days 8–28). Because NOOP presents it as pure arithmetic this matters less than it
-   would for a risk metric, but the number is partly self-correlated, which makes it less meaningful than it
-   looks. Cheap fix.
-2. **It uses bounded Effort/strain as the load unit**, which `TrainingLoadModel`'s own documentation forbids
-   for impulse load. Averaging is milder than summing, but it is the same category error, and the two
-   engines in this codebase currently disagree with each other about it.
-
-Foster monotony (mean/SD of weekly load, flagged at ≥ 2.0) is a real published metric used as a `.watch`
-hint rather than a risk claim. Acceptable.
-
-### Sleep staging — **the weakest metric, and the honest gap** ⚠️
-
-Measured against expert PSG (`MULTI-DATASET-VERDICTS.md`): 4-class agreement **46.8%** against the
-**65–73%** ceiling the engine's own header cites, with **REM recall 3.7%** and **deep recall 6.9%** — and
-51% of REM epochs classified as *wake*.
+The corrected harness directly exercises shipped `SleepStagerV2` against
+expert PSG (`MULTI-DATASET-VERDICTS.md`): 4-class agreement is **61.6%**,
+sleep/wake agreement **91.6%**, Deep recall **83.1%**, REM recall **75.6%**,
+and Wake recall only **10.0%**. The earlier 46.8% / 3.7% result exercised the
+legacy stager and is superseded. High aggregate sleep/wake agreement does not
+make the weak wake sensitivity acceptable for an arousal or wake-accuracy
+claim.
 
 The caveat is real: the dataset carries no R-R intervals and no respiration, both of which the engine's
-Stage-1 features expect. But the product consequence stands: **when R-R is unavailable, REM and deep minutes
-are not measurements and should not be presented as if they were.** That remains my top open recommendation,
-and it is a provenance change, not a model change.
+Stage-1 features expect. The product now handles that limitation explicitly: locally classified Deep, REM,
+Light, awake, and restorative figures require persisted sustained R-R evidence for the exact source, wake
+day, and canonical main-sleep group. A same-day nap cannot borrow the main night's verdict. Without it,
+the detailed split is withheld while total sleep remains available. Independently classified imports
+remain publishable with disclosed provenance inside NOOP and portable exports; NOOP-authored HealthKit
+and Health Connect writes keep those imported labels stage-free. Raw local estimates stay stored for
+diagnostics and future reprocessing; the gate changes publication, not the model.
 
 ### Notification integrity — **architecture is right** ✅
 
@@ -176,12 +171,15 @@ replaces rather than duplicates. No silent failures, no duplicates found.
 
 ## 4. Ranked recommendations
 
-1. **Gate REM/deep minutes on R-R availability.** Highest honesty-per-line item outstanding.
-2. **Resolve the 58 anchor** — the last ~3–10 points of systematic pessimism. Drive
-   `PersonalCalibrationModel`, which already exists for this.
-3. **Uncouple the ACWR** (chronic over days 8–28) or drop it. Also reconcile the strain-as-load
-   disagreement between `ReadinessEngine` and `TrainingLoadModel`.
-4. **Align watch HRV with the phone** (RMSSD) or document why SDNN differs there.
+1. **Preserve the detailed-stage evidence gate.** Local Deep, REM, Light, awake, restorative history,
+   and comparisons require persisted sustained R-R evidence. Independently classified imports retain
+   their disclosed provenance; total sleep remains available.
+2. **Preserve the D-025 scoring boundary.** Keep the fixed personal-baseline
+   logistic explicit, keep cold start nil, and keep `PersonalCalibrationModel`
+   and proprietary reference outcomes out of production Recovery scoring.
+3. **Preserve additive-load isolation.** ACWR is retired, bounded Effort never enters ATL/CTL/TSB,
+   and only explicit additive load entries may reach `TrainingLoadModel`.
+4. **Preserve HRV method provenance.** Apple Health SDNN and strap RMSSD keep source-isolated baselines.
 5. **Carrier delivery evidence.** Still no real SMS has been sent; A2P/10DLC registration is the long-lead
    item.
 

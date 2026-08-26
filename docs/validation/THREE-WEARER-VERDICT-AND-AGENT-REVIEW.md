@@ -42,8 +42,8 @@ accuracy or prove that the reference score is correct.
 
 All three Recovery biases are negative, but their magnitude differs. A fixed
 positive offset would fit the provider rather than validate NOOP, and it would
-not be justified by three wearers. The global Recovery anchor remains
-unchanged.
+not be justified by three wearers. The fixed personal-baseline logistic mapping
+remains unchanged.
 
 ## Rest results without target leakage
 
@@ -70,9 +70,9 @@ retained only for Recovery cold start. That input's sensitivity remains `0.12`.
 - Invalid Rest units are omitted instead of clamped into plausible scores.
 - Missing R-R or respiration evidence lowers confidence rather than changing
   the score to imitate the reference provider.
-- The internal `populationMean = 58` anchor remains uncited and unchanged. It
-  requires population evidence or an independently justified calibration
-  design, not a three-wearer patch.
+- Neutral personal-baseline composite z maps to about 57.9 through the fixed
+  logistic. That is an internal display mapping, not a population mean or a
+  cold-start fallback, and it must not be fitted to a three-wearer reference sample.
 
 ## Limitations
 

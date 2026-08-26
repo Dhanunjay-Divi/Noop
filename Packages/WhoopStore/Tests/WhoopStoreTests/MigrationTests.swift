@@ -73,7 +73,7 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 43)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 45)
         let tableNames = try await store.tableNames()
         XCTAssertTrue(tableNames.contains("healthKitSyncState"))
         XCTAssertTrue(tableNames.contains("nutritionEntry"))
@@ -117,6 +117,77 @@ final class MigrationTests: XCTestCase {
         let store = try await WhoopStore.inMemory()
         let cols = try await store.columnNamesForTest(table: "sleepSession")
         XCTAssertTrue(cols.contains("startTsAdjusted"), "sleepSession missing v14 startTsAdjusted column")
+    }
+
+    func testV44AddsNullableRREvidenceColumnsAndLegacyRowsRemainUnknown() async throws {
+        let queue = try DatabaseQueue()
+        let migrator = WhoopStore.makeMigrator()
+        try migrator.migrate(queue, upTo: "v43-nutrition-catalog")
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO sleepSession (deviceId, startTs, endTs)
+                    VALUES ('legacy', 1000, 5000)
+                    """
+            )
+        }
+
+        try migrator.migrate(queue)
+
+        try await queue.read { db in
+            let columns = try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_table_info('sleepSession') ORDER BY cid"
+            )
+            XCTAssertTrue(columns.contains("rrEligibleWindowCount"))
+            XCTAssertTrue(columns.contains("rrValidWindowCount"))
+
+            let row = try XCTUnwrap(
+                Row.fetchOne(
+                    db,
+                    sql: """
+                        SELECT rrEligibleWindowCount, rrValidWindowCount
+                        FROM sleepSession WHERE deviceId = 'legacy' AND startTs = 1000
+                        """
+                )
+            )
+            let eligible: Int? = row["rrEligibleWindowCount"]
+            let valid: Int? = row["rrValidWindowCount"]
+            XCTAssertNil(eligible)
+            XCTAssertNil(valid)
+        }
+    }
+
+    func testV45AddsNullableDailyHrvMethodAndLegacyRowsRemainUnknown() async throws {
+        let queue = try DatabaseQueue()
+        let migrator = WhoopStore.makeMigrator()
+        try migrator.migrate(queue, upTo: "v44-sleep-rr-window-evidence")
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO dailyMetric (deviceId, day, avgHrv)
+                    VALUES ('legacy', '2026-08-25', 57)
+                    """
+            )
+        }
+
+        try migrator.migrate(queue)
+
+        try await queue.read { db in
+            let columns = try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_table_info('dailyMetric') ORDER BY cid"
+            )
+            XCTAssertTrue(columns.contains("hrvMethod"))
+            let method: String? = try String.fetchOne(
+                db,
+                sql: """
+                    SELECT hrvMethod FROM dailyMetric
+                    WHERE deviceId = 'legacy' AND day = '2026-08-25'
+                    """
+            )
+            XCTAssertNil(method)
+        }
     }
 
     /// v16 adds `peripheralId` to pairedDevice (stable per-strap BLE identity for multi-WHOOP support).

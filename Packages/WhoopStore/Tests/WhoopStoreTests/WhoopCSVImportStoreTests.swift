@@ -178,7 +178,7 @@ final class WhoopCSVImportStoreTests: XCTestCase {
         XCTAssertEqual(recovery.map(\.value), [55])
     }
 
-    func testOfficialSleepReimportPreservesEditedWindowStagesAndLocalEvidence() async throws {
+    func testOfficialSleepReimportPreservesEditedWindowAndAuxDataButClearsExactRREvidence() async throws {
         let store = try await WhoopStore.inMemory()
         let deviceId = "wearable-import"
         let start = 1_767_300_000
@@ -192,7 +192,9 @@ final class WhoopCSVImportStoreTests: XCTestCase {
                     avgHrv: 39,
                     stagesJSON: #"{"stage":"edited"}"#,
                     userEdited: true,
-                    startTsAdjusted: start + 900
+                    startTsAdjusted: start + 900,
+                    rrEligibleWindowCount: 96,
+                    rrValidWindowCount: 30
                 ),
             ],
             deviceId: deviceId
@@ -249,6 +251,11 @@ final class WhoopCSVImportStoreTests: XCTestCase {
         XCTAssertTrue(persisted.userEdited)
         XCTAssertEqual(persisted.startTsAdjusted, start + 900)
         XCTAssertEqual(persisted.gravitySparse, true)
+        XCTAssertNil(
+            persisted.rrEligibleWindowCount,
+            "provider replacement has no exact-session R-R evidence and must clear stale counts"
+        )
+        XCTAssertNil(persisted.rrValidWindowCount)
         try await store.registryWriter.read { db in
             XCTAssertEqual(
                 try String.fetchOne(

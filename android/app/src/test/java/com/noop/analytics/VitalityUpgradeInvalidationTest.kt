@@ -36,6 +36,7 @@ class VitalityUpgradeInvalidationTest {
             when (method.name) {
                 "days" -> daily.filter { it.deviceId == args!![0] as String }
                 "editedSleepSessions" -> emptyList<Any>()
+                "sleepSessionsForSources" -> emptyList<Any>()
                 "latestMetricSeriesRow" -> {
                     val source = args!![0] as String
                     val key = args[1] as String

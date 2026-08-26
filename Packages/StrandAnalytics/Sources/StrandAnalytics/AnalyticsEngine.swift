@@ -874,18 +874,25 @@ public enum AnalyticsEngine {
             steps: stepsTotal,
             activeKcalEst: activeKcalEst,
             spo2Red: nightlySpo2Raw?.red,
-            spo2Ir: nightlySpo2Raw?.ir)
+            spo2Ir: nightlySpo2Raw?.ir,
+            hrvMethod: avgHRVDaily == nil ? nil : .rmssd)
         _ = sleepStart; _ = sleepEnd  // available for callers wiring sleep_start/end columns
 
         // ── Cache rows ────────────────────────────────────────────────────────
         let cachedSleep = matched.map { s in
-            CachedSleepSession(
+            // Persist raw coverage counts on the exact session whose stage payload they support.
+            // Publication later re-selects the current main-night group and aggregates these counts;
+            // a replacement/edit therefore cannot borrow a stale wake-day boolean.
+            let rrEvidence = mainSleepEvidenceCounts(mainGroup: [s], rr: rr, resp: [])
+            return CachedSleepSession(
                 startTs: s.start, endTs: s.end,
                 efficiency: s.efficiency,
                 restingHr: s.restingHR,
                 avgHrv: s.avgHRV,
                 stagesJSON: encodeStages(s.stages),
-                gravitySparse: gravitySparse)
+                gravitySparse: gravitySparse,
+                rrEligibleWindowCount: rrEvidence.eligibleWindows,
+                rrValidWindowCount: rrEvidence.validRRWindows)
         }
 
         // ── Per-session per-epoch motion (H8) ─────────────────────────────────

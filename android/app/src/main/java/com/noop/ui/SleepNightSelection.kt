@@ -1,11 +1,37 @@
 package com.noop.ui
 
 import com.noop.analytics.AnalyticsEngine
+import com.noop.analytics.DetailedSleepStagePublication
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
+import com.noop.data.WhoopRepository
 import com.noop.oura.OuraSleepSessionMapping
 import java.util.TimeZone
+
+internal data class SleepWakeDay(
+    val day: String,
+    val sessions: List<SleepSession>,
+)
+
+/** Bridge the complete timeline before assigning local wake days. */
+internal fun sleepWakeDayBuckets(sleeps: List<SleepSession>): List<SleepWakeDay> {
+    val blocks = sleeps.map {
+        SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs)
+    }
+    return SleepStageTotals.wakeDayBuckets(
+        blocks,
+        offsetAtEpochSec = { WhoopRepository.historicalOffsetSeconds(it) },
+    ).map { bucket ->
+        SleepWakeDay(
+            day = bucket.day,
+            sessions = bucket.groups
+                .flatMap { it.indices }
+                .map(sleeps::get)
+                .sortedBy { it.effectiveStartTs },
+        )
+    }
+}
 
 /**
  * Pick the night for the DAY [offset] stops back from the most recent (0 = latest). [navDays]
@@ -19,9 +45,10 @@ import java.util.TimeZone
  * the same calendar day, so both bucket here); the OLD `maxByOrNull { endTs }` picked the
  * latest-ending block, which is the afternoon nap — so the overnight vanished from the Sleep tab.
  * Picking the longest overnight block fixes it; the other blocks are carried as `napBlocks` for
- * the naps card. The day key tries UTC then local-tz attribution of the MAIN block's wake — imported
- * DailyMetric.day is local-tz while dayString is UTC, so a near-midnight-UTC wake needs the second
- * key; both derive from THIS night's endTs, never another night. (#160, #518)
+ * the naps card. The day key starts with local attribution of the BRIDGED GROUP'S FINAL wake. The
+ * single winning/edit-anchor block can end before midnight while a shorter sibling continues after
+ * midnight; keying from that winner would attach the full night to the wrong DailyMetric. UTC remains
+ * only a compatibility fallback for older rows. (#160, #518)
  */
 internal fun selectNight(
     navDays: List<List<SleepSession>>,
@@ -68,11 +95,12 @@ internal fun selectNight(
     val heroGroup = group.dropWhile {
         it.effectiveStartTs < onsetTsForHero && isPreOnsetAwakeStub(it, groupRefAsleepMin)
     }
-    val utcKey = AnalyticsEngine.dayString(session.endTs)
-    val localKey = localDayString(session.endTs)
-    val dayKey = listOf(utcKey, localKey).firstOrNull { key ->
+    val groupWakeTs = group.maxOfOrNull { it.endTs } ?: session.endTs
+    val localKey = localDayString(groupWakeTs)
+    val utcKey = AnalyticsEngine.dayString(groupWakeTs)
+    val dayKey = listOf(localKey, utcKey).firstOrNull { key ->
         days.any { it.day == key && (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0 }
-    } ?: utcKey
+    } ?: localKey
     // Lay every fragment's persisted segments end-to-end so a biphasic night draws as one continuous
     // hypnogram, and SUM their stage minutes for the hero. Built from `heroGroup` (the group minus a leading
     // spurious stub, #736) so the chart and minutes start at the displayed bedtime. Null for a single-block
@@ -109,7 +137,7 @@ internal fun selectNight(
     // heroGroup (first non-stub fragment onward), so label from THAT fragment's onset (mirrors Swift
     // nightOnsetTs / synth.startTs), closed by the group's latest wake. `session` stays the edit anchor only.
     val heroOnsetTs = heroGroup.firstOrNull()?.effectiveStartTs ?: session.effectiveStartTs
-    val heroWakeTs = heroGroup.maxOfOrNull { it.endTs } ?: session.endTs
+    val heroWakeTs = heroGroup.maxOfOrNull { it.endTs } ?: groupWakeTs
     // #561: whole-group time-in-bed (minutes) — fragment windows summed, gaps excluded — so the hero
     // subtitle matches the multi-fragment stage total it is shown with. Single-block days stay null.
     val groupInBedMin = if (heroGroup.size > 1) {
@@ -117,9 +145,18 @@ internal fun selectNight(
     } else null
     val hasRREvidence = heroGroup.any { it.avgHrv?.isFinite() == true }
     val hasOuraStages = heroGroup.any { OuraSleepSessionMapping.hasOuraProvenance(it.stagesJSON) }
+    val stageProducers = heroGroup.filter {
+        parseSessionStages(
+            SleepStageTotals.clampStagesToOnset(it.stagesJSON, it.effectiveStartTs)
+        ) != null
+    }
+    val independentlyStagedImport = stageProducers.isNotEmpty() &&
+        stageProducers.all { !it.deviceId.endsWith("-noop") }
+    val detailedStagesPublishable =
+        DetailedSleepStagePublication.canPublishCurrentMainGroup(group)
     return HeroNight(session, dayKey, segments, clockLabelFor(heroOnsetTs, heroWakeTs), napBlocks, groupStages,
         groupSegments, groupMotion, groupInBedMin, heroOnsetTs, heroWakeTs,
-        hasRREvidence, hasOuraStages)
+        hasRREvidence, hasOuraStages, independentlyStagedImport, detailedStagesPublishable)
 }
 
 /**
@@ -140,7 +177,7 @@ internal fun mainSleepBlock(blocks: List<SleepSession>, habitualMidsleepSec: Lon
     if (blocks.isEmpty()) return null
     val idx = SleepStageTotals.mainNightIndex(
         blocks.map { SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs) },
-        uiTzOffsetSec(),
+        uiTzOffsetSec(blocks.maxOf { it.endTs }),
         habitualMidsleepSec,
     ) ?: return null
     return blocks[idx]
@@ -156,9 +193,10 @@ internal fun mainSleepBlock(blocks: List<SleepSession>, habitualMidsleepSec: Lon
  * onset. Mirrors iOS SleepView.mainNightGroup. (#561/#555)
  */
 internal fun mainSleepGroup(blocks: List<SleepSession>, habitualMidsleepSec: Long? = null): List<SleepSession> {
+    if (blocks.isEmpty()) return emptyList()
     val idx = SleepStageTotals.mainNightGroupIndices(
         blocks.map { SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs) },
-        uiTzOffsetSec(),
+        uiTzOffsetSec(blocks.maxOf { it.endTs }),
         habitualMidsleepSec,
     ) ?: return emptyList()
     return idx.map { blocks[it] }.sortedBy { it.effectiveStartTs }
@@ -173,11 +211,11 @@ internal fun mainSleepGroup(blocks: List<SleepSession>, habitualMidsleepSec: Lon
 internal fun napSleepMinutesByDay(
     sleeps: List<SleepSession>,
     habitualMidsleepSec: Long? = null,
-): Map<String, Double> = sleeps
-    .groupBy { localDayString(it.endTs) }
-    .mapValues { (_, blocks) ->
+): Map<String, Double> = sleepWakeDayBuckets(sleeps)
+    .associate { bucket ->
+        val blocks = bucket.sessions
         val mainStarts = mainSleepGroup(blocks, habitualMidsleepSec).mapTo(hashSetOf()) { it.startTs }
-        blocks.asSequence()
+        bucket.day to blocks.asSequence()
             .filter { it.startTs !in mainStarts }
             .sumOf { decodedAsleepMinutes(it.stagesJSON, it.effectiveStartTs) }
     }
@@ -211,10 +249,9 @@ internal fun consistencyNightSpans(
     habitualMidsleepSec: Long? = null,
     limit: Int = 14,
 ): List<Pair<Long, Long>> =
-    sleeps.groupBy { localDayString(it.endTs) }
-        .toSortedMap()
-        .values
-        .mapNotNull { blocks -> mainSleepSpan(blocks.sortedBy { it.effectiveStartTs }, habitualMidsleepSec) }
+    sleepWakeDayBuckets(sleeps)
+        .sortedBy(SleepWakeDay::day)
+        .mapNotNull { bucket -> mainSleepSpan(bucket.sessions, habitualMidsleepSec) }
         .takeLast(limit)
 
 /** Longest a leading block can be and still be treated as a spurious pre-sleep awake stub (lying in bed
@@ -292,9 +329,11 @@ private fun sumGroupStages(group: List<SleepSession>): StageMins? {
     return if (any) StageMins(aw, li, dp, rm) else null
 }
 
-/** The device's current UTC offset (seconds east), evaluated per pick, fed to the selector's `offsetSec`
- *  so the timing test reads the user's clock via the SAME `offsetSec` math the engine uses
- *  ([SleepStageTotals.localSecOfDay]) instead of `Calendar.get(HOUR_OF_DAY)` — the duplicated, DST-fragile
- *  gate the audit flagged. Mirrors the engine's `TimeZone.getDefault().getOffset(...)`. (#547) */
-internal fun uiTzOffsetSec(): Long =
-    TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000L
+/** The UTC offset (seconds east) that applied at [epochSec]. Main-sleep selection can browse months of
+ *  history, so using today's offset changes an older night's local midpoint across DST and can select a
+ *  different block from the analytics pass that produced it. */
+internal fun uiTzOffsetSec(epochSec: Long): Long {
+    val epochMillis = runCatching { Math.multiplyExact(epochSec, 1_000L) }
+        .getOrElse { if (epochSec >= 0L) Long.MAX_VALUE else Long.MIN_VALUE }
+    return TimeZone.getDefault().getOffset(epochMillis).toLong() / 1_000L
+}

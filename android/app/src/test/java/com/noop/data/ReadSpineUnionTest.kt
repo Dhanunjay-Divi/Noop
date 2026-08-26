@@ -105,6 +105,7 @@ class ReadSpineUnionTest {
             deviceId = canonical, day = "2026-07-29", totalSleepMin = 435.0,
             efficiency = 91.0, deepMin = 96.0, remMin = 110.0, lightMin = 229.0,
             recovery = 93.2, restingHr = 64, avgHrv = 37.06, strain = 8.4,
+            hrvMethod = DailyHrvMethod.RMSSD,
         )
         val merged = WhoopRepository.unionByDay(listOf(listOf(active), listOf(filler))).single()
 
@@ -113,19 +114,49 @@ class ReadSpineUnionTest {
         assertEquals(435.0, merged.totalSleepMin)
         assertEquals(96.0, merged.deepMin)
         assertEquals(93.2, merged.recovery)
+        assertEquals(DailyHrvMethod.RMSSD, merged.hrvMethod)
     }
 
     @Test
     fun measuredZeroIsNotTreatedAsMissing() {
         val active = DailyMetric(deviceId = reAdded, day = "2026-07-29",
-            steps = 0, strain = 0.0, avgHrv = 0.0)
+            steps = 0, strain = 0.0, avgHrv = 0.0, hrvMethod = DailyHrvMethod.SDNN)
         val filler = DailyMetric(deviceId = canonical, day = "2026-07-29",
-            steps = 9_120, strain = 14.7, avgHrv = 42.0)
+            steps = 9_120, strain = 14.7, avgHrv = 42.0, hrvMethod = DailyHrvMethod.RMSSD)
         val merged = WhoopRepository.unionByDay(listOf(listOf(active), listOf(filler))).single()
 
         assertEquals(0, merged.steps)
         assertEquals(0.0, merged.strain)
         assertEquals(0.0, merged.avgHrv)
+        assertEquals(DailyHrvMethod.SDNN, merged.hrvMethod)
+    }
+
+    @Test
+    fun importedComputedMergeKeepsMethodFromHrvWinner() {
+        val computed = DailyMetric(
+            deviceId = "$canonical-noop",
+            day = "2026-07-29",
+            avgHrv = 42.0,
+            hrvMethod = DailyHrvMethod.RMSSD,
+        )
+        val sparseImport = DailyMetric(deviceId = canonical, day = computed.day)
+        val filled = WhoopRepository.mergeDaily(
+            imported = listOf(sparseImport),
+            computed = listOf(computed),
+        ).single()
+        assertEquals(42.0, filled.avgHrv)
+        assertEquals(DailyHrvMethod.RMSSD, filled.hrvMethod)
+
+        val sdnnImport = sparseImport.copy(
+            avgHrv = 55.0,
+            hrvMethod = DailyHrvMethod.SDNN,
+        )
+        val importedWinner = WhoopRepository.mergeDaily(
+            imported = listOf(sdnnImport),
+            computed = listOf(computed),
+        ).single()
+        assertEquals(55.0, importedWinner.avgHrv)
+        assertEquals(DailyHrvMethod.SDNN, importedWinner.hrvMethod)
     }
 
     @Test

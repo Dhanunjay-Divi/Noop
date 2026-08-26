@@ -65,6 +65,37 @@ class MergeSleepLocalDayTest {
         assertEquals(listOf(night.startTs, nap.startTs).sorted(), merged.map { it.startTs })
     }
 
+    @Test
+    fun mergeSleep_bridgesComputedNightBeforeImportedWakeDayPrecedence() {
+        val localMidnight = wake - 90 * 60L
+        val computedFirst = session(
+            startUtc = localMidnight - 4 * 3_600L,
+            endUtc = localMidnight - 5 * 60L,
+            stages = someStages,
+        )
+        val computedSecond = session(
+            startUtc = localMidnight + 5 * 60L,
+            endUtc = wake,
+            stages = someStages,
+        )
+        val imported = session(
+            startUtc = localMidnight - 6 * 3_600L,
+            endUtc = wake,
+            stages = someStages,
+        ).copy(deviceId = "my-whoop")
+
+        val merged = WhoopRepository.mergeSleep(
+            imported = listOf(imported),
+            computed = listOf(computedFirst, computedSecond),
+        )
+
+        assertEquals(
+            "the import wins the complete final wake day; no pre-midnight computed fragment leaks through",
+            listOf(imported.startTs),
+            merged.map { it.startTs },
+        )
+    }
+
     /**
      * The local wake-day key for an 01:30-local (UTC+3) wake is the LOCAL date — the date the dashboard's
      * "today" read uses — not the previous UTC date. This is the exact mis-attribution #304 fixed.
@@ -126,6 +157,27 @@ class MergeSleepLocalDayTest {
         val impBlank = session(next - 6 * 3600L, next, "  ")
         val merged = WhoopRepository.mergeSleep(imported = listOf(impEmpty, impBlank), computed = listOf(comp0, comp1))
         assertEquals("\"[]\" and blank JSON are not stages", listOf(comp0.startTs, comp1.startTs), merged.map { it.startTs })
+    }
+
+    @Test
+    fun mergeSleep_malformedNonblankPayloadCountsAsStageless() {
+        val comp = session(wake - 8 * 3600L, wake, someStages)
+        val malformed = session(
+            wake - 6 * 3600L,
+            wake,
+            """{"unrelated":"nonblank"}""",
+        )
+
+        val merged = WhoopRepository.mergeSleep(
+            imported = listOf(malformed),
+            computed = listOf(comp),
+        )
+
+        assertEquals(
+            "malformed JSON must not suppress a valid computed night",
+            listOf(comp.startTs),
+            merged.map { it.startTs },
+        )
     }
 
     @Test

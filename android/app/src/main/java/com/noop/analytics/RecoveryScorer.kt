@@ -43,17 +43,15 @@ import kotlin.math.roundToInt
  * needs BOTH the previous-day Effort value AND its EWMA baseline ([Baselines.strainCfg]) —
  * supplying only one drops the term.
  *
- * Each metric is standardized to a robust z-score against the personal baseline
+ * Each baseline-relative metric is standardized to a robust personal z-score
  * (mean + EWMA-abs-dev spread). Missing terms are dropped and the weights
- * renormalized. The composite z is squashed through a logistic anchored so that
- * Z = 0 → ~58%. The 58% anchor is an INTERNAL, UNCITED product choice (it centres the
- * distribution slightly above the midpoint so a typical day reads "moderate" rather than
- * "poor"). It is NOT a WHOOP-published figure — that attribution was withdrawn because no
- * such published population average could be verified. See the populationMean honesty note.
+ * renormalized. A fixed logistic maps the composite z onto 0..100. Its parameters
+ * define NOOP's personal-baseline display scale only: they are not a population
+ * statistic, a cold-start fallback, or a fit to a proprietary reference outcome.
  *
  * Cold-start: if the HRV baseline (dominant driver) is not yet usable
- * (< MIN_NIGHTS_SEED valid nights), recovery() returns null. Callers may use
- * [populationMean] (58.0) as a fallback but should flag it.
+ * (< MIN_NIGHTS_SEED valid nights), recovery() returns null. No numeric score is
+ * substituted before the personal baseline is ready.
  *
  * `start` / `end` are wall-clock unix SECONDS (Long), matching the com.noop.data
  * layer and HrSample.ts (the Swift source uses Int seconds).
@@ -111,14 +109,15 @@ object RecoveryScorer {
      */
     const val wActivityBalance: Double = 0.05
 
-    /** Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%). */
-    const val logisticK: Double = 1.6
+    /** Slope of the fixed personal-baseline logistic display mapping. */
+    const val personalBaselineLogisticSlope: Double = 1.6
 
-    /** Logistic offset so Z=0 → 58%. */
-    const val logisticZ0: Double = -0.20
-
-    /** WHOOP-published population-average recovery (%). Cold-start fallback. */
-    const val populationMean: Double = 58.0
+    /**
+     * Composite-z midpoint of the fixed personal-baseline logistic display mapping.
+     * Neutral personal-baseline z=0 maps to about 57.9; this is neither a population
+     * mean nor a cold-start score.
+     */
+    const val personalBaselineLogisticMidpointZ: Double = -0.20
 
     /** Recovery band thresholds (WHOOP color scheme). */
     const val bandRedMax: Double = 34.0
@@ -412,7 +411,9 @@ object RecoveryScorer {
 
         val z = terms.sumOf { it.first * it.second } / totalWeight
         if (!z.isFinite()) return null
-        val score = 100.0 / (1.0 + exp(-logisticK * (z - logisticZ0)))
+        val score = 100.0 / (
+            1.0 + exp(-personalBaselineLogisticSlope * (z - personalBaselineLogisticMidpointZ))
+        )
         if (!score.isFinite()) return null
         return max(0.0, min(100.0, score))
     }

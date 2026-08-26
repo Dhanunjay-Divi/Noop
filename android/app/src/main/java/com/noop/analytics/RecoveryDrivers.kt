@@ -242,7 +242,12 @@ object RecoveryDrivers {
 
     /** The Charge logistic, IDENTICAL to RecoveryScorer.recovery's final squash. */
     private fun scoreOf(z: Double): Double {
-        val s = 100.0 / (1.0 + exp(-RecoveryScorer.logisticK * (z - RecoveryScorer.logisticZ0)))
+        val s = 100.0 / (
+            1.0 + exp(
+                -RecoveryScorer.personalBaselineLogisticSlope *
+                    (z - RecoveryScorer.personalBaselineLogisticMidpointZ),
+            )
+        )
         return s.coerceIn(0.0, 100.0)
     }
 

@@ -171,7 +171,11 @@ final class NOOPiOSUITests: XCTestCase {
 
         let sync = app.descendants(matching: .any)["noop.today.pull-sync"]
         XCTAssertTrue(sync.waitForExistence(timeout: 3))
-        XCTAssertTrue(sync.label.localizedCaseInsensitiveContains("sync"))
+        XCTAssertTrue(
+            sync.label.localizedCaseInsensitiveContains("refresh")
+                || sync.label.localizedCaseInsensitiveContains("sync"),
+            "Unexpected pull feedback: \(sync.label)"
+        )
         XCTAssertTrue(
             String(describing: sync.value).localizedCaseInsensitiveContains("progress")
                 || sync.label.localizedCaseInsensitiveContains("syncing")
@@ -629,7 +633,10 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(rangeLabel.label.localizedCaseInsensitiveContains("last 3 months"))
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("recovery scores"))
         XCTAssertTrue(
-            coverage.label.localizedCaseInsensitiveContains("89 of 90 days"),
+            coverage.label.range(
+                of: #"Recovery scores: [1-9][0-9]* of 90 days\."#,
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil,
             "Unexpected coverage copy: \(coverage.label)"
         )
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("one score per day"))

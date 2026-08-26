@@ -126,20 +126,86 @@ public struct DailyMetricRow: Equatable, Sendable {
 public struct SleepSessionRow: Equatable, Sendable {
     public let startTs: Int
     public let endTs: Int
+    let startTsAdjusted: Int?
     public let efficiency: Double?
     public let restingHr: Int?
     public let avgHrv: Double?
     public let stagesJSON: String?
-    // NOTE (#318): this local-access read intentionally does NOT surface the user's `startTsAdjusted`
-    // onset correction — its SELECT must stay readable against pre-v14 / foreign sleepSession tables
-    // (see the `tableNames` guard), so adding the column would regress those. The MCP read therefore
-    // reports the DETECTED onset for a hand-edited night; the app's own screens use the corrected one.
+    public let rrEligibleWindowCount: Int?
+    public let rrValidWindowCount: Int?
+    var effectiveStartTs: Int { startTsAdjusted ?? startTs }
+    // NOTE (#318): local-access output continues to report the detected onset for compatibility.
+    // The optional adjusted onset is read internally when the column exists so stage evidence can be
+    // tied to the exact edited bounds; pre-v14/foreign tables receive a dynamic NULL alias.
 }
 
 public struct MetricPointRow: Equatable, Sendable {
     public let day: String
     public let key: String
     public let value: Double
+}
+
+/// Read-model mirror of StrandAnalytics' exact-session R-R publication contract. Local Access stays a
+/// small, read-only package, so it validates the two persisted counts directly.
+private enum DetailedSleepStagePolicy {
+    static let detailedKeys: Set<String> = [
+        "sleep_deep_min", "deep_min",
+        "sleep_rem_min", "rem_min",
+        "sleep_light_min", "core_min",
+        "sleep_awake_min", "awake_min",
+        "restorative_min", "restorative_pct",
+    ]
+
+    private static let minimumWindows = 12
+    private static let minimumCoverage = 0.25
+
+    private static func hasRecognizedPositiveDuration(_ json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data)
+        else { return false }
+
+        if let totals = payload as? [String: Any] {
+            let recognized = Set(["awake", "light", "deep", "rem"])
+            return totals.contains { key, value in
+                guard recognized.contains(key),
+                      let duration = value as? NSNumber
+                else { return false }
+                return duration.doubleValue.isFinite && duration.doubleValue > 0
+            }
+        }
+        guard let segments = payload as? [[String: Any]] else { return false }
+        let recognized = Set(["awake", "wake", "light", "deep", "rem"])
+        return segments.contains { segment in
+            guard let stage = segment["stage"] as? String,
+                  recognized.contains(stage),
+                  let start = segment["start"] as? NSNumber,
+                  let end = segment["end"] as? NSNumber
+            else { return false }
+            let startValue = start.doubleValue
+            let endValue = end.doubleValue
+            return startValue.isFinite && endValue.isFinite && endValue > startValue
+        }
+    }
+
+    static func canPublish(_ row: SleepSessionRow) -> Bool {
+        let (duration, durationOverflow) =
+            row.endTs.subtractingReportingOverflow(row.effectiveStartTs)
+        guard let eligible = row.rrEligibleWindowCount,
+              let valid = row.rrValidWindowCount,
+              !durationOverflow,
+              duration > 0,
+              eligible == duration / (5 * 60),
+              eligible > 0,
+              valid >= 0,
+              valid <= eligible,
+              let stages = row.stagesJSON?.trimmingCharacters(
+                  in: .whitespacesAndNewlines),
+              !stages.isEmpty,
+              hasRecognizedPositiveDuration(stages)
+        else { return false }
+        let coverageWindows = Int(ceil(Double(eligible) * minimumCoverage))
+        return valid >= max(minimumWindows, coverageWindows)
+    }
 }
 
 public struct AppleDailyRow: Equatable, Sendable {
@@ -178,14 +244,20 @@ public struct StorageStats: Equatable, Sendable {
 public final class ReadonlyNoopStore {
     private let dbQueue: DatabaseQueue
     private let tableNames: Set<String>
+    private let sleepSessionColumnNames: Set<String>
 
     public init(path: String) throws {
         var config = Configuration()
         config.readonly = true
         config.busyMode = .timeout(5)
         dbQueue = try DatabaseQueue(path: path, configuration: config)
-        tableNames = try dbQueue.read { db in
+        let names = try dbQueue.read { db in
             try Set(String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'"))
+        }
+        tableNames = names
+        sleepSessionColumnNames = try dbQueue.read { db in
+            guard names.contains("sleepSession") else { return [] }
+            return try Set(db.columns(in: "sleepSession").map(\.name))
         }
         try validateSchema()
     }
@@ -217,17 +289,30 @@ public final class ReadonlyNoopStore {
 
     public func sleepSessions(deviceId: String, from: Int, to: Int, limit: Int) throws -> [SleepSessionRow] {
         guard tableNames.contains("sleepSession") else { return [] }
+        let eligibleColumn = sleepSessionColumnNames.contains("rrEligibleWindowCount")
+            ? "rrEligibleWindowCount"
+            : "NULL AS rrEligibleWindowCount"
+        let validColumn = sleepSessionColumnNames.contains("rrValidWindowCount")
+            ? "rrValidWindowCount"
+            : "NULL AS rrValidWindowCount"
+        let adjustedColumn = sleepSessionColumnNames.contains("startTsAdjusted")
+            ? "startTsAdjusted"
+            : "NULL AS startTsAdjusted"
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON
+                SELECT startTs, endTs, \(adjustedColumn), efficiency, restingHr, avgHrv, stagesJSON,
+                       \(eligibleColumn), \(validColumn)
                 FROM sleepSession
                 WHERE deviceId = ? AND startTs >= ? AND startTs <= ?
                 ORDER BY startTs ASC LIMIT ?
                 """, arguments: [deviceId, from, to, limit])
                 .map {
                     SleepSessionRow(startTs: $0["startTs"], endTs: $0["endTs"],
+                                    startTsAdjusted: $0["startTsAdjusted"],
                                     efficiency: $0["efficiency"], restingHr: $0["restingHr"],
-                                    avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"])
+                                    avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"],
+                                    rrEligibleWindowCount: $0["rrEligibleWindowCount"],
+                                    rrValidWindowCount: $0["rrValidWindowCount"])
                 }
         }
     }
@@ -379,17 +464,26 @@ public final class NoopDataAccess {
         let daily = try mergedDaily(from: fromDay, to: toDay)
         let apple = try store.appleDaily(deviceId: "apple-health", from: fromDay, to: toDay)
         let latestHR = try store.latestHRSampleTs(deviceId: deviceId)
+        let publishableLocalStages = try publishableDetailedStageDays(
+            deviceId: computedDeviceId, from: fromDay, to: toDay)
 
         let logical = logicalDayKey(Date())
         let displayed = daily.last(where: { $0.row.day == logical }) ?? daily.last
+        func dailyPayload(_ item: (row: DailyMetricRow, source: String)) -> JSONValue {
+            dailyJSON(
+                item.row,
+                source: item.source,
+                publishDetailedStages: !item.source.hasSuffix("-noop")
+                    || publishableLocalStages.contains(item.row.day))
+        }
 
         return .object([
             "generatedAt": .string(iso(Date())),
             "logicalToday": .string(logical),
             "sources": Self.sources(),
             "freshness": freshnessPayload(latestHR: latestHR, apple: apple, daily: daily),
-            "today": displayed.map { dailyJSON($0.row, source: $0.source) } ?? .null,
-            "recentDays": .array(daily.suffix(days).map { dailyJSON($0.row, source: $0.source) }),
+            "today": displayed.map(dailyPayload) ?? .null,
+            "recentDays": .array(daily.suffix(days).map(dailyPayload)),
             "appleDaily": .array(apple.map(appleDailyJSON)),
         ])
     }
@@ -410,7 +504,14 @@ public final class NoopDataAccess {
         var usedSources: [String] = []
 
         for candidate in candidates {
-            let rows = try store.metricSeries(deviceId: candidate.source, key: candidate.key, from: fromDay, to: toDay)
+            var rows = try store.metricSeries(
+                deviceId: candidate.source, key: candidate.key, from: fromDay, to: toDay)
+            if candidate.source.hasSuffix("-noop"),
+               DetailedSleepStagePolicy.detailedKeys.contains(candidate.key) {
+                let publishableDays = try publishableDetailedStageDays(
+                    deviceId: candidate.source, from: fromDay, to: toDay)
+                rows.removeAll { !publishableDays.contains($0.day) }
+            }
             if !rows.isEmpty { usedSources.append(candidate.source) }
             for row in rows where mergedByDay[row.day] == nil {
                 mergedByDay[row.day] = .object([
@@ -475,18 +576,31 @@ public final class NoopDataAccess {
 
     public func sleepSummary(days: Int) throws -> JSONValue {
         let (fromTs, toTs) = timestampRange(days: days)
+        let (fromDay, toDay) = dayRange(days: days)
         let imported = try store.sleepSessions(deviceId: deviceId, from: fromTs, to: toTs, limit: 5000)
         let computed = try store.sleepSessions(deviceId: computedDeviceId, from: fromTs, to: toTs, limit: 5000)
         let merged = mergeSleep(imported: imported, computed: computed)
-        let durations = merged.map { Double(max(0, $0.endTs - $0.startTs)) / 60.0 }
-        let efficiencies = merged.compactMap(\.efficiency)
+        let publishableLocalStages = try publishableDetailedStageDays(
+            deviceId: computedDeviceId,
+            from: fromDay,
+            to: toDay)
+        let durations = merged.map { Double(max(0, $0.row.endTs - $0.row.startTs)) / 60.0 }
+        let efficiencies = merged.compactMap(\.row.efficiency)
 
         return .object([
             "range": .object(["fromTs": .int(fromTs), "toTs": .int(toTs), "days": .int(days)]),
             "count": .int(merged.count),
             "averageDurationMin": optionalDouble(mean(durations)),
             "averageEfficiency": optionalDouble(mean(efficiencies)),
-            "sessions": .array(merged.suffix(200).map(sleepJSON)),
+            "sessions": .array(merged.suffix(200).map { item in
+                let wakeDay = dayString(
+                    Date(timeIntervalSince1970: TimeInterval(item.row.endTs)))
+                return sleepJSON(
+                    item.row,
+                    publishDetailedStages: !item.source.hasSuffix("-noop")
+                        || (publishableLocalStages.contains(wakeDay)
+                            && DetailedSleepStagePolicy.canPublish(item.row)))
+            }),
         ])
     }
 
@@ -549,15 +663,115 @@ public final class NoopDataAccess {
         return byDay.values.sorted { $0.0.day < $1.0.day }
     }
 
-    private func mergeSleep(imported: [SleepSessionRow], computed: [SleepSessionRow]) -> [SleepSessionRow] {
+    private func publishableDetailedStageDays(
+        deviceId: String,
+        from: String,
+        to: String
+    ) throws -> Set<String> {
+        let sessions = try store.sleepSessions(
+            deviceId: deviceId,
+            from: 0,
+            to: Int.max,
+            limit: 100_000)
+        return Set(sleepWakeDayBuckets(sessions).compactMap { bucket in
+            // The standalone read-only package intentionally does not duplicate the app's learned
+            // main-night selector. Bridging still runs before wake-day assignment so an early
+            // cross-midnight fragment cannot publish alone. A single exact session is unambiguous;
+            // multi-session groups/days fail closed rather than lending evidence across fragments.
+            guard bucket.day >= from,
+                  bucket.day <= to,
+                  bucket.groups.count == 1,
+                  let rows = bucket.groups.first,
+                  rows.count == 1,
+                  let row = rows.first,
+                  DetailedSleepStagePolicy.canPublish(row)
+            else { return nil }
+            return bucket.day
+        })
+    }
+
+    /// Small read-only mirror of the app's bridge-before-wake-day contract. Local Access deliberately
+    /// avoids importing the full analytics package, but must not split one physical night at midnight.
+    private func sleepWakeDayBuckets(
+        _ sessions: [SleepSessionRow]
+    ) -> [(day: String, groups: [[SleepSessionRow]])] {
+        guard !sessions.isEmpty else { return [] }
+        let order = sessions.indices.sorted {
+            sessions[$0].effectiveStartTs < sessions[$1].effectiveStartTs
+        }
+        var groups: [[Int]] = []
+        var groupEnds: [Int] = []
+
+        for index in order {
+            let session = sessions[index]
+            if let lastEnd = groupEnds.last {
+                let (gap, overflow) =
+                    session.effectiveStartTs.subtractingReportingOverflow(lastEnd)
+                let onsetHour = Calendar.current.component(
+                    .hour,
+                    from: Date(timeIntervalSince1970:
+                        TimeInterval(session.effectiveStartTs)))
+                let overnightOnset = onsetHour >= 20 || onsetHour < 11
+                let bridges = !overflow
+                    && gap >= 0
+                    && (gap < 60 * 60 || (gap < 90 * 60 && overnightOnset))
+                if bridges {
+                    groups[groups.count - 1].append(index)
+                    groupEnds[groupEnds.count - 1] = max(lastEnd, session.endTs)
+                    continue
+                }
+            }
+            groups.append([index])
+            groupEnds.append(session.endTs)
+        }
+
+        var byDay: [String: [[SleepSessionRow]]] = [:]
+        for (indices, endTs) in zip(groups, groupEnds) {
+            let day = dayString(
+                Date(timeIntervalSince1970: TimeInterval(endTs)))
+            byDay[day, default: []].append(
+                indices.map { sessions[$0] })
+        }
+        return byDay.keys.sorted().map {
+            (day: $0, groups: byDay[$0] ?? [])
+        }
+    }
+
+    private func wakeDayByStart(
+        _ sessions: [SleepSessionRow]
+    ) -> [Int: String] {
+        var result: [Int: String] = [:]
+        for bucket in sleepWakeDayBuckets(sessions) {
+            for group in bucket.groups {
+                for session in group {
+                    result[session.startTs] = bucket.day
+                }
+            }
+        }
+        return result
+    }
+
+    private func mergeSleep(
+        imported: [SleepSessionRow],
+        computed: [SleepSessionRow]
+    ) -> [SourcedSleepSessionRow] {
+        let importedWakeDays = wakeDayByStart(imported)
+        let computedWakeDays = wakeDayByStart(computed)
         var importedDays = Set<String>()
         for session in imported {
-            importedDays.insert(dayString(Date(timeIntervalSince1970: TimeInterval(session.endTs))))
+            importedDays.insert(
+                importedWakeDays[session.startTs]
+                    ?? dayString(Date(timeIntervalSince1970: TimeInterval(session.endTs))))
         }
         let computedKept = computed.filter {
-            !importedDays.contains(dayString(Date(timeIntervalSince1970: TimeInterval($0.endTs))))
+            let day = computedWakeDays[$0.startTs]
+                ?? dayString(Date(timeIntervalSince1970: TimeInterval($0.endTs)))
+            return !importedDays.contains(day)
         }
-        return (imported + computedKept).sorted { $0.startTs < $1.startTs }
+        return (
+            imported.map { SourcedSleepSessionRow(row: $0, source: deviceId) }
+            + computedKept.map { SourcedSleepSessionRow(row: $0, source: computedDeviceId) }
+        ).sorted { $0.row.startTs < $1.row.startTs }
     }
 
     private func freshnessPayload(latestHR: Int?, apple: [AppleDailyRow], daily: [(row: DailyMetricRow, source: String)]) -> JSONValue {
@@ -601,15 +815,24 @@ private struct MetricSourceCandidate: Hashable {
     let key: String
 }
 
-private func dailyJSON(_ row: DailyMetricRow, source: String) -> JSONValue {
+private struct SourcedSleepSessionRow {
+    let row: SleepSessionRow
+    let source: String
+}
+
+private func dailyJSON(
+    _ row: DailyMetricRow,
+    source: String,
+    publishDetailedStages: Bool
+) -> JSONValue {
     .object([
         "day": .string(row.day),
         "source": .string(source),
         "totalSleepMin": optionalDouble(row.totalSleepMin),
         "efficiency": optionalDouble(row.efficiency),
-        "deepMin": optionalDouble(row.deepMin),
-        "remMin": optionalDouble(row.remMin),
-        "lightMin": optionalDouble(row.lightMin),
+        "deepMin": optionalDouble(publishDetailedStages ? row.deepMin : nil),
+        "remMin": optionalDouble(publishDetailedStages ? row.remMin : nil),
+        "lightMin": optionalDouble(publishDetailedStages ? row.lightMin : nil),
         "disturbances": optionalInt(row.disturbances),
         "restingHr": optionalInt(row.restingHr),
         "avgHrv": optionalDouble(row.avgHrv),
@@ -638,7 +861,10 @@ private func appleDailyJSON(_ row: AppleDailyRow) -> JSONValue {
     ])
 }
 
-private func sleepJSON(_ row: SleepSessionRow) -> JSONValue {
+private func sleepJSON(
+    _ row: SleepSessionRow,
+    publishDetailedStages: Bool
+) -> JSONValue {
     .object([
         "startTs": .int(row.startTs),
         "endTs": .int(row.endTs),
@@ -648,7 +874,7 @@ private func sleepJSON(_ row: SleepSessionRow) -> JSONValue {
         "efficiency": optionalDouble(row.efficiency),
         "restingHr": optionalInt(row.restingHr),
         "avgHrv": optionalDouble(row.avgHrv),
-        "hasStages": .bool(row.stagesJSON != nil),
+        "hasStages": .bool(publishDetailedStages && row.stagesJSON != nil),
     ])
 }
 

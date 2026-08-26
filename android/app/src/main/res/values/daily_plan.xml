@@ -34,12 +34,11 @@
     <string name="daily_plan_progress_in_range">Within today\'s planned range. This is a cue, not a stopping rule.</string>
     <string name="daily_plan_signal_good">Aligned</string>
     <string name="daily_plan_signal_hrv">Heart-rate variability</string>
-    <string name="daily_plan_signal_load">Recent-load ratio</string>
     <string name="daily_plan_signal_neutral">Within range</string>
     <string name="daily_plan_signal_respiration">Respiratory rate</string>
     <string name="daily_plan_signal_rhr">Resting heart rate</string>
     <string name="daily_plan_signal_shifted">Shifted</string>
-    <string name="daily_plan_signal_variety">Training variety</string>
+    <string name="daily_plan_signal_variety">Effort variety</string>
     <string name="daily_plan_signal_watch">Recheck</string>
     <string name="daily_plan_state_calibrating_body">NOOP needs a current, solid readiness read and at least seven recent scored Effort days.</string>
     <string name="daily_plan_state_calibrating_title">No range yet</string>

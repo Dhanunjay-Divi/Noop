@@ -228,6 +228,17 @@ data class GravitySample(
  * Field set/order matches MetricsCache.swift DailyMetric so com.noop.analytics.IllnessWatch
  * can read restingHr / avgHrv / recovery / strain / skinTempDevC / respRateBpm / totalSleepMin.
  */
+object DailyHrvMethod {
+    const val RMSSD = "RMSSD"
+    const val SDNN = "SDNN"
+
+    fun normalized(value: String?): String? = when (value?.uppercase()) {
+        RMSSD -> RMSSD
+        SDNN -> SDNN
+        else -> null
+    }
+}
+
 @Entity(tableName = "dailyMetric", primaryKeys = ["deviceId", "day"])
 data class DailyMetric(
     val deviceId: String,
@@ -261,6 +272,9 @@ data class DailyMetric(
     // (imports/cloud never carry them), so old rows + non-4.0 nights stay null.
     val spo2Red: Int? = null,           // mean raw red PPG ADC during detected sleep
     val spo2Ir: Int? = null,            // mean raw IR PPG ADC during detected sleep
+    // Durable time-domain statistic identity. A null value means the HRV method is unknown and the
+    // row must not enter an RMSSD- or SDNN-specific personal baseline.
+    val hrvMethod: String? = null,
 )
 
 /**
@@ -303,6 +317,12 @@ data class SleepSession(
     // through the targeted DAO methods (not the @Upsert path, which never names them and so preserves them).
     val motionJSON: String? = null,
     val sleepStateJSON: String? = null,
+    // v35. Exact-session sustained R-R evidence from the analysis that produced [stagesJSON].
+    // Both values are nullable and must travel as a pair: null means the session has no attributable
+    // analysis evidence (imports, legacy rows, manual edits, or failed/incomplete restore). Publication
+    // aggregates these counts only across the currently selected main-night group.
+    val rrEligibleWindowCount: Int? = null,
+    val rrValidWindowCount: Int? = null,
 ) {
     /** The bed (onset) time to DISPLAY / sort / re-stage by: the user's hand-set onset when edited,
      *  else the immutable detected [startTs]. Mirrors Swift `CachedSleepSession.effectiveStartTs`. */

@@ -87,7 +87,9 @@ final class RemoteSyncStoreTests: XCTestCase {
                     efficiency: nil,
                     restingHr: nil,
                     avgHrv: nil,
-                    stagesJSON: nil
+                    stagesJSON: nil,
+                    rrEligibleWindowCount: $0 == 200 ? 12 : nil,
+                    rrValidWindowCount: $0 == 200 ? 8 : nil
                 )
             },
             deviceId: deviceId
@@ -135,6 +137,10 @@ final class RemoteSyncStoreTests: XCTestCase {
             afterStartTs: 100
         )
         XCTAssertEqual(sleep.map(\.startTs), [200, 300])
+        XCTAssertEqual(sleep.first?.rrEligibleWindowCount, 12)
+        XCTAssertEqual(sleep.first?.rrValidWindowCount, 8)
+        XCTAssertNil(sleep.last?.rrEligibleWindowCount)
+        XCTAssertNil(sleep.last?.rrValidWindowCount)
 
         let workouts = try await store.remoteSyncWorkouts(
             deviceId: deviceId,

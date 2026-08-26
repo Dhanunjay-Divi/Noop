@@ -33,10 +33,9 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(r.level, .primed)
         XCTAssertEqual(r.signals.first { $0.key == "hrv" }?.flag, .good)
         XCTAssertEqual(r.signals.first { $0.key == "rhr" }?.flag, .good)
-        XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.flag, .neutral)
         XCTAssertEqual(r.signals.first { $0.key == "hrv" }?.evidence, "72 vs 60 ms")
         XCTAssertEqual(r.signals.first { $0.key == "rhr" }?.evidence, "46 vs 52 bpm")
-        XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.evidence, "7d 10.0 / 28d 10.0")
+        XCTAssertFalse(r.signals.contains { $0.key == "acwr" })
         XCTAssertEqual(r.summary,
                        "Your measured recovery trends are aligned with your recent baseline.")
         XCTAssertEqual(r.headline, "Aligned")
@@ -57,26 +56,21 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("diagnosis"))
     }
 
-    func testRecentLoadSpikeIsDescriptiveOnly() {
-        // With no evaluable recovery signals, even an extreme ratio remains context—not readiness.
+    func testNonlinearEffortNeverBecomesRecentLoadRatio() {
+        // A bounded score cannot become additive load or an acute:chronic ratio.
         var days: [DailyMetric] = []
         for i in 1...21 { days.append(d(i, hrv: 60, rhr: 52, strain: 5)) }
         for i in 22...28 { days.append(d(i, hrv: 60, rhr: 52, strain: 15)) }
         days.append(d(29, hrv: 60, rhr: 52, strain: 15))
         let r = ReadinessEngine.evaluate(days: days)
-        XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.flag, .neutral)
         XCTAssertEqual(r.level, .insufficient)
-        XCTAssertNotNil(r.acwr)
-        XCTAssertGreaterThan(r.acwr!, 1.5)
-        let load = r.signals.first { $0.key == "acwr" }
-        XCTAssertEqual(load?.label, "Recent-load ratio")
-        XCTAssertTrue(load?.detail.contains("7-day mean is") == true)
-        XCTAssertFalse(load?.detail.localizedCaseInsensitiveContains("injury") == true)
-        XCTAssertFalse(load?.detail.localizedCaseInsensitiveContains("sweet spot") == true)
+        XCTAssertFalse(r.signals.contains { $0.key == "acwr" })
+        XCTAssertNil(r.effortVariety)
+        XCTAssertNil(ReadinessEngine.evaluate(days: days, additiveLoadEntries: []).trainingLoad)
         XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("train"))
     }
 
-    func testRecentLoadRatioCannotChangeRecoveryDrivenReadiness() {
+    func testBoundedEffortCannotChangeRecoveryDrivenReadiness() {
         let steady = baseline(todayHrv: 72, todayRhr: 46, todayStrain: 10)
         var spiking = steady
         // Eight identical row changes also regress the old XOR cache fingerprint, where even changes
@@ -97,8 +91,9 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(spikeReadiness.level, steadyReadiness.level)
         XCTAssertEqual(spikeReadiness.headline, steadyReadiness.headline)
         XCTAssertEqual(spikeReadiness.summary, steadyReadiness.summary)
-        XCTAssertEqual(spikeReadiness.signals.first { $0.key == "acwr" }?.flag, .neutral)
-        XCTAssertGreaterThan(spikeReadiness.acwr ?? 0, steadyReadiness.acwr ?? 0)
+        XCTAssertFalse(spikeReadiness.signals.contains { $0.key == "acwr" })
+        XCTAssertNil(spikeReadiness.effortVariety)
+        XCTAssertNil(steadyReadiness.effortVariety)
     }
 
     func testTrainingMonotonyCannotDowngradeAlignedRecovery() {
@@ -117,8 +112,9 @@ final class ReadinessEngineTests: XCTestCase {
                 spo2Pct: row.spo2Pct, skinTempDevC: row.skinTempDevC, respRateBpm: row.respRateBpm)
         }
         let read = ReadinessEngine.evaluate(days: days)
-        let variety = read.signals.first { $0.key == "monotony" }
+        let variety = read.signals.first { $0.key == "effortVariety" }
         XCTAssertNotNil(variety)
+        XCTAssertEqual(variety?.label, "Effort variety")
         XCTAssertTrue(variety?.evidence?.contains("Effort 10-11 (average 10)") == true)
         XCTAssertFalse(variety?.evidence?.localizedCaseInsensitiveContains("monotony") == true)
         XCTAssertEqual(read.level, .primed)
@@ -159,9 +155,9 @@ final class ReadinessEngineTests: XCTestCase {
             recovery: nil, strain: 100, exerciseCount: nil, spo2Pct: nil,
             skinTempDevC: nil, respRateBpm: 14))
         let withFuture = ReadinessEngine.evaluate(days: days, today: "2024-03-29")
-        XCTAssertEqual(withFuture.acwr, historical.acwr)
-        XCTAssertEqual(withFuture.signals.first { $0.key == "acwr" },
-                       historical.signals.first { $0.key == "acwr" })
+        XCTAssertEqual(withFuture.effortVariety, historical.effortVariety)
+        XCTAssertEqual(withFuture.signals.first { $0.key == "effortVariety" },
+                       historical.signals.first { $0.key == "effortVariety" })
     }
 
     func testSparseRowsAcrossMonthsDoNotBecomeTwentyEightDayLoad() {
@@ -177,7 +173,7 @@ final class ReadinessEngineTests: XCTestCase {
             }
         }
         let result = ReadinessEngine.evaluate(days: days, today: "2024-12-15")
-        XCTAssertNil(result.acwr)
+        XCTAssertNil(result.effortVariety)
         XCTAssertFalse(result.signals.contains { $0.key == "acwr" })
     }
 

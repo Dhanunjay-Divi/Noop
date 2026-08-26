@@ -2452,7 +2452,7 @@ private fun dailyPlanSignalIcon(key: String): ImageVector = when (key) {
     "hrv" -> Icons.Filled.MonitorHeart
     "rhr" -> Icons.Filled.Favorite
     "respRate" -> Icons.Filled.Air
-    "monotony" -> Icons.Filled.Functions
+    "effortVariety" -> Icons.Filled.Functions
     else -> Icons.Filled.TrackChanges
 }
 
@@ -2479,8 +2479,7 @@ private fun dailyPlanSignalLabel(signal: ReadinessEngine.Signal): String {
         "hrv" -> stringResource(R.string.daily_plan_signal_hrv)
         "rhr" -> stringResource(R.string.daily_plan_signal_rhr)
         "respRate" -> stringResource(R.string.daily_plan_signal_respiration)
-        "acwr" -> stringResource(R.string.daily_plan_signal_load)
-        "monotony" -> stringResource(R.string.daily_plan_signal_variety)
+        "effortVariety" -> stringResource(R.string.daily_plan_signal_variety)
         else -> signal.label
     }
 }
@@ -6772,9 +6771,9 @@ private fun SourceRow(
 //
 // On-device training-readiness synthesis. Calls the analytics ReadinessEngine over the
 // view model's day history and renders the macOS card: a colored level dot + headline,
-// an optional acute:chronic "ratio X.XX" read-out, the plain-English summary, then one
-// row per driving signal (a small flag-colored dot + label + detail). The whole card is
-// suppressed until there is enough history (level == INSUFFICIENT), matching macOS.
+// the plain-English summary, then one row per driving signal (a small flag-colored dot +
+// label + detail). The whole card is suppressed until there is enough history
+// (level == INSUFFICIENT), matching macOS.
 
 @Composable
 private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? = null) {
@@ -6796,7 +6795,7 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
     SectionHeader("Readiness", overline = overline)
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Headline row: level dot + headline, then the fixed-window ratio read-out.
+            // Headline row: level dot + headline.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
@@ -6811,13 +6810,6 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
                     color = Palette.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
-                readiness.acwr?.let { acwr ->
-                    Text(
-                        uiString(R.string.today_load_ratio, String.format(Locale.US, "%.2f", acwr)),
-                        style = NoopType.captionNumber,
-                        color = Palette.textTertiary,
-                    )
-                }
             }
 
             // Plain-English summary.

@@ -1,6 +1,7 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import com.noop.data.DailyHrvMethod
 import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
@@ -976,6 +977,23 @@ object IntelligenceEngine {
             useExperimentalSleepV2 = useExperimentalSleepV2,
             useMotionAwareWake = useMotionAwareWake,
         )
+        // Bridge-before-wake-day attribution needs every detected continuation fragment. Build one
+        // complete computed-source timeline and replace each detected twin with its persisted edit.
+        val editTimelineByKey = linkedMapOf<Pair<String, Long>, SleepSession>()
+        for (night in scoredNights) {
+            for (session in night.result.sleepSessions) {
+                val row = SleepSession(
+                    deviceId = computedId,
+                    startTs = session.start,
+                    endTs = session.end,
+                )
+                editTimelineByKey[row.deviceId to row.startTs] = row
+            }
+        }
+        for (row in editedRows) {
+            editTimelineByKey[row.deviceId to row.startTs] = row
+        }
+        val editSourceTimeline = editTimelineByKey.values.toList()
         // #299: [editsByStart] / [editOnsetByStart] are now built PER DAY inside the scoring loop (scoped to
         // the day each edit belongs to), NOT window-wide here. sleepEditedDaily folds any edited row that
         // isn't a twin of THIS day's detected sessions in as a "manual" block, so a window-wide edit set let
@@ -1003,7 +1021,12 @@ object IntelligenceEngine {
             // here keeps a single-night edit overriding only its OWN night instead of every night. The
             // #547 effective-onset detail is preserved: editOnsetByStart still carries the user-CORRECTED
             // bedtime (startTsAdjusted ?: startTs) for this day's edited/manual blocks.
-            val dayEditedRows = editedRowsForDay(editedRows, res.daily.day, tzOffsetSeconds)
+            val dayEditedRows = editedRowsForDay(
+                editedRows,
+                res.daily.day,
+                tzOffsetSeconds,
+                editSourceTimeline,
+            )
             val editsByStart: Map<Long, String?> = dayEditedRows.associate { it.startTs to it.stagesJSON }
             val editOnsetByStart: Map<Long, Long> = dayEditedRows.associate { it.startTs to it.effectiveStartTs }
             // Substitute an edited block's (reshaped) stages for its detected twin before the daily
@@ -1163,6 +1186,7 @@ object IntelligenceEngine {
             )
             // Map the rich DetectedSleep sessions → Room SleepSession cache rows.
             for (s in res.sleepSessions) {
+                val rrEvidence = night.rawEvidence.countsBySessionStart[s.start]
                 sleepRows.add(
                     SleepSession(
                         deviceId = computedId,
@@ -1172,6 +1196,8 @@ object IntelligenceEngine {
                         restingHr = s.restingHR,
                         avgHrv = s.avgHRV,
                         stagesJSON = AnalyticsEngine.encodeStages(s.stages),
+                        rrEligibleWindowCount = rrEvidence?.eligibleWindows,
+                        rrValidWindowCount = rrEvidence?.validRRWindows,
                     ),
                 )
             }
@@ -1225,7 +1251,15 @@ object IntelligenceEngine {
             // score; those days also pre-claim the slot so the fold doesn't re-score them.
             val byDay = rows.associateBy { it.day }
             for (r in rows) if (r.recovery != null) importScoredDays.add(r.day)
-            for (w in watchRecoveries(rows, importScoredDays)) {
+            val hrvProvenance = WatchRecovery.HRVProvenance(
+                sourceId = source,
+                method = if (source == WhoopRepository.APPLE_HEALTH_SOURCE) {
+                    WatchRecovery.HRVMethod.SDNN
+                } else {
+                    WatchRecovery.HRVMethod.RMSSD
+                },
+            )
+            for (w in watchRecoveries(rows, hrvProvenance, importScoredDays)) {
                 val recovery = w.recovery ?: continue
                 val row = byDay[w.day] ?: continue
                 val scored = row.copy(deviceId = computedId, recovery = recovery)
@@ -1661,8 +1695,13 @@ object IntelligenceEngine {
         )
     }
 
-    /** One day's source-only (daily-aggregate) recovery output, keyed by day. Mirrors Swift WatchScoredDay. */
-    data class WatchScoredDay(val day: String, val recovery: Double?, val confidence: ScoreConfidence)
+    /** One source-only recovery output, including the exact HRV series used. */
+    data class WatchScoredDay(
+        val day: String,
+        val recovery: Double?,
+        val confidence: ScoreConfidence,
+        val hrvProvenance: WatchRecovery.HRVProvenance,
+    )
 
     /**
      * Score Charge for daily-aggregate (import-only) days that the raw-HR loop never touched (#823). For
@@ -1675,6 +1714,7 @@ object IntelligenceEngine {
      */
     fun watchRecoveries(
         rows: List<DailyMetric>,
+        hrvProvenance: WatchRecovery.HRVProvenance,
         strapRecoveryDays: Set<String> = emptySet(),
     ): List<WatchScoredDay> {
         val sorted = rows.sortedBy { it.day }
@@ -1682,15 +1722,33 @@ object IntelligenceEngine {
         for ((i, row) in sorted.withIndex()) {
             if (row.day in strapRecoveryDays) continue
             val prior = sorted.subList(0, i)
-            val hrvHistory = prior.mapNotNull { it.avgHrv }
+            val hrvHistory = prior.mapNotNull { daily ->
+                if (DailyHrvMethod.normalized(daily.hrvMethod) != hrvProvenance.method.name) {
+                    null
+                } else daily.avgHrv?.let {
+                    WatchRecovery.HRVSample(it, hrvProvenance)
+                }
+            }
             val rhrHistory = prior.mapNotNull { it.restingHr?.toDouble() }
             val res = WatchRecovery.compute(
-                todayHrv = row.avgHrv,
+                provenance = hrvProvenance,
+                todayHrv = row.avgHrv?.takeIf {
+                    DailyHrvMethod.normalized(row.hrvMethod) == hrvProvenance.method.name
+                }?.let {
+                    WatchRecovery.HRVSample(it, hrvProvenance)
+                },
                 todayRhr = row.restingHr,
                 hrvHistory = hrvHistory,
                 rhrHistory = rhrHistory,
             )
-            out.add(WatchScoredDay(row.day, res.recovery, res.confidence))
+            out.add(
+                WatchScoredDay(
+                    row.day,
+                    res.recovery,
+                    res.confidence,
+                    res.hrvProvenance,
+                ),
+            )
         }
         return out
     }
@@ -1823,7 +1881,23 @@ object IntelligenceEngine {
         editedRows: List<SleepSession>,
         day: String,
         tzOffsetSeconds: Long,
-    ): List<SleepSession> = editedRows.filter { AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) == day }
+        sourceTimeline: List<SleepSession> = emptyList(),
+    ): List<SleepSession> {
+        if (sourceTimeline.isEmpty()) {
+            return editedRows.filter {
+                AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) == day
+            }
+        }
+        val wakeDays = WhoopRepository.wakeDayBySession(
+            sourceTimeline,
+            offsetAtEpochSec = { tzOffsetSeconds },
+        )
+        return editedRows.filter { row ->
+            val resolved = wakeDays[row.deviceId to row.startTs]
+                ?: AnalyticsEngine.dayString(row.endTs, tzOffsetSeconds)
+            resolved == day
+        }
+    }
 
     /**
      * Rebuild the complete Rest evidence record from final user-edited sleep aggregates while preserving

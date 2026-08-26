@@ -2,6 +2,9 @@ package com.noop.data
 
 import android.content.Context
 import androidx.room.withTransaction
+import com.noop.analytics.DetailedSleepStagePublication
+import com.noop.analytics.ScoreConfidence
+import com.noop.analytics.SleepStageTotals
 import com.noop.protocol.DroppedRtcEvent
 import com.noop.protocol.RrSourceChannel
 import kotlinx.coroutines.flow.Flow
@@ -177,6 +180,17 @@ data class DataFreshness(
 }
 
 /**
+ * One point-in-time, source-resolved input for Health Connect sleep writeback.
+ *
+ * Both fields are read under the same Room transaction. The session query is uncapped, so an empty
+ * snapshot is a real empty database state rather than a saturated/partial page that could drive deletion.
+ */
+data class SleepWritebackSnapshot(
+    val sessions: List<SleepSession>,
+    val habitualMidsleepSec: Long?,
+)
+
+/**
  * Isolated, local-only menstrual-cycle anchors. Each user-logged cycle day 1 is represented by one
  * value-1 [MetricSeriesRow], under a source that cannot collide with a strap, import, or computed score.
  * Period starts anchor the awareness engine. Optional daily flow and symptoms are stored in a separate
@@ -295,14 +309,27 @@ object HistoryHeal {
 class WhoopRepository private constructor(
     private val dao: WhoopDao,
     /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
-    private val identityTransactor: suspend (block: suspend () -> Unit) -> Unit,
+    private val transactor: Transactor,
 ) {
 
-    constructor(dao: WhoopDao) : this(dao, { block -> block() })
+    /** Generic because integrity snapshots return a value from inside the transaction. */
+    interface Transactor {
+        suspend fun <R> run(block: suspend () -> R): R
+    }
+
+    constructor(dao: WhoopDao) : this(
+        dao,
+        object : Transactor {
+            override suspend fun <R> run(block: suspend () -> R): R = block()
+        },
+    )
 
     constructor(db: WhoopDatabase) : this(
         db.whoopDao(),
-        { block -> db.withTransaction { block() } },
+        object : Transactor {
+            override suspend fun <R> run(block: suspend () -> R): R =
+                db.withTransaction { block() }
+        },
     )
 
     // MARK: - Device
@@ -337,7 +364,7 @@ class WhoopRepository private constructor(
 
     /** Atomically reconcile the paired model and matching legacy device name once BLE identity is known. */
     suspend fun reconcileDeviceIdentity(id: String, model: String) {
-        identityTransactor {
+        transactor.run {
             dao.setModel(id, model)
             dao.setLegacyDeviceName(id, model)
         }
@@ -491,17 +518,21 @@ class WhoopRepository private constructor(
      *  of iOS PR #395 (Repository.editSleepTimes + MetricsCache.applySleepEdit).
      *
      *  The corrected onset is stored in [SleepSession.startTsAdjusted] and [SleepSession.startTs] stays
-     *  the IMMUTABLE detected primary key, so this upsert REPLACEs the existing (deviceId, startTs) row
-     *  IN PLACE , no delete, no key move. [SleepSession.userEdited] is set true so the post-sync
+     *  the IMMUTABLE detected primary key, so the targeted update changes the existing row
+     *  IN PLACE, with no delete and no key move. [SleepSession.userEdited] is set true so the post-sync
      *  recompute's overlap guard (IntelligenceEngine) preserves the correction instead of re-inserting
      *  the strap-detected twin over it.
      *
      *  This fixes the prior Android bug: the old delete-then-reinsert MUTATED the startTs primary key,
      *  so a later analysis run (which re-detects the night at a slightly drifted startTs) inserted a
      *  SECOND row beside the edited one (different PK ⇒ no ON CONFLICT match), double-counting time in
-     *  bed AND reverting the edit. Every other field (efficiency, restingHr, avgHrv, stagesJSON) is
-     *  preserved via [SleepSession.copy]. */
-    suspend fun updateSleepSessionTimes(session: SleepSession, newStartTs: Long, newEndTs: Long) {
+     *  bed AND reverting the edit. Auxiliary motion/state and derived vitals remain untouched by the
+     *  targeted update; the selected bounds, reclipped stages, and exact-session evidence change together. */
+    suspend fun updateSleepSessionTimes(
+        session: SleepSession,
+        newStartTs: Long,
+        newEndTs: Long,
+    ): Boolean {
         // #940 belt-and-braces: never persist a future-ending or inverted corrected window, whatever
         // the UI sent. The Sleep screen's own guards (cross-midnight bed auto-correct + the disjoint
         // confirm) should make this unreachable; it is the last line so no client misbehaviour can
@@ -509,18 +540,19 @@ class WhoopRepository private constructor(
         // Repository.editSleepTimes' SleepEditGuard.clampedEditWindow gate.
         val (safeStartTs, safeEndTs) = com.noop.analytics.SleepEditGuard.clampedEditWindow(
             newStartTs, newEndTs, System.currentTimeMillis() / 1000L,
-        ) ?: return
+        ) ?: return false
         val reclipped = com.noop.analytics.SleepWindowReclip.reclip(
             session.stagesJSON, session.effectiveStartTs, session.endTs, safeStartTs, safeEndTs,
         )
-        dao.upsertSleepSessions(
-            listOf(session.copy(
-                startTsAdjusted = safeStartTs,
-                endTs = safeEndTs,
-                userEdited = true,
-                stagesJSON = reclipped ?: session.stagesJSON,
-            )),
-        )
+        return dao.applySleepEdit(
+            deviceId = session.deviceId,
+            detectedStartTs = session.startTs,
+            startTsAdjusted = safeStartTs,
+            endTs = safeEndTs,
+            stagesJSON = reclipped ?: session.stagesJSON,
+            rrEligibleWindowCount = null,
+            rrValidWindowCount = null,
+        ) == 1
     }
 
     /** Remove a sleep session entirely , the delete half of [updateSleepSessionTimes] with no
@@ -642,7 +674,10 @@ class WhoopRepository private constructor(
             startTs, endTs, System.currentTimeMillis() / 1000L,
         ) ?: return
         val computedId = computedDeviceId(strapDeviceId)
-        val stagesJSON = com.noop.analytics.SleepStageHealer.restageFromRaw(this, strapDeviceId, safeStartTs, safeEndTs)
+        val analysis = com.noop.analytics.SleepStageHealer.restageWithEvidenceFromRaw(
+            this, strapDeviceId, safeStartTs, safeEndTs,
+        )
+        val stagesJSON = analysis?.stagesJSON
             ?: com.noop.analytics.AnalyticsEngine.encodeStages(
                 listOf(com.noop.analytics.StageSegment(start = safeStartTs, end = safeEndTs, stage = "wake")),
             )
@@ -655,6 +690,8 @@ class WhoopRepository private constructor(
                 stagesJSON = stagesJSON,
                 userEdited = true,
                 startTsAdjusted = null,
+                rrEligibleWindowCount = analysis?.rrEligibleWindowCount,
+                rrValidWindowCount = analysis?.rrValidWindowCount,
             ),
         )
     }
@@ -687,6 +724,21 @@ class WhoopRepository private constructor(
      *  the DAO query; keyed by the IMMUTABLE detected [detectedStartTs]. Returns rows changed. */
     suspend fun updateSleepStages(deviceId: String, detectedStartTs: Long, stagesJSON: String): Int =
         dao.updateSleepStages(deviceId, detectedStartTs, stagesJSON)
+
+    /** Stage + exact-session R-R evidence write from one successful raw analysis. */
+    suspend fun updateAnalyzedSleepStages(
+        deviceId: String,
+        detectedStartTs: Long,
+        stagesJSON: String,
+        rrEligibleWindowCount: Int,
+        rrValidWindowCount: Int,
+    ): Int = dao.updateAnalyzedSleepStages(
+        deviceId,
+        detectedStartTs,
+        stagesJSON,
+        rrEligibleWindowCount,
+        rrValidWindowCount,
+    )
 
     // MARK: - Per-epoch sleep analytics (v18: motionJSON / sleepStateJSON). Banked beside stagesJSON on
     // the sleepSession row; written/read through targeted methods so the @Upsert recompute/import path
@@ -768,7 +820,7 @@ class WhoopRepository private constructor(
      * Commit every Room-backed part of one portable wearable archive together.
      *
      * Parsing and graph validation complete before the transaction starts. In production,
-     * [identityTransactor] is [WhoopDatabase.withTransaction], so portable nutrition/strength rows,
+     * [transactor] is [WhoopDatabase.withTransaction], so portable nutrition/strength rows,
      * device registration, and the CSV projection either all commit or all roll back. URI reads and
      * caller-owned receipts/logs/preferences are intentionally outside SQLite and cannot be made part
      * of this ACID boundary.
@@ -785,7 +837,7 @@ class WhoopRepository private constructor(
             .distinctBy(WhoopCsvDeviceRegistration::id)
         val now = System.currentTimeMillis() / 1_000L
         var portableSummary: PortableUserDataImportSummary? = null
-        identityTransactor {
+        transactor.run {
             portableSummary = cleanPortable?.let { importValidatedPortableUserData(it) }
             for (device in cleanDevices) {
                 upsertDeviceInCurrentTransaction(
@@ -1302,7 +1354,7 @@ class WhoopRepository private constructor(
     ): PortableUserDataImportSummary {
         val clean = PortableUserDataCodec.validated(payload)
         var result: PortableUserDataImportSummary? = null
-        identityTransactor {
+        transactor.run {
             result = importValidatedPortableUserData(clean)
         }
         return checkNotNull(result)
@@ -1462,20 +1514,7 @@ class WhoopRepository private constructor(
         // Mirrors Swift Repository.habitualMidsleepSec (importedReadIds/computedReadIds + dedupBlocks).
         val imported = dedupSleepBlocks(importedSourceIds(deviceId).flatMap { dao.sleepSessions(it, lo, hi, 4000) })
         val computed = dedupSleepBlocks(computedSourceIds(deviceId).flatMap { dao.sleepSessions(it, lo, hi, 4000) })
-        val offsetSec = (java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000).toLong()
-        val blocks = (imported + computed).mapNotNull { s ->
-            val start = s.effectiveStartTs
-            val end = s.endTs
-            if (end <= start) {
-                null
-            } else {
-                val mid = start + (end - start) / 2
-                com.noop.analytics.SleepStageTotals.HistoryBlock(
-                    start, end, com.noop.analytics.AnalyticsEngine.dayString(mid, offsetSec),
-                )
-            }
-        }
-        return com.noop.analytics.SleepStageTotals.habitualMidsleepSec(blocks, offsetSec)
+        return historicalHabitualMidsleepSec(imported + computed)
     }
 
     suspend fun metricSeries(
@@ -1483,9 +1522,78 @@ class WhoopRepository private constructor(
         key: String,
         from: String,
         to: String,
+    ): List<MetricSeriesRow> {
+        if (deviceId.endsWith("-noop") &&
+            ScoreConfidence.isDetailedSleepStageSeriesKey(key)
+        ) {
+            return detailedSleepStageMinutes(deviceId, from, to).mapNotNull { (day, minutes) ->
+                detailedSleepStageValue(key, minutes)?.let { value ->
+                    MetricSeriesRow(deviceId = deviceId, day = day, key = key, value = value)
+                }
+            }
+        }
+        val rows = dao.metricSeries(deviceId, key, from, to)
+            .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+        return rows
+    }
+
+    /**
+     * Full-fidelity metric-series read for the portable raw sidecar only. Customer-facing queries
+     * intentionally gate unsupported local stage detail in [metricSeries]; the sidecar is a raw
+     * portability/reprocessing payload and must not inherit that presentation filter.
+     */
+    internal suspend fun metricSeriesForPortablePayload(
+        deviceId: String,
+        key: String,
+        from: String,
+        to: String,
     ): List<MetricSeriesRow> =
         dao.metricSeries(deviceId, key, from, to)
             .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+
+    /**
+     * Local wake-days whose current canonical main-night group carries exact-session sustained R-R
+     * evidence. Imported providers bypass this local gate at their presentation boundary.
+     */
+    suspend fun detailedSleepStagePublicationDays(
+        deviceId: String,
+        from: String,
+        to: String,
+    ): Set<String> =
+        detailedSleepStageMinutes(deviceId, from, to).keys
+
+    /**
+     * Detailed stage minutes derived from the currently authorized canonical main-night group.
+     *
+     * Persisted DailyMetric/metricSeries stage fields are deliberately not consulted here: a later edit,
+     * reanalysis, or main-night change can invalidate those independently cached values. Raw portable
+     * payload reads continue to use [metricSeriesForPortablePayload] and are not filtered or rewritten.
+     */
+    internal suspend fun detailedSleepStageMinutes(
+        deviceId: String,
+        from: String,
+        to: String,
+    ): Map<String, SleepStageTotals.Minutes> {
+        if (!deviceId.endsWith("-noop")) return emptyMap()
+        val (fromTs, toTs) = sleepSessionTimestampRange(from, to)
+        val sessions = dao.sleepSessions(deviceId, fromTs, toTs, DEFAULT_LIMIT)
+        if (sessions.isEmpty()) return emptyMap()
+        val sourceDeviceId = deviceId.removeSuffix("-noop")
+        val habitual = habitualMidsleepSec(sourceDeviceId)
+        return projectPublishableDetailedStages(
+            sessions = sessions,
+            habitualMidsleepSec = habitual,
+        ).minutesBySourceDay
+            .asSequence()
+            .filter { (sourceDay, _) ->
+                sourceDay.first == deviceId && sourceDay.second >= from && sourceDay.second <= to
+            }
+            .associateTo(linkedMapOf()) { (sourceDay, minutes) -> sourceDay.second to minutes }
+    }
+
+    suspend fun detailedSleepStagesPublishable(deviceId: String, day: String): Boolean =
+        !deviceId.endsWith("-noop") ||
+            day in detailedSleepStagePublicationDays(deviceId, day, day)
 
     // MARK: - Local cycle-day-1 history
 
@@ -1822,14 +1930,17 @@ class WhoopRepository private constructor(
         val computed = unionByDay(computedSourceIds(deviceId).map { dao.days(it) })
         val healthConnect = dao.days(HEALTH_CONNECT_SOURCE)
         val activityFile = dao.days(ACTIVITY_FILE_SOURCE)
-        // H5 (#509): days the user hand-edited the sleep of (the edit lives under the computed source); on
-        // those days the computed sleep fields win over a re-imported night. Pool the edited sessions across
-        // every computed source in the union so a re-add doesn't lose an earlier-id edit's precedence.
-        val editedSessions = computedSourceIds(deviceId).flatMap { dao.editedSleepSessions(it) }
+        // H5 (#509): bridge each complete computed source timeline before assigning an edit's wake day.
+        // An edited pre-midnight fragment can belong to the next day when its unedited continuation wakes.
+        val computedSessions = dao.sleepSessionsForSources(
+            computedSourceIds(deviceId),
+            0L,
+            Long.MAX_VALUE,
+        )
         val strap = mergeDaily(
             imported = imported,
             computed = computed,
-            userEditedDays = userEditedDays(editedSessions),
+            userEditedDays = userEditedDays(computedSessions),
         )
         return mergeActivityFileSteps(mergeDaily(imported = strap, computed = healthConnect), activityFile)
     }
@@ -1862,9 +1973,9 @@ class WhoopRepository private constructor(
             unionDaysFlow(computedSourceIds(deviceId).map { dao.daysFlow(it) }),
             dao.daysFlow(HEALTH_CONNECT_SOURCE),
             dao.daysFlow(ACTIVITY_FILE_SOURCE),
-            editedSleepSessionsFlow(deviceId),
-        ) { imported, computed, healthConnect, activityFile, edited ->
-            val strap = mergeDaily(imported, computed, userEditedDays(edited))
+            computedSleepSessionsFlow(deviceId),
+        ) { imported, computed, healthConnect, activityFile, computedSleeps ->
+            val strap = mergeDaily(imported, computed, userEditedDays(computedSleeps))
             mergeActivityFileSteps(mergeDaily(strap, healthConnect), activityFile)
         }
 
@@ -1889,19 +2000,20 @@ class WhoopRepository private constructor(
             unionDaysFlow(computedSourceIds(deviceId).map { dao.recentDaysFlow(it, RECENT_DAYS_CAP) }),
             dao.recentDaysFlow(HEALTH_CONNECT_SOURCE, RECENT_DAYS_CAP),
             dao.recentDaysFlow(ACTIVITY_FILE_SOURCE, RECENT_DAYS_CAP),
-            editedSleepSessionsFlow(deviceId),
-        ) { imported, computed, healthConnect, activityFile, edited ->
+            computedSleepSessionsFlow(deviceId),
+        ) { imported, computed, healthConnect, activityFile, computedSleeps ->
             // recentDaysFlow returns newest-first (DESC LIMIT); mergeDaily re-sorts ascending by day, so the
             // emitted order matches daysMergedFlow exactly.
-            val strap = mergeDaily(imported, computed, userEditedDays(edited))
+            val strap = mergeDaily(imported, computed, userEditedDays(computedSleeps))
             mergeActivityFileSteps(mergeDaily(strap, healthConnect), activityFile)
         }
 
-    /** Pooled user-edited sleep sessions across every computed source in the active∪canonical union, so a
-     *  re-add doesn't drop an earlier-id night's edit precedence (#509 + HIGH-2). Single-source ⇒ the plain
-     *  flow. */
-    private fun editedSleepSessionsFlow(deviceId: String): Flow<List<SleepSession>> {
-        val flows = computedSourceIds(deviceId).map { dao.editedSleepSessionsFlow(it) }
+    /**
+     * Complete computed source timelines across the active/canonical union. Edit-day attribution must see
+     * unedited continuation fragments, so an edited-only flow is insufficient for a bridged night.
+     */
+    private fun computedSleepSessionsFlow(deviceId: String): Flow<List<SleepSession>> {
+        val flows = computedSourceIds(deviceId).map { dao.sleepSessionsFlow(it) }
         return if (flows.size == 1) flows[0]
         else combine(flows) { arrays -> arrays.flatMap { it } }
     }
@@ -1932,6 +2044,56 @@ class WhoopRepository private constructor(
         val computed = computedSourceIds(deviceId).reversed()
             .flatMap { dao.sleepSessions(it, from, to, limit) }
         return mergeSleep(imported = external, computed = computed)
+    }
+
+    /**
+     * Complete and transactionally consistent sleep input for external-store replacement.
+     *
+     * The ordinary merged read is deliberately bounded and performs one query per source. That is safe
+     * for presentation, but not for a migration that deletes external records absent from the result.
+     * This path uses uncapped multi-source DAO reads inside one Room transaction and propagates every
+     * database failure. The caller advances its migration marker only after the external write succeeds.
+     */
+    suspend fun sleepWritebackSnapshot(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        historyDays: Int = 4_000,
+    ): SleepWritebackSnapshot = transactor.run {
+        require(from >= 0L && to >= from) { "invalid sleep snapshot range" }
+        require(historyDays > 0) { "historyDays must be positive" }
+
+        val importedIds = importedSourceIds(deviceId)
+        val computedIds = computedSourceIds(deviceId)
+        val requestedIds = (importedIds + computedIds + HEALTH_CONNECT_SOURCE).distinct()
+        val requestedRows = dao.sleepSessionsForSources(requestedIds, from, to)
+        val requestedBySource = requestedRows.groupBy(SleepSession::deviceId)
+        val imported = importedIds.reversed().flatMap { requestedBySource[it].orEmpty() }
+        val healthConnect = requestedBySource[HEALTH_CONNECT_SOURCE].orEmpty()
+        val external = mergeSleep(imported = imported, computed = healthConnect)
+        val computed = computedIds.reversed().flatMap { requestedBySource[it].orEmpty() }
+        val merged = mergeSleep(imported = external, computed = computed)
+
+        val now = System.currentTimeMillis() / 1_000L
+        val historyTo = maxOf(to, now + 86_400L)
+        val historySpan = runCatching {
+            Math.multiplyExact(historyDays.toLong(), 86_400L)
+        }.getOrElse { Long.MAX_VALUE }
+        val historyFrom = runCatching {
+            Math.subtractExact(historyTo, historySpan)
+        }.getOrDefault(0L).coerceAtLeast(0L)
+        val historyIds = (importedIds + computedIds).distinct()
+        val historyRows = dao.sleepSessionsForSources(historyIds, historyFrom, historyTo)
+        val historyBySource = historyRows.groupBy(SleepSession::deviceId)
+        val habitualRows = dedupSleepBlocks(
+            importedIds.flatMap { historyBySource[it].orEmpty() } +
+                computedIds.flatMap { historyBySource[it].orEmpty() },
+        )
+
+        SleepWritebackSnapshot(
+            sessions = merged,
+            habitualMidsleepSec = historicalHabitualMidsleepSec(habitualRows),
+        )
     }
 
     /** ALL imported sleep BLOCKS across the active∪canonical union (#814/#1008), keeping every session
@@ -2066,6 +2228,14 @@ class WhoopRepository private constructor(
         from: String,
         to: String,
     ): List<CandidateRow> {
+        val gatesLocalStages = candidate.source.endsWith("-noop") &&
+            ScoreConfidence.isDetailedSleepStageSeriesKey(candidate.key)
+        if (gatesLocalStages) {
+            return detailedSleepStageMinutes(candidate.source, from, to)
+                .mapNotNull { (day, minutes) ->
+                    detailedSleepStageValue(candidate.key, minutes)?.let { CandidateRow(day, it) }
+                }
+        }
         val byDay = LinkedHashMap<String, CandidateRow>()
         for (row in dao.metricSeries(candidate.source, candidate.key, from, to)) {
             byDay[row.day] = CandidateRow(row.day, row.value)
@@ -2085,13 +2255,6 @@ class WhoopRepository private constructor(
         }
         return byDay.values.sortedBy { it.day }
     }
-
-    /** The "yyyy-MM-dd" day one calendar day AFTER [day], or [day] verbatim when it isn't a parseable
-     *  ISO date (e.g. the wide-open "9999-99-99" sentinel Today passes , already past every real day, so
-     *  no buffer is needed). The +1-day read buffer in [resolvedRows] so a wake-day-keyed night that sorts
-     *  just past the requested upper bound still resolves the selected day (#614). */
-    private fun bufferDayAfter(day: String): String =
-        runCatching { java.time.LocalDate.parse(day).plusDays(1).toString() }.getOrDefault(day)
 
     /**
      * A compact snapshot of how much history each source holds, for the Data Sources "Freshness
@@ -2150,6 +2313,15 @@ class WhoopRepository private constructor(
     suspend fun latestBattery(deviceId: String): BatterySample? = dao.latestBattery(deviceId)
 
     companion object {
+        /** One ISO day after [day], capped at the lexical full-history sentinel. Year 10000 would
+         *  sort before every 2xxx day and incorrectly empty a full-history query. */
+        internal fun bufferDayAfter(day: String): String {
+            if (day >= "9999-12-31") return day
+            return runCatching {
+                java.time.LocalDate.parse(day).plusDays(1).toString()
+            }.getOrDefault(day)
+        }
+
         /** A workout row is STRAP-NATIVE when NOOP recorded/scored it from a strap trace: a "manual"
          *  session or a detected bout (source "<id>-noop"). Everything else (Apple Health / Health Connect /
          *  WHOOP CSV / activity file) is IMPORTED and carries its own avg/max. Single source of truth for the
@@ -2244,6 +2416,153 @@ class WhoopRepository private constructor(
                 for (row in rows) byDay.putIfAbsent(row.day, row)   // active-first: first seen per day wins
             }
             return byDay.values.sortedBy { it.day }
+        }
+
+        internal data class DetailedStageProjection(
+            val minutesBySourceDay: Map<Pair<String, String>, SleepStageTotals.Minutes>,
+            val authorizedSessionKeys: Set<DetailedSleepStagePublication.SessionKey>,
+        )
+
+        /**
+         * Pure session-row projection used by repository and publication/export contract tests.
+         * Each source/day is selected independently. Day assignment and main-night clock scoring use
+         * the offset in effect when that group actually ended, never the offset at query/export time.
+         */
+        internal fun projectPublishableDetailedStages(
+            sessions: List<SleepSession>,
+            habitualMidsleepSec: Long? = null,
+            offsetAtEpochSec: (Long) -> Long = { historicalOffsetSeconds(it) },
+        ): DetailedStageProjection {
+            val minutesBySourceDay =
+                linkedMapOf<Pair<String, String>, SleepStageTotals.Minutes>()
+            val authorizedSessionKeys =
+                linkedSetOf<DetailedSleepStagePublication.SessionKey>()
+            val localBySource = sessions
+                .filter { it.deviceId.endsWith("-noop") }
+                .groupBy(SleepSession::deviceId)
+            for ((source, sourceSessions) in localBySource) {
+                val blocks = sourceSessions.map {
+                    SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs)
+                }
+                val buckets = SleepStageTotals.wakeDayBuckets(blocks, offsetAtEpochSec)
+                for (bucket in buckets) {
+                    val daySessions = bucket.groups
+                        .flatMap { it.indices }
+                        .map(sourceSessions::get)
+                        .sortedBy { it.effectiveStartTs }
+                    val sourceDay = source to bucket.day
+                    val groupOffsetSec = offsetAtEpochSec(daySessions.maxOf { it.endTs })
+                    val indices =
+                        DetailedSleepStagePublication.publishableLocalMainGroupIndices(
+                            sessions = daySessions,
+                            offsetSec = groupOffsetSec,
+                            habitualMidsleepSec = habitualMidsleepSec,
+                        )
+                    if (indices.isEmpty()) continue
+
+                    val selected = indices.sorted().map(daySessions::get)
+                    val decoded = selected.mapNotNull { session ->
+                        SleepStageTotals.minutes(session.stagesJSON)?.let { session to it }
+                    }
+                    // Treat one bridged main group as one result. The projection remains fail-closed even
+                    // if the policy and parser are refactored independently later.
+                    if (decoded.size != selected.size) continue
+
+                    val total = SleepStageTotals.Minutes()
+                    for ((session, minutes) in decoded) {
+                        total.awake += minutes.awake
+                        total.light += minutes.light
+                        total.deep += minutes.deep
+                        total.rem += minutes.rem
+                        authorizedSessionKeys += DetailedSleepStagePublication.key(session)
+                    }
+                    if (total.inBed > 0.0) minutesBySourceDay[sourceDay] = total
+                }
+            }
+            return DetailedStageProjection(minutesBySourceDay, authorizedSessionKeys)
+        }
+
+        /** Pure session-row day set retained for existing publication call sites and tests. */
+        internal fun publishableDetailedStageDays(
+            sessions: List<SleepSession>,
+            habitualMidsleepSec: Long? = null,
+            offsetAtEpochSec: (Long) -> Long = { historicalOffsetSeconds(it) },
+        ): Set<String> =
+            projectPublishableDetailedStages(
+                sessions,
+                habitualMidsleepSec,
+                offsetAtEpochSec,
+            ).minutesBySourceDay.keys.mapTo(linkedSetOf()) { it.second }
+
+        internal fun detailedSleepStageValue(
+            key: String,
+            minutes: SleepStageTotals.Minutes,
+        ): Double? = when (key) {
+            "sleep_deep_min", "deep_min" -> minutes.deep
+            "sleep_rem_min", "rem_min" -> minutes.rem
+            "sleep_light_min", "core_min" -> minutes.light
+            "sleep_awake_min", "awake_min" -> minutes.awake
+            "restorative_min" -> minutes.deep + minutes.rem
+            "restorative_pct" -> minutes.asleep.takeIf { it > 0.0 }?.let {
+                (minutes.deep + minutes.rem) / it * 100.0
+            }
+            else -> null
+        }
+
+        /** Offset in effect at [epochSec], including the zone's historical DST rules. */
+        internal fun historicalOffsetSeconds(
+            epochSec: Long,
+            timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+        ): Long {
+            val epochMillis = runCatching { Math.multiplyExact(epochSec, 1_000L) }
+                .getOrElse { if (epochSec >= 0L) Long.MAX_VALUE else Long.MIN_VALUE }
+            return timeZone.getOffset(epochMillis).toLong() / 1_000L
+        }
+
+        /**
+         * Learn one local clock time across DST changes. Each historical block is shifted by the
+         * offset that applied at its own midpoint, then the circular learner runs at offset zero.
+         */
+        internal fun historicalHabitualMidsleepSec(
+            sessions: List<SleepSession>,
+            offsetAtEpochSec: (Long) -> Long = { historicalOffsetSeconds(it) },
+        ): Long? {
+            val blocks = sessions.mapNotNull { session ->
+                val start = session.effectiveStartTs
+                val end = session.endTs
+                if (start < 0L || end <= start) return@mapNotNull null
+                val midpoint = start + (end - start) / 2L
+                val offset = offsetAtEpochSec(midpoint)
+                val shiftedStart = runCatching { Math.addExact(start, offset) }.getOrNull()
+                    ?: return@mapNotNull null
+                val shiftedEnd = runCatching { Math.addExact(end, offset) }.getOrNull()
+                    ?: return@mapNotNull null
+                SleepStageTotals.HistoryBlock(
+                    start = shiftedStart,
+                    end = shiftedEnd,
+                    dayKey = com.noop.analytics.AnalyticsEngine.dayString(
+                        midpoint,
+                        offset,
+                    ),
+                )
+            }
+            return SleepStageTotals.habitualMidsleepSec(blocks, 0L)
+        }
+
+        /**
+         * Broad but bounded timestamp window for a wake-day query. Sessions may begin the prior day;
+         * malformed sentinel bounds deliberately fall back to the full local store and are filtered by
+         * the exact day string after selection.
+         */
+        private fun sleepSessionTimestampRange(from: String, to: String): Pair<Long, Long> {
+            val zone = java.time.ZoneId.systemDefault()
+            val lo = runCatching {
+                java.time.LocalDate.parse(from).minusDays(2).atStartOfDay(zone).toEpochSecond()
+            }.getOrDefault(0L)
+            val hi = runCatching {
+                java.time.LocalDate.parse(to).plusDays(2).atStartOfDay(zone).toEpochSecond()
+            }.getOrDefault(Long.MAX_VALUE)
+            return lo.coerceAtLeast(0L) to hi.coerceAtLeast(lo)
         }
 
         /** Drop sleep blocks sharing an identical (startTs, endTs) , the same physical night recorded
@@ -2493,6 +2812,7 @@ class WhoopRepository private constructor(
                 spo2Ir = if (rawSpo2FromFiller) filler.spo2Ir else winner.spo2Ir,
                 restingHr = winner.restingHr ?: filler.restingHr,
                 avgHrv = winner.avgHrv ?: filler.avgHrv,
+                hrvMethod = if (winner.avgHrv == null) filler.hrvMethod else winner.hrvMethod,
                 recovery = winner.recovery ?: filler.recovery,
                 strain = winner.strain ?: filler.strain,
                 exerciseCount = winner.exerciseCount ?: filler.exerciseCount,
@@ -2602,6 +2922,7 @@ class WhoopRepository private constructor(
                     disturbances = d.disturbances ?: c.disturbances,
                     restingHr = d.restingHr ?: c.restingHr,
                     avgHrv = d.avgHrv ?: c.avgHrv,
+                    hrvMethod = if (d.avgHrv == null) c.hrvMethod else d.hrvMethod,
                     recovery = d.recovery ?: c.recovery,
                     strain = d.strain ?: c.strain,
                     exerciseCount = d.exerciseCount ?: c.exerciseCount,
@@ -2687,13 +3008,12 @@ class WhoopRepository private constructor(
          * the H5 edit-merge precedence in [mergeDaily]. Port of macOS Repository.userEditedDays.
          */
         internal fun userEditedDays(sessions: List<SleepSession>): Set<String> {
-            val days = HashSet<String>()
-            for (s in sessions) {
-                if (!s.userEdited) continue
-                val offsetSec = (java.util.TimeZone.getDefault().getOffset(s.endTs * 1000) / 1000).toLong()
-                days.add(com.noop.analytics.AnalyticsEngine.dayString(s.endTs, offsetSec))
-            }
-            return days
+            if (sessions.none(SleepSession::userEdited)) return emptySet()
+            val wakeDays = wakeDayBySession(sessions)
+            return sessions.asSequence()
+                .filter(SleepSession::userEdited)
+                .mapNotNull { wakeDays[it.deviceId to it.startTs] }
+                .toSet()
         }
 
         /**
@@ -2710,11 +3030,22 @@ class WhoopRepository private constructor(
             imported: List<SleepSession>,
             computed: List<SleepSession>,
         ): List<SleepSession> {
-            fun endDay(s: SleepSession): String {
-                val offsetSec = (java.util.TimeZone.getDefault().getOffset(s.endTs * 1000) / 1000).toLong()
+            fun fallbackEndDay(s: SleepSession): String {
+                val offsetSec = historicalOffsetSeconds(s.endTs)
                 return com.noop.analytics.AnalyticsEngine.dayString(s.endTs, offsetSec)
             }
-            return mergeSleepRichness(imported, computed, ::endDay).sortedBy { it.startTs }
+            val importedWakeDays = wakeDayBySession(imported)
+            val computedWakeDays = wakeDayBySession(computed)
+            return mergeSleepRichness(
+                imported = imported,
+                computed = computed,
+                importedEndDay = {
+                    importedWakeDays[it.deviceId to it.startTs] ?: fallbackEndDay(it)
+                },
+                computedEndDay = {
+                    computedWakeDays[it.deviceId to it.startTs] ?: fallbackEndDay(it)
+                },
+            ).sortedBy { it.startTs }
         }
 
         /** Imported-wins-per-day sleep merge WITH the #241 richness exception, returned UNSORTED so callers
@@ -2731,9 +3062,18 @@ class WhoopRepository private constructor(
             imported: List<SleepSession>,
             computed: List<SleepSession>,
             endDay: (SleepSession) -> String,
+        ): List<SleepSession> =
+            mergeSleepRichness(imported, computed, endDay, endDay)
+
+        /** Source-aware twin used after each namespace has independently bridged its physical nights. */
+        internal fun mergeSleepRichness(
+            imported: List<SleepSession>,
+            computed: List<SleepSession>,
+            importedEndDay: (SleepSession) -> String,
+            computedEndDay: (SleepSession) -> String,
         ): List<SleepSession> {
-            val importedByDay = imported.groupBy(endDay)
-            val computedByDay = computed.groupBy(endDay)
+            val importedByDay = imported.groupBy(importedEndDay)
+            val computedByDay = computed.groupBy(computedEndDay)
             val out = ArrayList<SleepSession>(imported.size + computed.size)
             for ((day, imp) in importedByDay) {
                 val comp = computedByDay[day]
@@ -2762,11 +3102,34 @@ class WhoopRepository private constructor(
             return out
         }
 
-        /** True when the session carries a non-empty stage payload; null, "", and "[]" carry none.
+        /**
+         * Final local wake day for every session after bridging complete physical nights. Source
+         * namespaces are partitioned before bucketing so one device cannot lend attribution to another.
+         */
+        internal fun wakeDayBySession(
+            sessions: List<SleepSession>,
+            offsetAtEpochSec: (Long) -> Long = { historicalOffsetSeconds(it) },
+        ): Map<Pair<String, Long>, String> {
+            val result = linkedMapOf<Pair<String, Long>, String>()
+            for ((source, sourceSessions) in sessions.groupBy(SleepSession::deviceId)) {
+                val blocks = sourceSessions.map {
+                    SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs)
+                }
+                for (bucket in SleepStageTotals.wakeDayBuckets(blocks, offsetAtEpochSec)) {
+                    for (group in bucket.groups) {
+                        for (index in group.indices) {
+                            result[source to sourceSessions[index].startTs] = bucket.day
+                        }
+                    }
+                }
+            }
+            return result
+        }
+
+        /** True only for a decodable, positive-duration recognized stage payload.
          *  Twin of WhoopStore.SleepMerge.hasStages. */
         private fun hasStages(s: SleepSession): Boolean {
-            val json = s.stagesJSON?.trim() ?: return false
-            return json.isNotEmpty() && json != "[]"
+            return SleepStageTotals.minutes(s.stagesJSON) != null
         }
     }
 }

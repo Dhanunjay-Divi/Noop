@@ -84,8 +84,18 @@ class HealthExportPlanTest {
     // ---- Sleep session tests ----
 
     /** Unedited fragment: key == effective onset (the common case). */
-    private fun input(start: Long, end: Long, json: String? = null) =
-        HealthExportPlan.SleepInput(keyStartTs = start, startTs = start, endTs = end, stagesJSON = json)
+    private fun input(
+        start: Long,
+        end: Long,
+        json: String? = null,
+        publishDetailed: Boolean = true,
+    ) = HealthExportPlan.SleepInput(
+        keyStartTs = start,
+        startTs = start,
+        endTs = end,
+        stagesJSON = json,
+        publishDetailedStages = publishDetailed,
+    )
 
     @Test fun sleep_excludesUnfinalizedSessions() {
         val sessions = listOf(input(100, 900))
@@ -136,6 +146,43 @@ class HealthExportPlanTest {
             listOf(input(100, 900, "not json")), nowSec = 1000L, offsetSec = 0L)
         assertEquals(1, out.size)
         assertTrue(out[0].stages.isEmpty())
+    }
+
+    @Test fun sleep_withholdsUnsupportedLocalStagesButKeepsSessionBounds() {
+        val json = """
+            [{"start":100,"end":300,"stage":"light"},
+             {"start":300,"end":600,"stage":"deep"}]
+        """.trimIndent()
+        val input = input(100, 600, json, publishDetailed = false)
+
+        val plan = HealthExportPlan.sleepSessions(
+            listOf(input), nowSec = 1_000L, offsetSec = 0L).single()
+
+        assertEquals(100L, plan.startSec)
+        assertEquals(600L, plan.endSec)
+        assertTrue(plan.stages.isEmpty())
+        assertEquals(json, input.stagesJSON) // publication must not mutate the raw payload
+    }
+
+    @Test fun sleep_doesNotPublishAwakeSeamAcrossUnsupportedLocalFragments() {
+        val t = 1_767_312_000L
+        val a = input(
+            t - 3_600,
+            t + 2 * 3_600,
+            """[{"start":${t - 3_600},"end":${t + 2 * 3_600},"stage":"light"}]""",
+            publishDetailed = false,
+        )
+        val b = input(
+            t + 2 * 3_600 + 960,
+            t + 6 * 3_600,
+            """[{"start":${t + 2 * 3_600 + 960},"end":${t + 6 * 3_600},"stage":"rem"}]""",
+            publishDetailed = false,
+        )
+
+        val plan = HealthExportPlan.sleepSessions(
+            listOf(a, b), nowSec = t + 86_400, offsetSec = 0L).single()
+
+        assertTrue(plan.stages.isEmpty())
     }
 
     @Test fun sleep_includesSessionEndingExactlyAtNow() {
@@ -210,9 +257,36 @@ class HealthExportPlanTest {
     @Test fun sleep_editedOnsetMovesSpanButClientIdStaysImmutable() {
         val t = 1_767_312_000L
         val edited = HealthExportPlan.SleepInput(
-            keyStartTs = t, startTs = t + 600, endTs = t + 7_200, stagesJSON = null)
+            keyStartTs = t,
+            startTs = t + 600,
+            endTs = t + 7_200,
+            stagesJSON = null,
+            publishDetailedStages = true,
+        )
         val p = HealthExportPlan.sleepSessions(listOf(edited), nowSec = t + 86_400, offsetSec = 0L)[0]
         assertEquals("noop-sleep-$t", p.clientId)   // immutable detected key
         assertEquals(t + 600, p.startSec)           // edited onset drives the span
+    }
+
+    @Test fun sleep_bridgesBeforeAssigningHistoricalWakeDay() {
+        val midnight = 1_767_312_000L
+        val beforeMidnight = input(
+            midnight - 3_600,
+            midnight - 300,
+        ).copy(timezoneOffsetSec = 0L)
+        val afterMidnight = input(
+            midnight + 300,
+            midnight + 3_600,
+        ).copy(timezoneOffsetSec = 3_600L)
+
+        val plans = HealthExportPlan.sleepSessions(
+            listOf(beforeMidnight, afterMidnight),
+            nowSec = midnight + 86_400,
+            offsetSec = 3_600L,
+        )
+
+        assertEquals(1, plans.size)
+        assertEquals(beforeMidnight.startTs, plans.single().startSec)
+        assertEquals(afterMidnight.endTs, plans.single().endSec)
     }
 }

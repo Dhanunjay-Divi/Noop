@@ -139,6 +139,20 @@ public struct RemoteSleepSession: Codable, Equatable, Sendable {
     /// stage durations in minutes. The sync boundary normalises those representations so every client
     /// and server agrees on one unit and never has to infer whether a number means minutes or seconds.
     public let stages: [String: Int]?
+    /// Per-session evidence required to decide whether locally classified detailed stages may publish.
+    /// Raw stages remain backup data; consumers must enforce the evidence policy before presenting them.
+    public let metadata: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case startTs
+        case endTs
+        case efficiency
+        case restingHr
+        case avgHrv
+        case stages
+        case metadata
+    }
 
     public init(
         sessionId: String,
@@ -147,7 +161,8 @@ public struct RemoteSleepSession: Codable, Equatable, Sendable {
         efficiency: Double? = nil,
         restingHr: Int? = nil,
         avgHrv: Double? = nil,
-        stages: [String: Int]? = nil
+        stages: [String: Int]? = nil,
+        metadata: [String: String] = [:]
     ) {
         self.sessionId = sessionId
         self.startTs = startTs
@@ -156,6 +171,22 @@ public struct RemoteSleepSession: Codable, Equatable, Sendable {
         self.restingHr = restingHr
         self.avgHrv = avgHrv
         self.stages = stages
+        self.metadata = metadata
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        startTs = try container.decode(Int.self, forKey: .startTs)
+        endTs = try container.decode(Int.self, forKey: .endTs)
+        efficiency = try container.decodeIfPresent(Double.self, forKey: .efficiency)
+        restingHr = try container.decodeIfPresent(Int.self, forKey: .restingHr)
+        avgHrv = try container.decodeIfPresent(Double.self, forKey: .avgHrv)
+        stages = try container.decodeIfPresent([String: Int].self, forKey: .stages)
+        metadata = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .metadata
+        ) ?? [:]
     }
 }
 

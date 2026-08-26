@@ -27,6 +27,7 @@ import androidx.health.connect.client.time.TimeRangeFilter
 import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.HydrationStore
 import com.noop.data.AppleDaily
+import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.HealthConnectProjectionScope
@@ -729,6 +730,7 @@ object HealthConnectImporter {
                             spo2Pct = spo2,
                             respRateBpm = resp,
                             exerciseCount = exCount,
+                            hrvMethod = hrv?.let { DailyHrvMethod.RMSSD },
                         )
                     )
                 }

@@ -21,10 +21,26 @@ public enum SleepMerge {
     public static func merge(imported: [CachedSleepSession],
                              computed: [CachedSleepSession],
                              endDay: (CachedSleepSession) -> String) -> [CachedSleepSession] {
+        merge(
+            imported: imported,
+            computed: computed,
+            importedEndDay: endDay,
+            computedEndDay: endDay)
+    }
+
+    /// Source-aware variant for callers that bridge each source timeline before assigning wake days.
+    /// Separate keyers prevent a computed fragment from borrowing an imported source's day assignment
+    /// when both namespaces contain an otherwise identical row.
+    public static func merge(
+        imported: [CachedSleepSession],
+        computed: [CachedSleepSession],
+        importedEndDay: (CachedSleepSession) -> String,
+        computedEndDay: (CachedSleepSession) -> String
+    ) -> [CachedSleepSession] {
         var importedByDay: [String: [CachedSleepSession]] = [:]
-        for s in imported { importedByDay[endDay(s), default: []].append(s) }
+        for s in imported { importedByDay[importedEndDay(s), default: []].append(s) }
         var computedByDay: [String: [CachedSleepSession]] = [:]
-        for s in computed { computedByDay[endDay(s), default: []].append(s) }
+        for s in computed { computedByDay[computedEndDay(s), default: []].append(s) }
 
         var out: [CachedSleepSession] = []
         out.reserveCapacity(imported.count + computed.count)
@@ -61,9 +77,31 @@ public enum SleepMerge {
         return out.sorted { $0.startTs < $1.startTs }
     }
 
-    /// True when the session carries a non-empty stage payload; nil, "", and "[]" carry none.
+    /// True only when the session carries a decodable, positive-duration stage payload. A nonblank but
+    /// malformed string is not a richness signal and must not displace a valid computed night.
     static func hasStages(_ s: CachedSleepSession) -> Bool {
-        guard let json = s.stagesJSON?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
-        return !json.isEmpty && json != "[]"
+        guard let json = s.stagesJSON,
+              let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        let recognized = Set(["wake", "awake", "light", "deep", "rem"])
+        if let segments = object as? [[String: Any]] {
+            return segments.contains { segment in
+                guard let stage = (segment["stage"] as? String)?.lowercased(),
+                      recognized.contains(stage) else { return false }
+                if let start = segment["start"] as? NSNumber,
+                   let end = segment["end"] as? NSNumber {
+                    return end.doubleValue > start.doubleValue
+                }
+                return ((segment["min"] as? NSNumber)?.doubleValue ?? 0) > 0
+            }
+        }
+        if let totals = object as? [String: Any] {
+            return recognized.contains { key in
+                ((totals[key] as? NSNumber)?.doubleValue ?? 0) > 0
+            }
+        }
+        return false
     }
 }

@@ -151,6 +151,7 @@ object DemoSeeder {
                     disturbances = disturbances, restingHr = rhr, avgHrv = round1(hrv),
                     recovery = round1(recovery), strain = round1(strain), exerciseCount = nWorkouts,
                     spo2Pct = round1(spo2), skinTempDevC = round2(skinTempDev), respRateBpm = round1(resp),
+                    hrvMethod = DailyHrvMethod.RMSSD,
                 )
             )
 

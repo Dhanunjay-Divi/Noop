@@ -4,6 +4,21 @@ import WhoopStore
 @testable import Strand
 
 final class AppleDemoSeederTests: XCTestCase {
+    func testLockedDemoFixtureWorkRequiresAnExplicitDebugLaunchArgument() {
+        XCTAssertTrue(AppModel.shouldStartDemoFixtureWork(
+            startOperationalWork: false,
+            arguments: ["--demo-seed"]
+        ))
+        XCTAssertFalse(AppModel.shouldStartDemoFixtureWork(
+            startOperationalWork: true,
+            arguments: ["--demo-seed"]
+        ))
+        XCTAssertFalse(AppModel.shouldStartDemoFixtureWork(
+            startOperationalWork: false,
+            arguments: []
+        ))
+    }
+
     @MainActor
     func testLiveChargingFixtureDoesNotWaitForDatabaseSeed() {
         let live = LiveState()

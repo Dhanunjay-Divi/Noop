@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Xml
 import com.noop.data.AppleDaily
+import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
@@ -420,6 +421,7 @@ object AppleHealthImporter {
                     // daily step total via WhoopRepository.dailyColumn("steps") = d.steps, so leaving it null
                     // (the pre-fix state) meant imported Apple steps never surfaced. `d.steps` is a Double.
                     steps = d.steps?.let { Math.round(it).toInt() },
+                    hrvMethod = d.hrvSDNN?.let { DailyHrvMethod.SDNN },
                 )
             }
 

@@ -174,6 +174,8 @@ extension WhoopStore {
                           AND motionJSON IS NULL
                           AND sleepStateJSON IS NULL
                           AND gravitySparse IS NULL
+                          AND rrEligibleWindowCount IS NULL
+                          AND rrValidWindowCount IS NULL
                     """,
                     arguments: [batch.officialDeviceId, range.from, range.to]
                 )
@@ -290,7 +292,11 @@ extension WhoopStore {
                 steps = COALESCE(dailyMetric.steps, excluded.steps),
                 activeKcalEst = COALESCE(dailyMetric.activeKcalEst, excluded.activeKcalEst),
                 spo2Red = COALESCE(dailyMetric.spo2Red, excluded.spo2Red),
-                spo2Ir = COALESCE(dailyMetric.spo2Ir, excluded.spo2Ir)
+                spo2Ir = COALESCE(dailyMetric.spo2Ir, excluded.spo2Ir),
+                hrvMethod = CASE
+                    WHEN dailyMetric.avgHrv IS NULL THEN excluded.hrvMethod
+                    ELSE dailyMetric.hrvMethod
+                END
             """ : """
             DO UPDATE SET
                 totalSleepMin = excluded.totalSleepMin,
@@ -310,7 +316,8 @@ extension WhoopStore {
                 steps = excluded.steps,
                 activeKcalEst = excluded.activeKcalEst,
                 spo2Red = excluded.spo2Red,
-                spo2Ir = excluded.spo2Ir
+                spo2Ir = excluded.spo2Ir,
+                hrvMethod = excluded.hrvMethod
             """
         var changed = 0
         for row in rows {
@@ -318,8 +325,9 @@ extension WhoopStore {
                 INSERT INTO dailyMetric
                     (deviceId, day, totalSleepMin, efficiency, deepMin, remMin, lightMin,
                      disturbances, restingHr, avgHrv, recovery, strain, exerciseCount,
-                     spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst, spo2Red, spo2Ir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst, spo2Red, spo2Ir,
+                     hrvMethod)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(deviceId, day) \(conflict)
                 """, arguments: [
                     deviceId, row.day, finite(row.totalSleepMin), finite(row.efficiency),
@@ -328,6 +336,7 @@ extension WhoopStore {
                     finite(row.strain), row.exerciseCount, finite(row.spo2Pct),
                     finite(row.skinTempDevC), finite(row.respRateBpm), row.steps,
                     finite(row.activeKcalEst), row.spo2Red, row.spo2Ir,
+                    row.avgHrv == nil ? nil : row.hrvMethod?.rawValue,
                 ])
             changed += db.changesCount
         }
@@ -364,6 +373,8 @@ extension WhoopStore {
                     ELSE excluded.startTsAdjusted
                 END,
                 gravitySparse = COALESCE(sleepSession.gravitySparse, excluded.gravitySparse),
+                rrEligibleWindowCount = excluded.rrEligibleWindowCount,
+                rrValidWindowCount = excluded.rrValidWindowCount,
                 userEdited = sleepSession.userEdited
             """
         var changed = 0
@@ -371,13 +382,14 @@ extension WhoopStore {
             try db.execute(sql: """
                 INSERT INTO sleepSession
                     (deviceId, startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON,
-                     userEdited, startTsAdjusted, gravitySparse)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     userEdited, startTsAdjusted, gravitySparse,
+                     rrEligibleWindowCount, rrValidWindowCount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(deviceId, startTs) \(conflict)
                 """, arguments: [
                     deviceId, row.startTs, row.endTs, finite(row.efficiency), row.restingHr,
                     finite(row.avgHrv), row.stagesJSON, row.userEdited, row.startTsAdjusted,
-                    row.gravitySparse,
+                    row.gravitySparse, row.rrEligibleWindowCount, row.rrValidWindowCount,
                 ])
             changed += db.changesCount
         }

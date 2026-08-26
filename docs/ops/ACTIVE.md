@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-08-25**
+Last updated: **2026-08-26**
 
 ## Repository
 
@@ -12,18 +12,18 @@ Last updated: **2026-08-25**
 - Current source-rights record:
   [`../provenance/OWNER-RIGHTS-DECLARATION.md`](../provenance/OWNER-RIGHTS-DECLARATION.md)
 - Current agent handoff:
-  [`../handoff/AGENT-HANDOFF-20260825.md`](../handoff/AGENT-HANDOFF-20260825.md)
+  [`../handoff/AGENT-HANDOFF-20260826.md`](../handoff/AGENT-HANDOFF-20260826.md)
 - Current release blockers:
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
 
-Round 21 validates and hardens recovery calibration, sleep evidence,
-cross-platform wearable import, data repair, compact-device layouts, and
-localization. Its final continuation records the NOOP owner declaration,
-removes obsolete prior-repository blocker wording, preserves the PolyForm
-project license and exact dependency notices, and verifies the regular-glass
-bottom navigation treatment. The implementation is complete on `main`.
+Round 22 closes the metric-audit findings without fitting NOOP to proprietary
+reference scores. Local detailed sleep stages now require persisted sustained
+R-R evidence, ACWR is removed, bounded Effort stays outside additive load math,
+Recovery cold start remains nil, and Apple Health SDNN cannot enter a strap
+RMSSD baseline. The implementation and local evidence are recorded in
+[Metric evidence and training-load boundaries](rounds/2026-08-26-metric-evidence-boundaries.md).
 
 The
 [NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
@@ -40,10 +40,10 @@ tests pass, and the name-only build-setting isolation gate passes. Signed
 archive, upload, physical validation, and the recorded release gates remain
 open.
 
-Repository-local closeout is complete: local gates are green, the merged
-feature branch is removed, and `main` is synchronized with `origin/main`.
-Remaining release work requires external accounts, infrastructure, carriers,
-physical devices, participant evidence, or store review.
+Repository-local closeout for Round 22 is complete when the commit containing
+the round record is synchronized with `origin/main`. Remaining release work
+requires external accounts, infrastructure, carriers, physical devices,
+participant evidence, or store review.
 
 ## Decisions that remain binding
 

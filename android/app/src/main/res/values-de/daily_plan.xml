@@ -34,12 +34,11 @@
     <string name="daily_plan_progress_in_range">Im heute geplanten Bereich. Das ist eine Orientierung, keine Stoppregel.</string>
     <string name="daily_plan_signal_good">Günstig ausgerichtet</string>
     <string name="daily_plan_signal_hrv">Herzfrequenzvariabilität</string>
-    <string name="daily_plan_signal_load">Verhältnis der jüngsten Belastung</string>
     <string name="daily_plan_signal_neutral">Im Bereich</string>
     <string name="daily_plan_signal_respiration">Atemfrequenz</string>
     <string name="daily_plan_signal_rhr">Ruheherzfrequenz</string>
     <string name="daily_plan_signal_shifted">Verschoben</string>
-    <string name="daily_plan_signal_variety">Trainingsvielfalt</string>
+    <string name="daily_plan_signal_variety">Effort-Vielfalt</string>
     <string name="daily_plan_signal_watch">Erneut prüfen</string>
     <string name="daily_plan_state_calibrating_body">NOOP benötigt eine aktuelle, verlässliche Bereitschaftsauswertung und mindestens sieben kürzlich bewertete Effort-Tage.</string>
     <string name="daily_plan_state_calibrating_title">Noch kein Bereich</string>

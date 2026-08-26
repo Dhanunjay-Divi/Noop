@@ -13,7 +13,8 @@ final class WhoopCsvExporterTests: XCTestCase {
         let day = DailyMetric(day: "2026-06-01", totalSleepMin: 420, efficiency: 0.923, deepMin: 95,
                               remMin: 115, lightMin: 210, disturbances: nil, restingHr: 52,
                               avgHrv: 68.4, recovery: 72, strain: 12.5, exerciseCount: nil,
-                              spo2Pct: 96.0, skinTempDevC: 33.1, respRateBpm: 14.2)
+                              spo2Pct: 96.0, skinTempDevC: 33.1, respRateBpm: 14.2,
+                              hrvMethod: .sdnn)
         let series = ["2026-06-01": ["sleep_performance": 85.0, "sleep_consistency": 88.0,
                                      "sleep_need_min": 480.0, "sleep_debt_min": 60.0,
                                      "awake_min": 35.0, "in_bed_min": 455.0,
@@ -26,6 +27,7 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(r.recoveryScore, 72)
         XCTAssertEqual(r.restingHeartRate, 52)
         XCTAssertEqual(r.hrvMs, 68.4)
+        XCTAssertEqual(r.hrvMethod, .sdnn)
         XCTAssertEqual(r.skinTempCelsius, 33.1)
         XCTAssertEqual(r.bloodOxygenPct, 96.0)
         // The CSV "Day Strain" column is WHOOP's 0–21 scale, so our 0–100 Effort (12.5) is written
@@ -50,6 +52,45 @@ final class WhoopCsvExporterTests: XCTestCase {
         // Day attribution survives: cycleStart parsed at UTC+00:00 maps back to 2026-06-01 00:00Z.
         XCTAssertEqual(r.tzOffsetMin, 0)
         XCTAssertEqual(r.cycleStart, Date(timeIntervalSince1970: 1_780_272_000))
+    }
+
+    func testCyclesWithholdDetailedLocalStagesButKeepSleepTotals() throws {
+        let day = DailyMetric(day: "2026-06-01", totalSleepMin: 420, efficiency: 0.9,
+                              deepMin: 95, remMin: 115, lightMin: 210, disturbances: nil,
+                              restingHr: nil, avgHrv: nil, recovery: nil, strain: nil,
+                              exerciseCount: nil)
+        let csv = WhoopCsvExporter.cyclesCSV(
+            days: [day],
+            series: ["2026-06-01": ["in_bed_min": 455, "awake_min": 35]],
+            sourceByDay: ["2026-06-01": "noop (APPROXIMATE)"],
+            publishDetailedSleepStages: { _ in false })
+
+        let row = try XCTUnwrap(WhoopExportImporter().parseCycles(CSVTable(text: csv)).first)
+        XCTAssertEqual(row.asleepDurationMin, 420)
+        XCTAssertEqual(row.inBedDurationMin, 455)
+        XCTAssertNil(row.lightSleepDurationMin)
+        XCTAssertNil(row.deepSleepDurationMin)
+        XCTAssertNil(row.remDurationMin)
+        XCTAssertNil(row.awakeDurationMin)
+        XCTAssertEqual(row.sourceLabel, "noop (APPROXIMATE)")
+    }
+
+    func testCyclesUseAuthorizedSessionAwakeMinutesForComputedStages() throws {
+        let day = DailyMetric(
+            day: "2026-06-01", totalSleepMin: 420, efficiency: 0.9,
+            deepMin: 95, remMin: 115, lightMin: 210, disturbances: nil,
+            restingHr: nil, avgHrv: nil, recovery: nil, strain: nil,
+            exerciseCount: nil)
+        let csv = WhoopCsvExporter.cyclesCSV(
+            days: [day],
+            series: ["2026-06-01": ["awake_min": 999]],
+            sourceByDay: ["2026-06-01": "noop (APPROXIMATE)"],
+            publishDetailedSleepStages: { _ in true },
+            detailedAwakeMinutes: { _ in 35 })
+
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first)
+        XCTAssertEqual(row.awakeDurationMin, 35)
     }
 
     func testWorkoutSportWithCommaQuoteNewlineSurvives() throws {
@@ -105,6 +146,31 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(back[2].wakeOnset, Date(timeIntervalSince1970: 2_000_007_200))
     }
 
+    func testSleepsWithholdDetailedLocalStagesWithoutMutatingRawSession() throws {
+        let rawStages = #"[{"start":2000000000,"end":2000003600,"stage":"light"},{"start":2000003600,"end":2000007200,"stage":"deep"}]"#
+        let local = CachedSleepSession(
+            startTs: 2_000_000_000, endTs: 2_000_007_200, efficiency: 0.9,
+            restingHr: nil, avgHrv: nil, stagesJSON: rawStages)
+
+        let csv = WhoopCsvExporter.sleepsCSV(
+            [local],
+            cycleStart: { _ in "2033-05-18 00:00:00" },
+            publishDetailedStages: { _ in false },
+            sourceBySession: { _ in "noop (APPROXIMATE)" })
+        let row = try XCTUnwrap(WhoopExportImporter().parseSleeps(CSVTable(text: csv)).first)
+
+        XCTAssertEqual(row.sleepOnset, Date(timeIntervalSince1970: 2_000_000_000))
+        XCTAssertEqual(row.wakeOnset, Date(timeIntervalSince1970: 2_000_007_200))
+        XCTAssertEqual(row.inBedDurationMin, 120)
+        XCTAssertNil(row.asleepDurationMin)
+        XCTAssertNil(row.lightSleepDurationMin)
+        XCTAssertNil(row.deepSleepDurationMin)
+        XCTAssertNil(row.remDurationMin)
+        XCTAssertNil(row.awakeDurationMin)
+        XCTAssertEqual(row.sourceLabel, "noop (APPROXIMATE)")
+        XCTAssertEqual(local.stagesJSON, rawStages, "portable publication must not alter raw data")
+    }
+
     func testJournalRoundTripIncludingFalseAnswers() {
         let rows = [
             JournalEntry(day: "2026-06-01", question: "Any alcohol?", answeredYes: false, notes: nil),
@@ -143,6 +209,21 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(WhoopCsvExporter.num(68.4), "68.4")
         XCTAssertEqual(WhoopCsvExporter.num(nil as Double?), "")
         XCTAssertFalse(WhoopCsvExporter.num(12345.678).contains(","))
+    }
+
+    func testMetricSeriesSidecarRetainsUnpublishedStageEvidence() throws {
+        let data = WhoopCsvExporter.metricSeriesJSON([
+            "device-noop": [
+                MetricPoint(day: "2026-06-01", key: "sleep_deep_min", value: 95),
+                MetricPoint(day: "2026-06-01", key: "rest_evidence_flags", value: 3),
+            ],
+        ])
+        let rows = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertTrue(rows.contains { $0["key"] as? String == "sleep_deep_min" })
+        XCTAssertTrue(rows.contains { $0["key"] as? String == "rest_evidence_flags" })
     }
 
     func testZipArchiveRoundTripsThroughFullImporter() throws {

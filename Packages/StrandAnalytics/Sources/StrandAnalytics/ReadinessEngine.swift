@@ -12,12 +12,10 @@ import WhoopStore
 ///   personal-baseline comparison is surfaced as a shift to recheck, not a clinical explanation.
 /// - **Resting-HR drift** — resting HR compared with the wearer's own recent baseline.
 /// - **Respiratory-rate drift** — sleeping respiratory rate compared with the wearer's own baseline.
-/// - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
-///   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
-///   or a universal safe-load prescription. `TrainingLoadModel` separately implements ATL/CTL/TSB
-///   for additive load units.
-/// - **Training monotony** — mean/SD of recorded daily strain over a week. It is descriptive
-///   context only; NOOP does not turn it into an injury or illness prediction.
+/// - **Effort variety** — mean/SD of recorded bounded daily Effort over a week. It is descriptive
+///   context only; NOOP does not treat Effort as additive training load or turn this into an injury
+///   or illness prediction. `TrainingLoadModel` is the separate ATL/CTL/TSB path for genuine
+///   additive load units.
 ///
 /// Not medical advice. These are approximations from a consumer strap; they describe trends in
 /// *your own* data, nothing more.
@@ -38,7 +36,7 @@ public enum ReadinessEngine {
     }
 
     public struct Signal: Sendable, Equatable {
-        public let key: String      // "hrv" | "rhr" | "respRate" | "acwr" | "monotony"
+        public let key: String      // "hrv" | "rhr" | "respRate" | "effortVariety"
         public let label: String    // short human label
         public let evidence: String?
         public let detail: String   // one-line plain-English read
@@ -54,10 +52,8 @@ public enum ReadinessEngine {
         public let headline: String
         public let summary: String
         public let signals: [Signal]
-        /// Seven-day mean / 28-day mean of recorded nonlinear strain (nil with insufficient history).
-        public let acwr: Double?
-        /// Foster training monotony over the last week (nil if not enough strain history).
-        public let monotony: Double?
+        /// Mean/SD context over the last week of bounded Effort. This is not additive training load.
+        public let effortVariety: Double?
         /// Calendar day this read describes. nil only for legacy callers that did not select a day.
         public let asOfDay: String?
         /// Certainty of the read, derived from signal count and baseline coverage. It never changes
@@ -68,13 +64,13 @@ public enum ReadinessEngine {
         /// Plain-language constraints the UI can disclose beside the read.
         public let limitations: [String]
         public init(level: Level, headline: String, summary: String,
-                    signals: [Signal], acwr: Double?, monotony: Double?,
+                    signals: [Signal], effortVariety: Double?,
                     asOfDay: String? = nil,
                     confidence: ScoreConfidence = .calibrating,
                     baselineDays: Int = 0,
                     limitations: [String] = []) {
             self.level = level; self.headline = headline; self.summary = summary
-            self.signals = signals; self.acwr = acwr; self.monotony = monotony
+            self.signals = signals; self.effortVariety = effortVariety
             self.asOfDay = asOfDay; self.confidence = confidence
             self.baselineDays = baselineDays; self.limitations = limitations
         }
@@ -96,10 +92,8 @@ public enum ReadinessEngine {
 
     private static let baselineWindow = 30   // days for HRV / RHR / RR baselines
     private static let minBaseline    = 7    // need at least this many baseline nights
-    private static let acuteWindow    = 7
-    private static let chronicWindow  = 28
-    private static let minAcute       = 4    // do not call a sparse one-or-two-day sample a "7-day" load
-    private static let minChronic     = 14   // need at least this much strain history for ACWR
+    private static let effortVarietyWindow = 7
+    private static let minimumEffortDays = 4
 
     // MARK: Entry point
 
@@ -175,7 +169,7 @@ public enum ReadinessEngine {
             return Readiness(level: .insufficient,
                              headline: "Readiness",
                              summary: "A current daily row and enough prior nights are needed for this read.",
-                             signals: [], acwr: nil, monotony: nil,
+                             signals: [], effortVariety: nil,
                              asOfDay: today, confidence: .calibrating, baselineDays: 0,
                              limitations: ["No daily recovery row is available for this date."])
         }
@@ -242,33 +236,24 @@ public enum ReadinessEngine {
             }
         }
 
-        // Fixed-window recent-load ratio (ACWR) + monotony ------------------
-        var acwr: Double? = nil
-        var monotony: Double? = nil
-        // Anchor load windows to the selected/latest calendar day. The old `sorted.compactMap` path
-        // included rows AFTER an explicitly selected historical day, and `suffix(28)` treated 28 sparse
-        // readings spread across months as a 28-day training block. Calendar-bounded, one-value-per-day
-        // windows prevent both future leakage and false coverage.
-        let loadRows = sorted.filter { $0.day <= latest.day }
-        if let acuteSeries = calendarWindowStrains(rows: loadRows, ending: latest.day, days: acuteWindow),
-           let chronicSeries = calendarWindowStrains(rows: loadRows, ending: latest.day, days: chronicWindow),
-           acuteSeries.count >= minAcute, chronicSeries.count >= minChronic {
-            let acute = mean(acuteSeries)!
-            let chronic = mean(chronicSeries)!
-            if chronic > 0 {
-                let ratio = acute / chronic
-                acwr = ratio
-                signals.append(acwrSignal(ratio, acute: acute, chronic: chronic))
-            }
-            // Foster monotony over the last week of strain.
-            let week = acuteSeries
+        // Bounded-Effort variety context -----------------------------------
+        var effortVariety: Double? = nil
+        // Daily Effort is bounded and nonlinear, so it must not be presented as ACWR or fed into
+        // additive-load math. It remains suitable for a simple within-scale variety description.
+        // The calendar-bounded window prevents future leakage and sparse rows spanning months.
+        let effortRows = sorted.filter { $0.day <= latest.day }
+        if let week = calendarWindowEffort(
+            rows: effortRows,
+            ending: latest.day,
+            days: effortVarietyWindow
+        ), week.count >= minimumEffortDays {
             if week.count >= 4, let sd = sampleSD(week), sd > 0, let m = mean(week) {
                 let mono = m / sd
-                monotony = mono
+                effortVariety = mono
                 if mono >= 2.0 {
                     let low = week.min() ?? m
                     let high = week.max() ?? m
-                    signals.append(Signal(key: "monotony", label: "Training variety",
+                    signals.append(Signal(key: "effortVariety", label: "Effort variety",
                         evidence: "Last \(week.count) recorded days: Effort "
                             + "\(Int(low.rounded()))-\(Int(high.rounded())) "
                             + "(average \(Int(m.rounded())))",
@@ -277,8 +262,9 @@ public enum ReadinessEngine {
             }
         }
 
-        let (level, headline, summary) = synthesize(signals: signals,
-                                                    hasHistory: !history.isEmpty || acwr != nil)
+        let (level, headline, summary) = synthesize(
+            signals: signals,
+            hasHistory: !history.isEmpty)
         let recoveryKeys = Set(["hrv", "rhr", "respRate"])
         let recoverySignals = signals.filter { recoveryKeys.contains($0.key) }
         let supportingCounts = recoverySignals.compactMap { baselineCountByKey[$0.key] }
@@ -300,11 +286,8 @@ public enum ReadinessEngine {
         if !recoverySignals.isEmpty && baselineDays < Baselines.minNightsTrust {
             limitations.append("The personal baseline has \(baselineDays) supporting prior days and is still building.")
         }
-        if acwr != nil {
-            limitations.append("The recent-load ratio is descriptive and does not affect readiness.")
-        }
         return Readiness(level: level, headline: headline, summary: summary,
-                         signals: signals, acwr: acwr, monotony: monotony,
+                         signals: signals, effortVariety: effortVariety,
                          asOfDay: latest.day, confidence: confidence,
                          baselineDays: baselineDays, limitations: limitations)
     }
@@ -334,18 +317,6 @@ public enum ReadinessEngine {
                       detail: text, flag: flag)
     }
 
-    private static func acwrSignal(_ ratio: Double, acute: Double, chronic: Double) -> Signal {
-        let pct = String(format: "%.2f", ratio)
-        let evidence = "7d \(String(format: "%.1f", acute)) / 28d \(String(format: "%.1f", chronic))"
-        // This ratio has no validated universal "good", "bad", or injury-risk bands. Keep the legacy
-        // Signal/Flag API shape, but always emit `.neutral` and state only the arithmetic relationship.
-        // `synthesize` also excludes this key so the number cannot change readiness or prescribe training.
-        return Signal(key: "acwr", label: "Recent-load ratio",
-                      evidence: evidence,
-                      detail: "7-day mean is \(pct)x the 28-day mean of recorded strain",
-                      flag: .neutral)
-    }
-
     private static func evidence(value: Double, baseline: Double, unit: String, decimals: Int) -> String {
         "\(format(value, decimals: decimals)) vs \(format(baseline, decimals: decimals)) \(unit)"
     }
@@ -358,8 +329,8 @@ public enum ReadinessEngine {
 
     /// Values inside an actual calendar window, deduplicated to one daily row. ISO day keys compare
     /// lexicographically, but we parse the anchor once so month/year boundaries are handled correctly.
-    private static func calendarWindowStrains(rows: [DailyMetric], ending endDay: String,
-                                              days: Int) -> [Double]? {
+    private static func calendarWindowEffort(rows: [DailyMetric], ending endDay: String,
+                                             days: Int) -> [Double]? {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -380,7 +351,7 @@ public enum ReadinessEngine {
     // MARK: Synthesis
 
     private static func synthesize(signals: [Signal], hasHistory: Bool) -> (Level, String, String) {
-        // Training-load context (ratio and monotony) is descriptive only. Readiness is synthesized solely
+        // Effort-variety context is descriptive only. Readiness is synthesized solely
         // from the measured recovery physiology whose personal baselines are evaluated above. Keeping an
         // allow-list prevents a future context signal from silently changing the wellness verdict.
         let evaluativeKeys = Set(["hrv", "rhr", "respRate"])

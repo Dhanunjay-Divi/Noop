@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">目前恢復訊號沒有足夠的既往變化可供比較。</string>
     <string name="appwide_readiness_limitation_no_daily_row">此日期沒有每日恢復記錄。</string>
     <string name="appwide_readiness_limitation_one_signal">此評估基於一個目前恢復訊號。</string>
-    <string name="appwide_readiness_limitation_recent_load">近期負荷比僅用於描述，不影響準備度。</string>
     <string name="appwide_readiness_primed_headline">狀態一致</string>
     <string name="appwide_readiness_primed_summary">測得的恢復趨勢與你近期的個人基準一致。</string>
     <string name="appwide_readiness_rundown_headline">多項變化</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">一項測量訊號偏離了近期範圍。單日變化只提示需要複查，並非診斷或訓練指示。</string>
     <string name="appwide_rhythm_methodology">NOOP 僅分析已記錄運動之外的安靜夜間時段。偵測到動作、運動、非靜息狀態下的心率升高或訊號雜訊時，會略過該時段，不作解讀。它將心搏間期繪製為龐加萊散點圖，並計算已發表的描述性統計量。「節律」是選用的時間間隔檢視，不是診斷，也絕不會傳送警報。</string>
     <string name="appwide_shell_updates_unread_format">更新，%1$d 則未讀</string>
+    <string name="appwide_sleep_edit_conflict">編輯儲存前，這一晚的資料已變更。已還原最新資料。</string>
     <string name="appwide_sleep_recovery_added_format">近期睡眠平衡使今晚增加 %1$s。增加時間最多為 1 小時，且絕不會降低你的目標。</string>
     <string name="appwide_sleep_recovery_none">今晚不增加恢復時間。即使近期睡眠有盈餘，NOOP 也絕不會建議低於你的目標。</string>
     <string name="appwide_sleep_reminder_around_format">提醒已排定在 %1$s 左右。</string>

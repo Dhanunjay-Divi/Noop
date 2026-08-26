@@ -2,6 +2,7 @@ package com.noop.ui
 
 import com.noop.analytics.FusionSource
 import com.noop.data.DailyMetric
+import com.noop.data.SleepSession
 import com.noop.data.WhoopDao
 import com.noop.data.WhoopRepository
 import kotlinx.coroutines.runBlocking
@@ -10,6 +11,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.Proxy
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * #799 / SPINE regression: the fused record only lets a source win the day it ACTUALLY covers, and the
@@ -18,23 +21,32 @@ import java.lang.reflect.Proxy
  * must read each source's OWN row keyed to the exact requested day, so an import for day A never supplies a
  * value for day B; and an active band stored under its own id must fuse ITS data, not the WHOOP id's.
  *
- * Mirrors the iOS regression test logic. Driven through a Proxy-stub [WhoopDao] (no Room): the only DAO
- * method [FusionDayAdapter] touches is `days(deviceId)`, which we answer per device id from a fixture map.
+ * Mirrors the iOS regression test logic. Driven through a Proxy-stub [WhoopDao] (no Room): only daily
+ * rows and exact-source sleep-session evidence are available from the fixture.
  */
 class FusionDayAdapterCoverageTest {
 
-    /** Build a repository whose `days(deviceId)` returns the fixture rows for that id (else empty), and
-     *  whose every OTHER dao call throws (proof the adapter touches nothing else). */
-    private fun repo(rowsByDevice: Map<String, List<DailyMetric>>): WhoopRepository {
+    /** Build a repository exposing only the adapter's daily rows and exact sleep-session evidence. */
+    private fun repo(
+        rowsByDevice: Map<String, List<DailyMetric>>,
+        sessionsByDevice: Map<String, List<SleepSession>> = emptyMap(),
+    ): WhoopRepository {
         val dao = Proxy.newProxyInstance(
             WhoopDao::class.java.classLoader,
             arrayOf(WhoopDao::class.java),
         ) { _, method, args ->
             when (method.name) {
-                // The ONLY DAO method FusionDayAdapter touches (via repo.days). args[0] is the deviceId;
-                // a trailing Continuation (suspend ABI) is ignored. Returning the list synchronously is the
-                // supported way to stub a suspend fun through a Java Proxy.
+                // A trailing Continuation (suspend ABI) is ignored. Returning the list synchronously is
+                // the supported way to stub a suspend function through a Java Proxy.
                 "days" -> rowsByDevice[args?.get(0) as String].orEmpty()
+                "sleepSessions" -> {
+                    val callArgs = requireNotNull(args)
+                    val deviceId = callArgs[0] as String
+                    val from = callArgs[1] as Long
+                    val to = callArgs[2] as Long
+                    sessionsByDevice[deviceId].orEmpty()
+                        .filter { it.startTs in from..to }
+                }
                 // Anything else proves the adapter reached past its contract.
                 else -> throw UnsupportedOperationException("FusionDayAdapter must not call ${method.name}")
             }
@@ -44,6 +56,27 @@ class FusionDayAdapterCoverageTest {
 
     private fun sleepRow(deviceId: String, day: String, asleepMin: Double) =
         DailyMetric(deviceId = deviceId, day = day, totalSleepMin = asleepMin)
+
+    private fun stagedSleepRow(deviceId: String, day: String) = DailyMetric(
+        deviceId = deviceId,
+        day = day,
+        totalSleepMin = 420.0,
+        deepMin = 80.0,
+        remMin = 100.0,
+        lightMin = 240.0,
+    )
+
+    private fun stagedSession(deviceId: String, day: String, supported: Boolean = true): SleepSession {
+        val end = LocalDate.parse(day).atTime(8, 0).atZone(ZoneId.systemDefault()).toEpochSecond()
+        return SleepSession(
+            deviceId = deviceId,
+            startTs = end - 8 * 3_600L,
+            endTs = end,
+            stagesJSON = """{"awake":30,"light":210,"deep":80,"rem":100}""",
+            rrEligibleWindowCount = if (supported) 96 else null,
+            rrValidWindowCount = if (supported) 24 else null,
+        )
+    }
 
     private val dayA = "2026-06-10"
     private val dayB = "2026-06-11"
@@ -100,5 +133,68 @@ class FusionDayAdapterCoverageTest {
         val sleep = rec.rows.firstOrNull { it.point.metric == "sleep_total_min" }
         assertEquals(421.0, sleep?.point?.value)
         assertEquals(FusionSource.NOOP_COMPUTED, sleep?.point?.winningSource)
+    }
+
+    @Test
+    fun unsupportedComputedStagesAreWithheldWithoutHidingSleepTotal() = runBlocking {
+        val source = "my-whoop-noop"
+        val rec = FusionDayAdapter.buildFor(
+            repo(mapOf(source to listOf(stagedSleepRow(source, dayA)))),
+            dayA,
+        )
+
+        assertEquals(420.0, rec.rows.first { it.point.metric == "sleep_total_min" }.point.value, 0.0)
+        assertNull(rec.rows.firstOrNull { it.point.metric == "sleep_deep_min" })
+        assertNull(rec.rows.firstOrNull { it.point.metric == "sleep_rem_min" })
+    }
+
+    @Test
+    fun exactComputedSourceEvidencePublishesStages() = runBlocking {
+        val source = "my-whoop-noop"
+        val rec = FusionDayAdapter.buildFor(
+            repo(
+                rowsByDevice = mapOf(source to listOf(stagedSleepRow(source, dayA))),
+                sessionsByDevice = mapOf(source to listOf(stagedSession(source, dayA))),
+            ),
+            dayA,
+        )
+
+        assertEquals(80.0, rec.rows.first { it.point.metric == "sleep_deep_min" }.point.value, 0.0)
+        assertEquals(100.0, rec.rows.first { it.point.metric == "sleep_rem_min" }.point.value, 0.0)
+    }
+
+    @Test
+    fun anotherComputedSourceEvidenceCannotAuthorizeTheActiveSource() = runBlocking {
+        val activeId = "polar-h10"
+        val activeComputed = "$activeId-noop"
+        val canonicalComputed = "my-whoop-noop"
+        val rec = FusionDayAdapter.buildFor(
+            repo(
+                rowsByDevice = mapOf(
+                    activeComputed to listOf(stagedSleepRow(activeComputed, dayA)),
+                ),
+                sessionsByDevice = mapOf(
+                    canonicalComputed to listOf(stagedSession(canonicalComputed, dayA)),
+                ),
+            ),
+            dayA,
+            activeStrapId = activeId,
+        )
+
+        assertNull(rec.rows.firstOrNull { it.point.metric == "sleep_deep_min" })
+        assertNull(rec.rows.firstOrNull { it.point.metric == "sleep_rem_min" })
+    }
+
+    @Test
+    fun independentlyStagedImportRemainsPublishable() = runBlocking {
+        val source = "my-whoop"
+        val rec = FusionDayAdapter.buildFor(
+            repo(mapOf(source to listOf(stagedSleepRow(source, dayA)))),
+            dayA,
+        )
+
+        assertEquals(80.0, rec.rows.first { it.point.metric == "sleep_deep_min" }.point.value, 0.0)
+        assertEquals(FusionSource.WHOOP_IMPORT,
+            rec.rows.first { it.point.metric == "sleep_deep_min" }.point.winningSource)
     }
 }

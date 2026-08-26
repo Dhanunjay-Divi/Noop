@@ -1580,7 +1580,6 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Estrés %1$s de 3, %2$s</string>
     <string name="stress_peak_summary">pico %1$s · %2$s</string>
-    <string name="today_load_ratio">proporción %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
     <string name="widget_description">Recuperación, Esfuerzo y Sueño de hoy, con frecuencia cardíaca en directo y batería de la pulsera de un vistazo.</string>
@@ -2098,4 +2097,5 @@
     <string name="hydration_adaptive_timing_status">Actualmente cada %1$d min. El horario solo cambia cuando los datos de hoy lo respaldan.</string>
     <string name="hydration_base_interval_label">Intervalo base</string>
     <string name="today_calibration_valid_hrv_progress">VFC válida %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Las fases detalladas del sueño se ocultan porque esta noche no contiene suficientes datos utilizables de los intervalos entre latidos. El tiempo total de sueño sigue disponible.</string>
 </resources>

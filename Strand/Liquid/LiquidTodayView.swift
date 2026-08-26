@@ -168,10 +168,13 @@ struct LiquidTodayView: View {
     // Custom liquid pull-to-refresh: a vessel that FILLS as you drag, releases into a refresh (replaces
     // the system spinner). Driven by the scroll's top overscroll offset.
     @State private var pullY: CGFloat = 0
+    @State private var scrollOffset: CGFloat = 0
+    @State private var pullGestureStartedAtTop: Bool?
     @State private var refreshArmed = false
     @State private var refreshing = false
     @State private var pullHaptic = 0
     private let pullThreshold: CGFloat = 80
+    private static let minimumRefreshPresentation: Duration = .seconds(2)
 
     /// Mock Vitality purple (#9b7bff) has no exact StrandPalette token in this theme.
     private let liquidPurple = Color(.sRGB, red: 0x9b / 255, green: 0x7b / 255, blue: 0xff / 255, opacity: 1)
@@ -260,6 +263,35 @@ struct LiquidTodayView: View {
                                                  maxOffset: earliestDayOffset)
                 guard next != selectedDayOffset else { return }
                 withAnimation(StrandMotion.interactive) { selectedDayOffset = next }
+            }
+    }
+
+    /// iOS 26 can hold the ScrollView preference at zero throughout elastic top bounce. Keep the
+    /// preference path for older releases, but drive the same state machine directly from a vertical
+    /// gesture that began at the top so pull-to-sync cannot silently disappear.
+    private var pullRefreshGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                let startedAtTop = pullGestureStartedAtTop ?? (scrollOffset >= -2)
+                if pullGestureStartedAtTop == nil {
+                    pullGestureStartedAtTop = startedAtTop
+                }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard startedAtTop, dy > 0, abs(dy) > abs(dx) * 1.2 else { return }
+                handlePull(dy)
+            }
+            .onEnded { value in
+                let startedAtTop = pullGestureStartedAtTop ?? (scrollOffset >= -2)
+                pullGestureStartedAtTop = nil
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard startedAtTop, dy > 0, abs(dy) > abs(dx) * 1.2 else {
+                    if refreshArmed { refreshArmed = false }
+                    pullY = 0
+                    return
+                }
+                handlePull(0)
             }
     }
 
@@ -384,6 +416,7 @@ struct LiquidTodayView: View {
         }
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
+            scrollOffset = offset
             handlePull(offset)
             reportScrollPosition(offset)
         }
@@ -405,6 +438,7 @@ struct LiquidTodayView: View {
         }
         // Swipe left/right to change DAYS (WHOOP-style). Tab-swipe is disabled on Today in RootTabView so
         // this owns the horizontal gesture here.
+        .simultaneousGesture(pullRefreshGesture)
         .simultaneousGesture(daySwipeGesture)
         // A light tick when the day changes (swipe or calendar pick) — the WHOOP-style day nav should
         // feel physical ("every tiny little thing").
@@ -522,6 +556,8 @@ struct LiquidTodayView: View {
             refreshArmed = false
             refreshing = true
             Task {
+                let clock = ContinuousClock()
+                let earliestFinish = clock.now.advanced(by: Self.minimumRefreshPresentation)
                 // #334 (iOS twin of Android #426): a pull requests a fresh strap history offload, not just
                 // a UI reload. syncNow() is internally gated (connected + bonded + not-already-backfilling),
                 // so a pull while disconnected or mid-offload safely no-ops. The sync status chip owns the
@@ -533,7 +569,10 @@ struct LiquidTodayView: View {
                 // explicit reload (for raw intraday samples that don't alter the daily cache), preventing
                 // two concurrent copies of the same expensive Today load.
                 if repo.refreshSeq == previousSeq { await load() }
-                try? await Task.sleep(nanoseconds: 350_000_000)   // let the fill read as "done"
+                // Fast local refreshes used to finish while the drag was still settling, so the custom
+                // indicator could disappear before a sighted user or assistive technology observed it.
+                // Slow refreshes do not pay an extra delay: this is a minimum presentation deadline.
+                try? await clock.sleep(until: earliestFinish)
                 withAnimation(.easeOut(duration: 0.25)) { refreshing = false }
             }
         }
@@ -1921,7 +1960,7 @@ struct LiquidTodayView: View {
         case "hrv": return "waveform.path.ecg"
         case "rhr": return "heart.text.square.fill"
         case "respRate": return "lungs.fill"
-        case "monotony": return "chart.bar.xaxis"
+        case "effortVariety": return "chart.bar.xaxis"
         default: return "chart.line.uptrend.xyaxis"
         }
     }
@@ -1931,8 +1970,7 @@ struct LiquidTodayView: View {
         case "hrv": return String(localized: "daily_plan.signal.hrv")
         case "rhr": return String(localized: "daily_plan.signal.rhr")
         case "respRate": return String(localized: "daily_plan.signal.respiration")
-        case "acwr": return String(localized: "daily_plan.signal.load")
-        case "monotony": return String(localized: "daily_plan.signal.variety")
+        case "effortVariety": return String(localized: "daily_plan.signal.variety")
         default: return signal.label
         }
     }
@@ -3072,11 +3110,11 @@ private struct TodaySignalPatternsCard: View {
                           detail: "below your usual range", flag: .bad),
                     .init(key: "rhr", label: "Resting HR", evidence: "61 vs 54 bpm",
                           detail: "above your usual range", flag: .bad),
-                    .init(key: "acwr", label: "Recent-load ratio", evidence: "7d 14.8 / 28d 9.5",
-                          detail: "7-day mean is 1.56x the 28-day mean", flag: .neutral),
+                    .init(key: "effortVariety", label: "Effort variety",
+                          evidence: "Last 7 recorded days: Effort 46-52 (average 49)",
+                          detail: "recorded daily Effort stayed in a narrow range", flag: .watch),
                 ],
-                acwr: 1.56,
-                monotony: nil
+                effortVariety: 2.4
             )
             let demoVitals = IllnessSignalEngine.Result(
                 score: 72,

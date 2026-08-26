@@ -10,7 +10,7 @@ final class CrossMetricBriefEngineTests: XCTestCase {
     private func readiness(_ level: ReadinessEngine.Level,
                            _ signals: [ReadinessEngine.Signal]) -> ReadinessEngine.Readiness {
         .init(level: level, headline: "Readiness", summary: "Summary",
-              signals: signals, acwr: nil, monotony: nil)
+              signals: signals, effortVariety: nil)
     }
 
     func testColdStartBuildsWithoutInventingAdvice() {
@@ -27,18 +27,22 @@ final class CrossMetricBriefEngineTests: XCTestCase {
         XCTAssertTrue(result.findings.first?.summary.contains("not a conclusion") == true)
     }
 
-    func testLoadNeedsIndependentRecoverySignal() {
-        let loadOnly = CrossMetricBriefEngine.evaluate(
-            readiness: readiness(.strained, [signal("acwr", "Training load", flag: .bad)]))
-        XCTAssertFalse(loadOnly.findings.contains { $0.kind == .loadRecovery })
+    func testEffortContextNeedsIndependentRecoverySignal() {
+        let effortOnly = CrossMetricBriefEngine.evaluate(
+            readiness: readiness(.strained, [
+                signal("effortVariety", "Effort variety", flag: .watch),
+            ]))
+        XCTAssertTrue(effortOnly.findings.isEmpty)
 
         let combined = CrossMetricBriefEngine.evaluate(
             readiness: readiness(.rundown, [
-                signal("acwr", "Training load", flag: .bad),
+                signal("effortVariety", "Effort variety", flag: .watch),
                 signal("hrv", "HRV", flag: .bad),
             ]))
-        XCTAssertEqual(combined.findings.first?.kind, .loadRecovery)
-        XCTAssertTrue(combined.findings.first?.summary.contains("not overtraining or injury risk") == true)
+        XCTAssertEqual(combined.findings.first?.kind, .effortRecovery)
+        XCTAssertTrue(combined.findings.first?.summary.contains("association") == true)
+        XCTAssertTrue(combined.findings.first?.summary.contains("injury risk") == true)
+        XCTAssertFalse(combined.findings.first?.possibleContributors.contains("Hard or unfamiliar training") == true)
     }
 
     func testSleepAssociationRequiresRecoveryCorroboration() {
@@ -81,14 +85,14 @@ final class CrossMetricBriefEngineTests: XCTestCase {
             suppressedBy: [], signalCount: 3, copy: "unused")
         let result = CrossMetricBriefEngine.evaluate(
             readiness: readiness(.rundown, [
-                signal("acwr", "Training load", flag: .bad),
+                signal("effortVariety", "Effort variety", flag: .watch),
                 signal("hrv", "HRV", flag: .bad),
                 signal("rhr", "Resting HR", flag: .bad),
             ]),
             illness: illness,
             restScore: 45)
         XCTAssertEqual(result.findings.count, 2)
-        XCTAssertEqual(result.findings.map(\.kind), [.multiVital, .loadRecovery])
+        XCTAssertEqual(result.findings.map(\.kind), [.multiVital, .effortRecovery])
         XCTAssertEqual(result.checkedSignals.filter { $0 == "HRV" }.count, 1)
         XCTAssertTrue(CrossMetricBriefEngine.disclaimer.contains("not a diagnosis"))
     }

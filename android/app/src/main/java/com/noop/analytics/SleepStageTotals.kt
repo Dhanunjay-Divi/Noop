@@ -260,12 +260,31 @@ object SleepStageTotals {
      *  explicit wake segment. Mirrors Swift `BridgedNightGroup`. (#364) */
     data class BridgedNightGroup(val indices: List<Int>, val gaps: List<Pair<Long, Long>>)
 
+    /**
+     * One local wake day after adjacent fragments have been bridged across the complete timeline.
+     * [groups] preserves distinct main-sleep/nap candidates; every index still addresses the original
+     * input list.
+     */
+    data class WakeDayBucket(val day: String, val groups: List<BridgedNightGroup>)
+
     /** EVERY bridged group over [blocks] — the same two-tier bridge [mainNightGroupIndices] applies (#561
      *  short-wake, plus the #861 overnight night-tail widening), WITHOUT the winner pick. A negative gap
      *  (a block starting inside the previous span) does not bridge — pinned legacy semantics, `gap >= 0` —
      *  and never fabricates a seam. Groups ordered by start; pure and deterministic. Mirrors Swift
      *  `bridgedNightGroups`. (#364) */
     fun bridgedNightGroups(blocks: List<NightBlock>, offsetSec: Long): List<BridgedNightGroup> {
+        return bridgedNightGroups(blocks) { offsetSec }
+    }
+
+    /**
+     * Historical-offset variant of [bridgedNightGroups]. The later fragment's onset offset decides
+     * whether the 60..90 minute night-tail bridge applies, so a historical night is never evaluated
+     * with the query-time offset.
+     */
+    fun bridgedNightGroups(
+        blocks: List<NightBlock>,
+        offsetAtEpochSec: (Long) -> Long,
+    ): List<BridgedNightGroup> {
         if (blocks.isEmpty()) return emptyList()
         // Sort indices by onset so bridging sees neighbours, exactly as `bridgeAdjacent` sorts the blocks.
         val order = blocks.indices.sortedBy { blocks[it].start }
@@ -288,7 +307,8 @@ object SleepStageTotals {
                 // onset, or a gap >= NIGHT_TAIL_BRIDGE_MAX_MIN) still stands as its own block.
                 val bridges = gap >= 0 &&
                     (gap < bridgeS ||
-                        (gap < nightTailBridgeS && isOvernightOnset(b.start, offsetSec)))
+                        (gap < nightTailBridgeS &&
+                            isOvernightOnset(b.start, offsetAtEpochSec(b.start))))
                 if (bridges) {
                     if (gap > 0) gaps[gaps.size - 1].add(last.end to b.start)
                     bridged[bridged.size - 1] = NightBlock(last.start, maxOf(last.end, b.end))
@@ -301,6 +321,26 @@ object SleepStageTotals {
             gaps.add(mutableListOf())
         }
         return groups.zip(gaps).map { (g, gp) -> BridgedNightGroup(g.sorted(), gp) }
+    }
+
+    /**
+     * Bridge first, then assign each complete group to the local day of its latest wake. Grouping each
+     * fragment by day first can split an interrupted night across midnight and publish only its first
+     * half. Independent groups ending on the same day remain separate for main-night/nap selection.
+     */
+    fun wakeDayBuckets(
+        blocks: List<NightBlock>,
+        offsetAtEpochSec: (Long) -> Long,
+    ): List<WakeDayBucket> {
+        val byDay = linkedMapOf<String, MutableList<BridgedNightGroup>>()
+        for (group in bridgedNightGroups(blocks, offsetAtEpochSec)) {
+            val latestEnd = group.indices.maxOfOrNull { blocks[it].end } ?: continue
+            val day = AnalyticsEngine.dayString(latestEnd, offsetAtEpochSec(latestEnd))
+            byDay.getOrPut(day) { mutableListOf() }.add(group)
+        }
+        return byDay.toSortedMap().map { (day, groups) ->
+            WakeDayBucket(day, groups.toList())
+        }
     }
 
     /** The indices (into the ORIGINAL [blocks]) of the MAIN-NIGHT GROUP: the main night plus any adjacent

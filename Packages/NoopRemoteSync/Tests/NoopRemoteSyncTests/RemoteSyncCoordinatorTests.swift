@@ -4,6 +4,26 @@ import WhoopProtocol
 @testable import NoopRemoteSync
 
 final class RemoteSyncCoordinatorTests: XCTestCase {
+    func testLegacySleepPayloadWithoutMetadataStillDecodes() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = Data(
+            """
+            {
+              "session_id": "legacy-night",
+              "start_ts": 1700000000,
+              "end_ts": 1700028800,
+              "stages": {"light": 14400}
+            }
+            """.utf8)
+
+        let session = try decoder.decode(RemoteSleepSession.self, from: payload)
+
+        XCTAssertEqual(session.sessionId, "legacy-night")
+        XCTAssertEqual(session.stages, ["light": 14_400])
+        XCTAssertTrue(session.metadata.isEmpty)
+    }
+
     func testCanonicalSleepStagesNormalisesImportedMinuteObjectToSeconds() {
         let stages = RemoteSyncCoordinator.canonicalSleepStages(
             #"{"light":245.5,"deep":60,"rem":42,"wake":10,"unknown":99}"#
@@ -31,6 +51,51 @@ final class RemoteSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(stages, ["awake": 60, "deep": 120, "rem": 90])
         XCTAssertNil(RemoteSyncCoordinator.canonicalSleepStages(#"["not-a-stage"]"#))
         XCTAssertNil(RemoteSyncCoordinator.canonicalSleepStages("not json"))
+    }
+
+    func testSleepEvidenceMetadataPreservesOnlyExactCountPairs() {
+        let supported = CachedSleepSession(
+            startTs: 1_700_000_000,
+            endTs: 1_700_028_800,
+            efficiency: 0.9,
+            restingHr: 52,
+            avgHrv: 64,
+            stagesJSON: #"{"light":480}"#,
+            rrEligibleWindowCount: 96,
+            rrValidWindowCount: 24
+        )
+        XCTAssertEqual(
+            RemoteSyncCoordinator.sleepEvidenceMetadata(supported),
+            [
+                "hrv_method": "RMSSD",
+                "rr_eligible_window_count": "96",
+                "rr_valid_window_count": "24",
+            ]
+        )
+
+        let partial = CachedSleepSession(
+            startTs: supported.startTs,
+            endTs: supported.endTs,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            rrEligibleWindowCount: 96,
+            rrValidWindowCount: nil
+        )
+        XCTAssertTrue(RemoteSyncCoordinator.sleepEvidenceMetadata(partial).isEmpty)
+
+        let staleBounds = CachedSleepSession(
+            startTs: supported.startTs,
+            endTs: supported.endTs + 300,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            rrEligibleWindowCount: 96,
+            rrValidWindowCount: 24
+        )
+        XCTAssertTrue(RemoteSyncCoordinator.sleepEvidenceMetadata(staleBounds).isEmpty)
     }
 
     func testSuccessfulUploadAcknowledgesRawRowsAndMapsRawUnitsHonestly() async throws {

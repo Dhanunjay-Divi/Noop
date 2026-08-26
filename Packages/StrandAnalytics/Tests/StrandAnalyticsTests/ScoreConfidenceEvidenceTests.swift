@@ -62,6 +62,63 @@ final class ScoreConfidenceEvidenceTests: XCTestCase {
             [.missingRREvidence])
     }
 
+    func testDetailedStageSeriesKeysExcludeTotalSleep() {
+        XCTAssertTrue(ScoreConfidence.isDetailedSleepStageSeriesKey("sleep_rem_min"))
+        XCTAssertFalse(ScoreConfidence.isDetailedSleepStageSeriesKey("sleep_total_min"))
+    }
+
+    func testLocalMainNightEvidenceCannotAuthorizeSameDayNap() {
+        let blocks = [
+            SleepStageTotals.NightBlock(start: 22 * 3_600, end: 30 * 3_600),
+            SleepStageTotals.NightBlock(start: 38 * 3_600, end: 39 * 3_600),
+        ]
+
+        XCTAssertEqual(
+            ScoreConfidence.publishableDetailedSleepStageSessionIndices(
+                blocks: blocks,
+                rrEligibleWindowCounts: [96, 12],
+                rrValidWindowCounts: [24, 12],
+                independentlyStagedImport: false,
+                offsetSec: 0,
+                habitualMidsleepSec: nil),
+            [0])
+        XCTAssertEqual(
+            ScoreConfidence.publishableDetailedSleepStageSessionIndices(
+                blocks: blocks,
+                rrEligibleWindowCounts: [nil, nil],
+                rrValidWindowCounts: [nil, nil],
+                independentlyStagedImport: true,
+                offsetSec: 0,
+                habitualMidsleepSec: nil),
+            [0, 1])
+
+        XCTAssertEqual(
+            ScoreConfidence.publishableDetailedSleepStageSessionIndices(
+                blocks: blocks,
+                rrEligibleWindowCounts: [95, 12],
+                rrValidWindowCounts: [24, 12],
+                independentlyStagedImport: false,
+                offsetSec: 0,
+                habitualMidsleepSec: nil),
+            [],
+            "counts produced for different bounds must not authorize the current session")
+    }
+
+    func testDetailedStageEvidenceCountsFailClosedWhenMissingInvalidOrTooSparse() {
+        XCTAssertFalse(ScoreConfidence.hasSustainedRREvidence(
+            eligibleWindowCount: nil,
+            validRRWindowCount: 24))
+        XCTAssertFalse(ScoreConfidence.hasSustainedRREvidence(
+            eligibleWindowCount: 10,
+            validRRWindowCount: 11))
+        XCTAssertFalse(ScoreConfidence.hasSustainedRREvidence(
+            eligibleWindowCount: 96,
+            validRRWindowCount: 23))
+        XCTAssertTrue(ScoreConfidence.hasSustainedRREvidence(
+            eligibleWindowCount: 96,
+            validRRWindowCount: 24))
+    }
+
     func testEditedStageMixRecomputesConfidenceFromPreservedSensorEvidence() {
         let beforeEdit = ScoreConfidence.restEvidenceFlags(
             hasSession: true,

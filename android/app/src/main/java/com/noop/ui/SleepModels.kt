@@ -101,6 +101,11 @@ internal data class HeroNight(
     /** True when any block supplying the displayed main-night hypnogram came from Oura's on-ring
      *  SleepNet output. Kept separate from score provenance: this labels stages only. */
     val hasOuraStages: Boolean = false,
+    /** The displayed detailed stages came from an imported classifier, not NOOP's local model.
+     *  Imported stages retain their disclosed provenance and do not borrow the local R-R gate. */
+    val independentlyStagedImport: Boolean = false,
+    /** Exact current-main-group publication verdict from persisted per-session R-R evidence. */
+    val detailedStagesPublishable: Boolean = false,
 )
 
 /** What the hero card draws for the selected night — null means no usable stage data

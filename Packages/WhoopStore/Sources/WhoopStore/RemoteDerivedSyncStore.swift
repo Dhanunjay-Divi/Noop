@@ -30,7 +30,8 @@ extension WhoopStore {
             arguments.append(boundedLimit)
             return try Row.fetchAll(db, sql: """
                 SELECT startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON, userEdited,
-                       startTsAdjusted FROM sleepSession
+                       startTsAdjusted, gravitySparse, rrEligibleWindowCount, rrValidWindowCount
+                FROM sleepSession
                 WHERE deviceId = ? AND startTs >= ? AND startTs <= ?\(cursorClause)
                 ORDER BY startTs ASC LIMIT ?
                 """, arguments: StatementArguments(arguments))
@@ -39,7 +40,10 @@ extension WhoopStore {
                         startTs: $0["startTs"], endTs: $0["endTs"],
                         efficiency: $0["efficiency"], restingHr: $0["restingHr"],
                         avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"],
-                        userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"]
+                        userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"],
+                        gravitySparse: $0["gravitySparse"],
+                        rrEligibleWindowCount: $0["rrEligibleWindowCount"],
+                        rrValidWindowCount: $0["rrValidWindowCount"]
                     )
                 }
         }

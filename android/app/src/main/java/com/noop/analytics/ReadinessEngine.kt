@@ -21,12 +21,10 @@ import kotlin.math.sqrt
  *   personal-baseline comparison is surfaced as a shift to recheck, not a clinical explanation.
  * - **Resting-HR drift** — resting HR compared with the wearer's own recent baseline.
  * - **Respiratory-rate drift** — sleeping respiratory rate compared with the wearer's own baseline.
- * - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
- *   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
- *   or a universal safe-load prescription. [TrainingLoadModel] separately implements ATL/CTL/TSB
- *   for additive load units.
- * - **Training monotony** — mean/SD of recorded daily strain over a week. It is descriptive
- *   context only; NOOP does not turn it into an injury or illness prediction.
+ * - **Effort variety** — mean/SD of recorded bounded daily Effort over a week. It is descriptive
+ *   context only; NOOP does not treat Effort as additive training load or turn this into an injury
+ *   or illness prediction. [TrainingLoadModel] is the separate ATL/CTL/TSB path for genuine
+ *   additive load units.
  *
  * Not medical advice. These are approximations from a consumer strap; they describe trends in
  * *your own* data, nothing more.
@@ -46,11 +44,11 @@ object ReadinessEngine {
     enum class Flag { GOOD, NEUTRAL, WATCH, BAD }
 
     data class Signal(
-        val key: String,            // "hrv" | "rhr" | "respRate" | "acwr" | "monotony"
+        val key: String,            // "hrv" | "rhr" | "respRate" | "effortVariety"
         val label: String,          // short human label
         val detail: String,         // one-line plain-English read
         val flag: Flag,
-        // The numbers behind the signal, e.g. "48 vs 55 ms" or "7d 12.1 / 28d 9.4". Optional and
+        // The numbers behind the signal, e.g. "48 vs 55 ms". Optional and
         // backward-compatible (defaults null); rendered as a small caption under the signal in the UI.
         val evidence: String? = null,
     )
@@ -60,10 +58,8 @@ object ReadinessEngine {
         val headline: String,
         val summary: String,
         val signals: List<Signal>,
-        /** Seven-day mean / 28-day mean of recorded nonlinear strain (null with insufficient history). */
-        val acwr: Double?,
-        /** Foster training monotony over the last week (null if not enough strain history). */
-        val monotony: Double?,
+        /** Mean/SD context over the last week of bounded Effort. This is not additive training load. */
+        val effortVariety: Double?,
         /** Calendar day this read describes. Null only for legacy callers that did not select a day. */
         val asOfDay: String? = null,
         /** Certainty from current recovery-signal count and baseline coverage. */
@@ -87,10 +83,8 @@ object ReadinessEngine {
 
     private const val baselineWindow = 30   // days for HRV / RHR / RR baselines
     private const val minBaseline = 7       // need at least this many baseline nights
-    private const val acuteWindow = 7
-    private const val chronicWindow = 28
-    private const val minAcute = 4        // do not call one or two sparse readings a seven-day mean
-    private const val minChronic = 14       // need at least this much strain history for ACWR
+    private const val effortVarietyWindow = 7
+    private const val minimumEffortDays = 4
 
     // Resp-rate signal is sourced from either clean cloud RR or a higher-variance on-device RSA
     // estimate (no source flag on the field), so it uses wider z thresholds than HRV/RHR and a
@@ -195,7 +189,7 @@ object ReadinessEngine {
                 level = Level.INSUFFICIENT,
                 headline = "Readiness",
                 summary = "A current daily row and enough prior nights are needed for this read.",
-                signals = emptyList(), acwr = null, monotony = null,
+                signals = emptyList(), effortVariety = null,
                 asOfDay = today, confidence = ScoreConfidence.CALIBRATING, baselineDays = 0,
                 limitations = listOf("No daily recovery row is available for this date."),
             )
@@ -274,38 +268,28 @@ object ReadinessEngine {
             }
         }
 
-        // Fixed-window recent-load ratio (ACWR) + monotony ------------------
-        var acwr: Double? = null
-        var monotony: Double? = null
-        // Anchor both windows to the selected/latest calendar day. Counting the last N populated rows
-        // leaks future rows into a historical selection and turns sparse readings across months into a
-        // fictional 28-day block. This mirrors the Swift calendar-bounded, one-value-per-day path.
-        val loadRows = sorted.filter { it.day <= latest.day }
-        val acuteSeries = calendarWindowStrains(loadRows, ending = latest.day, days = acuteWindow)
-        val chronicSeries = calendarWindowStrains(loadRows, ending = latest.day, days = chronicWindow)
-        if (acuteSeries != null && chronicSeries != null &&
-            acuteSeries.size >= minAcute && chronicSeries.size >= minChronic
-        ) {
-            val acute = mean(acuteSeries)!!
-            val chronic = mean(chronicSeries)!!
-            if (chronic > 0) {
-                val ratio = acute / chronic
-                acwr = ratio
-                signals.add(acwrSignal(ratio, acute = acute, chronic = chronic))
-            }
-            // Foster monotony over the last week of strain.
-            val week = acuteSeries
+        // Bounded-Effort variety context -----------------------------------
+        var effortVariety: Double? = null
+        // Daily Effort is bounded and nonlinear, so it must not be presented as ACWR or fed into
+        // additive-load math. It remains suitable for a simple within-scale variety description.
+        val effortRows = sorted.filter { it.day <= latest.day }
+        val week = calendarWindowEffort(
+            effortRows,
+            ending = latest.day,
+            days = effortVarietyWindow,
+        )
+        if (week != null && week.size >= minimumEffortDays) {
             val sd = sampleSD(week)
             val m = mean(week)
             if (week.size >= 4 && sd != null && sd > 0 && m != null) {
                 val mono = m / sd
-                monotony = mono
+                effortVariety = mono
                 if (mono >= 2.0) {
                     val low = week.min()
                     val high = week.max()
                     signals.add(
                         Signal(
-                            key = "monotony", label = "Training variety",
+                            key = "effortVariety", label = "Effort variety",
                             detail = "recorded daily Effort stayed in a narrow range", flag = Flag.WATCH,
                             evidence = "Last ${week.size} recorded days: Effort " +
                                 "${Math.round(low)}-${Math.round(high)} " +
@@ -318,7 +302,7 @@ object ReadinessEngine {
 
         val (level, headline, summary) = synthesize(
             signals = signals,
-            hasHistory = history.isNotEmpty() || acwr != null,
+            hasHistory = history.isNotEmpty(),
         )
         val recoveryKeys = setOf("hrv", "rhr", "respRate")
         val recoverySignals = signals.filter { it.key in recoveryKeys }
@@ -338,13 +322,10 @@ object ReadinessEngine {
             if (recoverySignals.isNotEmpty() && baselineDays < Baselines.minNightsTrust) {
                 add("The personal baseline has $baselineDays supporting prior days and is still building.")
             }
-            if (acwr != null) {
-                add("The recent-load ratio is descriptive and does not affect readiness.")
-            }
         }
         return Readiness(
             level = level, headline = headline, summary = summary,
-            signals = signals, acwr = acwr, monotony = monotony,
+            signals = signals, effortVariety = effortVariety,
             asOfDay = latest.day, confidence = confidence,
             baselineDays = baselineDays, limitations = limitations,
         )
@@ -389,25 +370,8 @@ object ReadinessEngine {
         if (decimals == 0) Math.round(x).toString()
         else String.format(Locale.US, "%.${decimals}f", x)
 
-    private fun acwrSignal(ratio: Double, acute: Double, chronic: Double): Signal {
-        // #1033 (ryanbr): route the acute:chronic ratio through the Locale.US-pinned [fmt] helper (matching
-        // the evidence line below) so a comma-decimal device locale can't render "1,15" - iOS's
-        // String(format:) is already locale-independent. Pure separator fix, no behavior change.
-        val pct = fmt(ratio, 2)
-        // Evidence: the two strain loads the ratio is built from, 1 dp each.
-        val evidence = "7d ${fmt(acute, 1)} / 28d ${fmt(chronic, 1)}"
-        // No universal "good", "bad", or injury-risk bands are validated for this ratio. Keep the
-        // legacy Signal/Flag API shape, but always emit NEUTRAL and state only the arithmetic relation.
-        // [synthesize] independently excludes this key from readiness and training recommendations.
-        return Signal(
-            key = "acwr", label = "Recent-load ratio",
-            detail = "7-day mean is ${pct}x the 28-day mean of recorded strain",
-            flag = Flag.NEUTRAL, evidence = evidence,
-        )
-    }
-
     /** Values inside a real calendar window, deduplicated to one recorded strain per ISO day. */
-    private fun calendarWindowStrains(
+    private fun calendarWindowEffort(
         rows: List<DailyMetric>,
         ending: String,
         days: Int,
@@ -431,7 +395,7 @@ object ReadinessEngine {
     // MARK: Synthesis
 
     private fun synthesize(signals: List<Signal>, hasHistory: Boolean): Triple<Level, String, String> {
-        // Training-load context (ratio and monotony) is descriptive only. Readiness is synthesized solely
+        // Effort-variety context is descriptive only. Readiness is synthesized solely
         // from the measured recovery physiology whose personal baselines are evaluated above. Keeping an
         // allow-list prevents a future context signal from silently changing the wellness verdict.
         val evaluativeKeys = setOf("hrv", "rhr", "respRate")

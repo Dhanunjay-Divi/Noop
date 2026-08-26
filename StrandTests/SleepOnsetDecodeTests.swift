@@ -143,4 +143,27 @@ final class SleepNapDebtTests: XCTestCase {
 
         XCTAssertEqual(SleepView.napSleepMinutes([night, stageLessNap]), 0, accuracy: 1e-9)
     }
+
+    func testNapCreditBridgesNightBeforeAssigningWakeDay() throws {
+        let first = session(
+            start: midnight - 4 * 60 * 60,
+            durationMin: 230,
+            stages: #"{"awake":10,"light":140,"deep":45,"rem":35}"#)
+        let second = session(
+            start: midnight + 10 * 60,
+            durationMin: 230,
+            stages: #"{"awake":10,"light":135,"deep":45,"rem":40}"#)
+        let nap = session(
+            start: midnight + 14 * 60 * 60,
+            durationMin: 50,
+            stages: #"{"awake":2,"light":30,"deep":10,"rem":8}"#)
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+
+        let credit = SleepView.napSleepMinutesByWakeDay(
+            [first, second, nap],
+            timeZone: utc)
+
+        XCTAssertEqual(credit.count, 1)
+        XCTAssertEqual(try XCTUnwrap(credit.values.first), 48, accuracy: 1e-9)
+    }
 }

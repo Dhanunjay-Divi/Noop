@@ -121,12 +121,9 @@ struct SmartAlarmView: View {
     }
 
     private var plannerNapMinutesByDay: [String: Double] {
-        let groups = Dictionary(grouping: allSleepSessions) { session in
-            Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(session.endTs)))
-        }
-        return groups.mapValues {
-            SleepView.napSleepMinutes($0, habitualMidsleepSec: habitualMidsleepSec)
-        }
+        SleepView.napSleepMinutesByWakeDay(
+            allSleepSessions,
+            habitualMidsleepSec: habitualMidsleepSec)
     }
 
     // A Rest-tinted plan hero. It is useful even with reminders off: reminder state changes delivery,

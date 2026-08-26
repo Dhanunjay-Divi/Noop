@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">Kein aktuelles Erholungssignal weist genügend vorherige Schwankungen für einen Vergleich auf.</string>
     <string name="appwide_readiness_limitation_no_daily_row">Für dieses Datum ist kein täglicher Erholungsdatensatz verfügbar.</string>
     <string name="appwide_readiness_limitation_one_signal">Diese Auswertung basiert auf einem aktuellen Erholungssignal.</string>
-    <string name="appwide_readiness_limitation_recent_load">Das Verhältnis der letzten Belastung ist beschreibend und beeinflusst die Bereitschaft nicht.</string>
     <string name="appwide_readiness_primed_headline">Im Einklang</string>
     <string name="appwide_readiness_primed_summary">Deine gemessenen Erholungstrends stimmen mit deiner letzten Ausgangslage überein.</string>
     <string name="appwide_readiness_rundown_headline">Mehrere Abweichungen</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">Ein gemessenes Signal weicht von deinem letzten Bereich ab. Ein einzelner Tag ist ein Hinweis zum erneuten Prüfen, keine Diagnose oder Trainingsanweisung.</string>
     <string name="appwide_rhythm_methodology">NOOP wertet nur ruhige nächtliche Zeitfenster außerhalb aufgezeichneter Workouts aus. Bewegung, Training, eine erhöhte Herzfrequenz außerhalb der Ruhe und verrauschte Zeitfenster werden übersprungen statt interpretiert. Die Abstände zwischen Herzschlägen werden als Poincaré-Streudiagramm dargestellt und mit veröffentlichten deskriptiven Statistiken zusammengefasst. Rhythmus ist eine optionale Darstellung des Timings, keine Diagnose, und sendet niemals Warnungen.</string>
     <string name="appwide_shell_updates_unread_format">Updates, %1$d ungelesen</string>
+    <string name="appwide_sleep_edit_conflict">Diese Nacht wurde geändert, bevor die Bearbeitung gespeichert werden konnte. Die neuesten Daten wurden wiederhergestellt.</string>
     <string name="appwide_sleep_recovery_added_format">Die jüngste Bilanz fügt heute Nacht %1$s hinzu. Das ist auf 1 Stunde begrenzt und senkt dein Ziel nie.</string>
     <string name="appwide_sleep_recovery_none">Heute Nacht wird keine Erholungszeit hinzugefügt. NOOP empfiehlt wegen eines jüngsten Überschusses nie weniger als dein Ziel.</string>
     <string name="appwide_sleep_reminder_around_format">Erinnerung gegen %1$s geplant.</string>

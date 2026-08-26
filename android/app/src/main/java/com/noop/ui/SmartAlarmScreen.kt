@@ -39,7 +39,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.noop.analytics.AnalyticsEngine
 import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.SleepDebt
 import com.noop.analytics.SleepGoalMode
@@ -99,12 +98,8 @@ fun SmartAlarmScreen(vm: AppViewModel) {
             val now = System.currentTimeMillis() / 1000L
             val imported = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
             val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-            WhoopRepository.mergeSleepRichness(imported, computed) { session ->
-                val offsetSec = (
-                    java.util.TimeZone.getDefault().getOffset(session.endTs * 1000) / 1000
-                    ).toLong()
-                AnalyticsEngine.dayString(session.endTs, offsetSec)
-            }.sortedBy { it.effectiveStartTs }
+            WhoopRepository.mergeSleep(imported, computed)
+                .sortedBy { it.effectiveStartTs }
         }.getOrDefault(emptyList())
         habitualMidsleep = runCatching {
             vm.repo.habitualMidsleepSec(vm.activeStrapId)

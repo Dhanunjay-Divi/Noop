@@ -1746,7 +1746,6 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s von 3, %2$s</string>
     <string name="stress_peak_summary">Spitze %1$s · %2$s</string>
-    <string name="today_load_ratio">Verhältnis %1$s</string>
     <!-- #453 data-driven metric labels that do not appear directly in Compose calls. -->
     <string name="timeline_metric_heart_rate">Herzfrequenz</string>
     <string name="timeline_metric_rmssd">rMSSD (5 Min.)</string>
@@ -2114,4 +2113,5 @@
     <string name="hydration_adaptive_timing_status">Derzeit alle %1$d Min. Die Zeitplanung ändert sich nur, wenn die heutigen Daten dies stützen.</string>
     <string name="hydration_base_interval_label">Grundintervall</string>
     <string name="today_calibration_valid_hrv_progress">Gültige HRV %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Detaillierte Schlafphasen werden ausgeblendet, weil für diese Nacht nicht genügend verwertbare Schlag-zu-Schlag-Zeitdaten vorliegen. Die Gesamtschlafzeit bleibt verfügbar.</string>
 </resources>

@@ -3,6 +3,7 @@ package com.noop.ingest
 import android.content.Context
 import android.net.Uri
 import com.noop.analytics.SleepStageVocabulary
+import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
@@ -670,6 +671,7 @@ object WearableExportImporter {
                 strain = null,
                 spo2Pct = d.spo2Pct, skinTempDevC = d.skinTempDevC,
                 steps = d.steps, activeKcalEst = d.activeKcal,
+                hrvMethod = d.avgHrvMs?.let { DailyHrvMethod.RMSSD },
             )
         }
         if (dailyMetrics.isNotEmpty()) repo.upsertDailyMetrics(dailyMetrics)

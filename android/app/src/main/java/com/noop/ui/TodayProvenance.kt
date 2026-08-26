@@ -53,8 +53,6 @@ internal fun localizedReadinessLimitation(
         stringResource(R.string.appwide_readiness_limitation_no_current_signal)
     raw == "This read is based on one current recovery signal." ->
         stringResource(R.string.appwide_readiness_limitation_one_signal)
-    raw == "The recent-load ratio is descriptive and does not affect readiness." ->
-        stringResource(R.string.appwide_readiness_limitation_recent_load)
     raw.startsWith("The personal baseline has ") ->
         stringResource(R.string.appwide_readiness_limitation_baseline_building, readiness.baselineDays)
     else -> raw

@@ -1580,7 +1580,6 @@
     <string name="skin_temp_reason_summary">%1$s : %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s sur 3, %2$s</string>
     <string name="stress_peak_summary">pic %1$s · %2$s</string>
-    <string name="today_load_ratio">ratio %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
     <string name="widget_description">La Récupération, l\'Effort et le Sommeil d\'aujourd\'hui, avec la fréquence cardiaque et la batterie du bracelet en un coup d\'œil.</string>
@@ -2098,4 +2097,5 @@
     <string name="hydration_adaptive_timing_status">Actuellement toutes les %1$d min. L’horaire ne change que si les données du jour le justifient.</string>
     <string name="hydration_base_interval_label">Intervalle de base</string>
     <string name="today_calibration_valid_hrv_progress">VFC valide %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Les phases détaillées du sommeil sont masquées, car cette nuit ne contient pas assez de données exploitables sur les intervalles entre les battements. La durée totale du sommeil reste disponible.</string>
 </resources>

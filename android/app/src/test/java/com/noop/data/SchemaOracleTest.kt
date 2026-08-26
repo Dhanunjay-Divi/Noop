@@ -34,7 +34,6 @@ import java.io.File
  * Follows the `decoder_oracle.json` idiom (#869) rather than adding a third mechanism.
  */
 class SchemaOracleTest {
-
     // ---------------------------------------------------------------- fixtures
 
     private fun loadOracle(): JSONObject {
@@ -141,8 +140,10 @@ class SchemaOracleTest {
             }
             byName[col.name] = col
         }
-        val order = table.optJSONArray("androidColumnOrder")?.strings() ?: return byName.values.toList()
-        return order.map { byName.getValue(it) }
+        val base = table.optJSONArray("androidColumnOrder")?.strings()
+            ?.map { byName.getValue(it) }
+            ?: byName.values.toList()
+        return base
     }
 
     // ---------------------------------------------------------------- tests
@@ -157,7 +158,7 @@ class SchemaOracleTest {
     fun roomSchemaMatchesOracle() {
         val oracle = loadOracle()
         val tables = oracle.getJSONObject("tables")
-        val room = roomTables(loadRoomSchema(oracle.getInt("roomVersion")))
+        val room = roomTables(loadRoomSchema(NOOP_DATABASE_SCHEMA_VERSION))
         val problems = mutableListOf<String>()
 
         for (name in tables.keys().asSequence().sorted()) {
@@ -225,7 +226,7 @@ class SchemaOracleTest {
     fun oracleCoversEveryRoomTable() {
         val oracle = loadOracle()
         val pinned = oracle.getJSONObject("tables").keys().asSequence().toSet()
-        val unpinned = (roomTables(loadRoomSchema(oracle.getInt("roomVersion"))).keys - pinned).sorted()
+        val unpinned = (roomTables(loadRoomSchema(NOOP_DATABASE_SCHEMA_VERSION)).keys - pinned).sorted()
         assertTrue(
             "Room tables missing from schema_oracle.json: $unpinned. A new table needs a GRDB twin (or " +
                 "an explicit android_only entry) before it can land.",
@@ -243,6 +244,11 @@ class SchemaOracleTest {
     @Test
     fun pinnedMigrationIdentifiersAreCoherent() {
         val oracle = loadOracle()
+        assertEquals(
+            "schema_oracle.json must pin the current Room version",
+            NOOP_DATABASE_SCHEMA_VERSION,
+            oracle.getInt("roomVersion"),
+        )
         val grdb = oracle.getJSONArray("grdbMigrations").strings()
         assertEquals("duplicate GRDB migration identifier in schema_oracle.json", grdb.size, grdb.toSet().size)
         grdb.forEachIndexed { i, id ->
@@ -255,7 +261,7 @@ class SchemaOracleTest {
             )
         }
         // loadRoomSchema asserts the exported version equals this; call it so the check is not vacuous.
-        loadRoomSchema(oracle.getInt("roomVersion"))
+        loadRoomSchema(NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     /**

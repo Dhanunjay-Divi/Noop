@@ -145,6 +145,17 @@ enum class ScoreConfidence(val raw: String) {
             restConfidenceSeriesKey,
             restEvidenceSeriesKey,
         )
+        /** Customer-facing series that expose a detailed stage classification rather than duration. */
+        val detailedSleepStageSeriesKeys: Set<String> = setOf(
+            "sleep_deep_min", "deep_min",
+            "sleep_rem_min", "rem_min",
+            "sleep_light_min", "core_min",
+            "sleep_awake_min", "awake_min",
+            "restorative_min", "restorative_pct",
+        )
+
+        fun isDetailedSleepStageSeriesKey(key: String): Boolean =
+            key in detailedSleepStageSeriesKeys
 
         fun fromPersistedValue(value: Double?): ScoreConfidence? {
             if (value == null || !value.isFinite()) return null

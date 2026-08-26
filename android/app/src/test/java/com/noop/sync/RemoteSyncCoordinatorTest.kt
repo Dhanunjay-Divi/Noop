@@ -178,6 +178,52 @@ class RemoteSyncCoordinatorTest {
     }
 
     @Test
+    fun remoteSleepPreservesExactRrCountPairAndFailsClosedOnPartialPair() {
+        val state = FakeIdentities()
+        val coordinator = RemoteSyncCoordinator(FakeStore(), NoopUploader, state, state)
+        val source = "my-whoop-noop"
+        val supportedStart = 1_700_000_000L
+        val partialStart = supportedStart + 86_400L
+        val draft = coordinator.buildDraft(
+            namespace.copy(
+                remoteDeviceId = "android:install-1:my-whoop-noop-cer-v2",
+                logicalSourceId = source,
+                localDeviceId = source,
+                role = "noop_computed",
+                includeRaw = false,
+                includeDerived = true,
+            ),
+            paired = null,
+            pending = PendingRemoteStreams(),
+            derived = RemoteDerivedRows(
+                sleep = listOf(
+                    SleepSession(
+                        source,
+                        supportedStart,
+                        supportedStart + 28_800L,
+                        rrEligibleWindowCount = 96,
+                        rrValidWindowCount = 24,
+                    ),
+                    SleepSession(
+                        source,
+                        partialStart,
+                        partialStart + 28_800L,
+                        rrEligibleWindowCount = 96,
+                        rrValidWindowCount = null,
+                    ),
+                ),
+            ),
+        )
+
+        val supported = draft.sleepSessions.first { it.startTs == supportedStart }
+        assertEquals("96", supported.metadata["rr_eligible_window_count"])
+        assertEquals("24", supported.metadata["rr_valid_window_count"])
+        val partial = draft.sleepSessions.first { it.startTs == partialStart }
+        assertFalse(partial.metadata.containsKey("rr_eligible_window_count"))
+        assertFalse(partial.metadata.containsKey("rr_valid_window_count"))
+    }
+
+    @Test
     fun officialReferenceFiltersLegacyShadowsAndUsesExplicitWireUnits() {
         val state = FakeIdentities()
         val coordinator = RemoteSyncCoordinator(FakeStore(), NoopUploader, state, state)
@@ -210,7 +256,7 @@ class RemoteSyncCoordinatorTest {
                 ),
                 sleep = listOf(
                     SleepSession("my-whoop", 100, 200, stagesJSON = """[{"stage":"deep","min":1}]"""),
-                    SleepSession("my-whoop", 300, 400, efficiency = 0.88),
+                    SleepSession("my-whoop", 300, 400, efficiency = 0.88, avgHrv = 64.0),
                 ),
                 workouts = listOf(
                     WorkoutRow("my-whoop", 500, 600, "Run", "health-connect", strain = 40.0),
@@ -230,6 +276,7 @@ class RemoteSyncCoordinatorTest {
         assertFalse(daily.containsKey("strain"))
         assertFalse(daily.containsKey("skin_temp_dev_c"))
         assertEquals(listOf(300L), draft.sleepSessions.map(RemoteSleepSession::startTs))
+        assertEquals("RMSSD", draft.sleepSessions.single().metadata["hrv_method"])
         assertEquals(listOf("Ride"), draft.workouts.map(RemoteWorkout::sport))
         assertEquals(50.0, draft.workouts.single().metrics.getValue("effort"), 1e-9)
         assertEquals(10.5, draft.workouts.single().metrics.getValue("whoop_strain"), 1e-9)

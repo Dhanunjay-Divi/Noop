@@ -7,6 +7,7 @@ import StrandDesign   // TrendPoint , the shared chart point type the Deep Timel
 
 enum RepositoryReadError: Error {
     case storeUnavailable
+    case incompleteSleepSnapshot
 }
 
 /// Stable identity for one suggestion. The endpoint is deliberately excluded: a later sync can extend
@@ -212,6 +213,76 @@ struct SourcedDailyMetric: Equatable {
     let source: DailyMetricSource
 }
 
+/// Timing identity used only while attributing the exact rows in one in-memory collection to their
+/// bridged wake day. It deliberately remains compact; stage publication uses the stronger fingerprint below.
+struct SleepSessionIdentity: Hashable, Sendable {
+    let startTs: Int
+    let endTs: Int
+
+    init(_ session: CachedSleepSession) {
+        startTs = session.startTs
+        endTs = session.endTs
+    }
+}
+
+/// Content-complete identity for a stage-publication verdict. Timestamps alone are insufficient: imported
+/// and locally computed source twins can share detected bounds while carrying different edits, stage payloads,
+/// or R-R evidence. Including every publication-relevant field makes a later edit/rescore a different row and
+/// prevents one source twin's permission from following another row after the source-aware merge.
+struct SleepStageEvidenceFingerprint: Hashable, Sendable {
+    let startTs: Int
+    let effectiveStartTs: Int
+    let endTs: Int
+    let stagesJSON: String?
+    let rrEligibleWindowCount: Int?
+    let rrValidWindowCount: Int?
+
+    init(_ session: CachedSleepSession) {
+        startTs = session.startTs
+        effectiveStartTs = session.effectiveStartTs
+        endTs = session.endTs
+        stagesJSON = session.stagesJSON
+        rrEligibleWindowCount = session.rrEligibleWindowCount
+        rrValidWindowCount = session.rrValidWindowCount
+    }
+}
+
+/// Publication evidence for the sleep sessions returned by the merged read spine. Imported stages are
+/// independently classified; locally computed stages are keyed to the evidence row from the same device.
+struct DetailedSleepStageEvidenceSnapshot: Equatable, Sendable {
+    let independentlyStagedImports: Set<SleepStageEvidenceFingerprint>
+    let localPermissionBySession: [SleepStageEvidenceFingerprint: Bool]
+
+    static let empty = DetailedSleepStageEvidenceSnapshot(
+        independentlyStagedImports: [],
+        localPermissionBySession: [:])
+
+    func canPublish(_ session: CachedSleepSession) -> Bool {
+        let fingerprint = SleepStageEvidenceFingerprint(session)
+        let imported = independentlyStagedImports.contains(fingerprint)
+        let local = localPermissionBySession[fingerprint]
+        // Cached rows do not carry their source id. If byte-identical imported and local rows
+        // collide, source attribution is ambiguous and detail must be withheld rather than allowing
+        // an imported verdict to authorize an unsupported local classifier (or vice versa).
+        guard !(imported && local != nil) else { return false }
+        return imported || local == true
+    }
+
+    func isIndependentlyStagedImport(_ session: CachedSleepSession) -> Bool {
+        let fingerprint = SleepStageEvidenceFingerprint(session)
+        return independentlyStagedImports.contains(fingerprint)
+            && localPermissionBySession[fingerprint] == nil
+    }
+}
+
+/// Complete, source-resolved input for a HealthKit sleep replacement. This snapshot is produced only
+/// after every participating source read succeeds, so a destructive publication migration can never
+/// interpret a database failure as an empty sleep history.
+struct SleepWritebackRepositorySnapshot: Equatable, Sendable {
+    let sessions: [CachedSleepSession]
+    let detailedStageEvidence: DetailedSleepStageEvidenceSnapshot
+}
+
 /// A compact snapshot of how much history each source holds, fed to the Data Sources "Freshness
 /// Pipeline" card and the Android equivalent. Counts only , no per-day rows leave the refresh.
 struct RepositoryFreshness: Equatable, Sendable {
@@ -384,6 +455,9 @@ final class Repository: ObservableObject {
     /// path remains the real active/canonical store union.
     var reconciliationDailyMetricsReaderForTesting:
         ((String, String) async throws -> [DailyMetric])?
+    /// Inject a deterministic source-read failure into the destructive-writeback preflight.
+    var strictSleepSessionReaderForTesting:
+        ((String, Int, Int, Int) async throws -> [CachedSleepSession])?
     #endif
 
     // MARK: - Union reads (active strap + canonical)
@@ -451,7 +525,8 @@ final class Repository: ObservableObject {
             steps: winner.steps ?? filler.steps,
             activeKcalEst: winner.activeKcalEst ?? filler.activeKcalEst,
             spo2Red: rawSpo2FromFiller ? filler.spo2Red : winner.spo2Red,
-            spo2Ir: rawSpo2FromFiller ? filler.spo2Ir : winner.spo2Ir
+            spo2Ir: rawSpo2FromFiller ? filler.spo2Ir : winner.spo2Ir,
+            hrvMethod: winner.avgHrv == nil ? filler.hrvMethod : winner.hrvMethod
         )
     }
 
@@ -502,6 +577,87 @@ final class Repository: ObservableObject {
         return blocks
     }
 
+    /// Best-effort source-preserving sleep read for presentation refreshes. Keeping the source partition
+    /// until detailed-stage derivation prevents one band's evidence from authorizing another band's row.
+    private func sleepSessionsBySource(
+        store: WhoopStore,
+        ids: [String],
+        from: Int,
+        to: Int,
+        limit: Int = 4000
+    ) async -> [String: [CachedSleepSession]] {
+        var rows: [String: [CachedSleepSession]] = [:]
+        for id in ids {
+            rows[id] = (try? await store.sleepSessions(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+        }
+        return rows
+    }
+
+    /// Best-effort source-preserving daily read. Local detailed-stage columns are replaced from the
+    /// matching session payload before active/canonical coalescing.
+    private func dailyMetricsBySource(
+        store: WhoopStore,
+        ids: [String],
+        from: String,
+        to: String
+    ) async -> [String: [DailyMetric]] {
+        var rows: [String: [DailyMetric]] = [:]
+        for id in ids {
+            rows[id] = (try? await store.dailyMetrics(
+                deviceId: id, from: from, to: to)) ?? []
+        }
+        return rows
+    }
+
+    /// Throwing twin used before a destructive external-store migration. Reaching the query limit is
+    /// treated as incomplete rather than silently truncating the replacement snapshot.
+    private func strictSleepSessions(
+        store: WhoopStore,
+        ids: [String],
+        from: Int,
+        to: Int,
+        limit: Int
+    ) async throws -> [String: [CachedSleepSession]] {
+        var bySource: [String: [CachedSleepSession]] = [:]
+        for id in ids {
+            let rows: [CachedSleepSession]
+            #if DEBUG
+            if let reader = strictSleepSessionReaderForTesting {
+                rows = try await reader(id, from, to, limit)
+            } else {
+                rows = try await store.sleepSessions(
+                    deviceId: id, from: from, to: to, limit: limit)
+            }
+            #else
+            rows = try await store.sleepSessions(
+                deviceId: id, from: from, to: to, limit: limit)
+            #endif
+            guard rows.count < limit else {
+                throw RepositoryReadError.incompleteSleepSnapshot
+            }
+            bySource[id] = rows
+        }
+        return bySource
+    }
+
+    /// Strict learned-timing read for publication boundaries. `nil` is a valid cold-start result; a
+    /// failed or truncated source read throws so callers can distinguish it from insufficient history.
+    private func strictHabitualMidsleepSec(store: WhoopStore, days: Int = 4000) async throws -> Int? {
+        let now = Int(Date().timeIntervalSince1970)
+        let from = now - days * 86_400
+        let to = now + 86_400
+        let limit = 100_000
+        let imported = try await strictSleepSessions(
+            store: store, ids: importedReadIds, from: from, to: to, limit: limit)
+        let computed = try await strictSleepSessions(
+            store: store, ids: computedReadIds, from: from, to: to, limit: limit)
+        let sessions = Self.dedupBlocks(
+            importedReadIds.flatMap { imported[$0] ?? [] }
+                + computedReadIds.flatMap { computed[$0] ?? [] })
+        return Self.historicalHabitualMidsleepSec(sessions)
+    }
+
     /// Drop blocks that share a (startTs, endTs) key, the same physical session recorded under both union
     /// ids, keeping the first (active strap). Preserves genuinely distinct blocks (naps + main night).
     nonisolated private static func dedupBlocks(_ blocks: [CachedSleepSession]) -> [CachedSleepSession] {
@@ -512,6 +668,37 @@ final class Repository: ObservableObject {
             if seen.insert(key).inserted { out.append(b) }
         }
         return out
+    }
+
+    /// Learn habitual midsleep with the UTC offset that applied to each historical session. Shifting each
+    /// block into its historical local clock lets the shared circular learner run with offset zero while
+    /// preserving durations. This fixes DST-boundary bucketing without changing its selection formula.
+    nonisolated static func historicalHabitualMidsleepSec(
+        _ sessions: [CachedSleepSession],
+        timeZone: TimeZone = .current
+    ) -> Int? {
+        let blocks = sessions.compactMap { session -> SleepStageTotals.HistoryBlock? in
+            let start = session.effectiveStartTs
+            let end = session.endTs
+            guard end > start else { return nil }
+            let midpoint = start + (end - start) / 2
+            let offset = timeZone.secondsFromGMT(
+                for: Date(timeIntervalSince1970: TimeInterval(midpoint)))
+            return SleepStageTotals.HistoryBlock(
+                start: start + offset,
+                end: end + offset,
+                dayKey: AnalyticsEngine.dayString(midpoint, offsetSec: offset))
+        }
+        return SleepStageTotals.habitualMidsleepSec(blocks, offsetSec: 0)
+    }
+
+    /// Imported/computed merge shared by tolerant screen reads and strict HealthKit snapshots. Reuse the
+    /// canonical richness-aware policy so a sparse import cannot suppress a valid computed main night.
+    nonisolated private static func mergeAllSleepSessions(
+        imported: [CachedSleepSession],
+        computed: [CachedSleepSession]
+    ) -> [CachedSleepSession] {
+        mergeSleep(imported: imported, computed: computed)
     }
 
     /// Drop workout rows that share a (startTs, endTs, sport, source) key, the same session recorded under
@@ -900,11 +1087,20 @@ final class Repository: ObservableObject {
         // live data AND the canonical history both surface, deduped per day (active strap wins). Collapses to
         // a single id on a single-device install (byte-identical to before).
         let imported = await unionDailyMetrics(store: store, from: fromDay, to: toDay)
-        let computed = await unionComputedDailyMetrics(store: store, from: fromDay, to: toDay)
+        let computedDailyBySource = await dailyMetricsBySource(
+            store: store, ids: computedReadIds, from: fromDay, to: toDay)
         let apple = (try? await store.dailyMetrics(deviceId: Self.appleHealthSource, from: fromDay, to: toDay)) ?? []
         let activityFile = (try? await store.dailyMetrics(deviceId: Self.activityFileSource, from: fromDay, to: toDay)) ?? []
-        let impSleep = await unionSleepSessions(store: store, from: lo, to: hi)
-        let compSleep = await unionComputedSleepSessions(store: store, from: lo, to: hi)
+        let importedSleepBySource = await sleepSessionsBySource(
+            store: store, ids: importedReadIds, from: lo, to: hi)
+        let computedSleepBySource = await sleepSessionsBySource(
+            store: store, ids: computedReadIds, from: lo, to: hi)
+        let importedSourceOrder = importedReadIds
+        let computedSourceOrder = computedReadIds
+        let impSleep = Self.dedupBlocks(
+            importedSourceOrder.flatMap { importedSleepBySource[$0] ?? [] })
+        let compSleep = Self.dedupBlocks(
+            computedSourceOrder.flatMap { computedSleepBySource[$0] ?? [] })
 
         // Export-verbatim sleep figures (long-format metricSeries rows from WhoopImporter).
         // SleepView prefers these per day over its APPROXIMATE recomputations.
@@ -917,6 +1113,29 @@ final class Repository: ObservableObject {
         // the source-row sort, and the freshness counts are all pure over the rows just read, so they run in
         // a detached task and the main actor stays free for SwiftUI during a deep-history refresh.
         let merged: MergedCaches = await Task.detached(priority: .utility) {
+            let habitualMidsleep = Self.historicalHabitualMidsleepSec(
+                Self.dedupBlocks(impSleep + compSleep))
+            let detailedBySource = Dictionary(
+                uniqueKeysWithValues: computedSourceOrder.map { id in
+                    (
+                        id,
+                        Self.publishableDetailedStageMinutesByDay(
+                            computedSleepBySource[id] ?? [],
+                            habitualMidsleepSec: habitualMidsleep)
+                    )
+                })
+            var computedByDay: [String: DailyMetric] = [:]
+            for id in computedSourceOrder {
+                for row in computedDailyBySource[id] ?? [] {
+                    let sanitized = Self.replacingDetailedStageColumns(
+                        row,
+                        with: detailedBySource[id]?[row.day])
+                    computedByDay[row.day] = computedByDay[row.day].map {
+                        Self.coalesceDay($0, sanitized)
+                    } ?? sanitized
+                }
+            }
+            let computed = computedByDay.values.sorted { $0.day < $1.day }
             var fig: [String: ImportedSleepFigures] = [:]
             for p in perf { fig[p.day, default: ImportedSleepFigures()].performancePct = p.value }
             for p in cons { fig[p.day, default: ImportedSleepFigures()].consistencyPct = p.value }
@@ -926,7 +1145,7 @@ final class Repository: ObservableObject {
             // when a WHOOP/Apple import also covers that day. The computed ("-noop") session carries the edit,
             // and IntelligenceEngine re-keys the computed DAILY row from it; collect those edited days so the
             // merge lets the computed row's SLEEP fields win there (imports still win on every un-edited day).
-            let editedDays = Self.userEditedDays(compSleep)
+            let editedDays = Self.userEditedDays(computedSleepBySource)
             return MergedCaches(
                 importedSleep: fig,
                 days: Self.mergeActivityFileSteps(
@@ -1042,7 +1261,8 @@ final class Repository: ObservableObject {
                         steps: steps,
                         activeKcalEst: existing.activeKcalEst,
                         spo2Red: existing.spo2Red,
-                        spo2Ir: existing.spo2Ir
+                        spo2Ir: existing.spo2Ir,
+                        hrvMethod: existing.hrvMethod
                     )
                 }
             } else {
@@ -1052,14 +1272,26 @@ final class Repository: ObservableObject {
         return byDay.values.sorted { $0.day < $1.day }
     }
 
-    /// The set of LOCAL wake-days that carry a user-edited sleep session , keyed exactly as
+    /// The set of LOCAL wake-days that carry a user-edited sleep session, keyed exactly as
     /// `DailyMetric.day` is (the engine's cached-offset local-day keyer, matching `mergeSleep.endDay`).
-    /// Drives the H5 edit-merge precedence in `mergeDaily`.
+    /// This overload preserves source ownership so fragments from different devices can never bridge.
+    nonisolated static func userEditedDays(
+        _ sessionsBySource: [String: [CachedSleepSession]]
+    ) -> Set<String> {
+        sessionsBySource.values.reduce(into: Set<String>()) { days, sessions in
+            days.formUnion(userEditedDays(sessions))
+        }
+    }
+
+    /// Drives the H5 edit-merge precedence in `mergeDaily` for one complete source timeline.
     nonisolated static func userEditedDays(_ sessions: [CachedSleepSession]) -> Set<String> {
         var days = Set<String>()
-        for s in sessions where s.userEdited {
-            let offsetSec = TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
-            days.insert(AnalyticsEngine.dayString(s.endTs, offsetSec: offsetSec))
+        // Bridge every complete source timeline before assigning the wake day. An edited fragment that
+        // ends before midnight may be the first half of a night whose unedited continuation wakes after
+        // midnight; fragment-first attribution would give the edit precedence on the wrong daily row.
+        for bucket in wakeDaySessionBuckets(sessions)
+            where bucket.sessions.contains(where: \.userEdited) {
+            days.insert(bucket.day)
         }
         return days
     }
@@ -1087,15 +1319,37 @@ final class Repository: ObservableObject {
     /// in whatever the live device zone is and so disagreed with the engine's cached-offset attribution
     /// across a midnight boundary for non-UTC users (the Swift half of #406; mirrors the Android #304 fix
     /// pinned by MergeSleepLocalDayTest).
-    nonisolated private static func mergeSleep(imported: [CachedSleepSession], computed: [CachedSleepSession]) -> [CachedSleepSession] {
-        func endDay(_ s: CachedSleepSession) -> String {
+    nonisolated static func mergeSleep(
+        imported: [CachedSleepSession],
+        computed: [CachedSleepSession]
+    ) -> [CachedSleepSession] {
+        func fallbackEndDay(_ s: CachedSleepSession) -> String {
             let offsetSec = TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
             return AnalyticsEngine.dayString(s.endTs, offsetSec: offsetSec)
         }
+        func wakeDays(_ sessions: [CachedSleepSession]) -> [SleepSessionIdentity: String] {
+            var result: [SleepSessionIdentity: String] = [:]
+            for bucket in wakeDaySessionBuckets(sessions) {
+                for session in bucket.sessions {
+                    result[SleepSessionIdentity(session)] = bucket.day
+                }
+            }
+            return result
+        }
+        let importedWakeDays = wakeDays(imported)
+        let computedWakeDays = wakeDays(computed)
         // #715, preserve EVERY session (a day with a main night + a nap must keep both); imported still
         // wins per end-day. Shared, unit-tested grouping (WhoopStore.SleepMerge / SleepMergeTests) replaces
         // the old per-day dictionary that silently dropped a second same-day session.
-        return SleepMerge.merge(imported: imported, computed: computed, endDay: endDay)
+        return SleepMerge.merge(
+            imported: imported,
+            computed: computed,
+            importedEndDay: {
+                importedWakeDays[SleepSessionIdentity($0)] ?? fallbackEndDay($0)
+            },
+            computedEndDay: {
+                computedWakeDays[SleepSessionIdentity($0)] ?? fallbackEndDay($0)
+            })
     }
 
     // MARK: - Detail passthroughs
@@ -1248,6 +1502,149 @@ final class Repository: ObservableObject {
         return await unionSleepSessions(store: store, from: from, to: to, limit: limit)
     }
 
+    /// Resolve detailed-stage publication per exact stored session. The same-device requirement matters
+    /// after a band re-add: evidence from the canonical computed source must not authorize a value from the
+    /// active band (or vice versa). Active-source rows are visited first, matching the read-spine dedup rule.
+    /// Locally computed permission comes from counts persisted on each session, never a wake-day flag.
+    func detailedSleepStageEvidence(
+        from: Int = 0,
+        to: Int = Int.max,
+        limit: Int = 100_000,
+        habitualMidsleepSec: Int?
+    ) async -> DetailedSleepStageEvidenceSnapshot {
+        guard let store = await ensureStore() else { return .empty }
+
+        var imported = Set<SleepStageEvidenceFingerprint>()
+        for id in importedReadIds {
+            let sessions = (try? await store.sleepSessions(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+            for session in sessions where Self.hasStagePayload(session.stagesJSON) {
+                imported.insert(SleepStageEvidenceFingerprint(session))
+            }
+        }
+
+        var localPermission: [SleepStageEvidenceFingerprint: Bool] = [:]
+        for id in computedReadIds {
+            guard let sessions = try? await store.sleepSessions(
+                deviceId: id, from: from, to: to, limit: limit) else {
+                continue
+            }
+            let publishable = Self.publishableDetailedStageSessionFingerprints(
+                sessions,
+                habitualMidsleepSec: habitualMidsleepSec)
+            for session in sessions {
+                let fingerprint = SleepStageEvidenceFingerprint(session)
+                guard localPermission[fingerprint] == nil else { continue }
+                localPermission[fingerprint] = publishable.contains(fingerprint)
+            }
+        }
+
+        return DetailedSleepStageEvidenceSnapshot(
+            independentlyStagedImports: imported,
+            localPermissionBySession: localPermission)
+    }
+
+    /// Strict source snapshot for HealthKit writeback. Unlike the presentation reads above, one failed
+    /// source query aborts the snapshot. The caller must build this before deleting any app-authored
+    /// HealthKit sleep records.
+    func sleepWritebackSnapshot(
+        from: Int,
+        to: Int,
+        limit: Int
+    ) async throws -> SleepWritebackRepositorySnapshot {
+        guard let store = await ensureStore() else { throw RepositoryReadError.storeUnavailable }
+        let now = Int(Date().timeIntervalSince1970)
+        let historyFrom = now - 4_000 * 86_400
+        let historyTo = now + 86_400
+        let historyLimit = 100_000
+        let sourceIds = Array(Set(importedReadIds + computedReadIds)).sorted()
+
+        let requestedBySource: [String: [CachedSleepSession]]
+        let historyBySource: [String: [CachedSleepSession]]
+        #if DEBUG
+        if strictSleepSessionReaderForTesting != nil {
+            requestedBySource = try await strictSleepSessions(
+                store: store, ids: sourceIds, from: from, to: to, limit: limit)
+            historyBySource = try await strictSleepSessions(
+                store: store,
+                ids: sourceIds,
+                from: historyFrom,
+                to: historyTo,
+                limit: historyLimit)
+        } else {
+            let snapshot = try await store.sleepSessionReadSnapshot(
+                deviceIds: sourceIds,
+                requestedFrom: from,
+                requestedTo: to,
+                requestedLimit: limit,
+                historyFrom: historyFrom,
+                historyTo: historyTo,
+                historyLimit: historyLimit)
+            requestedBySource = snapshot.requestedByDevice
+            historyBySource = snapshot.historyByDevice
+        }
+        #else
+        let snapshot = try await store.sleepSessionReadSnapshot(
+            deviceIds: sourceIds,
+            requestedFrom: from,
+            requestedTo: to,
+            requestedLimit: limit,
+            historyFrom: historyFrom,
+            historyTo: historyTo,
+            historyLimit: historyLimit)
+        requestedBySource = snapshot.requestedByDevice
+        historyBySource = snapshot.historyByDevice
+        #endif
+
+        guard requestedBySource.values.allSatisfy({ $0.count < limit }),
+              historyBySource.values.allSatisfy({ $0.count < historyLimit }) else {
+            throw RepositoryReadError.incompleteSleepSnapshot
+        }
+
+        let importedBySource = Dictionary(
+            uniqueKeysWithValues: importedReadIds.map {
+                ($0, requestedBySource[$0] ?? [])
+            })
+        let computedBySource = Dictionary(
+            uniqueKeysWithValues: computedReadIds.map {
+                ($0, requestedBySource[$0] ?? [])
+            })
+        let habitualMidsleepSec = Self.historicalHabitualMidsleepSec(
+            Self.dedupBlocks(
+                sourceIds.flatMap { historyBySource[$0] ?? [] }))
+
+        var importedEvidence = Set<SleepStageEvidenceFingerprint>()
+        for sessions in importedBySource.values {
+            for session in sessions where Self.hasStagePayload(session.stagesJSON) {
+                importedEvidence.insert(SleepStageEvidenceFingerprint(session))
+            }
+        }
+
+        var localPermission: [SleepStageEvidenceFingerprint: Bool] = [:]
+        for id in computedReadIds {
+            let sessions = computedBySource[id] ?? []
+            let publishable = Self.publishableDetailedStageSessionFingerprints(
+                sessions,
+                habitualMidsleepSec: habitualMidsleepSec)
+            for session in sessions {
+                let fingerprint = SleepStageEvidenceFingerprint(session)
+                guard localPermission[fingerprint] == nil else { continue }
+                localPermission[fingerprint] = publishable.contains(fingerprint)
+            }
+        }
+
+        let imported = Self.dedupBlocks(
+            importedReadIds.flatMap { importedBySource[$0] ?? [] })
+        let computed = Self.dedupBlocks(
+            computedReadIds.flatMap { computedBySource[$0] ?? [] })
+        let merged = Self.mergeAllSleepSessions(imported: imported, computed: computed)
+        return SleepWritebackRepositorySnapshot(
+            sessions: merged,
+            detailedStageEvidence: DetailedSleepStageEvidenceSnapshot(
+                independentlyStagedImports: importedEvidence,
+                localPermissionBySession: localPermission))
+    }
+
     /// Every sleep BLOCK across BOTH sources, UN-deduplicated , so a split-sleep day (a nap
     /// + a main sleep, or any night recorded as multiple blocks) keeps ALL of its blocks.
     /// `sleeps` collapses each day to a single winner for the dashboard; this does not.
@@ -1260,22 +1657,30 @@ final class Repository: ObservableObject {
     /// the dashboard's imported-wins merge); computed blocks fill days with no import.
     /// Oldest→newest by onset.
     func allSleepSessions(days: Int = 4000) async -> [CachedSleepSession] {
-        guard let store = await ensureStore() else { return [] }
         let now = Int(Date().timeIntervalSince1970)
-        let lo = now - days * 86_400, hi = now + 86_400
+        return await allSleepSessions(
+            from: now - days * 86_400,
+            to: now + 86_400,
+            limit: 100_000)
+    }
+
+    /// Full-range variant used by publication boundaries such as HealthKit writeback. Keeping the
+    /// active/canonical union here prevents a re-paired band's older computed nights from being
+    /// stranded when a one-time policy migration rewrites app-authored health records.
+    func allSleepSessions(
+        from: Int,
+        to: Int,
+        limit: Int = 100_000
+    ) async -> [CachedSleepSession] {
+        guard let store = await ensureStore() else { return [] }
         // UNION the active strap + canonical (imported) and their computed siblings, keeping ALL blocks (not
         // one per day, this view expands split sleeps), but dropping any block that appears under BOTH union
         // ids (same start+end key) so a day present in both namespaces isn't double-listed.
-        let imported = Self.dedupBlocks(await unionRawSleepBlocks(store: store, ids: importedReadIds, from: lo, to: hi))
-        let computed = Self.dedupBlocks(await unionRawSleepBlocks(store: store, ids: computedReadIds, from: lo, to: hi))
-        let cal = Calendar.current
-        func endDay(_ s: CachedSleepSession) -> Date {
-            cal.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(s.endTs)))
-        }
-        var importedDays = Set<Date>()
-        for s in imported { importedDays.insert(endDay(s)) }
-        let computedKept = computed.filter { !importedDays.contains(endDay($0)) }
-        return (imported + computedKept).sorted { $0.effectiveStartTs < $1.effectiveStartTs }
+        let imported = Self.dedupBlocks(await unionRawSleepBlocks(
+            store: store, ids: importedReadIds, from: from, to: to, limit: limit))
+        let computed = Self.dedupBlocks(await unionRawSleepBlocks(
+            store: store, ids: computedReadIds, from: from, to: to, limit: limit))
+        return Self.mergeAllSleepSessions(imported: imported, computed: computed)
     }
 
     /// The persisted per-epoch MOTION series for each of `starts` (detected session start keys), keyed by
@@ -1311,15 +1716,8 @@ final class Repository: ObservableObject {
         // blocks recorded under both ids so a day present in both namespaces doesn't double-weight the learner.
         let imported = Self.dedupBlocks(await unionRawSleepBlocks(store: store, ids: importedReadIds, from: lo, to: hi))
         let computed = Self.dedupBlocks(await unionRawSleepBlocks(store: store, ids: computedReadIds, from: lo, to: hi))
-        let offsetSec = TimeZone.current.secondsFromGMT()
-        let blocks = (imported + computed).compactMap { s -> SleepStageTotals.HistoryBlock? in
-            let start = s.effectiveStartTs, end = s.endTs
-            guard end > start else { return nil }
-            let mid = start + (end - start) / 2
-            let dayKey = AnalyticsEngine.dayString(mid, offsetSec: offsetSec)
-            return SleepStageTotals.HistoryBlock(start: start, end: end, dayKey: dayKey)
-        }
-        return SleepStageTotals.habitualMidsleepSec(blocks, offsetSec: offsetSec)
+        return Self.historicalHabitualMidsleepSec(
+            Self.dedupBlocks(imported + computed))
     }
 
     /// Hand-correct a night's bed (onset) and/or wake (end) time. `detectedStartTs` is the immutable
@@ -1348,19 +1746,32 @@ final class Repository: ObservableObject {
         // imported night (no strap data at all) AND for the transient case where the user edits BEFORE
         // a sync has imported this window , the latter then self-heals on the next post-sync
         // `analyzeRecent` (see `selfHealEditedStages`), which re-derives the real stages once raw lands.
-        let stagesJSON = await restageFromRaw(start: safeStartTs, end: safeEndTs)
-            ?? SleepWindowReclip.reclip(stagesJSON: storedStagesJSON, sessionStart: detectedStartTs,
-                                        oldEnd: oldEndTs, newStart: safeStartTs, newEnd: safeEndTs)
+        let restaged = await restageFromRaw(start: safeStartTs, end: safeEndTs)
+        let stagesJSON = restaged?.stagesJSON
+            ?? SleepWindowReclip.reclip(
+                stagesJSON: storedStagesJSON,
+                sessionStart: detectedStartTs,
+                oldEnd: oldEndTs,
+                newStart: safeStartTs,
+                newEnd: safeEndTs)
         // Apply to the source that actually OWNS this block. Try the computed source first; only fall
         // back to the imported source when no computed row matched , so we never edit a coincidental
         // same-startTs row in the other namespace (which the old unconditional double-write could do).
         let computedChanged = (try? await store.applySleepEdit(
             deviceId: computedDeviceId, detectedStartTs: detectedStartTs,
-            newStartTs: safeStartTs, newEndTs: safeEndTs, stagesJSON: stagesJSON)) ?? 0
+            newStartTs: safeStartTs,
+            newEndTs: safeEndTs,
+            stagesJSON: stagesJSON,
+            rrEligibleWindowCount: restaged?.rrEligibleWindowCount,
+            rrValidWindowCount: restaged?.rrValidWindowCount)) ?? 0
         if computedChanged == 0 {
             _ = try? await store.applySleepEdit(
                 deviceId: deviceId, detectedStartTs: detectedStartTs,
-                newStartTs: safeStartTs, newEndTs: safeEndTs, stagesJSON: stagesJSON)
+                newStartTs: safeStartTs,
+                newEndTs: safeEndTs,
+                stagesJSON: stagesJSON,
+                rrEligibleWindowCount: nil,
+                rrValidWindowCount: nil)
         }
         await refresh()
     }
@@ -1517,12 +1928,18 @@ final class Repository: ObservableObject {
         // Stage from raw over the chosen window; fall back to a single awake block when the strap has no
         // dense data there yet (the self-heal re-stages once raw arrives). A nap's efficiency is the asleep
         // fraction of the staged window; nil for the fallback (no real stages yet).
-        let stagesJSON = await restageFromRaw(start: safeStartTs, end: safeEndTs)
-            ?? AnalyticsEngine.encodeStages([StageSegment(start: safeStartTs, end: safeEndTs, stage: "wake")])
+        let restaged = await restageFromRaw(start: safeStartTs, end: safeEndTs)
+        let stagesJSON = restaged?.stagesJSON
+            ?? AnalyticsEngine.encodeStages([
+                StageSegment(start: safeStartTs, end: safeEndTs, stage: "wake"),
+            ])
         let efficiency = sleepEfficiency(fromStagesJSON: stagesJSON)
         _ = try? await store.insertManualSleepSession(
             deviceId: computedDeviceId, startTs: safeStartTs, endTs: safeEndTs,
-            efficiency: efficiency, stagesJSON: stagesJSON)
+            efficiency: efficiency,
+            stagesJSON: stagesJSON,
+            rrEligibleWindowCount: restaged?.rrEligibleWindowCount,
+            rrValidWindowCount: restaged?.rrValidWindowCount)
         await refresh()
     }
 
@@ -1551,7 +1968,13 @@ final class Repository: ObservableObject {
     /// Extracted from `editSleepTimes` so the post-sync self-heal reuses the exact density gate +
     /// staging. Stages OFF the main actor , Repository is `@MainActor` and a multi-hour window is tens of
     /// thousands of samples, which would otherwise freeze the UI.
-    private func restageFromRaw(start: Int, end: Int) async -> String? {
+    private struct RestagedSleep: Sendable {
+        let stagesJSON: String
+        let rrEligibleWindowCount: Int
+        let rrValidWindowCount: Int
+    }
+
+    private func restageFromRaw(start: Int, end: Int) async -> RestagedSleep? {
         guard let store = await ensureStore() else { return nil }
         let lo = start - 3_600, hi = end + 3_600
         let grav = (try? await store.gravitySamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? []
@@ -1571,15 +1994,32 @@ final class Repository: ObservableObject {
         // retained V1 `SleepStager`. Read once here off the actor; the switch only chooses which engine
         // runs over the already-detected window. (V7 Pillar 3b)
         let useV2 = PuffinExperiment.experimentalSleepV2Enabled
-        let segs = await Task.detached(priority: .utility) {
+        return await Task.detached(priority: .utility) {
             let staged = useV2
                 ? SleepStagerV2.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
                 : SleepStager.stageSession(start: start, end: end, grav: grav, hr: hr, rr: rr, resp: resp)
             // #364 follow-up: motion-aware wake refinement post-pass, same toggle-shaped no-op when off
             // as every other Experimental switch here.
-            return WakeMotionRefinement.apply(staged, grav: grav, steps: steps, enabled: useMotionAwareWake)
+            let refined = WakeMotionRefinement.apply(
+                staged,
+                grav: grav,
+                steps: steps,
+                enabled: useMotionAwareWake)
+            guard let stagesJSON = AnalyticsEngine.encodeStages(refined) else { return nil }
+            let counts = ScoreConfidence.detailedStageRREvidenceCounts(
+                session: SleepSession(
+                    start: start,
+                    end: end,
+                    efficiency: 0,
+                    stages: refined,
+                    restingHR: nil,
+                    avgHRV: nil),
+                rr: rr)
+            return RestagedSleep(
+                stagesJSON: stagesJSON,
+                rrEligibleWindowCount: counts.eligibleWindowCount,
+                rrValidWindowCount: counts.validRRWindowCount)
         }.value
-        return AnalyticsEngine.encodeStages(segs)
     }
 
     /// Self-heal pass for the edit-races-sync bug. A night edited BEFORE the strap sync imported its raw
@@ -1605,11 +2045,21 @@ final class Repository: ObservableObject {
         for row in edited {
             // Re-derive over the LOCKED corrected window (effective onset → wake). Skip when the raw
             // isn't dense yet, or when the result already matches what's stored (steady state , no write).
-            guard let newJSON = await restageFromRaw(start: row.effectiveStartTs, end: row.endTs),
-                  newJSON != row.stagesJSON else { continue }
+            guard let restaged = await restageFromRaw(
+                start: row.effectiveStartTs,
+                end: row.endTs
+            ) else { continue }
+            guard restaged.stagesJSON != row.stagesJSON
+                    || restaged.rrEligibleWindowCount != row.rrEligibleWindowCount
+                    || restaged.rrValidWindowCount != row.rrValidWindowCount
+            else { continue }
             let n = (try? await store.updateSleepStages(deviceId: computedDeviceId,
                                                         detectedStartTs: row.startTs,
-                                                        stagesJSON: newJSON)) ?? 0
+                                                        stagesJSON: restaged.stagesJSON,
+                                                        rrEligibleWindowCount:
+                                                            restaged.rrEligibleWindowCount,
+                                                        rrValidWindowCount:
+                                                            restaged.rrValidWindowCount)) ?? 0
             if n > 0 { healed = true }
         }
         return healed ? await editedRows() : edited
@@ -1644,6 +2094,15 @@ final class Repository: ObservableObject {
                 active: active.map { ($0.day, $0.value) },
                 resting: resting.map { ($0.day, $0.value) }
             )
+        }
+        if source.hasSuffix("-noop"),
+           ScoreConfidence.isDetailedSleepStageSeriesKey(key) {
+            return await derivedDetailedStageRows(
+                store: store,
+                deviceId: source,
+                key: key,
+                from: from,
+                to: to)
         }
         let pts: [MetricPoint]
         if source == canonicalDeviceId {
@@ -1997,9 +2456,20 @@ final class Repository: ObservableObject {
     /// WhoopRepository.resolvedRows.
     private func resolvedRows(store: WhoopStore, candidate: MetricSourceCandidate,
                              from: String, to: String) async -> [(day: String, value: Double)] {
+        if candidate.source.hasSuffix("-noop"),
+           ScoreConfidence.isDetailedSleepStageSeriesKey(candidate.key) {
+            return await derivedDetailedStageRows(
+                store: store,
+                deviceId: candidate.source,
+                key: candidate.key,
+                from: from,
+                to: Self.dayAfter(to))
+        }
         let metricRows = (try? await store.metricSeries(deviceId: candidate.source, key: candidate.key,
                                                         from: from, to: to)) ?? []
-        var byDay = Dictionary(metricRows.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
+        var byDay = Dictionary(
+            metricRows.map { ($0.day, $0.value) },
+            uniquingKeysWith: { _, last in last })
         if let dailyRows = try? await store.dailyMetrics(deviceId: candidate.source,
                                                          from: from, to: Self.dayAfter(to)) {
             for row in dailyRows where byDay[row.day] == nil {
@@ -2116,6 +2586,38 @@ final class Repository: ObservableObject {
         let from = fullHistory ? "0000-01-01" : Self.dayString(now.addingTimeInterval(-Double(days) * 86_400))
         let to = fullHistory ? "9999-12-31" : Self.dayString(now.addingTimeInterval(86_400))
 
+        if ScoreConfidence.isDetailedSleepStageSeriesKey(key) {
+            // Derive each computed source from its own authorized session JSON before precedence merging.
+            // A stale daily/series copy and another band's evidence can therefore authorize nothing.
+            var detailedByDay: [String: Double] = [:]
+            for id in computedReadIds.reversed() {
+                for point in await derivedDetailedStageRows(
+                    store: store,
+                    deviceId: id,
+                    key: key,
+                    from: from,
+                    to: Self.dayAfter(to)) {
+                    detailedByDay[point.day] = point.value
+                }
+            }
+            // Imported providers classify their own stages. Keep their daily fallback as well as their
+            // long-format series, with the same active-over-canonical precedence as every Explore metric.
+            for id in importedReadIds.reversed() {
+                for row in (try? await store.dailyMetrics(
+                    deviceId: id, from: from, to: Self.dayAfter(to))) ?? [] {
+                    if let value = Self.dailyColumn(key: key, day: row) {
+                        detailedByDay[row.day] = value
+                    }
+                }
+                for point in (try? await store.metricSeries(
+                    deviceId: id, key: key, from: from, to: to)) ?? [] {
+                    detailedByDay[point.day] = point.value
+                }
+            }
+            return detailedByDay.sorted { $0.key < $1.key }
+                .map { (day: $0.key, value: $0.value) }
+        }
+
         // day → value, lowest-priority source first; higher-priority sources overwrite per day so a
         // real import always wins over the computed strap value.
         var byDay: [String: Double] = [:]
@@ -2129,7 +2631,9 @@ final class Repository: ObservableObject {
         // active strap's computed sibling + the canonical computed sibling (canonical first so the active
         // strap's value, applied last, wins per day).
         for id in computedReadIds.reversed() {
-            for p in (try? await store.metricSeries(deviceId: id, key: key, from: from, to: to)) ?? [] { byDay[p.day] = p.value }
+            for p in (try? await store.metricSeries(deviceId: id, key: key, from: from, to: to)) ?? [] {
+                byDay[p.day] = p.value
+            }
         }
         // Layer 1 (highest): the imported export's metricSeries. UNION active strap + canonical (canonical
         // first so the active strap's value wins per day).
@@ -2138,6 +2642,215 @@ final class Repository: ObservableObject {
         }
 
         return byDay.sorted { $0.key < $1.key }.map { (day: $0.key, value: $0.value) }
+    }
+
+    /// Fail-closed detailed-stage read for one exact computed source. Values are decoded from the
+    /// authorized sessions in this read, never from independently persisted daily/series copies.
+    private func derivedDetailedStageRows(
+        store: WhoopStore,
+        deviceId: String,
+        key: String,
+        from: String,
+        to: String
+    ) async -> [(day: String, value: Double)] {
+        do {
+            let habitualMidsleepSec = try await strictHabitualMidsleepSec(store: store)
+            let bySource = try await strictSleepSessions(
+                store: store,
+                ids: [deviceId],
+                from: 0,
+                to: Int.max,
+                limit: 100_000)
+            let minutesByDay = Self.publishableDetailedStageMinutesByDay(
+                bySource[deviceId] ?? [],
+                habitualMidsleepSec: habitualMidsleepSec)
+            return minutesByDay.keys.sorted().compactMap { day in
+                guard day >= from,
+                      day <= to,
+                      let minutes = minutesByDay[day],
+                      let value = Self.detailedStageValue(
+                        key: key,
+                        minutes: minutes) else { return nil }
+                return (day, value)
+            }
+        } catch {
+            return []
+        }
+    }
+
+    /// Exact sessions whose locally computed detail may publish. Every fragment in the selected
+    /// main-night group must retain a stage payload and exact-session R-R counts.
+    nonisolated static func publishableDetailedStageSessionFingerprints(
+        _ sessions: [CachedSleepSession],
+        habitualMidsleepSec: Int?
+    ) -> Set<SleepStageEvidenceFingerprint> {
+        var publishable = Set<SleepStageEvidenceFingerprint>()
+        for bucket in wakeDaySessionBuckets(sessions) {
+            let daySessions = bucket.sessions
+            let offsetSec = daySessions.max(by: { $0.endTs < $1.endTs }).map {
+                TimeZone.current.secondsFromGMT(
+                    for: Date(timeIntervalSince1970: TimeInterval($0.endTs)))
+            } ?? TimeZone.current.secondsFromGMT()
+            let indices = ScoreConfidence.publishableDetailedSleepStageSessionIndices(
+                blocks: daySessions.map {
+                    SleepStageTotals.NightBlock(
+                        start: $0.effectiveStartTs,
+                        end: $0.endTs)
+                },
+                rrEligibleWindowCounts: daySessions.map(\.rrEligibleWindowCount),
+                rrValidWindowCounts: daySessions.map(\.rrValidWindowCount),
+                independentlyStagedImport: false,
+                offsetSec: offsetSec,
+                habitualMidsleepSec: habitualMidsleepSec)
+            guard !indices.isEmpty,
+                  indices.allSatisfy({
+                      Self.detailedStageMinutes(for: daySessions[$0]) != nil
+                  }) else { continue }
+            for index in indices {
+                publishable.insert(SleepStageEvidenceFingerprint(daySessions[index]))
+            }
+        }
+        return publishable
+    }
+
+    /// Wake days whose selected local main-night group passes exact-session publication evidence.
+    nonisolated static func publishableDetailedStageDays(
+        _ sessions: [CachedSleepSession],
+        habitualMidsleepSec: Int?,
+        from: String = "0000-01-01",
+        to: String = "9999-12-31"
+    ) -> Set<String> {
+        let publishable = publishableDetailedStageSessionFingerprints(
+            sessions,
+            habitualMidsleepSec: habitualMidsleepSec)
+        return Set(wakeDaySessionBuckets(sessions).compactMap { bucket in
+            guard bucket.day >= from,
+                  bucket.day <= to,
+                  bucket.sessions.contains(where: {
+                      publishable.contains(SleepStageEvidenceFingerprint($0))
+                  }) else { return nil }
+            return bucket.day
+        })
+    }
+
+    /// Detailed stage totals derived from the exact authorized session payloads. Persisted daily/series
+    /// copies are intentionally ignored: a crash between session and day writes, or a later edit, must not
+    /// expose stale deep/REM/light values merely because the wake-day key still matches.
+    nonisolated static func publishableDetailedStageMinutesByDay(
+        _ sessions: [CachedSleepSession],
+        habitualMidsleepSec: Int?
+    ) -> [String: SleepStageTotals.Minutes] {
+        let publishable = publishableDetailedStageSessionFingerprints(
+            sessions,
+            habitualMidsleepSec: habitualMidsleepSec)
+        var byDay: [String: SleepStageTotals.Minutes] = [:]
+        for bucket in wakeDaySessionBuckets(sessions) {
+            let selected = bucket.sessions.filter {
+                publishable.contains(SleepStageEvidenceFingerprint($0))
+            }
+            guard !selected.isEmpty else { continue }
+            let decoded = selected.compactMap { session in
+                Self.detailedStageMinutes(for: session)
+            }
+            // A bridged main night is one customer-facing result. Never publish only the fragments
+            // that happened to decode, even if a future policy refactor weakens the earlier guard.
+            guard decoded.count == selected.count else { continue }
+            var total = SleepStageTotals.Minutes()
+            for minutes in decoded {
+                total.awake += minutes.awake
+                total.light += minutes.light
+                total.deep += minutes.deep
+                total.rem += minutes.rem
+            }
+            if total.inBed > 0 { byDay[bucket.day] = total }
+        }
+        return byDay
+    }
+
+    nonisolated static func detailedStageValue(
+        key: String,
+        minutes: SleepStageTotals.Minutes
+    ) -> Double? {
+        switch key {
+        case "sleep_deep_min", "deep_min": return minutes.deep
+        case "sleep_rem_min", "rem_min": return minutes.rem
+        case "sleep_light_min", "core_min": return minutes.light
+        case "sleep_awake_min", "awake_min": return minutes.awake
+        case "restorative_min": return minutes.deep + minutes.rem
+        case "restorative_pct":
+            guard minutes.asleep > 0 else { return nil }
+            return (minutes.deep + minutes.rem) / minutes.asleep * 100
+        default: return nil
+        }
+    }
+
+    /// Preserve every non-stage field while replacing local detailed stages with the session-derived
+    /// snapshot. `nil` clears all three fields, preventing an unsupported or edited night from retaining
+    /// a stale prior split.
+    nonisolated static func replacingDetailedStageColumns(
+        _ row: DailyMetric,
+        with minutes: SleepStageTotals.Minutes?
+    ) -> DailyMetric {
+        DailyMetric(
+            day: row.day,
+            totalSleepMin: row.totalSleepMin,
+            efficiency: row.efficiency,
+            deepMin: minutes?.deep,
+            remMin: minutes?.rem,
+            lightMin: minutes?.light,
+            disturbances: row.disturbances,
+            restingHr: row.restingHr,
+            avgHrv: row.avgHrv,
+            recovery: row.recovery,
+            strain: row.strain,
+            exerciseCount: row.exerciseCount,
+            spo2Pct: row.spo2Pct,
+            skinTempDevC: row.skinTempDevC,
+            respRateBpm: row.respRateBpm,
+            steps: row.steps,
+            activeKcalEst: row.activeKcalEst,
+            spo2Red: row.spo2Red,
+            spo2Ir: row.spo2Ir,
+            hrvMethod: row.hrvMethod)
+    }
+
+    /// Bridge the complete source timeline before assigning local wake days. A split night can cross
+    /// midnight between fragments; assigning each row first would let its early half publish alone.
+    nonisolated static func wakeDaySessionBuckets(
+        _ sessions: [CachedSleepSession],
+        timeZone: TimeZone = .current
+    ) -> [(day: String, sessions: [CachedSleepSession])] {
+        let blocks = sessions.map {
+            SleepStageTotals.NightBlock(
+                start: $0.effectiveStartTs,
+                end: $0.endTs)
+        }
+        return SleepStageTotals.wakeDayBuckets(
+            blocks,
+            offsetAtEpochSec: { epoch in
+                timeZone.secondsFromGMT(
+                    for: Date(timeIntervalSince1970: TimeInterval(epoch)))
+            }
+        ).map { bucket in
+            let rows = bucket.groups
+                .flatMap(\.indices)
+                .map { sessions[$0] }
+                .sorted { $0.effectiveStartTs < $1.effectiveStartTs }
+            return (bucket.day, rows)
+        }
+    }
+
+    nonisolated private static func hasStagePayload(_ json: String?) -> Bool {
+        SleepStageTotals.minutes(fromStagesJSON: json) != nil
+    }
+
+    nonisolated private static func detailedStageMinutes(
+        for session: CachedSleepSession
+    ) -> SleepStageTotals.Minutes? {
+        let clamped = SleepStageTotals.clampStagesToOnset(
+            session.stagesJSON,
+            onsetSec: session.effectiveStartTs)
+        return SleepStageTotals.minutes(fromStagesJSON: clamped)
     }
 
     /// The merged DailyMetric column backing an Explore metric key, for the days the imported/computed
@@ -3113,7 +3826,8 @@ final class Repository: ObservableObject {
     /// requested upper bound still resolves the selected day (#614). Mirrors Android
     /// WhoopRepository.bufferDayAfter.
     static func dayAfter(_ day: String) -> String {
-        guard let d = dayFormatter.date(from: day),
+        guard day < "9999-12-31",
+              let d = dayFormatter.date(from: day),
               let next = Calendar(identifier: .gregorian).date(byAdding: .day, value: 1, to: d)
         else { return day }
         return dayFormatter.string(from: next)
@@ -3146,7 +3860,8 @@ private extension DailyMetric {
             // Raw SpO2 is on-device only (imports never carry it), so the imported row's nil is
             // backfilled from the computed fallback — otherwise the nightly means would be lost. (#93)
             spo2Red: spo2Red ?? fallback.spo2Red,
-            spo2Ir: spo2Ir ?? fallback.spo2Ir
+            spo2Ir: spo2Ir ?? fallback.spo2Ir,
+            hrvMethod: avgHrv == nil ? fallback.hrvMethod : hrvMethod
         )
     }
 
@@ -3174,7 +3889,8 @@ private extension DailyMetric {
             steps: steps,
             activeKcalEst: activeKcalEst,
             spo2Red: spo2Red,   // non-sleep field: preserved as-is (#93)
-            spo2Ir: spo2Ir
+            spo2Ir: spo2Ir,
+            hrvMethod: hrvMethod
         )
     }
 }

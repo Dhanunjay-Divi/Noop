@@ -1,6 +1,7 @@
 package com.noop.ingest
 
 import com.noop.data.DailyMetric
+import com.noop.data.DailyHrvMethod
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -28,6 +29,26 @@ class WhoopCsvImporterTest {
         assertNull(mapOf("value" to "-Infinity").double("value"))
         assertNull(mapOf("value" to "1e999").double("value"))
         assertEquals(62.0, mapOf("value" to "62 ms").double("value"))
+    }
+
+    @Test
+    fun explicitUnknownHrvMethodFailsClosedWhileLegacyWhoopDefaultsToRmssd() {
+        val explicitUnknown = cycles(
+            """
+            Cycle start time,Cycle timezone,Heart rate variability (ms),HRV method
+            2026-01-01 06:00:00,UTC+00:00,61,proprietary
+            """
+        ).single()
+        assertEquals(61.0, explicitUnknown.avgHrv)
+        assertNull(explicitUnknown.hrvMethod)
+
+        val legacy = cycles(
+            """
+            Cycle start time,Cycle timezone,Heart rate variability (ms)
+            2026-01-01 06:00:00,UTC+00:00,61
+            """
+        ).single()
+        assertEquals(DailyHrvMethod.RMSSD, legacy.hrvMethod)
     }
 
     private val device = "my-whoop"

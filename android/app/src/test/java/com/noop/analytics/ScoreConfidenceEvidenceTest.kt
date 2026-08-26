@@ -60,6 +60,12 @@ class ScoreConfidenceEvidenceTest {
     }
 
     @Test
+    fun detailedStageSeriesKeysExcludeTotalSleep() {
+        assertTrue(ScoreConfidence.isDetailedSleepStageSeriesKey("sleep_rem_min"))
+        assertFalse(ScoreConfidence.isDetailedSleepStageSeriesKey("sleep_total_min"))
+    }
+
+    @Test
     fun editedStageMixRecomputesConfidenceFromPreservedSensorEvidence() {
         val beforeEdit = evidence(hasRr = true, hasRespiration = true, restorativeMinutes = 180.0)
         val afterEdit = evidence(hasRr = true, hasRespiration = true, restorativeMinutes = 20.0)

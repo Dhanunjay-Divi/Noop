@@ -802,6 +802,13 @@ class SleepSession(StrictModel):
     _metadata = field_validator("metadata")(validate_json_object)
     _session_id = field_validator("session_id")(validate_opaque_identifier)
 
+    @model_validator(mode="after")
+    def validate_hrv_method(self) -> SleepSession:
+        method = self.metadata.get("hrv_method")
+        if method is not None and method not in {"RMSSD", "SDNN"}:
+            raise ValueError("sleep-session hrv_method must be RMSSD or SDNN")
+        return self
+
     @field_validator("stages", mode="before")
     @classmethod
     def decode_stages(cls, value: Any) -> Any:

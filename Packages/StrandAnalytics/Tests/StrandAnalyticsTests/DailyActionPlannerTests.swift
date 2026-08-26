@@ -17,8 +17,7 @@ final class DailyActionPlannerTests: XCTestCase {
                 .init(key: "hrv", label: "HRV", detail: "in your normal range", flag: .neutral),
                 .init(key: "rhr", label: "Resting HR", detail: "in your normal range", flag: .neutral),
             ],
-            acwr: nil,
-            monotony: nil,
+            effortVariety: nil,
             asOfDay: day,
             confidence: confidence,
             baselineDays: 20

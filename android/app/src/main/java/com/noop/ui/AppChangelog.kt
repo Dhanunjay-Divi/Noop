@@ -1420,7 +1420,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_readiness_shows_its_evidence_and_a_90cf0076),
             date = "June 2026",
             items = listOf(
-                "New: each Readiness signal now shows the numbers behind it - e.g. ‘HRV 72 vs 60 ms’, ‘Resting HR 46 vs 52 bpm’, ‘Training load 7d 10.0 / 28d 10.0’ - so you can see exactly why a signal is flagged, not just the label. Thanks @khalilkm01.",
+                "New: each Readiness signal now shows the numbers behind it - e.g. ‘HRV 72 vs 60 ms’ and ‘Resting HR 46 vs 52 bpm’ - so you can see exactly why a signal is flagged, not just the label. Thanks @khalilkm01.",
                 "Fixed: a workout imported from Health Connect could show no distance even when the distance was recorded - a relay app (e.g. Suunto via Health Sync) often writes the distance with timestamps slightly offset from the workout, which NOOP's exact-window match missed. It now matches with a tolerance. Thanks @pilleuspulcher-blip. (#215)",
                 "Fixed (iPhone): on the Explore screen, tapping a metric could bounce you back to the More tab - a nested-navigation bug, now fixed. Thanks @sebastianwoo. (#199)",
             ),

@@ -97,8 +97,9 @@ final class HealthWritebackTests: XCTestCase {
     // previously exported as two entries deletes both before the merged write.
 
     private func frag(_ start: Int, _ end: Int, stages: String? = nil,
-                      eff: Int? = nil) -> HealthWriteback.SleepFragment {
-        .init(startTs: start, effectiveStartTs: eff ?? start, endTs: end, stagesJSON: stages)
+                      eff: Int? = nil, publishDetailed: Bool = true) -> HealthWriteback.SleepFragment {
+        .init(startTs: start, effectiveStartTs: eff ?? start, endTs: end, stagesJSON: stages,
+              publishDetailedStages: publishDetailed)
     }
     private func stagesJSON(_ segs: [(Int, Int, String)]) -> String {
         "[" + segs.map { "{\"start\":\($0.0),\"end\":\($0.1),\"stage\":\"\($0.2)\"}" }
@@ -159,6 +160,41 @@ final class HealthWritebackTests: XCTestCase {
             .init(start: t, end: t + 7_200, kind: .light),
             .init(start: t + 7_200, end: t + 7_200 + 960, kind: .awake),
             .init(start: t + 7_200 + 960, end: t + 14_400, kind: .unspecified),
+        ])
+    }
+
+    func testMergedPlanWithholdsUnsupportedLocalStagesButKeepsSleepBounds() {
+        let t = 1_767_312_000
+        let rawStages = stagesJSON([
+            (t, t + 3_600, "light"),
+            (t + 3_600, t + 7_200, "deep"),
+        ])
+        let local = frag(t, t + 7_200, stages: rawStages, publishDetailed: false)
+
+        let entry = HealthWriteback.mergedSleepPlan(groups: [[local]])[0]
+
+        XCTAssertEqual(entry.spanStart, t)
+        XCTAssertEqual(entry.spanEnd, t + 7_200)
+        XCTAssertEqual(entry.intervals, [
+            .init(start: t, end: t + 7_200, kind: .unspecified),
+        ])
+        XCTAssertEqual(local.stagesJSON, rawStages, "publication must not mutate raw stage payloads")
+    }
+
+    func testMergedPlanDoesNotPublishAwakeSeamAcrossUnsupportedLocalFragments() {
+        let t = 1_767_312_000
+        let a = frag(t, t + 3_600,
+                     stages: stagesJSON([(t, t + 3_600, "light")]),
+                     publishDetailed: false)
+        let b = frag(t + 4_200, t + 7_200,
+                     stages: stagesJSON([(t + 4_200, t + 7_200, "rem")]),
+                     publishDetailed: false)
+
+        let entry = HealthWriteback.mergedSleepPlan(groups: [[a, b]])[0]
+
+        XCTAssertEqual(entry.intervals, [
+            .init(start: t, end: t + 3_600, kind: .unspecified),
+            .init(start: t + 4_200, end: t + 7_200, kind: .unspecified),
         ])
     }
 

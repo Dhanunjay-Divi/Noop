@@ -190,4 +190,5 @@
     <string name="hydration_adaptive_timing_status">Attualmente ogni %1$d min. La programmazione cambia solo quando i dati di oggi lo supportano.</string>
     <string name="hydration_base_interval_label">Intervallo base</string>
     <string name="today_calibration_valid_hrv_progress">HRV valida %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Le fasi dettagliate del sonno sono nascoste perché questa notte non contiene dati sufficienti e utilizzabili sugli intervalli tra i battiti. La durata totale del sonno resta disponibile.</string>
 </resources>

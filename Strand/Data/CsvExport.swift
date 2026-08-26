@@ -7,6 +7,7 @@ import UIKit
 import UniformTypeIdentifiers
 import WhoopStore
 import StrandImport
+import StrandAnalytics
 
 /// Settings → Backup & restore → "Export CSV…": serialize the merged WHOOP history (imported wins
 /// per day — exactly what the dashboards show; Apple Health rows are deliberately EXCLUDED so a
@@ -27,6 +28,47 @@ import StrandImport
 /// inline rather than depending on Repository's private merge helpers, so the export is decoupled
 /// from the dashboard read path.
 enum CsvExport {
+    /// `CachedSleepSession` intentionally carries no source id on Apple. Keep enough immutable row
+    /// identity beside it while merging so publication evidence cannot leak across source namespaces.
+    struct SleepExportIdentity: Hashable, Sendable {
+        let startTs: Int
+        let effectiveStartTs: Int
+        let endTs: Int
+        let stagesJSON: String?
+
+        init(_ session: CachedSleepSession) {
+            startTs = session.startTs
+            effectiveStartTs = session.effectiveStartTs
+            endTs = session.endTs
+            stagesJSON = session.stagesJSON
+        }
+    }
+
+    /// Assign every fragment to the final wake day of its bridged physical night, independently for
+    /// each persisted source. Keeping source partitions intact prevents evidence or attribution from
+    /// crossing an active/canonical namespace boundary.
+    nonisolated static func bridgedWakeDayBySleep(
+        _ sessions: [CachedSleepSession],
+        sourceBySession: [SleepExportIdentity: String],
+        timeZone: TimeZone = .current
+    ) -> [SleepExportIdentity: String] {
+        var result: [SleepExportIdentity: String] = [:]
+        let bySource = Dictionary(grouping: sessions) {
+            sourceBySession[SleepExportIdentity($0)] ?? ""
+        }
+        for sourceSessions in bySource.values {
+            for bucket in Repository.wakeDaySessionBuckets(
+                sourceSessions,
+                timeZone: timeZone
+            ) {
+                for session in bucket.sessions {
+                    result[SleepExportIdentity(session)] = bucket.day
+                }
+            }
+        }
+        return result
+    }
+
     enum ExportResult {
         case exported(URL)
         case cancelled
@@ -51,12 +93,18 @@ enum CsvExport {
             var importedByDay: [String: DailyMetric] = [:]
             for id in importedIds {
                 for d in try await store.dailyMetrics(deviceId: id, from: fromDay, to: toDay)
-                where importedByDay[d.day] == nil { importedByDay[d.day] = d }
+                where importedByDay[d.day] == nil {
+                    importedByDay[d.day] = d
+                }
             }
             var computedByDay: [String: DailyMetric] = [:]
+            var computedSourceByDay: [String: String] = [:]
             for id in computedIds {
                 for d in try await store.dailyMetrics(deviceId: id, from: fromDay, to: toDay)
-                where computedByDay[d.day] == nil { computedByDay[d.day] = d }
+                where computedByDay[d.day] == nil {
+                    computedByDay[d.day] = d
+                    computedSourceByDay[d.day] = id
+                }
             }
             let imported = importedByDay.values.sorted { $0.day < $1.day }
             let computed = computedByDay.values.sorted { $0.day < $1.day }
@@ -75,13 +123,23 @@ enum CsvExport {
             // active-first (mirrors the Kotlin dedupSleepBlocks / dedupWorkoutsByKey unions).
             var seenSleep = Set<String>(), seenComp = Set<String>()
             var impSleep: [CachedSleepSession] = [], compSleep: [CachedSleepSession] = []
+            var importedSleepSource: [SleepExportIdentity: String] = [:]
+            var computedSleepSource: [SleepExportIdentity: String] = [:]
             for id in importedIds {
-                for s in try await store.sleepSessions(deviceId: id, from: 0, to: hi, limit: 100_000)
-                where seenSleep.insert("\(s.startTs)|\(s.endTs)").inserted { impSleep.append(s) }
+                for s in try await store.sleepSessions(
+                    deviceId: id, from: 0, to: hi, limit: 100_000
+                ) where seenSleep.insert("\(s.startTs)|\(s.endTs)").inserted {
+                    impSleep.append(s)
+                    importedSleepSource[SleepExportIdentity(s)] = id
+                }
             }
             for id in computedIds {
-                for s in try await store.sleepSessions(deviceId: id, from: 0, to: hi, limit: 100_000)
-                where seenComp.insert("\(s.startTs)|\(s.endTs)").inserted { compSleep.append(s) }
+                for s in try await store.sleepSessions(
+                    deviceId: id, from: 0, to: hi, limit: 100_000
+                ) where seenComp.insert("\(s.startTs)|\(s.endTs)").inserted {
+                    compSleep.append(s)
+                    computedSleepSource[SleepExportIdentity(s)] = id
+                }
             }
             var seenImpW = Set<String>(), seenCompW = Set<String>()
             var impWorkouts: [WorkoutRow] = [], compWorkouts: [WorkoutRow] = []
@@ -121,15 +179,23 @@ enum CsvExport {
             let strengthRoutines = try await store.strengthRoutines(includeArchived: true)
             let strengthSessions = try await store.strengthSessions(includeInProgress: true)
 
-            // The ONLY main-actor-isolated call in the assembly is Repository.localDayKey (Repository is
-            // @MainActor). Precompute every session's local end-day HERE, on main, into a plain Sendable
-            // [startTs: dayKey] map so the detached merge/serialization can key off it without touching the
-            // actor. startTs is the session's natural key (same key `sleepSource` uses). Same for the export
-            // file name (also localDayKey-derived).
-            var endDayByStartTs: [Int: String] = [:]
+            // Bridge each source timeline before assigning cycle days. These plain Sendable maps keep the
+            // detached serializer off Repository's actor and ensure every fragment of a cross-midnight
+            // physical night points to the same final wake day.
+            let importedWakeDayBySleep = bridgedWakeDayBySleep(
+                impSleep,
+                sourceBySession: importedSleepSource)
+            let computedWakeDayBySleep = bridgedWakeDayBySleep(
+                compSleep,
+                sourceBySession: computedSleepSource)
+            var offsetBySleep: [SleepExportIdentity: Int] = [:]
             for s in impSleep + compSleep {
-                endDayByStartTs[s.startTs] = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(s.endTs)))
+                let identity = SleepExportIdentity(s)
+                let wakeDate = Date(timeIntervalSince1970: TimeInterval(s.endTs))
+                offsetBySleep[identity] = TimeZone.current.secondsFromGMT(for: wakeDate)
             }
+            let habitualMidsleepSec = Repository.historicalHabitualMidsleepSec(
+                impSleep + compSleep)
             let name = defaultName()
 
             // Assembly + serialization + zip deflate run OFF the main actor (mirrors the timelineSeries
@@ -138,12 +204,87 @@ enum CsvExport {
             // and SleepMerge are pure package statics; workoutSource is a pure static; endDay is now a pure
             // dictionary lookup. Byte-identical output to the in-line version.
             let tmp = try await Task.detached(priority: .utility) {
+                let importedEndDay: (CachedSleepSession) -> String = {
+                    importedWakeDayBySleep[SleepExportIdentity($0)] ?? ""
+                }
+                let computedEndDay: (CachedSleepSession) -> String = {
+                    computedWakeDayBySleep[SleepExportIdentity($0)] ?? ""
+                }
+                var publishableComputedSleep = Set<SleepExportIdentity>()
+                var publishableComputedMinutesByDay:
+                    [String: [String: SleepStageTotals.Minutes]] = [:]
+                for source in computedIds {
+                    let sourceSessions = compSleep.filter {
+                        computedSleepSource[SleepExportIdentity($0)] == source
+                    }
+                    for (day, daySessions) in Dictionary(
+                        grouping: sourceSessions,
+                        by: computedEndDay
+                    ) {
+                        let representative = daySessions.max { $0.endTs < $1.endTs }
+                        let historicalOffsetSec = representative.flatMap {
+                            offsetBySleep[SleepExportIdentity($0)]
+                        } ?? 0
+                        let indices =
+                            ScoreConfidence.publishableDetailedSleepStageSessionIndices(
+                                blocks: daySessions.map {
+                                    SleepStageTotals.NightBlock(
+                                        start: $0.effectiveStartTs,
+                                        end: $0.endTs)
+                                },
+                                rrEligibleWindowCounts:
+                                    daySessions.map(\.rrEligibleWindowCount),
+                                rrValidWindowCounts:
+                                    daySessions.map(\.rrValidWindowCount),
+                                independentlyStagedImport: false,
+                                offsetSec: historicalOffsetSec,
+                                habitualMidsleepSec: habitualMidsleepSec)
+                        guard !indices.isEmpty else { continue }
+                        let selected = indices.sorted()
+                        let selectedMinutes = selected.compactMap { index in
+                            let session = daySessions[index]
+                            let clamped = SleepStageTotals.clampStagesToOnset(
+                                session.stagesJSON,
+                                onsetSec: session.effectiveStartTs)
+                            return SleepStageTotals.minutes(fromStagesJSON: clamped)
+                        }
+                        guard selectedMinutes.count == selected.count else { continue }
+                        var total = SleepStageTotals.Minutes()
+                        for minutes in selectedMinutes {
+                            total.awake += minutes.awake
+                            total.light += minutes.light
+                            total.deep += minutes.deep
+                            total.rem += minutes.rem
+                        }
+                        publishableComputedMinutesByDay[source, default: [:]][day] = total
+                        for index in selected {
+                            publishableComputedSleep.insert(
+                                SleepExportIdentity(daySessions[index]))
+                        }
+                    }
+                }
+
                 // Merged exactly like Repository.mergeDaily: computed first, imported overwrites, so a
                 // real WHOOP import always wins and the strap-only user still exports a full history.
                 var byDay: [String: DailyMetric] = [:]
                 var sourceByDay: [String: String] = [:]
-                for d in computed { byDay[d.day] = d; sourceByDay[d.day] = "noop (APPROXIMATE)" }
-                for d in imported { byDay[d.day] = d; sourceByDay[d.day] = "import" }
+                var publishStagesByDay: [String: Bool] = [:]
+                for d in computed {
+                    let source = computedSourceByDay[d.day]
+                    let minutes = source.flatMap {
+                        publishableComputedMinutesByDay[$0]?[d.day]
+                    }
+                    byDay[d.day] = Repository.replacingDetailedStageColumns(
+                        d,
+                        with: minutes)
+                    sourceByDay[d.day] = "noop (APPROXIMATE)"
+                    publishStagesByDay[d.day] = minutes != nil
+                }
+                for d in imported {
+                    byDay[d.day] = d
+                    sourceByDay[d.day] = "import"
+                    publishStagesByDay[d.day] = true
+                }
                 let days = byDay.values.sorted { $0.day < $1.day }
 
                 // The cycles columns DailyMetric lacks, recovered from the imported metricSeries.
@@ -152,16 +293,15 @@ enum CsvExport {
                     for p in points { series[p.day, default: [:]][key] = p.value }
                 }
 
-                // Sleep: merged per end-day, imported wins (Repository.mergeSleep semantics). endDay is a
-                // pure lookup into the precomputed map (localDayKey already ran on main).
-                let endDay: (CachedSleepSession) -> String = { endDayByStartTs[$0.startTs] ?? "" }
-                var sleepSource: [Int: String] = [:]   // keyed by startTs (the session's natural key)
+                // Sleep: merged per bridged wake day, imported wins (Repository.mergeSleep semantics).
                 // #715: keep EVERY session, naps and main nights each export as their own sleeps.csv row.
                 // Imported still wins per end-day. Shared, unit-tested grouping (WhoopStore.SleepMerge) replaces
                 // the per-day dict that silently dropped a second same-day session.
-                for s in compSleep { sleepSource[s.startTs] = "noop (APPROXIMATE)" }
-                for s in impSleep { sleepSource[s.startTs] = "import" }
-                let sleeps = SleepMerge.merge(imported: impSleep, computed: compSleep, endDay: endDay)
+                let sleeps = SleepMerge.merge(
+                    imported: impSleep,
+                    computed: compSleep,
+                    importedEndDay: importedEndDay,
+                    computedEndDay: computedEndDay)
 
                 // Workouts: imported WHOOP ∪ on-device detected. Apple-Health workouts are intentionally
                 // omitted (read only the two NOOP sources), matching the cycles/sleep exclusion.
@@ -181,14 +321,42 @@ enum CsvExport {
                 ).encodedData()
                 let entries: [(name: String, data: Data)] = [
                     ("physiological_cycles.csv",
-                     Data(WhoopCsvExporter.cyclesCSV(days: days, series: series, sourceByDay: sourceByDay).utf8)),
+                     Data(WhoopCsvExporter.cyclesCSV(
+                        days: days,
+                        series: series,
+                        sourceByDay: sourceByDay,
+                        publishDetailedSleepStages: {
+                            publishStagesByDay[$0.day] == true
+                        },
+                        detailedAwakeMinutes: { day in
+                            guard sourceByDay[day.day] == "noop (APPROXIMATE)",
+                                  let source = computedSourceByDay[day.day]
+                            else { return nil }
+                            return publishableComputedMinutesByDay[source]?[day.day]?.awake
+                        }).utf8)),
                     ("sleeps.csv",
                      Data(WhoopCsvExporter.sleepsCSV(
                         sleeps,
-                        // "Cycle start time" = the session's local end-day (the same key cyclesCSV/mergeSleep
-                        // use), so the two CSVs reconcile by cycle for a non-UTC user (#715).
-                        cycleStart: { endDay($0) + " 00:00:00" },
-                        sourceBySession: { sleepSource[$0.startTs] ?? "" }).utf8)),
+                        // Every fragment of a bridged night uses the group's final local wake day, matching
+                        // cycle aggregation even when the interruption straddles midnight.
+                        cycleStart: { session in
+                            let identity = SleepExportIdentity(session)
+                            let day = importedWakeDayBySleep[identity]
+                                ?? computedWakeDayBySleep[identity]
+                                ?? ""
+                            return day + " 00:00:00"
+                        },
+                        publishDetailedStages: { session in
+                            let identity = SleepExportIdentity(session)
+                            if importedSleepSource[identity] != nil { return true }
+                            return publishableComputedSleep.contains(identity)
+                        },
+                        sourceBySession: { session in
+                            let identity = SleepExportIdentity(session)
+                            if importedSleepSource[identity] != nil { return "import" }
+                            return computedSleepSource[identity] == nil
+                                ? "" : "noop (APPROXIMATE)"
+                        }).utf8)),
                     ("workouts.csv",
                      Data(WhoopCsvExporter.workoutsCSV(workouts, sourceLabel: { workoutSource($0, computedIds: computedIds) }).utf8)),
                     ("journal_entries.csv", Data(WhoopCsvExporter.journalCSV(journal).utf8)),

@@ -94,7 +94,8 @@ enum WhoopImporter {
                 exerciseCount: nil,
                 spo2Pct: c.bloodOxygenPct,
                 skinTempDevC: c.skinTempCelsius,   // NOTE: Whoop export gives absolute °C, not a baseline deviation
-                respRateBpm: c.respiratoryRate))
+                respRateBpm: c.respiratoryRate,
+                hrvMethod: c.hrvMethod))
         }
         for c in officialCycles { appendMetric(c, to: &metrics) }
         for c in approximateCycles { appendMetric(c, to: &approximateMetrics) }

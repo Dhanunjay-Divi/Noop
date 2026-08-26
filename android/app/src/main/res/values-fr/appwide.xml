@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">Aucun signal de récupération actuel ne présente assez de variation antérieure pour être comparé.</string>
     <string name="appwide_readiness_limitation_no_daily_row">Aucun relevé quotidien de récupération n’est disponible pour cette date.</string>
     <string name="appwide_readiness_limitation_one_signal">Cette lecture repose sur un seul signal de récupération actuel.</string>
-    <string name="appwide_readiness_limitation_recent_load">Le ratio de charge récente est descriptif et n’influence pas la préparation.</string>
     <string name="appwide_readiness_primed_headline">Aligné</string>
     <string name="appwide_readiness_primed_summary">Vos tendances de récupération mesurées sont alignées sur votre référence récente.</string>
     <string name="appwide_readiness_rundown_headline">Plusieurs écarts</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">Un signal mesuré s’est écarté de votre plage récente. Une seule journée invite à revérifier, ce n’est ni un diagnostic ni une consigne d’entraînement.</string>
     <string name="appwide_rhythm_methodology">NOOP analyse uniquement les périodes nocturnes calmes en dehors des entraînements enregistrés. Les mouvements, l’exercice, une fréquence cardiaque élevée hors repos et les périodes bruitées sont ignorés plutôt qu’interprétés. L’intervalle entre les battements est représenté dans un nuage de points de Poincaré et résumé par des statistiques descriptives publiées. Rythme est une vue facultative du rythme des battements, jamais un diagnostic, et n’envoie aucune alerte.</string>
     <string name="appwide_shell_updates_unread_format">Mises à jour, %1$d non lues</string>
+    <string name="appwide_sleep_edit_conflict">Cette nuit a changé avant que la modification puisse être enregistrée. Les données les plus récentes ont été restaurées.</string>
     <string name="appwide_sleep_recovery_added_format">L’équilibre récent ajoute %1$s cette nuit. Cet ajout est limité à 1 heure et ne réduit jamais votre objectif.</string>
     <string name="appwide_sleep_recovery_none">Aucun temps de récupération n’est ajouté cette nuit. NOOP ne recommande jamais moins que votre objectif en raison d’un excédent récent.</string>
     <string name="appwide_sleep_reminder_around_format">Rappel prévu vers %1$s.</string>

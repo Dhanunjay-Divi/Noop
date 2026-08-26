@@ -8,8 +8,9 @@ physical-device and external-service release gates remain
 
 - Recovery centers Rest on a personal `rest_quality` EWMA baseline. The fixed
   `0.85` center is cold-start fallback only.
-- Rest sensitivity stays `0.12`; the global Recovery anchor stays unchanged.
-  Neither is tuned to the three private cohorts.
+- Rest sensitivity stays `0.12`; the fixed personal-baseline logistic stays
+  unchanged. Neither is tuned to the three private cohorts, and cold start
+  remains nil.
 - Reference Sleep Performance is an outcome only. NOOP Rest is derived from
   raw sleep aggregates before it enters Recovery.
 - Non-finite and out-of-range Rest fractions are missing data, not values to

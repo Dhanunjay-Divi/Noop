@@ -4,6 +4,7 @@ import com.noop.analytics.DayOwnerResolver
 import com.noop.analytics.FusionInput
 import com.noop.analytics.FusionResolver
 import com.noop.analytics.FusionSource
+import com.noop.analytics.ScoreConfidence
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
 
@@ -23,6 +24,14 @@ object FusionDayAdapter {
 
     /** The fusion metrics shown on the record, in display order, each with its label + resolver key. */
     private data class MetricSpec(val key: String, val label: String)
+
+    /** Retains the physical source id so a local stage split can use only its own night's evidence. */
+    private data class SourceDayRow(
+        val source: FusionSource,
+        val deviceId: String,
+        val row: DailyMetric,
+        val detailedStagesPublishable: Boolean,
+    )
 
     private val METRICS: List<MetricSpec> = listOf(
         MetricSpec("rhr", "Resting HR"),
@@ -81,23 +90,41 @@ object FusionDayAdapter {
         // day is a clean null, dropping that source out of every metric for the day rather than carrying a
         // stale value forward. (firstOrNull over lastOrNull: day keys are unique per (deviceId, day) PK, so
         // either is the same single row; firstOrNull is the cheaper short-circuit.)
-        val perSource: List<Pair<FusionSource, DailyMetric?>> = sourceIds(activeStrapId).map { (source, ids) ->
+        val perSource: List<SourceDayRow?> = sourceIds(activeStrapId).map { (source, ids) ->
             // HIGH-2 union: a source may span MORE THAN ONE id (active strap ∪ canonical "my-whoop"). The ids
             // are active-FIRST, so `firstNotNullOfOrNull` takes the active (live/measured) row for the day and
             // only falls back to the canonical (imported) row when the active id doesn't cover it, so the import
             // is no longer orphaned after a re-add, and a single-id source is the same single read as before.
-            val row = ids.firstNotNullOfOrNull { id ->
-                runCatching { repo.days(id) }.getOrDefault(emptyList()).firstOrNull { it.day == day }
+            val selected = ids.firstNotNullOfOrNull { id ->
+                runCatching { repo.days(id) }.getOrDefault(emptyList())
+                    .firstOrNull { it.day == day }
+                    ?.let { id to it }
+            } ?: return@map null
+            val (deviceId, row) = selected
+            val stagesPublishable = if (!deviceId.endsWith("-noop")) {
+                true
+            } else {
+                runCatching {
+                    repo.detailedSleepStagesPublishable(deviceId, day)
+                }.getOrDefault(false)
             }
-            source to row
+            SourceDayRow(source, deviceId, row, stagesPublishable)
         }
 
-        val contributingSources = perSource.count { it.second != null }
+        val contributingSources = perSource.count { it != null }
 
         val rows = ArrayList<FusedRow>()
         for (spec in METRICS) {
-            val inputs = perSource.mapNotNull { (source, row) ->
-                row?.let { WhoopRepository.dailyColumn(spec.key, it)?.let { v -> FusionInput(source, v) } }
+            val inputs = perSource.mapNotNull { selected ->
+                selected ?: return@mapNotNull null
+                if (ScoreConfidence.isDetailedSleepStageSeriesKey(spec.key) &&
+                    !selected.detailedStagesPublishable
+                ) {
+                    return@mapNotNull null
+                }
+                WhoopRepository.dailyColumn(spec.key, selected.row)?.let { value ->
+                    FusionInput(selected.source, value)
+                }
             }
             val point = FusionResolver.resolve(spec.key, inputs) ?: continue
             rows.add(FusedRow(point = point, label = spec.label))
@@ -114,12 +141,12 @@ object FusionDayAdapter {
     }
 
     /** Pick the day's score-owner via [DayOwnerResolver]: active strap (0) beats imports/phone. */
-    private fun resolveDayOwner(perSource: List<Pair<FusionSource, DailyMetric?>>): FusionSource? {
-        val candidates = perSource.map { (source, row) ->
+    private fun resolveDayOwner(perSource: List<SourceDayRow?>): FusionSource? {
+        val candidates = sourceIds(WhoopRepository.WHOOP_SOURCE).map { (source, _) ->
             DayOwnerResolver.Candidate(
                 deviceId = source.id,
                 priority = ownerPriority(source),
-                hasData = row != null,
+                hasData = perSource.any { it?.source == source },
             )
         }
         val ownerId = DayOwnerResolver.resolve(day = "", lockedOwner = null, candidates = candidates) ?: return null

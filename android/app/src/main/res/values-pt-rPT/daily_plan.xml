@@ -34,12 +34,11 @@
     <string name="daily_plan_progress_in_range">Dentro do intervalo planeado de hoje. É uma referência, não uma regra para parar.</string>
     <string name="daily_plan_signal_good">Alinhado</string>
     <string name="daily_plan_signal_hrv">Variabilidade da frequência cardíaca</string>
-    <string name="daily_plan_signal_load">Rácio de carga recente</string>
     <string name="daily_plan_signal_neutral">No intervalo</string>
     <string name="daily_plan_signal_respiration">Frequência respiratória</string>
     <string name="daily_plan_signal_rhr">Frequência cardíaca em repouso</string>
     <string name="daily_plan_signal_shifted">Desviado</string>
-    <string name="daily_plan_signal_variety">Variedade do treino</string>
+    <string name="daily_plan_signal_variety">Variedade do Effort</string>
     <string name="daily_plan_signal_watch">Voltar a verificar</string>
     <string name="daily_plan_state_calibrating_body">O NOOP precisa de uma leitura atual e sólida de prontidão e de pelo menos sete dias recentes com Effort calculado.</string>
     <string name="daily_plan_state_calibrating_title">Ainda sem intervalo</string>

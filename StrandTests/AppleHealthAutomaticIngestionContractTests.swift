@@ -193,6 +193,47 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(view.contains("follow your Apple Health and iCloud settings"))
     }
 
+    func testSleepPublicationMigrationPreflightsACompleteThrowingSnapshot() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let repository = try text("Strand/Data/Repository.swift")
+        let writebackStart = try XCTUnwrap(bridge.range(of: "private func writeBack("))
+        let vitalsStart = try XCTUnwrap(
+            bridge.range(of: "private func writeVitals(",
+                         range: writebackStart.upperBound..<bridge.endIndex))
+        let writebackBody = String(bridge[writebackStart.lowerBound..<vitalsStart.lowerBound])
+
+        XCTAssertTrue(writebackBody.contains("try await repo.sleepWritebackSnapshot("))
+        XCTAssertFalse(writebackBody.contains("repo.allSleepSessions("))
+        XCTAssertFalse(writebackBody.contains("repo.detailedSleepStageEvidence("))
+        let snapshot = try XCTUnwrap(writebackBody.range(of: "sleepWritebackSnapshot("))
+        let mutation = try XCTUnwrap(writebackBody.range(of: "try await writeSleep("))
+        XCTAssertLessThan(snapshot.lowerBound, mutation.lowerBound)
+
+        XCTAssertTrue(repository.contains("func sleepWritebackSnapshot("))
+        XCTAssertTrue(repository.contains("throw RepositoryReadError.incompleteSleepSnapshot"))
+        XCTAssertTrue(repository.contains("store.sleepSessionReadSnapshot("))
+        XCTAssertTrue(repository.contains("snapshot.requestedByDevice"))
+    }
+
+    func testSleepPublicationMigrationReplacesBatchesBeforeOrphanCleanup() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let sleepStart = try XCTUnwrap(bridge.range(of: "private func writeSleep("))
+        let markerStart = try XCTUnwrap(
+            bridge.range(
+                of: "private var sleepStagePublicationMigrationKey",
+                range: sleepStart.upperBound..<bridge.endIndex))
+        let body = String(bridge[sleepStart.lowerBound..<markerStart.lowerBound])
+
+        XCTAssertFalse(
+            body.contains(
+                "predicate: HKQuery.predicateForObjects(from: HKSource.default()))"),
+            "A migration must never delete the complete authored sleep history before saving.")
+        let batchSave = try XCTUnwrap(body.range(of: "try await store.save("))
+        let orphanRead = try XCTUnwrap(body.range(of: "appAuthoredSleepSamples("))
+        XCTAssertLessThan(batchSave.lowerBound, orphanRead.lowerBound)
+        XCTAssertTrue(body.contains("try await store.delete(Array(stale["))
+    }
+
     private func text(_ relativePath: String) throws -> String {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent().deletingLastPathComponent()

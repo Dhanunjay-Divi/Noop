@@ -15,9 +15,8 @@ import kotlinx.coroutines.flow.Flow
  * Stream inserts use OnConflictStrategy.IGNORE == Swift `ON CONFLICT(...) DO NOTHING`
  * (idempotent by natural key — re-inserting an existing row is a no-op).
  *
- * Server-derived caches (dailyMetric, sleepSession, metricSeries) use @Upsert so the
- * latest server value wins on conflict, matching the `ON CONFLICT ... DO UPDATE SET ...`
- * upserts in MetricsCache.swift.
+ * Server-derived dailyMetric/metricSeries caches use @Upsert. sleepSession uses a conditional
+ * transaction because a blanket Room upsert would erase user edits and locally banked evidence.
  *
  * Range reads are ORDER BY ts ASC (R-R and events add a secondary key matching Reads.swift),
  * and bound by [from, to] inclusive with a row limit.
@@ -231,8 +230,70 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun deleteDailyMetricRange(deviceId: String, fromDay: String, toDay: String): Int
 
-    @Upsert
-    suspend fun upsertSleepSessions(rows: List<SleepSession>)
+    /**
+     * Sleep-session insert/update with field ownership preserved on conflict.
+     *
+     * An existing user edit owns its effective bounds, stage payload, and exact R-R evidence. Fresh
+     * analysis may still refresh vitals. Per-epoch motion/state are written by targeted APIs and never
+     * replaced on conflict, though an incoming value may fill a previously absent auxiliary. An
+     * unedited row accepts all incoming analysis fields, including null evidence, so stale detail fails
+     * closed. The dedicated [applySleepEdit] path mutates an already-edited row.
+     */
+    @Transaction
+    suspend fun upsertSleepSessions(rows: List<SleepSession>) {
+        if (rows.isEmpty()) return
+        val inserted = insertSleepSessionsIgnoringConflicts(rows)
+        for (index in rows.indices) {
+            if (inserted.getOrNull(index) != -1L) continue
+            val row = rows[index]
+            updateSleepSessionOnConflict(
+                deviceId = row.deviceId,
+                startTs = row.startTs,
+                endTs = row.endTs,
+                efficiency = row.efficiency,
+                restingHr = row.restingHr,
+                avgHrv = row.avgHrv,
+                stagesJSON = row.stagesJSON,
+                incomingUserEdited = row.userEdited,
+                startTsAdjusted = row.startTsAdjusted,
+                incomingMotionJSON = row.motionJSON,
+                incomingSleepStateJSON = row.sleepStateJSON,
+                rrEligibleWindowCount = row.rrEligibleWindowCount,
+                rrValidWindowCount = row.rrValidWindowCount,
+            )
+        }
+    }
+
+    @Query(
+        "UPDATE sleepSession SET " +
+            "endTs = CASE WHEN userEdited = 1 THEN endTs ELSE :endTs END, " +
+            "efficiency = :efficiency, restingHr = :restingHr, avgHrv = :avgHrv, " +
+            "stagesJSON = CASE WHEN userEdited = 1 THEN stagesJSON ELSE :stagesJSON END, " +
+            "userEdited = CASE WHEN userEdited = 1 THEN 1 ELSE :incomingUserEdited END, " +
+            "startTsAdjusted = CASE WHEN userEdited = 1 THEN startTsAdjusted ELSE :startTsAdjusted END, " +
+            "motionJSON = COALESCE(motionJSON, :incomingMotionJSON), " +
+            "sleepStateJSON = COALESCE(sleepStateJSON, :incomingSleepStateJSON), " +
+            "rrEligibleWindowCount = CASE WHEN userEdited = 1 " +
+                "THEN rrEligibleWindowCount ELSE :rrEligibleWindowCount END, " +
+            "rrValidWindowCount = CASE WHEN userEdited = 1 " +
+                "THEN rrValidWindowCount ELSE :rrValidWindowCount END " +
+            "WHERE deviceId = :deviceId AND startTs = :startTs"
+    )
+    suspend fun updateSleepSessionOnConflict(
+        deviceId: String,
+        startTs: Long,
+        endTs: Long,
+        efficiency: Double?,
+        restingHr: Int?,
+        avgHrv: Double?,
+        stagesJSON: String?,
+        incomingUserEdited: Boolean,
+        startTsAdjusted: Long?,
+        incomingMotionJSON: String?,
+        incomingSleepStateJSON: String?,
+        rrEligibleWindowCount: Int?,
+        rrValidWindowCount: Int?,
+    ): Int
 
     @Query(
         "SELECT * FROM sleepSession WHERE deviceId = :deviceId AND startTs = :startTs LIMIT 1"
@@ -254,9 +315,9 @@ interface WhoopDao : DeviceRegistryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSleepSessionsIgnoringConflicts(rows: List<SleepSession>): List<Long>
 
-    /** Remove one sleep session by its full primary key (deviceId, startTs) — used by the
-     *  bed/wake-time edit, which deletes then re-inserts because startTs is part of the PK. Returns the
-     *  number of rows changed so repair callers never report a candidate as deleted when it was not. */
+    /** Remove one sleep session by its immutable full primary key (deviceId, startTs). Bed/wake edits
+     *  use [applySleepEdit] in place; this delete is reserved for an explicit user deletion or repair.
+     *  Returns the number of rows changed so callers never report a row as deleted when it was not. */
     @Query("DELETE FROM sleepSession WHERE deviceId = :deviceId AND startTs = :startTs")
     suspend fun deleteSleepSession(deviceId: String, startTs: Long): Int
 
@@ -270,6 +331,27 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun insertSleepSession(row: SleepSession): Long
 
     /**
+     * Apply a user-selected window and its matching stage/evidence payload without replacing auxiliary
+     * motion/state. Nullable evidence deliberately clears stale counts when no exact restaging exists.
+     */
+    @Query(
+        "UPDATE sleepSession SET endTs = :endTs, stagesJSON = :stagesJSON, userEdited = 1, " +
+            "startTsAdjusted = :startTsAdjusted, " +
+            "rrEligibleWindowCount = :rrEligibleWindowCount, " +
+            "rrValidWindowCount = :rrValidWindowCount " +
+            "WHERE deviceId = :deviceId AND startTs = :detectedStartTs"
+    )
+    suspend fun applySleepEdit(
+        deviceId: String,
+        detectedStartTs: Long,
+        startTsAdjusted: Long,
+        endTs: Long,
+        stagesJSON: String?,
+        rrEligibleWindowCount: Int?,
+        rrValidWindowCount: Int?,
+    ): Int
+
+    /**
      * Replace ONLY the stage breakdown of an already user-edited night, leaving the corrected
      * bed/wake bounds (startTsAdjusted/endTs) and the userEdited flag untouched. Port of iOS
      * MetricsCache.updateSleepStages (PR #449). The post-sync self-heal
@@ -277,7 +359,8 @@ interface WhoopDao : DeviceRegistryDao {
      * streams for a night that was edited BEFORE they arrived: at edit time the stages were
      * fabricated by SleepWindowReclip (a trailing "wake" block) because the raw wasn't present yet,
      * and userEdited then froze that breakdown against every later sync. This swaps in the real
-     * re-derived stages without disturbing the user's bound correction.
+     * re-derived stages without disturbing the user's bound correction. A stage-only mutation has no
+     * attributable R-R analysis, so it clears both exact-session evidence counts.
      *
      * Scoped to `userEdited = 1` rows (Room stores Boolean true as INTEGER 1) so it can NEVER rewrite
      * an un-edited (freely re-derivable) night — the regular recompute upsert owns those. Keyed by the
@@ -285,10 +368,30 @@ interface WhoopDao : DeviceRegistryDao {
      * effectiveStartTs. Returns rows changed (0 when no such edited session exists).
      */
     @Query(
-        "UPDATE sleepSession SET stagesJSON = :stagesJSON " +
+        "UPDATE sleepSession SET stagesJSON = :stagesJSON, " +
+            "rrEligibleWindowCount = NULL, rrValidWindowCount = NULL " +
             "WHERE deviceId = :deviceId AND startTs = :detectedStartTs AND userEdited = 1"
     )
     suspend fun updateSleepStages(deviceId: String, detectedStartTs: Long, stagesJSON: String): Int
+
+    /**
+     * Atomically replace an edited session's stages and the exact-session R-R counts produced by the
+     * same successful raw analysis. Keeping these in one UPDATE prevents a crash from publishing stages
+     * against stale evidence or evidence against stale bounds.
+     */
+    @Query(
+        "UPDATE sleepSession SET stagesJSON = :stagesJSON, " +
+            "rrEligibleWindowCount = :rrEligibleWindowCount, " +
+            "rrValidWindowCount = :rrValidWindowCount " +
+            "WHERE deviceId = :deviceId AND startTs = :detectedStartTs AND userEdited = 1"
+    )
+    suspend fun updateAnalyzedSleepStages(
+        deviceId: String,
+        detectedStartTs: Long,
+        stagesJSON: String,
+        rrEligibleWindowCount: Int,
+        rrValidWindowCount: Int,
+    ): Int
 
     /**
      * v18 (H8): write the per-epoch motion magnitudes (compact JSON array) for one session, banked beside
@@ -875,6 +978,25 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY startTs ASC LIMIT :limit"
     )
     suspend fun sleepSessions(deviceId: String, from: Long, to: Long, limit: Int): List<SleepSession>
+
+    /**
+     * Complete, uncapped sleep read for a set of source namespaces. This is intentionally separate from
+     * bounded presentation/export reads: a destructive external-store replacement must either observe
+     * every local row in its range or fail, never mistake a query cap for the end of history.
+     */
+    @Query(
+        "SELECT * FROM sleepSession WHERE deviceId IN (:deviceIds) " +
+            "AND startTs >= :from AND startTs <= :to ORDER BY deviceId ASC, startTs ASC"
+    )
+    suspend fun sleepSessionsForSources(
+        deviceIds: List<String>,
+        from: Long,
+        to: Long,
+    ): List<SleepSession>
+
+    /** Complete source timeline used to assign edited fragments after bridge-before-wake-day grouping. */
+    @Query("SELECT * FROM sleepSession WHERE deviceId = :deviceId ORDER BY startTs ASC")
+    fun sleepSessionsFlow(deviceId: String): Flow<List<SleepSession>>
 
     /** Keyset-paged twin used by optional self-hosted export so local deletes cannot shift an OFFSET. */
     @Query(

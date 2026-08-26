@@ -129,14 +129,22 @@ class SleepStageHealTest {
     private fun runHealLoop(
         store: MutableMap<Long, SleepSession>,
         edited: List<SleepSession>,
-        restage: (SleepSession) -> String?,
+        restage: (SleepSession) -> SleepStageHealer.RestageResult?,
     ): Pair<List<SleepSession>, Int> {
         var writes = 0
         for (row in edited) {
-            val newJSON = restage(row) ?: continue
-            if (newJSON == row.stagesJSON) continue
-            // updateSleepStages: stages-only write, bounds + userEdited untouched, keyed by detected startTs.
-            store[row.startTs] = store.getValue(row.startTs).copy(stagesJSON = newJSON)
+            val analysis = restage(row) ?: continue
+            if (analysis.stagesJSON == row.stagesJSON &&
+                analysis.rrEligibleWindowCount == row.rrEligibleWindowCount &&
+                analysis.rrValidWindowCount == row.rrValidWindowCount
+            ) {
+                continue
+            }
+            store[row.startTs] = store.getValue(row.startTs).copy(
+                stagesJSON = analysis.stagesJSON,
+                rrEligibleWindowCount = analysis.rrEligibleWindowCount,
+                rrValidWindowCount = analysis.rrValidWindowCount,
+            )
             writes++
         }
         return store.values.filter { it.userEdited } to writes
@@ -157,8 +165,10 @@ class SleepStageHealTest {
             stagesJSON = fabricated, userEdited = true,
         )
         val store = mutableMapOf(start to edited)
-        val restage: (SleepSession) -> String? = { row ->
-            SleepStageHealer.restageFromSamples(row.effectiveStartTs, row.endTs, grav, hr, emptyList(), emptyList())
+        val restage: (SleepSession) -> SleepStageHealer.RestageResult? = { row ->
+            SleepStageHealer.restageWithEvidenceFromSamples(
+                row.effectiveStartTs, row.endTs, grav, hr, emptyList(), emptyList(),
+            )
         }
 
         // Pass 1: heals (one write); bounds + userEdited preserved, only stagesJSON changes.
@@ -169,6 +179,8 @@ class SleepStageHealTest {
         assertEquals("wake bound must be untouched", end, healed.endTs)
         assertTrue("userEdited must stay set", healed.userEdited)
         assertNotEquals("stages must have been replaced", fabricated, healed.stagesJSON)
+        assertEquals(((end - start) / 300L).toInt(), healed.rrEligibleWindowCount)
+        assertEquals(0, healed.rrValidWindowCount)
 
         // Pass 2: re-derive equals the now-stored real stages → NO write (idempotent steady state).
         val (_, w2) = runHealLoop(store, afterFirst, restage)
@@ -189,6 +201,32 @@ class SleepStageHealTest {
         val (rows, writes) = runHealLoop(store, listOf(edited)) { null }
         assertEquals("a no-raw night must not be written", 0, writes)
         assertEquals("the user's edited (fabricated) stages must remain", fabricated, rows.single().stagesJSON)
+    }
+
+    @Test
+    fun byteIdenticalStagesStillWritePreviouslyMissingEvidence() {
+        val start = startAtHour(7)
+        val duration = 6 * 60 * 60
+        val end = start + duration - 1
+        val grav = stillGravity(start, duration)
+        val hr = hrStream(start, duration, 50)
+        val analysis = SleepStageHealer.restageWithEvidenceFromSamples(
+            start, end, grav, hr, emptyList(), emptyList(),
+        )!!
+        val edited = SleepSession(
+            deviceId = "my-whoop-noop",
+            startTs = start,
+            endTs = end,
+            stagesJSON = analysis.stagesJSON,
+            userEdited = true,
+        )
+        val store = mutableMapOf(start to edited)
+
+        val (rows, writes) = runHealLoop(store, listOf(edited)) { analysis }
+
+        assertEquals(1, writes)
+        assertEquals(analysis.rrEligibleWindowCount, rows.single().rrEligibleWindowCount)
+        assertEquals(analysis.rrValidWindowCount, rows.single().rrValidWindowCount)
     }
 
     // ── 4. Encoder determinism (the linchpin: equality-skip relies on stable key order) ──────────────

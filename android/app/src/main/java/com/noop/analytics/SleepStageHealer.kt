@@ -37,6 +37,11 @@ import kotlin.math.max
  *   - Only ever touches `userEdited = 1` rows (the DAO query is scoped), and never moves the bounds.
  */
 object SleepStageHealer {
+    data class RestageResult(
+        val stagesJSON: String,
+        val rrEligibleWindowCount: Int,
+        val rrValidWindowCount: Int,
+    )
 
     /**
      * Re-derive stages from the raw streams for `[start, end]` (read under the strap [deviceId]),
@@ -64,7 +69,27 @@ object SleepStageHealer {
         // observed gravity + step density, so turning it on is a no-op for any night too sparse to trust
         // (e.g. a WHOOP 4.0, which never emits a step sample at all).
         useMotionAwareWake: Boolean = false,
-    ): String? {
+    ): String? = restageWithEvidenceFromRaw(
+        repo = repo,
+        deviceId = deviceId,
+        start = start,
+        end = end,
+        useExperimentalSleepV2 = useExperimentalSleepV2,
+        useMotionAwareWake = useMotionAwareWake,
+    )?.stagesJSON
+
+    /**
+     * Exact-analysis twin of [restageFromRaw]. The stage payload and R-R evidence counts are produced
+     * from the same raw snapshot so callers can persist them atomically.
+     */
+    suspend fun restageWithEvidenceFromRaw(
+        repo: WhoopRepository,
+        deviceId: String,
+        start: Long,
+        end: Long,
+        useExperimentalSleepV2: Boolean = false,
+        useMotionAwareWake: Boolean = false,
+    ): RestageResult? {
         val lo = start - 3_600L
         val hi = end + 3_600L
         val grav = repo.gravitySamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
@@ -75,7 +100,9 @@ object SleepStageHealer {
         val resp = repo.respSamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
         // Only read when the refinement might actually use it — no point paying for it on the (default) off path.
         val steps = if (useMotionAwareWake) repo.stepSamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT) else emptyList()
-        return restageFromSamples(start, end, grav, hr, rr, resp, useExperimentalSleepV2, steps, useMotionAwareWake)
+        return restageWithEvidenceFromSamples(
+            start, end, grav, hr, rr, resp, useExperimentalSleepV2, steps, useMotionAwareWake,
+        )
     }
 
     /**
@@ -116,7 +143,22 @@ object SleepStageHealer {
         // just ran, reclassifying a hot-but-still wake segment to light. Default false, self-gated on
         // observed density either way — see [WakeMotionRefinement].
         useMotionAwareWake: Boolean = false,
-    ): String? {
+    ): String? = restageWithEvidenceFromSamples(
+        start, end, grav, hr, rr, resp, useExperimentalSleepV2, steps, useMotionAwareWake,
+    )?.stagesJSON
+
+    /** Pure exact-analysis result used by both normal tests and the edited-session self-heal. */
+    fun restageWithEvidenceFromSamples(
+        start: Long,
+        end: Long,
+        grav: List<GravitySample>,
+        hr: List<HrSample>,
+        rr: List<RrInterval>,
+        resp: List<RespSample>,
+        useExperimentalSleepV2: Boolean = false,
+        steps: List<StepSample> = emptyList(),
+        useMotionAwareWake: Boolean = false,
+    ): RestageResult? {
         if (!isDense(grav, start, end)) return null
         val segs = if (useExperimentalSleepV2) {
             SleepStagerV2.stageSession(start = start, end = end, grav = grav, hr = hr, rr = rr, resp = resp)
@@ -124,7 +166,26 @@ object SleepStageHealer {
             SleepStager.stageSession(start = start, end = end, grav = grav, hr = hr, rr = rr, resp = resp)
         }
         val refined = WakeMotionRefinement.apply(segs, grav, steps, useMotionAwareWake)
-        return AnalyticsEngine.encodeStages(refined)
+        val stagesJSON = AnalyticsEngine.encodeStages(refined) ?: return null
+        val counts = AnalyticsEngine.mainSleepEvidenceCounts(
+            mainGroup = listOf(
+                DetectedSleep(
+                    start = start,
+                    end = end,
+                    efficiency = 0.0,
+                    stages = refined,
+                    restingHR = null,
+                    avgHRV = null,
+                ),
+            ),
+            rr = rr,
+            resp = resp,
+        )
+        return RestageResult(
+            stagesJSON = stagesJSON,
+            rrEligibleWindowCount = counts.eligibleWindows,
+            rrValidWindowCount = counts.validRRWindows,
+        )
     }
 
     /**
@@ -162,12 +223,24 @@ object SleepStageHealer {
             // Re-derive over the LOCKED corrected window (effective onset → wake), reading raw under the
             // STRAP id (where the sensor streams live), not the computed namespace. Skip when the raw
             // isn't dense yet, or when the result already matches what's stored (steady state — no write).
-            val newJSON = restageFromRaw(repo, strapDeviceId, row.effectiveStartTs, row.endTs,
+            val analysis = restageWithEvidenceFromRaw(
+                repo, strapDeviceId, row.effectiveStartTs, row.endTs,
                 useExperimentalSleepV2, useMotionAwareWake) ?: continue
-            if (newJSON == row.stagesJSON) continue
+            if (analysis.stagesJSON == row.stagesJSON &&
+                analysis.rrEligibleWindowCount == row.rrEligibleWindowCount &&
+                analysis.rrValidWindowCount == row.rrValidWindowCount
+            ) {
+                continue
+            }
             // Keyed by the IMMUTABLE detected startTs (never effectiveStartTs) so it lands on the right
             // primary-key row; the DAO scopes the write to userEdited = 1.
-            val n = repo.updateSleepStages(computedDeviceId, row.startTs, newJSON)
+            val n = repo.updateAnalyzedSleepStages(
+                deviceId = computedDeviceId,
+                detectedStartTs = row.startTs,
+                stagesJSON = analysis.stagesJSON,
+                rrEligibleWindowCount = analysis.rrEligibleWindowCount,
+                rrValidWindowCount = analysis.rrValidWindowCount,
+            )
             if (n > 0) healed = true
         }
         return if (healed) editedRows() else edited

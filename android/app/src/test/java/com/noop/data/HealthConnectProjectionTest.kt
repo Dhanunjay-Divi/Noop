@@ -78,7 +78,10 @@ class HealthConnectProjectionTest {
         assertEquals(400.0, mergedApple.activeKcal!!, 0.0)
         assertEquals(80.0, mergedApple.weightKg!!, 0.0)
 
-        val oldDaily = DailyMetric(source, oldApple.day, restingHr = 52, avgHrv = 61.0, spo2Pct = 97.0)
+        val oldDaily = DailyMetric(
+            source, oldApple.day, restingHr = 52, avgHrv = 61.0, spo2Pct = 97.0,
+            hrvMethod = DailyHrvMethod.RMSSD,
+        )
         val freshDaily = DailyMetric(source, oldApple.day, restingHr = 50)
         val mergedDaily = HealthConnectProjectionMerge.dailyMetricsAdditive(
             listOf(oldDaily),
@@ -86,6 +89,7 @@ class HealthConnectProjectionTest {
         ).single()
         assertEquals(50, mergedDaily.restingHr)
         assertEquals(61.0, mergedDaily.avgHrv!!, 0.0)
+        assertEquals(DailyHrvMethod.RMSSD, mergedDaily.hrvMethod)
         assertEquals(97.0, mergedDaily.spo2Pct!!, 0.0)
     }
 

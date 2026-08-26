@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">Nenhum sinal de recuperação atual tem variação anterior suficiente para comparação.</string>
     <string name="appwide_readiness_limitation_no_daily_row">Não existe um registo diário de recuperação para esta data.</string>
     <string name="appwide_readiness_limitation_one_signal">Esta leitura baseia-se num único sinal de recuperação atual.</string>
-    <string name="appwide_readiness_limitation_recent_load">O rácio de carga recente é descritivo e não afeta a prontidão.</string>
     <string name="appwide_readiness_primed_headline">Alinhado</string>
     <string name="appwide_readiness_primed_summary">As tendências de recuperação medidas estão alinhadas com a sua referência recente.</string>
     <string name="appwide_readiness_rundown_headline">Vários desvios</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">Um sinal medido desviou-se do seu intervalo recente. Um único dia é um motivo para voltar a verificar, não um diagnóstico nem uma instrução de treino.</string>
     <string name="appwide_rhythm_methodology">A NOOP analisa apenas períodos noturnos tranquilos fora de treinos registados. Movimento, exercício, frequência cardíaca elevada fora do repouso e períodos com ruído são ignorados em vez de interpretados. Representa o tempo entre batimentos num diagrama de dispersão de Poincaré e calcula estatísticas descritivas publicadas. Ritmo é uma vista opcional da temporização, nunca um diagnóstico, e não envia alertas.</string>
     <string name="appwide_shell_updates_unread_format">Atualizações, %1$d não lidas</string>
+    <string name="appwide_sleep_edit_conflict">Esta noite foi alterada antes de ser possível guardar a edição. Os dados mais recentes foram repostos.</string>
     <string name="appwide_sleep_recovery_added_format">O equilíbrio recente acrescenta %1$s esta noite. O máximo é 1 hora e nunca reduz o seu objetivo.</string>
     <string name="appwide_sleep_recovery_none">Não é acrescentado tempo de recuperação esta noite. O NOOP nunca recomenda menos do que o seu objetivo devido a um excedente recente.</string>
     <string name="appwide_sleep_reminder_around_format">Lembrete agendado para cerca das %1$s.</string>

@@ -159,7 +159,8 @@ extension RecoveryScorer {
         // Final logistic score + band, read from recovery(...) verbatim.
         if let s = score {
             lines.append("charge score=\(r2(s)) band=\(band(s)) "
-                + "(logistic k=\(r2(logisticK)) z0=\(r2(logisticZ0)))")
+                + "(logistic k=\(r2(personalBaselineLogisticSlope)) "
+                + "z0=\(r2(personalBaselineLogisticMidpointZ)))")
         } else {
             lines.append("charge nilScore reason=noValidTerms (no driver produced a usable term)")
         }

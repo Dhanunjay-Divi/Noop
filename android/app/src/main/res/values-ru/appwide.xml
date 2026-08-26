@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">Ни у одного текущего сигнала восстановления пока нет достаточной предыдущей вариативности для сравнения.</string>
     <string name="appwide_readiness_limitation_no_daily_row">Для этой даты нет дневной записи восстановления.</string>
     <string name="appwide_readiness_limitation_one_signal">Эта оценка основана на одном текущем сигнале восстановления.</string>
-    <string name="appwide_readiness_limitation_recent_load">Соотношение недавней нагрузки носит описательный характер и не влияет на готовность.</string>
     <string name="appwide_readiness_primed_headline">Согласовано</string>
     <string name="appwide_readiness_primed_summary">Измеренные тенденции восстановления соответствуют вашей недавней базовой линии.</string>
     <string name="appwide_readiness_rundown_headline">Несколько отклонений</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">Один измеренный сигнал отклонился от недавнего диапазона. Один день лишь повод перепроверить, а не диагноз или указание по тренировке.</string>
     <string name="appwide_rhythm_methodology">NOOP анализирует только спокойные ночные интервалы вне записанных тренировок. Движение, нагрузка, повышенная частота пульса не в покое и зашумлённые интервалы пропускаются, а не интерпретируются. Интервалы между ударами отображаются на диаграмме рассеяния Пуанкаре и описываются опубликованными статистическими показателями. «Ритм»: это включаемое пользователем представление временных интервалов, а не диагноз; оно никогда не отправляет тревожные оповещения.</string>
     <string name="appwide_shell_updates_unread_format">Обновления, непрочитанных: %1$d</string>
+    <string name="appwide_sleep_edit_conflict">Данные этой ночи изменились до сохранения правки. Восстановлены последние данные.</string>
     <string name="appwide_sleep_recovery_added_format">С учётом недавнего баланса сегодня добавляется %1$s. Добавка ограничена одним часом и никогда не уменьшает вашу цель.</string>
     <string name="appwide_sleep_recovery_none">Сегодня дополнительное время на восстановление не добавляется. Из-за недавнего избытка NOOP никогда не рекомендует меньше вашей цели.</string>
     <string name="appwide_sleep_reminder_around_format">Напоминание запланировано примерно на %1$s.</string>

@@ -4,9 +4,9 @@ package com.noop.analytics
  * Recovery/Charge from DAILY aggregates (Apple Watch / Health Connect / an Oura/Fitbit/Garmin export).
  * Kotlin twin of the Swift `WatchRecovery`.
  *
- * A WHOOP strap gives dense overnight R-R intervals, so RecoveryScorer runs off raw-derived nightly RMSSD.
- * A daily-aggregate source does NOT: it gives a daily HRV (SDNN-ish) reading plus a resting HR. So this is
- * a genuinely lower-density computation.
+ * A strap gives dense overnight R-R intervals, so RecoveryScorer runs off raw-derived nightly RMSSD.
+ * A daily-aggregate source does not: it gives one source-specific HRV statistic plus resting HR. This is
+ * a genuinely lower-density computation, and its source/method identity must remain attached.
  *
  * We do NOT invent a new formula. Recovery is HRV-and-RHR-vs-personal-baseline, and because every term is
  * relative to the person's OWN baseline, the metric scale cancels out: SDNN-vs-SDNN-baseline behaves like
@@ -23,8 +23,33 @@ package com.noop.analytics
  */
 object WatchRecovery {
 
-    /** Result: the score (null while calibrating) and its confidence tier. */
-    data class Result(val recovery: Double?, val confidence: ScoreConfidence)
+    /** SDNN and RMSSD share milliseconds as a unit but are not interchangeable measurements. */
+    enum class HRVMethod { SDNN, RMSSD }
+
+    /** Stable identity of one HRV series. A baseline belongs to exactly one source and method. */
+    data class HRVProvenance(
+        val sourceId: String,
+        val method: HRVMethod,
+    ) {
+        init {
+            require(sourceId.isNotBlank()) { "HRV sourceId must not be blank" }
+        }
+
+        val label: String get() = "$sourceId HRV (${method.name})"
+    }
+
+    /** One HRV value with enough identity to decide whether it belongs in a baseline. */
+    data class HRVSample(
+        val value: Double,
+        val provenance: HRVProvenance,
+    )
+
+    /** Result plus the exact HRV source/method used for both today and its isolated baseline. */
+    data class Result(
+        val recovery: Double?,
+        val confidence: ScoreConfidence,
+        val hrvProvenance: HRVProvenance,
+    )
 
     /**
      * Minimum nights of HRV history before we score recovery from a daily-aggregate source. Sits ABOVE the
@@ -34,47 +59,73 @@ object WatchRecovery {
     const val minBaselineNights = 7
 
     /**
-     * Compute recovery/Charge from a daily HRV + resting HR vs the person's own baseline.
+     * Compute recovery/Charge from one explicitly identified HRV series + resting HR.
      *
-     * @param todayHrv today's HRV reading (ms), or null if the source logged none.
+     * @param provenance source and method this computation is allowed to use.
+     * @param todayHrv today's source-and-method-identified HRV reading, or null.
      * @param todayRhr today's resting HR (bpm), or null to drop the RHR term.
-     * @param hrvHistory ordered nightly HRV values (oldest -> newest), the baseline input.
+     * @param hrvHistory ordered nightly HRV samples (oldest -> newest). Mismatched source/method
+     * samples are excluded before baseline construction.
      * @param rhrHistory ordered nightly resting-HR values (oldest -> newest).
      */
     fun compute(
-        todayHrv: Double?,
+        provenance: HRVProvenance,
+        todayHrv: HRVSample?,
         todayRhr: Int?,
-        hrvHistory: List<Double>,
+        hrvHistory: List<HRVSample>,
         rhrHistory: List<Double>,
     ): Result {
+        // Enforce isolation here rather than relying on every caller to pre-filter correctly. Switching
+        // source or statistic therefore starts calibration again even when the values look plausible.
+        val isolatedHistory = hrvHistory
+            .filter { it.provenance == provenance }
+            .map(HRVSample::value)
+        val isolatedToday = todayHrv
+            ?.takeIf { it.provenance == provenance }
+            ?.value
+
         // Build both baselines through the production model (Winsorized EWMA + cold-start gating), exactly
         // as the strap path does. HRV feeds the HRV config; resting HR feeds the RHR config.
-        val hrvBase = Baselines.foldHistory(hrvHistory, Baselines.hrvCfg)
+        val hrvBase = Baselines.foldHistory(isolatedHistory, Baselines.hrvCfg)
         val rhrBase = Baselines.foldHistory(rhrHistory, Baselines.restingHRCfg)
 
         // Confidence is the SAME helper the strap Charge uses, so the calibrating -> building -> solid arc
         // matches. It reads CALIBRATING whenever recovery would be null (no usable HRV baseline).
-        val conf = ScoreConfidence.forCharge(todayHrv, hrvBase)
+        val conf = ScoreConfidence.forCharge(isolatedToday, hrvBase)
 
         // Honesty gate: no number unless we have today's HRV, a usable baseline, AND at least a week of
         // nights. Any miss -> null recovery + calibrating, never a fabricated value.
-        if (todayHrv == null || !hrvBase.usable || hrvHistory.size < minBaselineNights) {
-            return Result(recovery = null, confidence = ScoreConfidence.CALIBRATING)
+        if (isolatedToday == null || !hrvBase.usable ||
+            isolatedHistory.size < minBaselineNights
+        ) {
+            return Result(
+                recovery = null,
+                confidence = ScoreConfidence.CALIBRATING,
+                hrvProvenance = provenance,
+            )
         }
 
         // Reuse the canonical Charge engine. Drop the resp / sleep / skin-temp terms (the daily aggregate
         // doesn't carry them here) -> RecoveryScorer renormalises to HRV + RHR. RHR is optional: a missing
         // resting HR today passes the at-baseline value (z~0, neutral term) and drops the RHR term entirely.
         val recovery = RecoveryScorer.recovery(
-            hrv = todayHrv,
+            hrv = isolatedToday,
             rhr = todayRhr?.toDouble() ?: rhrBase.baseline,
             resp = null,
             hrvBaseline = hrvBase,
             rhrBaseline = if (todayRhr != null) rhrBase else null,
             respBaseline = null,
             sleepPerf = null,
-        ) ?: return Result(recovery = null, confidence = ScoreConfidence.CALIBRATING)
+        ) ?: return Result(
+            recovery = null,
+            confidence = ScoreConfidence.CALIBRATING,
+            hrvProvenance = provenance,
+        )
 
-        return Result(recovery = recovery, confidence = conf)
+        return Result(
+            recovery = recovery,
+            confidence = conf,
+            hrvProvenance = provenance,
+        )
     }
 }

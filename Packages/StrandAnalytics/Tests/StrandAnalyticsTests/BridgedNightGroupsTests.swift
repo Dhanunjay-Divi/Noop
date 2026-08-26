@@ -101,6 +101,34 @@ final class BridgedNightGroupsTests: XCTestCase {
         XCTAssertEqual(SleepStageTotals.mainNightGroupIndices([a, b, nap], offsetSec: 0), [0, 1])
     }
 
+    func testWakeDayBucketsBridgeBeforeAssigningCrossMidnightFragments() {
+        // America/New_York: Jan 1 19:00 -> 23:00, then 23:10 -> Jan 2 03:00.
+        // Fragment-first day grouping splits this physical night across Jan 1 and Jan 2.
+        let first = B(start: t0, end: t0 + 4 * 3_600)
+        let second = B(start: t0 + 4 * 3_600 + 600, end: t0 + 8 * 3_600)
+        let nap = B(start: t0 + 19 * 3_600, end: t0 + 20 * 3_600)
+
+        let buckets = SleepStageTotals.wakeDayBuckets(
+            [first, second, nap],
+            offsetAtEpochSec: { _ in -5 * 3_600 })
+
+        XCTAssertEqual(buckets.map(\.day), ["2026-01-02"])
+        XCTAssertEqual(buckets[0].groups.map(\.indices), [[0, 1], [2]])
+    }
+
+    func testHistoricalOffsetAtLaterFragmentControlsNightTailBridge() {
+        let first = B(start: t0 + 6 * 3_600, end: t0 + 9 * 3_600)
+        let second = B(
+            start: first.end + 75 * 60,
+            end: first.end + 75 * 60 + 2 * 3_600)
+
+        let groups = SleepStageTotals.bridgedNightGroups(
+            [first, second],
+            offsetAtEpochSec: { epoch in epoch == second.start ? 3_600 : 0 })
+
+        XCTAssertEqual(groups.map(\.indices), [[0], [1]])
+    }
+
     /// REAL NIGHT (2026-07-14, PDT): a 12:16 first-sleep fragment (67 min) then a ~6-min walk then the
     /// main 1:29 → 7:32 sleep, stored as two rows on `my-whoop-noop` with the main's onset user-edited
     /// later via `startTsAdjusted` (so its EFFECTIVE start is 1:29). The 6-min effective gap is far under

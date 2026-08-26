@@ -25,7 +25,11 @@ import org.junit.Test
  *
  * The exact shapes mirrored from AppViewModel:
  *
- *   suspend fun updateSleepSessionTimes(...) { runCatching { repository.updateSleepSessionTimes(...) }; rescoreAfterSleepEdit() }
+ *   suspend fun updateSleepSessionTimes(...): Boolean {
+ *       val saved = runCatching { repository.updateSleepSessionTimes(...) }.getOrDefault(false)
+ *       rescoreAfterSleepEdit()
+ *       return saved
+ *   }
  *   suspend fun deleteSleepSession(...)      { runCatching { repository.deleteSleepSession(...) };      rescoreAfterSleepEdit() }
  *   suspend fun addManualNap(...)            { runCatching { repository.addManualNap(...) };            rescoreAfterSleepEdit() }
  *
@@ -48,11 +52,12 @@ class SleepEditRescoreTest {
 
     /** Pure mirror of an edit method: best-effort persist, then unconditional re-score. */
     private suspend fun editMethod(
-        persist: suspend () -> Unit,
+        persist: suspend () -> Boolean,
         analyzeRecent: suspend () -> Unit,
-    ) {
-        runCatching { persist() }
+    ): Boolean {
+        val saved = runCatching { persist() }.getOrDefault(false)
         rescoreAfterSleepEdit(analyzeRecent)
+        return saved
     }
 
     /** Pure mirror of recomputeDeletedSleep: the marker must be cleared before analysis, and a failed
@@ -69,10 +74,11 @@ class SleepEditRescoreTest {
     @Test
     fun rescoreRunsAfterAPersist() = runTest {
         val rec = Recorder()
-        editMethod(
-            persist = { rec.events += "persist" },
+        val saved = editMethod(
+            persist = { rec.events += "persist"; true },
             analyzeRecent = { rec.events += "rescore" },
         )
+        assertTrue(saved)
         assertEquals("persist must precede the re-score", listOf("persist", "rescore"), rec.events)
     }
 
@@ -81,10 +87,11 @@ class SleepEditRescoreTest {
         // The Sleep screen already applied the edit optimistically, so a persist failure must NOT skip the
         // re-score (the day still needs to recompute off whatever the persist managed / the prior state).
         val rec = Recorder()
-        editMethod(
+        val saved = editMethod(
             persist = { throw IllegalStateException("DB write failed") },
             analyzeRecent = { rec.events += "rescore" },
         )
+        assertTrue(!saved)
         assertEquals("a failed persist must not suppress the re-score", listOf("rescore"), rec.events)
     }
 
@@ -93,11 +100,21 @@ class SleepEditRescoreTest {
         // An analyzeRecent hiccup must never throw into the edit caller (the screen's scope.launch) — the
         // 15-min loop will catch up. Best-effort, exactly like the loop's runCatching.
         editMethod(
-            persist = { },
+            persist = { true },
             analyzeRecent = { throw RuntimeException("scoring blew up") },
         )
         // Reaching here without throwing IS the assertion.
         assertTrue(true)
+    }
+
+    @Test
+    fun zeroRowEditIsReportedToTheScreen() = runTest {
+        val saved = editMethod(
+            persist = { false },
+            analyzeRecent = { },
+        )
+
+        assertTrue(!saved)
     }
 
     @Test

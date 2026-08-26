@@ -34,12 +34,11 @@
     <string name="daily_plan_progress_in_range">В запланированном на сегодня диапазоне. Это ориентир, а не правило остановки.</string>
     <string name="daily_plan_signal_good">Согласовано</string>
     <string name="daily_plan_signal_hrv">Вариабельность сердечного ритма</string>
-    <string name="daily_plan_signal_load">Соотношение недавней нагрузки</string>
     <string name="daily_plan_signal_neutral">В диапазоне</string>
     <string name="daily_plan_signal_respiration">Частота дыхания</string>
     <string name="daily_plan_signal_rhr">Пульс в покое</string>
     <string name="daily_plan_signal_shifted">Сдвиг</string>
-    <string name="daily_plan_signal_variety">Разнообразие тренировок</string>
+    <string name="daily_plan_signal_variety">Разнообразие Effort</string>
     <string name="daily_plan_signal_watch">Перепроверьте</string>
     <string name="daily_plan_state_calibrating_body">NOOP нужны актуальная и надёжная оценка готовности и не менее семи недавних дней с рассчитанным Effort.</string>
     <string name="daily_plan_state_calibrating_title">Диапазона пока нет</string>

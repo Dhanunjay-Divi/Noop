@@ -79,6 +79,23 @@ final class SleepMergeTests: XCTestCase {
         XCTAssertEqual(merged.map(\.startTs), [0, 86_400], #""[]" and blank JSON are not stages"#)
     }
 
+    func testMalformedNonblankPayloadDoesNotCountAsStages() {
+        let computed = session(start: 0, end: 8 * 3600, stages: someStages)
+        let malformed = session(
+            start: 3600,
+            end: 8 * 3600 + 1800,
+            stages: #"{"unrelated":"nonblank"}"#)
+        let merged = SleepMerge.merge(
+            imported: [malformed],
+            computed: [computed],
+            endDay: dayKey)
+
+        XCTAssertEqual(
+            merged.map(\.startTs),
+            [0],
+            "malformed JSON must not suppress a valid computed night")
+    }
+
     func testRichnessExceptionKeepsEverySessionOfWinningDay() {
         // Day has computed main night (with stages) + computed nap (no stages); import is stage-less.
         // The WHOLE computed day survives — #715's keep-every-session guarantee still holds.

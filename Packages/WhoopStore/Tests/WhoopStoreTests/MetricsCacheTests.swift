@@ -16,7 +16,7 @@ final class MetricsCacheTests: XCTestCase {
     }
 
     func testSchemaVersionBumped() {
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 43)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 45)
     }
 
     // MARK: - sleep sessions
@@ -66,6 +66,89 @@ final class MetricsCacheTests: XCTestCase {
                      "legacy/imported callers default to unknown coverage, never dense")
     }
 
+    func testSleepSessionRREvidenceRoundTripsThroughStorageAndCodable() async throws {
+        let store = try await WhoopStore.inMemory()
+        let session = CachedSleepSession(
+            startTs: 1_000,
+            endTs: 29_800,
+            efficiency: 0.9,
+            restingHr: 52,
+            avgHrv: 65,
+            stagesJSON: "[]",
+            rrEligibleWindowCount: 96,
+            rrValidWindowCount: 31
+        )
+
+        try await store.upsertSleepSessions([session], deviceId: "devA")
+        let storedRows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        let stored = try XCTUnwrap(storedRows.first)
+        XCTAssertEqual(stored, session)
+        XCTAssertEqual(stored.rrEligibleWindowCount, 96)
+        XCTAssertEqual(stored.rrValidWindowCount, 31)
+
+        let portable = try JSONEncoder().encode(stored)
+        XCTAssertEqual(try JSONDecoder().decode(CachedSleepSession.self, from: portable), session)
+    }
+
+    func testSleepSessionLegacyCodableAndInitializerDefaultRREvidenceToNil() throws {
+        let legacy = Data(
+            """
+            {
+              "startTs": 1000,
+              "endTs": 5000,
+              "efficiency": 0.9,
+              "restingHr": 52,
+              "avgHrv": 65,
+              "stagesJSON": "[]",
+              "gravitySparse": false,
+              "userEdited": false,
+              "startTsAdjusted": null
+            }
+            """.utf8
+        )
+        let decoded = try JSONDecoder().decode(CachedSleepSession.self, from: legacy)
+        XCTAssertNil(decoded.rrEligibleWindowCount)
+        XCTAssertNil(decoded.rrValidWindowCount)
+
+        let defaulted = CachedSleepSession(
+            startTs: 2_000, endTs: 6_000, efficiency: nil,
+            restingHr: nil, avgHrv: nil, stagesJSON: nil
+        )
+        XCTAssertNil(defaulted.rrEligibleWindowCount)
+        XCTAssertNil(defaulted.rrValidWindowCount)
+    }
+
+    func testSleepSessionReplacementWithoutRREvidenceClearsOldCounts() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertSleepSessions(
+            [
+                CachedSleepSession(
+                    startTs: 1_000, endTs: 5_000, efficiency: 0.9,
+                    restingHr: 52, avgHrv: 65, stagesJSON: "[]",
+                    rrEligibleWindowCount: 13, rrValidWindowCount: 8
+                ),
+            ],
+            deviceId: "devA"
+        )
+
+        try await store.upsertSleepSessions(
+            [
+                CachedSleepSession(
+                    startTs: 1_000, endTs: 6_000, efficiency: 0.95,
+                    restingHr: 50, avgHrv: 70, stagesJSON: "[]"
+                ),
+            ],
+            deviceId: "devA"
+        )
+
+        let replacedRows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        let replaced = try XCTUnwrap(replacedRows.first)
+        XCTAssertNil(replaced.rrEligibleWindowCount)
+        XCTAssertNil(replaced.rrValidWindowCount)
+    }
+
     func testSleepSessionRangeFilter() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertSleepSessions([
@@ -74,6 +157,33 @@ final class MetricsCacheTests: XCTestCase {
         ], deviceId: "devA")
         let rows = try await store.sleepSessions(deviceId: "devA", from: 400, to: 1000, limit: 100)
         XCTAssertEqual(rows.map { $0.startTs }, [500])
+    }
+
+    func testSleepSessionReadSnapshotReturnsBothRangesAndSources() async throws {
+        let store = try await WhoopStore.inMemory()
+        let old = CachedSleepSession(
+            startTs: 1_000, endTs: 2_000, efficiency: nil,
+            restingHr: nil, avgHrv: nil, stagesJSON: nil)
+        let recent = CachedSleepSession(
+            startTs: 10_000, endTs: 20_000, efficiency: nil,
+            restingHr: nil, avgHrv: nil, stagesJSON: nil)
+        try await store.upsertSleepSessions([old, recent], deviceId: "devA")
+        try await store.upsertSleepSessions([recent], deviceId: "devB")
+
+        let snapshot = try await store.sleepSessionReadSnapshot(
+            deviceIds: ["devB", "devA", "devA"],
+            requestedFrom: 5_000,
+            requestedTo: 30_000,
+            requestedLimit: 10,
+            historyFrom: 0,
+            historyTo: 30_000,
+            historyLimit: 10)
+
+        XCTAssertEqual(snapshot.requestedByDevice["devA"], [recent])
+        XCTAssertEqual(snapshot.requestedByDevice["devB"], [recent])
+        XCTAssertEqual(snapshot.historyByDevice["devA"], [old, recent])
+        XCTAssertEqual(snapshot.historyByDevice["devB"], [recent])
+        XCTAssertEqual(snapshot.requestedByDevice.count, 2)
     }
 
     // MARK: - v13 user-edited sleep bounds (#367 parity: edits survive re-sync)
@@ -140,6 +250,63 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(rows[0].stagesJSON, "[\"reclipped\"]", "nil stagesJSON preserves existing stages")
     }
 
+    func testSleepEditAndStageReplacementClearRREvidenceUnlessExplicitlySupplied() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertSleepSessions(
+            [
+                CachedSleepSession(
+                    startTs: 1_000, endTs: 5_000, efficiency: 0.9,
+                    restingHr: 52, avgHrv: 60, stagesJSON: "[\"original\"]",
+                    rrEligibleWindowCount: 13, rrValidWindowCount: 8
+                ),
+            ],
+            deviceId: "devA"
+        )
+
+        try await store.applySleepEdit(
+            deviceId: "devA", detectedStartTs: 1_000,
+            newStartTs: 1_200, newEndTs: 4_800,
+            stagesJSON: "[\"edited\"]"
+        )
+        var rows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        var row = try XCTUnwrap(rows.first)
+        XCTAssertNil(row.rrEligibleWindowCount)
+        XCTAssertNil(row.rrValidWindowCount)
+
+        try await store.applySleepEdit(
+            deviceId: "devA", detectedStartTs: 1_000,
+            newStartTs: 1_200, newEndTs: 4_800,
+            stagesJSON: "[\"restaged\"]",
+            rrEligibleWindowCount: 12,
+            rrValidWindowCount: 9
+        )
+        rows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.rrEligibleWindowCount, 12)
+        XCTAssertEqual(row.rrValidWindowCount, 9)
+
+        try await store.updateSleepStages(
+            deviceId: "devA", detectedStartTs: 1_000, stagesJSON: "[\"replacement\"]"
+        )
+        rows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        row = try XCTUnwrap(rows.first)
+        XCTAssertNil(row.rrEligibleWindowCount)
+        XCTAssertNil(row.rrValidWindowCount)
+
+        try await store.updateSleepStages(
+            deviceId: "devA", detectedStartTs: 1_000, stagesJSON: "[\"exact\"]",
+            rrEligibleWindowCount: 12, rrValidWindowCount: 10
+        )
+        rows = try await store.sleepSessions(
+            deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.rrEligibleWindowCount, 12)
+        XCTAssertEqual(row.rrValidWindowCount, 10)
+    }
+
     func testApplySleepEditStoresAdjustedOnsetAndSurvivesRecompute() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertSleepSessions(
@@ -148,7 +315,8 @@ final class MetricsCacheTests: XCTestCase {
             deviceId: "devA")
         // Correct BOTH onset (1000 → 1300) and wake (5000 → 4200). The detected key stays 1000.
         try await store.applySleepEdit(deviceId: "devA", detectedStartTs: 1000, newStartTs: 1300,
-                                       newEndTs: 4200, stagesJSON: "[\"restaged\"]")
+                                       newEndTs: 4200, stagesJSON: "[\"restaged\"]",
+                                       rrEligibleWindowCount: 10, rrValidWindowCount: 7)
         var rows = try await store.sleepSessions(deviceId: "devA", from: 0, to: 100_000, limit: 100)
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].startTs, 1000, "detected onset key is unchanged")
@@ -157,16 +325,20 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(rows[0].endTs, 4200)
         XCTAssertTrue(rows[0].userEdited)
 
-        // A re-sync recompute (userEdited=false, startTsAdjusted nil incoming) must preserve the onset edit.
+        // A re-sync recompute (userEdited=false, startTsAdjusted nil incoming) must preserve the onset edit
+        // and the exact edited-window evidence rather than attaching detector-window counts to it.
         try await store.upsertSleepSessions(
             [CachedSleepSession(startTs: 1000, endTs: 5000, efficiency: 0.95,
-                                restingHr: 49, avgHrv: 71, stagesJSON: "[\"resync\"]")],
+                                restingHr: 49, avgHrv: 71, stagesJSON: "[\"resync\"]",
+                                rrEligibleWindowCount: 13, rrValidWindowCount: 8)],
             deviceId: "devA")
         rows = try await store.sleepSessions(deviceId: "devA", from: 0, to: 100_000, limit: 100)
         XCTAssertEqual(rows[0].startTsAdjusted, 1300, "onset edit survives re-sync")
         XCTAssertEqual(rows[0].endTs, 4200, "wake edit survives re-sync")
         XCTAssertEqual(rows[0].stagesJSON, "[\"restaged\"]")
         XCTAssertEqual(rows[0].efficiency, 0.95, "vitals still refresh")
+        XCTAssertEqual(rows[0].rrEligibleWindowCount, 10)
+        XCTAssertEqual(rows[0].rrValidWindowCount, 7)
     }
 
     // MARK: - self-heal: re-derive stages for a night edited before its raw synced
@@ -282,6 +454,8 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertTrue(rows[0].userEdited, "a manual nap is flagged user-edited so the recompute guard keeps it")
         XCTAssertNil(rows[0].startTsAdjusted, "a manual nap's onset is the chosen onset (no detected twin)")
         XCTAssertEqual(rows[0].efficiency, 0.8)
+        XCTAssertNil(rows[0].rrEligibleWindowCount)
+        XCTAssertNil(rows[0].rrValidWindowCount)
     }
 
     /// Adding a nap leaves the night's main sleep untouched — they are two distinct rows (the nap is
@@ -385,6 +559,33 @@ final class MetricsCacheTests: XCTestCase {
         ], deviceId: "devA")
         let rows = try await store.dailyMetrics(deviceId: "devA", from: "2026-05-10", to: "2026-05-31")
         XCTAssertEqual(rows.map { $0.day }, ["2026-05-20"])
+    }
+
+    func testDailyHrvMethodRoundTripsAndUnknownReplacementClearsStaleMethod() async throws {
+        let store = try await WhoopStore.inMemory()
+        let measured = DailyMetric(
+            day: "2026-05-21", totalSleepMin: nil, efficiency: nil,
+            deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+            restingHr: 52, avgHrv: 61, recovery: nil, strain: nil,
+            exerciseCount: nil, hrvMethod: .rmssd)
+        try await store.upsertDailyMetrics([measured], deviceId: "devA")
+
+        var rows = try await store.dailyMetrics(
+            deviceId: "devA", from: measured.day, to: measured.day)
+        var row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.hrvMethod, .rmssd)
+
+        let unknownReplacement = DailyMetric(
+            day: measured.day, totalSleepMin: nil, efficiency: nil,
+            deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
+            restingHr: 53, avgHrv: 59, recovery: nil, strain: nil,
+            exerciseCount: nil)
+        try await store.upsertDailyMetrics([unknownReplacement], deviceId: "devA")
+        rows = try await store.dailyMetrics(
+            deviceId: "devA", from: measured.day, to: measured.day)
+        row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.avgHrv, 59)
+        XCTAssertNil(row.hrvMethod, "a replacement cannot retain method evidence for another value")
     }
 
     // MARK: - windowed computed-daily delete (#277 local-day re-bucketing migration)

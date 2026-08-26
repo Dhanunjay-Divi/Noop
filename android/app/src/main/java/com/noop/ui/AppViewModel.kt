@@ -1751,14 +1751,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** All workouts for the Workouts screen (newest first), dismissed detected bouts removed. */
     val workouts: StateFlow<List<WorkoutRow>> = _workouts.asStateFlow()
 
-    /** Persist a bed/wake-time edit for one sleep session (delete-then-upsert at the new window), then
+    /** Persist a bed/wake-time edit for one sleep session in place, then
      *  re-score the affected day immediately so Charge / Rest / recovery and the persisted
      *  sleep_performance honor the corrected window without waiting for the 15-min loop — matching Swift
-     *  SleepView, which calls analyzeRecent() right after editSleepTimes. Swallows persist failures — the
-     *  Sleep screen already applied the change optimistically. */
-    suspend fun updateSleepSessionTimes(session: com.noop.data.SleepSession, newStartTs: Long, newEndTs: Long) {
-        runCatching { repository.updateSleepSessionTimes(session, newStartTs, newEndTs) }
+     *  SleepView, which calls analyzeRecent() right after editSleepTimes. Returns false when the row was
+     *  concurrently removed or the write failed, allowing the optimistic screen to reload authoritative
+     *  history instead of fabricating a replacement. */
+    suspend fun updateSleepSessionTimes(
+        session: com.noop.data.SleepSession,
+        newStartTs: Long,
+        newEndTs: Long,
+    ): Boolean {
+        val saved = runCatching {
+            repository.updateSleepSessionTimes(session, newStartTs, newEndTs)
+        }.onFailure {
+            if (it is CancellationException) throw it
+        }.getOrDefault(false)
         rescoreAfterEdit()
+        return saved
     }
 
     /** Delete one sleep session, then re-score the affected day immediately so the dashboard aggregates

@@ -186,7 +186,6 @@
     <string name="appwide_readiness_limitation_no_current_signal">No current recovery signal has enough prior variation for comparison.</string>
     <string name="appwide_readiness_limitation_no_daily_row">No daily recovery row is available for this date.</string>
     <string name="appwide_readiness_limitation_one_signal">This read is based on one current recovery signal.</string>
-    <string name="appwide_readiness_limitation_recent_load">The recent-load ratio is descriptive and does not affect readiness.</string>
     <string name="appwide_readiness_primed_headline">Aligned</string>
     <string name="appwide_readiness_primed_summary">Your measured recovery trends are aligned with your recent baseline.</string>
     <string name="appwide_readiness_rundown_headline">Multiple shifts</string>
@@ -195,6 +194,7 @@
     <string name="appwide_readiness_strained_summary">One measured signal shifted from your recent range. A single day is a cue to recheck, not a diagnosis or training instruction.</string>
     <string name="appwide_rhythm_methodology">NOOP reads only quiet overnight windows outside recorded workouts. Movement, exercise, elevated non-resting heart rate, and noisy windows are skipped rather than interpreted. It draws the timing between heartbeats as a Poincaré scatter and computes published descriptive statistics. Rhythm is an opt-in picture of timing, never a diagnosis, and it never sends alerts.</string>
     <string name="appwide_shell_updates_unread_format">Updates, %1$d unread</string>
+    <string name="appwide_sleep_edit_conflict">This night changed before the edit could be saved. Latest data restored.</string>
     <string name="appwide_sleep_recovery_added_format">Recent balance adds %1$s tonight. This is capped at 1 hour and will never reduce your target.</string>
     <string name="appwide_sleep_recovery_none">No recovery time is added tonight. NOOP never recommends less than your target because of a recent surplus.</string>
     <string name="appwide_sleep_reminder_around_format">Reminder scheduled around %1$s.</string>

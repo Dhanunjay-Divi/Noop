@@ -31,7 +31,11 @@ internal fun sleepMetricSpec(key: String): SleepMetricSpec = when (key) {
     else              -> SleepMetricSpec(key, "", Palette.accent) { "${it.roundToInt()}" }
 }
 
-internal fun buildSleepMetricPoints(days: List<DailyMetric>, key: String): List<Pair<String, Double>> {
+internal fun buildSleepMetricPoints(
+    days: List<DailyMetric>,
+    key: String,
+    detailedStageDays: Set<String> = emptySet(),
+): List<Pair<String, Double>> {
     val needMin = max(450.0, days.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 } }.average().let { if (it.isNaN()) 480.0 else it })
     return days.mapNotNull { d ->
         val v: Double? = when (key) {
@@ -53,6 +57,7 @@ internal fun buildSleepMetricPoints(days: List<DailyMetric>, key: String): List<
             }
             "hours_vs_needed" -> d.totalSleepMin?.takeIf { it > 0.0 }?.let { minOf(100.0, it / needMin * 100.0) }
             "restorative" -> {
+                if (d.day !in detailedStageDays) return@mapNotNull null
                 val dp = d.deepMin ?: return@mapNotNull null
                 val rm = d.remMin ?: return@mapNotNull null
                 val sl = d.totalSleepMin ?: return@mapNotNull null

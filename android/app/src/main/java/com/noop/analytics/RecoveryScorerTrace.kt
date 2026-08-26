@@ -177,7 +177,8 @@ object RecoveryScorerTrace {
         // invalid/nil paths returned above, so score is non-null here.
         lines.add(
             "charge score=${r2(score)} band=${RecoveryScorer.band(score)} " +
-                "(logistic k=${r2(RecoveryScorer.logisticK)} z0=${r2(RecoveryScorer.logisticZ0)})",
+                "(logistic k=${r2(RecoveryScorer.personalBaselineLogisticSlope)} " +
+                "z0=${r2(RecoveryScorer.personalBaselineLogisticMidpointZ)})",
         )
 
         return score to lines

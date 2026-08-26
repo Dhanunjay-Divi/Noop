@@ -79,7 +79,16 @@ object HealthExportPlan {
     /** One stored fragment as the export sees it: [keyStartTs] is the immutable detected onset (the
      *  dedup identity — a user edit must never change it), [startTs] the EFFECTIVE onset that drives
      *  the exported span (`startTsAdjusted ?: startTs`, iOS parity #318). */
-    data class SleepInput(val keyStartTs: Long, val startTs: Long, val endTs: Long, val stagesJSON: String?)
+    data class SleepInput(
+        val keyStartTs: Long,
+        val startTs: Long,
+        val endTs: Long,
+        val stagesJSON: String?,
+        /** Resolved by the Health Connect boundary from this exact source and wake-day evidence. */
+        val publishDetailedStages: Boolean,
+        /** Offset in effect when this fragment ended. Null retains the caller's legacy fallback. */
+        val timezoneOffsetSec: Long? = null,
+    )
     enum class StageKind { AWAKE, SLEEPING, LIGHT, DEEP, REM }
     data class StagePlan(val startSec: Long, val endSec: Long, val kind: StageKind)
     data class SleepPlan(
@@ -104,31 +113,52 @@ object HealthExportPlan {
     fun sleepSessions(sessions: List<SleepInput>, nowSec: Long, offsetSec: Long): List<SleepPlan> {
         val finalized = sessions.filter { it.endTs > it.startTs && it.endTs <= nowSec }
         if (finalized.isEmpty()) return emptyList()
-        val blocks = finalized.map { com.noop.analytics.SleepStageTotals.NightBlock(it.startTs, it.endTs) }
         val out = ArrayList<SleepPlan>()
-        for (group in com.noop.analytics.SleepStageTotals.bridgedNightGroups(blocks, offsetSec)) {
-            val frags = group.indices.map { finalized[it] }.sortedBy { it.startTs }
-            val stages = ArrayList<StagePlan>()
-            var prevEnd: Long? = null
-            for (f in frags) {
-                val p = prevEnd
-                // The inter-fragment seam is time the user was demonstrably awake — export it as an
-                // explicit AWAKE stage so the merged night carries the wake instead of a silent hole.
-                if (p != null && f.startTs > p) stages.add(StagePlan(p, f.startTs, StageKind.AWAKE))
-                stages.addAll(parseStages(f.stagesJSON))
-                prevEnd = maxOf(prevEnd ?: f.endTs, f.endTs)
+        val offsetsAtBoundary = buildMap<Long, Long> {
+            for (input in finalized) {
+                val historicalOffset = input.timezoneOffsetSec ?: offsetSec
+                put(input.startTs, historicalOffset)
+                put(input.endTs, historicalOffset)
             }
-            val rep = frags.minOf { it.keyStartTs }
-            out.add(SleepPlan(
-                clientId = "noop-sleep-$rep",
-                startSec = frags.first().startTs,
-                endSec = frags.maxOf { it.endTs },
-                stages = stages,
-                absorbedClientIds = frags.map { it.keyStartTs }.filter { it != rep }
-                    .sorted().map { "noop-sleep-$it" },
-            ))
         }
-        return out
+        val blocks = finalized.map {
+            com.noop.analytics.SleepStageTotals.NightBlock(it.startTs, it.endTs)
+        }
+        val buckets = com.noop.analytics.SleepStageTotals.wakeDayBuckets(
+            blocks,
+            offsetAtEpochSec = { offsetsAtBoundary[it] ?: offsetSec },
+        )
+        for (bucket in buckets) {
+            for (group in bucket.groups) {
+                val frags = group.indices.map { finalized[it] }.sortedBy { it.startTs }
+                val stages = ArrayList<StagePlan>()
+                var prevEnd: Long? = null
+                var previousPublishedDetail: Boolean? = null
+                for (f in frags) {
+                    val p = prevEnd
+                    // The inter-fragment seam is time the user was demonstrably awake — export it as an
+                    // explicit AWAKE stage only when both adjacent fragments may publish stage detail.
+                    if (p != null && f.startTs > p &&
+                        previousPublishedDetail == true && f.publishDetailedStages
+                    ) {
+                        stages.add(StagePlan(p, f.startTs, StageKind.AWAKE))
+                    }
+                    if (f.publishDetailedStages) stages.addAll(parseStages(f.stagesJSON))
+                    prevEnd = maxOf(prevEnd ?: f.endTs, f.endTs)
+                    previousPublishedDetail = f.publishDetailedStages
+                }
+                val rep = frags.minOf { it.keyStartTs }
+                out.add(SleepPlan(
+                    clientId = "noop-sleep-$rep",
+                    startSec = frags.first().startTs,
+                    endSec = frags.maxOf { it.endTs },
+                    stages = stages,
+                    absorbedClientIds = frags.map { it.keyStartTs }.filter { it != rep }
+                        .sorted().map { "noop-sleep-$it" },
+                ))
+            }
+        }
+        return out.sortedBy { it.startSec }
     }
 
     /** Parse the `{start,end,stage}` segment array and preserve stages Health Connect can represent.

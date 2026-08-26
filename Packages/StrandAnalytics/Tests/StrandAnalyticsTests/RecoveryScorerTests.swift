@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import StrandAnalytics
 import WhoopProtocol
@@ -23,16 +24,20 @@ final class RecoveryScorerTests: XCTestCase {
                       nightsSinceUpdate: 0, status: nValid >= 14 ? .trusted : .provisional)
     }
 
-    func testRecoveryAtBaselineNearPopulationMean() {
-        // HRV at baseline, RHR at baseline, no resp, sleepPerf at center → Z≈0 → ~58%.
+    func testRecoveryAtPersonalBaselineUsesFixedLogisticMapping() {
+        // Every supplied driver is at its personal center, so composite z is zero.
         let r = RecoveryScorer.recovery(
             hrv: 50, rhr: 55, resp: nil,
             hrvBaseline: baseline(mean: 50, sigma: 6),
             rhrBaseline: baseline(mean: 55, sigma: 3),
             respBaseline: nil,
             sleepPerf: RecoveryScorer.sleepPerfCenter)
+        let expected = 100.0 / (1.0 + exp(
+            -RecoveryScorer.personalBaselineLogisticSlope
+                * (0.0 - RecoveryScorer.personalBaselineLogisticMidpointZ)
+        ))
         XCTAssertNotNil(r)
-        XCTAssertEqual(r!, 57.93, accuracy: 0.5)
+        XCTAssertEqual(r!, expected, accuracy: 1e-9)
     }
 
     func testPersonalRestCenterRemovesPersistentSleepPenalty() {
@@ -163,7 +168,7 @@ final class RecoveryScorerTests: XCTestCase {
 
     func testRespTermDropAndRenormalize() {
         // With resp present vs nil but everything else equal at baseline, the score
-        // stays near population mean either way (no driver pushes Z off zero).
+        // stays at the neutral personal-baseline mapping (no driver moves z off zero).
         let withResp = RecoveryScorer.recovery(
             hrv: 50, rhr: 55, resp: 100,
             hrvBaseline: baseline(mean: 50, sigma: 6),

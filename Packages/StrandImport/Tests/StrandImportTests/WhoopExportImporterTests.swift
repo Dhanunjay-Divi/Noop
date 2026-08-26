@@ -89,6 +89,7 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(r0.recoveryScore, 72)
         XCTAssertEqual(r0.restingHeartRate, 52)
         XCTAssertEqual(r0.hrvMs, 68.4)
+        XCTAssertEqual(r0.hrvMethod, .rmssd)
         XCTAssertEqual(r0.skinTempCelsius, 33.1)
         XCTAssertEqual(r0.bloodOxygenPct, 96.0)
         XCTAssertEqual(r0.dayStrain, 12.5)
@@ -116,6 +117,18 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(r1.tzOffsetMin, -300)
         XCTAssertEqual(r1.cycleStart, Fixtures.utc(2024, 1, 3, 11, 29, 0)) // 06:29 -05:00
         XCTAssertEqual(r1.recoveryScore, 55)
+    }
+
+    func testCycleExplicitUnknownHrvMethodFailsClosed() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Heart rate variability (ms),HRV method
+        2026-01-01 06:00:00,UTC+00:00,61,proprietary
+        """
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first)
+
+        XCTAssertEqual(row.hrvMs, 61)
+        XCTAssertNil(row.hrvMethod)
     }
 
     func testCycleSkinTemperatureFahrenheitIsNormalizedToCelsius() throws {

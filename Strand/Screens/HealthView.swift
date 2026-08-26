@@ -1550,15 +1550,12 @@ enum HealthSleepTimelineResolver {
         calendar: Calendar = .current
     ) -> [HealthSleepTimelineEvent] {
         let valid = sessions.filter { $0.endTs > $0.effectiveStartTs }
-        let byDay = Dictionary(grouping: valid) { session in
-            dayKey(
-                Date(timeIntervalSince1970: TimeInterval(session.endTs)),
-                calendar: calendar
-            )
-        }
-        return byDay.compactMap { day, sessions in
+        let wakeDays = SleepView.wakeDaySessionBuckets(
+            valid,
+            timeZone: calendar.timeZone)
+        return wakeDays.compactMap { bucket in
             let main = SleepView.mainNightGroup(
-                sessions,
+                bucket.sessions,
                 habitualMidsleepSec: habitualMidsleepSec
             )
             guard let first = main.first,
@@ -1567,22 +1564,12 @@ enum HealthSleepTimelineResolver {
                 return nil
             }
             return HealthSleepTimelineEvent(
-                day: day,
+                day: bucket.day,
                 startTs: first.effectiveStartTs,
                 endTs: last.endTs
             )
         }
         .sorted { $0.endTs > $1.endTs }
-    }
-
-    private static func dayKey(_ date: Date, calendar: Calendar) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(
-            format: "%04d-%02d-%02d",
-            parts.year ?? 0,
-            parts.month ?? 0,
-            parts.day ?? 0
-        )
     }
 }
 

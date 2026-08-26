@@ -111,6 +111,8 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertNotNil(result.cachedSleep[0].stagesJSON)
         XCTAssertEqual(result.cachedSleep[0].restingHr, 50)
         XCTAssertEqual(result.cachedSleep[0].gravitySparse, false)
+        XCTAssertGreaterThan(result.cachedSleep[0].rrEligibleWindowCount ?? 0, 0)
+        XCTAssertGreaterThan(result.cachedSleep[0].rrValidWindowCount ?? 0, 0)
     }
 
     func testMainSleepEvidenceRequiresSustainedCoverageInsideMainGroup() {

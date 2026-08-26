@@ -1,8 +1,10 @@
 package com.noop.sync
 
+import com.noop.analytics.DetailedSleepStagePublication
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
+import com.noop.data.DailyHrvMethod
 import com.noop.data.PairedDeviceRow
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
@@ -253,11 +255,22 @@ class RemoteSyncCoordinator(
                         restingHr = row.restingHr,
                         avgHrv = row.avgHrv?.takeIf(Double::isFinite),
                         stages = stageSeconds(row.stagesJSON),
-                        metadata = mapOf(
-                            "detected_start_ts" to row.startTs.toString(),
-                            "user_edited" to row.userEdited.toString(),
-                            "provenance" to namespace.role,
-                        ),
+                        metadata = buildMap {
+                            put("detected_start_ts", row.startTs.toString())
+                            put("user_edited", row.userEdited.toString())
+                            put("provenance", namespace.role)
+                            row.avgHrv?.takeIf(Double::isFinite)?.let {
+                                // Session-level HRV producers are RMSSD. Health Connect/Apple
+                                // SDNN is represented only on typed daily rows.
+                                put("hrv_method", DailyHrvMethod.RMSSD)
+                            }
+                            // Preserve the nullable pair together. Omitting both is the fail-closed
+                            // representation for imports, legacy rows, and incomplete/corrupt evidence.
+                            DetailedSleepStagePublication.exactRrWindowCounts(row)?.let { counts ->
+                                put("rr_eligible_window_count", counts.eligible.toString())
+                                put("rr_valid_window_count", counts.valid.toString())
+                            }
+                        },
                     )
                 }
                 .toList(),
@@ -522,6 +535,11 @@ class RemoteSyncCoordinator(
         out.putFinite("disturbances", row.disturbances?.toDouble())
         out.putFinite("resting_hr", row.restingHr?.toDouble())
         out.putFinite("avg_hrv", row.avgHrv)
+        when (DailyHrvMethod.normalized(row.hrvMethod)) {
+            DailyHrvMethod.RMSSD -> out.putFinite("avg_hrv_rmssd", row.avgHrv)
+            DailyHrvMethod.SDNN -> out.putFinite("avg_hrv_sdnn", row.avgHrv)
+            else -> Unit
+        }
         out.putFinite("recovery", row.recovery)
         out.putFinite("effort", row.strain)
         if (namespaceRole == "official_reference") {

@@ -366,6 +366,15 @@ public struct WhoopExportImporter {
             r.recoveryScore    = row.double("recovery_score_pct")
             r.restingHeartRate = row.double("resting_heart_rate_bpm", "resting_heart_rate")
             r.hrvMs            = row.double("heart_rate_variability_ms", "heart_rate_variability_rmssd_ms")
+            if r.hrvMs != nil {
+                if let method = row.cell("hrv_method") {
+                    r.hrvMethod = DailyHRVMethod(rawValue: method.uppercased())
+                } else {
+                    // Genuine WHOOP exports predate NOOP's optional method column and define this
+                    // field as RMSSD. An explicit unknown value remains nil instead of being relabelled.
+                    r.hrvMethod = .rmssd
+                }
+            }
             // WHOOP schemas seen in the wild use either an explicit Celsius or Fahrenheit
             // header. Keep the normalized model genuinely Celsius: accepting `skin_temp_f`
             // verbatim made a 95 °F reading look like 95 °C downstream. Prefer Celsius if a

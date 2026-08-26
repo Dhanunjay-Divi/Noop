@@ -33,6 +33,19 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
         restConfidenceSeriesKey,
         restEvidenceSeriesKey,
     ]
+    /// Customer-facing series that expose a detailed stage classification rather than sleep duration.
+    /// Locally computed values for these keys must pass the exact-session publication policy below.
+    public static let detailedSleepStageSeriesKeys: Set<String> = [
+        "sleep_deep_min", "deep_min",
+        "sleep_rem_min", "rem_min",
+        "sleep_light_min", "core_min",
+        "sleep_awake_min", "awake_min",
+        "restorative_min", "restorative_pct",
+    ]
+
+    public static func isDetailedSleepStageSeriesKey(_ key: String) -> Bool {
+        detailedSleepStageSeriesKeys.contains(key)
+    }
 
     /// Stable numeric projection used only for the local `rest_confidence` metric series.
     public var persistedValue: Double {
@@ -332,6 +345,100 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
             limitations.append(.implausibleStageMix)
         }
         return RestAssessment(confidence: confidence, limitations: limitations)
+    }
+
+    /// Whether exact-session R-R coverage is sufficient to publish a locally computed stage split.
+    /// Counts are nullable at the persistence boundary so legacy, imported, manually reshaped, and
+    /// partially restored rows fail closed. Invalid counts also fail closed instead of being clamped.
+    public static func hasSustainedRREvidence(
+        eligibleWindowCount: Int?,
+        validRRWindowCount: Int?
+    ) -> Bool {
+        guard let eligibleWindowCount,
+              let validRRWindowCount,
+              eligibleWindowCount > 0,
+              validRRWindowCount >= 0,
+              validRRWindowCount <= eligibleWindowCount else { return false }
+        return AnalyticsEngine.hasSustainedRestEvidence(
+            validWindowCount: validRRWindowCount,
+            eligibleWindowCount: eligibleWindowCount)
+    }
+
+    /// Raw exact-session counts stored beside a local stage payload. The persistence layer keeps these
+    /// counts rather than a thresholded boolean so a bridged main-night group can be re-evaluated after
+    /// edits without retaining or replaying the underlying beat intervals.
+    public struct DetailedStageRREvidenceCounts: Equatable, Sendable {
+        public let eligibleWindowCount: Int
+        public let validRRWindowCount: Int
+
+        public init(eligibleWindowCount: Int, validRRWindowCount: Int) {
+            self.eligibleWindowCount = eligibleWindowCount
+            self.validRRWindowCount = validRRWindowCount
+        }
+    }
+
+    /// Evaluate one exact staged session with the classifier's canonical five-minute R-R pipeline.
+    public static func detailedStageRREvidenceCounts(
+        session: SleepSession,
+        rr: [RRInterval]
+    ) -> DetailedStageRREvidenceCounts {
+        let counts = AnalyticsEngine.mainSleepEvidenceCounts(
+            mainGroup: [session],
+            rr: rr,
+            resp: [])
+        return DetailedStageRREvidenceCounts(
+            eligibleWindowCount: counts.eligibleWindows,
+            validRRWindowCount: counts.validRRWindows)
+    }
+
+    /// Session indices whose detailed stages may leave raw storage.
+    ///
+    /// Callers pass one exact source and one local wake day at a time. The currently selected
+    /// main-night group's persisted per-session counts are summed and evaluated with the classifier's
+    /// canonical sustained-coverage rule. Missing evidence on any selected fragment fails the whole
+    /// group closed. Imported classifiers retain their own disclosed provenance.
+    public static func publishableDetailedSleepStageSessionIndices(
+        blocks: [SleepStageTotals.NightBlock],
+        rrEligibleWindowCounts: [Int?],
+        rrValidWindowCounts: [Int?],
+        independentlyStagedImport: Bool,
+        offsetSec: Int,
+        habitualMidsleepSec: Int?
+    ) -> Set<Int> {
+        if independentlyStagedImport { return Set(blocks.indices) }
+        guard blocks.count == rrEligibleWindowCounts.count,
+              blocks.count == rrValidWindowCounts.count,
+              let mainIndices = SleepStageTotals.mainNightGroupIndices(
+            blocks,
+            offsetSec: offsetSec,
+            habitualMidsleepSec: habitualMidsleepSec
+        ), !mainIndices.isEmpty else { return [] }
+
+        var eligibleTotal = 0
+        var validTotal = 0
+        for index in mainIndices {
+            let block = blocks[index]
+            let (duration, durationOverflow) =
+                block.end.subtractingReportingOverflow(block.start)
+            guard let eligible = rrEligibleWindowCounts[index],
+                  let valid = rrValidWindowCounts[index],
+                  !durationOverflow,
+                  duration > 0,
+                  eligible == duration / AnalyticsEngine.restEvidenceWindowSeconds,
+                  eligible > 0,
+                  valid >= 0,
+                  valid <= eligible else { return [] }
+            let (nextEligible, eligibleOverflow) = eligibleTotal.addingReportingOverflow(eligible)
+            let (nextValid, validOverflow) = validTotal.addingReportingOverflow(valid)
+            guard !eligibleOverflow, !validOverflow else { return [] }
+            eligibleTotal = nextEligible
+            validTotal = nextValid
+        }
+        guard hasSustainedRREvidence(
+            eligibleWindowCount: eligibleTotal,
+            validRRWindowCount: validTotal
+        ) else { return [] }
+        return Set(mainIndices)
     }
 
     /// Capture the same sustained five-minute evidence verdict `AnalyticsEngine` used for this main night.

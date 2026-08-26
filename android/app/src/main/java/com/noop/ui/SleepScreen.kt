@@ -145,6 +145,15 @@ internal fun resolvedRestAssessment(
     }
 }
 
+/** Authoritative active-plus-canonical sleep history for every browse reload and mutation recovery. */
+private suspend fun loadSleepBrowseSessions(vm: AppViewModel): List<SleepSession> {
+    val now = System.currentTimeMillis() / 1_000L
+    val imported = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
+    val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
+    return WhoopRepository.mergeSleep(imported, computed)
+        .sortedBy { it.effectiveStartTs }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SleepScreen(
@@ -185,28 +194,9 @@ fun SleepScreen(
     var nightOffset by remember { mutableIntStateOf(0) }
     LaunchedEffect(days) {
         sleeps = runCatching {
-            val now = System.currentTimeMillis() / 1000L
-            // Read the ACTIVE-strap ∪ canonical "my-whoop" union (#814/#1008), not the canonical id
-            // alone: after a strap remove+re-add live nights land under the fresh "whoop-<uuid>" id, so
-            // a canonical-only read left this screen STUCK on the last pre-re-add night while every
-            // union-joined surface moved on (the #1014/#1009 stuck-sleep divergence, in the OTHER
-            // direction). Exact-duplicate (startTs, endTs) blocks recorded under both ids are dropped;
-            // naps/split blocks survive. Single-device installs collapse to one id, byte-identical.
-            val imported = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
-            val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-            // Key by the LOCAL wake-day (#304), matching WhoopRepository.mergeSleep — a UTC key
-            // mis-attributed a UTC+ user's early-morning wake to yesterday. REUSE the existing
-            // dayString(ts, offsetSec) overload; do not add a new one (it clashes on the JVM).
-            fun localEndDay(ts: Long): String {
-                val offsetSec = (java.util.TimeZone.getDefault().getOffset(ts * 1000) / 1000).toLong()
-                return AnalyticsEngine.dayString(ts, offsetSec)
-            }
-            // Imported wins per local wake-day, WITH the #241 richness exception (a stage-less import
-            // yields to a computed day that has stages) — the SAME rule the browse/CSV path uses via
-            // WhoopRepository.mergeSleep. Sort by the EFFECTIVE onset so a hand-edited bedtime orders the
-            // night correctly (PR #395).
-            WhoopRepository.mergeSleepRichness(imported, computed) { localEndDay(it.endTs) }
-                .sortedBy { it.effectiveStartTs }
+            // Read the ACTIVE-strap plus canonical union (#814/#1008), richness-merge each historical
+            // local wake-day, and preserve naps/split blocks.
+            loadSleepBrowseSessions(vm)
         }.getOrDefault(emptyList())
         nightOffset = 0
     }
@@ -285,17 +275,23 @@ fun SleepScreen(
         }.getOrDefault(emptyList()).mapNotNull { row ->
             ScoreConfidence.fromPersistedValue(row.value)?.let { row.day to it }
         }.toMap()
-        restEvidenceByDay = runCatching {
-            vm.repo.metricSeriesComputedUnion(
-                vm.activeStrapId,
-                ScoreConfidence.restEvidenceSeriesKey,
-                "0000-00-00",
-                "9999-99-99",
-            )
-        }.getOrDefault(emptyList()).mapNotNull { row ->
-            ScoreConfidence.RestEvidenceFlags.fromPersistedValue(row.value)
-                ?.let { row.day to it }
-        }.toMap()
+        val evidenceRows = vm.repo.computedSourceIds(vm.activeStrapId).flatMap { source ->
+            runCatching {
+                vm.repo.metricSeries(
+                    source,
+                    ScoreConfidence.restEvidenceSeriesKey,
+                    "0000-00-00",
+                    "9999-99-99",
+                )
+            }.getOrDefault(emptyList())
+        }
+        val mergedEvidence = linkedMapOf<String, ScoreConfidence.RestEvidenceFlags>()
+        for (row in evidenceRows.asReversed()) {
+            ScoreConfidence.RestEvidenceFlags.fromPersistedValue(row.value)?.let {
+                mergedEvidence[row.day] = it
+            }
+        }
+        restEvidenceByDay = mergedEvidence
     }
 
     val context = LocalContext.current
@@ -373,6 +369,18 @@ fun SleepScreen(
         }
     }
 
+    val detailedStageDays = remember(
+        days,
+        sleeps,
+        habitualMidsleep,
+    ) {
+        detailedStagePublicationDays(
+            days,
+            sleeps,
+            habitualMidsleep,
+        )
+    }
+
     // Tapping a metric tile opens a full-history detail sheet for that one metric. (PR #260)
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var detailMetricKey by remember { mutableStateOf<String?>(null) }
@@ -384,7 +392,11 @@ fun SleepScreen(
             containerColor = Palette.surfaceRaised,
             contentColor = Palette.textPrimary,
         ) {
-            SleepMetricDetailSheetContent(vm = vm, key = currentDetailKey)
+            SleepMetricDetailSheetContent(
+                vm = vm,
+                key = currentDetailKey,
+                detailedStageDays = detailedStageDays,
+            )
         }
     }
 
@@ -393,11 +405,10 @@ fun SleepScreen(
     // oldest→newest. Each day is ONE ◀/▶ stop, so a split-sleep / nap day reads as a single night
     // and a WHOOP 4.0 user with one detected night isn't stuck on dead arrows — the chevrons step
     // by DAY, not by flat session index (#57/#59). Mirrors iOS SleepView.navDays (in-view grouping).
-    val navDays = remember(sleeps) {
-        sleeps.groupBy { localDayString(it.endTs) }
-            .toSortedMap(reverseOrder())                       // newest day first
-            .map { (_, blocks) -> blocks.sortedBy { it.effectiveStartTs } }
+    val navWakeDays = remember(sleeps) {
+        sleepWakeDayBuckets(sleeps).sortedByDescending(SleepWakeDay::day)
     }
+    val navDays = remember(navWakeDays) { navWakeDays.map(SleepWakeDay::sessions) }
 
     // Debt credit is the canonical main-night DailyMetric total PLUS actual asleep minutes from blocks
     // outside that main-night group. Keep the nap sum separate: Rest, the hero and daily total deliberately
@@ -412,15 +423,19 @@ fun SleepScreen(
     val night = remember(nightOffset, navDays, days, habitualMidsleep, motionByStart) {
         selectNight(navDays, days, nightOffset, habitualMidsleep, motionByStart)
     }
+    val canPublishSelectedStages = remember(night) {
+        night?.let(::canPublishDetailedStages) ?: false
+    }
 
     // The HERO follows the selected night (its stage breakdown comes from that day's row); the
     // at-a-glance TILES, the debt ledger, the personal need and the trend stay full-history /
     // latest-anchored, matching iOS SleepView. `selectedDay` re-points only the hero. Model is null
     // when the selected day has no stage minutes. (#5)
-    val model = remember(days, night, imported, napSleepMinByDay, sleeps) {
+    val model = remember(days, night, imported, napSleepMinByDay, sleeps, detailedStageDays) {
         buildSleepModel(days, night?.session, imported, selectedDay = night?.dayKey,
             heroStages = night?.groupStages, heroSegments = night?.groupSegments,
-            napSleepMinByDay = napSleepMinByDay, sessions = sleeps)
+            napSleepMinByDay = napSleepMinByDay, sessions = sleeps,
+            detailedStageDays = detailedStageDays)
     }
     val display = remember(model, night) { heroDisplay(model, night) }
 
@@ -431,15 +446,21 @@ fun SleepScreen(
     // newest stage-bearing day instead of vanishing. The HERO stays on `model`/`display` (an
     // honest no-stage-data fallback for the bad day, edit pencil reachable). Null only when NO day
     // has stage data: the true first-run empty state.
-    val tilesModel = remember(model, days, imported, napSleepMinByDay, sleeps) {
-        model ?: fallbackSleepModel(days, imported, napSleepMinByDay, sessions = sleeps)
+    val tilesModel = remember(model, days, imported, napSleepMinByDay, sleeps, detailedStageDays) {
+        model ?: fallbackSleepModel(
+            days,
+            imported,
+            napSleepMinByDay,
+            sessions = sleeps,
+            detailedStageDays = detailedStageDays,
+        )
     }
 
     // Jump straight to a night by its (local) wake-day — the center date block opens a picker.
     // navDays is newest-day-first, so the day's index IS its offset (0 = last night). (#160, #59)
     val onPickNightDate: (LocalDate) -> Unit = { targetDate ->
         val targetStr = targetDate.toString()
-        val dayIdx = navDays.indexOfFirst { day -> day.any { localDayString(it.endTs) == targetStr } }
+        val dayIdx = navWakeDays.indexOfFirst { it.day == targetStr }
         if (dayIdx >= 0) nightOffset = dayIdx
     }
 
@@ -465,14 +486,7 @@ fun SleepScreen(
                         sleepUndo = null
                         scope.launch {
                             vm.undoDeleteSleepSession(deleted)
-                            // Re-read so the restored night reappears in the ◀/▶ browse. Same
-                            // active∪canonical union as the main loader (#814/#1008), so the undo
-                            // reload can't snap the browse back to a canonical-only night set.
-                            sleeps = runCatching {
-                                val now = System.currentTimeMillis() / 1000L
-                                vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now) +
-                                    vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-                            }.getOrDefault(sleeps)
+                            sleeps = runCatching { loadSleepBrowseSessions(vm) }.getOrDefault(sleeps)
                         }
                     },
                 )
@@ -630,12 +644,32 @@ fun SleepScreen(
                             if (it.deviceId == s.deviceId && it.startTs == s.startTs) {
                                 val reclipped = SleepWindowReclip.reclip(it.stagesJSON, it.effectiveStartTs, it.endTs, safeStart, safeEnd)
                                 it.copy(startTsAdjusted = safeStart, endTs = safeEnd, userEdited = true,
-                                        stagesJSON = reclipped ?: it.stagesJSON)
+                                        stagesJSON = reclipped ?: it.stagesJSON,
+                                        rrEligibleWindowCount = null,
+                                        rrValidWindowCount = null)
                             } else {
                                 it
                             }
                         }
-                        scope.launch { vm.updateSleepSessionTimes(s, safeStart, safeEnd) }
+                        scope.launch {
+                            val saved = vm.updateSleepSessionTimes(s, safeStart, safeEnd)
+                            if (!saved) {
+                                // The row can disappear between opening the editor and tapping Save. Do not
+                                // fabricate a replacement from stale UI state; restore the authoritative union.
+                                sleeps = runCatching {
+                                    loadSleepBrowseSessions(vm)
+                                }.getOrElse {
+                                    sleeps.filterNot {
+                                        it.deviceId == s.deviceId && it.startTs == s.startTs
+                                    }
+                                }
+                                Toast.makeText(
+                                    context,
+                                    uiString(R.string.appwide_sleep_edit_conflict),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
                     } else {
                         // The clamp refused a future/inverted window. Never drop an edit silently (the nap
                         // pickers used to do exactly that): tell the user why nothing changed. (#940)
@@ -668,20 +702,7 @@ fun SleepScreen(
                     // insert here because the stages are staged from raw off the UI thread.
                     scope.launch {
                         vm.addManualNap(startTs, endTs)
-                        sleeps = runCatching {
-                            val now = System.currentTimeMillis() / 1000L
-                            // Same active∪canonical union as the main loader (#814/#1008), so the
-                            // post-nap reload can't snap the browse back to a canonical-only night set.
-                            val importedSessions = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
-                            val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-                            fun localEndDay(ts: Long): String {
-                                val offsetSec = (java.util.TimeZone.getDefault().getOffset(ts * 1000) / 1000).toLong()
-                                return AnalyticsEngine.dayString(ts, offsetSec)
-                            }
-                            // Same imported-wins + #241 richness merge as the main loader.
-                            WhoopRepository.mergeSleepRichness(importedSessions, computed) { localEndDay(it.endTs) }
-                                .sortedBy { it.effectiveStartTs }
-                        }.getOrDefault(sleeps)
+                        sleeps = runCatching { loadSleepBrowseSessions(vm) }.getOrDefault(sleeps)
                     }
                 },
                 onPickNightDate = onPickNightDate,
@@ -692,6 +713,8 @@ fun SleepScreen(
                 windowOnsetTs = night?.heroOnsetTs,
                 windowWakeTs = night?.heroWakeTs,
                 hasOuraStages = night?.hasOuraStages == true,
+                independentlyStagedImport = night?.independentlyStagedImport == true,
+                canPublishDetailedStages = canPublishSelectedStages,
             )
             }
             // Tiles / ledger / trends read the FULL-history model (#940): they stay up when only the
@@ -710,7 +733,7 @@ fun SleepScreen(
                 // day), showing tilesModel here would label ANOTHER day's stages as this night (#940).
                 // Hide the card in that state (iOS shows the stub's honest zeros); MetricGrid/ledger/
                 // trends above/below stay on the full-history tilesModel exactly as before.
-                if (model != null) {
+                if (model != null && canPublishSelectedStages) {
                     // Bind a non-null local so the smart-cast carries into the item {} lambda.
                     val selectedModel = model
                     item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -1076,6 +1099,8 @@ private fun Hero(
     windowOnsetTs: Long? = null,
     windowWakeTs: Long? = null,
     hasOuraStages: Boolean = false,
+    independentlyStagedImport: Boolean = false,
+    canPublishDetailedStages: Boolean = false,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onDeleteSession, onAddNap, onPickNightDate)
@@ -1097,6 +1122,21 @@ private fun Hero(
                     color = Palette.textTertiary,
                 )
             }
+        } else if (!canPublishDetailedStages) {
+            NoopCard(tint = Palette.restColor) {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                    Text(
+                        uiString(R.string.l10n_sleep_screen_stage_breakdown_e9b714f9),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        uiString(R.string.sleep_stage_detail_withheld),
+                        style = NoopType.subhead,
+                        color = Palette.textTertiary,
+                    )
+                }
+            }
         } else {
             val s = display.stages
             // After a bed/wake edit the session window is the source of truth for time-in-bed,
@@ -1109,6 +1149,7 @@ private fun Hero(
                 ?: s.total
             val stageProvenance = when {
                 hasOuraStages -> uiString(R.string.sleep_stages_oura_provenance)
+                independentlyStagedImport -> uiString(R.string.appwide_source_imported)
                 display.realSegments != null -> uiString(R.string.sleep_stages_on_device_provenance)
                 else -> null
             }
@@ -1296,9 +1337,10 @@ private fun MainSleepFooter(
  * copy is byte-identical to iOS SleepView.mainSleepReasonText. (spec 2026-06-20 C1)
  */
 internal fun mainSleepReasonText(blocks: List<SleepSession>, habitualMidsleepSec: Long?): String? {
+    if (blocks.isEmpty()) return null
     val sel = SleepStageTotals.mainNightSelection(
         blocks.map { SleepStageTotals.NightBlock(it.effectiveStartTs, it.endTs) },
-        uiTzOffsetSec(),
+        uiTzOffsetSec(blocks.maxOf { it.endTs }),
         habitualMidsleepSec,
     ) ?: return null
     // Round to whole minutes for "Xh Ym", matching Swift durationText(sel.asleepMinutes).
@@ -2446,8 +2488,8 @@ private fun NightNavHeader(
 
 @Composable
 private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
-    val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { mod ->
+    val tiles = buildList<@Composable (Modifier) -> Unit> {
+        add { mod ->
             SparkTile(
                 mod, "Sleep Score",
                 value = pctValue(m.performance.latest),
@@ -2456,8 +2498,8 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
                 spark = m.performance.series, sparkColor = Palette.restColor,
                 onClick = { onMetricClick("performance") },
             )
-        },
-        { mod ->
+        }
+        add { mod ->
             SparkTile(
                 mod, "Efficiency",
                 value = pctValue(m.efficiency.latest),
@@ -2466,8 +2508,8 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
                 spark = m.efficiency.series, sparkColor = Palette.statusPositive,
                 onClick = { onMetricClick("efficiency") },
             )
-        },
-        { mod ->
+        }
+        add { mod ->
             SparkTile(
                 mod, "Consistency",
                 value = pctValue(m.consistency.latest),
@@ -2476,8 +2518,8 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
                 spark = m.consistency.series, sparkColor = Palette.metricCyan,
                 onClick = { onMetricClick("consistency") },
             )
-        },
-        { mod ->
+        }
+        add { mod ->
             SparkTile(
                 mod, "Hours vs Needed",
                 value = pctValue(m.hoursVsNeeded.latest),
@@ -2486,18 +2528,20 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
                 spark = m.hoursVsNeeded.series, sparkColor = Palette.restColor,
                 onClick = { onMetricClick("hours_vs_needed") },
             )
-        },
-        { mod ->
-            SparkTile(
-                mod, "Restorative",
-                value = pctValue(m.restorative.latest),
-                caption = vsTypical(m.restorative.latest, m.restorative.typical, "%"),
-                accent = Palette.sleepREM,
-                spark = m.restorative.series, sparkColor = Palette.sleepREM,
-                onClick = { onMetricClick("restorative") },
-            )
-        },
-        { mod ->
+        }
+        if (m.restorative.latest != null) {
+            add { mod ->
+                SparkTile(
+                    mod, "Restorative",
+                    value = pctValue(m.restorative.latest),
+                    caption = vsTypical(m.restorative.latest, m.restorative.typical, "%"),
+                    accent = Palette.sleepREM,
+                    spark = m.restorative.series, sparkColor = Palette.sleepREM,
+                    onClick = { onMetricClick("restorative") },
+                )
+            }
+        }
+        add { mod ->
             SparkTile(
                 mod, "Respiratory",
                 value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) } ?: "-",
@@ -2506,8 +2550,8 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
                 spark = m.respiratory.series, sparkColor = Palette.metricPurple,
                 onClick = { onMetricClick("respiratory") },
             )
-        },
-    )
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Night detail", overline = "Metrics", trailing = "vs typical")
@@ -3294,11 +3338,17 @@ internal fun SleepConsistencyCard(sleeps: List<SleepSession>, habitualMidsleepSe
 // MARK: - Sleep metric detail sheet
 
 @Composable
-private fun SleepMetricDetailSheetContent(vm: AppViewModel, key: String) {
+private fun SleepMetricDetailSheetContent(
+    vm: AppViewModel,
+    key: String,
+    detailedStageDays: Set<String>,
+) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     var range by remember { mutableStateOf(SleepMetricRange.MONTH) }
     val spec = remember(key) { sleepMetricSpec(key) }
-    val allPoints = remember(days, key) { buildSleepMetricPoints(days, key) }
+    val allPoints = remember(days, key, detailedStageDays) {
+        buildSleepMetricPoints(days, key, detailedStageDays)
+    }
     val filteredPoints = remember(allPoints, range) { filterSleepMetricPoints(allPoints, range) }
 
     Column(

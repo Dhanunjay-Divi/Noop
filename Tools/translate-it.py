@@ -54,7 +54,6 @@ IT: dict[str, str] = {
     'Activity': 'Attività',
     'Activity & Energy': 'Attività ed energia',
     'Activity Breakdown': 'Dettaglio attività',
-    'Acute (7-day) vs chronic (28-day) training load. 0.8–1.3 is the sweet spot.': 'Carico di allenamento acuto (7 giorni) rispetto a cronico (28 giorni). 0,8–1,3 è la fascia ideale.',
     'Add a metric to compare': 'Aggiungi una metrica da confrontare',
     'Add metric': 'Aggiungi metrica',
     'Age': 'Età',

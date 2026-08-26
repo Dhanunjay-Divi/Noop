@@ -86,6 +86,29 @@ class EditMergePrecedenceTest {
         assertEquals(setOf(AnalyticsEngine.dayString(endTs, offsetSec)), days)
     }
 
+    @Test
+    fun userEditedDays_bridgesBeforeAssigningWakeDay() {
+        val midnight = 1_783_641_600L
+        val source = "my-whoop-noop"
+        val first = SleepSession(
+            deviceId = source,
+            startTs = midnight - 90 * 60,
+            endTs = midnight - 5 * 60,
+            userEdited = true,
+        )
+        val continuation = SleepSession(
+            deviceId = source,
+            startTs = midnight + 5 * 60,
+            endTs = midnight + 2 * 3_600,
+        )
+        val offset = WhoopRepository.historicalOffsetSeconds(continuation.endTs)
+
+        assertEquals(
+            setOf(AnalyticsEngine.dayString(continuation.endTs, offset)),
+            WhoopRepository.userEditedDays(listOf(first, continuation)),
+        )
+    }
+
     // MARK: - v18 per-epoch JSON codecs (byte-equivalent with Swift JSONEncoder/JSONDecoder)
 
     @Test

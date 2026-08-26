@@ -937,6 +937,25 @@ extension WhoopStore {
                 columns: ["isSaved", "lastUsedAt", "updatedAt"]
             )
         }
+        // v44: exact-session R-R evidence counts. Both columns are nullable and have no default:
+        // existing/imported/manual sessions must remain unknown rather than deriving evidence from
+        // duration or borrowing a day-level flag. Producers persist the number of complete five-minute
+        // windows eligible for evaluation and the subset with a valid R-R/HRV result for that exact
+        // session. Replacement/edit paths name both columns so omitted evidence clears instead of
+        // silently following a changed window.
+        migrator.registerMigration("v44-sleep-rr-window-evidence") { db in
+            try db.alter(table: "sleepSession") { t in
+                t.add(column: "rrEligibleWindowCount", .integer)
+                t.add(column: "rrValidWindowCount", .integer)
+            }
+        }
+        // v45: durable HRV statistic identity. Existing rows stay unknown instead of being guessed
+        // from a source name; producers write RMSSD or SDNN only when that method is established.
+        migrator.registerMigration("v45-daily-hrv-method") { db in
+            try db.alter(table: "dailyMetric") { t in
+                t.add(column: "hrvMethod", .text)
+            }
+        }
         return migrator
     }
 

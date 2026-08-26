@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import android.content.Context
 import android.net.Uri
+import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
@@ -199,6 +200,7 @@ object WhoopCsvExporter {
         daily: List<DailyMetric>,
         seriesByDay: Map<String, Map<String, Double>>,
         sourceByDay: Map<String, String> = emptyMap(),
+        publishDetailedSleepStages: (DailyMetric) -> Boolean = { true },
     ): String {
         val sb = StringBuilder()
         sb.append("Cycle start time,Cycle end time,Cycle timezone,Recovery score %,")
@@ -207,9 +209,11 @@ object WhoopCsvExporter {
             .append("Sleep onset,Wake onset,Sleep performance %,Respiratory rate (rpm),")
             .append("Asleep duration (min),In bed duration (min),Light sleep duration (min),")
             .append("Deep (SWS) duration (min),REM duration (min),Awake duration (min),")
-            .append("Sleep efficiency %,Sleep consistency %,Sleep need (min),Sleep debt (min),Source\r\n")
+            .append("Sleep efficiency %,Sleep consistency %,Sleep need (min),Sleep debt (min),")
+            .append("HRV method,Source\r\n")
         for (d in daily.sortedBy { it.day }) {
             val s = seriesByDay[d.day].orEmpty()
+            val publishStages = publishDetailedSleepStages(d)
             sb.append(
                 listOf(
                     d.day + " 00:00:00", "", "UTC+00:00",
@@ -223,7 +227,9 @@ object WhoopCsvExporter {
                     "", "",                // sleep/wake onset live in sleeps.csv
                     num(s["sleep_performance"]), num(d.respRateBpm), num(d.totalSleepMin),
                     "",                    // in-bed not stored on the Android daily row
-                    num(d.lightMin), num(d.deepMin), num(d.remMin),
+                    num(d.lightMin.takeIf { publishStages }),
+                    num(d.deepMin.takeIf { publishStages }),
+                    num(d.remMin.takeIf { publishStages }),
                     // "Awake duration (min)" is MINUTES - the daily row doesn't carry it, so leave
                     // the cell empty. (Writing the disturbance COUNT here exported a wrong unit
                     // that round-tripped on reimport — PR #97 review, tigercraft4. Swift parity.)
@@ -234,7 +240,9 @@ object WhoopCsvExporter {
                     // (WhoopExportImporter.whoopEfficiencyPctFromFraction).
                     num(d.efficiency?.let { round(it * 100.0 * 10_000) / 10_000 }),
                     num(s["sleep_consistency"]), num(s["sleep_need_min"]),
-                    num(s["sleep_debt_min"]), csvField(sourceByDay[d.day]),
+                    num(s["sleep_debt_min"]),
+                    csvField(d.avgHrv?.let { DailyHrvMethod.normalized(d.hrvMethod) }),
+                    csvField(sourceByDay[d.day]),
                 ).joinToString(","),
             ).append("\r\n")
         }
@@ -254,6 +262,7 @@ object WhoopCsvExporter {
     internal fun sleepsCsv(
         sessions: List<SleepSession>,
         cycleStart: (SleepSession) -> String,
+        publishDetailedStages: (SleepSession) -> Boolean = { true },
         sourceBySession: (SleepSession) -> String = { "" },
     ): String {
         val sb = StringBuilder()
@@ -263,7 +272,9 @@ object WhoopCsvExporter {
             .append("Awake duration (min),Sleep efficiency %,Sleep consistency %,")
             .append("Sleep need (min),Sleep debt (min),Source\r\n")
         for (s in sessions.sortedBy { it.startTs }) {
-            val stages = stageMinutes(s.stagesJSON)
+            // Publication-only projection: raw stagesJSON remains in Room, native backup, sidecars,
+            // and self-hosted sync. Unsupported local detail is decoded as absent for this CSV only.
+            val stages = stageMinutes(s.stagesJSON.takeIf { publishDetailedStages(s) })
             val inBedMin = if (s.endTs > s.startTs) (s.endTs - s.startTs) / 60.0 else null
             sb.append(
                 listOf(
@@ -375,16 +386,17 @@ object WhoopCsvExporter {
         deviceId: String,
     ): String {
         val hi = System.currentTimeMillis() / 1000 + 86_400
-        // physiological_cycles keys each row by the LOCAL calendar day (analyze, #277); the sleeps
-        // "Cycle start time" must use the SAME local end-day so the two CSVs reconcile by cycle - else a
-        // non-UTC user's night lands on a different date in each file (#715). Current device offset,
-        // matching how analyze bucketed the stored days.
-        val tzOffsetSec = java.time.ZoneId.systemDefault().rules.getOffset(java.time.Instant.now()).totalSeconds.toLong()
-
         // The active∪canonical union ids (#458): active strap FIRST, so a per-row dedup keeps the
         // live/measured copy; a single-canonical install collapses to one id each.
         val importedIds = repo.importedSourceIds(deviceId)
         val computedIds = repo.computedSourceIds(deviceId)
+        val publishedStageMinutesBySource = computedIds.associateWith { source ->
+            repo.detailedSleepStageMinutes(
+                source,
+                "0000-01-01",
+                "9999-12-31",
+            )
+        }
 
         // Daily export uses whole source rows, matching Apple. Dashboard reads intentionally
         // coalesce fields for presentation; exporting that hybrid and labelling it "import" would
@@ -392,11 +404,36 @@ object WhoopCsvExporter {
         val selectedDaily = selectDailyRowsForExport(
             importedBySource = importedIds.map { repo.days(it) },
             computedBySource = computedIds.map { repo.days(it) },
-        )
+        ).map { row ->
+            val minutes = publishedStageMinutesBySource[row.metric.deviceId]?.get(row.metric.day)
+            if (!row.metric.deviceId.endsWith("-noop") || minutes == null) {
+                row
+            } else {
+                row.copy(
+                    metric = row.metric.copy(
+                        deepMin = minutes.deep,
+                        remMin = minutes.rem,
+                        lightMin = minutes.light,
+                    ),
+                )
+            }
+        }
         val daily = selectedDaily.map(DailyExportRow::metric)
         val sourceByDay = selectedDaily.associate { it.metric.day to it.source }
+        val publishStagesByDay = selectedDaily.associate { row ->
+            row.metric.day to (
+                !row.metric.deviceId.endsWith("-noop") ||
+                    publishedStageMinutesBySource[row.metric.deviceId]?.containsKey(row.metric.day) == true
+                )
+        }
 
         val sleeps = repo.sleepSessionsMerged(deviceId, 0L, hi)
+        val wakeDayBySession = WhoopRepository.wakeDayBySession(sleeps)
+        val habitualMidsleepSec = repo.habitualMidsleepSec(deviceId)
+        val publishableLocalSleepSessions = WhoopRepository.projectPublishableDetailedStages(
+            sessions = sleeps,
+            habitualMidsleepSec = habitualMidsleepSec,
+        ).authorizedSessionKeys
         // Workouts: imported WHOOP ∪ on-device detected (which carries the "-noop" device id), each
         // side read across its union ids (#458). Apple Health / Health Connect workouts are
         // intentionally omitted, matching the cycles/sleep cut. Dedup by (startTs, sport), imported
@@ -430,7 +467,8 @@ object WhoopCsvExporter {
         val sidecarRows = buildList {
             for (id in importedIds + computedIds) {
                 for (key in repo.metricKeys(id)) {
-                    addAll(repo.metricSeries(id, key, "0000-01-01", "9999-12-31"))
+                    addAll(repo.metricSeriesForPortablePayload(
+                        id, key, "0000-01-01", "9999-12-31"))
                 }
             }
         }
@@ -466,13 +504,40 @@ object WhoopCsvExporter {
 
         val zip = zipBytes(
             linkedMapOf(
-                "physiological_cycles.csv" to cyclesCsv(daily, seriesByDay, sourceByDay).toByteArray(),
+                "physiological_cycles.csv" to cyclesCsv(
+                    daily,
+                    seriesByDay,
+                    sourceByDay,
+                    publishDetailedSleepStages = {
+                        publishStagesByDay[it.day] == true
+                    },
+                ).toByteArray(),
                 "sleeps.csv" to sleepsCsv(
                     sleeps,
-                    cycleStart = { com.noop.analytics.AnalyticsEngine.dayString(it.endTs, tzOffsetSec) + " 00:00:00" },
-                ) { s ->
-                    if (s.deviceId.endsWith("-noop")) "noop (APPROXIMATE)" else "import"
-                }.toByteArray(),
+                    cycleStart = {
+                        val day = wakeDayBySession[it.deviceId to it.startTs] ?: run {
+                            val wakeOffsetSec =
+                                WhoopRepository.historicalOffsetSeconds(it.endTs)
+                            com.noop.analytics.AnalyticsEngine.dayString(
+                                it.endTs,
+                                wakeOffsetSec,
+                            )
+                        }
+                        "$day 00:00:00"
+                    },
+                    publishDetailedStages = { session ->
+                        !session.deviceId.endsWith("-noop") ||
+                            com.noop.analytics.DetailedSleepStagePublication.key(session) in
+                            publishableLocalSleepSessions
+                    },
+                    sourceBySession = { session ->
+                        if (session.deviceId.endsWith("-noop")) {
+                            "noop (APPROXIMATE)"
+                        } else {
+                            "import"
+                        }
+                    },
+                ).toByteArray(),
                 "workouts.csv" to workoutsCsv(workouts, ::workoutSource).toByteArray(),
                 "journal_entries.csv" to journalCsv(journal).toByteArray(),
                 "noop_metric_series.json" to metricSeriesJson(sidecarRows).toByteArray(),

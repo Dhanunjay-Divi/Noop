@@ -116,4 +116,33 @@ class BridgedNightGroupsTest {
         val nap = b(t0 + 14 * 3_600, t0 + 15 * 3_600)
         assertEquals(listOf(0, 1), SleepStageTotals.mainNightGroupIndices(listOf(a, c, nap), 0L))
     }
+
+    @Test
+    fun wakeDayBucketsBridgeBeforeAssigningCrossMidnightFragments() {
+        // America/New_York: Jan 1 19:00 -> 23:00, then 23:10 -> Jan 2 03:00.
+        val first = b(t0, t0 + 4 * 3_600)
+        val second = b(t0 + 4 * 3_600 + 600, t0 + 8 * 3_600)
+        val nap = b(t0 + 19 * 3_600, t0 + 20 * 3_600)
+
+        val buckets = SleepStageTotals.wakeDayBuckets(
+            listOf(first, second, nap),
+            offsetAtEpochSec = { -5 * 3_600L },
+        )
+
+        assertEquals(listOf("2026-01-02"), buckets.map { it.day })
+        assertEquals(listOf(listOf(0, 1), listOf(2)), buckets.single().groups.map { it.indices })
+    }
+
+    @Test
+    fun historicalOffsetAtLaterFragmentControlsNightTailBridge() {
+        val first = b(t0 + 6 * 3_600, t0 + 9 * 3_600)
+        val second = b(first.end + 75 * 60, first.end + 75 * 60 + 2 * 3_600)
+
+        val groups = SleepStageTotals.bridgedNightGroups(
+            listOf(first, second),
+            offsetAtEpochSec = { epoch -> if (epoch == second.start) 3_600L else 0L },
+        )
+
+        assertEquals(listOf(listOf(0), listOf(1)), groups.map { it.indices })
+    }
 }

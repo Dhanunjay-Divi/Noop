@@ -46,8 +46,9 @@ Swift absorbs and returns `0` for. Both an Android-only crash and a parity break
 
 ### E2 · Withdrawn claim still in the header *(MEDIUM, false science)*
 `RecoveryScorer` header still read "Z = 0 → ~58% (**WHOOP's published population-average recovery**)",
-directly contradicting the `populationMean` honesty note in the same file that had already withdrawn that
-attribution. **Fix (both platforms):** 58% is documented as an internal, uncited product choice.
+directly contradicting the nearby honesty note that had already withdrawn that attribution.
+**Fix (both platforms):** the logistic is documented as an internal personal-baseline display mapping,
+not a population statistic or cold-start fallback; D-025 later removed the unused fallback symbol.
 
 ### E3 · UK Biobank SRI hazard ratio applied to a proxy it wasn't derived from *(MEDIUM)*
 `VitalityEngine` cited "most-regular vs least ≈ HR 0.70 (UK Biobank SRI)" for coefficient `0.450`, but the

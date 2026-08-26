@@ -37,7 +37,8 @@ enum OuraSyncWriter {
                         deepMin: d.deepMin, remMin: d.remMin, lightMin: d.lightMin, disturbances: nil,
                         restingHr: d.restingHr, avgHrv: d.avgHrvMs, recovery: nil, strain: nil,
                         exerciseCount: nil, spo2Pct: d.spo2Pct, skinTempDevC: d.skinTempDevC,
-                        respRateBpm: d.respRateBpm, steps: d.steps, activeKcalEst: d.activeKcal)
+                        respRateBpm: d.respRateBpm, steps: d.steps, activeKcalEst: d.activeKcal,
+                        hrvMethod: d.avgHrvMs == nil ? nil : .rmssd)
         }
         summary.days = try await store.upsertDailyMetrics(metrics, deviceId: deviceId)
 

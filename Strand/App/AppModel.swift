@@ -274,6 +274,15 @@ final class AppModel: ObservableObject {
     /// hardware/background subsystem inert. This latch makes the later unlock edge idempotent.
     private var operationalWorkStarted = false
 
+    #if DEBUG
+    nonisolated static func shouldStartDemoFixtureWork(
+        startOperationalWork: Bool,
+        arguments: [String]
+    ) -> Bool {
+        !startOperationalWork && arguments.contains("--demo-seed")
+    }
+    #endif
+
     private static func applyPendingRestoreAtColdLaunch() {
         do {
             let path = try StorePaths.defaultDatabasePath()
@@ -531,7 +540,35 @@ final class AppModel: ObservableObject {
         if startOperationalWork {
             startOperationalWorkAfterLaunchAccess()
         }
+        #if DEBUG
+        if Self.shouldStartDemoFixtureWork(
+            startOperationalWork: startOperationalWork,
+            arguments: CommandLine.arguments
+        ) {
+            startDemoFixtureWork()
+        }
+        #endif
     }
+
+    #if DEBUG
+    /// Prepare deterministic screenshot/UI-test data without crossing the protected hardware boundary.
+    /// `--demo-seed` deliberately bypasses first-run presentation gates, but a clean simulator can still
+    /// have no launch-access receipt. In that state the full operational runtime must remain off while the
+    /// synthetic store and registry still need to materialize for production-screen layout tests.
+    private func startDemoFixtureWork() {
+        Task(priority: .utility) { [weak self] in
+            guard let self, let store = await self.repo.storeHandle() else { return }
+            await AppleDemoSeeder.seedIfRequested(
+                into: store,
+                profileAge: self.profile.age,
+                profileSex: self.profile.sex
+            )
+            AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
+            await self.repo.refresh()
+            _ = await self.wireDeviceRegistry()
+        }
+    }
+    #endif
 
     /// Cross the hardware/background boundary after the launch-access receipt is valid. The locked app
     /// still owns a lightweight observable graph for SwiftUI injection, but does not restore Bluetooth,
@@ -713,10 +750,18 @@ final class AppModel: ObservableObject {
     /// untouched. The coordinator only acts if/when a non-WHOOP strap becomes the active device.
     /// `startWhoop`/`stopWhoop` are thin closures over BLEManager's EXISTING public methods (via the
     /// model's `scan()` / `disconnect()`), so the coordinator never references BLEManager directly.
-    private func wireSourceCoordinator() async {
-        guard sourceCoordinator == nil, let store = await repo.storeHandle() else { return }
+    private func wireDeviceRegistry() async -> DeviceRegistry? {
+        if let deviceRegistry { return deviceRegistry }
+        guard let store = await repo.storeHandle() else { return nil }
         let registry = DeviceRegistry(store: DeviceRegistryStore(dbQueue: store.registryWriter))
         registry.reload()
+        self.deviceRegistry = registry
+        return registry
+    }
+
+    private func wireSourceCoordinator() async {
+        guard sourceCoordinator == nil,
+              let registry = await wireDeviceRegistry() else { return }
         // BLE writes connected GATT/DIS identity directly to the durable registry. Refresh this observable
         // cache on each actual identity change so Devices immediately shows WHOOP MG vs WHOOP 5.0 rather
         // than waiting for a disconnect or relaunch.
@@ -742,7 +787,6 @@ final class AppModel: ObservableObject {
                 self?.live.append(log: "[\(AppModel.logTimeFormatter.string(from: Date()))] \(line)")
             })
         coordinator.start()
-        self.deviceRegistry = registry
         self.sourceCoordinator = coordinator
         // #814 READ SPINE (HIGH-1): drive the read side off the registry's `activeDeviceId` for the WHOLE
         // session, exactly as SourceCoordinator drives the WRITE side off the SAME publisher. A Devices-

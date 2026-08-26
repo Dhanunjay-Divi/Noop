@@ -60,7 +60,12 @@ These are supported by the analysis but were deliberately not shipped, each for 
 
 Raise the recovery sleep weight and add an HRV/RHR-ratio term in `RecoveryScorer`. Supported by the driver analysis and by Plews (2013) and Bellenger (2016), but the exact weights need more nights before they are fixed, and the change touches the Swift parity port. A second wearer found that adding an RHR term destabilised their recovery fit and that HRV alone was the robust choice at n = 20, which is the same overfit wall the honest-limits section describes and reinforces holding this until more nights are available.
 
-Recalibrate the recovery logistic (`logisticK`, `logisticZ0`). The shipped `logisticK = 1.6` is too steep and saturates the extremes; a gentler slope cut the recovery MAE from about 20 to about 9 leave-one-out. This centers to the user's current elevated-RHR period, so it needs more nights before the constants are hardcoded, and it should likely become a personal calibration rather than a fixed constant.
+Historical proposal, superseded by D-025: reconsider the fixed Recovery
+logistic (`personalBaselineLogisticSlope`,
+`personalBaselineLogisticMidpointZ`). The exploratory result is not sufficient
+to change production scoring. Any future mapping change requires independent
+evidence and must not wire proprietary reference outcomes or
+`PersonalCalibrationModel` into Recovery.
 
 Raise the per-window beat floors toward 20 to 30 beats. `sessionHrvWindows` allows a window RMSSD from two beats and `rollingRmssd` from eight, both below Baek (2015)'s roughly 30-beat reliability floor for RMSSD. Cheap and pure-Kotlin, and independent of the WHOOP-match work.
 

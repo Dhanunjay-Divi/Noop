@@ -89,8 +89,8 @@ either score measures physiological recovery correctly.
 
 Bias remains negative in all three cohorts, but it is neither constant nor a
 basis for adding a provider-matching offset. No coefficient was fit to these
-three wearers. The global Recovery anchor remains unchanged and must not be
-tuned to a three-person sample.
+three wearers. The fixed personal-baseline logistic mapping remains unchanged
+and must not be tuned to a three-person sample.
 
 ## Verdict 4: Rest associates with the reference outcome without direct target reuse
 
@@ -112,7 +112,7 @@ provider score.
 
 Recovery now centers Rest on each wearer's own usable `rest_quality` baseline.
 The fixed `0.85` center is a cold-start fallback only. Rest sensitivity remains
-`0.12`, and the global Recovery anchor remains unchanged.
+`0.12`, and the fixed personal-baseline logistic mapping remains unchanged.
 
 ## Input and confidence safeguards
 

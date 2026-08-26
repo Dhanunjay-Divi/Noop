@@ -90,6 +90,13 @@ final class HealthKitBridge: ObservableObject {
 
     // MARK: - Types
 
+    /// Source/evidence verdict carried beside a source-free cache row until the pure HealthKit plan
+    /// is built. Raw stage JSON remains in the store for backup, sync, and future reprocessing.
+    private struct SleepWritebackSession {
+        let session: CachedSleepSession
+        let publishDetailedStages: Bool
+    }
+
     private var readTypes: Set<HKObjectType> {
         var s = Set<HKObjectType>()
         for id in HealthKitBridge.quantityReadIds { if let t = HKObjectType.quantityType(forIdentifier: id) { s.insert(t) } }
@@ -888,7 +895,8 @@ final class HealthKitBridge: ObservableObject {
                 spo2Pct: row.spo2,
                 skinTempDevC: nil,
                 respRateBpm: row.respRate,
-                steps: row.steps.map { Int($0.rounded()) }
+                steps: row.steps.map { Int($0.rounded()) },
+                hrvMethod: row.hrv == nil ? nil : .sdnn
             )
         }
         let aggregates = byDay.map { day, row in
@@ -1136,7 +1144,8 @@ final class HealthKitBridge: ObservableObject {
                         restingHr: a.restingHr.map { Int($0.rounded()) }, avgHrv: a.hrv,
                         recovery: nil, strain: nil, exerciseCount: nil,
                         spo2Pct: a.spo2, skinTempDevC: nil, respRateBpm: a.respRate,
-                        steps: a.steps.map { Int($0.rounded()) })
+                        steps: a.steps.map { Int($0.rounded()) },
+                        hrvMethod: a.hrv == nil ? nil : .sdnn)
         }
         // Flatten to the generic metricSeries the shared Apple Health screen, the Today apple-health
         // sparklines, and the Metric Explorer read from - repo.series(key:source:"apple-health")
@@ -1279,11 +1288,14 @@ final class HealthKitBridge: ObservableObject {
 
     // MARK: - Write back (NOOP → Health)
 
-    /// Write NOOP's strap-derived data into Apple Health: sleep sessions with full stage segments,
-    /// strap/manual workouts, and compatible nightly vitals (resting HR, SpO₂, respiratory rate)
-    /// stamped at that day's wake time. Continuous 1-minute HR and workout energy/distance require
-    /// the separate detailed-write action. HRV is read-only until the store distinguishes RMSSD from
-    /// SDNN; writing an ambiguous `avgHrv` as Apple's SDNN would be semantic corruption.
+    /// Write NOOP's strap-derived data into Apple Health: sleep sessions (detailed local stages only
+    /// for the exact computed source, wake day, and main-sleep group with sustained R-R evidence;
+    /// imported classifier labels remain unspecified because HealthKit attributes writes to NOOP),
+    /// strap/manual workouts,
+    /// and compatible nightly vitals (resting HR, SpO₂, respiratory rate) stamped at that day's wake
+    /// time. Continuous 1-minute HR and workout energy/distance require the separate detailed-write
+    /// action. HRV is read-only until the store distinguishes RMSSD from SDNN; writing an ambiguous
+    /// `avgHrv` as Apple's SDNN would be semantic corruption.
     ///
     /// Each feature saves independently and guards on ITS OWN type's share status, so one declined
     /// Health checkbox (or a save error) skips that feature without sinking the rest; the first error
@@ -1302,25 +1314,48 @@ final class HealthKitBridge: ObservableObject {
         guard let fromDate = Calendar.current.date(byAdding: .day, value: -days, to: now) else { return }
         let fromTs = Int(fromDate.timeIntervalSince1970)
         let nowTs = Int(now.timeIntervalSince1970)
+        let migrateSleepStageHistory =
+            !UserDefaults.standard.bool(forKey: sleepStagePublicationMigrationKey)
+        let sleepFromTs = migrateSleepStageHistory ? 0 : fromTs
+        let sleepLimit = migrateSleepStageHistory ? 100_000 : 200
 
-        // Sleep sessions drive both the sleep write and the vitals' wake-time stamps: computed
-        // sessions (deviceId + "-noop") first, imported rows override on startTs collision - the
-        // same source precedence as the dailies union below and IntelligenceEngine's sleep reads.
-        let computedSleeps = try await whoopStore.sleepSessions(
-            deviceId: computedDeviceId, from: fromTs, to: nowTs, limit: 200)
-        let importedSleeps = try await whoopStore.sleepSessions(
-            deviceId: noopDeviceId, from: fromTs, to: nowTs, limit: 200)
-        var sleepsByStart: [Int: CachedSleepSession] = [:]
-        for s in computedSleeps { sleepsByStart[s.startTs] = s }
-        for s in importedSleeps { sleepsByStart[s.startTs] = s }
-        let sessions = sleepsByStart.keys.sorted().map { sleepsByStart[$0]! }
+        // Resolve the complete active/canonical and imported/computed union before any HealthKit
+        // mutation. The strict snapshot throws if even one source/history read fails or truncates;
+        // a protected/locked database can therefore never become `[]` immediately before the
+        // full-history delete.
+        let sleepSnapshot = try await repo.sleepWritebackSnapshot(
+            from: sleepFromTs,
+            to: nowTs,
+            limit: sleepLimit)
+        let sessions = sleepSnapshot.sessions.map {
+            SleepWritebackSession(
+                session: $0,
+                // HealthKit records are attributed to NOOP. Keep imported classifiers visible
+                // in-app with provenance, but do not republish their stage labels as NOOP-authored.
+                publishDetailedStages:
+                    sleepSnapshot.detailedStageEvidence.canPublish($0)
+                    && !sleepSnapshot.detailedStageEvidence
+                        .isIndependentlyStagedImport($0))
+        }
 
         var firstError: Error?
         func attempt(_ op: () async throws -> Void) async {
             do { try await op() } catch { if firstError == nil { firstError = error } }
         }
-        await attempt { try await writeVitals(whoopStore: whoopStore, days: days, sessions: sessions) }
-        await attempt { try await writeSleep(sessions: sessions) }
+        await attempt {
+            try await writeVitals(
+                whoopStore: whoopStore,
+                days: days,
+                sessions: sessions.map(\.session).filter { $0.startTs >= fromTs })
+        }
+        await attempt {
+            let migrationWasApplied = try await writeSleep(
+                sessions: sessions,
+                replaceFullHistory: migrateSleepStageHistory)
+            if migrateSleepStageHistory && migrationWasApplied {
+                UserDefaults.standard.set(true, forKey: sleepStagePublicationMigrationKey)
+            }
+        }
         if highResolutionWritebackRequested {
             await attempt { try await writeHeartRate(whoopStore: whoopStore, fromTs: fromTs, nowTs: nowTs) }
         }
@@ -1427,62 +1462,149 @@ final class HealthKitBridge: ObservableObject {
     /// Write each BRIDGED NIGHT (#364) as one `.inBed` sample plus one category sample per stage
     /// segment (`deep → .asleepDeep`, `rem → .asleepREM`, `light → .asleepCore`, `wake → .awake`) —
     /// the same shape Oura and Apple Watch write, so Health renders the full hypnogram. A night the
-    /// detector split on a brief mid-night wake exports as ONE entry whose gap is an explicit
-    /// `.awake` segment (grouped by `SleepStageTotals.bridgedNightGroups`, the SAME bridge the daily
-    /// totals score with, #561); naps never bridge and stay their own entries. Fragments whose
-    /// `stagesJSON` carries no timing (the legacy aggregate-minutes shapes) get one honest
-    /// `.asleepUnspecified` block instead of fabricated stage placement.
+    /// detector split on a brief mid-night wake exports as ONE entry; its gap is explicit `.awake`
+    /// only when both adjacent fragments may publish detail (grouped by
+    /// `SleepStageTotals.bridgedNightGroups`, the SAME bridge the daily totals score with, #561).
+    /// Naps never bridge and stay their own entries. Fragments whose `stagesJSON` carries no timing
+    /// or whose local R-R evidence is insufficient get one honest `.asleepUnspecified` block instead
+    /// of fabricated stage placement.
     ///
     /// Dedup: every sample of a night carries `HKMetadataKeyExternalUUID =
     /// noop:<deviceId>:sleep:<startTs>` keyed by the group's EARLIEST fragment's immutable detected
     /// onset (a user edit moves the span, never the key). The delete predicate carries EVERY
     /// fragment's key, so a night previously written as two entries fully clears when it becomes
     /// one; delete-then-write scoped to our own `HKSource`, like the vitals.
-    private func writeSleep(sessions: [CachedSleepSession]) async throws {
+    @discardableResult
+    private func writeSleep(
+        sessions: [SleepWritebackSession],
+        replaceFullHistory: Bool
+    ) async throws -> Bool {
         guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
-              store.authorizationStatus(for: type) == .sharingAuthorized else { return }
-        let blocks = sessions.map { SleepStageTotals.NightBlock(start: $0.effectiveStartTs, end: $0.endTs) }
-        let groups = SleepStageTotals.bridgedNightGroups(blocks, offsetSec: TimeZone.current.secondsFromGMT())
-            .map { g in
-                g.indices.map { i -> HealthWriteback.SleepFragment in
-                    let s = sessions[i]
-                    return .init(startTs: s.startTs, effectiveStartTs: s.effectiveStartTs,
-                                 endTs: s.endTs, stagesJSON: s.stagesJSON)
+              store.authorizationStatus(for: type) == .sharingAuthorized else { return false }
+        let blocks = sessions.map {
+            SleepStageTotals.NightBlock(
+                start: $0.session.effectiveStartTs,
+                end: $0.session.endTs)
+        }
+        let groups: [[HealthWriteback.SleepFragment]] =
+            SleepStageTotals.wakeDayBuckets(
+                blocks,
+                offsetAtEpochSec: { epoch in
+                    TimeZone.current.secondsFromGMT(
+                        for: Date(timeIntervalSince1970: TimeInterval(epoch)))
+                }
+            ).flatMap { bucket in
+                bucket.groups.map { group in
+                    group.indices.map { index -> HealthWriteback.SleepFragment in
+                        let row = sessions[index]
+                        let session = row.session
+                        return .init(
+                            startTs: session.startTs,
+                            effectiveStartTs: session.effectiveStartTs,
+                            endTs: session.endTs,
+                            stagesJSON: session.stagesJSON,
+                            publishDetailedStages: row.publishDetailedStages)
+                    }
                 }
             }
-        var samples: [HKCategorySample] = []
-        var keys: [String] = []
-        for entry in HealthWriteback.mergedSleepPlan(groups: groups) {
-            let key = "noop:\(noopDeviceId):sleep:\(entry.keyStartTs)"
-            let meta = [HKMetadataKeyExternalUUID: key]
-            keys.append(contentsOf: entry.allKeyStartTs.map { "noop:\(noopDeviceId):sleep:\($0)" })
-            samples.append(HKCategorySample(type: type, value: HKCategoryValueSleepAnalysis.inBed.rawValue,
-                                            start: Date(timeIntervalSince1970: TimeInterval(entry.spanStart)),
-                                            end: Date(timeIntervalSince1970: TimeInterval(entry.spanEnd)),
-                                            metadata: meta))
-            for seg in entry.intervals {
-                let value: HKCategoryValueSleepAnalysis
-                switch seg.kind {
-                case .awake:       value = .awake
-                case .light:       value = .asleepCore
-                case .deep:        value = .asleepDeep
-                case .rem:         value = .asleepREM
-                case .unspecified: value = .asleepUnspecified
-                }
+        let entries = HealthWriteback.mergedSleepPlan(groups: groups)
+        let desiredKeys = Set(entries.map {
+            "noop:\(noopDeviceId):sleep:\($0.keyStartTs)"
+        })
+
+        // A policy migration can cover years of nights. Replace in bounded batches so metadata
+        // predicates and HealthKit save arrays stay small. Delete only this batch's prior keys before
+        // saving it; a failure can affect at most one bounded batch, never erase the complete history.
+        for lowerBound in stride(from: 0, to: entries.count, by: 100) {
+            let upperBound = min(entries.count, lowerBound + 100)
+            var samples: [HKCategorySample] = []
+            var keys: [String] = []
+            for entry in entries[lowerBound..<upperBound] {
+                let key = "noop:\(noopDeviceId):sleep:\(entry.keyStartTs)"
+                let meta = [HKMetadataKeyExternalUUID: key]
+                keys.append(contentsOf: entry.allKeyStartTs.map {
+                    "noop:\(noopDeviceId):sleep:\($0)"
+                })
                 samples.append(HKCategorySample(
-                    type: type, value: value.rawValue,
-                    start: Date(timeIntervalSince1970: TimeInterval(seg.start)),
-                    end: Date(timeIntervalSince1970: TimeInterval(seg.end)),
+                    type: type,
+                    value: HKCategoryValueSleepAnalysis.inBed.rawValue,
+                    start: Date(timeIntervalSince1970: TimeInterval(entry.spanStart)),
+                    end: Date(timeIntervalSince1970: TimeInterval(entry.spanEnd)),
                     metadata: meta))
+                for seg in entry.intervals {
+                    let value: HKCategoryValueSleepAnalysis
+                    switch seg.kind {
+                    case .awake:       value = .awake
+                    case .light:       value = .asleepCore
+                    case .deep:        value = .asleepDeep
+                    case .rem:         value = .asleepREM
+                    case .unspecified: value = .asleepUnspecified
+                    }
+                    samples.append(HKCategorySample(
+                        type: type, value: value.rawValue,
+                        start: Date(timeIntervalSince1970: TimeInterval(seg.start)),
+                        end: Date(timeIntervalSince1970: TimeInterval(seg.end)),
+                        metadata: meta))
+                }
+            }
+            let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                HKQuery.predicateForObjects(from: HKSource.default()),
+                HKQuery.predicateForObjects(
+                    withMetadataKey: HKMetadataKeyExternalUUID,
+                    allowedValues: keys),
+            ])
+            _ = try await store.deleteObjects(of: type, predicate: pred)
+            for sampleStart in stride(from: 0, to: samples.count, by: 1_000) {
+                let sampleEnd = min(samples.count, sampleStart + 1_000)
+                try await store.save(Array(samples[sampleStart..<sampleEnd]))
             }
         }
-        guard !samples.isEmpty else { return }
-        let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [
-            HKQuery.predicateForObjects(from: HKSource.default()),
-            HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyExternalUUID, allowedValues: keys),
-        ])
-        _ = try? await store.deleteObjects(of: type, predicate: pred)
-        try await store.save(samples)
+
+        // Only after every desired entry was replaced successfully, remove app-authored records that no
+        // longer correspond to a local session (including legacy records without an external key).
+        if replaceFullHistory {
+            let authored = try await appAuthoredSleepSamples(type: type)
+            let stale = authored.filter { sample in
+                guard let key = sample.metadata?[HKMetadataKeyExternalUUID] as? String else {
+                    return true
+                }
+                return !desiredKeys.contains(key)
+            }
+            for lowerBound in stride(from: 0, to: stale.count, by: 1_000) {
+                let upperBound = min(stale.count, lowerBound + 1_000)
+                try await store.delete(Array(stale[lowerBound..<upperBound]))
+            }
+        }
+        return true
+    }
+
+    private func appAuthoredSleepSamples(
+        type: HKCategoryType
+    ) async throws -> [HKCategorySample] {
+        let result = await withCheckedContinuation {
+            (continuation: CheckedContinuation<Result<[HKCategorySample], Error>, Never>) in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: HKQuery.predicateForObjects(from: HKSource.default()),
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(returning: .failure(error))
+                    return
+                }
+                continuation.resume(returning: .success(
+                    (samples ?? []).compactMap { $0 as? HKCategorySample }))
+            }
+            store.execute(query)
+        }
+        return try result.get()
+    }
+
+    /// Per-source migration marker: a later device can carry older records that the current source
+    /// never rewrote, so completion must not be global.
+    private var sleepStagePublicationMigrationKey: String {
+        "healthkit.sleepStagePublicationMigrated.v1.\(noopDeviceId)"
     }
 
     /// UserDefaults key for the HR write cursor (the newest bucket ts we've written). Per-strap so a

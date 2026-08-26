@@ -30,7 +30,7 @@ public enum CrossMetricBriefEngine {
 
     public enum Kind: String, Sendable, Equatable {
         case multiVital
-        case loadRecovery
+        case effortRecovery
         case sleepRecovery
         case singleSignal
     }
@@ -86,10 +86,10 @@ public enum CrossMetricBriefEngine {
                                 illness: IllnessSignalEngine.Result? = nil,
                                 restScore: Double? = nil) -> Result {
         let recoveryKeys: Set<String> = ["hrv", "rhr", "respRate"]
-        let loadKeys: Set<String> = ["acwr", "monotony"]
+        let effortContextKeys: Set<String> = ["effortVariety"]
         let flagged = readiness.signals.filter { $0.flag == .watch || $0.flag == .bad }
         let recovery = flagged.filter { recoveryKeys.contains($0.key) }
-        let load = flagged.filter { loadKeys.contains($0.key) }
+        let effortContext = flagged.filter { effortContextKeys.contains($0.key) }
 
         var checked = readiness.signals.map(\.label)
         if restScore != nil { checked.append("Sleep Score") }
@@ -141,20 +141,25 @@ public enum CrossMetricBriefEngine {
             ))
         }
 
-        // Load is allowed to form a finding only when an independent recovery family also shifted.
-        if let loadSignal = load.first, let recoverySignal = recovery.first {
+        // Bounded Effort is context, not additive load. It forms an association only when an
+        // independent recovery family also shifted, and never becomes an injury-risk inference.
+        if let effortSignal = effortContext.first, let recoverySignal = recovery.first {
             findings.append(Finding(
-                kind: .loadRecovery,
-                title: "Load is outpacing recovery",
-                summary: "Recent Effort is elevated while a recovery signal is lower. This describes load balance, not overtraining or injury risk.",
-                evidence: evidence(from: [loadSignal, recoverySignal]),
-                possibleContributors: ["Hard or unfamiliar training", "Short sleep", "Travel or life stress"],
+                kind: .effortRecovery,
+                title: "Effort pattern and recovery shifted together",
+                summary: "Recorded daily Effort stayed in a narrow range while a recovery signal shifted. This is an association, not evidence that Effort caused the change or a measure of injury risk.",
+                evidence: evidence(from: [effortSignal, recoverySignal]),
+                possibleContributors: [
+                    "Similar recorded Effort on consecutive days",
+                    "A repetitive training schedule",
+                    "Recovery shifted for another reason",
+                ],
                 safeActions: [
                     "Reduce duration or intensity if you feel run down",
                     "Protect tonight's sleep opportunity",
                     "Reassess after one or two nights",
                 ],
-                confidence: loadSignal.flag == .bad && recoverySignal.flag == .bad ? .strong : .moderate
+                confidence: recoverySignal.flag == .bad ? .moderate : .early
             ))
         }
 
@@ -179,7 +184,7 @@ public enum CrossMetricBriefEngine {
 
         // One metric can never become an inferred condition. It is still useful to make the change
         // discoverable, framed as a measurement to repeat rather than a conclusion.
-        if findings.isEmpty, let signal = flagged.first {
+        if findings.isEmpty, let signal = recovery.first {
             findings.append(Finding(
                 kind: .singleSignal,
                 title: "\(signal.label) is worth rechecking",
@@ -238,7 +243,7 @@ public enum CrossMetricBriefEngine {
             return ["Training load", "Sleep", "Stress", "Alcohol, heat or dehydration", "Travel"]
         case "respRate":
             return ["Sleep environment", "Altitude or travel", "Hard training", "Sensor fit"]
-        case "acwr", "monotony":
+        case "effortVariety":
             return ["A recent training block", "Similar effort on consecutive days", "Less recovery time"]
         default:
             return ["Training", "Sleep", "Stress", "Travel", "Measurement context"]

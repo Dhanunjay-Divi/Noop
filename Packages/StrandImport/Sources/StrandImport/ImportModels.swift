@@ -207,6 +207,9 @@ public struct WhoopCycleRow: Sendable, Equatable {
     public var recoveryScore: Double?
     public var restingHeartRate: Double?
     public var hrvMs: Double?
+    /// Time-domain statistic represented by `hrvMs`. Genuine WHOOP exports omit the column and
+    /// are RMSSD; NOOP's portable extension writes it explicitly so SDNN survives a round trip.
+    public var hrvMethod: DailyHRVMethod?
     public var skinTempCelsius: Double?
     public var bloodOxygenPct: Double?
     public var dayStrain: Double?

@@ -190,4 +190,5 @@
     <string name="hydration_adaptive_timing_status">Сейчас каждые %1$d мин. Расписание меняется только при наличии подтверждающих данных за сегодня.</string>
     <string name="hydration_base_interval_label">Базовый интервал</string>
     <string name="today_calibration_valid_hrv_progress">Достоверная ВСР %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Подробные стадии сна скрыты, потому что за эту ночь недостаточно пригодных данных об интервалах между ударами сердца. Общая продолжительность сна остаётся доступной.</string>
 </resources>

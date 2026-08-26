@@ -41,8 +41,6 @@ enum ReadinessPresentation {
             return String(localized: "appwide.readiness.limitation.no_current_signal")
         case "This read is based on one current recovery signal.":
             return String(localized: "appwide.readiness.limitation.one_signal")
-        case "The recent-load ratio is descriptive and does not affect readiness.":
-            return String(localized: "appwide.readiness.limitation.recent_load")
         default:
             if raw.hasPrefix("The personal baseline has ") {
                 return String.localizedStringWithFormat(
@@ -1818,12 +1816,6 @@ struct TodayView: View {
                                 .foregroundStyle(StrandPalette.textPrimary)
                                 .accessibilityLabel("Readiness: \(levelWord(r.level)). \(r.headline)")
                             Spacer()
-                            if let acwr = r.acwr {
-                                Text("ratio \(String(format: "%.2f", acwr))")
-                                    .font(StrandFont.captionNumber)
-                                    .foregroundStyle(StrandPalette.textTertiary)
-                                    .help("7-day mean divided by the 28-day mean of recorded strain. Descriptive context, not Training Stress Balance or an injury-risk threshold.")
-                            }
                         }
                         Text(LocalizedStringKey(r.summary)).font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)

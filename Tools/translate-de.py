@@ -99,7 +99,6 @@ DE: dict[str, str] = {
     "Activity": "Aktivität",
     "Activity & Energy": "Aktivität & Energie",
     "Activity Breakdown": "Aktivitätsaufschlüsselung",
-    "Acute (7-day) vs chronic (28-day) training load. 0.8–1.3 is the sweet spot.": "Akute (7 Tage) vs. chronische (28 Tage) Trainingslast. 0,8–1,3 ist der ideale Bereich.",
     "Add a metric to compare": "Eine Metrik zum Vergleich hinzufügen",
     "Add metric": "Metrik hinzufügen",
     "Age": "Alter",

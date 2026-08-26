@@ -1759,7 +1759,6 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s of 3, %2$s</string>
     <string name="stress_peak_summary">peak %1$s · %2$s</string>
-    <string name="today_load_ratio">ratio %1$s</string>
     <!-- #453 data-driven metric labels that do not appear directly in Compose calls. -->
     <string name="timeline_metric_heart_rate">Heart Rate</string>
     <string name="timeline_metric_rmssd">rMSSD (5 min)</string>
@@ -2128,4 +2127,5 @@
     <string name="smart_alarm_tap_window_accessibility">alarm tap window</string>
     <string name="smart_alarm_tap_snooze_accessibility">alarm snooze length</string>
     <string name="today_calibration_valid_hrv_progress">Valid HRV %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">Detailed sleep stages are withheld because this night did not contain enough usable beat-to-beat timing data. Total sleep remains available.</string>
 </resources>

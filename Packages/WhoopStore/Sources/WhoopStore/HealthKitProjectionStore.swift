@@ -275,9 +275,14 @@ extension WhoopStore {
                 """, arguments: [deviceId, row.day, row.restingHr])
         case .hrv where row.avgHrv != nil:
             try db.execute(sql: """
-                INSERT INTO dailyMetric (deviceId, day, avgHrv) VALUES (?, ?, ?)
-                ON CONFLICT(deviceId, day) DO UPDATE SET avgHrv = excluded.avgHrv
-                """, arguments: [deviceId, row.day, row.avgHrv])
+                INSERT INTO dailyMetric (deviceId, day, avgHrv, hrvMethod) VALUES (?, ?, ?, ?)
+                ON CONFLICT(deviceId, day) DO UPDATE SET
+                    avgHrv = excluded.avgHrv,
+                    hrvMethod = excluded.hrvMethod
+                """, arguments: [
+                    deviceId, row.day, row.avgHrv,
+                    row.hrvMethod?.rawValue,
+                ])
         case .oxygenSaturation where row.spo2Pct != nil:
             try db.execute(sql: """
                 INSERT INTO dailyMetric (deviceId, day, spo2Pct) VALUES (?, ?, ?)

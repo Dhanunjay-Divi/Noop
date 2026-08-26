@@ -229,7 +229,8 @@ enum ShortcutHealthImport {
                         deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
                         restingHr: d.restingHr, avgHrv: d.hrvMs,
                         recovery: nil, strain: nil, exerciseCount: nil,
-                        spo2Pct: nil, skinTempDevC: nil, respRateBpm: nil)
+                        spo2Pct: nil, skinTempDevC: nil, respRateBpm: nil,
+                        hrvMethod: d.hrvMs == nil ? nil : .sdnn)
         }
     }
 

@@ -1,6 +1,7 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import com.noop.data.DailyHrvMethod
 import com.noop.data.EventRow
 import com.noop.data.GravitySample
 import com.noop.data.HrSample
@@ -761,6 +762,7 @@ object AnalyticsEngine {
             activeKcalEst = activeKcalEst,
             spo2Red = nightlySpo2Raw?.first,
             spo2Ir = nightlySpo2Raw?.second,
+            hrvMethod = avgHRVDaily?.let { DailyHrvMethod.RMSSD },
         )
 
         // ── Per-score confidence tiers (mirror Swift ScoreConfidence.derive decisions) ──

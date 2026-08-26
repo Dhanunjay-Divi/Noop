@@ -204,8 +204,7 @@ class IllnessSignalEngineTest {
             headline = "Aligned",
             summary = "Available signals are aligned.",
             signals = emptyList(),
-            acwr = null,
-            monotony = null,
+            effortVariety = null,
             asOfDay = "2026-08-23",
             confidence = ScoreConfidence.SOLID,
         )

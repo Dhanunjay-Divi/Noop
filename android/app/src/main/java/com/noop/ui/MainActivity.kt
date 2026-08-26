@@ -529,6 +529,23 @@ object NoopPrefs {
         of(context).edit().putLong(KEY_HC_HR_FRONTIER, tsSec).apply()
     }
 
+    /** One-time Health Connect rewrite that replaces stage detail published before the sustained
+     *  R-R evidence gate. The marker is set only after the full-history write succeeds. */
+    const val KEY_HC_SLEEP_STAGE_PUBLICATION_MIGRATED_PREFIX =
+        "noop.hcSleepStagePublicationMigrated.v1"
+
+    private fun hcSleepStagePublicationMigrationKey(deviceId: String) =
+        "$KEY_HC_SLEEP_STAGE_PUBLICATION_MIGRATED_PREFIX.$deviceId"
+
+    fun hcSleepStagePublicationMigrated(context: Context, deviceId: String): Boolean =
+        of(context).getBoolean(hcSleepStagePublicationMigrationKey(deviceId), false)
+
+    fun setHcSleepStagePublicationMigrated(context: Context, deviceId: String) {
+        of(context).edit()
+            .putBoolean(hcSleepStagePublicationMigrationKey(deviceId), true)
+            .apply()
+    }
+
     /** Smart alarm: arm the strap's firmware alarm to buzz at a wake time. Default off; default time 07:00. */
     const val KEY_SMART_ALARM = "noop.smartAlarmEnabled"
     const val KEY_SMART_ALARM_MINUTES = "noop.smartAlarmMinutes"

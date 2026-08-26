@@ -216,8 +216,7 @@ final class IllnessSignalEngineTests: XCTestCase {
             headline: "Aligned",
             summary: "Available signals are aligned.",
             signals: [],
-            acwr: nil,
-            monotony: nil,
+            effortVariety: nil,
             asOfDay: "2026-08-23",
             confidence: .solid
         )
@@ -226,8 +225,7 @@ final class IllnessSignalEngineTests: XCTestCase {
             headline: "Aligned",
             summary: "Available signals are aligned.",
             signals: [],
-            acwr: nil,
-            monotony: nil,
+            effortVariety: nil,
             asOfDay: "2026-08-23",
             confidence: .building
         )

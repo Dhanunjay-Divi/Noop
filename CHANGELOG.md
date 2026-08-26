@@ -1501,9 +1501,8 @@ A complete, ground-up redesign of all three apps. Deep-navy surfaces, a warm gol
 
 ## 2.8.7 — Readiness shows its evidence, and a Health Connect distance fix
 
-- **New:** each Readiness signal now shows the numbers behind it — e.g. *HRV 72 vs 60 ms*, *Resting HR 46
-  vs 52 bpm*, *Training load 7d 10.0 / 28d 10.0* — so you can see exactly why a signal is flagged, not just
-  the label. Thanks @khalilkm01.
+- **New:** each Readiness signal now shows the numbers behind it — e.g. *HRV 72 vs 60 ms* and *Resting HR
+  46 vs 52 bpm* — so you can see exactly why a signal is flagged, not just the label. Thanks @khalilkm01.
 - **Fixed (Android):** a workout imported from Health Connect could show no distance even when it was
   recorded — a relay app (e.g. Suunto via Health Sync) often writes the distance with timestamps slightly
   offset from the workout, which NOOP's exact-window match missed. It now matches with a tolerance. Thanks

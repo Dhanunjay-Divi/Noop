@@ -190,4 +190,5 @@
     <string name="hydration_adaptive_timing_status">目前每 %1$d 分鐘一次。只有在今天的資料充分支持時才會調整時間。</string>
     <string name="hydration_base_interval_label">基礎間隔</string>
     <string name="today_calibration_valid_hrv_progress">有效 HRV %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">由於這一晚缺少足夠的可用逐次心搏間隔資料，詳細睡眠階段暫不顯示。總睡眠時長仍可查看。</string>
 </resources>

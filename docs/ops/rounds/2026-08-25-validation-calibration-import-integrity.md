@@ -68,7 +68,7 @@ build/test/policy gate is recorded.
 
 - Centered Recovery's Rest-quality term on a usable causal personal
   `rest_quality` EWMA baseline. The fixed `0.85` center is cold-start only;
-  sensitivity and the global Recovery anchor remain unchanged.
+  sensitivity and the fixed personal-baseline logistic mapping remain unchanged.
 - Made non-finite physiology, corrupt baselines, invalid Rest fractions, and
   invalid optional drivers fail closed instead of becoming plausible scores.
 - Split scoring eligibility from visible calibration progress so a just-synced
@@ -114,7 +114,7 @@ build/test/policy gate is recorded.
   preserves user-edited sleep windows, local evidence, unrelated sources, and
   out-of-range history.
 - Source/provenance or formula impact: Recovery's Rest center becomes personal
-  after calibration. No coefficient or global anchor was fit to private
+  after calibration. No coefficient or logistic mapping parameter was fit to private
   cohorts. Reference outcomes remain comparison targets, not scoring inputs.
 - Permissions/network disclosure impact: none. Validation preparation writes
   owner-only local files and adds no upload path.
@@ -175,8 +175,9 @@ build/test/policy gate is recorded.
 ## Decisions
 
 - Added D-025: Recovery centers Rest on a causal personal Rest baseline once
-  usable; fixed `0.85` is cold-start only, the `0.12` scale and global anchor
-  remain unchanged, and private reference outcomes are never production inputs.
+  usable; fixed `0.85` is cold-start only, the `0.12` scale and fixed
+  personal-baseline logistic remain unchanged, cold start remains nil, and
+  private reference outcomes are never production inputs.
 
 ## Open risks and honest limitations
 

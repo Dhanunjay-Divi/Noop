@@ -15,8 +15,8 @@ import java.util.TimeZone
  * cross-platform contract — they MUST be byte-identical to iOS SleepView.mainSleepReasonText, so this
  * guards against an accidental reword on the Kotlin side.
  *
- * [mainSleepReasonText] resolves the reason via [SleepStageTotals.mainNightSelection] using
- * `uiTzOffsetSec()` (the device default tz), so the timezone is pinned to UTC here — making the local
+ * [mainSleepReasonText] resolves the reason via [SleepStageTotals.mainNightSelection] using the historical
+ * offset at the latest block's wake, so the timezone is pinned to UTC here — making the local
  * time-of-day of each block's midpoint equal its UTC time-of-day, exactly matching the `offsetSec = 0L`
  * foundation fixtures in MainNightConsistencyTest. One case per reason branch + the empty-day null.
  */

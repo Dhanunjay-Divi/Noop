@@ -329,7 +329,8 @@ public actor RemoteSyncCoordinator {
                     avgHrv: $0.avgHrv.flatMap {
                         $0.isFinite && (0...1_000).contains($0) ? $0 : nil
                     },
-                    stages: Self.canonicalSleepStages($0.stagesJSON)
+                    stages: Self.canonicalSleepStages($0.stagesJSON),
+                    metadata: Self.sleepEvidenceMetadata($0)
                 )
             },
             workouts: workoutRows.filter {
@@ -494,6 +495,16 @@ public actor RemoteSyncCoordinator {
         add(row.disturbances.map(Double.init), as: "disturbances", to: &metrics)
         add(row.restingHr.map(Double.init), as: "resting_hr", to: &metrics)
         add(row.avgHrv, as: "avg_hrv", to: &metrics)
+        if let hrv = row.avgHrv {
+            switch row.hrvMethod {
+            case .rmssd:
+                add(hrv, as: "avg_hrv_rmssd", to: &metrics)
+            case .sdnn:
+                add(hrv, as: "avg_hrv_sdnn", to: &metrics)
+            case nil:
+                break
+            }
+        }
         add(row.recovery, as: "recovery", to: &metrics)
         add(row.strain, as: "effort", to: &metrics)
         if provenance == .officialReference {
@@ -588,6 +599,37 @@ public actor RemoteSyncCoordinator {
             return min(Int(value.rounded()), 172_800)
         }
         return canonical.isEmpty ? nil : canonical
+    }
+
+    /// Preserve an exact-session R-R count pair for downstream publication checks.
+    ///
+    /// Both values are omitted unless they are internally valid and still match the session's current
+    /// effective bounds. This is backup provenance, not a publication verdict: grouped main-night
+    /// coverage is evaluated by the consuming client.
+    static func sleepEvidenceMetadata(_ session: CachedSleepSession) -> [String: String] {
+        var metadata: [String: String] = [:]
+        if let hrv = session.avgHrv,
+           hrv.isFinite,
+           (0...1_000).contains(hrv) {
+            // Every currently supported session-level HRV producer (strap analytics, WHOOP
+            // export, Oura, and wearable import) supplies RMSSD. Apple Health SDNN is daily-only.
+            metadata["hrv_method"] = DailyHRVMethod.rmssd.rawValue
+        }
+        guard let eligible = session.rrEligibleWindowCount,
+              let valid = session.rrValidWindowCount,
+              eligible >= 0,
+              valid >= 0,
+              valid <= eligible,
+              session.effectiveStartTs >= 0,
+              session.endTs >= 0 else { return metadata }
+        let (duration, overflow) =
+            session.endTs.subtractingReportingOverflow(session.effectiveStartTs)
+        guard !overflow,
+              duration > 0,
+              eligible == duration / (5 * 60) else { return metadata }
+        metadata["rr_eligible_window_count"] = String(eligible)
+        metadata["rr_valid_window_count"] = String(valid)
+        return metadata
     }
 
     private static func add(

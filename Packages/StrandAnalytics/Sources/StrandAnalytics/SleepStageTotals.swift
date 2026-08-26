@@ -327,12 +327,35 @@ public enum SleepStageTotals {
         public init(indices: [Int], gaps: [GapSpan]) { self.indices = indices; self.gaps = gaps }
     }
 
+    /// One local wake day after adjacent fragments have been bridged across the complete timeline.
+    /// `groups` preserves the distinct main-sleep/nap candidates that finish on this day; each group's
+    /// indices still refer to the original input array.
+    public struct WakeDayBucket: Equatable {
+        public let day: String
+        public let groups: [BridgedNightGroup]
+
+        public init(day: String, groups: [BridgedNightGroup]) {
+            self.day = day
+            self.groups = groups
+        }
+    }
+
     /// EVERY bridged group over `blocks` — the same two-tier bridge `mainNightGroupIndices` applies
     /// (#561 short-wake, plus the #861 overnight night-tail widening), WITHOUT the winner pick. A
     /// negative gap (a block starting inside the previous span) does not bridge — pinned legacy
     /// semantics, `gap >= 0` — and never fabricates a seam. Groups ordered by start; pure and
     /// deterministic; Kotlin twin `bridgedNightGroups`. (#364)
     public static func bridgedNightGroups(_ blocks: [NightBlock], offsetSec: Int) -> [BridgedNightGroup] {
+        bridgedNightGroups(blocks, offsetAtEpochSec: { _ in offsetSec })
+    }
+
+    /// Historical-offset variant of `bridgedNightGroups`. The later fragment's onset offset decides
+    /// whether the 60...90 minute night-tail rule applies, so a DST transition or historical browse
+    /// cannot be evaluated with today's offset.
+    public static func bridgedNightGroups(
+        _ blocks: [NightBlock],
+        offsetAtEpochSec: (Int) -> Int
+    ) -> [BridgedNightGroup] {
         guard !blocks.isEmpty else { return [] }
         // Sort indices by onset so bridging sees neighbours, exactly as `bridgeAdjacent` sorts the blocks.
         let order = blocks.indices.sorted { blocks[$0].start < blocks[$1].start }
@@ -354,7 +377,10 @@ public enum SleepStageTotals {
                 // (daytime onset, or a gap at/over nightTailBridgeMaxMin) still stands as its own block.
                 let bridges = gap >= 0
                     && (gap < bridgeS
-                        || (gap < nightTailBridgeS && isOvernightOnset(b.start, offsetSec: offsetSec)))
+                        || (gap < nightTailBridgeS
+                            && isOvernightOnset(
+                                b.start,
+                                offsetSec: offsetAtEpochSec(b.start))))
                 if bridges {
                     if gap > 0 {
                         gaps[gaps.count - 1].append(.init(start: last.end, end: b.start))
@@ -369,6 +395,30 @@ public enum SleepStageTotals {
             gaps.append([])
         }
         return zip(groups, gaps).map { BridgedNightGroup(indices: $0.sorted(), gaps: $1) }
+    }
+
+    /// Bridge first, then assign each complete group to the local day of its latest wake. Day-first
+    /// grouping can split one interrupted night when an early fragment ends before midnight and its
+    /// continuation ends after midnight, allowing an incomplete fragment to publish by itself.
+    ///
+    /// Multiple independent groups that finish on the same day remain separate inside one bucket so
+    /// callers can still select the main night and classify the others as naps.
+    public static func wakeDayBuckets(
+        _ blocks: [NightBlock],
+        offsetAtEpochSec: (Int) -> Int
+    ) -> [WakeDayBucket] {
+        let groups = bridgedNightGroups(blocks, offsetAtEpochSec: offsetAtEpochSec)
+        var byDay: [String: [BridgedNightGroup]] = [:]
+        for group in groups {
+            guard let latestEnd = group.indices.map({ blocks[$0].end }).max() else { continue }
+            let day = AnalyticsEngine.dayString(
+                latestEnd,
+                offsetSec: offsetAtEpochSec(latestEnd))
+            byDay[day, default: []].append(group)
+        }
+        return byDay.keys.sorted().map {
+            WakeDayBucket(day: $0, groups: byDay[$0] ?? [])
+        }
     }
 
     /// The indices (into the ORIGINAL `blocks`) of the MAIN-NIGHT GROUP: the main night plus any adjacent

@@ -1,9 +1,11 @@
 package com.noop.ingest
 
 import com.noop.data.DailyMetric
+import com.noop.data.DailyHrvMethod
 import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
+import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -79,6 +81,7 @@ class WhoopCsvExporterTest {
                 deepMin = 95.0, remMin = 115.0, lightMin = 210.0, disturbances = 35, restingHr = 52,
                 avgHrv = 68.4, recovery = 72.0, strain = 12.5, exerciseCount = null,
                 spo2Pct = 96.0, skinTempDevC = 33.1, respRateBpm = 14.2,
+                hrvMethod = DailyHrvMethod.SDNN,
             ),
         )
         val series = mapOf(
@@ -95,6 +98,7 @@ class WhoopCsvExporterTest {
         assertEquals("72", row["recovery_score_pct"])
         assertEquals("52", row["resting_heart_rate_bpm"])
         assertEquals("68.4", row["heart_rate_variability_ms"])
+        assertEquals("SDNN", row["hrv_method"])
         assertEquals("33.1", row["skin_temp_celsius"])
         assertEquals("96", row["blood_oxygen_pct"])
         // CSV is WHOOP 0–21 scale: 12.5 Effort × 21/100 = 2.625 (re-import scales back up).
@@ -119,6 +123,37 @@ class WhoopCsvExporterTest {
         assertEquals(480.0, s.getValue("sleep_need_min"), 1e-9)
         assertEquals(60.0, s.getValue("sleep_debt_min"), 1e-9)
         assertEquals(0.923, s.getValue("sleep_efficiency"), 1e-9)
+        val imported = WhoopCsvImporter.parseCycles(table, "my-whoop").single()
+        assertEquals(DailyHrvMethod.SDNN, imported.hrvMethod)
+    }
+
+    @Test
+    fun cyclesWithholdDetailedLocalStagesButKeepSleepTotal() {
+        val daily = DailyMetric(
+            deviceId = "my-whoop-noop",
+            day = "2026-06-01",
+            totalSleepMin = 420.0,
+            efficiency = 0.9,
+            deepMin = 95.0,
+            remMin = 115.0,
+            lightMin = 210.0,
+        )
+        val table = CsvTable.fromData(
+            WhoopCsvExporter.cyclesCsv(
+                daily = listOf(daily),
+                seriesByDay = emptyMap(),
+                sourceByDay = mapOf(daily.day to "noop (APPROXIMATE)"),
+                publishDetailedSleepStages = { false },
+            ).toByteArray(),
+        )
+        val row = table.rows.single()
+
+        assertEquals("420", row["asleep_duration_min"])
+        assertEquals("", row["light_sleep_duration_min"].orEmpty())
+        assertEquals("", row["deep_sws_duration_min"].orEmpty())
+        assertEquals("", row["rem_duration_min"].orEmpty())
+        assertEquals("", row["awake_duration_min"].orEmpty())
+        assertEquals("noop (APPROXIMATE)", row["source"])
     }
 
     @Test
@@ -182,6 +217,69 @@ class WhoopCsvExporterTest {
         assertEquals("60", byStart[1]["light_sleep_duration_min"])
         assertEquals("60", byStart[1]["deep_sws_duration_min"])
         assertEquals(2_000_007_200L, WhoopTime.parseEpochSeconds(byStart[1].cell("wake_onset"), 0))
+    }
+
+    @Test
+    fun sleepsWithholdDetailedLocalStagesWithoutMutatingRawSession() {
+        val rawStages = """[{"start":2000000000,"end":2000003600,"stage":"light"},""" +
+            """{"start":2000003600,"end":2000007200,"stage":"deep"}]"""
+        val local = SleepSession(
+            deviceId = "my-whoop-noop",
+            startTs = 2_000_000_000L,
+            endTs = 2_000_007_200L,
+            efficiency = 0.9,
+            stagesJSON = rawStages,
+        )
+        val table = CsvTable.fromData(
+            WhoopCsvExporter.sleepsCsv(
+                sessions = listOf(local),
+                cycleStart = { "2033-05-18 00:00:00" },
+                publishDetailedStages = { false },
+                sourceBySession = { "noop (APPROXIMATE)" },
+            ).toByteArray(),
+        )
+        val row = table.rows.single()
+
+        assertEquals("120", row["in_bed_duration_min"])
+        assertEquals("", row["asleep_duration_min"].orEmpty())
+        assertEquals("", row["light_sleep_duration_min"].orEmpty())
+        assertEquals("", row["deep_sws_duration_min"].orEmpty())
+        assertEquals("", row["rem_duration_min"].orEmpty())
+        assertEquals("", row["awake_duration_min"].orEmpty())
+        assertEquals("noop (APPROXIMATE)", row["source"])
+        assertEquals(rawStages, local.stagesJSON)
+    }
+
+    @Test
+    fun sleepsAttributeCrossMidnightFragmentsToFinalWakeCycle() {
+        val midnight = 1_767_312_000L
+        val first = SleepSession(
+            deviceId = "my-whoop-noop",
+            startTs = midnight - 4 * 3_600,
+            endTs = midnight - 300,
+        )
+        val second = SleepSession(
+            deviceId = "my-whoop-noop",
+            startTs = midnight + 300,
+            endTs = midnight + 4 * 3_600,
+        )
+        val sessions = listOf(first, second)
+        val wakeDays = WhoopRepository.wakeDayBySession(sessions) { 0L }
+
+        val table = CsvTable.fromData(
+            WhoopCsvExporter.sleepsCsv(
+                sessions = sessions,
+                cycleStart = {
+                    wakeDays.getValue(it.deviceId to it.startTs) + " 00:00:00"
+                },
+            ).toByteArray(),
+        )
+
+        assertEquals(2, table.rows.size)
+        assertEquals(
+            setOf("2026-01-02 00:00:00"),
+            table.rows.map { it["cycle_start_time"] }.toSet(),
+        )
     }
 
     @Test
@@ -255,6 +353,8 @@ class WhoopCsvExporterTest {
         val json = WhoopCsvExporter.metricSeriesJson(
             listOf(
                 MetricSeriesRow("my-whoop-noop", "2026-06-02", "recovery", 60.0),
+                MetricSeriesRow("my-whoop-noop", "2026-06-02", "sleep_deep_min", 95.0),
+                MetricSeriesRow("my-whoop-noop", "2026-06-02", "rest_evidence_flags", 3.0),
                 MetricSeriesRow("my-whoop", "2026-06-01", "strain", 12.5),
             ),
         )
@@ -262,6 +362,8 @@ class WhoopCsvExporterTest {
         assertTrue(json.indexOf("\"my-whoop\"") < json.indexOf("\"my-whoop-noop\""))
         assertTrue(json.contains("\"strain\""))
         assertTrue(json.contains("\"recovery\""))
+        assertTrue(json.contains("\"sleep_deep_min\""))
+        assertTrue(json.contains("\"rest_evidence_flags\""))
     }
 
     @Test

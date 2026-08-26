@@ -73,8 +73,7 @@ final class StrainTargetPolicyTests: XCTestCase {
             headline: "Readiness",
             summary: "Stale fixture",
             signals: [],
-            acwr: nil,
-            monotony: nil,
+            effortVariety: nil,
             asOfDay: "2026-07-17",
             confidence: .solid,
             baselineDays: 14

@@ -124,4 +124,5 @@ private fun DailyMetric.fillNullFieldsFrom(incoming: DailyMetric): DailyMetric =
     activeKcalEst = activeKcalEst ?: incoming.activeKcalEst,
     spo2Red = spo2Red ?: incoming.spo2Red,
     spo2Ir = spo2Ir ?: incoming.spo2Ir,
+    hrvMethod = if (avgHrv == null) incoming.hrvMethod else hrvMethod,
 )

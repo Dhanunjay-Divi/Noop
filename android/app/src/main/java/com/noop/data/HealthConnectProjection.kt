@@ -75,6 +75,7 @@ internal object HealthConnectProjectionMerge {
                 disturbances = fresh.disturbances ?: old?.disturbances,
                 restingHr = fresh.restingHr ?: old?.restingHr,
                 avgHrv = fresh.avgHrv ?: old?.avgHrv,
+                hrvMethod = if (fresh.avgHrv == null) old?.hrvMethod else fresh.hrvMethod,
                 recovery = fresh.recovery ?: old?.recovery,
                 strain = fresh.strain ?: old?.strain,
                 exerciseCount = fresh.exerciseCount ?: old?.exerciseCount,
@@ -153,6 +154,7 @@ internal object HealthConnectProjectionMerge {
                 activeKcalEst = old?.activeKcalEst,
                 spo2Red = old?.spo2Red,
                 spo2Ir = old?.spo2Ir,
+                hrvMethod = if (scope.hrv) fresh?.hrvMethod else old?.hrvMethod,
             )
             row.takeIf {
                 listOf(

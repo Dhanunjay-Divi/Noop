@@ -43,4 +43,39 @@ class Issue299EditDayScopeTest {
         assertEquals(emptyList<SleepSession>(),
             IntelligenceEngine.editedRowsForDay(listOf(e), emptyDay, tz))
     }
+
+    @Test
+    fun `edited first fragment inherits bridged final wake day`() {
+        val midnight = 1_783_641_600L
+        val editedFirst = edit(
+            startTs = midnight - 90 * 60,
+            endTs = midnight - 5 * 60,
+        )
+        val continuation = SleepSession(
+            deviceId = editedFirst.deviceId,
+            startTs = midnight + 5 * 60,
+            endTs = midnight + 2 * 3_600,
+        )
+        val previousDay = AnalyticsEngine.dayString(midnight - 1, tz)
+        val wakeDay = AnalyticsEngine.dayString(continuation.endTs, tz)
+
+        assertEquals(
+            emptyList<SleepSession>(),
+            IntelligenceEngine.editedRowsForDay(
+                listOf(editedFirst),
+                previousDay,
+                tz,
+                listOf(editedFirst, continuation),
+            ),
+        )
+        assertEquals(
+            listOf(editedFirst),
+            IntelligenceEngine.editedRowsForDay(
+                listOf(editedFirst),
+                wakeDay,
+                tz,
+                listOf(editedFirst, continuation),
+            ),
+        )
+    }
 }

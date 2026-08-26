@@ -69,6 +69,21 @@ def test_stage_total_object_requires_integer_seconds() -> None:
         SyncPayload.model_validate(payload)
 
 
+def test_sleep_session_rejects_unknown_hrv_method() -> None:
+    payload = minimal_payload()
+    payload["sleep_sessions"] = [
+        {
+            "session_id": "s1",
+            "start_ts": 1784870400,
+            "end_ts": 1784899200,
+            "avg_hrv": 61,
+            "metadata": {"hrv_method": "proprietary"},
+        }
+    ]
+    with pytest.raises(ValidationError, match="hrv_method"):
+        SyncPayload.model_validate(payload)
+
+
 def test_epoch_legacy_rows_and_bounded_user_text_do_not_poison_batch() -> None:
     raw_payload = minimal_payload()
     raw_payload["source"]["sent_at"] = "1970-01-01T00:01:40Z"

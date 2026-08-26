@@ -1338,6 +1338,17 @@ final class IntelligenceEngine: ObservableObject {
         // already staged from raw (idempotent) and for imported nights (raw never dense). This MUST run
         // before the scoring loop so the healed stages flow into Rest/recovery this same pass.
         let editedRows = await repo.selfHealEditedStages(from: windowStart, to: now)
+        // Bridge-before-wake-day edit attribution needs every detected continuation fragment, not only
+        // the edited rows returned above. Replace detected twins with their persisted edits, then reuse
+        // this complete computed-source timeline for every per-day edit lookup below.
+        var editTimelineByStart: [Int: CachedSleepSession] = [:]
+        for row in scoredNights.flatMap(\.cachedSleep) {
+            editTimelineByStart[row.startTs] = row
+        }
+        for row in editedRows {
+            editTimelineByStart[row.startTs] = row
+        }
+        let editSourceTimeline = Array(editTimelineByStart.values)
         // #299: `editsByStart` is now built PER DAY inside the scoring loop (scoped to the day each edit
         // belongs to), NOT window-wide here. sleepEditedDaily folds any edited row that isn't a twin of THIS
         // day's detected sessions in as a "manual" block, so a window-wide edit set let ONE user edit /
@@ -1380,7 +1391,11 @@ final class IntelligenceEngine: ObservableObject {
             // is stable under a bedtime edit (only the onset/`startTsAdjusted` moves), so end-day is the
             // right key. Filtering here keeps a single-night edit overriding only its OWN night instead of
             // every night. `effectiveStartTs` (the #318 user-corrected onset) is preserved on the row.
-            let dayEditedRows = Self.editedRowsForDay(editedRows, day: night.daily.day, tzOffsetSeconds: tzOffset)
+            let dayEditedRows = Self.editedRowsForDay(
+                editedRows,
+                day: night.daily.day,
+                tzOffsetSeconds: tzOffset,
+                sourceTimeline: editSourceTimeline)
             let editsByStart = Dictionary(dayEditedRows.map { ($0.startTs, $0) }, uniquingKeysWith: { a, _ in a })
             let editedSleep = Self.sleepEditedDaily(
                 night.daily,
@@ -1554,7 +1569,11 @@ final class IntelligenceEngine: ObservableObject {
         // apple-health rows so the source-aware dashboard reads it, and the watch-only days are appended to
         // `out` so the By-Day list shows them with their honest confidence.
         let strapRecoveryDays = Set(out.map { $0.day }).union(importedWhoopDays)
-        let watchScored = Self.watchRecoveries(appleRows: appleRows, strapRecoveryDays: strapRecoveryDays)
+        let watchScored = Self.watchRecoveries(
+            sourceRows: appleRows,
+            hrvProvenance: WatchRecovery.HRVProvenance(
+                sourceID: Repository.appleHealthSource, method: .sdnn),
+            strapRecoveryDays: strapRecoveryDays)
         // Persist the recovery onto each apple-health row that gained one (nil-recovery days are left as-is,
         // never fabricated). Rebuild the row with the new recovery; every other field is unchanged.
         var appleRecoveryRows: [DailyMetric] = []
@@ -1608,7 +1627,11 @@ final class IntelligenceEngine: ObservableObject {
                 .sorted { $0.day < $1.day }
             guard !rows.isEmpty else { continue }
             let byDay = Dictionary(rows.map { ($0.day, $0) }, uniquingKeysWith: { a, _ in a })
-            for w in Self.watchRecoveries(appleRows: rows, strapRecoveryDays: importScoredDays) {
+            for w in Self.watchRecoveries(
+                sourceRows: rows,
+                hrvProvenance: WatchRecovery.HRVProvenance(
+                    sourceID: source, method: .rmssd),
+                strapRecoveryDays: importScoredDays) {
                 guard let recovery = w.recovery, let row = byDay[w.day] else { continue }
                 let scored = row.with(recovery: recovery, skinTempDevC: row.skinTempDevC)
                 dailies.append(scored)
@@ -2286,6 +2309,7 @@ final class IntelligenceEngine: ObservableObject {
         let day: String
         let recovery: Double?
         let confidence: ScoreConfidence
+        let hrvProvenance: WatchRecovery.HRVProvenance
     }
 
     /// Compute Apple-Watch recovery (Charge) for the apple-health days that lack a strap recovery.
@@ -2300,22 +2324,49 @@ final class IntelligenceEngine: ObservableObject {
     /// `strapRecoveryDays` are the days a strap (WHOOP / computed) already scored a recovery , those are SKIPPED
     /// so the strap keeps winning (matching the source precedence; we never overwrite a strap recovery with a
     /// lower-density watch one). Pure (no store) so it's unit-tested directly and is the SAME logic
-    /// `analyzeRecent` ships. `appleRows` must be chronological (oldest first).
-    nonisolated static func watchRecoveries(appleRows: [DailyMetric],
-                                strapRecoveryDays: Set<String> = []) -> [WatchScoredDay] {
-        let rows = appleRows.sorted { $0.day < $1.day }
+    /// `analyzeRecent` ships. `sourceRows` must all come from the source named by
+    /// `hrvProvenance`; the typed samples below keep that source and method attached through
+    /// baseline construction.
+    nonisolated static func watchRecoveries(
+        sourceRows: [DailyMetric],
+        hrvProvenance: WatchRecovery.HRVProvenance,
+        strapRecoveryDays: Set<String> = []
+    ) -> [WatchScoredDay] {
+        let rows = sourceRows.sorted { $0.day < $1.day }
         var out: [WatchScoredDay] = []
         for (i, row) in rows.enumerated() where !strapRecoveryDays.contains(row.day) {
-            // Trailing baseline history = every earlier apple-health day with a usable value. Today is the
-            // current row; the baseline is built from the days BEFORE it so it can't see its own value.
+            // Trailing baseline history = every earlier day from this source with a usable value.
+            // Today is the current row; the baseline is built from days BEFORE it so it cannot see
+            // its own value. Provenance stays attached so WatchRecovery can enforce the boundary too.
             let prior = rows[..<i]
-            let sdnnHistory = prior.compactMap { $0.avgHrv }
+            let hrvHistory: [WatchRecovery.HRVSample] = prior.compactMap { daily in
+                guard daily.hrvMethod == hrvProvenance.persistedMethod,
+                      let value = daily.avgHrv else { return nil }
+                return WatchRecovery.HRVSample(
+                    value: value,
+                    provenance: hrvProvenance)
+            }
             let rhrHistory = prior.compactMap { $0.restingHr.map(Double.init) }
-            let res = WatchRecovery.compute(todaySDNN: row.avgHrv,
-                                            todayRHR: row.restingHr,
-                                            sdnnHistory: sdnnHistory,
-                                            rhrHistory: rhrHistory)
-            out.append(WatchScoredDay(day: row.day, recovery: res.recovery, confidence: res.confidence))
+            let todayHRV: WatchRecovery.HRVSample?
+            if row.hrvMethod == hrvProvenance.persistedMethod,
+               let value = row.avgHrv {
+                todayHRV = WatchRecovery.HRVSample(
+                    value: value,
+                    provenance: hrvProvenance)
+            } else {
+                todayHRV = nil
+            }
+            let res = WatchRecovery.compute(
+                provenance: hrvProvenance,
+                todayHRV: todayHRV,
+                todayRHR: row.restingHr,
+                hrvHistory: hrvHistory,
+                rhrHistory: rhrHistory)
+            out.append(WatchScoredDay(
+                day: row.day,
+                recovery: res.recovery,
+                confidence: res.confidence,
+                hrvProvenance: res.hrvProvenance))
         }
         return out
     }
@@ -2332,9 +2383,46 @@ final class IntelligenceEngine: ObservableObject {
     /// `sleepEditedDaily` folds any row that isn't a twin of a day's detected sessions in as a "manual"
     /// block, so one edit / nap leaked its total onto EVERY night. Byte-identical twin of Android
     /// `IntelligenceEngine.editedRowsForDay`.
-    static func editedRowsForDay(_ editedRows: [CachedSleepSession], day: String,
-                                 tzOffsetSeconds: Int) -> [CachedSleepSession] {
-        editedRows.filter { AnalyticsEngine.dayString($0.endTs, offsetSec: tzOffsetSeconds) == day }
+    nonisolated static func editedRowsForDay(
+        _ editedRows: [CachedSleepSession],
+        day: String,
+        tzOffsetSeconds: Int,
+        sourceTimeline: [CachedSleepSession] = []
+    ) -> [CachedSleepSession] {
+        guard !sourceTimeline.isEmpty else {
+            return editedRows.filter {
+                AnalyticsEngine.dayString(
+                    $0.endTs,
+                    offsetSec: tzOffsetSeconds) == day
+            }
+        }
+
+        // Cached rows are already read from one computed source. Every fragment in a bridged group
+        // inherits that complete group's final wake day.
+        let blocks = sourceTimeline.map {
+            SleepStageTotals.NightBlock(
+                start: $0.effectiveStartTs,
+                end: $0.endTs)
+        }
+        var wakeDayByStart: [Int: String] = [:]
+        for bucket in SleepStageTotals.wakeDayBuckets(
+            blocks,
+            offsetAtEpochSec: { _ in tzOffsetSeconds }
+        ) {
+            for group in bucket.groups {
+                for index in group.indices {
+                    wakeDayByStart[sourceTimeline[index].startTs] = bucket.day
+                }
+            }
+        }
+
+        return editedRows.filter { row in
+            let resolved = wakeDayByStart[row.startTs]
+                ?? AnalyticsEngine.dayString(
+                    row.endTs,
+                    offsetSec: tzOffsetSeconds)
+            return resolved == day
+        }
     }
 
     /// Rebuild the complete Rest evidence record from the final, user-edited daily sleep aggregates while
@@ -2492,14 +2580,7 @@ final class IntelligenceEngine: ObservableObject {
         // covers an imported night and its computed twin (the longest capture wins, exactly what the
         // per-day length rule chose anyway).
         let merged = SleepSessionDedup.dedupe(imported + computed).kept
-        let blocks = merged.compactMap { s -> SleepStageTotals.HistoryBlock? in
-            let start = s.effectiveStartTs, end = s.endTs
-            guard end > start else { return nil }
-            let mid = start + (end - start) / 2
-            let dayKey = AnalyticsEngine.dayString(mid, offsetSec: offsetSec)
-            return SleepStageTotals.HistoryBlock(start: start, end: end, dayKey: dayKey)
-        }
-        return SleepStageTotals.habitualMidsleepSec(blocks, offsetSec: offsetSec)
+        return Repository.historicalHabitualMidsleepSec(merged)
     }
 
     /// Floor a unix-seconds timestamp to 00:00:00 of its UTC calendar day. Mirrors the Android
@@ -2533,7 +2614,8 @@ private extension DailyMetric {
                     avgHrv: avgHrv, recovery: r, strain: strain, exerciseCount: exerciseCount,
                     spo2Pct: spo2Pct, skinTempDevC: sd, respRateBpm: respRateBpm,
                     steps: steps, activeKcalEst: activeKcalEst,
-                    spo2Red: spo2Red, spo2Ir: spo2Ir)
+                    spo2Red: spo2Red, spo2Ir: spo2Ir,
+                    hrvMethod: hrvMethod)
     }
 
     /// Rebuild with substituted sleep-derived fields (a user-corrected wake window), leaving every
@@ -2544,7 +2626,17 @@ private extension DailyMetric {
                     disturbances: disturbances, restingHr: restingHr, avgHrv: avgHrv, recovery: recovery,
                     strain: strain, exerciseCount: exerciseCount, spo2Pct: spo2Pct,
                     skinTempDevC: skinTempDevC, respRateBpm: respRateBpm, steps: steps,
-                    activeKcalEst: activeKcalEst, spo2Red: spo2Red, spo2Ir: spo2Ir)
+                    activeKcalEst: activeKcalEst, spo2Red: spo2Red, spo2Ir: spo2Ir,
+                    hrvMethod: hrvMethod)
+    }
+}
+
+private extension WatchRecovery.HRVProvenance {
+    var persistedMethod: DailyHRVMethod {
+        switch method {
+        case .rmssd: return .rmssd
+        case .sdnn: return .sdnn
+        }
     }
 }
 

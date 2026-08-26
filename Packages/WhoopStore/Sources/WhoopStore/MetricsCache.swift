@@ -24,6 +24,13 @@ public struct CachedSleepSession: Equatable, Codable, Sendable {
     /// whose coverage was never evaluated — presentation must not infer density from an expanded
     /// `motionJSON` epoch count.
     public let gravitySparse: Bool?
+    /// Complete five-minute windows eligible for R-R evidence evaluation within this exact session.
+    /// This is nullable provenance, not a duration-derived fallback: legacy/imported/manual rows and
+    /// any replacement that does not explicitly recompute exact-session evidence remain `nil`.
+    public let rrEligibleWindowCount: Int?
+    /// Eligible five-minute windows that produced a valid R-R/HRV result for this exact session.
+    /// Consumers must require BOTH R-R count fields and fail closed when either is `nil`.
+    public let rrValidWindowCount: Int?
     /// True once the user has hand-corrected this session's wake/sleep bounds. The recompute/import
     /// upsert preserves an edited session's `endTs`/`stagesJSON` instead of overwriting them with the
     /// strap-detected values (see `upsertSleepSessions`). Defaults false so every cache/recompute path
@@ -36,14 +43,44 @@ public struct CachedSleepSession: Equatable, Codable, Sendable {
     public var effectiveStartTs: Int { startTsAdjusted ?? startTs }
     public init(startTs: Int, endTs: Int, efficiency: Double?, restingHr: Int?,
                 avgHrv: Double?, stagesJSON: String?, userEdited: Bool = false,
-                startTsAdjusted: Int? = nil, gravitySparse: Bool? = nil) {
+                startTsAdjusted: Int? = nil, gravitySparse: Bool? = nil,
+                rrEligibleWindowCount: Int? = nil,
+                rrValidWindowCount: Int? = nil) {
         self.startTs = startTs; self.endTs = endTs
         self.efficiency = efficiency; self.restingHr = restingHr
         self.avgHrv = avgHrv; self.stagesJSON = stagesJSON
         self.userEdited = userEdited
         self.startTsAdjusted = startTsAdjusted
         self.gravitySparse = gravitySparse
+        self.rrEligibleWindowCount = rrEligibleWindowCount
+        self.rrValidWindowCount = rrValidWindowCount
     }
+}
+
+/// Two sleep-session ranges read from one GRDB snapshot. `requestedByDevice` is the caller's
+/// publication window; `historyByDevice` is the wider timing-learning window. Keeping both queries in
+/// one `DatabaseReader.read` closure prevents a concurrent import/edit from mixing database revisions.
+public struct SleepSessionReadSnapshot: Equatable, Sendable {
+    public let requestedByDevice: [String: [CachedSleepSession]]
+    public let historyByDevice: [String: [CachedSleepSession]]
+
+    public init(
+        requestedByDevice: [String: [CachedSleepSession]],
+        historyByDevice: [String: [CachedSleepSession]]
+    ) {
+        self.requestedByDevice = requestedByDevice
+        self.historyByDevice = historyByDevice
+    }
+}
+
+/// Time-domain statistic represented by a persisted daily HRV value.
+///
+/// RMSSD and SDNN share milliseconds as a unit but are not interchangeable. Persisting the method
+/// beside the value prevents restored, imported, or future mixed-method rows from entering the wrong
+/// personal baseline.
+public enum DailyHRVMethod: String, Codable, Equatable, Sendable {
+    case rmssd = "RMSSD"
+    case sdnn = "SDNN"
 }
 
 /// One cached daily-metrics row pulled from the server's /v1/daily. Natural key (deviceId, day).
@@ -75,12 +112,14 @@ public struct DailyMetric: Equatable, Codable, Sendable {
     // call site is unaffected.
     public let spo2Red: Int?           // mean raw red PPG ADC during detected sleep
     public let spo2Ir: Int?            // mean raw IR PPG ADC during detected sleep
+    public let hrvMethod: DailyHRVMethod?
     public init(day: String, totalSleepMin: Double?, efficiency: Double?, deepMin: Double?,
                 remMin: Double?, lightMin: Double?, disturbances: Int?, restingHr: Int?,
                 avgHrv: Double?, recovery: Double?, strain: Double?, exerciseCount: Int?,
                 spo2Pct: Double? = nil, skinTempDevC: Double? = nil, respRateBpm: Double? = nil,
                 steps: Int? = nil, activeKcalEst: Double? = nil,
-                spo2Red: Int? = nil, spo2Ir: Int? = nil) {
+                spo2Red: Int? = nil, spo2Ir: Int? = nil,
+                hrvMethod: DailyHRVMethod? = nil) {
         self.day = day; self.totalSleepMin = totalSleepMin; self.efficiency = efficiency
         self.deepMin = deepMin; self.remMin = remMin; self.lightMin = lightMin
         self.disturbances = disturbances; self.restingHr = restingHr; self.avgHrv = avgHrv
@@ -88,6 +127,7 @@ public struct DailyMetric: Equatable, Codable, Sendable {
         self.spo2Pct = spo2Pct; self.skinTempDevC = skinTempDevC; self.respRateBpm = respRateBpm
         self.steps = steps; self.activeKcalEst = activeKcalEst
         self.spo2Red = spo2Red; self.spo2Ir = spo2Ir
+        self.hrvMethod = avgHrv == nil ? nil : hrvMethod
     }
 
     /// The freshest STRICTLY-PRIOR day that carries at least one overnight vital (HRV / resting HR /
@@ -135,8 +175,9 @@ extension WhoopStore {
                 try db.execute(sql: """
                     INSERT INTO sleepSession
                         (deviceId, startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON,
-                         userEdited, startTsAdjusted, gravitySparse)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         userEdited, startTsAdjusted, gravitySparse,
+                         rrEligibleWindowCount, rrValidWindowCount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deviceId, startTs) DO UPDATE SET
                         -- A user-corrected night keeps its hand-set bed/wake times and stage breakdown;
                         -- a recompute/import refresh (this path) updates only the derived vitals. The
@@ -149,10 +190,18 @@ extension WhoopStore {
                         stagesJSON = CASE WHEN sleepSession.userEdited THEN sleepSession.stagesJSON ELSE excluded.stagesJSON END,
                         startTsAdjusted = CASE WHEN sleepSession.userEdited THEN sleepSession.startTsAdjusted ELSE excluded.startTsAdjusted END,
                         gravitySparse = excluded.gravitySparse,
+                        -- Incoming detector evidence describes its incoming bounds. When a user edit
+                        -- preserves different bounds/stages, preserve the evidence explicitly written
+                        -- for that edited window. Unedited replacements take incoming values, including
+                        -- nil, so unsupported/legacy inputs clear stale evidence.
+                        rrEligibleWindowCount = CASE WHEN sleepSession.userEdited THEN sleepSession.rrEligibleWindowCount ELSE excluded.rrEligibleWindowCount END,
+                        rrValidWindowCount = CASE WHEN sleepSession.userEdited THEN sleepSession.rrValidWindowCount ELSE excluded.rrValidWindowCount END,
                         userEdited = sleepSession.userEdited
                     """, arguments: [deviceId, s.startTs, s.endTs, s.efficiency,
                                      s.restingHr, s.avgHrv, s.stagesJSON, s.userEdited,
-                                     s.startTsAdjusted, s.gravitySparse])
+                                     s.startTsAdjusted, s.gravitySparse,
+                                     s.rrEligibleWindowCount,
+                                     s.rrValidWindowCount])
                 n += db.changesCount
             }
             return n
@@ -166,16 +215,26 @@ extension WhoopStore {
     /// `startTsAdjusted`. `newStartTs == detectedStartTs` leaves the onset effectively unchanged.
     /// `stagesJSON`, when non-nil, replaces the stored breakdown (the caller re-derives it for the new
     /// window via `SleepStager.stageSession`, falling back to `SleepWindowReclip`); nil keeps the
-    /// existing stages. Returns rows changed (0 if no such session).
+    /// existing stages. R-R evidence defaults to nil and is therefore cleared whenever bounds/stages
+    /// change; a caller may supply both counts only when it recomputed them for these exact edited bounds.
+    /// Returns rows changed (0 if no such session).
     @discardableResult
     public func applySleepEdit(deviceId: String, detectedStartTs: Int, newStartTs: Int, newEndTs: Int,
-                               stagesJSON: String? = nil) async throws -> Int {
+                               stagesJSON: String? = nil,
+                               rrEligibleWindowCount: Int? = nil,
+                               rrValidWindowCount: Int? = nil) async throws -> Int {
         try syncWrite { db in
             try db.execute(sql: """
                 UPDATE sleepSession
-                SET startTsAdjusted = ?, endTs = ?, stagesJSON = COALESCE(?, stagesJSON), userEdited = 1
+                SET startTsAdjusted = ?, endTs = ?, stagesJSON = COALESCE(?, stagesJSON),
+                    rrEligibleWindowCount = ?, rrValidWindowCount = ?,
+                    userEdited = 1
                 WHERE deviceId = ? AND startTs = ?
-                """, arguments: [newStartTs, newEndTs, stagesJSON, deviceId, detectedStartTs])
+                """, arguments: [
+                    newStartTs, newEndTs, stagesJSON,
+                    rrEligibleWindowCount, rrValidWindowCount,
+                    deviceId, detectedStartTs,
+                ])
             return db.changesCount
         }
     }
@@ -207,18 +266,26 @@ extension WhoopStore {
     ///
     /// Uses `ON CONFLICT(deviceId, startTs) DO NOTHING` so it is purely ADDITIVE: it can never clobber an
     /// existing detected/edited session that happens to share the exact onset second. Returns rows inserted
-    /// (0 when a session already exists at that onset). Mirrors Android `insertManualSleepSession`.
+    /// (0 when a session already exists at that onset). Exact-session R-R evidence defaults to nil; callers
+    /// may supply both counts only when raw R-R was evaluated over this manually chosen window. Mirrors
+    /// Android `insertManualSleepSession`.
     @discardableResult
     public func insertManualSleepSession(deviceId: String, startTs: Int, endTs: Int,
-                                         efficiency: Double?, stagesJSON: String?) async throws -> Int {
+                                         efficiency: Double?, stagesJSON: String?,
+                                         rrEligibleWindowCount: Int? = nil,
+                                         rrValidWindowCount: Int? = nil) async throws -> Int {
         try syncWrite { db in
             try db.execute(sql: """
                 INSERT INTO sleepSession
                     (deviceId, startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON,
-                     userEdited, startTsAdjusted)
-                VALUES (?, ?, ?, ?, NULL, NULL, ?, 1, NULL)
+                     userEdited, startTsAdjusted,
+                     rrEligibleWindowCount, rrValidWindowCount)
+                VALUES (?, ?, ?, ?, NULL, NULL, ?, 1, NULL, ?, ?)
                 ON CONFLICT(deviceId, startTs) DO NOTHING
-                """, arguments: [deviceId, startTs, endTs, efficiency, stagesJSON])
+                """, arguments: [
+                    deviceId, startTs, endTs, efficiency, stagesJSON,
+                    rrEligibleWindowCount, rrValidWindowCount,
+                ])
             return db.changesCount
         }
     }
@@ -230,15 +297,25 @@ extension WhoopStore {
     /// block) because the raw wasn't present yet, and `userEdited` then froze that breakdown against every
     /// later sync. This swaps in the real re-derived stages without disturbing the user's bound correction.
     /// Scoped to `userEdited = 1` rows so it can never rewrite an un-edited (freely re-derivable) night.
-    /// Returns rows changed (0 when no such edited session exists).
+    /// Replacing stages clears R-R evidence by default because stage eligibility may have changed; callers
+    /// may supply both counts only when they were recomputed with the replacement stages. Returns rows
+    /// changed (0 when no such edited session exists).
     @discardableResult
-    public func updateSleepStages(deviceId: String, detectedStartTs: Int, stagesJSON: String) async throws -> Int {
+    public func updateSleepStages(deviceId: String, detectedStartTs: Int, stagesJSON: String,
+                                  rrEligibleWindowCount: Int? = nil,
+                                  rrValidWindowCount: Int? = nil) async throws -> Int {
         try syncWrite { db in
             try db.execute(sql: """
                 UPDATE sleepSession
-                SET stagesJSON = ?
+                SET stagesJSON = ?,
+                    rrEligibleWindowCount = ?,
+                    rrValidWindowCount = ?
                 WHERE deviceId = ? AND startTs = ? AND userEdited = 1
-                """, arguments: [stagesJSON, deviceId, detectedStartTs])
+                """, arguments: [
+                    stagesJSON,
+                    rrEligibleWindowCount, rrValidWindowCount,
+                    deviceId, detectedStartTs,
+                ])
             return db.changesCount
         }
     }
@@ -390,8 +467,8 @@ extension WhoopStore {
                         (deviceId, day, totalSleepMin, efficiency, deepMin, remMin, lightMin,
                          disturbances, restingHr, avgHrv, recovery, strain, exerciseCount,
                          spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst,
-                         spo2Red, spo2Ir)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         spo2Red, spo2Ir, hrvMethod)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deviceId, day) DO UPDATE SET
                         totalSleepMin = excluded.totalSleepMin,
                         efficiency = excluded.efficiency,
@@ -410,13 +487,15 @@ extension WhoopStore {
                         steps = excluded.steps,
                         activeKcalEst = excluded.activeKcalEst,
                         spo2Red = excluded.spo2Red,
-                        spo2Ir = excluded.spo2Ir
+                        spo2Ir = excluded.spo2Ir,
+                        hrvMethod = excluded.hrvMethod
                     """, arguments: [deviceId, d.day, d.totalSleepMin, d.efficiency, d.deepMin,
                                      d.remMin, d.lightMin, d.disturbances, d.restingHr, d.avgHrv,
                                      d.recovery, d.strain, d.exerciseCount,
                                      d.spo2Pct, d.skinTempDevC, d.respRateBpm,
                                      d.steps, d.activeKcalEst,
-                                     d.spo2Red, d.spo2Ir])
+                                     d.spo2Red, d.spo2Ir,
+                                     d.hrvMethod?.rawValue])
                 n += db.changesCount
             }
             return n
@@ -442,22 +521,73 @@ extension WhoopStore {
 
     // MARK: - Reads
 
+    private nonisolated static func fetchSleepSessions(
+        _ db: Database,
+        deviceId: String,
+        from: Int,
+        to: Int,
+        limit: Int
+    ) throws -> [CachedSleepSession] {
+        try Row.fetchAll(db, sql: """
+            SELECT startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON, userEdited,
+                   startTsAdjusted, gravitySparse,
+                   rrEligibleWindowCount, rrValidWindowCount
+            FROM sleepSession
+            WHERE deviceId = ? AND startTs >= ? AND startTs <= ?
+            ORDER BY startTs ASC LIMIT ?
+            """, arguments: [deviceId, from, to, limit])
+            .map {
+                CachedSleepSession(startTs: $0["startTs"], endTs: $0["endTs"],
+                                   efficiency: $0["efficiency"], restingHr: $0["restingHr"],
+                                   avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"],
+                                   userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"],
+                                   gravitySparse: $0["gravitySparse"],
+                                   rrEligibleWindowCount: $0["rrEligibleWindowCount"],
+                                   rrValidWindowCount: $0["rrValidWindowCount"])
+            }
+    }
+
     /// Cached sleep sessions overlapping [from, to] (by startTs), oldest first.
     public func sleepSessions(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [CachedSleepSession] {
         try syncRead { db in
-            try Row.fetchAll(db, sql: """
-                SELECT startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON, userEdited,
-                       startTsAdjusted, gravitySparse FROM sleepSession
-                WHERE deviceId = ? AND startTs >= ? AND startTs <= ?
-                ORDER BY startTs ASC LIMIT ?
-                """, arguments: [deviceId, from, to, limit])
-                .map {
-                    CachedSleepSession(startTs: $0["startTs"], endTs: $0["endTs"],
-                                       efficiency: $0["efficiency"], restingHr: $0["restingHr"],
-                                       avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"],
-                                       userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"],
-                                       gravitySparse: $0["gravitySparse"])
-                }
+            try Self.fetchSleepSessions(
+                db, deviceId: deviceId, from: from, to: to, limit: limit)
+        }
+    }
+
+    /// Read the publication range and wider habitual-timing range for every source from one SQLite
+    /// snapshot. The returned arrays may contain exactly their limit; callers that require completeness
+    /// must treat that as truncation and retry with a larger bound.
+    public func sleepSessionReadSnapshot(
+        deviceIds: [String],
+        requestedFrom: Int,
+        requestedTo: Int,
+        requestedLimit: Int,
+        historyFrom: Int,
+        historyTo: Int,
+        historyLimit: Int
+    ) async throws -> SleepSessionReadSnapshot {
+        let ids = Array(Set(deviceIds)).sorted()
+        return try syncRead { db in
+            var requested: [String: [CachedSleepSession]] = [:]
+            var history: [String: [CachedSleepSession]] = [:]
+            for id in ids {
+                requested[id] = try Self.fetchSleepSessions(
+                    db,
+                    deviceId: id,
+                    from: requestedFrom,
+                    to: requestedTo,
+                    limit: requestedLimit)
+                history[id] = try Self.fetchSleepSessions(
+                    db,
+                    deviceId: id,
+                    from: historyFrom,
+                    to: historyTo,
+                    limit: historyLimit)
+            }
+            return SleepSessionReadSnapshot(
+                requestedByDevice: requested,
+                historyByDevice: history)
         }
     }
 
@@ -468,7 +598,7 @@ extension WhoopStore {
                 SELECT day, totalSleepMin, efficiency, deepMin, remMin, lightMin, disturbances,
                        restingHr, avgHrv, recovery, strain, exerciseCount,
                        spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst,
-                       spo2Red, spo2Ir FROM dailyMetric
+                       spo2Red, spo2Ir, hrvMethod FROM dailyMetric
                 WHERE deviceId = ? AND day >= ? AND day <= ?
                 ORDER BY day ASC
                 """, arguments: [deviceId, from, to])
@@ -482,7 +612,9 @@ extension WhoopStore {
                                 spo2Pct: $0["spo2Pct"], skinTempDevC: $0["skinTempDevC"],
                                 respRateBpm: $0["respRateBpm"],
                                 steps: $0["steps"], activeKcalEst: $0["activeKcalEst"],
-                                spo2Red: $0["spo2Red"], spo2Ir: $0["spo2Ir"])
+                                spo2Red: $0["spo2Red"], spo2Ir: $0["spo2Ir"],
+                                hrvMethod: ($0["hrvMethod"] as String?)
+                                    .flatMap(DailyHRVMethod.init(rawValue:)))
                 }
         }
     }

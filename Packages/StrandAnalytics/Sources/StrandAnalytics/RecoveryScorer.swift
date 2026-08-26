@@ -44,17 +44,15 @@ import WhoopProtocol
 // BOTH the previous-day Effort value AND its EWMA baseline (`Baselines.strainCfg`) — supplying
 // only one drops the term.
 //
-// Each metric is standardized to a robust z-score against the personal baseline
+// Each baseline-relative metric is standardized to a robust personal z-score
 // (mean + EWMA-abs-dev spread). Missing terms are dropped and the weights
-// renormalized. The composite z is squashed through a logistic anchored so that
-// Z = 0 → ~58%. The 58% anchor is an INTERNAL, UNCITED product choice (it centres the
-// distribution slightly above the midpoint so a typical day reads "moderate" rather than
-// "poor"). It is NOT a WHOOP-published figure — that attribution was withdrawn because no
-// such published population average could be verified. See the populationMean honesty note.
+// renormalized. A fixed logistic maps the composite z onto 0...100. Its parameters
+// define NOOP's personal-baseline display scale only: they are not a population
+// statistic, a cold-start fallback, or a fit to a proprietary reference outcome.
 //
 // Cold-start: if the HRV baseline (dominant driver) is not yet usable
-// (< MIN_NIGHTS_SEED valid nights), recovery() returns nil. Callers may use
-// RECOVERY_POPULATION_MEAN (58.0) as a fallback but should flag it.
+// (< MIN_NIGHTS_SEED valid nights), recovery() returns nil. No numeric score is
+// substituted before the personal baseline is ready.
 
 public enum RecoveryScorer {
 
@@ -89,18 +87,13 @@ public enum RecoveryScorer {
     /// baseline (`Baselines.strainCfg`) are supplied.
     public static let wActivityBalance: Double = 0.05
 
-    /// Logistic spread: ±2 z-units ≈ full Red–Green band (15%–95%).
-    public static let logisticK: Double = 1.6
-    /// Logistic offset so Z=0 → 58%.
-    public static let logisticZ0: Double = -0.20
-    /// Cold-start fallback recovery (%) used ONLY before a personal baseline exists.
-    ///
-    /// HONESTY NOTE (2026-08-22): previously commented as "WHOOP-published population-average
-    /// recovery". No such WHOOP publication is cited anywhere in this repo, so that attribution is
-    /// withdrawn: treat 58 as an INTERNAL, UNCITED cold-start anchor (a plausible mid-band value on
-    /// the 0–100 axis), not a population norm. It affects only the pre-baseline fallback, never a
-    /// scored day, and must not be presented to the user as a population comparison.
-    public static let populationMean: Double = 58.0
+    /// Slope of the fixed personal-baseline logistic display mapping.
+    /// Approximately ±2 composite z-units spans the Red-Green band (15%...95%).
+    public static let personalBaselineLogisticSlope: Double = 1.6
+    /// Composite-z midpoint of the fixed personal-baseline logistic display mapping.
+    /// This maps neutral personal-baseline z=0 to about 57.9 without asserting a
+    /// population mean or supplying any cold-start score.
+    public static let personalBaselineLogisticMidpointZ: Double = -0.20
 
     /// Recovery band thresholds (WHOOP color scheme).
     public static let bandRedMax: Double = 34.0
@@ -431,7 +424,9 @@ public enum RecoveryScorer {
 
         let z = terms.reduce(0) { $0 + $1.z * $1.w } / totalWeight
         guard z.isFinite else { return nil }
-        let score = 100.0 / (1.0 + exp(-logisticK * (z - logisticZ0)))
+        let score = 100.0 / (1.0 + exp(
+            -personalBaselineLogisticSlope * (z - personalBaselineLogisticMidpointZ)
+        ))
         guard score.isFinite else { return nil }
         return max(0.0, min(100.0, score))
     }

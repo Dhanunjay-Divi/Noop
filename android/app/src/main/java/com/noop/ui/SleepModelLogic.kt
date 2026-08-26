@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.analytics.AnalyticsEngine
+import com.noop.analytics.DetailedSleepStagePublication
 import com.noop.analytics.SleepDebt
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.DailyMetric
@@ -106,6 +107,7 @@ internal fun buildSleepModel(
     // debt without changing DailyMetric.totalSleepMin, which remains the Rest/headline main-night figure.
     napSleepMinByDay: Map<String, Double> = emptyMap(),
     sessions: List<SleepSession> = emptyList(),
+    detailedStageDays: Set<String> = emptySet(),
 ): SleepModel? {
     val effectiveDay = selectedDay ?: days.lastOrNull()?.day ?: return null
     // The HERO night = the selected day's stage-bearing row. The TILE / debt / need / trend
@@ -152,9 +154,10 @@ internal fun buildSleepModel(
     // Typical = mean across ALL nights with data (full history, latest-anchored — never bounded
     // to the browsed night), mirroring iOS typicalTotalMin / typicalStageMin over repo.days.
     val typicalTotalMin = mean(days.mapNotNull { it.totalSleepMin }.filter { it > 0.0 })
-    val typicalDeepMin = mean(days.mapNotNull { it.deepMin }.filter { it > 0.0 })
-    val typicalRemMin = mean(days.mapNotNull { it.remMin }.filter { it > 0.0 })
-    val typicalLightMin = mean(days.mapNotNull { it.lightMin }.filter { it > 0.0 })
+    val stageHistory = days.filter { it.day in detailedStageDays }
+    val typicalDeepMin = mean(stageHistory.mapNotNull { it.deepMin }.filter { it > 0.0 })
+    val typicalRemMin = mean(stageHistory.mapNotNull { it.remMin }.filter { it > 0.0 })
+    val typicalLightMin = mean(stageHistory.mapNotNull { it.lightMin }.filter { it > 0.0 })
 
     // Personal sleep need (minutes): mean asleep, floored at 7.5h (450 min).
     val needMin = max(450.0, typicalTotalMin ?: 450.0)
@@ -189,9 +192,19 @@ internal fun buildSleepModel(
         val need = imported.needMin[d.day] ?: needMin   // imported need wins per day
         d.totalSleepMin?.takeIf { it > 0.0 && need > 0.0 }?.let { it / need * 100.0 }
     }
-    val restorative = metric(days) { d ->
-        val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
-        if (dp != null && rm != null && sl != null && sl > 0.0) (dp + rm) / sl * 100.0 else null
+    val restorative = run {
+        val rows = stageHistory.mapNotNull { d ->
+            val dp = d.deepMin; val rm = d.remMin; val sl = d.totalSleepMin
+            if (dp != null && rm != null && sl != null && sl > 0.0) {
+                d.day to (dp + rm) / sl * 100.0
+            } else {
+                null
+            }
+        }
+        val values = rows.map { it.second }
+        val latestSleepDay = days.lastOrNull { (it.totalSleepMin ?: 0.0) > 0.0 }?.day
+        val latestValue = rows.lastOrNull()?.takeIf { it.first == latestSleepDay }?.second
+        Metric(latestValue, mean(values), values)
     }
     val respiratory = metric(days) { it.respRateBpm }
     val sleepDebt = run {
@@ -279,13 +292,39 @@ internal fun fallbackSleepModel(
     imported: ImportedSleepSeries = ImportedSleepSeries(),
     napSleepMinByDay: Map<String, Double> = emptyMap(),
     sessions: List<SleepSession> = emptyList(),
+    detailedStageDays: Set<String> = emptySet(),
 ): SleepModel? {
     val anchorDay = days.lastOrNull {
         (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0
     }?.day ?: return null
     return buildSleepModel(days, null, imported, selectedDay = anchorDay,
-        napSleepMinByDay = napSleepMinByDay, sessions = sessions)
+        napSleepMinByDay = napSleepMinByDay, sessions = sessions,
+        detailedStageDays = detailedStageDays)
 }
+
+/**
+ * Detailed-stage publication policy shared by the Android Sleep hero and all stage-derived history.
+ * Locally modelled nights require the durable sustained R-R evidence verdict. Imported provider stages
+ * are independently classified and remain publishable with their own provenance. Missing or corrupt
+ * evidence fails closed; total sleep and non-stage metrics are not part of this set.
+ */
+internal fun detailedStagePublicationDays(
+    days: List<DailyMetric>,
+    sessions: List<SleepSession>,
+    habitualMidsleepSec: Long? = null,
+): Set<String> {
+    val knownDays = days.mapTo(hashSetOf()) { it.day }
+    return sleepWakeDayBuckets(sessions).mapNotNullTo(linkedSetOf()) { bucket ->
+        if (bucket.day !in knownDays) return@mapNotNullTo null
+        val currentMainGroup = mainSleepGroup(bucket.sessions, habitualMidsleepSec)
+        bucket.day.takeIf {
+            DetailedSleepStagePublication.canPublishCurrentMainGroup(currentMainGroup)
+        }
+    }
+}
+
+internal fun canPublishDetailedStages(night: HeroNight): Boolean =
+    night.detailedStagesPublishable
 
 /** Build a metric from a per-day transform, keeping only finite values. */
 private fun metric(days: List<DailyMetric>, transform: (DailyMetric) -> Double?): Metric {

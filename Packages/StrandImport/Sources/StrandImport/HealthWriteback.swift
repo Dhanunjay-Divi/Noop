@@ -84,9 +84,14 @@ public enum HealthWriteback {
         public let effectiveStartTs: Int
         public let endTs: Int
         public let stagesJSON: String?
-        public init(startTs: Int, effectiveStartTs: Int, endTs: Int, stagesJSON: String?) {
+        /// Customer-facing publication decision resolved by the app from this fragment's exact
+        /// source and wake-day evidence. The raw `stagesJSON` remains untouched for reprocessing.
+        public let publishDetailedStages: Bool
+        public init(startTs: Int, effectiveStartTs: Int, endTs: Int, stagesJSON: String?,
+                    publishDetailedStages: Bool = true) {
             self.startTs = startTs; self.effectiveStartTs = effectiveStartTs
             self.endTs = endTs; self.stagesJSON = stagesJSON
+            self.publishDetailedStages = publishDetailedStages
         }
     }
 
@@ -99,9 +104,9 @@ public enum HealthWriteback {
         /// Earliest edited onset → latest wake across the group: the one `.inBed` span.
         public let spanStart: Int
         public let spanEnd: Int
-        /// The fragments' stage intervals in time order — a fragment with no decodable timing
-        /// contributes one honest `.unspecified` block over its own window — with every
-        /// inter-fragment seam as an explicit `.awake` interval.
+        /// The fragments' stage intervals in time order — a fragment with no decodable timing or
+        /// no publication permission contributes one honest `.unspecified` block over its own
+        /// window. A seam is explicit `.awake` only when both adjacent fragments may publish detail.
         public let intervals: [StageInterval]
         /// EVERY fragment's immutable `startTs`, ascending. The delete predicate must carry all of
         /// them: a night previously exported as two entries would otherwise orphan the absorbed
@@ -115,26 +120,28 @@ public enum HealthWriteback {
     }
 
     /// Fold bridged night groups (#364) into write-back entries — one `.inBed` span per night with
-    /// the mid-night wake seams as explicit `.awake` intervals, matching what the daily totals
-    /// already score (#561/#777) and what Oura / Apple Watch write into Health. `groups` comes from
-    /// `SleepStageTotals.bridgedNightGroups` (this package deliberately doesn't depend on the
-    /// analytics package, so the grouping happens in the caller). Fragments are re-sorted by
-    /// effective onset defensively; a zero/negative-length fragment contributes no interval but
-    /// keeps its key in the delete set; a group with no positive span is skipped entirely.
+    /// supported mid-night wake seams as explicit `.awake` intervals, matching what the daily totals
+    /// already score (#561/#777). `groups` comes from `SleepStageTotals.bridgedNightGroups` (this
+    /// package deliberately doesn't depend on the analytics package, so the grouping happens in the
+    /// caller). Fragments are re-sorted by effective onset defensively; a zero/negative-length
+    /// fragment contributes no interval but keeps its key in the delete set; a group with no positive
+    /// span is skipped entirely.
     public static func mergedSleepPlan(groups: [[SleepFragment]]) -> [MergedSleepEntry] {
         var out: [MergedSleepEntry] = []
         for group in groups where !group.isEmpty {
             let frags = group.sorted { $0.effectiveStartTs < $1.effectiveStartTs }
             var intervals: [StageInterval] = []
             var prevEnd: Int? = nil
+            var previousPublishedDetail: Bool? = nil
             var spanStart: Int? = nil
             for f in frags {
                 guard f.endTs > f.effectiveStartTs else { continue }
                 if spanStart == nil { spanStart = f.effectiveStartTs }
-                if let p = prevEnd, f.effectiveStartTs > p {
+                if let p = prevEnd, f.effectiveStartTs > p,
+                   previousPublishedDetail == true, f.publishDetailedStages {
                     intervals.append(StageInterval(start: p, end: f.effectiveStartTs, kind: .awake))
                 }
-                let stages = stageIntervals(stagesJSON: f.stagesJSON,
+                let stages = stageIntervals(stagesJSON: f.publishDetailedStages ? f.stagesJSON : nil,
                                             sessionStart: f.effectiveStartTs, sessionEnd: f.endTs)
                 if stages.isEmpty {
                     intervals.append(StageInterval(start: f.effectiveStartTs, end: f.endTs,
@@ -143,6 +150,7 @@ public enum HealthWriteback {
                     intervals.append(contentsOf: stages)
                 }
                 prevEnd = max(prevEnd ?? f.endTs, f.endTs)
+                previousPublishedDetail = f.publishDetailedStages
             }
             guard let start = spanStart, let end = prevEnd, end > start else { continue }
             out.append(MergedSleepEntry(

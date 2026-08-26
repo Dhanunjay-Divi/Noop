@@ -34,12 +34,11 @@
     <string name="daily_plan_progress_in_range">处于今日计划范围内。这只是参考，并非停止规则。</string>
     <string name="daily_plan_signal_good">良好一致</string>
     <string name="daily_plan_signal_hrv">心率变异性</string>
-    <string name="daily_plan_signal_load">近期负荷比</string>
     <string name="daily_plan_signal_neutral">在范围内</string>
     <string name="daily_plan_signal_respiration">呼吸频率</string>
     <string name="daily_plan_signal_rhr">静息心率</string>
     <string name="daily_plan_signal_shifted">出现偏移</string>
-    <string name="daily_plan_signal_variety">训练多样性</string>
+    <string name="daily_plan_signal_variety">Effort 多样性</string>
     <string name="daily_plan_signal_watch">建议复查</string>
     <string name="daily_plan_state_calibrating_body">NOOP 需要当前且可信的准备度结果，以及最近至少七个已评分的 Effort 日。</string>
     <string name="daily_plan_state_calibrating_title">暂不显示范围</string>

@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 34
+const val NOOP_DATABASE_SCHEMA_VERSION = 36
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -884,6 +884,35 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v34 -> v35: persist exact-session R-R evidence behind locally computed detailed sleep stages.
+         * Nullable additive columns make every legacy/imported row fail closed until that exact session is
+         * analyzed again; no existing health row is rewritten or inferred during migration.
+         */
+        internal val SLEEP_RR_EVIDENCE_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `sleepSession` ADD COLUMN `rrEligibleWindowCount` INTEGER",
+            "ALTER TABLE `sleepSession` ADD COLUMN `rrValidWindowCount` INTEGER",
+        )
+
+        internal val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in SLEEP_RR_EVIDENCE_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        /**
+         * v35 -> v36: persist the HRV statistic represented by each daily value. Existing rows stay
+         * unknown; producers write RMSSD or SDNN only when the method is established.
+         */
+        internal const val DAILY_HRV_METHOD_MIGRATION_SQL =
+            "ALTER TABLE `dailyMetric` ADD COLUMN `hrvMethod` TEXT"
+
+        internal val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(DAILY_HRV_METHOD_MIGRATION_SQL)
+            }
+        }
+
         internal fun strengthBuiltInInsertSQL(): List<String> =
             StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
                 "INSERT OR IGNORE INTO `strengthExercise` " +
@@ -917,7 +946,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
                     MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
                     MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
-                    MIGRATION_33_34,
+                    MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

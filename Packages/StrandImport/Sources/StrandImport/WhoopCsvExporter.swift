@@ -8,10 +8,10 @@ import WhoopStore
 /// output with the REAL importer and asserts field-level equality — so any header/format drift
 /// fails a test rather than silently producing an un-reimportable zip.
 ///
-/// Header strings are byte-identical to a real WHOOP export (the importer normalises them down to
-/// `recovery_score_pct` etc., so they must match exactly). Everything is emitted in UTC with a
+/// WHOOP-defined header strings remain byte-identical, with NOOP's optional `HRV method` and `Source`
+/// extension columns appended for lossless provenance. Everything is emitted in UTC with a
 /// literal "UTC+00:00" timezone column: NOOP stores epoch seconds and tz-less day strings, so UTC
-/// is the only encoding that round-trips a timestamp to the same instant. A trailing "Source"
+/// is the only encoding that round-trips a timestamp to the same instant. The trailing "Source"
 /// column marks on-device computed rows as "noop (APPROXIMATE)" per the house rules; importers read
 /// this provenance solely to keep those rows out of the official WHOOP reference namespace. A
 /// noop_metric_series.json
@@ -136,18 +136,26 @@ public enum WhoopCsvExporter {
     /// physiological_cycles.csv. `series` is day -> (metricSeries key -> value), carrying the
     /// cycles-only columns DailyMetric doesn't store (sleep performance/consistency/need/debt,
     /// in-bed, energy, avg/max HR). `sourceByDay` feeds the trailing, parser-ignored Source column.
+    /// `publishDetailedSleepStages` is resolved by the app from the row's exact source and evidence;
+    /// a denied row keeps total sleep/in-bed values while detailed stage columns remain blank.
+    /// `detailedAwakeMinutes` lets a computed row use awake minutes derived from the same authorized
+    /// session payload as light/deep/REM. Imported rows can keep their existing metric-series value.
     public static func cyclesCSV(days: [DailyMetric],
                                  series: [String: [String: Double]],
-                                 sourceByDay: [String: String] = [:]) -> String {
+                                 sourceByDay: [String: String] = [:],
+                                 publishDetailedSleepStages: (DailyMetric) -> Bool = { _ in true },
+                                 detailedAwakeMinutes: (DailyMetric) -> Double? = { _ in nil }) -> String {
         var out = "Cycle start time,Cycle end time,Cycle timezone,Recovery score %,"
             + "Resting heart rate (bpm),Heart rate variability (ms),Skin temp (celsius),"
             + "Blood oxygen %,Day Strain,Energy burned (cal),Max HR (bpm),Average HR (bpm),"
             + "Sleep onset,Wake onset,Sleep performance %,Respiratory rate (rpm),"
             + "Asleep duration (min),In bed duration (min),Light sleep duration (min),"
             + "Deep (SWS) duration (min),REM duration (min),Awake duration (min),"
-            + "Sleep efficiency %,Sleep consistency %,Sleep need (min),Sleep debt (min),Source\r\n"
+            + "Sleep efficiency %,Sleep consistency %,Sleep need (min),Sleep debt (min),"
+            + "HRV method,Source\r\n"
         for d in days.sorted(by: { $0.day < $1.day }) {
             let s = series[d.day] ?? [:]
+            let publishStages = publishDetailedSleepStages(d)
             let cols: [String] = [
                 d.day + " 00:00:00", "", "UTC+00:00",
                 num(d.recovery), num(d.restingHr), num(d.avgHrv), num(d.skinTempDevC), num(d.spo2Pct),
@@ -156,15 +164,18 @@ public enum WhoopCsvExporter {
                 num(WhoopExportImporter.whoopDayStrainFromEffort(d.strain)), num(s["energy_kcal"]), num(s["max_hr"]), num(s["avg_hr"]),
                 "", "",                              // sleep/wake onset live in sleeps.csv, not here
                 num(s["sleep_performance"]), num(d.respRateBpm), num(d.totalSleepMin), num(s["in_bed_min"]),
-                num(d.lightMin), num(d.deepMin), num(d.remMin),
+                num(publishStages ? d.lightMin : nil),
+                num(publishStages ? d.deepMin : nil),
+                num(publishStages ? d.remMin : nil),
                 // Awake duration is MINUTES; when absent leave the cell empty. (Falling back to the
                 // disturbance COUNT exported a wrong unit that round-tripped on reimport — PR #97
                 // review, tigercraft4.)
-                num(s["awake_min"]),
+                num(publishStages ? (detailedAwakeMinutes(d) ?? s["awake_min"]) : nil),
                 // "Sleep efficiency %" is WHOOP's 0–100 column → convert the stored 0–1 fraction up,
                 // mirroring the Day Strain conversion above (importer scales it back down).
                 num(WhoopExportImporter.whoopEfficiencyPctFromFraction(d.efficiency)), num(s["sleep_consistency"]), num(s["sleep_need_min"]),
                 num(s["sleep_debt_min"]),
+                field(d.avgHrv == nil ? nil : d.hrvMethod?.rawValue),
                 field(sourceByDay[d.day]),
             ]
             out += cols.joined(separator: ",") + "\r\n"
@@ -173,7 +184,9 @@ public enum WhoopCsvExporter {
     }
 
     /// sleeps.csv. Stage durations come from the tolerant stagesJSON decoder; in-bed is derived
-    /// from the session span when the row carries no explicit figure.
+    /// from the session span when the row carries no explicit figure. `publishDetailedStages`
+    /// controls only this customer-facing projection: denied local detail is decoded as absent while
+    /// the caller's raw session remains byte-for-byte available to backup/sync/reprocessing paths.
     /// `cycleStart` returns the "Cycle start time" for a session - the LOCAL day-midnight of the cycle the
     /// sleep belongs to (the caller passes `Repository.localDayKey(endTs) + " 00:00:00"`, the same end-day
     /// key analyze/mergeSleep use), so it matches the corresponding physiological_cycles row's key and the
@@ -182,6 +195,7 @@ public enum WhoopCsvExporter {
     /// (the importer keys on `sleep_onset`, not Cycle start time).
     public static func sleepsCSV(_ sessions: [CachedSleepSession],
                                  cycleStart: (CachedSleepSession) -> String,
+                                 publishDetailedStages: (CachedSleepSession) -> Bool = { _ in true },
                                  sourceBySession: (CachedSleepSession) -> String = { _ in "" }) -> String {
         var out = "Cycle start time,Sleep onset,Wake onset,Cycle timezone,Nap,Sleep performance %,"
             + "Respiratory rate (rpm),Asleep duration (min),In bed duration (min),"
@@ -189,7 +203,7 @@ public enum WhoopCsvExporter {
             + "Awake duration (min),Sleep efficiency %,Sleep consistency %,"
             + "Sleep need (min),Sleep debt (min),Source\r\n"
         for s in sessions.sorted(by: { $0.startTs < $1.startTs }) {
-            let stages = stageMinutes(s.stagesJSON)
+            let stages = stageMinutes(publishDetailedStages(s) ? s.stagesJSON : nil)
             let inBedMin: Double? = s.endTs > s.startTs ? Double(s.endTs - s.startTs) / 60.0 : nil
             let cols: [String] = [
                 cycleStart(s), utc(s.startTs), utc(s.endTs), "UTC+00:00",

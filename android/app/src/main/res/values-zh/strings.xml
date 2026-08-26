@@ -1706,7 +1706,6 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">压力值 %1$s / 3，%2$s</string>
     <string name="stress_peak_summary">峰值 %1$s · %2$s</string>
-    <string name="today_load_ratio">比值 %1$s</string>
     <string name="timeline_metric_heart_rate">心率</string>
     <string name="timeline_metric_rmssd">rMSSD (5分钟)</string>
     <string name="timeline_metric_spo2">血氧(SpO₂)</string>
@@ -2092,4 +2091,5 @@
     <string name="hydration_adaptive_timing_status">当前每 %1$d 分钟一次。仅在今天的数据充分支持时调整时间。</string>
     <string name="hydration_base_interval_label">基础间隔</string>
     <string name="today_calibration_valid_hrv_progress">有效 HRV %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">由于这一晚缺少足够的可用逐次心搏间隔数据，详细睡眠阶段暂不显示。总睡眠时长仍可查看。</string>
 </resources>

@@ -1725,7 +1725,6 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s de 3, %2$s</string>
     <string name="stress_peak_summary">pico %1$s · %2$s</string>
-    <string name="today_load_ratio">rácio %1$s</string>
     <string name="timeline_metric_heart_rate">Frequência cardíaca</string>
     <string name="timeline_metric_rmssd">rMSSD (5 min)</string>
     <string name="timeline_metric_spo2">SpO₂</string>
@@ -2092,4 +2091,5 @@
     <string name="hydration_adaptive_timing_status">Atualmente a cada %1$d min. O horário só muda quando os dados de hoje o justificam.</string>
     <string name="hydration_base_interval_label">Intervalo base</string>
     <string name="today_calibration_valid_hrv_progress">VFC válida %1$d/%2$d</string>
+    <string name="sleep_stage_detail_withheld">As fases detalhadas do sono são ocultadas porque esta noite não contém dados utilizáveis suficientes dos intervalos entre batimentos. O tempo total de sono continua disponível.</string>
 </resources>

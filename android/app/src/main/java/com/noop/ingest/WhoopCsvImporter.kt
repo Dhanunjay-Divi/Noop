@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import android.content.Context
 import android.net.Uri
+import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.JournalEntry
@@ -655,6 +656,13 @@ object WhoopCsvImporter {
             val recovery = row.double("recovery_score_pct")
             val restingHr = row.double("resting_heart_rate_bpm", "resting_heart_rate")
             val avgHrv = row.double("heart_rate_variability_ms", "heart_rate_variability_rmssd_ms")
+            val hrvMethod = if (avgHrv == null) {
+                null
+            } else {
+                val explicit = row.cell("hrv_method")
+                if (explicit == null) DailyHrvMethod.RMSSD
+                else DailyHrvMethod.normalized(explicit)
+            }
             val skinTemp = importedSkinTemperatureCelsius(row)
             val spo2 = row.double("blood_oxygen_pct", "blood_oxygen_pct_pct")
             val strain = row.double("day_strain")
@@ -688,6 +696,7 @@ object WhoopCsvImporter {
                     spo2Pct = spo2,
                     skinTempDevC = skinTemp,
                     respRateBpm = resp,
+                    hrvMethod = hrvMethod,
                 )
             )
         }
@@ -1272,6 +1281,7 @@ object WhoopCsvImporter {
         spo2Pct = base.spo2Pct ?: fill.spo2Pct,
         skinTempDevC = base.skinTempDevC ?: fill.skinTempDevC,
         respRateBpm = base.respRateBpm ?: fill.respRateBpm,
+        hrvMethod = if (base.avgHrv == null) fill.hrvMethod else base.hrvMethod,
     )
 
     // MARK: - JSON encoders (match DemoSeeder shapes)

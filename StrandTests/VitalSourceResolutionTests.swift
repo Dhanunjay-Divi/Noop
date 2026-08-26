@@ -387,6 +387,29 @@ final class ReferenceDataIntegrityTests: XCTestCase {
         XCTAssertEqual(events.first?.durationSeconds, 8 * 3_600 + 15 * 60)
     }
 
+    func testTimelineBridgesBeforeCrossMidnightWakeDayAssignment() {
+        let firstStart = date(2026, 8, 20, hour: 20)
+        let finalWake = date(2026, 8, 21, hour: 3, minute: 45)
+        let events = HealthSleepTimelineResolver.primaryEvents(
+            sessions: [
+                sleep(
+                    start: firstStart,
+                    end: date(2026, 8, 20, hour: 23, minute: 45)
+                ),
+                sleep(
+                    start: date(2026, 8, 21, hour: 0),
+                    end: finalWake
+                ),
+            ],
+            calendar: calendar
+        )
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.day, "2026-08-21")
+        XCTAssertEqual(events.first?.startTs, Int(firstStart.timeIntervalSince1970))
+        XCTAssertEqual(events.first?.endTs, Int(finalWake.timeIntervalSince1970))
+    }
+
     func testBiomarkerSparklineRequiresRecentCloselySpacedObservations() {
         let now = date(2026, 8, 23, hour: 12)
         let dense = BiomarkerTrendIntegrity.snapshot(

@@ -288,8 +288,7 @@ final class SchemaOracleTests: XCTestCase {
         }
     }
 
-    /// The Swift and Android copies of the oracle MUST be byte-identical, so neither platform can edit
-    /// its fixture without the other. Skips gracefully if the Android tree isn't present.
+    /// Both platforms share one exact oracle. A schema change cannot land by editing only one copy.
     func testOracleCopiesAreIdentical() throws {
         let swiftURL = try XCTUnwrap(Bundle.module.url(forResource: "schema_oracle", withExtension: "json"))
         let swiftData = try Data(contentsOf: swiftURL)
@@ -305,8 +304,8 @@ final class SchemaOracleTests: XCTestCase {
         guard FileManager.default.fileExists(atPath: androidURL.path) else {
             throw XCTSkip("android oracle copy not present at \(androidURL.path)")
         }
-        XCTAssertEqual(swiftData, try Data(contentsOf: androidURL),
-                       "schema_oracle.json copies differ — keep the Swift and Android copies in lockstep")
+        let androidData = try Data(contentsOf: androidURL)
+        XCTAssertEqual(swiftData, androidData, "schema_oracle.json copies must be byte-identical")
     }
 }
 

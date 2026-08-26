@@ -66,7 +66,7 @@ class ReadinessEngineTest {
         assertEquals(ReadinessEngine.Level.PRIMED, r.level)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "hrv" }?.flag)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "rhr" }?.flag)
-        assertEquals(ReadinessEngine.Flag.NEUTRAL, r.signals.firstOrNull { it.key == "acwr" }?.flag)
+        assertTrue(r.signals.none { it.key == "acwr" })
         assertEquals(
             "Your measured recovery trends are aligned with your recent baseline.",
             r.summary,
@@ -90,27 +90,22 @@ class ReadinessEngineTest {
     }
 
     @Test
-    fun recentLoadSpikeIsDescriptiveOnly() {
-        // With no evaluable recovery signals, even an extreme ratio remains context—not readiness.
+    fun nonlinearEffortNeverBecomesRecentLoadRatio() {
+        // A bounded score cannot become additive load or an acute:chronic ratio.
         val days = mutableListOf<DailyMetric>()
         for (i in 1..21) days.add(d(i, hrv = 60.0, rhr = 52, strain = 5.0))
         for (i in 22..28) days.add(d(i, hrv = 60.0, rhr = 52, strain = 15.0))
         days.add(d(29, hrv = 60.0, rhr = 52, strain = 15.0))
         val r = ReadinessEngine.evaluate(days)
-        assertEquals(ReadinessEngine.Flag.NEUTRAL, r.signals.firstOrNull { it.key == "acwr" }?.flag)
         assertEquals(ReadinessEngine.Level.INSUFFICIENT, r.level)
-        assertNotNull(r.acwr)
-        assertTrue(r.acwr!! > 1.5)
-        val load = r.signals.firstOrNull { it.key == "acwr" }
-        assertEquals("Recent-load ratio", load?.label)
-        assertTrue(load?.detail?.contains("7-day mean is") == true)
-        assertFalse(load?.detail?.contains("injury", ignoreCase = true) == true)
-        assertFalse(load?.detail?.contains("sweet spot", ignoreCase = true) == true)
+        assertTrue(r.signals.none { it.key == "acwr" })
+        assertNull(r.effortVariety)
+        assertNull(ReadinessEngine.evaluate(days, additiveLoadEntries = emptyList()).trainingLoad)
         assertFalse(r.summary.contains("train", ignoreCase = true))
     }
 
     @Test
-    fun recentLoadRatioCannotChangeRecoveryDrivenReadiness() {
+    fun boundedEffortCannotChangeRecoveryDrivenReadiness() {
         val steady = baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0)
         val spiking = steady.mapIndexed { index, row ->
             // Eight identical final-field changes used to cancel in the XOR cache fingerprint.
@@ -123,8 +118,9 @@ class ReadinessEngineTest {
         assertEquals(steadyReadiness.level, spikeReadiness.level)
         assertEquals(steadyReadiness.headline, spikeReadiness.headline)
         assertEquals(steadyReadiness.summary, spikeReadiness.summary)
-        assertEquals(ReadinessEngine.Flag.NEUTRAL, spikeReadiness.signals.first { it.key == "acwr" }.flag)
-        assertTrue(spikeReadiness.acwr!! > steadyReadiness.acwr!!)
+        assertTrue(spikeReadiness.signals.none { it.key == "acwr" })
+        assertNull(spikeReadiness.effortVariety)
+        assertNull(steadyReadiness.effortVariety)
     }
 
     @Test
@@ -139,8 +135,9 @@ class ReadinessEngineTest {
         }
 
         val read = ReadinessEngine.evaluate(days)
-        val variety = read.signals.firstOrNull { it.key == "monotony" }
+        val variety = read.signals.firstOrNull { it.key == "effortVariety" }
         assertNotNull(variety)
+        assertEquals("Effort variety", variety?.label)
         val evidence = requireNotNull(variety?.evidence)
         assertTrue(evidence.contains("Effort 10-11 (average 10)"))
         assertFalse(evidence.contains("monotony", ignoreCase = true))
@@ -202,10 +199,10 @@ class ReadinessEngineTest {
         )
 
         val withFuture = ReadinessEngine.evaluate(days, today = "2024-03-29")
-        assertEquals(historical.acwr, withFuture.acwr)
+        assertEquals(historical.effortVariety, withFuture.effortVariety)
         assertEquals(
-            historical.signals.firstOrNull { it.key == "acwr" },
-            withFuture.signals.firstOrNull { it.key == "acwr" },
+            historical.signals.firstOrNull { it.key == "effortVariety" },
+            withFuture.signals.firstOrNull { it.key == "effortVariety" },
         )
     }
 
@@ -224,7 +221,7 @@ class ReadinessEngineTest {
         }
 
         val result = ReadinessEngine.evaluate(days, today = "2024-12-15")
-        assertNull(result.acwr)
+        assertNull(result.effortVariety)
         assertTrue(result.signals.none { it.key == "acwr" })
     }
 

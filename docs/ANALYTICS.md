@@ -177,16 +177,23 @@ Only nights strictly before the scored day enter that baseline. Before enough pr
 Missing terms are dropped and weights renormalized. The weighted-mean z is squashed:
 
 ```
-score = 100 / (1 + exp(−logisticK · (z − logisticZ0)))
-        logisticK  = 1.6     (±2 z ≈ the full red–green band)
-        logisticZ0 = −0.20   (anchors z = 0 → ~58 %)
+score = 100 / (1 + exp(−personalBaselineLogisticSlope
+                       · (z − personalBaselineLogisticMidpointZ)))
+        personalBaselineLogisticSlope    = 1.6
+        personalBaselineLogisticMidpointZ = −0.20
 ```
 
-The resulting `~58%` value at `z = 0` is an internal model anchor created by `logisticZ0`. The matching `populationMean = 58.0` constant is an internal, uncited cold-start fallback, not a provider population norm and not a user-facing comparison.
+The resulting `~57.9%` value at `z = 0` is the fixed display mapping for a
+neutral personal-baseline composite. It is not a population mean, a provider
+target, or a cold-start fallback.
 
 ### Cold-start ("Calibrating")
 
-HRV is the dominant driver, and NOOP needs a few nights to learn your personal baseline first. If that baseline isn't usable yet (`BaselineState.usable == false`, i.e. fewer than `minNightsSeed` valid nights), `recovery(...)` returns `nil` and the UI shows **"Calibrating"** — more honest than fabricating a number. Any explicit non-production use of `populationMean` must label it as an internal fallback rather than measured recovery or a population comparison.
+HRV is the dominant driver, and NOOP needs a few nights to learn your personal
+baseline first. If that baseline isn't usable yet
+(`BaselineState.usable == false`, i.e. fewer than `minNightsSeed` valid nights),
+`recovery(...)` returns `nil` and the UI shows **"Calibrating"**. No numeric
+Recovery fallback is substituted.
 
 ### Bands (`band(_:)`)
 
