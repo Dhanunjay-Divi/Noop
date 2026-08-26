@@ -1,0 +1,6 @@
+{
+  "rootCommit": "ecaabdc0",
+  "maxLines": 38829,
+  "fileCount": 212,
+  "note": "Ceiling for source lines still attributable to the shared root commit. May only decrease. Reaching zero does not by itself cure derivative-work status: see the header of Tools/provenance_ratchet.py."
+}

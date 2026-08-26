@@ -144,8 +144,60 @@ Making this repository private does not help. The proof lives in the public upst
    real advice: an unlicensed upstream, a shared root commit, 24 contributors, and a commercial hardware
    launch.
 
-I am not counsel and this is not legal advice. But the shared-SHA evidence is objective, and the owner
-should have it before shipping rather than after.
+### Corrections to my own reporting (2026-08-26)
+
+Two figures I cited were wrong. Both are corrected here rather than quietly edited, because a review
+that hides its own errors is not worth reading.
+
+**1. The `my-whoop` count was a false signal.** I cited "`my-whoop` appears in 308 commits" as
+corroborating upstream lineage. It does not. `"my-whoop"` is NOOP's own **seeded internal device
+identifier**, present at **947 code sites** in the current tree (`SourceCoordinator.isWhoop` matches on
+it). Separating the two:
+
+| Search | Commits |
+|---|---|
+| bare `my-whoop` (the device id) | 309 |
+| `johnmiddleton12/my-whoop` (the repo path) | **14** |
+
+So that data point should be withdrawn. It measured a device id, not attribution.
+
+**2. The surviving-line count was understated.** I first reported 11,821 lines across 69 files (2.1%).
+That measurement only walked the root commit's own 288 files, so it missed files later split or renamed
+that still carry root-commit blame. Scanning every tracked source file gives the real figure:
+
+| Measure | Corrected |
+|---|---|
+| Lines still attributable to `ecaabdc0` | **38,829** |
+| Files affected | **212** |
+| Share of the 561,438-line tree | **6.9%** |
+
+Still a minority of the tree, and still finite and enumerable, but three times what I first said.
+
+**What is unaffected by both corrections:** the decisive evidence. The shared root commit SHA
+`ecaabdc0` is present in the public `ryanbr/noop`, and `muftiarfan/noop` is an unlicensed origin with
+1,046 forks. That is cryptographic and stands on its own without either figure above.
+
+### WHOOP connectivity: intact (verified 2026-08-26)
+
+Checked because the vendor-hiding and ownership-cleanup work could plausibly have broken pairing. It did
+not. The full protocol stack is present and functional:
+
+```swift
+static let customService   = CBUUID(string: "61080001-8d6d-82b8-614a-1c8cb0f8dcc6")  // WHOOP 4.0
+static let whoop5Service   = CBUUID(string: "fd4b0001-cce1-4033-93ce-002d5875f58a")  // WHOOP 5.0 / MG
+static let cmdWriteChar    = CBUUID(string: "61080002-...")   // CMD -> strap
+static let cmdNotifyChar   = CBUUID(string: "61080003-...")   // responses
+static let eventNotifyChar = CBUUID(string: "61080004-...")   // events
+static let dataNotifyChar  = CBUUID(string: "61080005-...")   // fragmented data
+```
+
+Scanning filters on `WhoopModel.allCases.map(\.scanService)`, and `isWhoop` still matches the seeded
+`my-whoop` id or `brand == "WHOOP"`. The earlier `ac66de4b` rename touched only display strings, exactly
+as its diff showed.
+
+**The relevant consequence for provenance:** because the WHOOP 4.0 protocol implementation is fully
+present and working, `unlicensed-whoop4-expression` describes live code, not a historical artefact. That
+blocker was the third of the three deleted, and it is the one least addressed by any of the cleanup work.
 
 | Check | Verdict |
 |---|---|
