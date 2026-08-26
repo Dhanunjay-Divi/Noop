@@ -53,6 +53,7 @@ enum SafetyCheckInNotifications {
         }
 
         let content = UNMutableNotificationContent()
+        content.applyProminence(.safetyCritical)
         content.title = String(localized: "safety.notification.title")
         content.body = String(localized: "safety.notification.body")
         content.sound = .default

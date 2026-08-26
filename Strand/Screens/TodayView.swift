@@ -374,6 +374,9 @@ struct TodayView: View {
     // merge uses), so a provenance badge reflects which source actually supplied that day's number rather
     // than a blanket "on-device" claim. Absent until loaded / when a day has no value. (spec 2026-06-20)
     @State private var provenanceByMetric: [String: String] = [:]
+    /// Provenance of the exact Recovery row the breakdown would explain. This can differ from the
+    /// selected day during morning carry-over, so it is resolved separately and gates explanations.
+    @State private var breakdownRecoverySource: String?
 
     // On-device steps ESTIMATE per day (key "steps_est", computed "-noop" source). The Steps tile
     // prefers the WHOOP 5/MG @57 motion estimate, then measured Apple Health steps; only when a day has
@@ -566,15 +569,89 @@ struct TodayView: View {
     }
 
     /// Recovery cold-start: recovery is nil until the HRV baseline crosses the seed gate
-    /// (Baselines.minNightsSeed valid nights). While calibrating, this is the count of nights
-    /// banked so far, it drives an honest "Calibrating, N of 4 nights" on the recovery ring,
+    /// (Baselines.minNightsSeed valid HRV nights). While calibrating, this is the count of valid
+    /// nightly HRV readings banked so far; sleep can sync without advancing it when no usable R-R
+    /// window produced HRV. It drives the calibration treatment on the recovery ring,
     /// the synthesis card and the Key Metrics tile instead of a bare empty state. It self-clears
-    /// the moment recovery populates, and never claims "calibrating" at/above the seed gate.
+    /// the moment recovery populates; exactly the seed count is shown as "Baseline ready", not calibrating.
     /// Mirrors Android TodayScreen.recoveryCalibrationNights (7b5f212). Only meaningful for today,     /// a past day with no recovery is missing data, not mid-calibration, so navigated days return nil.
     private var recoveryCalibration: Int? {
         guard selectedDayOffset == 0 else { return nil }
         if derivedKey == todayInputKey, let d = derived { return d.calibration }
         return computeCalibration()
+    }
+
+    /// Evidence available for the displayed wake-day while Charge is calibrating. Sleep detection and
+    /// nightly HRV qualification are deliberately separate: a sleep row proves that sleep synced, while
+    /// a finite in-range aggregate HRV value can qualify as a baseline input. That aggregate does not prove
+    /// local beat-to-beat coverage or identify why a night failed to qualify.
+    enum CalibrationNightEvidence: Equatable {
+        case awaitingSleep
+        case sleepSyncedWithoutValidHrv
+        case validHrv
+    }
+
+    static func calibrationNightEvidence(
+        totalSleepMin: Double?,
+        hasSleepSession: Bool,
+        nightlyHrv: Double?
+    ) -> CalibrationNightEvidence {
+        let cfg = Baselines.hrvCfg
+        if let nightlyHrv,
+           nightlyHrv.isFinite,
+           (cfg.minVal...cfg.maxVal).contains(nightlyHrv) {
+            return .validHrv
+        }
+        let durationShowsSleep = totalSleepMin.map { $0.isFinite && $0 > 0 } ?? false
+        return durationShowsSleep || hasSleepSession ? .sleepSyncedWithoutValidHrv : .awaitingSleep
+    }
+
+    /// Full calibration explanation used by the expanded Synthesis card and countdown callout. The
+    /// baseline count is always named as valid HRV nights, never as slept nights.
+    static func calibrationDetailCopy(
+        validHrvNights: Int,
+        seed: Int,
+        evidence: CalibrationNightEvidence,
+        staleDays: Int?
+    ) -> String {
+        if validHrvNights >= seed {
+            return String(localized: "\(seed) of \(seed) valid HRV nights complete. The next qualifying night can produce your first Recovery.")
+        }
+        if evidence == .sleepSyncedWithoutValidHrv {
+            return String(localized: "Sleep synced, but HRV was unavailable or did not pass the baseline quality and range checks. Calibration remains at \(validHrvNights) of \(seed) valid HRV nights.")
+        }
+        if let staleDays, staleDays > Baselines.staleDays {
+            return String(localized: "No valid HRV night has synced from Noop Band for \(staleDays) days. Check that it is connected and syncing overnight data.")
+        }
+        if evidence == .awaitingSleep {
+            return String(localized: "Last night's sleep has not synced yet. Calibration has \(validHrvNights) of \(seed) valid HRV nights.")
+        }
+        return String(localized: "Learning your baseline, \(validHrvNights) of \(seed) valid HRV nights.")
+    }
+
+    static func calibrationCountdown(validHrvNightsRemaining: Int) -> String {
+        let remaining = max(0, validHrvNightsRemaining)
+        return remaining == 1
+            ? String(localized: "1 valid HRV night to go")
+            : String(localized: "\(remaining) valid HRV nights to go")
+    }
+
+    static func calibrationHeadline(validHrvNights: Int, seed: Int) -> String {
+        validHrvNights >= seed
+            ? String(localized: "Baseline ready")
+            : calibrationCountdown(validHrvNightsRemaining: seed - validHrvNights)
+    }
+
+    static func calibrationProgress(validHrvNights: Int, seed: Int) -> String {
+        String(localized: "Calibrating, \(max(0, validHrvNights)) of \(seed) valid HRV nights")
+    }
+
+    private var currentCalibrationNightEvidence: CalibrationNightEvidence {
+        Self.calibrationNightEvidence(
+            totalSleepMin: displayDay?.totalSleepMin,
+            hasSleepSession: sleepToday != nil,
+            nightlyHrv: displayDay?.avgHrv
+        )
     }
 
     /// The most recent fully-SCORED recovery day to carry over on TODAY while tonight's recovery hasn't
@@ -755,13 +832,75 @@ struct TodayView: View {
     /// scored day (#543) so the sheet matches the carried ring instead of being empty at the rollover.
     private var chargeBreakdownRow: DailyMetric? { lastScoredRecoveryDay ?? displayDay }
 
+    /// Build the same causal, epoch-aware personal baselines the scoring engine used for `day`.
+    /// The scored day and every later synced row are excluded, so opening an old breakdown cannot let
+    /// future physiology revise its explanation. Internal for focused app-target regression tests and
+    /// shared with CoupledView.
+    static func chargeBreakdownBaselines(
+        sourceRows: [SourcedDailyMetric],
+        before day: String,
+        hrvBaselineEpoch: Double = Baselines.hrvBaselineEpoch(),
+        recoveryBaselineEpoch: Double = Baselines.recoveryBaselineEpoch()
+    ) -> (hrv: BaselineState, rhr: BaselineState, resp: BaselineState, rest: BaselineState) {
+        let imported = sourceRows.filter { $0.source == .whoopImport }
+        let computed = sourceRows.filter { $0.source == .noopComputed }
+        func causalValues(_ value: (DailyMetric) -> Double?) -> [String: Double?] {
+            var byDay: [String: Double?] = [:]
+            // Match IntelligenceEngine: imported raw aggregates establish context for a
+            // covered day; locally computed rows fill only days the import does not cover.
+            for row in imported {
+                byDay[row.metric.day] = .some(value(row.metric))
+            }
+            for row in computed where byDay[row.metric.day] == nil {
+                byDay[row.metric.day] = .some(value(row.metric))
+            }
+            return byDay
+        }
+        return (
+            Baselines.foldHistory(
+                causalValues(\.avgHrv), before: day, cfg: Baselines.hrvCfg,
+                baselineEpoch: hrvBaselineEpoch),
+            Baselines.foldHistory(
+                causalValues { $0.restingHr.map(Double.init) }, before: day,
+                cfg: Baselines.restingHRCfg, baselineEpoch: recoveryBaselineEpoch),
+            Baselines.foldHistory(
+                causalValues(\.respRateBpm), before: day, cfg: Baselines.respCfg,
+                baselineEpoch: recoveryBaselineEpoch),
+            Baselines.foldHistory(
+                causalValues {
+                    AnalyticsEngine.Rest.composite(daily: $0).map { $0 / 100.0 }
+                },
+                before: day, cfg: Baselines.restQualityCfg,
+                baselineEpoch: recoveryBaselineEpoch)
+        )
+    }
+
+    /// Rest value that actually belongs to a locally computed daily row. Provider
+    /// Sleep Performance is a reference outcome and can never explain local Charge.
+    static func locallyDerivedRestScore(
+        day: String,
+        sourceRows: [SourcedDailyMetric]
+    ) -> Double? {
+        locallyComputedDay(day: day, sourceRows: sourceRows).flatMap {
+            AnalyticsEngine.Rest.composite(daily: $0)
+        }
+    }
+
+    static func locallyComputedDay(
+        day: String,
+        sourceRows: [SourcedDailyMetric]
+    ) -> DailyMetric? {
+        sourceRows.last {
+            $0.source == .noopComputed && $0.metric.day == day
+        }?.metric
+    }
+
     /// The ordered "What shaped it" Charge drivers for the displayed Charge ring, PLUS the confidence tier
-    /// computed from the SAME folded HRV baseline. PURE derivation from the SAME `displayDay` (post-#814
-    /// union-read row) the ring already shows, plus the HRV/RHR/resp baselines folded from `repo.days`
-    /// (exactly the inputs `AnalyticsEngine` scored with), so a row can NEVER describe a term the ring's
-    /// number didn't use. This is NOT a second store read: it reads only data already resolved into
-    /// `repo.days`/`displayDay`. nil for a calibrating / cold-start night (no usable HRV baseline or no
-    /// value), so the sheet gates through to the calibration countdown instead.
+    /// computed from the SAME causal baselines. PURE derivation from the SAME `displayDay` (post-#814
+    /// union-read row) the ring already shows and rows strictly before it, so a row can NEVER describe a
+    /// term the ring's number didn't use. This is NOT a second store read: it reads only data already
+    /// resolved into `repo.days`/`displayDay`. nil for a calibrating / cold-start night (no usable HRV
+    /// baseline or no value), so the sheet gates through to the calibration countdown instead.
     ///
     /// PERF: this replaces the two separate computed properties (`chargeDrivers` +
     /// `chargeBreakdownConfidence`) that EACH re-folded the full `repo.days` history per body evaluation of
@@ -769,32 +908,46 @@ struct TodayView: View {
     /// fold while actually recomputing it. One call folds each series exactly once (three passes), and the
     /// sheet reads drivers + confidence out of a single sheet-local `let`.
     private func chargeBreakdown() -> (drivers: [ChargeDriver], confidence: ScoreConfidence)? {
-        guard let row = chargeBreakdownRow,
+        guard let displayedRow = chargeBreakdownRow,
+              Self.canExplainRecovery(source: breakdownRecoverySource) else { return nil }
+        let sourceRows = repo.vitalMetricRows
+        guard let row = Self.locallyComputedDay(day: displayedRow.day, sourceRows: sourceRows),
               let hrv = row.avgHrv, let rhr = row.restingHr else { return nil }
-        let hrvBase = Baselines.foldHistory(repo.days.map(\.avgHrv), cfg: Baselines.hrvCfg)
+        let baselines = Self.chargeBreakdownBaselines(sourceRows: sourceRows, before: row.day)
+        let hrvBase = baselines.hrv
         guard hrvBase.usable else { return nil }
-        let rhrBase = Baselines.foldHistory(repo.days.map { $0.restingHr.map(Double.init) },
-                                            cfg: Baselines.restingHRCfg)
-        let respBase = Baselines.foldHistory(repo.days.map(\.respRateBpm), cfg: Baselines.respCfg)
-        // Rest-quality term = the Rest composite ÷100, matching AnalyticsEngine's `sleepPerf`. `restScore`
-        // is the same merged sleep_performance value the Rest ring reads, so the term stays consistent.
-        let sleepPerf = restScore.map { $0 / 100.0 }
+        let rowRestScore = Self.locallyDerivedRestScore(day: row.day, sourceRows: sourceRows)
+        let sleepPerf = rowRestScore.map { $0 / 100.0 }
         let drivers = RecoveryScorer.chargeDrivers(
             hrv: hrv, rhr: Double(rhr), resp: row.respRateBpm,
             hrvBaseline: hrvBase,
-            rhrBaseline: rhrBase.usable ? rhrBase : nil,
-            respBaseline: respBase.usable ? respBase : nil,
-            sleepPerf: sleepPerf, skinTempDev: row.skinTempDevC)
+            rhrBaseline: baselines.rhr.usable ? baselines.rhr : nil,
+            respBaseline: baselines.resp.usable ? baselines.resp : nil,
+            sleepPerf: sleepPerf,
+            restQualityBaseline: baselines.rest.usable ? baselines.rest : nil,
+            skinTempDev: row.skinTempDevC)
         // Confidence tier SURFACED (never recomputed) from the existing `ScoreConfidence.charge` against
         // the SAME folded HRV baseline the drivers scored with, so the dot + tier tag in the sheet header
         // agree with the breakdown by construction.
-        return (drivers, ScoreConfidence.charge(recovery: row.recovery, hrvBaseline: hrvBase))
+        return (drivers, ScoreConfidence.charge(
+            recovery: displayedRow.recovery,
+            hrvBaseline: hrvBase))
+    }
+
+    /// Only a score emitted by NOOP's computed namespace can be explained with NOOP's local drivers.
+    /// Imported and unknown provenance fail closed; reconstructing local drivers beside a provider score
+    /// would imply a causal explanation the imported score never supplied.
+    nonisolated static func canExplainRecovery(source: String?) -> Bool {
+        source?.hasSuffix("-noop") == true
     }
 
     /// The night's relative skin-temp marker for the displayed row (A5), or nil. Surfaced verbatim from
     /// `RecoveryScorer.skinTempRelative` (no recompute) so it reads identically to the Intelligence screen.
     private var chargeSkinTempRel: SkinTempRelative? {
-        RecoveryScorer.skinTempRelative(deviationC: chargeBreakdownRow?.skinTempDevC)
+        let local = chargeBreakdownRow.flatMap {
+            Self.locallyComputedDay(day: $0.day, sourceRows: repo.vitalMetricRows)
+        }
+        return RecoveryScorer.skinTempRelative(deviationC: local?.skinTempDevC)
     }
 
     /// #205 one-line readiness context kept on the hero (Aligned / Within range / Recheck /
@@ -822,7 +975,7 @@ struct TodayView: View {
     private var chargeScoreState: MetricTileState {
         MetricTileState.resolve(
             hasTodayValue: displayDay?.recovery != nil,
-            calibratingNightsRemaining: recoveryCalibration.map { max(1, Baselines.minNightsSeed - $0) },
+            calibratingNightsRemaining: recoveryCalibration.map { Baselines.minNightsSeed - $0 },
             carriedDate: lastScoredRecoveryDay.map { Self.lastChargeDateFmt($0.day) },
             carriedStale: lastScoredRecoveryDay.map {
                 Self.isCarryStale(priorDayKey: $0.day, todayKey: selectedDayKey)
@@ -1031,6 +1184,8 @@ struct TodayView: View {
         guard selectedDayOffset == 0 else { return nil }
         return RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
                                                 dayKeys: repo.days.map(\.day),
+                                                before: repo.today?.day
+                                                    ?? Repository.logicalDayKey(Date()),
                                                 hasRecovery: repo.today?.recovery != nil)
     }
 
@@ -1038,23 +1193,24 @@ struct TodayView: View {
         TodayDerived(readiness: computeReadiness(), calibration: computeCalibration())
     }
 
-    /// Synthesis-card copy while the recovery baseline calibrates; nil otherwise. Built as
-    /// LocalizedStringKey literals so the String Catalog picks up the %lld patterns.
+    /// Synthesis-card copy while the recovery baseline calibrates; nil otherwise.
     private var calibrationStatus: LocalizedStringKey? {
-        recoveryCalibration == nil ? nil : "Calibrating"
+        guard let validHrvNights = recoveryCalibration else { return nil }
+        return validHrvNights >= Baselines.minNightsSeed ? "Baseline ready" : "Calibrating"
     }
-    private var calibrationDetail: LocalizedStringKey? {
+    private var calibrationDetail: String? {
         guard let n = recoveryCalibration else { return nil }
-        // #612: if the baseline aged out silently — connected, but no new night for > staleDays — say WHY
-        // it's calibrating instead of only "learning your baseline". The honest calibrating state is correct;
-        // this attaches its reason. `stale` is always > staleDays (14) here, so the copy is always plural.
-        if let stale = Baselines.nightsSinceNewestValidNight(dayKeys: repo.days.map(\.day),
-                                                             nightlyHrv: repo.days.map(\.avgHrv),
-                                                             today: Repository.logicalDayKey(Date())),
-           stale > Baselines.staleDays {
-            return "No new nights from Noop Band for \(stale) days. Check that it is connected and saving data."
-        }
-        return "Learning your baseline, \(n) of \(Baselines.minNightsSeed) nights."
+        let stale = Baselines.nightsSinceNewestValidNight(
+            dayKeys: repo.days.map(\.day),
+            nightlyHrv: repo.days.map(\.avgHrv),
+            today: Repository.logicalDayKey(Date())
+        )
+        return Self.calibrationDetailCopy(
+            validHrvNights: n,
+            seed: Baselines.minNightsSeed,
+            evidence: currentCalibrationNightEvidence,
+            staleDays: stale
+        )
     }
 
     /// The iOS tab is already labelled "Today", and "Control Center" collides with the OS feature of
@@ -1767,6 +1923,18 @@ struct TodayView: View {
     private var heroSection: some View {
         let d = displayDay
         let score = d?.recovery
+        return heroSectionBody(d: d, score: score)
+            // A tactile landing when the day's Charge resolves. Deliberately `.light` and NOT `.success`:
+            // this fires on a 14 as readily as on a 94, and a celebratory buzz on someone's worst recovery
+            // morning is the kind of tone-deaf detail that makes an app feel like it isn't listening. The
+            // cue marks "your number has arrived", nothing more. Firing on `score` (not on a load flag)
+            // also means a day the user scrubs to lands the same way the morning read does, and iOS still
+            // honours the system Sounds & Haptics master switch underneath.
+            .strandHaptic(.light, trigger: score)
+    }
+
+    @ViewBuilder
+    private func heroSectionBody(d: DailyMetric?, score: Double?) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             // Recording status now lives as a colour-coded light in the header icon row, not a full-width
             // banner sandwiched above the rings. The three clean rings lead the screen directly.
@@ -1779,7 +1947,7 @@ struct TodayView: View {
             // honest explanation rather than the usual silent bare ring.
             if chargeDeepWindowGap {
                 chargeDeepWindowGapNote
-            } else if selectedDayOffset == 0 && !chargeScoreState.isCalibrating {
+            } else if selectedDayOffset == 0 && !chargeScoreState.isCalibrationGuidance {
                 // Component 2, when Charge has no real today value, an explained state with its detail +
                 // next step replaces a bare blank, sitting directly under the rings. The CALIBRATING case is
                 // already richly explained by the data-confidence pill + calibration Synthesis card + the ring
@@ -1804,8 +1972,17 @@ struct TodayView: View {
                         todayCardDismissButton {
                             dismissTodayCard(
                                 id: "calibratingBaseline",
-                                title: String(localized: "Building your baseline"),
-                                message: String(localized: "Recovery, Effort and Sleep Score become personal after a few nights of wear.")
+                                title: banked >= Baselines.minNightsSeed
+                                    ? String(localized: "Baseline ready")
+                                    : String(localized: "Building your baseline"),
+                                message: banked >= Baselines.minNightsSeed
+                                    ? Self.calibrationDetailCopy(
+                                        validHrvNights: banked,
+                                        seed: Baselines.minNightsSeed,
+                                        evidence: currentCalibrationNightEvidence,
+                                        staleDays: nil
+                                    )
+                                    : String(localized: "Recovery, Effort and Sleep Score become personal after a few nights of wear.")
                             )
                         }
                     }
@@ -1849,15 +2026,18 @@ struct TodayView: View {
     }
 
     /// A4 , the Charge calibrating countdown callout. `banked` is the existing `recoveryCalibration`
-    /// (nights gathered so far); the nights-to-go and progress copy come from the pure
-    /// `ChargeBreakdownFormat` helpers so they read identically here and in tests. Near-black Charge card,
-    /// slate confidence tier, no fabricated number.
+    /// (valid HRV nights gathered so far); the nights-to-go and progress copy come from the pure
+    /// `TodayView` helpers pinned by focused tests. Near-black Charge card, slate confidence tier,
+    /// no fabricated number.
     @ViewBuilder
     private func chargeCalibrationCountdown(banked: Int) -> some View {
-        let remaining = max(1, Baselines.minNightsSeed - banked)
-        let countdown = ChargeBreakdownFormat.calibrationCountdown(nightsRemaining: remaining)
+        let seedComplete = banked >= Baselines.minNightsSeed
+        let headline = Self.calibrationHeadline(
+            validHrvNights: banked,
+            seed: Baselines.minNightsSeed
+        )
         let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Recovery"))
-        let progress = ChargeBreakdownFormat.calibrationProgress(banked: banked, seed: Baselines.minNightsSeed)
+        let progress = Self.calibrationProgress(validHrvNights: banked, seed: Baselines.minNightsSeed)
         NoopCard(padding: 14, tint: StrandPalette.chargeColor) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "gauge.with.dots.needle.bottom.50percent")
@@ -1866,24 +2046,44 @@ struct TodayView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(countdown)
+                        Text(headline)
                             .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Spacer(minLength: 0)
-                        ConfidenceTierChip(confidence: .calibrating)
+                        if !seedComplete {
+                            ConfidenceTierChip(confidence: .calibrating)
+                        }
                     }
-                    Text(unlock)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(progress)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    if seedComplete, let calibrationDetail {
+                        Text(calibrationDetail)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if currentCalibrationNightEvidence == .validHrv {
+                        Text(unlock)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(progress)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    } else if let calibrationDetail {
+                        Text(calibrationDetail)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Recovery baseline calibrating. \(countdown), \(unlock). \(progress).")
+        .accessibilityLabel(
+            (seedComplete
+                ? [headline, calibrationDetail ?? progress]
+                : [String(localized: "Calibrating"), headline,
+                   calibrationDetail ?? [unlock, progress].joined(separator: ". ")])
+                .joined(separator: ". ")
+        )
     }
 
     // MARK: A1/S4 Charge breakdown sheet (the Charge-ring tap target)
@@ -1907,6 +2107,9 @@ struct TodayView: View {
                                                    confidence: breakdown.confidence,
                                                    skinTempRel: chargeSkinTempRel)
                         }
+                    } else if chargeBreakdownRow?.recovery != nil,
+                              !Self.canExplainRecovery(source: breakdownRecoverySource) {
+                        chargeProvenanceUnavailableNote
                     } else {
                         // #233: a night with no deep sleep under the Deep HRV window has a known, specific
                         // cause, so it tap-throughs to that explanation rather than the generic empty note.
@@ -1992,6 +2195,20 @@ struct TodayView: View {
         }
     }
 
+    private var chargeProvenanceUnavailableNote: some View {
+        NoopCard(padding: 18, tint: StrandPalette.chargeColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                Text("Imported")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("The method behind the score, not today's values.")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     /// S4: the Readiness card folded into the breakdown sheet. Same content as the old standalone
     /// `readinessSection`, just hosted here behind the Charge-ring tap. Hidden when there isn't enough
     /// history (the `.insufficient` level), matching the old card's own hide.
@@ -2068,8 +2285,13 @@ struct TodayView: View {
             return ("\(f.synthHeadline)", "\(f.synthBody)")
         }
         #endif
-        return (calibrationStatus ?? "\(synthesisCardStatus(d, score: score))",
-                calibrationDetail ?? "\(synthesisCardDetail(d, score: score))")
+        let detail: LocalizedStringKey
+        if let calibrationDetail {
+            detail = LocalizedStringKey(calibrationDetail)
+        } else {
+            detail = "\(synthesisCardDetail(d, score: score))"
+        }
+        return (calibrationStatus ?? "\(synthesisCardStatus(d, score: score))", detail)
     }
 
     @ViewBuilder
@@ -2483,6 +2705,7 @@ struct TodayView: View {
             let symbol: String = {
                 switch state {
                 case .calibrating:      return "gauge.with.dots.needle.bottom.50percent"
+                case .baselineReady:    return "checkmark.circle"
                 case .carriedLastNight: return "clock.arrow.circlepath"
                 case .needsStrap:       return "exclamationmark.circle"
                 case .scored:           return "info.circle"
@@ -2531,7 +2754,11 @@ struct TodayView: View {
         } else if score != nil {
             ScoreStatePill(.solid)
         } else if let n = recoveryCalibration {
-            ScoreStatePill(.calibrating, text: "Calibrating, \(n) of \(Baselines.minNightsSeed)")
+            if n < Baselines.minNightsSeed {
+                ScoreStatePill(
+                    .calibrating,
+                    text: "Calibrating, \(n) of \(Baselines.minNightsSeed) valid HRV nights")
+            }
         } else {
             ScoreStatePill(.calibrating)
         }
@@ -2539,7 +2766,11 @@ struct TodayView: View {
         if score != nil {
             ScoreStatePill(.solid)
         } else if let n = recoveryCalibration {
-            ScoreStatePill(.calibrating, text: "Calibrating, \(n) of \(Baselines.minNightsSeed)")
+            if n < Baselines.minNightsSeed {
+                ScoreStatePill(
+                    .calibrating,
+                    text: "Calibrating, \(n) of \(Baselines.minNightsSeed) valid HRV nights")
+            }
         } else {
             ScoreStatePill(.calibrating)
         }
@@ -3053,12 +3284,21 @@ struct TodayView: View {
     private func ringEmptyOverlay(d: DailyMetric?, diameter: CGFloat) -> some View {
         VStack(spacing: 3) {
             if let n = recoveryCalibration {
-                // "Calibrating" is a long word for the ring's interior, it reads as the centre label, with
-                // the same lineLimit/scaleFactor guard so it never wraps, then its "N of 4" subtitle below.
-                Text("Calibrating").font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
-                    .lineLimit(1).minimumScaleFactor(0.7).fixedSize()
-                Text("\(n) of \(Baselines.minNightsSeed)").font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
+                Text(
+                    n >= Baselines.minNightsSeed
+                        ? String(localized: "Baseline ready")
+                        : String(localized: "Calibrating")
+                )
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.65)
+                Text("Valid HRV \(n)/\(Baselines.minNightsSeed)")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             } else {
                 ringNoData(diameter: diameter)
             }
@@ -3419,7 +3659,11 @@ struct TodayView: View {
                 // Component 2: never a bare blank, when there's no number, no calibration count and
                 // nothing to carry, the caption states the honest "Needs the strap" rather than nothing.
                 caption: d?.recovery.map { StrandPalette.recoveryState($0).capitalized }
-                    ?? recoveryCalibration.map { _ in String(localized: "Calibrating") }
+                    ?? recoveryCalibration.map {
+                        $0 >= Baselines.minNightsSeed
+                            ? String(localized: "Baseline ready")
+                            : String(localized: "Valid HRV nights")
+                    }
                     ?? carried.map { $0.caption }
                     ?? Self.needsStrapCaption,
                 accent: d?.recovery.map { StrandPalette.recoveryGaugeColors($0).base }
@@ -4127,6 +4371,7 @@ struct TodayView: View {
         sparks["sleep_performance"] = c.restSpark
         restScore = c.restScore
         provenanceByMetric = c.provenanceByMetric
+        breakdownRecoverySource = c.breakdownRecoverySource
         hrPoints = c.hrPoints
         stepActivityClassToday = c.stepActivityClassToday
         liveTodayStrain = c.liveTodayStrain
@@ -4234,6 +4479,10 @@ struct TodayView: View {
         if let win = recoveryResolved.points.last(where: { $0.day == selectedDayKey })?.source {
             provenance["recovery"] = win
         }
+        let breakdownSourceLocal = chargeBreakdownRow.flatMap { row in
+            recoveryResolved.points.last(where: { $0.day == row.day })?.source
+        }
+        breakdownRecoverySource = breakdownSourceLocal
         let restResolved = await restResolvedA
         if let win = restResolved.points.last(where: { $0.day == selectedDayKey })?.source {
             provenance["sleep_performance"] = win
@@ -4330,6 +4579,7 @@ struct TodayView: View {
             restSpark: restSparkLocal,
             restScore: restScoreLocal,
             provenanceByMetric: provenance,
+            breakdownRecoverySource: breakdownSourceLocal,
             hrPoints: hrPointsLocal,
             stepActivityClassToday: stepClassLocal,
             liveTodayStrain: liveStrainLocal,
@@ -4768,6 +5018,7 @@ struct TodayDayScopedCache {
     let restSpark: [Double]
     let restScore: Double?
     let provenanceByMetric: [String: String]
+    let breakdownRecoverySource: String?
     let hrPoints: [TrendPoint]
     let stepActivityClassToday: Int?
     let liveTodayStrain: Double?
@@ -5066,6 +5317,8 @@ enum MetricTileState: Equatable {
     case scored
     /// Baselines still cold-start: `nightsRemaining` more nights until the score is personal. No number.
     case calibrating(nightsRemaining: Int)
+    /// The seed window is complete, but the completed seed night cannot score against itself. No number.
+    case baselineReady
     /// A prior scored day shown pre-tonight (#543 carry-over). `date` is that scored day's own date.
     /// `stale` is true when that day is older than the freshness cap (#779): the carry is still shown so the
     /// recovery side isn't a bare blank, but it's relabelled "Latest sleep" so a weeks-old import is never
@@ -5080,6 +5333,7 @@ enum MetricTileState: Equatable {
         switch self {
         case .scored:                       return nil
         case .calibrating:                  return "Calibrating"
+        case .baselineReady:                return "Baseline ready"
         case .carriedLastNight(let date, let stale):
             // A LocalizedStringKey literal so the extractor catalogues the "Latest sleep · %@" /
             // "Last night · %@" format keys; the rendered English string is unchanged.
@@ -5099,6 +5353,8 @@ enum MetricTileState: Equatable {
             return n == 1
                 ? "Building your baseline. About 1 more night until your scores are personal."
                 : "Building your baseline. About \(n) more nights until your scores are personal."
+        case .baselineReady:
+            return "\(Baselines.minNightsSeed) of \(Baselines.minNightsSeed) valid HRV nights complete. The next qualifying night can produce your first Recovery."
         case .carriedLastNight(_, let stale):
             // A fresh post-rollover carry tells you tonight's score is on its way; a stale carry (an older
             // import, #779) instead explains the number is from that earlier session, not today.
@@ -5120,6 +5376,8 @@ enum MetricTileState: Equatable {
             return n == 1
                 ? String(localized: "Calibrating. Building your baseline. About 1 more night until your scores are personal.")
                 : String(localized: "Calibrating. Building your baseline. About \(n) more nights until your scores are personal.")
+        case .baselineReady:
+            return String(localized: "Baseline ready. \(Baselines.minNightsSeed) of \(Baselines.minNightsSeed) valid HRV nights complete. The next qualifying night can produce your first Recovery.")
         case .carriedLastNight(let date, let stale):
             return stale
                 ? String(localized: "Latest sleep, \(date). This is your last scored session. Wear Noop Band overnight for a fresh score.")
@@ -5131,9 +5389,13 @@ enum MetricTileState: Equatable {
 
     /// Convenience for the hero, where calibration is already richly explained by the data-confidence
     /// pill + Synthesis card + ring overlay, so the explained note defers to those for that one case.
-    var isCalibrating: Bool {
-        if case .calibrating = self { return true }
-        return false
+    var isCalibrationGuidance: Bool {
+        switch self {
+        case .calibrating, .baselineReady:
+            return true
+        default:
+            return false
+        }
     }
 
     /// PURE mapper (unit-testable), the honest precedence behind every Today score/tile state, given
@@ -5142,16 +5404,17 @@ enum MetricTileState: Equatable {
     ///   2. still mid-calibration (today only)  → `.calibrating(nightsRemaining)`
     ///   3. a prior scored day to carry (#543)  → `.carriedLastNight(date, stale)`
     ///   4. nothing banked anywhere             → `.needsStrap`
-    /// `nightsRemaining` is clamped to AT LEAST 1 so a boundary count never reads "0 more nights" while
-    /// calibration is genuinely still on (the singular/plural rule then reads the clamped value). Mirror
-    /// the Kotlin `coerceAtLeast(1)` exactly. `carriedStale` (#779) relabels an out-of-cap carry to
+    /// Zero or fewer nights remaining resolves to `.baselineReady`: the seed window is complete, but its
+    /// final night cannot score against itself. `carriedStale` (#779) relabels an out-of-cap carry to
     /// "Latest sleep" so a weeks-old import is never passed off as "Last night".
     static func resolve(hasTodayValue: Bool,
                         calibratingNightsRemaining: Int?,
                         carriedDate: String?,
                         carriedStale: Bool = false) -> MetricTileState {
         if hasTodayValue { return .scored }
-        if let remaining = calibratingNightsRemaining { return .calibrating(nightsRemaining: max(1, remaining)) }
+        if let remaining = calibratingNightsRemaining {
+            return remaining <= 0 ? .baselineReady : .calibrating(nightsRemaining: remaining)
+        }
         if let date = carriedDate { return .carriedLastNight(date: date, stale: carriedStale) }
         return .needsStrap
     }

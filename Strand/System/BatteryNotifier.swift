@@ -131,6 +131,7 @@ enum BatteryNotifier {
                 return
             }
             let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
             content.title = title
             content.body = body
             content.sound = .default

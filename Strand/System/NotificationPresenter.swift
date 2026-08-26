@@ -320,3 +320,45 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 }
+
+// MARK: - Prominence policy
+
+/// How loudly a notification is allowed to arrive.
+///
+/// iOS silences the default `.active` level under Focus and Do Not Disturb. Before this existed every
+/// NOOP notification used that default, which produced two opposite defects at once: a safety check-in
+/// the user had explicitly armed could be silenced by a Focus mode, while a strap-battery nudge arrived
+/// with exactly the same prominence as that safety message.
+///
+/// The vocabulary is deliberately three-valued. Adding a fourth tier invites per-notification tuning,
+/// and prominence creep is how apps train users to swipe everything away.
+///
+/// `.timeSensitive` requires the `com.apple.developer.usernotifications.time-sensitive` entitlement.
+/// Without it iOS silently downgrades the request to `.active`, so the entitlement and this policy have
+/// to travel together. It does NOT require, and NOOP does not request, the critical-alert entitlement:
+/// that one pierces silent mode and is reserved for medical devices, which NOOP explicitly is not.
+enum NotificationProminence {
+    /// A safety flow the user armed themselves: check-ins and SOS results. Allowed to pierce Focus,
+    /// because a safety feature that Do Not Disturb can mute is not a safety feature.
+    case safetyCritical
+    /// Everything score- or coaching-related. Keeps the ordinary `.active` behaviour.
+    case standard
+    /// Housekeeping the user never needs woken for: battery, review reminders, digests.
+    case ambient
+
+    var level: UNNotificationInterruptionLevel {
+        switch self {
+        case .safetyCritical: return .timeSensitive
+        case .standard:       return .active
+        case .ambient:        return .passive
+        }
+    }
+}
+
+extension UNMutableNotificationContent {
+    /// Applies the prominence tier. Call this on every content object so the choice is explicit at the
+    /// producer rather than inherited from an iOS default nobody chose.
+    func applyProminence(_ prominence: NotificationProminence) {
+        interruptionLevel = prominence.level
+    }
+}

@@ -230,6 +230,7 @@ enum MetricReviewReminders {
             ) else { continue }
 
             let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
             content.title = spec.title
             content.body = spec.body
             content.sound = .default

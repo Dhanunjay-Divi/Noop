@@ -484,6 +484,7 @@ final class SafetySOSRuntime {
             return false
         }
         let content = UNMutableNotificationContent()
+        content.applyProminence(.safetyCritical)
         content.title = String(localized: String.LocalizationValue(titleKey))
         content.body = String(localized: String.LocalizationValue(bodyKey))
         content.sound = .default

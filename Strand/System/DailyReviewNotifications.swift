@@ -191,6 +191,7 @@ enum DailyReviewNotifications {
 
         for spec in reminderSpecs(morning: morningMinutes, evening: eveningMinutes) {
             let content = UNMutableNotificationContent()
+            content.applyProminence(.ambient)
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
@@ -341,6 +342,7 @@ enum BluetoothAvailabilityNotifications {
         guard deliveryStillAllowed(stillRelevant: stillRelevant) else { return }
 
         let content = UNMutableNotificationContent()
+        content.applyProminence(.ambient)
         content.title = String(localized: "Bluetooth is off")
         content.body = String(localized: "Wearable sync is paused. Turn Bluetooth on and NOOP will reconnect automatically.")
         content.sound = .default
@@ -594,6 +596,7 @@ enum AutoWorkoutNotifications {
               !deliveryQueue.contains(where: { $0.deliveryToken == deliveryToken }) else { return }
 
         let content = UNMutableNotificationContent()
+        content.applyProminence(.ambient)
         content.title = kind.title
         content.body = kind.body
         content.sound = .default
