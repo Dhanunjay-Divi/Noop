@@ -54,17 +54,49 @@ Preserve these decisions:
 - The focused iPhone 14 Pro simulator UI test passed after the fallback and
   accessibility-copy assertion were updated.
 
+## Active Minutes closed
+
+- Apple and Android now persist a conservative seven-day moderate/vigorous
+  activity total against the 150-minute WHO/AHA weekly guideline.
+- Zone 3 earns one minute of credit; Zones 4 and 5 earn two. Zones 1 and 2 do
+  not earn credit. This deliberately under-counts the 64-70% HRmax boundary
+  instead of inflating a public-health total.
+- Only plausible HR intervals no more than ten seconds apart count as observed.
+  Long gaps, missing wear, corrupt timestamps, and the final sample's unknown
+  tail remain unmeasured.
+- Daytime activity is persisted even when overnight HR cannot support sleep
+  scoring. A one-time 21-day in-place backfill upgrades existing installs
+  without replacing user history.
+- Workouts shows weekly progress, moderate/vigorous detail, measured HR
+  coverage, and explicit missing-wear language. All nine locales are generated
+  from the shared catalog.
+- Large-text UI evidence passed on iPhone SE and iPhone 14 Pro. The SE test
+  separately proves the final note can scroll clear of floating navigation.
+
+## Repository provenance migration is not complete
+
+- Future commits use `Dhanunjay Divi` with the GitHub private noreply address;
+  do not introduce `divii@amazon.com`.
+- The owner identifies `ryanbr` and `Fanboynz` as prior personal identities.
+- No history rewrite or replacement repository has been performed yet.
+- A new root alone does not establish code ownership. Before calling a
+  replacement repository provenance-clean, inventory unrelated contributor
+  code and retain a grant, compatible license, or independently documented
+  replacement for each surviving contribution. Preserve mandatory dependency
+  notices.
+
 ## Verified local evidence
 
-- StrandAnalytics: 1,402 total, 7 skipped, 0 failures.
+- StrandAnalytics: 1,419 total, 7 skipped, 0 failures.
 - macOS app: 1,490 total, 1 skipped, 0 failures.
-- Android Full Debug: 3,775 total, 3,768 passed, 7 skipped, 0 failures.
-- Android Demo Debug: 3,775 total, 3,768 passed, 7 skipped, 0 failures.
+- Android Full Debug: 3,791 total, 3,784 passed, 7 skipped, 0 failures.
+- Android Demo Debug: 3,791 total, 3,784 passed, 7 skipped, 0 failures.
 - Focused Apple stage/Watch integration: 27 executed, 0 failures.
 - Focused iOS pull-to-sync UI: 1 executed, 0 failures.
+- Focused iOS Active Minutes UI: iPhone SE and iPhone 14 Pro, 0 failures.
 - Full localization inventory completed with no missing shipped Apple
   translations; the Android localization policy passes both variants.
-- Health-claims scan is clear across 1,066 files.
+- Health-claims scan is clear across 1,068 files.
 
 ## External release gates
 

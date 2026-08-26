@@ -29,6 +29,7 @@
   <a href="https://discord.com/invite/wKgyqVdjrP">💬&nbsp;Discord</a> ·
   <a href="https://www.reddit.com/r/NoopBand/">👽&nbsp;Reddit</a> ·
   <a href="#features">Features</a> ·
+  <a href="docs/README.md">Docs index</a> ·
   <a href="docs/FEATURE_PARITY.md">WHOOP comparison</a> ·
   <a href="docs/COMPETITIVE_CAPABILITY_AUDIT.md">Wearable audit</a> ·
   <a href="docs/PROTOCOL.md">Protocol</a> ·

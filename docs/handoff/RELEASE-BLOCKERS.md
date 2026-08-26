@@ -72,7 +72,7 @@ local-only so gates 4 and 5 leave the critical path entirely.
 
 Round 21 records the latest package, app, simulator, emulator, localization,
 privacy, and migration results in
-[`ROUND-21-validation-calibration-import-integrity.md`](ROUND-21-validation-calibration-import-integrity.md).
+[`ROUND-21-validation-calibration-import-integrity.md`](archive/ROUND-21-validation-calibration-import-integrity.md).
 Simulator, emulator, and unit evidence does not close any physical-device,
 carrier, signing, store, infrastructure, clinical, or regulatory gate above.
 

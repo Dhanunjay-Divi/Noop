@@ -12,7 +12,7 @@ Last updated: **2026-08-26**
 - Current source-rights record:
   [`../provenance/OWNER-RIGHTS-DECLARATION.md`](../provenance/OWNER-RIGHTS-DECLARATION.md)
 - Current agent handoff:
-  [`../handoff/AGENT-HANDOFF-20260826.md`](../handoff/AGENT-HANDOFF-20260826.md)
+  [`../handoff/AGENT-HANDOFF-20260826.md`](../handoff/archive/AGENT-HANDOFF-20260826.md)
 - Current release blockers:
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
