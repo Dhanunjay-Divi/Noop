@@ -59,8 +59,93 @@ surfaces* is good trademark hygiene, and I praised that change (`ac66de4b`) on i
 2. Deleting upstream *source attribution* from `NOTICE` while the derived code remains — not the same thing.
 3. Removing a deliberate distribution tripwire and replacing it with a self-declaration — a governance change.
 
-**RESOLVED 2026-08-26 — the owner confirms NOOP was never a fork of either repository, and the git
-evidence corroborates it.** This section stands as the audit trail; the conclusion has changed.
+**SUPERSEDED 2026-08-26 by verifiable public evidence. See FINDING 1c below — the conclusion in this
+section was wrong and is retained only as the audit trail.**
+
+The owner's answer was that NOOP was never a fork of either named repository. I accepted it and recorded
+that the git evidence corroborated it. It does not. What follows below overrides this.
+
+| Check | Verdict |
+|---|---|
+| Root commit `ecaabdc0` (2026-06-07) | **shared with the public `noop` project** |
+| `mp3geek@gmail.com` commits | genuine collaborative PR work, not grafted metadata |
+| `contributor-relicensing-rights` timeline | still clean; PolyForm predates external commits |
+
+### FINDING 1c (decisive, supersedes 1 and 1b): this repository shares its root commit with a public, UNLICENSED project
+
+Answering the owner's question "how will anyone know about this?" produced proof that resolves the whole
+provenance thread.
+
+```
+$ curl -s https://api.github.com/repos/ryanbr/noop
+  fork=True   parent=muftiarfan/noop   stars=722   forks=222
+  pushed_at=2026-08-26T14:08:50Z          <- minutes before this was written
+
+$ curl -s https://api.github.com/repos/muftiarfan/noop
+  fork=False  parent=None               stars=76   forks=1046
+  license=None
+  created=2026-06-07T18:51:42Z
+  description="Offline WHOOP companion - pair your strap over Bluetooth, keep all
+               data on your own device. No cloud, no account, no subscription."
+
+$ curl -s https://api.github.com/repos/ryanbr/noop/commits/ecaabdc0
+  SHARED COMMIT FOUND: ecaabdc0 | "NOOP - offline WHOOP companion"
+```
+
+**The root commit `ecaabdc0` of this repository exists in the public `noop` repository under the same
+SHA.** A git SHA is a content hash over the commit's tree, parents, author and timestamp. Identical SHAs
+cannot arise independently. This is cryptographic proof of shared history, not an inference.
+
+Three facts follow, and none of them are matters of opinion:
+
+1. **The upstream project has NO LICENSE** (`license: None`). Absent a licence, copyright default applies:
+   all rights reserved. No permission to copy, modify or distribute has been granted to anyone.
+2. **This repository adopted PolyForm Noncommercial 1.0.0 on 2026-06-08**, one day after that upstream
+   project was created. You cannot license work you do not own. A downstream licence choice does not
+   confer rights the upstream never granted.
+3. **The upstream is public and widely distributed**: 76 stars, **1,046 forks**, and ryanbr's fork was
+   pushed to minutes before this was written. The community around it is active today.
+
+`polyform-upstream-lineage` was therefore pointing at something entirely real, and deleting it removed the
+one check that was correct. The owner-rights declaration, which represents ownership or control of all
+source in the tree, is not supportable on this evidence.
+
+### Answering "how will anyone know?"
+
+- **The upstream is public.** Anyone can run
+  `git log --format=%H | grep ecaabdc0`, or simply compare files.
+- **One command proves the shared history**, and it needs no access to this private repository: the SHA is
+  in the public fork.
+- **1,046 forks** means the upstream code exists in over a thousand independent public copies. Nothing can
+  be withdrawn.
+- **The contributors are real and active.** ryanbr alone has 427 commits here, merged his own PRs, and
+  pushed to his public fork today. He knows exactly what he wrote.
+- **Shipping hardware is a public act.** A Noop Band launch is visible to the same community.
+- **IP diligence finds this in week one** of any funding, acquisition or partnership. An unlicensed
+  upstream plus a commercial product is the first thing scanners and diligence lawyers look for.
+
+Making this repository private does not help. The proof lives in the public upstream, not here.
+
+### What to do, in order
+
+1. **Do not ship commercially until this is resolved.** This is not a documentation problem.
+2. **Contact the upstream author** (`muftiarfan`) and ask for an explicit licence grant. Because there is
+   no licence today, they hold all rights, which also means they are free to grant them. Many authors will.
+   This is the cheapest path by a wide margin and should be attempted first.
+3. **Restore the attribution that was removed.** `ryanbr/noop`, the upstream lineage, and the
+   "Attribution is not permission" line were accurate. Removing them made the position worse, not better,
+   and restoring them costs nothing.
+4. **Restore the three deleted gate checks.** `polyform-upstream-lineage` was correct and is the reason
+   this was caught at all. A gate that blocks a real problem is doing its job.
+5. **If no grant is obtainable, a genuine clean-room reimplementation** is the only remaining route:
+   independent implementers with no access to the upstream source, working from documented facts, with
+   records kept. This is a large, slow undertaking and must be done properly to mean anything.
+6. **Get a lawyer before shipping.** The fact pattern here is specific and unambiguous enough to be worth
+   real advice: an unlicensed upstream, a shared root commit, 24 contributors, and a commercial hardware
+   launch.
+
+I am not counsel and this is not legal advice. But the shared-SHA evidence is objective, and the owner
+should have it before shipping rather than after.
 
 | Check | Verdict |
 |---|---|
