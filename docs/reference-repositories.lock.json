@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "captured_at": "2026-08-11",
+  "schema": 2,
+  "captured_at": "2026-08-25",
   "checkout_root": "external-local-checkouts",
   "repositories": [
     {"repo":"HealthyApps/health-auto-export-server","commit":"d0f3a78e17aeb2e01fb7da89a4bf25f67057fc0e","license":"NOASSERTION","use":"concepts-only"},
@@ -9,17 +9,12 @@
     {"repo":"OpenStrap/protocol","commit":"3b93df1aa07b34c93daa847100e07f3c576c0cc8","edge_pinned_commit":"7edcb3e377329968118c62cb03a81d95e2f6db8e","license":"AMBIGUOUS-MIT-OR-ISC","use":"concepts-only"},
     {"repo":"RuochenLyu/apple-health-analyst","commit":"9449183db14dec5641682d3a1b464aff216d9b0b","license":"MIT","use":"compatible-with-notice"},
     {"repo":"ashishworkacc/life-tracker","commit":"1273bd9fb8005d10b03d5fedb9bdd66aee771844","license":"AGPL-3.0-only","use":"concepts-only"},
-    {"repo":"b-nnett/goose","commit":"ba9ae0280c9b5b9a1545baab8e944cb3b7563c62","license":"NOASSERTION","use":"facts-only"},
     {"repo":"endurain-project/endurain","commit":"2452ea6ad95b82fda1ad8a7f2429af771cb55767","license":"AGPL-3.0-only","use":"concepts-only"},
     {"repo":"jimmykane/quantified-self","commit":"d2403a6599c3b67113210fc14032b351c270de44","license":"AGPL-3.0-only","use":"concepts-only"},
-    {"repo":"johnmiddleton12/wearable","commit":"890e0c96beb817ab0cec3aaf7d9a06c530025355","license":"NOASSERTION","use":"provenance-review-facts-only"},
     {"repo":"krumjahn/applehealth","commit":"dabb834be5447aa731b7d0699d95da69652f285f","license":"NOASSERTION","use":"concepts-only"},
     {"repo":"krumjahn/health-dashboard","commit":"7dbae98c88dcb209ff09e95ea6e099696a7f8b37","license":"NOASSERTION","use":"concepts-only"},
     {"repo":"markwk/qs_ledger","commit":"218e9d8abd52135f8c1de797a8ec390621bf6bc2","license":"MIT","use":"compatible-with-notice"},
-    {"repo":"muftiarfan/noop","commit":"7be90e0af86ba2c6545dbf7d051bacd370350c67","license":"NOASSERTION","use":"provenance-review-facts-only"},
-    {"repo":"ryanbr/noop","commit":"3605f6168aac4752b625604414168a5c8e390f09","license":"PolyForm-Noncommercial-1.0.0","use":"upstream-review"},
     {"repo":"the-momentum/open-wearables","commit":"71843a5c013499f6487ef9731c494775b75725fd","license":"MIT","use":"compatible-with-notice"},
-    {"repo":"tigercraft4/goose","commit":"33cea3fd88412486b91fc693970329fb484a4600","license":"PolyForm-Noncommercial-1.0.0","use":"lineage-review-required"},
     {"repo":"wger-project/wger","commit":"53e85b328efaab42eb736d24d5d294d036b2a7ef","license":"AGPL-3.0-only","use":"concepts-only"},
     {"repo":"woop/awesome-quantified-self","commit":"230393e33a61e05d494a18a3b598c218d8253224","license":"CC0-1.0","use":"discovery-only"}
   ]

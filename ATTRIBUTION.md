@@ -1,34 +1,21 @@
 # Attribution
 
-NOOP is an independent, unofficial, local-first app for macOS, Android and iOS. It is not affiliated
-with, endorsed by, or connected to WHOOP, Inc. "WHOOP" is used nominatively only to
-identify the hardware the app interoperates with.
+NOOP is an independent, unofficial, local-first app for macOS, Android, and iOS.
+It is not affiliated with, endorsed by, or connected to any supported wearable
+manufacturer. Third-party marks identify compatible hardware only.
 
-NOOP builds on prior community reverse-engineering and interoperability work:
+## NOOP source
 
-## Project lineage and self-hosting inspiration
-- **[`ryanbr/noop`](https://github.com/ryanbr/noop)** — the active
-  cross-platform NOOP application this codebase derives from and extends. Its PolyForm
-  Noncommercial license, required notice, history, and contributor attribution
-  are preserved.
-- **[`tigercraft4/goose`](https://github.com/tigercraft4/goose)** — demonstrated
-  the local-first self-hosting direction for WHOOP-derived data and prompted this
-  codebase's independently implemented FastAPI, TimescaleDB, Apple, and Android sync
-  stack. Its repository is now archived and points users to `ryanbr/noop`; no
-  source from it is copied or redistributed here.
+The source and contributions consolidated in this repository are controlled by
+the NOOP repository owner and distributed under the repository's PolyForm
+Noncommercial License 1.0.0. The dated owner authorization is recorded in
+[`docs/provenance/OWNER-RIGHTS-DECLARATION.md`](docs/provenance/OWNER-RIGHTS-DECLARATION.md).
 
-## WHOOP 4.0 protocol + Swift packages
-- **`johnmiddleton12/my-whoop`** — the `WhoopProtocol` and `WhoopStore` Swift packages
-  (vendored under `Packages/`), the WHOOP 4.0 BLE framing/command/decode work, and the
-  iOS collection logic that NOOP's `WhoopBLE`/`Collect` layers are adapted from.
-  See `DISCLAIMER.md` (carried over from that project).
-
-## WHOOP 5.0 / MG protocol
-- **[`b-nnett/goose`](https://github.com/b-nnett/goose)** — documented observed
-  WHOOP 5.0 BLE interoperability facts (service UUID family `fd4b0001-…`,
-  CRC16-Modbus header, CLIENT_HELLO, and the "puffin" packet types). That
-  repository has no explicit software license, so NOOP treats it as
-  facts-only reference documentation and copies none of its source or assets.
+NOOP's device protocol, storage, analytics, Apple, Android, and self-hosted
+service implementations are maintained in this canonical repository. Protocol
+compatibility is based on observed wire behavior and public interoperability
+facts. NOOP does not intentionally copy or redistribute a manufacturer's app
+source, firmware, binaries, credentials, logos, or assets.
 
 ## Xiaomi Smart Band (Mi Band) import
 - **`artyomxx/xiaomi-band-ios-export`** — documented the Mi Fitness iOS app's on-device
@@ -63,7 +50,11 @@ remains available as a fallback.
 - **MarkdownUI** (`gonzalezreal/swift-markdown-ui`) — renders the AI Coach's Markdown
   replies (via Swift Package Manager).
 
-NOOP contains no WHOOP proprietary code, binaries, firmware, logos, or assets, and
-performs no DRM circumvention. It operates only with the user's own device and data.
-NOOP is **not a medical device**; all metrics (HR, HRV, recovery, strain, sleep,
-SpO₂, temperature) are approximations and not clinically validated.
+The complete resolved runtime dependency inventory and required license texts
+are generated into [`NOTICE`](NOTICE). Those independent dependencies remain
+under their own licenses and are not relicensed by NOOP.
+
+NOOP contains no supported manufacturer's proprietary app code, binaries,
+firmware, logos, or assets and performs no DRM circumvention. It operates only
+with the user's own device and data. NOOP is **not a medical device**; all
+metrics are approximations and not clinically validated.

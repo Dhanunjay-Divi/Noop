@@ -113,6 +113,119 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(result.cachedSleep[0].gravitySparse, false)
     }
 
+    func testMainSleepEvidenceRequiresSustainedCoverageInsideMainGroup() {
+        func session(start: Int, seconds: Int) -> SleepSession {
+            SleepSession(
+                start: start, end: start + seconds, efficiency: 0.9,
+                stages: [], restingHR: nil, avgHRV: nil)
+        }
+
+        let main = session(start: 100_000, seconds: 8 * 3_600)
+        let shortFragment = session(start: main.end + 20 * 60, seconds: 30 * 60)
+        let rr = (shortFragment.start..<shortFragment.end).map { ts in
+            RRInterval(ts: ts, rrMs: ts.isMultiple(of: 2) ? 995 : 1_005)
+        }
+        let resp = (shortFragment.start..<shortFragment.end).map { ts in
+            let phase = Double(ts - shortFragment.start)
+            let raw = 1_000 + Int((100 * sin(2 * Double.pi * phase / 4)).rounded())
+            return RespSample(ts: ts, raw: raw)
+        }
+
+        let shortOnly = AnalyticsEngine.mainSleepEvidence(
+            mainGroup: [shortFragment], rr: rr, resp: resp)
+        XCTAssertFalse(shortOnly.hasRREvidence,
+                       "a 30-minute fragment is too short for a day-level main-night verdict")
+        XCTAssertFalse(shortOnly.hasRespirationEvidence)
+        XCTAssertFalse(AnalyticsEngine.hasSustainedRestEvidence(
+            validWindowCount: 11, eligibleWindowCount: 12))
+        XCTAssertTrue(AnalyticsEngine.hasSustainedRestEvidence(
+            validWindowCount: 12, eligibleWindowCount: 12),
+            "one detector-minimum hour is the absolute evidence floor")
+
+        let outsideMain = AnalyticsEngine.mainSleepEvidence(
+            mainGroup: [main], rr: rr, resp: resp)
+        XCTAssertFalse(outsideMain.hasRREvidence, "a nap or unrelated session cannot support the main night")
+        XCTAssertFalse(outsideMain.hasRespirationEvidence)
+
+        let oneShortFragment = AnalyticsEngine.mainSleepEvidence(
+            mainGroup: [main, shortFragment], rr: rr, resp: resp)
+        XCTAssertFalse(oneShortFragment.hasRREvidence,
+                       "30 minutes cannot support an otherwise empty eight-hour main group")
+        XCTAssertFalse(oneShortFragment.hasRespirationEvidence)
+    }
+
+    func testMainSleepEvidenceDoesNotCountRRDerivedRespirationAsIndependent() {
+        let start = 200_000
+        let session = SleepSession(
+            start: start,
+            end: start + 3_600,
+            efficiency: 0.9,
+            stages: [],
+            restingHR: nil,
+            avgHRV: nil
+        )
+        let rr = (session.start..<session.end).map { ts in
+            RRInterval(ts: ts, rrMs: ts.isMultiple(of: 2) ? 995 : 1_005)
+        }
+        let withoutRawRespiration = AnalyticsEngine.mainSleepEvidence(
+            mainGroup: [session], rr: rr, resp: [])
+        XCTAssertTrue(withoutRawRespiration.hasRREvidence)
+        XCTAssertFalse(
+            withoutRawRespiration.hasRespirationEvidence,
+            "RSA derived from the R-R lane must not count again as independent respiration evidence"
+        )
+
+        let resp = (session.start..<session.end).map { ts in
+            let phase = Double(ts - session.start)
+            return RespSample(
+                ts: ts,
+                raw: 1_000 + Int((100 * sin(2 * Double.pi * phase / 4)).rounded())
+            )
+        }
+        let withRawRespiration = AnalyticsEngine.mainSleepEvidence(
+            mainGroup: [session], rr: rr, resp: resp)
+        XCTAssertTrue(withRawRespiration.hasRREvidence)
+        XCTAssertTrue(withRawRespiration.hasRespirationEvidence)
+    }
+
+    func testRawEvidenceCanResolveAChangedMainNightWithoutUsingTheOldWinner() {
+        func session(start: Int) -> SleepSession {
+            SleepSession(
+                start: start,
+                end: start + 3_600,
+                efficiency: 0.9,
+                stages: [],
+                restingHR: nil,
+                avgHRV: nil)
+        }
+        let supported = session(start: 300_000)
+        let unsupported = session(start: 400_000)
+        let rr = (supported.start..<supported.end).map { ts in
+            RRInterval(ts: ts, rrMs: ts.isMultiple(of: 2) ? 995 : 1_005)
+        }
+        let resp = (supported.start..<supported.end).map { ts in
+            let phase = Double(ts - supported.start)
+            return RespSample(
+                ts: ts,
+                raw: 1_000 + Int((100 * sin(2 * Double.pi * phase / 4)).rounded()))
+        }
+
+        let captured = ScoreConfidence.restRawEvidence(
+            sessions: [supported, unsupported],
+            rr: rr,
+            resp: resp,
+            offsetSec: 0,
+            habitualMidsleepSec: nil)
+        let first = captured.selecting(mainSessionStarts: [supported.start])
+        let second = captured.selecting(mainSessionStarts: [unsupported.start])
+
+        XCTAssertTrue(first.hasRREvidence)
+        XCTAssertTrue(first.hasRespirationEvidence)
+        XCTAssertFalse(second.hasRREvidence)
+        XCTAssertFalse(second.hasRespirationEvidence)
+        XCTAssertEqual(second.mainSessionStarts, [unsupported.start])
+    }
+
     func testAnalyzeDayPersistsSparseVerdictWhenTwoSamplesExpandToFullTrace() throws {
         let day = "2021-06-15"
         let n = night(endDay: day, hours: 7)
@@ -424,6 +537,59 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(withNil, 53.0, accuracy: 1e-9)
     }
 
+    func testRestCompositeRejectsCorruptPersistedInputs() {
+        func daily(total: Double = 480,
+                   efficiency: Double = 0.9,
+                   deep: Double? = 90,
+                   rem: Double? = 120) -> DailyMetric {
+            DailyMetric(
+                day: "2026-08-25",
+                totalSleepMin: total,
+                efficiency: efficiency,
+                deepMin: deep,
+                remMin: rem,
+                lightMin: 270,
+                disturbances: nil,
+                restingHr: nil,
+                avgHrv: nil,
+                recovery: nil,
+                strain: nil,
+                exerciseCount: nil
+            )
+        }
+
+        for total in [Double.nan, .infinity, -.infinity, -1, 0, 1_441] {
+            XCTAssertNil(AnalyticsEngine.Rest.composite(daily: daily(total: total)))
+        }
+        for efficiency in [Double.nan, .infinity, -.infinity, -0.1, 0, 1.01] {
+            XCTAssertNil(
+                AnalyticsEngine.Rest.composite(daily: daily(efficiency: efficiency))
+            )
+        }
+        for deep in [Double.nan, .infinity, -.infinity, -1, 481] {
+            XCTAssertNil(AnalyticsEngine.Rest.composite(daily: daily(deep: deep)))
+        }
+        for rem in [Double.nan, .infinity, -.infinity, -1, 481] {
+            XCTAssertNil(AnalyticsEngine.Rest.composite(daily: daily(rem: rem)))
+        }
+        XCTAssertNil(
+            AnalyticsEngine.Rest.composite(daily: daily(deep: 250, rem: 250))
+        )
+        for need in [Double.nan, .infinity, -.infinity, -1, 0, 24.01] {
+            XCTAssertNil(
+                AnalyticsEngine.Rest.composite(daily: daily(), needHours: need)
+            )
+        }
+        for consistency in [Double.nan, .infinity, -.infinity, -0.01, 1.01] {
+            XCTAssertNil(
+                AnalyticsEngine.Rest.composite(
+                    daily: daily(),
+                    consistency: consistency
+                )
+            )
+        }
+    }
+
     func testAnalyzeDayPopulatesRestAndConfidence() {
         // A normal night yields a Rest score and a Rest confidence that is at least
         // .building (a session exists). With no HRV baseline, Charge is .calibrating;
@@ -545,6 +711,47 @@ final class AnalyticsEngineTests: XCTestCase {
                                  asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
                                  efficiency: 0.95),
             .solid)
+    }
+
+    func testRestConfidenceMissingRREvidenceDowngradesStagedNight() {
+        let asleep = 8.0 * 3600.0
+        XCTAssertEqual(
+            ScoreConfidence.rest(hasSession: true, hasStagedSleep: true,
+                                 asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+                                 efficiency: 0.95, hasRREvidence: false),
+            .building)
+    }
+
+    func testRestConfidenceMissingRespirationEvidenceDowngradesStagedNight() {
+        let asleep = 8.0 * 3600.0
+        XCTAssertEqual(
+            ScoreConfidence.rest(hasSession: true, hasStagedSleep: true,
+                                 asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+                                 efficiency: 0.95, hasRespirationEvidence: false),
+            .building)
+    }
+
+    func testRestConfidenceKeepsSolidWhenBothCardiorespiratoryLanesArePresent() {
+        let asleep = 8.0 * 3600.0
+        XCTAssertEqual(
+            ScoreConfidence.rest(hasSession: true, hasStagedSleep: true,
+                                 asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+                                 efficiency: 0.95, hasRREvidence: true,
+                                 hasRespirationEvidence: true),
+            .solid)
+    }
+
+    func testRestAssessmentNamesMissingCardiorespiratoryLanesSeparately() {
+        let asleep = 8.0 * 3600.0
+        let assessment = ScoreConfidence.restAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+            efficiency: 0.95, hasRREvidence: false,
+            hasRespirationEvidence: false)
+        XCTAssertEqual(assessment.confidence, .building)
+        XCTAssertEqual(assessment.limitations, [.missingRREvidence, .missingRespirationEvidence])
+        XCTAssertEqual(assessment.limitations.map(\.rawValue),
+                       ["missingRREvidence", "missingRespirationEvidence"])
     }
 
     func testRestAssessmentSurfacesSparseMotionWithoutChangingTheTier() {

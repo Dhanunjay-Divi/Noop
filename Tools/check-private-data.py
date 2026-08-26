@@ -26,6 +26,7 @@ BLOCKED_SUFFIXES = {
     ".jsonl",
 }
 WHOOP_FILENAMES = {
+    "prepared_cycles.json",
     "physiological_cycles.csv",
     "sleeps.csv",
     "workouts.csv",
@@ -49,6 +50,13 @@ WHOOP_FILENAMES = {
 }
 
 
+def is_prepared_cohort_json(name: str) -> bool:
+    if not name.startswith("export-") or not name.endswith(".json"):
+        return False
+    cohort = name[len("export-") : -len(".json")]
+    return cohort.isdigit()
+
+
 def tracked_files() -> list[str]:
     result = subprocess.run(
         ["git", "ls-files", "-z"],
@@ -64,7 +72,7 @@ def blocked(path: str) -> bool:
         return False
     item = PurePosixPath(path)
     lowered = item.name.lower()
-    if lowered in WHOOP_FILENAMES:
+    if lowered in WHOOP_FILENAMES or is_prepared_cohort_json(lowered):
         return True
     suffixes = "".join(item.suffixes).lower()
     return any(

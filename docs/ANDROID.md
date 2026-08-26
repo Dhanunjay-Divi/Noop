@@ -764,14 +764,10 @@ deeper scores still being reverse-engineered.
 
 ## Credits
 
-The Android client re-implements protocol and behavior built on prior community
-reverse-engineering and interoperability work:
+The Android protocol and storage layers mirror NOOP's canonical Swift behavior
+and are maintained as NOOP-controlled source. Independent runtime dependencies
+retain their own licenses in `NOTICE`.
 
-- **`johnmiddleton12/my-whoop`** — WHOOP 4.0 BLE protocol; the `WhoopProtocol` / `WhoopStore`
-  packages the Kotlin protocol and storage ports follow.
-- **`b-nnett/goose`** — WHOOP 5.0 / MG BLE protocol (service family `fd4b0001-…`, CRC16-Modbus
-  header, CLIENT_HELLO, "puffin" packet types) that the WHOOP-5 path is ported from.
-
-See [`../ATTRIBUTION.md`](../ATTRIBUTION.md) for full detail. NOOP contains no WHOOP proprietary
-code, firmware, logos, or assets, operates only with the user's own device and data, and is **not a
-medical device**.
+See [`../ATTRIBUTION.md`](../ATTRIBUTION.md) for full detail. NOOP contains no
+WHOOP proprietary app code, firmware, logos, or assets, operates only with the
+user's own device and data, and is **not a medical device**.

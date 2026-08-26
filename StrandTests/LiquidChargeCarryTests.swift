@@ -70,6 +70,20 @@ final class LiquidChargeCarryTests: XCTestCase {
         XCTAssertEqual(d, .calibrating(nights: 2))
     }
 
+    func testCompletedFourthNightIsBaselineReadyAndStillBeatsTheCarry() {
+        let d = Display.resolve(todayRecovery: nil, priorScored: day("2026-07-14", recovery: 82.3),
+                                calibrationNights: Baselines.minNightsSeed,
+                                todayKey: "2026-07-15")
+
+        XCTAssertEqual(d, .baselineReady)
+        XCTAssertEqual(d.stateLabel, "Baseline ready")
+        XCTAssertEqual(d.calibrationCaption, "Baseline ready")
+        XCTAssertEqual(
+            d.calibrationDetail,
+            "4 of 4 valid HRV nights complete. The next qualifying night can produce your first Recovery.")
+        XCTAssertNil(d.pct, "baseline completion is not a fabricated Recovery score")
+    }
+
     // MARK: - The label must not lie
 
     /// The second half of the bug. Liquid rendered `recovery != nil ? "Solid" : "Calibrating"`, so EVERY
@@ -106,6 +120,7 @@ final class LiquidChargeCarryTests: XCTestCase {
     /// Calibrating and no-data draw nothing — the honest empty vessel. Never a fabricated 0.
     func testStatesWithNoHonestNumberDrawNothing() {
         XCTAssertNil(Display.calibrating(nights: 2).pct)
+        XCTAssertNil(Display.baselineReady.pct)
         XCTAssertNil(Display.noData.pct)
         XCTAssertNotEqual(Display.noData.pct, 0, "an absent Charge is not a Charge of zero")
     }
@@ -113,6 +128,7 @@ final class LiquidChargeCarryTests: XCTestCase {
     /// The label half of the bug: only a genuinely calibrating baseline may say "Calibrating".
     func testOnlyCalibratingStateClaimsCalibrating() {
         XCTAssertEqual(Display.calibrating(nights: 2).stateLabel, "Calibrating")
+        XCTAssertNotEqual(Display.baselineReady.stateLabel, "Calibrating")
         XCTAssertNotEqual(Display.noData.stateLabel, "Calibrating",
                           "a trusted baseline with no scored night is missing data, not calibrating")
         XCTAssertEqual(Display.scored(pct: 61).stateLabel, "Solid")
@@ -129,16 +145,17 @@ final class LiquidChargeCarryTests: XCTestCase {
     /// screens — before this, Liquid dropped the count and showed a bare "Calibrating".
     func testCalibratingCarriesTheClassicNightCountCopy() {
         XCTAssertEqual(Display.calibrating(nights: 2).calibrationDetail,
-                       "Learning your baseline, 2 of 4 nights.",
+                       "Learning your baseline, 2 of 4 valid HRV nights.",
                        "Liquid must mirror TodayView.calibrationDetail's copy verbatim (\(Baselines.minNightsSeed)-night seed)")
         XCTAssertEqual(Display.calibrating(nights: 0).calibrationDetail,
-                       "Learning your baseline, 0 of 4 nights.",
+                       "Learning your baseline, 0 of 4 valid HRV nights.",
                        "night zero still reads honestly with its count, never a bare 'Calibrating'")
     }
 
-    /// Only the calibrating state owns a synthesis detail line. A scored / carried / no-data day leaves the
-    /// readiness one-liner (`synthLine`) untouched — no stray "N of 4" appears once the baseline is trusted.
-    func testOnlyCalibratingStateHasASynthesisDetailLine() {
+    /// Calibration guidance owns a synthesis detail line. A scored / carried / no-data day leaves the
+    /// readiness one-liner (`synthLine`) untouched.
+    func testOnlyCalibrationGuidanceHasASynthesisDetailLine() {
+        XCTAssertNotNil(Display.baselineReady.calibrationDetail)
         XCTAssertNil(Display.scored(pct: 61).calibrationDetail)
         XCTAssertNil(Display.carried(pct: 82.3, caption: "Last night · 4 Jul").calibrationDetail)
         XCTAssertNil(Display.noData.calibrationDetail)
@@ -151,11 +168,12 @@ final class LiquidChargeCarryTests: XCTestCase {
         XCTAssertEqual(Display.calibrating(nights: 99).calibrationFraction, 1,
                        "the visual must clamp corrupt or stale counts to a full vessel")
         XCTAssertEqual(Display.calibrating(nights: -2).calibrationFraction, 0)
-        XCTAssertEqual(Display.calibrating(nights: 2).calibrationCompactText, "2/4")
+        XCTAssertEqual(Display.baselineReady.calibrationFraction, 1)
+        XCTAssertEqual(Display.calibrating(nights: 2).calibrationCaption, "Valid HRV 2/4")
 
         for display in [Display.scored(pct: 61), .carried(pct: 82, caption: "Last night"), .noData] {
             XCTAssertNil(display.calibrationFraction)
-            XCTAssertNil(display.calibrationCompactText)
+            XCTAssertNil(display.calibrationCaption)
         }
     }
 }

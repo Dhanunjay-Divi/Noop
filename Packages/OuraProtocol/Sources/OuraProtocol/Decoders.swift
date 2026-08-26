@@ -385,7 +385,7 @@ public enum OuraDecoders {
         // A whole record of 0xFF code bytes is erased flash, not four awake epochs per byte. Require at
         // least two code bytes so a lone 0xFF (which can genuinely represent four awake epochs) remains
         // valid. Keep placeholders through decode so their positions remain explicit; persistence drops
-        // them as gaps. Upstream ryanbr/noop #1246, expressed against this fork's direct-event pipeline.
+        // them as gaps. Upstream Dhanunjay-Divi/Noop #1246, expressed against this fork's direct-event pipeline.
         let codeBytes = b.dropFirst()
         let unwritten = codeBytes.count >= 2 && codeBytes.allSatisfy { $0 == 0xFF }
         var out: [OuraSleepPhase] = []

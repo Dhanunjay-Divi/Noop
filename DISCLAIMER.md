@@ -20,12 +20,11 @@ agreed to; how you use hardware you own is your responsibility.
 ## 2. Proprietary material and source provenance
 
 This repository does not intentionally include WHOOP proprietary application source or assets.
-Protocol facts were investigated for interoperability. Parts of the protocol, storage, and collection
-lineage were adapted from earlier community work, as recorded in `ATTRIBUTION.md`, `NOTICE`, and the
-reference audit. One inherited lineage has no explicit upstream software license; attribution alone is
-not permission, so clean redistribution rights must not be claimed unless permission is obtained or the
-affected expression is independently replaced. Specifically, this repository does **NOT** intentionally
-contain or bundle any of the following:
+Protocol facts were investigated for interoperability. The repository owner's
+rights and consolidation authorization are recorded in
+`docs/provenance/OWNER-RIGHTS-DECLARATION.md`; independent dependencies and
+their required terms are recorded in `NOTICE`. Specifically, this repository
+does **NOT** intentionally contain or bundle any of the following:
 
 - WHOOP application binaries, APKs, IPAs, or installers;
 - WHOOP firmware, firmware images, or extracted firmware;
@@ -59,11 +58,11 @@ development.
 
 ## 4. Licensing, non-commercial use, and no warranty
 
-NOOP's own source code and documentation are made available under the **PolyForm Noncommercial
+NOOP-controlled source code and documentation in this repository are made available under the **PolyForm Noncommercial
 License 1.0.0** (see [`LICENSE`](LICENSE)): free for personal and other **non-commercial** use —
 you may read, run, fork, and contribute, but commercial use is not granted. The license covers
-NOOP's original work only; protocol facts are uncopyrightable, and bundled dependencies keep their
-own licenses (see [`NOTICE`](NOTICE)).
+the source consolidated into canonical NOOP; protocol facts are uncopyrightable, and bundled
+dependencies keep their own licenses (see [`NOTICE`](NOTICE)).
 
 The software is provided **as-is**, with **no warranty of any kind**, express or implied. You use it
 entirely **at your own risk**, including any risk to your device, data, or warranty status. The

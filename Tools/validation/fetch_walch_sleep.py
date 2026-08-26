@@ -21,6 +21,8 @@ import urllib.request
 from collections import defaultdict
 
 BASE_URL = "https://physionet.org/files/sleep-accel/1.0.0"
+DATASET_VERSION = "1.0.0"
+MANIFEST_NAME = "_manifest.json"
 # Arbitrary wall-clock anchor. Only RELATIVE time matters to the stager, but its inputs are unix seconds.
 TIME_ANCHOR = 1_700_000_000
 
@@ -121,15 +123,32 @@ def main() -> None:
     os.makedirs(args.out, exist_ok=True)
 
     ids = subject_ids(args.raw, args.subjects)
+    # The test consumes the directory as one fixed fixture. Remove stale prepared subjects from an
+    # earlier wider run so `--subjects 6` cannot silently evaluate 6 plus leftovers.
+    for name in os.listdir(args.out):
+        if name.endswith(".json"):
+            os.remove(os.path.join(args.out, name))
+
     print(f"preparing {len(ids)} subject(s) into {args.out}")
+    prepared: list[str] = []
     for subject in ids:
         record = prepare(subject, args.raw, args.out)
         if not record:
             print(f"  {subject}: no labels, skipped")
             continue
+        prepared.append(subject)
         hours = (record["psgEnd"] - record["psgStart"]) / 3600
         print(f"  {subject}: {len(record['labels'])} epochs, {hours:.1f} h, "
               f"hr={len(record['hr'])} grav={len(record['grav'])}")
+    manifest = {
+        "dataset": "sleep-accel",
+        "version": DATASET_VERSION,
+        "requestedSubjects": args.subjects,
+        "subjects": prepared,
+        "timeAnchor": TIME_ANCHOR,
+    }
+    with open(os.path.join(args.out, MANIFEST_NAME), "w") as f:
+        json.dump(manifest, f, sort_keys=True)
     print(f"\nNOOP_WALCH_DIR={args.out} swift test --filter SleepStagerRealPSGTests")
 
 

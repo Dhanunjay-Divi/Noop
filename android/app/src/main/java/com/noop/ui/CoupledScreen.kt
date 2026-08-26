@@ -152,6 +152,24 @@ fun CoupledScreen(
     }
     val recovery = todayRow?.recovery ?: carriedRecoveryDay?.recovery
     val isCarrying = todayRow?.recovery == null && carriedRecoveryDay?.recovery != null
+    val breakdownCarriedDay = carriedRecoveryDay.takeIf { todayRow?.recovery == null }
+    val breakdownDay = (breakdownCarriedDay ?: todayRow)?.day
+    var breakdownRecoverySource by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(days, breakdownDay, vm.activeStrapId) {
+        breakdownRecoverySource = if (breakdownDay == null) {
+            null
+        } else {
+            runCatching {
+                vm.repo.resolvedSeries(
+                    "recovery",
+                    "my-whoop",
+                    breakdownDay,
+                    breakdownDay,
+                    strapDeviceId = vm.activeStrapId,
+                ).points.lastOrNull { it.day == breakdownDay }?.source
+            }.getOrNull()
+        }
+    }
 
     // Effort strain on NOOP's 0-100 axis (stored row), mapped to the 0-21 coupled axis via the shipped
     // formatter, so the number matches every other Effort read-out's conversion factor.
@@ -177,7 +195,12 @@ fun CoupledScreen(
     val context = LocalContext.current
     val hrvEpoch = remember { NoopPrefs.of(context).getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble() }
     val calibrationNights = remember(days, todayRow, hrvEpoch) {
-        recoveryCalibrationNights(days, hasRecovery = todayRow?.recovery != null, hrvBaselineEpoch = hrvEpoch)
+        recoveryCalibrationNights(
+            days,
+            beforeDay = todayKey,
+            hasRecovery = todayRow?.recovery != null,
+            hrvBaselineEpoch = hrvEpoch,
+        )
     }
 
     // The Charge breakdown (the hero's tap target, the EXISTING Today sheet) + the scoring guide it
@@ -250,7 +273,8 @@ fun CoupledScreen(
             ChargeBreakdownSheet(
                 days = days,
                 displayDay = todayRow,
-                carriedDay = carriedRecoveryDay,
+                carriedDay = breakdownCarriedDay,
+                recoverySource = breakdownRecoverySource,
                 showReadiness = true,
                 onClose = { showChargeBreakdown = false },
                 onHowCalculated = {

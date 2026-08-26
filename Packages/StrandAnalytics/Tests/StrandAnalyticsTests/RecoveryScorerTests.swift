@@ -3,6 +3,18 @@ import XCTest
 import WhoopProtocol
 
 final class RecoveryScorerTests: XCTestCase {
+    func testScoreConfidencePersistenceRoundTripsAndRejectsUnknownValues() {
+        for confidence in [ScoreConfidence.calibrating, .building, .solid] {
+            XCTAssertEqual(
+                ScoreConfidence(persistedValue: confidence.persistedValue),
+                confidence
+            )
+        }
+        XCTAssertNil(ScoreConfidence(persistedValue: -1))
+        XCTAssertNil(ScoreConfidence(persistedValue: 1.5))
+        XCTAssertNil(ScoreConfidence(persistedValue: .infinity))
+    }
+
 
     /// A usable (trusted) baseline with a given mean and σ (Gaussian).
     private func baseline(mean: Double, sigma: Double, nValid: Int = 14) -> BaselineState {
@@ -21,6 +33,94 @@ final class RecoveryScorerTests: XCTestCase {
             sleepPerf: RecoveryScorer.sleepPerfCenter)
         XCTAssertNotNil(r)
         XCTAssertEqual(r!, 57.93, accuracy: 0.5)
+    }
+
+    func testPersonalRestCenterRemovesPersistentSleepPenalty() {
+        let hrv = baseline(mean: 50, sigma: 6)
+        let rhr = baseline(mean: 55, sigma: 3)
+        let personalRest = baseline(mean: 0.75, sigma: 0.04)
+        let coldStart = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: hrv, rhrBaseline: rhr, respBaseline: nil,
+            sleepPerf: 0.75)!
+        let personalized = RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: hrv, rhrBaseline: rhr, respBaseline: nil,
+            sleepPerf: 0.75, restQualityBaseline: personalRest)!
+
+        XCTAssertLessThan(coldStart, personalized)
+        XCTAssertEqual(personalized, 57.93, accuracy: 0.5)
+    }
+
+    func testRestQualityRejectsPercentScaleAndNonFiniteValues() {
+        let hrv = baseline(mean: 50, sigma: 6)
+        let rhr = baseline(mean: 55, sigma: 3)
+        func score(_ rest: Double?) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 55, rhr: 52, resp: nil,
+                hrvBaseline: hrv, rhrBaseline: rhr, respBaseline: nil,
+                sleepPerf: rest)!
+        }
+        let omitted = score(nil)
+        XCTAssertEqual(score(75), omitted, accuracy: 1e-9)
+        XCTAssertEqual(score(.nan), omitted, accuracy: 1e-9)
+        XCTAssertEqual(score(.infinity), omitted, accuracy: 1e-9)
+        XCTAssertNotEqual(score(0.75), omitted)
+    }
+
+    func testRecoveryRejectsNonFiniteRequiredPhysiologyAndBaseline() {
+        let valid = RecoveryScorer.DriverBaseline(mean: 50, spread: 5)
+        XCTAssertNil(RecoveryScorer.recovery(
+            hrv: .nan, rhr: 55, resp: nil,
+            hrvBaseline: valid, rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+        XCTAssertNil(RecoveryScorer.recovery(
+            hrv: 50, rhr: .infinity, resp: nil,
+            hrvBaseline: valid, rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+        XCTAssertNil(RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: .init(mean: .nan, spread: 5),
+            rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+        XCTAssertNil(RecoveryScorer.recovery(
+            hrv: 50, rhr: 55, resp: nil,
+            hrvBaseline: .init(mean: 50, spread: -.infinity),
+            rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+        XCTAssertNil(RecoveryScorer.recovery(
+            hrv: .greatestFiniteMagnitude, rhr: 55, resp: nil,
+            hrvBaseline: .init(mean: -.greatestFiniteMagnitude, spread: 1),
+            rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+    }
+
+    func testRecoveryDropsInvalidOptionalDrivers() throws {
+        let hrv = RecoveryScorer.DriverBaseline(mean: 50, spread: 5)
+        let withoutOptional = try XCTUnwrap(RecoveryScorer.recovery(
+            hrv: 55, rhr: 52, resp: nil,
+            hrvBaseline: hrv, rhrBaseline: nil, respBaseline: nil, sleepPerf: nil))
+        let corruptOptional = try XCTUnwrap(RecoveryScorer.recovery(
+            hrv: 55, rhr: 52, resp: .nan,
+            hrvBaseline: hrv,
+            rhrBaseline: .init(mean: .infinity, spread: 3),
+            respBaseline: .init(mean: 14, spread: .nan),
+            sleepPerf: nil,
+            recoveryIndexSlope: .infinity,
+            effortBaseline: .init(mean: .nan, spread: 2),
+            priorDayEffort: .infinity))
+        XCTAssertEqual(corruptOptional, withoutOptional, accuracy: 1e-9)
+    }
+
+    func testPersonalRestCenterRetainsFixedScale() {
+        let hrv = baseline(mean: 50, sigma: 6)
+        let rhr = baseline(mean: 55, sigma: 3)
+        let tight = BaselineState(baseline: 0.75, spread: 0.001, nValid: 20,
+                                  nightsSinceUpdate: 0, status: .trusted)
+        let wide = BaselineState(baseline: 0.75, spread: 0.2, nValid: 20,
+                                 nightsSinceUpdate: 0, status: .trusted)
+        func score(_ restBaseline: BaselineState) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 50, rhr: 55, resp: nil,
+                hrvBaseline: hrv, rhrBaseline: rhr, respBaseline: nil,
+                sleepPerf: 0.87, restQualityBaseline: restBaseline)!
+        }
+        XCTAssertEqual(score(tight), score(wide), accuracy: 1e-9)
     }
 
     func testRecoveryHigherWhenHRVAboveAndRHRBelow() {

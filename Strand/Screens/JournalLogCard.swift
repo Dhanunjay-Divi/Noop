@@ -116,7 +116,7 @@ struct JournalLogCard: View {
                          ? String(localized: "appwide.journal.editing_help")
                          : dayOffset == -1
                          ? "Logging ahead for tomorrow: today's activities inform tomorrow's recovery, just as yesterday's are reflected in today's. Tomorrow's answers line up with tomorrow's morning."
-                         : "Answers are about the night and day leading into this morning, the same attribution a WHOOP export uses, so logged and imported days line up.")
+                         : String(localized: "Answers are about the night and day leading into this morning, the same attribution a wearable export uses, so logged and imported days line up."))
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -294,7 +294,7 @@ struct JournalLogCard: View {
             Text("Rename item").font(StrandFont.headline)
             TextField("Display name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
-            Text("History stays under the original question so WHOOP imports still line up.")
+            Text("History stays under the original question so imported references still line up.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

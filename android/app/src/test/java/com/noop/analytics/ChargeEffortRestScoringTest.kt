@@ -1,11 +1,15 @@
 package com.noop.analytics
 
 import com.noop.data.HrSample
+import com.noop.data.RespSample
+import com.noop.data.RrInterval
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.roundToInt
 
 /**
  * Charge / Effort / Rest scoring redesign (2026-06-12).
@@ -22,8 +26,72 @@ import org.junit.Test
  * constant byte-identical to the Swift source.
  */
 class ChargeEffortRestScoringTest {
+    @Test
+    fun scoreConfidencePersistenceRoundTripsAndRejectsUnknownValues() {
+        ScoreConfidence.entries.forEach { confidence ->
+            assertEquals(
+                confidence,
+                ScoreConfidence.fromPersistedValue(confidence.persistedValue),
+            )
+        }
+        assertNull(ScoreConfidence.fromPersistedValue(-1.0))
+        assertNull(ScoreConfidence.fromPersistedValue(1.5))
+        assertNull(ScoreConfidence.fromPersistedValue(Double.POSITIVE_INFINITY))
+    }
+
 
     private val EPS = 1e-9
+
+    @Test
+    fun recoveryRejectsNonFiniteRequiredPhysiologyAndBaseline() {
+        val valid = RecoveryScorer.DriverBaseline(mean = 50.0, spread = 5.0)
+        assertNull(
+            RecoveryScorer.recovery(
+                hrv = Double.NaN, rhr = 55.0, resp = null,
+                hrvBaseline = valid, rhrBaseline = null, respBaseline = null, sleepPerf = null,
+            ),
+        )
+        assertNull(
+            RecoveryScorer.recovery(
+                hrv = 50.0, rhr = Double.POSITIVE_INFINITY, resp = null,
+                hrvBaseline = valid, rhrBaseline = null, respBaseline = null, sleepPerf = null,
+            ),
+        )
+        assertNull(
+            RecoveryScorer.recovery(
+                hrv = 50.0, rhr = 55.0, resp = null,
+                hrvBaseline = RecoveryScorer.DriverBaseline(Double.NaN, 5.0),
+                rhrBaseline = null, respBaseline = null, sleepPerf = null,
+            ),
+        )
+        assertNull(
+            RecoveryScorer.recovery(
+                hrv = Double.MAX_VALUE, rhr = 55.0, resp = null,
+                hrvBaseline = RecoveryScorer.DriverBaseline(-Double.MAX_VALUE, 1.0),
+                rhrBaseline = null, respBaseline = null, sleepPerf = null,
+            ),
+        )
+    }
+
+    @Test
+    fun recoveryDropsInvalidOptionalDrivers() {
+        val hrv = RecoveryScorer.DriverBaseline(mean = 50.0, spread = 5.0)
+        val withoutOptional = RecoveryScorer.recovery(
+            hrv = 55.0, rhr = 52.0, resp = null,
+            hrvBaseline = hrv, rhrBaseline = null, respBaseline = null, sleepPerf = null,
+        )
+        val corruptOptional = RecoveryScorer.recovery(
+            hrv = 55.0, rhr = 52.0, resp = Double.NaN,
+            hrvBaseline = hrv,
+            rhrBaseline = RecoveryScorer.DriverBaseline(Double.POSITIVE_INFINITY, 3.0),
+            respBaseline = RecoveryScorer.DriverBaseline(14.0, Double.NaN),
+            sleepPerf = null,
+            recoveryIndexSlope = Double.POSITIVE_INFINITY,
+            effortBaseline = RecoveryScorer.DriverBaseline(Double.NaN, 2.0),
+            priorDayEffort = Double.POSITIVE_INFINITY,
+        )
+        assertEquals(withoutOptional, corruptOptional)
+    }
 
     // ── Effort (StrainScorer 0–100) ────────────────────────────────────────────
 
@@ -279,6 +347,38 @@ class ChargeEffortRestScoringTest {
         assertEquals(expected, score, EPS)
     }
 
+    @Test
+    fun restFromDailyRejectsCorruptHistoricalInputs() {
+        fun daily(
+            total: Double = 480.0,
+            efficiency: Double = 0.9,
+            deep: Double? = 90.0,
+            rem: Double? = 120.0,
+        ) = com.noop.data.DailyMetric(
+            deviceId = "test",
+            day = "2026-08-25",
+            totalSleepMin = total,
+            efficiency = efficiency,
+            deepMin = deep,
+            remMin = rem,
+            lightMin = 270.0,
+        )
+
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0, 0.0, 1_441.0)
+            .forEach { assertNull(RestScorer.restFromDaily(daily(total = it))) }
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -0.1, 0.0, 1.01)
+            .forEach { assertNull(RestScorer.restFromDaily(daily(efficiency = it))) }
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0, 481.0)
+            .forEach { assertNull(RestScorer.restFromDaily(daily(deep = it))) }
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0, 481.0)
+            .forEach { assertNull(RestScorer.restFromDaily(daily(rem = it))) }
+        assertNull(RestScorer.restFromDaily(daily(deep = 250.0, rem = 250.0)))
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -0.01, 1.01)
+            .forEach {
+                assertNull(RestScorer.restFromDaily(daily(), consistency = it))
+            }
+    }
+
     // ── ScoreConfidence tiers ──────────────────────────────────────────────────
 
     private fun baseline(nValid: Int, status: BaselineStatus): BaselineState =
@@ -325,6 +425,134 @@ class ChargeEffortRestScoringTest {
             ScoreConfidence.forRest(hasSession = true, hasStagedSleep = false))
         assertEquals(ScoreConfidence.SOLID,
             ScoreConfidence.forRest(hasSession = true, hasStagedSleep = true))
+    }
+
+    @Test
+    fun confidence_mainSleepEvidenceRequiresSustainedCoverageInsideMainGroup() {
+        fun session(start: Long, seconds: Long) = DetectedSleep(
+            start = start,
+            end = start + seconds,
+            efficiency = 0.9,
+            stages = emptyList(),
+            restingHR = null,
+            avgHRV = null,
+        )
+
+        val main = session(start = 100_000L, seconds = 8L * 3_600L)
+        val shortFragment = session(start = main.end + 20L * 60L, seconds = 30L * 60L)
+        val rr = (shortFragment.start until shortFragment.end).map { ts ->
+            RrInterval("test", ts, if (ts % 2L == 0L) 995 else 1_005)
+        }
+        val resp = (shortFragment.start until shortFragment.end).map { ts ->
+            val phase = (ts - shortFragment.start).toDouble()
+            RespSample(
+                deviceId = "test",
+                ts = ts,
+                raw = 1_000 + (100 * kotlin.math.sin(2 * Math.PI * phase / 4)).roundToInt(),
+            )
+        }
+
+        val shortOnly = AnalyticsEngine.mainSleepEvidence(
+            listOf(shortFragment), rr, resp)
+        assertFalse(
+            "a 30-minute fragment is too short for a day-level main-night verdict",
+            shortOnly.hasRREvidence,
+        )
+        assertFalse(shortOnly.hasRespirationEvidence)
+        assertFalse(AnalyticsEngine.hasSustainedRestEvidence(11, 12))
+        assertTrue(
+            "one detector-minimum hour is the absolute evidence floor",
+            AnalyticsEngine.hasSustainedRestEvidence(12, 12),
+        )
+
+        val outsideMain = AnalyticsEngine.mainSleepEvidence(
+            listOf(main), rr, resp)
+        assertFalse("another session cannot support the main night", outsideMain.hasRREvidence)
+        assertFalse(outsideMain.hasRespirationEvidence)
+
+        val oneShortFragment = AnalyticsEngine.mainSleepEvidence(
+            listOf(main, shortFragment), rr, resp)
+        assertFalse("30 minutes cannot support an otherwise empty eight-hour group",
+            oneShortFragment.hasRREvidence)
+        assertFalse(oneShortFragment.hasRespirationEvidence)
+    }
+
+    @Test
+    fun confidence_mainSleepEvidenceDoesNotDoubleCountRrAsRespiration() {
+        val start = 200_000L
+        val session = DetectedSleep(
+            start = start,
+            end = start + 3_600L,
+            efficiency = 0.9,
+            stages = emptyList(),
+            restingHR = null,
+            avgHRV = null,
+        )
+        val rr = (session.start until session.end).map { ts ->
+            RrInterval("test", ts, if (ts % 2L == 0L) 995 else 1_005)
+        }
+        val withoutRawRespiration = AnalyticsEngine.mainSleepEvidence(
+            listOf(session), rr, emptyList())
+        assertTrue(withoutRawRespiration.hasRREvidence)
+        assertFalse(
+            "RSA from the R-R lane must not count again as independent respiration evidence",
+            withoutRawRespiration.hasRespirationEvidence,
+        )
+
+        val resp = (session.start until session.end).map { ts ->
+            val phase = (ts - session.start).toDouble()
+            RespSample(
+                deviceId = "test",
+                ts = ts,
+                raw = 1_000 + (100 * kotlin.math.sin(2 * Math.PI * phase / 4)).roundToInt(),
+            )
+        }
+        val withRawRespiration = AnalyticsEngine.mainSleepEvidence(
+            listOf(session), rr, resp)
+        assertTrue(withRawRespiration.hasRREvidence)
+        assertTrue(withRawRespiration.hasRespirationEvidence)
+    }
+
+    @Test
+    fun confidence_rawEvidenceCanResolveAChangedMainNightWithoutOldWinnerData() {
+        fun session(start: Long) = DetectedSleep(
+            start = start,
+            end = start + 3_600L,
+            efficiency = 0.9,
+            stages = emptyList(),
+            restingHR = null,
+            avgHRV = null,
+        )
+        val supported = session(300_000L)
+        val unsupported = session(400_000L)
+        val rr = (supported.start until supported.end).map { ts ->
+            RrInterval("test", ts, if (ts % 2L == 0L) 995 else 1_005)
+        }
+        val resp = (supported.start until supported.end).map { ts ->
+            val phase = (ts - supported.start).toDouble()
+            RespSample(
+                deviceId = "test",
+                ts = ts,
+                raw = 1_000 +
+                    (100 * kotlin.math.sin(2 * Math.PI * phase / 4)).roundToInt(),
+            )
+        }
+
+        val captured = ScoreConfidence.restRawEvidence(
+            sessions = listOf(supported, unsupported),
+            rr = rr,
+            resp = resp,
+            offsetSec = 0,
+            habitualMidsleepSec = null,
+        )
+        val first = captured.selecting(setOf(supported.start))
+        val second = captured.selecting(setOf(unsupported.start))
+
+        assertTrue(first.hasRREvidence)
+        assertTrue(first.hasRespirationEvidence)
+        assertFalse(second.hasRREvidence)
+        assertFalse(second.hasRespirationEvidence)
+        assertEquals(setOf(unsupported.start), second.mainSessionStarts)
     }
 
     @Test
@@ -412,6 +640,71 @@ class ChargeEffortRestScoringTest {
                 hasSession = true, hasStagedSleep = true,
                 asleepSeconds = asleep, restorativeSeconds = asleep * 0.45, efficiency = 0.95,
             ),
+        )
+    }
+
+    @Test
+    fun confidence_restMissingRREvidenceDowngradesStagedNight() {
+        val asleep = 8.0 * 3600.0
+        assertEquals(
+            ScoreConfidence.BUILDING,
+            ScoreConfidence.forRest(
+                hasSession = true, hasStagedSleep = true,
+                asleepSeconds = asleep, restorativeSeconds = asleep * 0.45, efficiency = 0.95,
+                hasRREvidence = false,
+            ),
+        )
+    }
+
+    @Test
+    fun confidence_restMissingRespirationEvidenceDowngradesStagedNight() {
+        val asleep = 8.0 * 3600.0
+        assertEquals(
+            ScoreConfidence.BUILDING,
+            ScoreConfidence.forRest(
+                hasSession = true, hasStagedSleep = true,
+                asleepSeconds = asleep, restorativeSeconds = asleep * 0.45, efficiency = 0.95,
+                hasRespirationEvidence = false,
+            ),
+        )
+    }
+
+    @Test
+    fun confidence_restKeepsSolidWhenBothCardiorespiratoryLanesArePresent() {
+        val asleep = 8.0 * 3600.0
+        assertEquals(
+            ScoreConfidence.SOLID,
+            ScoreConfidence.forRest(
+                hasSession = true, hasStagedSleep = true,
+                asleepSeconds = asleep, restorativeSeconds = asleep * 0.45, efficiency = 0.95,
+                hasRREvidence = true, hasRespirationEvidence = true,
+            ),
+        )
+    }
+
+    @Test
+    fun confidence_restAssessmentNamesMissingCardiorespiratoryLanesSeparately() {
+        val asleep = 8.0 * 3600.0
+        val assessment = ScoreConfidence.restAssessment(
+            hasSession = true,
+            hasStagedSleep = true,
+            asleepSeconds = asleep,
+            restorativeSeconds = asleep * 0.45,
+            efficiency = 0.95,
+            hasRREvidence = false,
+            hasRespirationEvidence = false,
+        )
+        assertEquals(ScoreConfidence.BUILDING, assessment.confidence)
+        assertEquals(
+            listOf(
+                ScoreConfidence.RestLimitation.MISSING_RR_EVIDENCE,
+                ScoreConfidence.RestLimitation.MISSING_RESPIRATION_EVIDENCE,
+            ),
+            assessment.limitations,
+        )
+        assertEquals(
+            listOf("missingRREvidence", "missingRespirationEvidence"),
+            assessment.limitations.map { it.raw },
         )
     }
 }

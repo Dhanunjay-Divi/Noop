@@ -43,10 +43,12 @@ public enum AnalyticsEngine {
         public let restingHR: BaselineState?
         public let resp: BaselineState?
         public let skinTemp: BaselineState?
+        public let restQuality: BaselineState?
         public init(hrv: BaselineState? = nil, restingHR: BaselineState? = nil,
-                    resp: BaselineState? = nil, skinTemp: BaselineState? = nil) {
+                    resp: BaselineState? = nil, skinTemp: BaselineState? = nil,
+                    restQuality: BaselineState? = nil) {
             self.hrv = hrv; self.restingHR = restingHR; self.resp = resp
-            self.skinTemp = skinTemp
+            self.skinTemp = skinTemp; self.restQuality = restQuality
         }
     }
 
@@ -208,6 +210,146 @@ public enum AnalyticsEngine {
         encoder.outputFormatting = .sortedKeys
         guard let data = try? encoder.encode(stages) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Cardiorespiratory evidence supporting the main night's stage-confidence verdict.
+    struct RestEvidence: Equatable, Sendable {
+        let hasRREvidence: Bool
+        let hasRespirationEvidence: Bool
+    }
+
+    /// Compact per-session evidence retained after raw streams leave scope. Counts compose across a
+    /// bridged main-night group, unlike already-thresholded booleans, so a post-edit winner can be
+    /// re-evaluated against the exact same coverage rule without retaining health samples.
+    struct RestEvidenceCounts: Equatable, Sendable {
+        let eligibleWindows: Int
+        let validRRWindows: Int
+        let validRespirationWindows: Int
+
+        static let zero = RestEvidenceCounts(
+            eligibleWindows: 0,
+            validRRWindows: 0,
+            validRespirationWindows: 0)
+
+        static func + (lhs: RestEvidenceCounts, rhs: RestEvidenceCounts) -> RestEvidenceCounts {
+            RestEvidenceCounts(
+                eligibleWindows: lhs.eligibleWindows + rhs.eligibleWindows,
+                validRRWindows: lhs.validRRWindows + rhs.validRRWindows,
+                validRespirationWindows: lhs.validRespirationWindows + rhs.validRespirationWindows)
+        }
+
+        var resolved: RestEvidence {
+            RestEvidence(
+                hasRREvidence: AnalyticsEngine.hasSustainedRestEvidence(
+                    validWindowCount: validRRWindows,
+                    eligibleWindowCount: eligibleWindows),
+                hasRespirationEvidence: AnalyticsEngine.hasSustainedRestEvidence(
+                    validWindowCount: validRespirationWindows,
+                    eligibleWindowCount: eligibleWindows))
+        }
+    }
+
+    /// Evidence is evaluated in full five-minute windows, matching the HRV/RSA analyzers.
+    static let restEvidenceWindowSeconds = 5 * 60
+    /// Require at least one detector-minimum sleep run of valid evidence. A shorter fragment cannot
+    /// independently support a day-level main-night verdict.
+    static let restEvidenceMinimumWindows =
+        SleepStager.minSleepMin * 60 / restEvidenceWindowSeconds
+    /// Long nights additionally require evidence across at least a quarter of eligible main-night windows.
+    static let restEvidenceMinimumCoverage = 0.25
+    /// The raw respiration estimator assumes a 1 Hz stream. Reject sparse or bursty windows before
+    /// discarding timestamps, otherwise a handful of samples can be compressed into a plausible wave.
+    static let restRespirationMinimumCoverage = 0.80
+    static let restRespirationEdgeToleranceSeconds = 2
+    static let restRespirationMaximumGapSeconds = 2
+
+    static func hasSustainedRestEvidence(validWindowCount: Int, eligibleWindowCount: Int) -> Bool {
+        guard eligibleWindowCount > 0 else { return false }
+        let coverageWindows = Int(ceil(Double(eligibleWindowCount) * restEvidenceMinimumCoverage))
+        return validWindowCount >= max(restEvidenceMinimumWindows, coverageWindows)
+    }
+
+    /// Return one value per unique timestamp only when a nominally 1 Hz window is dense end to end.
+    static func denseRespirationWindow(_ samples: [RespSample],
+                                       start: Int,
+                                       end: Int) -> [Double]? {
+        guard end > start else { return nil }
+        let sorted = samples
+            .filter { $0.ts >= start && $0.ts < end }
+            .enumerated()
+            .sorted { ($0.element.ts, $0.offset) < ($1.element.ts, $1.offset) }
+
+        var unique: [(ts: Int, raw: Double)] = []
+        unique.reserveCapacity(sorted.count)
+        for sample in sorted where unique.last?.ts != sample.element.ts {
+            unique.append((sample.element.ts, Double(sample.element.raw)))
+        }
+
+        let expectedSamples = end - start
+        let minimumSamples = Int(ceil(Double(expectedSamples) * restRespirationMinimumCoverage))
+        guard unique.count >= minimumSamples,
+              let first = unique.first?.ts,
+              let last = unique.last?.ts,
+              first - start <= restRespirationEdgeToleranceSeconds,
+              (end - 1) - last <= restRespirationEdgeToleranceSeconds
+        else {
+            return nil
+        }
+        for index in 1..<unique.count
+            where unique[index].ts - unique[index - 1].ts > restRespirationMaximumGapSeconds {
+            return nil
+        }
+        return unique.map(\.raw)
+    }
+
+    /// Evaluate only the fragments selected for the day's main-night group. Naps and other matched sessions
+    /// must not upgrade the main night's confidence. A valid lane also needs sustained five-minute coverage,
+    /// so one short fragment cannot make an otherwise unsupported night read as solid.
+    static func mainSleepEvidenceCounts(mainGroup: [SleepSession],
+                                        rr: [RRInterval],
+                                        resp: [RespSample]) -> RestEvidenceCounts {
+        let eligibleWindows = mainGroup.reduce(into: 0) { count, session in
+            count += max(0, session.end - session.start) / restEvidenceWindowSeconds
+        }
+        guard eligibleWindows > 0 else {
+            return .zero
+        }
+
+        let rrSorted = rr.sortedByTsStable()
+        let validRRWindows = mainGroup.reduce(into: 0) { count, session in
+            count += SleepStager.sessionHrvWindows(
+                start: session.start, end: session.end, rr: rrSorted, stages: session.stages
+            ).filter {
+                $0.startTs + restEvidenceWindowSeconds <= session.end
+                    && $0.rmssd?.isFinite == true
+            }.count
+        }
+
+        var validRespirationWindows = 0
+        for session in mainGroup {
+            var windowStart = session.start
+            while windowStart + restEvidenceWindowSeconds <= session.end {
+                let windowEnd = windowStart + restEvidenceWindowSeconds
+                if let raw = denseRespirationWindow(resp, start: windowStart, end: windowEnd),
+                   case let evidence = SleepStager.respRateAndRRV(raw),
+                   evidence.0.isFinite,
+                   evidence.1.isFinite {
+                    validRespirationWindows += 1
+                }
+                windowStart = windowEnd
+            }
+        }
+
+        return RestEvidenceCounts(
+            eligibleWindows: eligibleWindows,
+            validRRWindows: validRRWindows,
+            validRespirationWindows: validRespirationWindows)
+    }
+
+    static func mainSleepEvidence(mainGroup: [SleepSession],
+                                  rr: [RRInterval],
+                                  resp: [RespSample]) -> RestEvidence {
+        mainSleepEvidenceCounts(mainGroup: mainGroup, rr: rr, resp: resp).resolved
     }
 
     /// Analyze one day's streams into a `DayResult`.
@@ -583,6 +725,11 @@ public enum AnalyticsEngine {
                 .filter { $0.isFinite }
             return perSession.isEmpty ? nil : HRVAnalyzer.median(perSession)
         }()
+        // Confidence evidence is deliberately narrower than the daily physiology above: Rest describes the
+        // selected main night, so a nap cannot supply its R-R/raw-respiration lanes. V2 can derive RSA
+        // respiration from R-R for staging and daily display, but that same stream cannot count twice as
+        // independent confidence evidence. The shared helper also requires sustained coverage.
+        let restEvidence = mainSleepEvidence(mainGroup: mainGroup, rr: rr, resp: resp)
 
         let sleepStart = matched.map { $0.start }.min()
         let sleepEnd = matched.map { $0.end }.max()
@@ -622,6 +769,7 @@ public enum AnalyticsEngine {
                 rhrBaseline: baselines.restingHR,
                 respBaseline: baselines.resp,
                 sleepPerf: sleepPerf,
+                restQualityBaseline: baselines.restQuality,
                 skinTempDev: skinTempDevC)  // symmetric penalty; drops + renormalizes when nil
             // Driver breakdown from the identical inputs; omits any missing term, never faked.
             chargeDrivers = RecoveryScorer.chargeDrivers(
@@ -632,6 +780,7 @@ public enum AnalyticsEngine {
                 rhrBaseline: baselines.restingHR,
                 respBaseline: baselines.resp,
                 sleepPerf: sleepPerf,
+                restQualityBaseline: baselines.restQuality,
                 skinTempDev: skinTempDevC)
         }
         // A5: skin temp as a RELATIVE deviation marker (trend, not a clinical absolute). nil
@@ -774,7 +923,10 @@ public enum AnalyticsEngine {
         let restConfidence = ScoreConfidence.rest(hasSession: !matched.isEmpty,
                                                   hasStagedSleep: hasStagedSleep,
                                                   asleepSeconds: tstS, restorativeSeconds: deepS + remS,
-                                                  efficiency: efficiency, gravitySparse: gravitySparse)
+                                                  efficiency: efficiency, gravitySparse: gravitySparse,
+                                                  hasRREvidence: restEvidence.hasRREvidence,
+                                                  hasRespirationEvidence:
+                                                    restEvidence.hasRespirationEvidence)
 
         return DayResult(daily: daily, sleepSessions: matched, cachedSleep: cachedSleep,
                          workouts: workouts, recovery: recovery, strain: strain,
@@ -883,10 +1035,36 @@ public enum AnalyticsEngine {
         /// "Rest quality" term agree. `consistency` is the caller's regularity signal (nil → neutral).
         public static func composite(daily d: DailyMetric, needHours: Double = defaultNeedHours,
                                      consistency: Double? = nil) -> Double? {
-            guard let tstMin = d.totalSleepMin, tstMin > 0, let eff = d.efficiency else { return nil }
+            guard let tstMin = d.totalSleepMin,
+                  tstMin.isFinite,
+                  tstMin > 0,
+                  tstMin <= 24 * 60,
+                  let eff = d.efficiency,
+                  eff.isFinite,
+                  eff > 0,
+                  eff <= 1,
+                  needHours.isFinite,
+                  needHours > 0,
+                  needHours <= 24,
+                  consistency.map({ $0.isFinite && $0 >= 0 && $0 <= 1 }) ?? true
+            else {
+                return nil
+            }
+            let deepMin = d.deepMin ?? 0
+            let remMin = d.remMin ?? 0
+            guard deepMin.isFinite,
+                  remMin.isFinite,
+                  deepMin >= 0,
+                  remMin >= 0,
+                  deepMin <= tstMin,
+                  remMin <= tstMin,
+                  deepMin + remMin <= tstMin
+            else {
+                return nil
+            }
             let tstSec = tstMin * 60.0
-            let deepSec = (d.deepMin ?? 0) * 60.0
-            let restorativeSec = (d.deepMin ?? 0) * 60.0 + (d.remMin ?? 0) * 60.0
+            let deepSec = deepMin * 60.0
+            let restorativeSec = (deepMin + remMin) * 60.0
             return composite(tstSeconds: tstSec, inBedSeconds: tstSec / max(eff, 0.01),
                              efficiency: eff, restorativeSeconds: restorativeSec,
                              needHours: needHours, consistency: consistency,

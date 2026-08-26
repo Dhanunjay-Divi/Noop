@@ -1536,15 +1536,14 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     /// Re-point which device id live WHOOP samples store under, when the active WHOOP changes (a
-    /// WHOOP↔WHOOP switch via the registry). Only the `SourceCoordinator` calls this, and only when a
-    /// DIFFERENT registered WHOOP becomes active - the single-WHOOP path leaves the seeded "my-whoop" id
-    /// in place (bootstrapStore set it; this is never called), so that path is byte-for-byte unchanged.
+    /// band-to-band switch via the registry). Only the `SourceCoordinator` calls this. The single-band
+    /// path may idempotently reapply the seeded id; a reverse switch must apply it so writes cannot remain
+    /// pinned to the previously active registry row.
     /// Sets the manager's `deviceId` AND re-points the in-flight Collector/Backfiller so the very next
     /// flush / standard-HR persist / historical finishChunk attributes new samples to the new id —
     /// without waiting for a relaunch or a full strap-switch store rebuild. The Collector reads
     /// `deviceId` at persist time (live + 0x2A37 standard-HR paths) and the Backfiller at finishChunk,
-    /// so updating their mutable `deviceId` here is sufficient. Additive: nothing on the single-WHOOP
-    /// path invokes it, so with one WHOOP the id stays "my-whoop" throughout.
+    /// so updating their mutable `deviceId` here is sufficient.
     public func setActiveDeviceId(_ id: String) {
         guard !id.isEmpty else { return }
         deviceId = id

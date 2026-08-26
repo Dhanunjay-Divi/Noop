@@ -15,7 +15,7 @@ public enum ExtendedBatteryProbe {
     /// printed for WHOOP4 — the `pay[7..8]` offset is confirmed there, but the 5/MG response to 98 is an
     /// undecoded stub, so a decoded voltage there would be a guess presented as fact.
     public static func format(frame: [UInt8], cmdOff: Int, isWhoop5: Bool, prevPayloadHex: String?) -> (text: String, payloadHex: String?) {
-        let fam = isWhoop5 ? "WHOOP 5/MG" : "WHOOP 4.0"
+        let fam = isWhoop5 ? "newer band" : "legacy band"
         let payStart = cmdOff + 1
         let payEnd = frame.count - 4
         let hasPayload = payEnd > payStart

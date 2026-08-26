@@ -1,16 +1,35 @@
 import XCTest
 
 final class NOOPiOSUITests: XCTestCase {
-    private func launchApp(tab: String = "today") -> XCUIApplication {
+    private enum PreferredContentSize {
+        static let standard = "UICTContentSizeCategoryL"
+        static let accessibilityLarge = "UICTContentSizeCategoryAccessibilityL"
+    }
+
+    private func launchApp(
+        tab: String = "today",
+        extraArguments: [String] = [],
+        preferredContentSize: String = PreferredContentSize.standard
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--demo-seed", "--demo-tab", tab]
+        app.launchArguments = [
+            "-UIPreferredContentSizeCategoryName", preferredContentSize,
+            "--demo-seed", "--demo-tab", tab,
+        ] + extraArguments
         app.launch()
         return app
     }
 
-    private func launchDemoScreen(_ name: String, extraArguments: [String] = []) -> XCUIApplication {
+    private func launchDemoScreen(
+        _ name: String,
+        extraArguments: [String] = [],
+        preferredContentSize: String = PreferredContentSize.standard
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--demo-seed", "--demo-screen", name] + extraArguments
+        app.launchArguments = [
+            "-UIPreferredContentSizeCategoryName", preferredContentSize,
+            "--demo-seed", "--demo-screen", name,
+        ] + extraArguments
         app.launch()
         return app
     }
@@ -88,6 +107,31 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "floating-navigation-scroll-compact")
     }
 
+    func testAccessibilityNavigationRetainsLabelsAcrossDenseScreens() {
+        var app = launchApp(
+            tab: "more",
+            preferredContentSize: PreferredContentSize.accessibilityLarge
+        )
+        let explore = app.buttons["Explore"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 20))
+        assertExpandedNavigationLabels(selectedTab: 4, in: app)
+        app.swipeUp()
+        assertExpandedNavigationLabels(selectedTab: 4, in: app)
+        keepScreenshot(app, name: "se-accessibility-more-clear-navigation")
+
+        app.terminate()
+        app = launchApp(
+            tab: "workouts",
+            preferredContentSize: PreferredContentSize.accessibilityLarge
+        )
+        let activityCalendar = app.staticTexts["Activity calendar"]
+        XCTAssertTrue(activityCalendar.waitForExistence(timeout: 20))
+        assertExpandedNavigationLabels(selectedTab: 2, in: app)
+        app.swipeUp()
+        assertExpandedNavigationLabels(selectedTab: 2, in: app)
+        keepScreenshot(app, name: "se-accessibility-workouts-clear-navigation")
+    }
+
     func testTodayCalendarButtonOpensMonthHistory() {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]
@@ -111,6 +155,28 @@ final class NOOPiOSUITests: XCTestCase {
             app.staticTexts["noop.calendar.month"].label,
             formatter.string(from: Date())
         )
+    }
+
+    func testPullToSyncRevealsCircularFeedback() {
+        let app = launchApp()
+        let calendar = app.buttons["noop.today.calendar"]
+        XCTAssertTrue(calendar.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any)["noop.today.pull-sync"].exists)
+
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.16))
+        let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+        start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.5)
+
+        let sync = app.descendants(matching: .any)["noop.today.pull-sync"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 3))
+        XCTAssertTrue(sync.label.localizedCaseInsensitiveContains("sync"))
+        XCTAssertTrue(
+            String(describing: sync.value).localizedCaseInsensitiveContains("progress")
+                || sync.label.localizedCaseInsensitiveContains("syncing")
+        )
+        keepScreenshot(app, name: "today-pull-sync-circular-feedback")
     }
 
     func testBandBatteryShowsChargingStateFromLiveFixture() {
@@ -209,6 +275,45 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["WHOOP 4.0"].exists)
         XCTAssertFalse(app.staticTexts["WHOOP 5.0 / MG"].exists)
         keepScreenshot(app, name: "onboarding-noop-band")
+    }
+
+    func testOnboardingScanEndpointClearsFooterAtAccessibilitySize() {
+        let app = launchDemoScreen(
+            "onboarding",
+            extraArguments: ["--demo-onboarding-step", "5"],
+            preferredContentSize: PreferredContentSize.accessibilityLarge
+        )
+        let primaryAction = app.buttons["noop.onboarding.primary"]
+        let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
+        let scanHelp = app.buttons["Don't see it?"]
+        let scanFootnote = app.staticTexts["noop.onboarding.scan-footnote"]
+        XCTAssertTrue(primaryAction.waitForExistence(timeout: 20))
+        XCTAssertTrue(footer.waitForExistence(timeout: 5))
+        XCTAssertTrue(scanHelp.waitForExistence(timeout: 5))
+        XCTAssertTrue(scanFootnote.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            scanHelp.isHittable && scanHelp.frame.intersects(footer.frame),
+            "Visible Scan help must not be exposed underneath the fixed onboarding footer."
+        )
+
+        for _ in 0..<8
+            where !scanFootnote.isHittable
+                || scanFootnote.frame.maxY + 12 > footer.frame.minY {
+            app.swipeUp()
+        }
+
+        XCTAssertTrue(
+            scanFootnote.isHittable,
+            "The final Scan guidance must be reachable above the fixed onboarding footer."
+        )
+        XCTAssertLessThanOrEqual(
+            scanFootnote.frame.maxY + 12,
+            footer.frame.minY,
+            "The fixed onboarding footer must not cover the Scan step's final guidance."
+        )
+        XCTAssertFalse(scanFootnote.frame.intersects(footer.frame))
+        XCTAssertFalse(scanFootnote.frame.intersects(primaryAction.frame))
+        keepScreenshot(app, name: "se-accessibility-onboarding-clear-footer")
     }
 
     func testProfileMeasurementsCanBeClearedAndRetyped() {
@@ -344,7 +449,7 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(range.label.localizedCaseInsensitiveContains("not a confidence interval"))
         XCTAssertTrue(
             app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS[c] %@", "not biological, medical")
+                NSPredicate(format: "label CONTAINS[c] %@", "not biological or medical age")
             ).firstMatch.exists
         )
     }
@@ -524,7 +629,7 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(rangeLabel.label.localizedCaseInsensitiveContains("last 3 months"))
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("recovery scores"))
         XCTAssertTrue(
-            coverage.label.localizedCaseInsensitiveContains("90 of 90 days"),
+            coverage.label.localizedCaseInsensitiveContains("89 of 90 days"),
             "Unexpected coverage copy: \(coverage.label)"
         )
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("one score per day"))
@@ -533,6 +638,28 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertFalse(rangeLabel.frame.intersects(coverage.frame))
         XCTAssertFalse(rangeDates.frame.intersects(coverage.frame))
         keepScreenshot(app, name: "trends-range-compact-copy")
+    }
+
+    private func assertExpandedNavigationLabels(
+        selectedTab: Int,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let labels = ["Today", "Trends", "Fitness", "Sleep", "More"]
+        for (index, label) in labels.enumerated() {
+            let tab = app.buttons["noop.tab.\(index)"]
+            XCTAssertTrue(tab.waitForExistence(timeout: 5), file: file, line: line)
+            XCTAssertEqual(tab.label, label, file: file, line: line)
+            XCTAssertEqual(tab.isSelected, index == selectedTab, file: file, line: line)
+        }
+        XCTAssertFalse(
+            app.buttons["noop.tab.compact"].exists,
+            "Accessibility Dynamic Type must keep visible navigation labels.",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(app.buttons["noop.quick-actions"].exists, file: file, line: line)
     }
 
     private func keepScreenshot(_ app: XCUIApplication, name: String) {

@@ -252,7 +252,7 @@ public enum Whoop5EcgProbe {
                               candidateFrames: [String],
                               windowSeconds: Int) -> String {
         var sb = ""
-        sb += "WHOOP MG ECG (Labrador) TURN-ON PROBE\n"
+        sb += "ECG-capable band spot-recording probe\n"
         sb += "Verdict: \(verdict(steps: steps, ecgPacketsSeen: ecgPacketsSeen, windowSeconds: windowSeconds).headline)\n"
         sb += "\nCommands sent:\n"
         if steps.isEmpty {

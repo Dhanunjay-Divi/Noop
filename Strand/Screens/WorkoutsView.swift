@@ -799,15 +799,15 @@ struct WorkoutsView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(StrandPalette.accent)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Time range")
-                        .font(StrandFont.overline)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                    Text(range.label)
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                }
+                Text("Time range")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
+                Text(range.label)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -815,15 +815,17 @@ struct WorkoutsView: View {
             }
             .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(StrandPalette.surfaceInset,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(StrandPalette.hairline, lineWidth: 1)
-            }
             .contentShape(Rectangle())
+            .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 72)
+        .background(StrandPalette.surfaceInset,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+        }
         .accessibilityLabel("Time range")
         .accessibilityValue(range.label)
     }

@@ -1,6 +1,7 @@
 import XCTest
 import Combine
 @testable import Strand
+import StrandAnalytics
 import WhoopStore
 
 /// Pins the DETERMINISTIC pieces of the experimental clean-room BLE drivers: the Huami custom HR parse,
@@ -159,6 +160,164 @@ final class ExperimentalDriversTests: XCTestCase {
         XCTAssertEqual(startWhoopCalls, 0, "The HealthKit watch source must not re-scan WHOOP")
         XCTAssertFalse(strapLogLines.contains(where: { $0.hasPrefix("HR-strap:") }),
                        "No StandardHRSource should be started for a HealthKit pseudo-device")
+    }
+
+    @MainActor
+    func testSwitchingBackToSeededBandKeepsPersistedRowsVisibleAndScoreable() async throws {
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistry(store: DeviceRegistryStore(dbQueue: store.registryWriter))
+        registry.reload()
+        registry.add(PairedDevice(
+            id: "whoop-new", brand: "WHOOP", model: "WHOOP 5.0",
+            peripheralId: "11111111-1111-1111-1111-111111111111",
+            sourceKind: .liveBLE, capabilities: [.hr], status: .paired,
+            addedAt: 1, lastSeenAt: 1))
+
+        var writerId = "my-whoop"
+        var routedIds: [String] = []
+        let coordinator = SourceCoordinator(
+            registry: registry,
+            live: LiveState(),
+            storeHandle: { nil },
+            startWhoop: {},
+            stopWhoop: {},
+            setWhoopPreferredPeripheral: { _ in },
+            setWhoopActiveDeviceId: {
+                writerId = $0
+                routedIds.append($0)
+            },
+            connectedPeripheralUUID: Empty<String?, Never>().eraseToAnyPublisher())
+
+        coordinator.activeDeviceChanged(to: "whoop-new")
+        coordinator.activeDeviceChanged(to: "my-whoop")
+
+        XCTAssertEqual(routedIds, ["whoop-new", "my-whoop"])
+        XCTAssertEqual(writerId, "my-whoop")
+
+        // Persist five completed nights through the writer id selected by the reverse switch. Under the
+        // old routing bug `writerId` remained "whoop-new", while the seeded read model below watched
+        // "my-whoop"; the rows were durable but invisible and could not seed or score Recovery.
+        let midnight = Calendar.current.startOfDay(for: Date())
+        let dayKeys = try (0..<5).map { index in
+            let date = try XCTUnwrap(
+                Calendar.current.date(byAdding: .day, value: index - 4, to: midnight)
+            )
+            return Repository.localDayKey(date)
+        }
+        let rows = dayKeys.enumerated().map { index, day in
+            DailyMetric(
+                day: day,
+                totalSleepMin: 420,
+                efficiency: 0.9,
+                deepMin: 80,
+                remMin: 100,
+                lightMin: 240,
+                disturbances: 2,
+                restingHr: 60 - index,
+                avgHrv: 55 + Double(index),
+                recovery: nil,
+                strain: nil,
+                exerciseCount: 0,
+                respRateBpm: 14
+            )
+        }
+        try await store.upsertDailyMetrics(rows, deviceId: writerId)
+
+        let repo = Repository(deviceId: "my-whoop")
+        repo.setStoreForTesting(store)
+        await repo.refresh()
+
+        XCTAssertEqual(repo.days.map(\.day), dayKeys, "reverse-switch writes must remain visible")
+        let scoredDay = try XCTUnwrap(repo.days.last)
+        let hrvByDay: [String: Double?] = Dictionary(
+            uniqueKeysWithValues: repo.days.map { ($0.day, $0.avgHrv) }
+        )
+        let hrvBaseline = Baselines.foldHistory(
+            hrvByDay,
+            before: scoredDay.day,
+            cfg: Baselines.hrvCfg,
+            baselineEpoch: 0
+        )
+        XCTAssertEqual(hrvBaseline.nValid, Baselines.minNightsSeed)
+        XCTAssertTrue(hrvBaseline.usable)
+        XCTAssertNotNil(
+            RecoveryScorer.recovery(
+                hrv: try XCTUnwrap(scoredDay.avgHrv),
+                rhr: Double(try XCTUnwrap(scoredDay.restingHr)),
+                resp: scoredDay.respRateBpm,
+                hrvBaseline: hrvBaseline,
+                rhrBaseline: nil,
+                respBaseline: nil,
+                sleepPerf: nil
+            ),
+            "visible post-switch rows must be sufficient to produce a score"
+        )
+    }
+
+    @MainActor
+    func testCalibrationEvidenceSeparatesSleepSyncFromValidHrv() {
+        XCTAssertEqual(
+            TodayView.calibrationNightEvidence(
+                totalSleepMin: nil, hasSleepSession: false, nightlyHrv: nil),
+            .awaitingSleep
+        )
+        XCTAssertEqual(
+            TodayView.calibrationNightEvidence(
+                totalSleepMin: 420, hasSleepSession: false, nightlyHrv: nil),
+            .sleepSyncedWithoutValidHrv
+        )
+        XCTAssertEqual(
+            TodayView.calibrationNightEvidence(
+                totalSleepMin: nil, hasSleepSession: true, nightlyHrv: nil),
+            .sleepSyncedWithoutValidHrv
+        )
+        XCTAssertEqual(
+            TodayView.calibrationNightEvidence(
+                totalSleepMin: 420, hasSleepSession: true, nightlyHrv: 65),
+            .validHrv
+        )
+        XCTAssertEqual(
+            TodayView.calibrationNightEvidence(
+                totalSleepMin: 420, hasSleepSession: true, nightlyHrv: .nan),
+            .sleepSyncedWithoutValidHrv
+        )
+    }
+
+    @MainActor
+    func testCalibrationCopyNamesValidHrvAndExplainsUnqualifiedSleep() {
+        XCTAssertEqual(
+            TodayView.calibrationCountdown(validHrvNightsRemaining: 2),
+            "2 valid HRV nights to go"
+        )
+        XCTAssertEqual(
+            TodayView.calibrationProgress(validHrvNights: 1, seed: 4),
+            "Calibrating, 1 of 4 valid HRV nights"
+        )
+        XCTAssertEqual(
+            TodayView.calibrationHeadline(validHrvNights: 4, seed: 4),
+            "Baseline ready"
+        )
+        let detail = TodayView.calibrationDetailCopy(
+            validHrvNights: 1,
+            seed: 4,
+            evidence: .sleepSyncedWithoutValidHrv,
+            staleDays: nil
+        )
+        XCTAssertTrue(detail.contains("Sleep synced"))
+        XCTAssertTrue(detail.contains("1 of 4 valid HRV nights"))
+        XCTAssertTrue(detail.contains("quality and range checks"))
+        XCTAssertFalse(detail.contains("R-R"),
+                       "an aggregate HRV value cannot prove local beat-to-beat provenance")
+
+        XCTAssertEqual(
+            TodayView.calibrationDetailCopy(
+                validHrvNights: 4,
+                seed: 4,
+                evidence: .validHrv,
+                staleDays: nil
+            ),
+            "4 of 4 valid HRV nights complete. The next qualifying night can produce your first Recovery."
+        )
     }
 
     /// Device removal must be classified while the full registry row is still available. In particular,

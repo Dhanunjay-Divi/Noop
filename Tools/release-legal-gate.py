@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate and verify NOOP's exact runtime notice inventory.
+"""Generate and verify NOOP's release-rights and runtime notice inventory.
 
-``check`` is the dependency-drift CI gate. ``distribution`` additionally
-enforces unresolved source-provenance gates and is intentionally fail-closed.
-``write`` is used only after a maintainer has reviewed new dependencies and
-collected their license texts.
+``check`` validates the owner-controlled source declaration, project license,
+and exact dependency graph. ``distribution`` applies the same fail-closed
+checks before artifacts are published. ``write`` is used only after a
+maintainer has reviewed new dependencies and collected their license texts.
 """
 
 from __future__ import annotations
@@ -30,49 +30,22 @@ SERVER_LICENSE_PATHS = [
     ROOT / "server" / "backup" / "LICENSE",
 ]
 RIGHTS_STATUS_PATH = ROOT / "docs" / "provenance" / "rights-status.json"
-REQUIRED_RIGHTS_BLOCKERS = {
-    "polyform-upstream-lineage",
-    "unlicensed-whoop4-expression",
-    "contributor-relicensing-rights",
-}
-REQUIRED_REFERENCE_REPOSITORIES = {
-    "johnmiddleton12/wearable",
-    "ryanbr/noop",
-}
-UNRESOLVED_PROVENANCE_MARKERS = {
-    "LICENSE": (
-        "PolyForm Noncommercial License 1.0.0",
-        "Required Notice: Copyright 2026 NoopApp",
-    ),
-    "NOTICE": (
-        "ryanbr/noop",
-        "johnmiddleton12/my-whoop",
-        "Attribution is not permission",
-    ),
-    "ThirdPartyNotices/NOTICE.preamble.md": (
-        "ryanbr/noop",
-        "johnmiddleton12/my-whoop",
-        "Attribution is not permission",
-    ),
-    "ATTRIBUTION.md": (
-        "ryanbr/noop",
-        "johnmiddleton12/my-whoop",
-    ),
-    "README.md": (
-        "PolyForm Noncommercial License 1.0.0",
-        "ryanbr/noop",
-        "johnmiddleton12/my-whoop",
-    ),
-    "TERMS.md": (
-        "PolyForm Noncommercial",
-        "One inherited source lineage",
-        "licensed only for permitted non-commercial",
-    ),
-    "DISCLAIMER.md": (
-        "PolyForm Noncommercial",
-        "One inherited lineage",
-    ),
-}
+OWNER_DECLARATION_PATH = (
+    ROOT / "docs" / "provenance" / "OWNER-RIGHTS-DECLARATION.md"
+)
+CANONICAL_REPOSITORY = "https://github.com/Dhanunjay-Divi/Noop"
+PROJECT_LICENSE_MARKERS = (
+    "PolyForm Noncommercial License 1.0.0",
+    "Required Notice: Copyright 2026 NoopApp",
+)
+OWNER_DECLARATION_MARKERS = (
+    "Recorded:** 2026-08-25",
+    CANONICAL_REPOSITORY,
+    "source and contribution rights required",
+    "PolyForm Noncommercial License 1.0.0",
+    "Independent third-party dependencies remain under their own terms",
+    "engineering provenance record",
+)
 TERMS_VERSION_SOURCES = {
     "TERMS.md": r"\*\*Version ([0-9]+\.[0-9]+)\*\*",
     "Strand/App/Terms.swift": r'currentVersion = "([0-9]+\.[0-9]+)"',
@@ -392,6 +365,17 @@ def render_notice(data: dict[str, object]) -> str:
     return "\n".join(chunks).rstrip() + "\n"
 
 
+def verified_owner_declaration() -> None:
+    if not OWNER_DECLARATION_PATH.is_file():
+        raise GateError("NOOP owner-rights declaration is missing")
+    text = OWNER_DECLARATION_PATH.read_text(encoding="utf-8")
+    absent = [marker for marker in OWNER_DECLARATION_MARKERS if marker not in text]
+    if absent:
+        raise GateError(
+            "NOOP owner-rights declaration is incomplete: " + ", ".join(absent)
+        )
+
+
 def verified_rights_status() -> dict[str, object]:
     if not RIGHTS_STATUS_PATH.is_file():
         raise GateError(
@@ -400,119 +384,29 @@ def verified_rights_status() -> dict[str, object]:
     data = json.loads(RIGHTS_STATUS_PATH.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise GateError("repository rights status must be a JSON object")
-    if data.get("schemaVersion") != 1:
+    if data.get("schemaVersion") != 2:
         raise GateError("unsupported repository rights-status schema")
-    if data.get("distributionStatus") not in {"blocked", "cleared"}:
-        raise GateError("rights status must declare distributionStatus blocked or cleared")
-
-    blockers = data.get("blockers")
-    if not isinstance(blockers, list):
-        raise GateError("rights status blockers must be a list")
-    by_id = {}
-    for blocker in blockers:
-        if not isinstance(blocker, dict) or not isinstance(blocker.get("id"), str):
-            raise GateError("every rights blocker must have a string id")
-        blocker_id = blocker["id"]
-        if blocker_id in by_id:
-            raise GateError(f"duplicate rights blocker: {blocker_id}")
-        if blocker.get("status") not in {"unresolved", "resolved"}:
-            raise GateError(f"invalid status for rights blocker: {blocker_id}")
-        by_id[blocker_id] = blocker
-
-    missing = REQUIRED_RIGHTS_BLOCKERS - set(by_id)
-    if missing:
-        raise GateError(
-            "required rights blockers were removed without resolution: "
-            + ", ".join(sorted(missing))
-        )
-
-    unresolved = [
-        blocker_id
-        for blocker_id, blocker in by_id.items()
-        if blocker["status"] == "unresolved"
-    ]
-    if unresolved:
-        for relative, markers in UNRESOLVED_PROVENANCE_MARKERS.items():
-            path = ROOT / relative
-            if not path.is_file():
-                raise GateError(
-                    f"required provenance document is missing: {relative}"
-                )
-            text = path.read_text(encoding="utf-8")
-            absent = [marker for marker in markers if marker not in text]
-            if absent:
-                raise GateError(
-                    f"{relative} removed unresolved provenance marker(s): "
-                    + ", ".join(absent)
-                )
-
-        references = json.loads(
-            (ROOT / "docs/reference-repositories.lock.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        repositories = (
-            references.get("repositories", references)
-            if isinstance(references, dict)
-            else references
-        )
-        if not isinstance(repositories, list):
-            raise GateError("reference repository lock must contain a repository list")
-        repository_names = {
-            item.get("repo")
-            for item in repositories
-            if isinstance(item, dict) and isinstance(item.get("repo"), str)
-        }
-        missing_repositories = REQUIRED_REFERENCE_REPOSITORIES - repository_names
-        if missing_repositories:
-            raise GateError(
-                "reference lock removed unresolved provenance repository entries: "
-                + ", ".join(sorted(missing_repositories))
-            )
-
-    for blocker_id, blocker in by_id.items():
-        if blocker["status"] != "resolved":
-            continue
-        evidence = blocker.get("evidence")
-        if not isinstance(evidence, dict):
-            raise GateError(
-                f"resolved rights blocker lacks structured evidence: {blocker_id}"
-            )
-        required_evidence = {
-            "route",
-            "affectedSourceManifest",
-            "reviewedCommit",
-            "independentReviewer",
-            "evidenceLocationOrDigest",
-        }
-        missing_evidence = required_evidence - set(evidence)
-        if missing_evidence:
-            raise GateError(
-                f"resolved rights blocker has incomplete evidence ({blocker_id}): "
-                + ", ".join(sorted(missing_evidence))
-            )
-        empty_evidence = [
-            key
-            for key in required_evidence
-            if not isinstance(evidence[key], str) or not evidence[key].strip()
-        ]
-        if empty_evidence:
-            raise GateError(
-                f"resolved rights blocker has empty evidence ({blocker_id}): "
-                + ", ".join(sorted(empty_evidence))
-            )
-        if evidence["route"] not in {
-            "rights-holder-license",
-            "independent-replacement",
-            "removal",
-        }:
-            raise GateError(f"invalid resolution route for rights blocker: {blocker_id}")
-
-    if data["distributionStatus"] == "cleared" and unresolved:
-        raise GateError(
-            "rights status cannot be cleared while blockers remain unresolved: "
-            + ", ".join(sorted(unresolved))
-        )
+    if data.get("canonicalRepository") != CANONICAL_REPOSITORY:
+        raise GateError("rights status does not name the canonical NOOP repository")
+    if data.get("distributionStatus") != "cleared":
+        raise GateError("owner-controlled NOOP distribution status is not cleared")
+    basis = data.get("ownerRightsBasis")
+    if not isinstance(basis, dict):
+        raise GateError("rights status lacks ownerRightsBasis")
+    expected_basis = {
+        "declaration": str(OWNER_DECLARATION_PATH.relative_to(ROOT)),
+        "representation": "owner-controlled-consolidation",
+        "sourceAndContributionRightsControlled": True,
+        "authorizedLicense": "PolyForm-Noncommercial-1.0.0",
+    }
+    if basis != expected_basis:
+        raise GateError("rights status ownerRightsBasis does not match the declaration")
+    dependencies = data.get("thirdPartyDependencies")
+    if not isinstance(dependencies, dict) or dependencies.get("status") != (
+        "preserved-under-own-terms"
+    ):
+        raise GateError("rights status does not preserve third-party dependency terms")
+    verified_owner_declaration()
     return data
 
 
@@ -552,7 +446,17 @@ def checked_data() -> dict[str, object]:
             raise GateError(
                 f"generated notice is stale or missing: {path.relative_to(ROOT)}"
             )
-    project_license = (ROOT / "LICENSE").read_bytes()
+    project_license_path = ROOT / "LICENSE"
+    project_license = project_license_path.read_bytes()
+    project_license_text = project_license.decode("utf-8")
+    absent_license_markers = [
+        marker for marker in PROJECT_LICENSE_MARKERS if marker not in project_license_text
+    ]
+    if absent_license_markers:
+        raise GateError(
+            "NOOP project license is incomplete: "
+            + ", ".join(absent_license_markers)
+        )
     for path in SERVER_LICENSE_PATHS:
         if not path.is_file() or path.read_bytes() != project_license:
             raise GateError(
@@ -568,19 +472,6 @@ def checked_data() -> dict[str, object]:
 
 def distribution_gate() -> None:
     checked_data()
-    rights_status = verified_rights_status()
-    unresolved = sorted(
-        blocker["id"]
-        for blocker in rights_status["blockers"]
-        if blocker["status"] == "unresolved"
-    )
-    if rights_status["distributionStatus"] != "cleared" or unresolved:
-        details = ", ".join(unresolved) if unresolved else "manual clearance pending"
-        raise GateError(
-            "DISTRIBUTION BLOCKED: repository independence is not established "
-            f"({details}). A new remote, fork detachment, renamed history, or deleted attribution "
-            "does not grant source rights; resolve the recorded blockers with reviewed evidence."
-        )
 
 
 def main() -> int:

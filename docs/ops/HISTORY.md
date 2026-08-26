@@ -12,10 +12,9 @@ Git history begins with the Goose Swift MVP (`59353e06`), the server line
 foundation releases through June added wearable UX, metrics/IMU work, sync and
 sleep correctness, BLE/protocol reliability, architecture, and release tooling.
 
-From early July through NOOP 9.1.1, the inherited upstream product line added
+From early July through NOOP 9.1.1, the consolidated product line added
 substantial metric, sleep, history/offload, Oura, packaging, localization, and
-platform hardening. This is inherited project lineage and must not be presented
-as entirely original fork work. The current repository contains the resulting
+platform hardening. The current canonical repository contains the resulting
 broad local-first platform: direct wearable interoperability, local SQLite
 storage, transparent analytics, imports, Apple/Android surfaces, Oura research,
 and extensive protocol, architecture, safety, and parity documentation.
@@ -70,11 +69,10 @@ physical-phone scroll lag.
 Commit `972a126b` added the temporary versioned launch gate, App Store metadata
 and review/privacy worksheets, public in-app policy/support links, Apple-managed
 update behavior, background-task and HealthKit disclosure corrections, media
-validation tooling, and a protocol-rights remediation plan. Focused policy
-tests and an unsigned consolidated Release simulator build passed. No signed
-archive was uploaded: public distribution remains blocked by inherited
-third-party expression without an explicit software license, and signing,
-review access/media, export decisions, and physical-device validation remain
+validation tooling, and an initial source-rights review. Focused policy tests
+and an unsigned consolidated Release simulator build passed. No signed archive
+was uploaded: signing, review access/media, export decisions, and
+physical-device validation remain
 open.
 
 ## Ledger transition

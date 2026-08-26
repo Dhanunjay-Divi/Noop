@@ -4,7 +4,8 @@ Copyright 2026 NoopApp
 
 Scope and notices:
 
-- This license applies ONLY to NOOP's own original source code and documentation.
+- This license applies to the NOOP-controlled source code and documentation
+  consolidated in this canonical repository.
 - The protocol facts documented in this repository (BLE service/characteristic
   identifiers, frame layouts, CRC parameters, command/event/packet numbers, byte
   offsets) are uncopyrightable factual information about how bytes appear on a wire.

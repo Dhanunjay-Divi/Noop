@@ -96,6 +96,8 @@ internal data class HeroNight(
     // window row and axis were already whole-night. Null only via the default → session fallback.
     val heroOnsetTs: Long? = null,
     val heroWakeTs: Long? = null,
+    /** At least one displayed main-night fragment carried a trustworthy HRV window derived from R-R. */
+    val hasRREvidence: Boolean = false,
     /** True when any block supplying the displayed main-night hypnogram came from Oura's on-ring
      *  SleepNet output. Kept separate from score provenance: this labels stages only. */
     val hasOuraStages: Boolean = false,

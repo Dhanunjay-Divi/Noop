@@ -735,7 +735,7 @@ final class Repository: ObservableObject {
                 NSLog("WhoopStore: ensureStore FAILED opening store: \(ns.domain) code=\(ns.code): \(ns.localizedDescription)")
                 return nil
             }
-            try? await s.upsertDevice(id: deviceId, mac: nil, name: "WHOOP")
+            try? await s.upsertDevice(id: deviceId, mac: nil, name: "Noop Band")
             return s
         }
         storeOpenTask = task
@@ -1567,10 +1567,9 @@ final class Repository: ObservableObject {
         let steps = useMotionAwareWake
             ? ((try? await store.stepSamples(deviceId: deviceId, from: lo, to: hi, limit: 200_000)) ?? [])
             : []
-        // Opt-in experimental staging (Settings → Experimental · Sleep staging): when the user has flipped
-        // the V2 flag on, re-stage with the cardiorespiratory recipe `SleepStagerV2`; otherwise the default
-        // V1 `SleepStager`. Read once here off the actor; the switch is purely which engine runs over the
-        // already-detected window , V1 stays the default and is untouched. (V7 Pillar 3b)
+        // V2 staging ships enabled after cross-subject validation; disabling its setting selects the
+        // retained V1 `SleepStager`. Read once here off the actor; the switch only chooses which engine
+        // runs over the already-detected window. (V7 Pillar 3b)
         let useV2 = PuffinExperiment.experimentalSleepV2Enabled
         let segs = await Task.detached(priority: .utility) {
             let staged = useV2
@@ -2034,7 +2033,7 @@ final class Repository: ObservableObject {
             // resolves (the union model) and imports outrank computed estimates — the documented
             // `imported WHOOP > NOOP-computed` order. The computed sibling used to sit ahead of the
             // canonical import, so after a device re-add (active != canonical) the new strap's computed
-            // estimates shadowed richer imported my-whoop history (Swift twin of the ryanbr/noop#240
+            // estimates shadowed richer imported my-whoop history (Swift twin of the Dhanunjay-Divi/Noop#240
             // precedence fix). `uniqued` collapses these to one pair per source on a single-device
             // install (active == canonical), so that path is byte-identical. Apple is the final
             // cross-source fallback.

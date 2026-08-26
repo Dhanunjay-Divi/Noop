@@ -2573,6 +2573,39 @@
     "zh-Hans": "正在同步 Noop Band 历史记录",
     "zh-Hant": "正在同步 Noop Band 歷史記錄"
   },
+  "appwide.today.band_sync.unavailable": {
+    "de": "Noop Band-Synchronisierung nicht verfügbar",
+    "en": "Noop Band sync unavailable",
+    "es": "Sincronización de Noop Band no disponible",
+    "fr": "Synchronisation Noop Band indisponible",
+    "it": "Sincronizzazione Noop Band non disponibile",
+    "pt-PT": "Sincronização da Noop Band indisponível",
+    "ru": "Синхронизация Noop Band недоступна",
+    "zh-Hans": "Noop Band 同步不可用",
+    "zh-Hant": "Noop Band 同步無法使用"
+  },
+  "appwide.today.band_sync.failed": {
+    "de": "Noop Band-Synchronisierung nicht abgeschlossen",
+    "en": "Noop Band sync did not finish",
+    "es": "La sincronización de Noop Band no terminó",
+    "fr": "La synchronisation Noop Band ne s’est pas terminée",
+    "it": "La sincronizzazione Noop Band non è terminata",
+    "pt-PT": "A sincronização da Noop Band não terminou",
+    "ru": "Синхронизация Noop Band не завершилась",
+    "zh-Hans": "Noop Band 同步未完成",
+    "zh-Hant": "Noop Band 同步未完成"
+  },
+  "appwide.today.local_refresh.refreshing": {
+    "de": "Lokale Daten werden aktualisiert",
+    "en": "Refreshing local data",
+    "es": "Actualizando datos locales",
+    "fr": "Actualisation des données locales",
+    "it": "Aggiornamento dei dati locali",
+    "pt-PT": "A atualizar dados locais",
+    "ru": "Обновление локальных данных",
+    "zh-Hans": "正在更新本地数据",
+    "zh-Hant": "正在更新本機資料"
+  },
   "appwide.today.greeting.afternoon": {
     "de": "Guten Tag",
     "en": "Good afternoon",
@@ -2979,6 +3012,61 @@
     "ru": "ещё не рассчитано",
     "zh-Hans": "尚未计算",
     "zh-Hant": "尚未計算"
+  },
+  "appwide.v4.not_calculated_with_context_format": {
+    "de": "Noch nicht berechnet, %1$s",
+    "en": "Not yet calculated, %1$s",
+    "es": "Aún no calculado, %1$s",
+    "fr": "Pas encore calculé, %1$s",
+    "it": "Non ancora calcolato, %1$s",
+    "pt-PT": "Ainda não calculado, %1$s",
+    "ru": "Ещё не рассчитано, %1$s",
+    "zh-Hans": "尚未计算，%1$s",
+    "zh-Hant": "尚未計算，%1$s"
+  },
+  "appwide.v4.value_out_of_format": {
+    "de": "%1$d von %2$d",
+    "en": "%1$d out of %2$d",
+    "es": "%1$d de %2$d",
+    "fr": "%1$d sur %2$d",
+    "it": "%1$d su %2$d",
+    "pt-PT": "%1$d de %2$d",
+    "ru": "%1$d из %2$d",
+    "zh-Hans": "%1$d，共 %2$d",
+    "zh-Hant": "%1$d，共 %2$d"
+  },
+  "appwide.v4.value_out_of_with_context_format": {
+    "de": "%1$d von %2$d, %3$s",
+    "en": "%1$d out of %2$d, %3$s",
+    "es": "%1$d de %2$d, %3$s",
+    "fr": "%1$d sur %2$d, %3$s",
+    "it": "%1$d su %2$d, %3$s",
+    "pt-PT": "%1$d de %2$d, %3$s",
+    "ru": "%1$d из %2$d, %3$s",
+    "zh-Hans": "%1$d，共 %2$d，%3$s",
+    "zh-Hant": "%1$d，共 %2$d，%3$s"
+  },
+  "appwide.v4.value_text_out_of_text_format": {
+    "de": "%1$s von %2$s",
+    "en": "%1$s out of %2$s",
+    "es": "%1$s de %2$s",
+    "fr": "%1$s sur %2$s",
+    "it": "%1$s su %2$s",
+    "pt-PT": "%1$s de %2$s",
+    "ru": "%1$s из %2$s",
+    "zh-Hans": "%1$s，共 %2$s",
+    "zh-Hant": "%1$s，共 %2$s"
+  },
+  "appwide.v4.value_text_out_of_text_with_context_format": {
+    "de": "%1$s von %2$s, %3$s",
+    "en": "%1$s out of %2$s, %3$s",
+    "es": "%1$s de %2$s, %3$s",
+    "fr": "%1$s sur %2$s, %3$s",
+    "it": "%1$s su %2$s, %3$s",
+    "pt-PT": "%1$s de %2$s, %3$s",
+    "ru": "%1$s из %2$s, %3$s",
+    "zh-Hans": "%1$s，共 %2$s，%3$s",
+    "zh-Hant": "%1$s，共 %2$s，%3$s"
   },
   "appwide.v4.sleep.met": {
     "de": "BEDARF ERREICHT",

@@ -24,8 +24,8 @@ NOOP is built on community interoperability and protocol-documentation work, wit
 
 | Project | Contribution |
 | --- | --- |
-| [`johnmiddleton12/my-whoop`](https://github.com/johnmiddleton12/my-whoop) | WHOOP 4.0 BLE protocol — framing, commands, decoding |
-| [`b-nnett/goose`](https://github.com/b-nnett/goose) | Observed WHOOP 5.0 / MG BLE protocol facts; unlicensed lineage remains under distribution-rights review |
+| [`NOOP`](https://github.com/Dhanunjay-Divi/Noop) | WHOOP 4.0 BLE protocol — framing, commands, decoding |
+| [`NOOP protocol implementation`](https://github.com/Dhanunjay-Divi/Noop) | Owner-controlled WHOOP 4.0 and 5.0 / MG BLE interoperability implementation |
 | [`groue/GRDB.swift`](https://github.com/groue/GRDB.swift) | On-device SQLite persistence |
 
 ---

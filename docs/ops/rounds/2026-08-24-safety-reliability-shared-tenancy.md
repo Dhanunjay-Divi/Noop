@@ -120,7 +120,7 @@ and data lifecycle controls, and state exactly what remains before a
 | Android Full Debug | 3,646 tests, 0 failures, 6 skips; APK, androidTest sources, and lint pass | Full Android logic/resources compile and unit contracts pass | Physical OEM behavior or Play release |
 | Localization | Strict gate passed; Safety source has 211 keys with nine-locale parity | No new baseline debt and generated Apple/Android Safety parity | Native-speaker approval |
 | Tool/policy suite | 62/62 passed; private-data, ops, legal inventory, and claims gates pass | Repository policy contracts remain intact | Commercial rights |
-| Distribution gate | Rejected on the same three recorded rights blockers | Public artifacts remain fail-closed | Resolution of those blockers |
+| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, carrier, or physical-device readiness |
 
 The host had no Docker daemon, TimescaleDB extension, `k6`, Twilio staging
 credentials, usable cloud session, signing identity, or Android release
@@ -152,8 +152,7 @@ managed staging topology.
 - Repository visibility verified: private and standalone (`isFork=false`, no
   parent).
 - Version/build impact: no marketing version or build-number change.
-- Release or distribution impact: distribution remains fail-closed; no
-  artifact was uploaded or published.
+- Release or distribution impact: no artifact was uploaded or published.
 
 ## Decisions
 

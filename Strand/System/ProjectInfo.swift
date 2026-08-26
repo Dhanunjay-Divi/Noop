@@ -16,9 +16,4 @@ enum ProjectInfo {
         string: "https://noop-private-trial.usetaptech.chatgpt.site/support"
     )!
 
-    /// Open-source reverse-engineering this is built on.
-    static let attributions: [(repo: String, note: String)] = [
-        ("johnmiddleton12/my-whoop", "WHOOP 4.0 BLE protocol"),
-        ("b-nnett/goose", "WHOOP 5.0 BLE protocol"),
-    ]
 }

@@ -201,7 +201,7 @@ struct CompareView: View {
                 officialReferenceSection
 
                 if selected.count < minSelection {
-                    ComingSoon(what: "Compare needs at least two metrics with history. Import your WHOOP export in Data Sources first.")
+                    ComingSoon(what: "Compare needs at least two metrics with history. Import your wearable export in Data Sources first.")
                 } else {
                     let series = activeSeries
                     if series.allSatisfy({ $0.rows.isEmpty }) {
@@ -359,7 +359,7 @@ struct CompareView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Text("Noop keeps official outcomes and local scores in separate namespaces, then pairs only days freshly recomputed from your WHOOP strap streams. WHOOP Recovery, Strain, and Sleep Performance never enter the raw Noop formulas; imported physiology or sleep timing can seed personal baseline context.")
+                    Text("Noop keeps official outcomes and local scores in separate namespaces, then pairs only days freshly recomputed from your compatible band streams. Imported Recovery, Strain and Sleep Performance never enter the raw Noop formulas; imported physiology or sleep timing can seed personal baseline context.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -431,7 +431,7 @@ struct CompareView: View {
                         let excludedOfficial =
                             referenceReport?.audit.unverifiedStoredOfficialDays ?? 0
                         let excludedNoop = referenceReport?.audit.unverifiedStoredNoopDays ?? 0
-                        Text("Official values require importer stamp \(WhoopImporter.schemaRevision); Noop revision \(referenceMetric.algorithmVersion) is accepted only with a completed WHOOP raw-stream score receipt in this \(referenceRescoreDays)-day window. Excluded: \(excludedOfficial) unstamped official, \(excludedNoop) old, imported-only, or unverified Noop.")
+                        Text("Official values require importer stamp \(WhoopImporter.schemaRevision); Noop revision \(referenceMetric.algorithmVersion) is accepted only with a completed compatible-band raw-stream score receipt in this \(referenceRescoreDays)-day window. Excluded: \(excludedOfficial) unstamped official, \(excludedNoop) old, imported-only, or unverified Noop.")
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -473,7 +473,7 @@ struct CompareView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Text("A validated calibration is only a per-user presentation transform. It does not recover or claim to reproduce WHOOP's proprietary model.")
+                    Text("A validated calibration is only a per-user presentation transform. It does not recover or claim to reproduce a provider's proprietary model.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -487,13 +487,13 @@ struct CompareView: View {
         unstamped: Int
     ) -> String {
         if unstamped == 1 {
-            return String(localized: "1 older reference row lacks the provenance stamp. Re-import your official WHOOP CSV once with this version to verify it safely.")
+            return String(localized: "1 older reference row lacks the provenance stamp. Re-import your official wearable CSV once with this version to verify it safely.")
         }
         if unstamped > 1 {
-            return String(localized: "\(unstamped) older reference rows lack the provenance stamp. Re-import your official WHOOP CSV once with this version to verify them safely.")
+            return String(localized: "\(unstamped) older reference rows lack the provenance stamp. Re-import your official wearable CSV once with this version to verify them safely.")
         }
         if paired == 0 {
-            return String(localized: "No paired days yet. Import your official WHOOP CSV in Data Sources, then let Noop compute the same days locally.")
+            return String(localized: "No paired days yet. Import your official wearable CSV in Data Sources, then let Noop compute the same days locally.")
         }
         return String(localized: "Only \(paired) paired days are available. Comparison starts immediately; personal calibration needs at least 28, including 7 untouched validation days.")
     }
@@ -557,8 +557,8 @@ struct CompareView: View {
             return
         }
         referenceExportStatus = scope == .summaryOnly
-            ? String(localized: "NOOP summary ZIP ready. In Files, select it with your latest original WHOOP export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
-            : String(localized: "Sensitive NOOP exact-pairs ZIP ready. In Files, select it with your latest original WHOOP export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
+            ? String(localized: "NOOP summary ZIP ready. In Files, select it with your latest original wearable export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
+            : String(localized: "Sensitive NOOP exact-pairs ZIP ready. In Files, select it with your latest original wearable export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
     }
 
     // MARK: - Selection key (re-loads when the set of metrics changes)
@@ -1069,7 +1069,7 @@ private struct ReferenceComparisonExportSheet: View {
                             .exactDailyPairs,
                             title: "Exact daily pairs",
                             badge: "SENSITIVE",
-                            detail: "Adds a CSV with every matched date, official WHOOP value, NOOP value, and their difference."
+                            detail: "Adds a CSV with every matched date, official source value, NOOP value, and their difference."
                         )
                     }
 
@@ -1086,8 +1086,8 @@ private struct ReferenceComparisonExportSheet: View {
 
                             sharingChecklistRow(
                                 number: "1",
-                                title: "Latest original WHOOP export ZIP",
-                                detail: "Keep the unmodified ZIP you downloaded from WHOOP."
+                                title: "Latest original wearable export ZIP",
+                                detail: "Keep the unmodified ZIP from your source provider."
                             )
                             sharingChecklistRow(
                                 number: "2",
@@ -1097,7 +1097,7 @@ private struct ReferenceComparisonExportSheet: View {
 
                             Divider().overlay(StrandPalette.hairline)
 
-                            Text("The WHOOP ZIP contains sensitive health data. Verify the iMessage recipient before sending. NOOP never chooses a contact, sends a message, or uploads either file automatically.")
+                            Text("The wearable ZIP contains sensitive health data. Verify the iMessage recipient before sending. NOOP never chooses a contact, sends a message, or uploads either file automatically.")
                                 .font(StrandFont.caption)
                                 .foregroundStyle(StrandPalette.statusWarning)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1224,9 +1224,9 @@ private struct ReferenceComparisonExportSheet: View {
 
     private var confirmationMessage: String {
         if scope == .summaryOnly {
-            return String(localized: "Create an aggregate-only ZIP now? It omits exact comparison dates, daily values, and personal means. Save the ZIP, then in Files select it with your latest original WHOOP export ZIP and tap Share → Messages. NOOP does not choose a recipient or send automatically.")
+            return String(localized: "Create an aggregate-only ZIP now? It omits exact comparison dates, daily values, and personal means. Save the ZIP, then in Files select it with your latest original wearable export ZIP and tap Share → Messages. NOOP does not choose a recipient or send automatically.")
         }
-        return String(localized: "This ZIP will contain sensitive health data: every matched date and daily official WHOOP and NOOP value. Include those exact pairs? If you continue, save the ZIP, then in Files select it with your latest original WHOOP export ZIP and tap Share → Messages. Verify the recipient; NOOP does not send automatically.")
+        return String(localized: "This ZIP will contain sensitive health data: every matched date and daily official source and NOOP value. Include those exact pairs? If you continue, save the ZIP, then in Files select it with your latest original wearable export ZIP and tap Share → Messages. Verify the recipient; NOOP does not send automatically.")
     }
 }
 

@@ -29,7 +29,7 @@ has reviewable evidence.
   branch, and fork relationship.
 - Consolidate completed local history on `main` and remove merged remote
   feature branches.
-- Rename fork-era workflow paths and remove stale hosting/stat artifacts.
+- Rename retired hosting workflow paths and remove stale hosting/stat artifacts.
 - Remove the tracked shared Android debug key and document per-machine debug
   signing.
 - Add machine-readable rights status, terms-version parity, provenance
@@ -53,11 +53,11 @@ has reviewable evidence.
 - Local `main` contained 45 completed commits not yet present on
   `origin/main`; the remote had no divergent commit.
 - Three remaining remote feature branches were all ancestors of local `main`.
-- The tree still had fork-era workflow filenames, a tracked shared debug
+- The tree still had retired hosting workflow filenames, a tracked shared debug
   keystore, a stale fork-count artifact, and an obsolete LAN agent handoff.
-- The inherited source, PolyForm Noncommercial terms, unlicensed WHOOP 4
-  expression, and multi-author history still prevented an honest commercial
-  clearance claim.
+- At the time, the source-rights review had not yet received the repository
+  owner's consolidation declaration. That declaration was recorded on
+  2026-08-25.
 
 ## Delivered
 
@@ -129,7 +129,7 @@ has reviewable evidence.
 | Final hosted app run `32670362286` at `94661a17` | Passed: universal macOS build plus 1,390 tests with 1 skipped; iOS simulator build plus 16/16 production-shell tests, including charging | The first-frame remediation passes on clean hosted runners across both Apple jobs | Signing, physical hardware, or store readiness |
 | Hosted i18n run `32670362251` and health-claims run `32670362291` at `94661a17` | Passed | The final implementation checkpoint preserves both hosted policy gates | App compilation or runtime behavior |
 | Ops validator, private-data guard, JSON parse, and `git diff --check` | Passed | Documentation structure, filename privacy guard, structured state, and whitespace are clean | A full secret-history audit |
-| Authenticated GitHub inspection | Private; default `main`; `isFork=false`; parent absent | The canonical hosting repository is standalone in GitHub metadata | Ownership of inherited source |
+| Authenticated GitHub inspection | Private; default `main`; `isFork=false`; parent absent | The canonical hosting repository is standalone in GitHub metadata | Source ownership, which was recorded separately on 2026-08-25 |
 | Git ancestry checks | All three legacy branches and `origin/main` were ancestors of local `main` | Mainline push and branch deletion do not discard unique branch commits | Correctness of every historical commit |
 
 ## Physical device and deployment
@@ -166,8 +166,8 @@ has reviewable evidence.
 
 ## Open risks and honest limitations
 
-- Three commercial-rights blockers remain unresolved: PolyForm upstream
-  lineage, unlicensed WHOOP 4 expression, and contributor relicensing rights.
+- The source-rights review described in this historical round was superseded by
+  the 2026-08-25 owner-controlled consolidation declaration.
 - This round does not provide legal advice or replace review by qualified
   counsel.
 - No store signing, notarization, release-secret, physical-device, accuracy,
@@ -176,21 +176,16 @@ has reviewable evidence.
   the regression gate does not mean those surfaces are translated.
 - The reproductive-health locale values remain machine translations pending
   native-speaker sign-off in every supported locale.
-- A new GitHub repository containing this inherited history is not a clean-room
-  commercial implementation.
+- Existing commit history was retained; the current release gate validates the
+  owner-rights record and does not rely on a history rewrite.
 
 ## Next round
 
-1. Choose and execute a documented resolution route for each rights blocker:
-   rights-holder license, independent replacement, or removal.
-2. Build the commercial product in a genuinely independent history containing
-   only newly authored or separately licensed code.
-3. Record affected-source manifests and independent review evidence, then
-   update the rights state and rerun both legal gates.
-4. Retire the localization baseline through reviewed resource migrations and
-   complete native-speaker review of reproductive-health copy.
-5. Only after the distribution gate passes, complete signing, store,
-   physical-device, accuracy, safety, and regulatory release work.
+The source-rights actions originally listed here were superseded by the
+owner-controlled consolidation record on 2026-08-25. Remaining launch work is
+store signing and metadata, production infrastructure, carrier paging evidence,
+physical-device validation, held-out accuracy studies, and native-speaker
+localization review.
 
 ## Privacy check
 

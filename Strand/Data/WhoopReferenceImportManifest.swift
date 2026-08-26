@@ -42,6 +42,41 @@ struct WhoopReferenceImportManifest {
         defaults.set(data, forKey: key(deviceId: deviceId))
     }
 
+    /// Replace provenance over the same day/key range the relational import replaced.
+    ///
+    /// This intentionally runs after the SQLite transaction. A crash between the two leaves a newly
+    /// imported row unverified rather than letting a deleted or changed row retain stale verification.
+    func replaceOfficialMetrics(
+        _ entries: [(day: String, metricKey: String)],
+        deviceId: String,
+        schemaRevision: String,
+        from: String,
+        to: String,
+        managedKeys: Set<String>
+    ) {
+        guard !deviceId.isEmpty,
+              !schemaRevision.isEmpty,
+              Self.validDay(from),
+              Self.validDay(to),
+              from <= to else { return }
+        let keys = Set(managedKeys.filter(Self.validMetricKey))
+        guard !keys.isEmpty else { return }
+
+        var state = loadState(deviceId: deviceId)
+        state.revisionByMetricDay = state.revisionByMetricDay.filter { metricDay, _ in
+            guard let parsed = Self.parseMetricDayKey(metricDay) else { return true }
+            return !(parsed.day >= from && parsed.day <= to && keys.contains(parsed.metricKey))
+        }
+        for entry in entries where entry.day >= from && entry.day <= to
+            && Self.validDay(entry.day) && keys.contains(entry.metricKey) {
+            state.revisionByMetricDay[
+                Self.metricDayKey(day: entry.day, metricKey: entry.metricKey)
+            ] = schemaRevision
+        }
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        defaults.set(data, forKey: key(deviceId: deviceId))
+    }
+
     func verifiedDays(
         deviceId: String,
         schemaRevision: String,
@@ -73,6 +108,15 @@ struct WhoopReferenceImportManifest {
 
     private static func metricDayKey(day: String, metricKey: String) -> String {
         "\(day)|\(metricKey)"
+    }
+
+    private static func parseMetricDayKey(_ value: String) -> (day: String, metricKey: String)? {
+        let parts = value.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        let day = String(parts[0])
+        let metricKey = String(parts[1])
+        guard validDay(day), validMetricKey(metricKey) else { return nil }
+        return (day, metricKey)
     }
 
     private static func validMetricKey(_ key: String) -> Bool {

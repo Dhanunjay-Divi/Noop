@@ -189,4 +189,5 @@
     <string name="hydration_adaptive_timing_help">根據今天的運動負荷和已確認飲水量調整間隔。不會推估缺少的資料。</string>
     <string name="hydration_adaptive_timing_status">目前每 %1$d 分鐘一次。只有在今天的資料充分支持時才會調整時間。</string>
     <string name="hydration_base_interval_label">基礎間隔</string>
+    <string name="today_calibration_valid_hrv_progress">有效 HRV %1$d/%2$d</string>
 </resources>

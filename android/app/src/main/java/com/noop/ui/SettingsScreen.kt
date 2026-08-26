@@ -760,7 +760,11 @@ fun SettingsScreen(
                     ).show()
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "Backup problem: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        CustomerFacingBrand.text("Backup problem: ${e.message}"),
+                        Toast.LENGTH_LONG,
+                    ).show()
                 },
             )
         }
@@ -908,7 +912,9 @@ fun SettingsScreen(
                                             }
                                         }
                                         is DataBackup.ImportResult.Failed -> Toast.makeText(
-                                            context, result.message, Toast.LENGTH_LONG,
+                                            context,
+                                            CustomerFacingBrand.text(result.message),
+                                            Toast.LENGTH_LONG,
                                         ).show()
                                     }
                                 }

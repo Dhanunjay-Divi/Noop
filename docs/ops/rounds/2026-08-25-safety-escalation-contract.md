@@ -108,7 +108,7 @@ paging until acknowledgement, and share latest-only location for a user-selected
 | Android Full Debug | 3,649 tests, 0 failures, 6 skips; APK, lint, and instrumentation-source compilation passed; final 221-key Safety localization contract rerun passed | Android logic, resources, and build graph remain coherent | OEM background behavior, band haptics, Play signing, or carrier delivery |
 | Localization and claims | Strict i18n gate passed; Safety source has 221 keys with nine-locale parity; health-claims gate clear across 1,052 files | No new baseline debt, generated parity, and no prohibited affirmative health claim | Native-speaker approval or clinical validity |
 | Repository policy | 62/62 tool tests, ops validator, private-data guard, legal inventory, Ruff check/format, and `git diff --check` passed | Repository policy, documentation, inventory, Python formatting, and whitespace contracts pass | Commercial rights or distribution approval |
-| Distribution gate | Rejected on the same three recorded rights blockers, as designed | Artifact distribution remains fail-closed | Resolution of any rights blocker |
+| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, carrier, store, or physical-device readiness |
 
 ## Physical device and deployment
 
@@ -148,13 +148,13 @@ paging until acknowledgement, and share latest-only location for a user-selected
   physical haptic delivery, background reliability, location continuity,
   carrier reach, or human acknowledgement.
 - Twilio staging, A2P/country registration, on-call ownership, failover/load,
-  identity/recovery, signing, stores, rights, and regulatory review remain.
+  identity/recovery, signing, stores, and regulatory review remain.
 - Generated translations require native-speaker review.
 
 ## Next round
 
-1. Resolve the three recorded source-rights blockers without removing required
-   provenance or weakening the distribution gate.
+1. Keep the owner-rights record, NOOP license, and independent dependency
+   notices enforced by the distribution gate.
 2. Run controlled carrier staging and physical app/band scenarios without
    resetting existing user data.
 3. Provision identity/recovery, cloud regions, monitoring/on-call, backup,

@@ -236,6 +236,71 @@ class CustomerFacingBrandAudit(unittest.TestCase):
         literal = "${WhoopModel.CUSTOMER_NAME} (Live Bluetooth)"
         self.assertEqual(ia._static_literal_text(literal, "android"), " (Live Bluetooth)")
 
+    def source_violations(self, source: str, platform: str, rel: str) -> list[str]:
+        suffix = ".swift" if platform == "ios" else ".kt"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / f"Screen{suffix}"
+            path.write_text(source, encoding="utf-8")
+            return ia.source_file_brand_violations(path, platform, rel=rel)
+
+    def test_plain_custom_view_copy_is_rejected_even_outside_text_call(self):
+        violations = self.source_violations(
+            'ComingSoon(what: "Import your WHOOP export first.")',
+            "ios",
+            "Strand/Screens/ExampleView.swift",
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertIn("customer UI source", violations[0])
+
+    def test_catalog_override_does_not_hide_authored_normal_ui_vendor_copy(self):
+        violations = self.source_violations(
+            'Text(String(localized: "Import WHOOP export"))',
+            "ios",
+            "Strand/Screens/ExampleView.swift",
+        )
+        self.assertEqual(len(violations), 1)
+
+    def test_internal_source_ids_and_symbols_remain_allowed(self):
+        violations = self.source_violations(
+            'let source = "my-whoop"\nlet key = "selectedWhoopModel"\nlet family = "WHOOP"',
+            "ios",
+            "Strand/Screens/ExampleView.swift",
+        )
+        self.assertEqual(violations, [])
+
+    def test_internal_interpolation_symbol_is_not_authored_copy(self):
+        violations = self.source_violations(
+            'Text("Revision \\(WhoopImporter.schemaRevision) is current")',
+            "ios",
+            "Strand/Screens/ExampleView.swift",
+        )
+        self.assertEqual(violations, [])
+
+    def test_comments_do_not_trigger_source_brand_gate(self):
+        violations = self.source_violations(
+            '// Text("WHOOP should not count")\nText("Noop Band")',
+            "ios",
+            "Strand/Screens/ExampleView.swift",
+        )
+        self.assertEqual(violations, [])
+
+    def test_test_centre_diagnostics_are_explicitly_exempt(self):
+        violations = self.source_violations(
+            'Text("WHOOP protocol frame")',
+            "ios",
+            "Strand/Screens/TestCentreView.swift",
+        )
+        self.assertEqual(violations, [])
+
+    def test_android_customer_copy_is_rejected_but_source_id_is_retained(self):
+        violations = self.source_violations(
+            'val source = "my-whoop"\nText("WHOOP import")',
+            "android",
+            "android/app/src/main/java/com/noop/ui/ExampleScreen.kt",
+        )
+        self.assertEqual(len(violations), 1)
+        self.assertIn("WHOOP import", violations[0])
+
 
 class ScanAndroidEndToEnd(unittest.TestCase):
     """Exercises scan_android() against real files on disk (its actual

@@ -180,7 +180,9 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
 - **Versioning (SemVer):** bump `MARKETING_VERSION` in `project.yml` **and** `versionName` in
   `android/app/build.gradle.kts` together; build numbers increment independently. The parts are
   counters, not decimals (`2.0.10` follows `2.0.9`).
-- **Voice:** docs/comments are neutral, third-person, project-voice. Keep required lineage and contributor credits intact.
+- **Voice:** docs/comments are neutral, third-person, project-voice. Keep NOOP's
+  project license, Required Notice, owner-rights record, and independent
+  dependency notices intact.
 
 When in doubt, open an issue to coordinate first, and prefer the smallest change that's correct and
 covered by a test that runs without a strap.

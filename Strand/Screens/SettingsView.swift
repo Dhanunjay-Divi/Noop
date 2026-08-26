@@ -242,7 +242,7 @@ struct SettingsView: View {
         .alert(backupAlertTitle, isPresented: $showBackupAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(backupAlertMessage)
+            Text(CustomerFacingBrand.text(backupAlertMessage))
         }
         .sheet(item: $backupPassphraseMode) { mode in
             BackupPassphraseSheet(
@@ -1183,7 +1183,7 @@ struct SettingsView: View {
                         Task { await model.intelligence.analyzeRecent(); await model.repo.refresh() }
                     }
                 }
-                Text("Whole night is NOOP's default measure; Deep sleep pools HRV over slow-wave sleep only, reading lower and matching WHOOP. Switching re-scores your recent nights over the new window and takes effect right away once you have a few nights of data.")
+                Text("Whole night is NOOP's default measure; Deep sleep pools HRV over slow-wave sleep only, reading lower and using the deep-sleep window. Switching re-scores your recent nights over the new window and takes effect right away once you have a few nights of data.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1481,7 +1481,7 @@ struct SettingsView: View {
                     .accessibilityHint("Choose off or ask before saving")
                 }
 
-                Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for your approval before saving. Automatic saving stays unavailable until the detector has held-out field validation and calibrated confidence. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
+                Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for your approval before saving. Automatic saving stays unavailable until the detector has held-out field validation and calibrated confidence. This is a conservative on-device heuristic, not a provider's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1639,7 +1639,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
-                Text("A transparent cardiorespiratory recipe that recovers deep and REM better than the older V1 staging, and is now the default. It only changes how already-detected nights are split into stages (detection and scores are unchanged); turn it off to fall back to V1. Takes effect on the next nights staged.")
+                Text("A transparent cardiorespiratory recipe for estimating deep and REM, now used by default. It changes how already-detected nights are split into stages. Sleep detection is unchanged, but Rest and Recovery may change because stage estimates feed those scores. Turn it off to fall back to V1. Takes effect on the next nights staged.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2038,7 +2038,7 @@ struct SettingsView: View {
                         .accessibilityHidden(true)
                     (Text("appwide.backup.encryption_body")
                      + Text(" ")
-                     + Text("Export data creates a portable ZIP with WHOOP-compatible CSVs plus readable NOOP JSON for editable nutrition and Strength Trainer records."))
+                     + Text("Export data creates a portable ZIP with wearable-compatible CSVs plus readable NOOP JSON for editable nutrition and Strength Trainer records."))
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2113,7 +2113,7 @@ struct SettingsView: View {
                 return
             case .exported(let url):
                 backupAlertTitle = String(localized: "Data exported")
-                backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). The portable zip re-imports into NOOP (Data Sources → WHOOP Export) on any Mac, iPhone, or Android device, including editable nutrition and Strength Trainer records.")
+                backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). The portable zip re-imports into NOOP (Data Sources → Wearable Export) on any Mac, iPhone, or Android device, including editable nutrition and Strength Trainer records.")
                 showBackupAlert = true
             case .failure(let message):
                 backupAlertTitle = String(localized: "Export problem")
@@ -2215,7 +2215,7 @@ struct SettingsView: View {
                             Text("How your scores work")
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text("Recovery, Effort and Sleep Score (and how they differ from WHOOP).")
+                            Text("Recovery, Effort and Sleep Score: how they are calculated.")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)

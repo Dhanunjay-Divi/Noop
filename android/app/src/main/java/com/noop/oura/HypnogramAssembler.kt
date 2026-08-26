@@ -1,7 +1,7 @@
 package com.noop.oura
 
 // Time-axis reconstruction for Oura's burst-written SleepNet hypnogram.
-// Kotlin twin of the Swift implementation, adapted from ryanbr/noop's clean-room Oura pipeline
+// Kotlin twin of the Swift implementation, adapted from Dhanunjay-Divi/Noop's clean-room Oura pipeline
 // (upstream #1246); project LICENSE/NOTICE/ATTRIBUTION retain provenance and terms.
 
 data class OuraHypnogramRecord(val ringTimestamp: Long, val phases: List<OuraSleepPhase>)

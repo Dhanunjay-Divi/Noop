@@ -485,8 +485,12 @@ object SleepStageTotals {
         return gap.toDouble()
     }
 
-    /** Result of [dailyAggregateHonoringEdits]: the aggregate plus whether an edit actually applied. */
-    data class HonoredAggregate(val sleep: DailySleep, val editApplied: Boolean)
+    /** Result plus the stable start keys of the main-night group selected on the stages path. */
+    data class HonoredAggregate(
+        val sleep: DailySleep,
+        val editApplied: Boolean,
+        val selectedStartTimestamps: Set<Long>? = null,
+    )
 
     /**
      * The night's daily sleep aggregate, substituting any USER-EDITED block for its detected twin before
@@ -581,7 +585,11 @@ object SleepStageTotals {
             }
             val gapAwakeS = interFragmentAwakeSeconds(spans)
             val agg = dailyAggregate(clampedStages, gapAwakeS) ?: return null
-            return HonoredAggregate(agg, applied)
+            return HonoredAggregate(
+                sleep = agg,
+                editApplied = applied,
+                selectedStartTimestamps = group.mapTo(mutableSetOf()) { blocks[it].first },
+            )
         }
         val agg = dailyAggregate(blocks.map { it.second }) ?: return null
         return HonoredAggregate(agg, applied)

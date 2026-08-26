@@ -810,7 +810,7 @@
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">O NOOP oferece três pontuações diárias (Recuperação, Esforço e Pontuação de sono), cada uma de 0 a 100.</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">pontuaçãoCardHighlight</string>
     <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Trata-se de aproximações independentes de uma faixa de consumo, construídas com base na ciência aberta: não </string>
-    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">VS GRUPO</string>
+    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">MÉTODO NOOP</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">avançadoChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
     <string name="l10n_settings_screen_repo_note_0a694b50">%1$s, %2$s</string>
@@ -2091,4 +2091,5 @@
     <string name="hydration_adaptive_timing_help">Ajusta o intervalo de hoje com base no Esforço e na ingestão confirmada. Os dados em falta nunca são estimados.</string>
     <string name="hydration_adaptive_timing_status">Atualmente a cada %1$d min. O horário só muda quando os dados de hoje o justificam.</string>
     <string name="hydration_base_interval_label">Intervalo base</string>
+    <string name="today_calibration_valid_hrv_progress">VFC válida %1$d/%2$d</string>
 </resources>

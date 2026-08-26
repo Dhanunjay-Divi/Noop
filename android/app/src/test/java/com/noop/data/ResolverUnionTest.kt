@@ -42,7 +42,7 @@ class ResolverUnionTest {
 
     /** After a re-add the resolver tries the ACTIVE strap first (live/measured wins per day), then the
      *  CANONICAL "my-whoop" IMPORT, then the computed siblings — imports outrank computed estimates, so a
-     *  fresh strap's computed rows no longer shadow richer imported my-whoop history (ryanbr/noop#241
+     *  fresh strap's computed rows no longer shadow richer imported my-whoop history (Dhanunjay-Divi/Noop#241
      *  precedence fix). Before #1008 the canonical fallback was missing entirely. */
     @Test
     fun reAddCandidatesUnionActiveThenCanonical() {

@@ -156,5 +156,6 @@ Records used: `afdb/04015`, `afdb/04043`, `afdb/04936`, `afdb/08455`, `nsrdb/162
    `afdb` records contain `(AFL` spans already.
 3. **Sleep staging against `sleep-edf`** — the same treatment for the sleep engine, which has the same
    "validated only against itself" exposure.
-4. Once a reference protocol exists, this harness is the natural place to add held-out
-   sensitivity/specificity, which is the published-accuracy moat in `docs/handoff/FOUNDER-REVIEW-20260823.md`.
+4. Once a reference protocol exists, this harness is the natural place to add
+   held-out sensitivity/specificity, following the evidence rules in
+   `docs/validation/MULTI-DATASET-VERDICTS.md`.

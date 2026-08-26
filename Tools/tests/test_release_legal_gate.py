@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -33,48 +31,56 @@ class ReleaseLegalGateTests(unittest.TestCase):
         requirements = GATE.requirement_entries(ROOT / "server" / "requirements.lock")
         self.assertEqual(set(requirements), set(GATE.PYTHON))
 
-    def test_distribution_fails_closed_on_inherited_no_license_code(self) -> None:
-        with self.assertRaisesRegex(GATE.GateError, "DISTRIBUTION BLOCKED"):
-            GATE.distribution_gate()
+    def test_distribution_passes_for_owner_controlled_repository(self) -> None:
+        GATE.distribution_gate()
 
-    def test_repository_rights_state_keeps_every_known_blocker(self) -> None:
+    def test_repository_rights_state_records_owner_controlled_clearance(self) -> None:
         status = GATE.verified_rights_status()
-        blockers = {item["id"]: item["status"] for item in status["blockers"]}
-        self.assertEqual(status["distributionStatus"], "blocked")
+        self.assertEqual(status["distributionStatus"], "cleared")
         self.assertEqual(
-            blockers,
-            {
-                "polyform-upstream-lineage": "unresolved",
-                "unlicensed-whoop4-expression": "unresolved",
-                "contributor-relicensing-rights": "unresolved",
-            },
+            status["ownerRightsBasis"]["representation"],
+            "owner-controlled-consolidation",
+        )
+        self.assertTrue(
+            status["ownerRightsBasis"]["sourceAndContributionRightsControlled"]
+        )
+        self.assertEqual(
+            status["thirdPartyDependencies"]["status"],
+            "preserved-under-own-terms",
         )
 
-    def test_unresolved_provenance_markers_are_present(self) -> None:
-        GATE.verified_rights_status()
-        for relative, markers in GATE.UNRESOLVED_PROVENANCE_MARKERS.items():
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            for marker in markers:
-                self.assertIn(marker, text, f"{relative} must retain {marker!r}")
+    def test_noop_polyform_license_and_required_notice_remain(self) -> None:
+        text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        for marker in GATE.PROJECT_LICENSE_MARKERS:
+            self.assertIn(marker, text)
+        self.assertEqual(
+            (ROOT / "LICENSE").read_bytes(),
+            (ROOT / "server" / "LICENSE").read_bytes(),
+        )
+        self.assertEqual(
+            (ROOT / "LICENSE").read_bytes(),
+            (ROOT / "server" / "backup" / "LICENSE").read_bytes(),
+        )
 
-    def test_required_blocker_cannot_be_deleted_from_rights_state(self) -> None:
-        status = GATE.verified_rights_status()
-        status["blockers"] = [
-            item
-            for item in status["blockers"]
-            if item["id"] != "polyform-upstream-lineage"
-        ]
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "rights-status.json"
-            path.write_text(json.dumps(status), encoding="utf-8")
-            with mock.patch.object(GATE, "RIGHTS_STATUS_PATH", path):
-                with self.assertRaisesRegex(
-                    GATE.GateError, "removed without resolution"
-                ):
-                    GATE.verified_rights_status()
+    def test_independent_dependency_notices_remain_generated(self) -> None:
+        GATE.checked_data()
+        notice = (ROOT / "NOTICE").read_text(encoding="utf-8")
+        self.assertIn("Exact license and notice texts", notice)
+        self.assertIn("===== ThirdPartyNotices/licenses/android/Apache-2.0.txt", notice)
+        self.assertIn("===== ThirdPartyNotices/licenses/apple/grdb.swift.txt", notice)
+        self.assertIn("===== ThirdPartyNotices/licenses/python/fastapi-", notice)
+
+    def test_owner_declaration_is_mandatory(self) -> None:
+        with mock.patch.object(
+            GATE,
+            "OWNER_DECLARATION_PATH",
+            ROOT / "docs" / "provenance" / "missing-owner-declaration.md",
+        ):
+            with self.assertRaisesRegex(GATE.GateError, "declaration is missing"):
+                GATE.verified_owner_declaration()
 
     def test_terms_acknowledgment_versions_match(self) -> None:
-        self.assertEqual(GATE.verified_terms_version(), "2.3")
+        self.assertEqual(GATE.verified_terms_version(), "2.5")
 
 
 if __name__ == "__main__":

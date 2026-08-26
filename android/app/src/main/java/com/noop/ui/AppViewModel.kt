@@ -67,6 +67,7 @@ import com.noop.notif.ScheduledReportPolicy
 import com.noop.protocol.CommandNumber
 import com.noop.safety.SafetySosDispatcher
 import com.noop.safety.SafetySosGestureRuntime
+import com.noop.sync.RemoteNoopAlgorithmRevision
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +90,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
+
+/**
+ * Upgrade boundary for Charge formula changes that leave raw-input fingerprints unchanged.
+ *
+ * The revision string makes future formula updates fail open into one full-history pass. AppViewModel
+ * writes completion only from the successful branch of the scoring call.
+ */
+internal object ChargeFormulaUpgradeGate {
+    const val COMPLETED_REVISION_KEY = "noop.analysis.completedChargeFormulaRevision"
+    const val HISTORY_DAYS = 4_000
+    const val CURRENT_REVISION = RemoteNoopAlgorithmRevision.CHARGE
+
+    fun needsRescore(completedRevision: String?): Boolean =
+        completedRevision != CURRENT_REVISION
+}
 
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
@@ -952,16 +968,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         NoopPrefs.setTsHealPending(appContext, false)
                     }
                 }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
-                // #836 parity (Android): the 15-min tick is a backstop, not a data-driven refresh. Every real
-                // update (sync, import, edit, recalibrate, the #547 heal above) rescores via its own path and
-                // moves the scoring-input fingerprint, so skip the heavy 21-day rescore when raw inputs are unchanged
-                // since the last COMPLETED run. Mirrors the Swift analyzeRecent(force:false) gate; the watermark
-                // advances only on success (below), so an interrupted run can never hide unscored data.
+                // #836 parity (Android): the 15-min tick normally skips when raw inputs are unchanged. A
+                // formula-only upgrade does not move that fingerprint, so the explicit Charge revision
+                // overrides the skip and expands this one pass to full history. The completion marker is
+                // written only from onSuccess below; interruption/failure therefore retries next iteration.
+                val prefs = NoopPrefs.of(appContext)
+                val chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
+                    prefs.getString(ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY, null),
+                )
                 val analyzeFp = repository.analysisFingerprint(deviceId)
-                if (analyzeFp != NoopPrefs.analyzeWatermark(appContext)) runCatching {
+                if (chargeUpgradePending ||
+                    analyzeFp != NoopPrefs.analyzeWatermark(appContext)
+                ) runCatching {
                     IntelligenceEngine.analyzeRecent(
                         repo = repository,
                         profileProvider = ::currentProfile,
+                        maxDays = if (chargeUpgradePending) {
+                            ChargeFormulaUpgradeGate.HISTORY_DAYS
+                        } else {
+                            21
+                        },
                         importedDeviceId = deviceId,
                         maxHROverride = profileStore.hrMaxOverride
                             .takeIf { it > 0 }?.toDouble(),
@@ -1062,6 +1088,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
                 }.onSuccess {
                     NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp)
+                    if (chargeUpgradePending) {
+                        prefs.edit()
+                            .putString(
+                                ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
+                                ChargeFormulaUpgradeGate.CURRENT_REVISION,
+                            )
+                            .apply()
+                    }
                     // Foreground/periodic reanalysis parity with the background post-sync hook. Reuse the
                     // Today card's suggestion-only scan; the notifier never asks permission or saves.
                     AutoWorkoutCandidateNotifier.afterReanalysis(

@@ -6,7 +6,7 @@ import WhoopStore
 /// Before the fix, the strap-preferred candidate list tried the ACTIVE strap's computed sibling
 /// before the CANONICAL "my-whoop" import, so after a device re-add (active id != canonical) the
 /// new strap's computed estimates shadowed richer imported history. Swift twin of the
-/// ryanbr/noop#240 precedence fix.
+/// Dhanunjay-Divi/Noop#240 precedence fix.
 @MainActor
 final class SourceCandidatesOrderTests: XCTestCase {
 

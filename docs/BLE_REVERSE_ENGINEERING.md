@@ -15,21 +15,13 @@ data stream contains, and how to extend the decoder for new packet types or sens
 
 ---
 
-## Credits
+## Provenance
 
-The protocol understanding in this codebase builds directly on two community reverse-engineering
-projects, and the Swift code ports their findings:
-
-| Project | Generation | What it contributed |
-|---|---|---|
-| **`johnmiddleton12/my-whoop`** | WHOOP 4.0 | The `61080001…` GATT service, the `0xAA` CRC8/CRC32 frame envelope, the command numbers, and the type-40/43/47 stream layouts. |
-| **`b-nnett/goose`** | WHOOP 5.0 | The `fd4b0001…` GATT service, the CRC16-Modbus header check, the static `CLIENT_HELLO` frame, and the "puffin" packet types. |
-
-Where a function or constant is a direct transcription, the source file says so (e.g.
-`crc16Modbus` in `Framing.swift` is noted as *"Ported verbatim from the Goose reverse-engineering"*,
-and `DeviceFamily.whoop5ClientHello` is transcribed from `GooseHello.clientHelloFrameHex`). Sensor
-scale factors and field offsets were additionally re-verified on a real WHOOP 4.0 strap (see the
-on-device verification notes embedded in `Resources/whoop_protocol.json`).
+The protocol implementation is NOOP-controlled source maintained in the
+canonical repository. It documents observed interoperability facts including
+the generation-specific GATT services, CRC envelopes, commands, and stream
+layouts. Sensor scales and offsets are additionally checked against real
+hardware; device evidence is recorded beside the relevant schema and tests.
 
 ---
 
@@ -802,8 +794,8 @@ triggering just-works bonding with a single confirmed `GET_BATTERY_LEVEL` write,
 flood is switched off on connect (`SEND_R10_R11_REALTIME [0x00]`), leaving the periodically-offloaded
 type-47 14-day biometric store as the primary on-device data source. WHOOP 4.0 and 5.0 differ only in
 their GATT UUIDs, header checksum (CRC8 vs CRC16-Modbus), inner-record offset, and session start — all
-funnelled through `DeviceFamily`. The work stands on the shoulders of `johnmiddleton12/my-whoop`
-(4.0) and `b-nnett/goose` (5.0), with sensor scales and offsets re-verified on real hardware.
+funnelled through `DeviceFamily`, with sensor scales and offsets re-verified on
+real hardware.
 
 > Reminder: not affiliated with WHOOP; not a medical device. All values are raw or locally-estimated
 > and are for personal, informational use only.

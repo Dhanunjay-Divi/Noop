@@ -2,11 +2,12 @@ import XCTest
 @testable import StrandAnalytics
 
 /// Scores NOOP's Recovery against a provider's reference Recovery % across opt-in private cohorts,
-/// using exported HRV / resting HR / respiratory rate plus NOOP Rest derived from raw sleep aggregates.
+/// using exported HRV / resting HR / respiratory rate plus NOOP Rest derived from exported sleep
+/// aggregates.
 ///
-/// This is the most directly meaningful validation available for the Charge/Recovery family: same wearer,
-/// same nights, same underlying signals, and the vendor's own published score as the reference. It answers
-/// the question a switching user actually asks - *"will NOOP tell me roughly what WHOOP told me?"*
+/// This is interoperability/regression evidence for the Charge/Recovery family: same wearer, same nights,
+/// shared provider-processed inputs, and the vendor's own score as the reference. It answers whether NOOP
+/// moves similarly for a switching user. It is not independent physiological validation.
 ///
 /// OPT-IN, because the export is personal health data and must never be committed:
 ///
@@ -35,12 +36,38 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         let remMin: Double?
     }
 
+    private struct RecoveryPairCandidate {
+        let index: Int
+        let cycle: Cycle
+        let referenceRecovery: Double
+        let hrv: Double
+        let rhr: Double
+    }
+
+    private func decodeCycles(_ raw: Data) throws -> [Cycle] {
+        try JSONDecoder().decode([Cycle].self, from: raw)
+            .sorted { $0.start < $1.start }
+    }
+
     private func cycles() throws -> [Cycle] {
         guard let path = ProcessInfo.processInfo.environment["NOOP_WHOOP_CYCLES"] else { return [] }
         let raw = try Data(contentsOf: URL(fileURLWithPath: path))
-        return try JSONDecoder().decode([Cycle].self, from: raw)
-            .filter { $0.recovery != nil && $0.hrv != nil && $0.rhr != nil }
-            .sorted { $0.start < $1.start }
+        return try decodeCycles(raw)
+    }
+
+    private func recoveryPairCandidates(_ cycles: [Cycle]) -> [RecoveryPairCandidate] {
+        cycles.enumerated().compactMap { index, cycle in
+            guard let referenceRecovery = cycle.recovery,
+                  let hrv = cycle.hrv,
+                  let rhr = cycle.rhr else { return nil }
+            return RecoveryPairCandidate(
+                index: index,
+                cycle: cycle,
+                referenceRecovery: referenceRecovery,
+                hrv: hrv,
+                rhr: rhr
+            )
+        }
     }
 
     /// Production EWMA baseline from strictly preceding days. Optional rows stay aligned by day.
@@ -50,8 +77,9 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         return state.usable ? .init(state) : nil
     }
 
-    /// Derive NOOP Rest from raw sleep aggregates only. Reference Sleep Performance,
-    /// Sleep Need, and consistency outcomes are deliberately not inputs.
+    /// Derive NOOP Rest without directly reusing the reference Sleep Performance target. The exported
+    /// duration, efficiency, and stage aggregates are themselves provider-processed, so this avoids direct
+    /// target leakage but is not an independent sensor-level validation.
     private func restQuality(_ cycle: Cycle) -> Double? {
         guard let asleepMin = cycle.asleepMin, asleepMin > 0 else { return nil }
         let efficiency: Double
@@ -96,20 +124,22 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         var paired: [(day: String, whoop: Double, noop: Double)] = []
         var declined = 0
 
-        for (i, c) in cycles.enumerated() {
+        for candidate in recoveryPairCandidates(cycles) {
+            let i = candidate.index
+            let c = candidate.cycle
             guard let hrvBase = baseline(hrvSeries, at: i, cfg: Baselines.hrvCfg),
                   let rhrBase = baseline(rhrSeries, at: i, cfg: Baselines.restingHRCfg)
             else { continue }
             let respBase = baseline(respSeries, at: i, cfg: Baselines.respCfg)
             let restBase = baseline(restSeries, at: i, cfg: Baselines.restQualityCfg)
             let score = RecoveryScorer.recovery(
-                hrv: c.hrv!, rhr: c.rhr!, resp: c.resp,
+                hrv: candidate.hrv, rhr: candidate.rhr, resp: c.resp,
                 hrvBaseline: hrvBase, rhrBaseline: rhrBase, respBaseline: respBase,
                 sleepPerf: restSeries[i],
                 restQualityBaseline: restBase
             )
             guard let score else { declined += 1; continue }
-            paired.append((String(c.start.prefix(10)), c.recovery!, score))
+            paired.append((String(c.start.prefix(10)), candidate.referenceRecovery, score))
         }
 
         try XCTSkipIf(paired.count < 30, "Only \(paired.count) comparable days after baseline warm-up.")
@@ -172,13 +202,29 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
             print(w + String(repeating: " ", count: max(0, 8 - w.count)) + cells)
         }
 
-        // Assertions: loose, and about SANITY not calibration. A verdict on calibration belongs in
-        // docs/validation/, because "NOOP differs from WHOOP" is not automatically a defect.
+        // Fixed-fixture regression floors, not population accuracy claims. Every audited cohort clears
+        // these with material margin; crossing one means the implementation changed enough to require a
+        // new dated verdict rather than silently accepting any positive association.
         XCTAssertGreaterThan(paired.count, 30, "Too few comparable days.")
         if let s = stats, let r = s.correlation {
-            XCTAssertGreaterThan(r, 0.0,
-                                 "NOOP Recovery is NEGATIVELY correlated with WHOOP Recovery on the same "
-                                 + "nights (r=\(r)). That is not a calibration difference, it is inverted.")
+            XCTAssertGreaterThanOrEqual(
+                r,
+                0.50,
+                "Recovery association fell below the fixed-fixture regression floor (r=\(r)); "
+                    + "re-measure and update the dated verdict before changing this threshold."
+            )
+        }
+        XCTAssertGreaterThanOrEqual(
+            bandRate,
+            0.45,
+            "Band agreement fell below the fixed-fixture regression floor."
+        )
+        if dirTotal > 0 {
+            XCTAssertGreaterThanOrEqual(
+                Double(dirAgree) / Double(dirTotal),
+                0.70,
+                "Day-over-day direction agreement fell below the fixed-fixture regression floor."
+            )
         }
         for p in paired {
             XCTAssertTrue(
@@ -188,7 +234,56 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         }
     }
 
-    func testNoopRestTracksReferenceSleepOutcomeWithoutLeakage() throws {
+    func testMissingReferenceOutcomeRemainsInBaselineHistoryUntilPairing() throws {
+        let raw = Data(
+            """
+            [
+              {"start":"2026-01-01","recovery":60,"rhr":60,"hrv":50},
+              {"start":"2026-01-02","recovery":null,"rhr":59,"hrv":52},
+              {"start":"2026-01-03","recovery":62,"rhr":58,"hrv":54},
+              {"start":"2026-01-04","recovery":63,"rhr":57,"hrv":56},
+              {"start":"2026-01-05","recovery":64,"rhr":56,"hrv":58}
+            ]
+            """.utf8
+        )
+        let cycles = try decodeCycles(raw)
+        let candidates = recoveryPairCandidates(cycles)
+
+        XCTAssertEqual(cycles.count, 5)
+        XCTAssertNil(cycles[1].recovery)
+        XCTAssertEqual(candidates.map(\.index), [0, 2, 3, 4])
+
+        let finalIndex = try XCTUnwrap(candidates.last?.index)
+        let hrvSeries = cycles.map(\.hrv)
+        let rhrSeries = cycles.map(\.rhr)
+        let hrvHistory = Baselines.foldHistory(
+            Array(hrvSeries[..<finalIndex]), cfg: Baselines.hrvCfg)
+        let rhrHistory = Baselines.foldHistory(
+            Array(rhrSeries[..<finalIndex]), cfg: Baselines.restingHRCfg)
+        XCTAssertEqual(hrvHistory.nValid, 4)
+        XCTAssertEqual(rhrHistory.nValid, 4)
+        XCTAssertNotNil(baseline(hrvSeries, at: finalIndex, cfg: Baselines.hrvCfg))
+        XCTAssertNotNil(baseline(rhrSeries, at: finalIndex, cfg: Baselines.restingHRCfg))
+
+        let prematurelyFiltered = candidates.map(\.cycle)
+        XCTAssertNil(
+            baseline(
+                prematurelyFiltered.map(\.hrv),
+                at: prematurelyFiltered.count - 1,
+                cfg: Baselines.hrvCfg
+            ),
+            "filtering on reference Recovery before folding would discard a valid physiology night"
+        )
+        XCTAssertNil(
+            baseline(
+                prematurelyFiltered.map(\.rhr),
+                at: prematurelyFiltered.count - 1,
+                cfg: Baselines.restingHRCfg
+            )
+        )
+    }
+
+    func testNoopRestAssociatesWithReferenceOutcomeWithoutDirectTargetReuse() throws {
         let cycles = try self.cycles()
         try XCTSkipIf(cycles.count < 30, "Set NOOP_WHOOP_CYCLES (see the class documentation).")
         let paired = cycles.compactMap { cycle -> (day: String, reference: Double, noop: Double)? in
@@ -196,7 +291,7 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
                   let noop = restQuality(cycle).map({ $0 * 100.0 }) else { return nil }
             return (String(cycle.start.prefix(10)), reference, noop)
         }
-        try XCTSkipIf(paired.count < 30, "Too few independently derived Rest days.")
+        try XCTSkipIf(paired.count < 30, "Too few comparable Rest days.")
 
         let observations = paired.flatMap { row -> [ReferenceMetricObservation] in
             [.whoopExport(day: row.day, metric: .restScore, value: row.reference),
@@ -209,7 +304,7 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
             noopAlgorithmVersion: NoopScoreAlgorithmRevision.rest
         )
         let stats = try XCTUnwrap(report.statistics)
-        print("\n=== NOOP Rest vs reference Sleep Performance (outcome only) ===")
+        print("\n=== NOOP Rest vs reference Sleep Performance (no direct target reuse) ===")
         print(String(format: "days %d    reference mean %.1f    NOOP mean %.1f    bias %+.1f",
                      paired.count, stats.officialMean, stats.noopMean, stats.bias))
         print(String(format: "MAE %.1f    RMSE %.1f    Pearson r %@",
@@ -218,35 +313,12 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
 
         XCTAssertTrue(paired.allSatisfy { (0.0...100.0).contains($0.noop) })
         if let correlation = stats.correlation {
-            XCTAssertGreaterThan(correlation, 0,
-                                 "Independently derived Rest is inverted against the reference outcome.")
+            XCTAssertGreaterThanOrEqual(
+                correlation,
+                0.50,
+                "Rest association fell below the fixed-fixture regression floor; exported stages and "
+                    + "efficiency are provider-processed, so re-measure before revising this contract."
+            )
         }
-    }
-
-    /// WHOOP exports Day Strain on 0...21; NOOP's Effort is 0...100. The import boundary documents that
-    /// conversion, so a rank comparison is the honest check: do both agree on which days were hard?
-    func testEffortRanksTheSameDaysHardAsWhoopStrain() throws {
-        let cycles = try self.cycles()
-        try XCTSkipIf(cycles.count < 30, "Set NOOP_WHOOP_CYCLES (see the other test).")
-        let withStrain = cycles.compactMap { c -> (String, Double)? in
-            guard let s = c.strain else { return nil }
-            return (String(c.start.prefix(10)), s)
-        }
-        try XCTSkipIf(withStrain.count < 30, "Too few strain days.")
-
-        // Spearman: rank WHOOP strain against WHOOP strain scaled to NOOP's 0...100 range. This validates
-        // the documented scale conversion is monotonic, which is all that can be checked without raw HR.
-        let scaled = withStrain.map { ($0.0, min(100, max(0, $0.1 / 21.0 * 100))) }
-        var inversions = 0
-        for i in 1..<withStrain.count {
-            let dw = withStrain[i].1 - withStrain[i-1].1
-            let dn = scaled[i].1 - scaled[i-1].1
-            if dw != 0, (dw > 0) != (dn > 0) { inversions += 1 }
-        }
-        print("\n=== WHOOP Day Strain -> NOOP Effort scale conversion ===")
-        print("days: \(withStrain.count)   rank inversions: \(inversions)")
-        XCTAssertEqual(inversions, 0,
-                       "The documented 0...21 -> 0...100 conversion must be strictly monotonic; \(inversions) "
-                       + "inversions means the mapping reorders how hard days were.")
     }
 }

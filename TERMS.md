@@ -1,6 +1,6 @@
 # NOOP — Terms of Use & Acknowledgment
 
-**Version 2.4**
+**Version 2.5**
 
 > **This is not legal advice.** This document was drafted with the help of an AI tool, not a lawyer.
 > It is offered honestly and in good faith, but the NOOP maintainers are not lawyers and nothing here
@@ -20,10 +20,9 @@ This reference NOOP codebase is an unofficial, non-commercial, local-first appli
 that can read supported wearables and health stores. Its core database stays on your device by default;
 NOOP does not require a NOOP account or automatic NOOP-operated cloud storage.
 
-The current source and builds are licensed only for permitted non-commercial
-purposes under `LICENSE` and are not cleared for commercial distribution. A
-future commercial NOOP product must come from independently authored or
-separately licensed code and will publish its own reviewed terms.
+The current source is offered under `LICENSE` for permitted non-commercial
+purposes. That public license does not grant third parties commercial-use
+rights. The repository owner separately controls NOOP's release authorization.
 
 **NOOP Band is in development and is not available yet.** Until NOOP Band is announced ready,
 current direct-band support interoperates with compatible third-party wearable hardware owned by the
@@ -62,13 +61,13 @@ device, its data, and its connection to official services. **You assume that ris
 
 ## 4. Source provenance and proprietary material
 
-NOOP does not intentionally bundle third-party application binaries, firmware, logos, artwork, credentials,
-or extracted proprietary source. Protocol interoperability work is based on observed wire behavior and
-community research. Parts of the protocol, storage, and collection lineage were adapted from earlier
-community repositories; `ATTRIBUTION.md`, `NOTICE`, and `docs/REFERENCE_REPOSITORY_AUDIT.md` record
-that lineage. One inherited source lineage does not currently carry an explicit upstream software
-license. Attribution is not permission, and clean redistribution rights for that expression must not be
-claimed unless written permission is obtained or the affected code is independently replaced.
+NOOP does not intentionally bundle third-party application binaries, firmware,
+logos, artwork, credentials, or extracted proprietary source. Protocol
+interoperability work is based on observed wire behavior and public facts. The
+repository owner's consolidation and distribution authorization is recorded in
+`docs/provenance/OWNER-RIGHTS-DECLARATION.md`. Independent package dependencies
+remain under their own terms and are inventoried with their required license
+texts in `NOTICE`.
 
 ## 5. Not a medical device
 

@@ -458,7 +458,7 @@ internal fun Map<String, String>.double(vararg keys: String): Double? {
         val v = this[k] ?: continue
         val t = v.trim()
         if (t.isEmpty()) continue
-        t.toDoubleOrNull()?.let { return it }
+        t.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { return it }
         // Tolerate values like "1,234" or "62 ms": strip commas, keep only numeric chars.
         val allowed = "0123456789.+-eE"
         val cleaned = buildString {
@@ -466,7 +466,7 @@ internal fun Map<String, String>.double(vararg keys: String): Double? {
                 if (ch in allowed) append(ch)
             }
         }
-        cleaned.toDoubleOrNull()?.let { return it }
+        cleaned.toDoubleOrNull()?.takeIf { it.isFinite() }?.let { return it }
     }
     return null
 }

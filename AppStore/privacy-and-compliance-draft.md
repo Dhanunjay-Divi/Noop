@@ -177,15 +177,9 @@ general-wellness, non-diagnostic, non-emergency, and non-treatment.
 Answer that the app **does contain/show/access third-party content**: it imports
 user-selected vendor export files, interoperates with third-party wearables,
 and includes third-party dependencies and references. App Store Connect's
-rights certification must not be accepted until the legal evidence inventory
-passes.
-
-The current distribution gate remains a hard blocker: inherited WHOOP 4 source
-expression has no explicit redistribution license in the evidence currently
-available. Attribution text is not permission. Keep the acknowledgements and
-notices in the app; do not certify Content Rights, upload, submit, or publicly
-release this binary until the rights gate is resolved or the affected
-implementation is independently replaced and audited.
+Content Rights certification must match the owner-controlled source declaration,
+NOOP's project license, and the generated runtime dependency inventory. Both
+legal gate modes must pass for the exact release commit before upload.
 
 ## Final archive checks still required
 
@@ -199,8 +193,7 @@ implementation is independently replaced and audited.
 4. Physically verify background Bluetooth restoration, Health observer delivery,
    route continuation/stop, and both BG task registration paths. Background
    delivery remains best effort even after a passing test.
-5. Re-run the distribution legal gate. A green archive validation does not
-   override the content-rights blocker.
+5. Re-run the distribution legal gate for the exact archive commit.
 
 ## Apple sources
 

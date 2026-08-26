@@ -1019,7 +1019,7 @@ struct LiquidTodayView: View {
         if let score = chargeDisplay.pct {
             return StrandPalette.recoveryState(score).localizedCapitalized
         }
-        return chargeDisplay.calibrationCompactText.map { "\($0) nights" }
+        return chargeDisplay.calibrationCaption
             ?? chargeDisplay.stateLabel
     }
 
@@ -2565,6 +2565,7 @@ struct LiquidTodayView: View {
         let calNights = (selectedDayOffset == 0)
             ? RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
                                                dayKeys: repo.days.map(\.day),
+                                               before: tkey,
                                                hasRecovery: day?.recovery != nil)
             : nil
         cachedChargeDisplay = ChargeDisplay.resolve(
@@ -4060,16 +4061,9 @@ private struct FitnessAgeHeroRow: View {
 
 // MARK: - Scene controls (LiveState-isolated leaves)
 
-/// The liquid pull-to-refresh vessel + a "Syncing…" label. Owns LiveState (isolated leaf, per the file's
-/// convention — see `LiquidLiveHR`) so a live-HR notify doesn't re-render the whole Today, but the vessel
-/// still knows about an ONGOING strap backfill.
-///
-/// Visibility used to be driven only by the local `refreshing` flag, which flips false ~350ms after the
-/// pull releases (once the local repo reload + a short "let the fill read as done" delay complete) - but
-/// `ble.syncNow()` kicks off a real BLE history offload that can run far longer than that. The vessel was
-/// disappearing while the strap was still mid-sync, with no feedback beyond the easy-to-miss header
-/// `SyncStatusChip`. `syncing` now also holds it (and the label) up while `live.backfilling` is true, so
-/// releasing the pull and watching it go away actually means the sync finished.
+/// Pull feedback owns LiveState in an isolated leaf so live HR does not invalidate the whole dashboard.
+/// A local repository refresh, a real band transfer, and its eventual outcome are intentionally separate:
+/// pulling while disconnected must never claim that Noop Band is syncing.
 private struct LiquidRefreshIndicator: View {
     let pullY: CGFloat
     let pullThreshold: CGFloat
@@ -4080,50 +4074,240 @@ private struct LiquidRefreshIndicator: View {
 
     private var progress: CGFloat { min(1, max(0, pullY / pullThreshold)) }
 
-    /// The RAW "a sync is happening" signal. `live.backfilling` toggles false→true between EVERY offload
-    /// chunk (`exitBackfilling` at each HISTORY_END → auto-continue re-kick → `beginBackfill`), with a real
-    /// BLE round-trip gap in between. A deep backlog is now up to ~24 chunks in ONE connection (#594 raised
-    /// the auto-continue cap 6→24), so binding the vessel straight to this strobes it in/out on every chunk
-    /// boundary. The MenuBar header pins a constant height for exactly this reason (see MenuBarContent).
-    private var syncingRaw: Bool { refreshing || live.backfilling }
+    private enum Outcome {
+        case synced
+        case unavailable
+        case failed
+    }
 
-    /// Debounced visibility that drives the body: goes true INSTANTLY, but only goes false after riding out
-    /// [hideDelay] with no new chunk — so a brief per-chunk `backfilling` gap can't flicker the vessel.
-    @State private var syncing = false
-    @State private var hideTask: Task<Void, Never>?
-    private static let hideDelaySeconds: UInt64 = 3   // comfortably longer than an inter-chunk gap
+    private enum Phase: Equatable {
+        case idle
+        case pulling
+        case refreshing
+        case syncing
+        case synced
+        case unavailable
+        case failed
+    }
+
+    /// Backfill briefly falls false between chunks. Keep the transfer visible through that quiet window,
+    /// then use `lastSyncedAt` rather than elapsed time to decide whether it actually completed.
+    @State private var presentingBandSync = false
+    @State private var syncStartedAt: TimeInterval?
+    @State private var refreshStartedAt: TimeInterval?
+    @State private var outcome: Outcome?
+    @State private var settleTask: Task<Void, Never>?
+    @State private var outcomeTask: Task<Void, Never>?
+
+    private static let interChunkDelayNanoseconds: UInt64 = 3_000_000_000
+    private static let outcomeDelayNanoseconds: UInt64 = 2_000_000_000
+
+    private var phase: Phase {
+        if live.backfilling || presentingBandSync { return .syncing }
+        if refreshing { return .refreshing }
+        switch outcome {
+        case .synced: return .synced
+        case .unavailable: return .unavailable
+        case .failed: return .failed
+        case nil: return pullY > 2 ? .pulling : .idle
+        }
+    }
+
+    private var visible: Bool { phase != .idle }
+    private var armed: Bool { progress >= 1 }
+    private var holdsOpen: Bool {
+        switch phase {
+        case .refreshing, .syncing, .synced, .unavailable, .failed: return true
+        case .idle, .pulling: return false
+        }
+    }
+
+    private var accessibilityLabel: String {
+        switch phase {
+        case .refreshing:
+            return String(localized: "appwide.today.local_refresh.refreshing")
+        case .syncing:
+            return String(localized: "appwide.today.band_sync.syncing")
+        case .synced:
+            return String(localized: "appwide.today.band_sync.synced")
+        case .unavailable:
+            return String(localized: "appwide.today.band_sync.unavailable")
+        case .failed:
+            return String(localized: "appwide.today.band_sync.failed")
+        case .idle, .pulling:
+            return String(localized: "Pull to sync")
+        }
+    }
+
+    private var accessibilityValue: String {
+        if phase == .refreshing || phase == .syncing {
+            return String(localized: "In progress")
+        }
+        if armed { return String(localized: "Release to sync") }
+        return Double(progress).formatted(.percent.precision(.fractionLength(0)))
+    }
 
     var body: some View {
-        ZStack {
-            if syncing {
-                VStack(spacing: 6) {
-                    LiquidVessel(value: 0.6, tint: liquidHeart, animated: true)
-                        .frame(width: 34, height: 34)
-                    Text("Syncing…")
-                        .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                }
-            } else if pullY > 2 {
-                LiquidVessel(value: progress, tint: liquidHeart, animated: false)
-                    .frame(width: 30, height: 30)
-                    .opacity(progress)
-                    .scaleEffect(0.7 + 0.3 * progress)
+        Group {
+            if holdsOpen {
+                indicatorContent
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 72)
+            } else {
+                indicatorContent
+                    .frame(height: min(pullY, pullThreshold * 1.15))
+                    .clipped()
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: syncing ? 64 : min(pullY, pullThreshold * 1.15))
-        .animation(.easeOut(duration: 0.22), value: syncing)
-        .onAppear { syncing = syncingRaw }
-        .onChangeCompat(of: syncingRaw) { raw in
-            hideTask?.cancel()
-            if raw {
-                syncing = true                       // a sync (or pull) is active — show at once
-            } else {
-                // Might just be the gap between two chunks — wait it out; a new chunk cancels this.
-                hideTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: Self.hideDelaySeconds * 1_000_000_000)
-                    if !Task.isCancelled { syncing = false }
+        .animation(.easeOut(duration: 0.22), value: holdsOpen)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("noop.today.pull-sync")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint("Pull down from the top of Today, then release to sync Noop Band.")
+        .accessibilityHidden(!visible)
+        .onAppear {
+            refreshStartedAt = live.lastSyncedAt
+            if live.backfilling {
+                syncStartedAt = live.lastSyncedAt
+                presentingBandSync = true
+            }
+        }
+        .onChangeCompat(of: refreshing) { active in
+            handleRefreshChange(active)
+        }
+        .onChangeCompat(of: live.backfilling) { active in
+            handleBandSyncChange(active)
+        }
+        .onDisappear {
+            settleTask?.cancel()
+            outcomeTask?.cancel()
+        }
+    }
+
+    private var indicatorContent: some View {
+        VStack(spacing: 6) {
+            if visible {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.58))
+                    Circle()
+                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                    Circle()
+                        .trim(from: 0, to: holdsOpen ? 1 : max(0.04, progress))
+                        .stroke(
+                            phase == .failed || phase == .unavailable
+                                ? StrandPalette.statusWarning
+                                : liquidHeart,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+
+                    switch phase {
+                    case .refreshing, .syncing:
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    case .synced:
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(StrandPalette.statusPositive)
+                    case .unavailable:
+                        Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(StrandPalette.statusWarning)
+                    case .failed:
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(StrandPalette.statusWarning)
+                    case .idle, .pulling:
+                        Image(systemName: armed ? "arrow.down" : "arrow.clockwise")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .rotationEffect(.degrees(armed ? 0 : Double(progress) * 110))
+                    }
                 }
+                .frame(width: 42, height: 42)
+                .shadow(
+                    color: liquidHeart.opacity(holdsOpen || armed ? 0.34 : 0.18),
+                    radius: holdsOpen || armed ? 9 : 5
+                )
+                .opacity(holdsOpen ? 1 : max(0.38, progress))
+                .scaleEffect(holdsOpen ? 1 : 0.82 + 0.18 * progress)
+
+                if holdsOpen || armed {
+                    Text(armed && phase == .pulling
+                         ? String(localized: "Release to sync")
+                         : accessibilityLabel)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(
+                        phase == .failed || phase == .unavailable
+                            ? StrandPalette.statusWarning
+                            : StrandPalette.textSecondary
+                    )
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func handleRefreshChange(_ active: Bool) {
+        if active {
+            outcomeTask?.cancel()
+            outcome = nil
+            refreshStartedAt = live.lastSyncedAt
+            return
+        }
+        guard !live.backfilling, !presentingBandSync else { return }
+        if LiquidTodayView.bandSyncCompletionAdvanced(
+            from: refreshStartedAt,
+            to: live.lastSyncedAt
+        ) {
+            showOutcome(.synced)
+        } else if !live.connected || !live.bonded {
+            showOutcome(.unavailable)
+        } else {
+            showOutcome(.failed)
+        }
+        refreshStartedAt = nil
+    }
+
+    private func handleBandSyncChange(_ active: Bool) {
+        settleTask?.cancel()
+        if active {
+            outcomeTask?.cancel()
+            outcome = nil
+            if !presentingBandSync {
+                syncStartedAt = refreshStartedAt ?? live.lastSyncedAt
+            }
+            presentingBandSync = true
+            return
+        }
+        guard presentingBandSync else { return }
+        settleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.interChunkDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            let completed = LiquidTodayView.bandSyncCompletionAdvanced(
+                from: syncStartedAt,
+                to: live.lastSyncedAt
+            )
+            presentingBandSync = false
+            syncStartedAt = nil
+            refreshStartedAt = nil
+            showOutcome(completed ? .synced : .failed)
+        }
+    }
+
+    private func showOutcome(_ next: Outcome) {
+        outcomeTask?.cancel()
+        outcome = next
+        outcomeTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.outcomeDelayNanoseconds)
+            if !Task.isCancelled {
+                outcome = nil
             }
         }
     }
@@ -4362,6 +4546,8 @@ extension LiquidTodayView {
         case carried(pct: Double, caption: String)
         /// Pre-seed-gate: the baseline is still learning and owns its own "N of 4 nights" copy.
         case calibrating(nights: Int)
+        /// The displayed night completed the seed window, but cannot score against itself.
+        case baselineReady
         /// Nothing honest to show — no score, no prior night, and not calibrating.
         case noData
 
@@ -4371,7 +4557,7 @@ extension LiquidTodayView {
             switch self {
             case .scored(let p): return p
             case .carried(let p, _): return p
-            case .calibrating, .noData: return nil
+            case .calibrating, .baselineReady, .noData: return nil
             }
         }
 
@@ -4385,34 +4571,52 @@ extension LiquidTodayView {
             case .scored: return String(localized: "Solid")
             case .carried: return String(localized: "Last night")
             case .calibrating: return String(localized: "Calibrating")
+            case .baselineReady: return String(localized: "Baseline ready")
             case .noData: return String(localized: "No data")
             }
         }
 
-        /// The synthesis-card detail line while the baseline is still forming - the same "N of
-        /// `Baselines.minNightsSeed` nights" progress classic `TodayView.calibrationDetail` surfaces, so a
-        /// wearer in their first few nights reads identical calibration copy on both Today screens (before
-        /// this, Liquid dropped the count and showed a bare "Calibrating"). Non-nil ONLY for `.calibrating`:
-        /// the compact greeting pill stays short ("Calibrating") because it shares a `fixedSize` row with
-        /// the greeting, so the count lives here in the card, exactly as classic keeps it out of its
-        /// `ScoreStatePill`. Reuses classic's String Catalog key verbatim — one entry serves both screens.
+        /// The synthesis-card detail line while the baseline is forming or has just completed its seed
+        /// window. Reuses classic Today's complete localized phrases so the default Liquid Today cannot
+        /// drift into generic "nights" copy or call the fourth valid HRV night calibrating.
         var calibrationDetail: String? {
-            guard case .calibrating(let nights) = self else { return nil }
-            return String(localized: "Learning your baseline, \(nights) of \(Baselines.minNightsSeed) nights.")
+            let required = Baselines.minNightsSeed
+            switch self {
+            case .calibrating(let nights):
+                return String(localized: "Learning your baseline, \(nights) of \(required) valid HRV nights.")
+            case .baselineReady:
+                return String(localized: "\(required) of \(required) valid HRV nights complete. The next qualifying night can produce your first Recovery.")
+            default:
+                return nil
+            }
         }
 
         /// Bounded learning progress for the liquid vessel. The score remains nil: a half-filled
         /// vessel means "2 of 4 calibration nights", never a fabricated 50% Recovery.
         var calibrationFraction: Double? {
-            guard case .calibrating(let nights) = self else { return nil }
             let required = max(1, Baselines.minNightsSeed)
-            return Double(max(0, min(nights, required))) / Double(required)
+            switch self {
+            case .calibrating(let nights):
+                return Double(max(0, min(nights, required))) / Double(required)
+            case .baselineReady:
+                return 1
+            default:
+                return nil
+            }
         }
 
-        var calibrationCompactText: String? {
-            guard case .calibrating(let nights) = self else { return nil }
+        /// Complete localized hero caption. Never stitches a translated number onto an English "nights".
+        var calibrationCaption: String? {
             let required = max(1, Baselines.minNightsSeed)
-            return "\(max(0, min(nights, required)))/\(required)"
+            switch self {
+            case .calibrating(let nights):
+                let completed = max(0, min(nights, required))
+                return String(localized: "Valid HRV \(completed)/\(required)")
+            case .baselineReady:
+                return String(localized: "Baseline ready")
+            default:
+                return nil
+            }
         }
 
         @MainActor
@@ -4421,7 +4625,11 @@ extension LiquidTodayView {
             if let pct = todayRecovery { return .scored(pct: pct) }
             // Calibration owns its own copy and beats the carry — mid-calibration there is no trustworthy
             // prior score to stand in. Mirrors `lastScoredRecoveryDay`, which returns nil when calibrating.
-            if let n = calibrationNights { return .calibrating(nights: n) }
+            if let n = calibrationNights {
+                return n >= Baselines.minNightsSeed
+                    ? .baselineReady
+                    : .calibrating(nights: max(0, n))
+            }
             // `lastScoredRecoveryDay` only ever selects a row whose recovery is non-nil, so the second bind
             // is belt-and-suspenders: a nil falls through to noData rather than fabricating a carry.
             guard let prior = priorScored, let pct = prior.recovery else { return .noData }

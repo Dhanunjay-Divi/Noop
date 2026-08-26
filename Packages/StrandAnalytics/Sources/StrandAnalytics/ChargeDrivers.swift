@@ -127,14 +127,25 @@ extension RecoveryScorer {
                                      rhrBaseline: BaselineState?,
                                      respBaseline: BaselineState?,
                                      sleepPerf: Double?,
+                                     restQualityBaseline: BaselineState? = nil,
                                      skinTempDev: Double? = nil) -> [ChargeDriver] {
         let validSkinTempDev = VitalBands.skinTempDeviation(from: skinTempDev)
+        let usableRhrBaseline = rhrBaseline.flatMap {
+            validDriverBaseline(DriverBaseline($0)) == nil ? nil : $0
+        }
+        let usableRespBaseline = respBaseline.flatMap {
+            validDriverBaseline(DriverBaseline($0)) == nil ? nil : $0
+        }
+        let usableRestBaseline = restQualityBaseline.flatMap {
+            $0.usable && validDriverBaseline(DriverBaseline($0)) != nil ? $0 : nil
+        }
 
         // No score => no real contributions to attribute (cold-start). recovery(...) enforces
         // the usable gate; mirror it so a nil headline never yields fabricated driver rows.
         guard let full = recovery(hrv: hrv, rhr: rhr, resp: resp,
-                                  hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                  respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                  hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                  respBaseline: usableRespBaseline, sleepPerf: sleepPerf,
+                                  restQualityBaseline: usableRestBaseline,
                                   skinTempDev: validSkinTempDev) else {
             return []
         }
@@ -161,8 +172,9 @@ extension RecoveryScorer {
         drivers.append(ChargeDriver(
             label: "Heart rate variability",
             deltaPoints: points(recovery(hrv: hrvBaseline.baseline, rhr: rhr, resp: resp,
-                                         hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                         respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                         hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                         respBaseline: usableRespBaseline, sleepPerf: sleepPerf,
+                                         restQualityBaseline: usableRestBaseline,
                                          skinTempDev: validSkinTempDev)),
             valueText: "\(Int(hrv.rounded())) ms",
             baselineText: "\(Int(hrvBaseline.baseline.rounded())) ms baseline",
@@ -170,39 +182,45 @@ extension RecoveryScorer {
 
         // ── Resting HR (lower vs baseline supports recovery) ─────────────────────
         // Neutral = resting HR at the baseline mean.
-        if let b = rhrBaseline {
+        if let b = usableRhrBaseline {
             drivers.append(ChargeDriver(
                 label: "Resting heart rate",
                 deltaPoints: points(recovery(hrv: hrv, rhr: b.baseline, resp: resp,
-                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                             hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                             respBaseline: usableRespBaseline, sleepPerf: sleepPerf,
+                                             restQualityBaseline: usableRestBaseline,
                                              skinTempDev: validSkinTempDev)),
                 valueText: "\(Int(rhr.rounded())) bpm",
                 baselineText: "\(Int(b.baseline.rounded())) bpm baseline",
                 verdict: rhrVerdict(value: rhr, baseline: b.baseline)))
         }
 
-        // ── Rest quality (the Rest composite; neutral at sleepPerfCenter) ────────
-        if let sp = sleepPerf {
+        // ── Rest quality (neutral at the personal center, fixed center at cold start) ──
+        if let sp = validRestQuality(sleepPerf) {
+            let center = restQualityCenter(usableRestBaseline.map(DriverBaseline.init))
             drivers.append(ChargeDriver(
                 label: "Sleep quality",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
-                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerfCenter,
+                                             hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                             respBaseline: usableRespBaseline, sleepPerf: center,
+                                             restQualityBaseline: usableRestBaseline,
                                              skinTempDev: validSkinTempDev)),
                 valueText: "\(Int((sp * 100).rounded()))%",
-                baselineText: "",   // centred on a fixed "good night", not a learned baseline
-                verdict: sleepVerdict(sleepPerf: sp)))
+                baselineText: usableRestBaseline == nil
+                    ? ""
+                    : "\(Int((center * 100).rounded()))% baseline",
+                verdict: sleepVerdict(sleepPerf: sp, center: center)))
         }
 
         // ── Respiration (lower vs baseline supports recovery) ────────────────────
         // Neutral = respiration at the baseline mean.
-        if let r = resp, let b = respBaseline {
+        if let r = resp, r.isFinite, let b = usableRespBaseline {
             drivers.append(ChargeDriver(
                 label: "Respiratory rate",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: b.baseline,
-                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                             hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                             respBaseline: usableRespBaseline, sleepPerf: sleepPerf,
+                                             restQualityBaseline: usableRestBaseline,
                                              skinTempDev: validSkinTempDev)),
                 valueText: String(format: "%.1f br/min", r),
                 baselineText: String(format: "%.1f br/min baseline", b.baseline),
@@ -215,8 +233,9 @@ extension RecoveryScorer {
             drivers.append(ChargeDriver(
                 label: "Skin temperature",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
-                                             hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
-                                             respBaseline: respBaseline, sleepPerf: sleepPerf,
+                                             hrvBaseline: hrvBaseline, rhrBaseline: usableRhrBaseline,
+                                             respBaseline: usableRespBaseline, sleepPerf: sleepPerf,
+                                             restQualityBaseline: usableRestBaseline,
                                              skinTempDev: 0)),
                 valueText: skinTempDevText(dev),
                 baselineText: "",   // a deviation already; the reference is the personal baseline (0)
@@ -252,9 +271,10 @@ extension RecoveryScorer {
         return "at baseline"
     }
 
-    static func sleepVerdict(sleepPerf: Double) -> String {
-        if sleepPerf > sleepPerfCenter { return "a strong night, supporting recovery" }
-        if sleepPerf < sleepPerfCenter { return "below a good night, limiting recovery" }
+    static func sleepVerdict(sleepPerf: Double, center: Double? = nil) -> String {
+        let reference = center ?? sleepPerfCenter
+        if sleepPerf > reference { return "above baseline, supporting recovery" }
+        if sleepPerf < reference { return "below baseline, limiting recovery" }
         return "a typical night"
     }
 

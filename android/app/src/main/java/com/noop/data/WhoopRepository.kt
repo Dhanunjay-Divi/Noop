@@ -308,7 +308,20 @@ class WhoopRepository private constructor(
     // MARK: - Device
 
     suspend fun upsertDevice(id: String, mac: String? = null, name: String? = null) {
-        val now = System.currentTimeMillis() / 1000
+        upsertDeviceInCurrentTransaction(
+            id = id,
+            mac = mac,
+            name = name,
+            now = System.currentTimeMillis() / 1000,
+        )
+    }
+
+    private suspend fun upsertDeviceInCurrentTransaction(
+        id: String,
+        mac: String?,
+        name: String?,
+        now: Long,
+    ) {
         // Preserve firstSeen on update: read existing, keep its firstSeen if present.
         val existing = dao.device(id)
         dao.upsertDevice(
@@ -716,7 +729,100 @@ class WhoopRepository private constructor(
     suspend fun sessionSleepState(deviceId: String, sessionStart: Long): List<Int>? =
         dao.sessionSleepStateJson(deviceId, sessionStart)?.let { decodeIntArray(it) }
 
-    suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) = dao.upsertMetricSeries(rows)
+    suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) {
+        val normalized = rows.mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+        if (normalized.isNotEmpty()) dao.upsertMetricSeries(normalized)
+    }
+
+    /** Normalize generic-series units, then atomically persist one complete wearable CSV projection. */
+    suspend fun importWhoopCsv(batch: WhoopCsvImportBatch) {
+        dao.applyWhoopCsvImport(normalizedWhoopCsvBatch(batch))
+    }
+
+    private fun normalizedWhoopCsvBatch(batch: WhoopCsvImportBatch): WhoopCsvImportBatch {
+        val replacements = batch.officialMetricSeriesReplacements.map { replacement ->
+            val keys = replacement.managedKeys.filter(String::isNotEmpty).distinct().sorted()
+            val allowed = keys.toHashSet()
+            replacement.copy(
+                managedKeys = keys,
+                rows = replacement.rows
+                    .asSequence()
+                    .filter {
+                        it.deviceId == replacement.deviceId &&
+                            it.day in replacement.fromDay..replacement.toDay &&
+                            it.key in allowed
+                    }
+                    .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+                    .toList(),
+            )
+        }
+        val normalized = batch.copy(
+            officialMetricSeriesReplacements = replacements,
+            fillOnlyMetricSeries =
+                batch.fillOnlyMetricSeries.mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow),
+        )
+        return normalized
+    }
+
+    /**
+     * Commit every Room-backed part of one portable wearable archive together.
+     *
+     * Parsing and graph validation complete before the transaction starts. In production,
+     * [identityTransactor] is [WhoopDatabase.withTransaction], so portable nutrition/strength rows,
+     * device registration, and the CSV projection either all commit or all roll back. URI reads and
+     * caller-owned receipts/logs/preferences are intentionally outside SQLite and cannot be made part
+     * of this ACID boundary.
+     */
+    suspend fun importWhoopArchive(
+        portableUserData: PortableUserData?,
+        devices: List<WhoopCsvDeviceRegistration>,
+        csvBatch: WhoopCsvImportBatch,
+    ): PortableUserDataImportSummary? {
+        val cleanPortable = portableUserData?.let(PortableUserDataCodec::validated)
+        val normalizedCsv = normalizedWhoopCsvBatch(csvBatch)
+        val cleanDevices = devices
+            .onEach { require(it.id.isNotBlank()) { "invalid imported device id" } }
+            .distinctBy(WhoopCsvDeviceRegistration::id)
+        val now = System.currentTimeMillis() / 1_000L
+        var portableSummary: PortableUserDataImportSummary? = null
+        identityTransactor {
+            portableSummary = cleanPortable?.let { importValidatedPortableUserData(it) }
+            for (device in cleanDevices) {
+                upsertDeviceInCurrentTransaction(
+                    id = device.id,
+                    mac = null,
+                    name = device.name,
+                    now = now,
+                )
+            }
+            dao.applyWhoopCsvImport(normalizedCsv)
+        }
+        return portableSummary
+    }
+
+    suspend fun replaceMetricSeriesRange(
+        deviceId: String,
+        fromDay: String,
+        toDay: String,
+        managedKeys: Set<String>,
+        rows: List<MetricSeriesRow>,
+    ) {
+        if (fromDay > toDay || managedKeys.isEmpty()) return
+        val keys = managedKeys.filter { it.isNotEmpty() }.sorted()
+        if (keys.isEmpty()) return
+        val allowed = keys.toHashSet()
+        val normalized = rows
+            .asSequence()
+            .filter {
+                it.deviceId == deviceId &&
+                    it.day in fromDay..toDay &&
+                    it.key in allowed
+            }
+            .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
+            .toList()
+        dao.replaceMetricSeriesRange(deviceId, fromDay, toDay, keys, normalized)
+    }
+
     suspend fun upsertNutritionEntries(rows: List<NutritionEntryRow>) = dao.upsertNutritionEntries(rows)
     suspend fun deleteNutritionEntry(id: String): Boolean = dao.deleteNutritionEntry(id)
     suspend fun nutritionEntries(
@@ -1197,76 +1303,83 @@ class WhoopRepository private constructor(
         val clean = PortableUserDataCodec.validated(payload)
         var result: PortableUserDataImportSummary? = null
         identityTransactor {
-            var nutritionImported = 0
-            var nutritionCatalogImported = 0
-            var exercisesImported = 0
-            var routinesImported = 0
-            var routineExercisesImported = 0
-            var sessionsImported = 0
-            var setsImported = 0
-
-            val nutritionToImport = clean.nutritionEntries.filter { incoming ->
-                val existing = dao.nutritionEntry(incoming.id)
-                existing == null || incoming.updatedAt > existing.updatedAt
-            }
-            if (nutritionToImport.isNotEmpty()) {
-                dao.upsertNutritionEntries(nutritionToImport)
-                nutritionImported = nutritionToImport.size
-            }
-
-            val nutritionCatalogToImport = clean.nutritionCatalogItems.filter { incoming ->
-                val existing = dao.nutritionCatalogItem(incoming.id)
-                existing == null || incoming.updatedAt > existing.updatedAt
-            }
-            if (nutritionCatalogToImport.isNotEmpty()) {
-                dao.upsertNutritionCatalogItems(nutritionCatalogToImport)
-                nutritionCatalogImported = nutritionCatalogToImport.size
-            }
-
-            val exercisesToImport = clean.strengthExercises.map { it.toRow() }.filter { incoming ->
-                val existing = dao.strengthExercise(incoming.id)
-                when {
-                    existing == null -> true
-                    !existing.isCustom || !incoming.isCustom -> false
-                    else -> incoming.updatedAt > existing.updatedAt
-                }
-            }
-            if (exercisesToImport.isNotEmpty()) {
-                dao.upsertStrengthExercisesRaw(exercisesToImport)
-                exercisesImported = exercisesToImport.size
-            }
-
-            val prescriptions = clean.strengthRoutineExercises.groupBy { it.routineId }
-            for (routine in clean.strengthRoutines) {
-                val existing = dao.strengthRoutineRow(routine.id)
-                if (existing != null && routine.updatedAt <= existing.updatedAt) continue
-                val children = prescriptions[routine.id].orEmpty()
-                dao.saveStrengthRoutine(routine, children)
-                routinesImported += 1
-                routineExercisesImported += children.size
-            }
-
-            val sets = clean.strengthSets.groupBy { it.sessionId }
-            for (session in clean.strengthSessions) {
-                val existing = dao.strengthSessionRow(session.id)
-                if (existing != null && session.updatedAt <= existing.updatedAt) continue
-                val children = sets[session.id].orEmpty()
-                dao.saveStrengthSession(session, children)
-                sessionsImported += 1
-                setsImported += children.size
-            }
-
-            result = PortableUserDataImportSummary(
-                nutritionEntries = nutritionImported,
-                nutritionCatalogItems = nutritionCatalogImported,
-                strengthExercises = exercisesImported,
-                strengthRoutines = routinesImported,
-                strengthRoutineExercises = routineExercisesImported,
-                strengthSessions = sessionsImported,
-                strengthSets = setsImported,
-            )
+            result = importValidatedPortableUserData(clean)
         }
         return checkNotNull(result)
+    }
+
+    /** Apply a graph already validated before the surrounding transaction was opened. */
+    private suspend fun importValidatedPortableUserData(
+        clean: PortableUserData,
+    ): PortableUserDataImportSummary {
+        var nutritionImported = 0
+        var nutritionCatalogImported = 0
+        var exercisesImported = 0
+        var routinesImported = 0
+        var routineExercisesImported = 0
+        var sessionsImported = 0
+        var setsImported = 0
+
+        val nutritionToImport = clean.nutritionEntries.filter { incoming ->
+            val existing = dao.nutritionEntry(incoming.id)
+            existing == null || incoming.updatedAt > existing.updatedAt
+        }
+        if (nutritionToImport.isNotEmpty()) {
+            dao.upsertNutritionEntries(nutritionToImport)
+            nutritionImported = nutritionToImport.size
+        }
+
+        val nutritionCatalogToImport = clean.nutritionCatalogItems.filter { incoming ->
+            val existing = dao.nutritionCatalogItem(incoming.id)
+            existing == null || incoming.updatedAt > existing.updatedAt
+        }
+        if (nutritionCatalogToImport.isNotEmpty()) {
+            dao.upsertNutritionCatalogItems(nutritionCatalogToImport)
+            nutritionCatalogImported = nutritionCatalogToImport.size
+        }
+
+        val exercisesToImport = clean.strengthExercises.map { it.toRow() }.filter { incoming ->
+            val existing = dao.strengthExercise(incoming.id)
+            when {
+                existing == null -> true
+                !existing.isCustom || !incoming.isCustom -> false
+                else -> incoming.updatedAt > existing.updatedAt
+            }
+        }
+        if (exercisesToImport.isNotEmpty()) {
+            dao.upsertStrengthExercisesRaw(exercisesToImport)
+            exercisesImported = exercisesToImport.size
+        }
+
+        val prescriptions = clean.strengthRoutineExercises.groupBy { it.routineId }
+        for (routine in clean.strengthRoutines) {
+            val existing = dao.strengthRoutineRow(routine.id)
+            if (existing != null && routine.updatedAt <= existing.updatedAt) continue
+            val children = prescriptions[routine.id].orEmpty()
+            dao.saveStrengthRoutine(routine, children)
+            routinesImported += 1
+            routineExercisesImported += children.size
+        }
+
+        val sets = clean.strengthSets.groupBy { it.sessionId }
+        for (session in clean.strengthSessions) {
+            val existing = dao.strengthSessionRow(session.id)
+            if (existing != null && session.updatedAt <= existing.updatedAt) continue
+            val children = sets[session.id].orEmpty()
+            dao.saveStrengthSession(session, children)
+            sessionsImported += 1
+            setsImported += children.size
+        }
+
+        return PortableUserDataImportSummary(
+            nutritionEntries = nutritionImported,
+            nutritionCatalogItems = nutritionCatalogImported,
+            strengthExercises = exercisesImported,
+            strengthRoutines = routinesImported,
+            strengthRoutineExercises = routineExercisesImported,
+            strengthSessions = sessionsImported,
+            strengthSets = setsImported,
+        )
     }
 
     /**
@@ -1365,8 +1478,14 @@ class WhoopRepository private constructor(
         return com.noop.analytics.SleepStageTotals.habitualMidsleepSec(blocks, offsetSec)
     }
 
-    suspend fun metricSeries(deviceId: String, key: String, from: String, to: String) =
+    suspend fun metricSeries(
+        deviceId: String,
+        key: String,
+        from: String,
+        to: String,
+    ): List<MetricSeriesRow> =
         dao.metricSeries(deviceId, key, from, to)
+            .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
 
     // MARK: - Local cycle-day-1 history
 
@@ -2207,7 +2326,7 @@ class WhoopRepository private constructor(
                 // computed estimates shadowed richer imported my-whoop history. uniqued() collapses these
                 // to one pair per source on a single-device install (active == canonical), so that path
                 // stays byte-identical. Apple is the final cross-source fallback. Mirrors Swift
-                // Repository.sourceCandidates (ryanbr/noop#241).
+                // Repository.sourceCandidates (Dhanunjay-Divi/Noop#241).
                 val candidates = mutableListOf(
                     MetricSourceCandidate(strapDeviceId, key),
                     MetricSourceCandidate(WHOOP_SOURCE, key),
@@ -2604,7 +2723,7 @@ class WhoopRepository private constructor(
          *  this directly to get the SAME richness rule the browse/CSV path uses.
          *
          *  #715 — preserve EVERY session (a day with a main night + a nap must keep both). Richness exception
-         *  (ryanbr/noop#241): a sparse import (no stage data on ANY of its sessions that day) must NOT clobber
+         *  (Dhanunjay-Divi/Noop#241): a sparse import (no stage data on ANY of its sessions that day) must NOT clobber
          *  a computed day that HAS stage data — otherwise a stage-less WHOOP/Apple/HC re-import blanks the
          *  stage breakdown for a night the strap fully staged. Days where the import carries stages, or where
          *  neither side does, keep the imported-wins rule. Mirrors WhoopStore.SleepMerge (SleepMergeTests). */

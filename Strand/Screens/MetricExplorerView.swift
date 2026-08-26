@@ -48,7 +48,7 @@ enum MetricEmptyStateCopy {
         case "noop-mood":
             return String(localized: "Log this signal in NOOP to begin its private on-device history.")
         case "whoop-official-reference":
-            return String(localized: "Import a WHOOP export in Data Sources to add this official reference metric.")
+            return String(localized: "Import a wearable export in Data Sources to add this official reference metric.")
         case "my-whoop":
             return String(localized: "Wear and sync your connected band to begin this on-device metric history.")
         default:

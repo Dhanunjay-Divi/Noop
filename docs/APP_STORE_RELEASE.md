@@ -21,10 +21,9 @@ transition.
 
 ## Hard gates before archive
 
-- [ ] `python3 Tools/release-legal-gate.py distribution` passes. A private repo
-      or paid membership does not waive third-party rights. Follow the
-      [protocol redistribution-rights remediation plan](PROTOCOL_RIGHTS_REMEDIATION.md)
-      without claiming clearance before its evidence is reviewed.
+- [ ] `python3 Tools/release-legal-gate.py distribution` passes. This verifies
+      the owner-rights record, NOOP license, and exact independent dependency
+      notices; it does not replace signing, privacy, trademark, or store review.
 - [ ] The paid organization/team—not a Personal Team—is selected for the iOS
       app, widget, Watch app, and complication.
 - [ ] Apple Developer identifiers exist for all four bundle identifiers, with
@@ -122,16 +121,15 @@ and App Store Connect warnings before attaching the build to a version. Upload
 is not submission; submission is not approval; approval is not release when
 manual release is selected.
 
-## Current locally observed blockers (2026-08-22)
+## Current locally observed blockers (updated 2026-08-25)
 
 - Xcode has an Apple account/team selection, but local files do not prove paid
   membership, App Store Connect role, agreements, or portal capability state.
 - Only an Apple Development signing identity is locally available; no Apple
   Distribution identity or App Store provisioning profile is installed.
-- The repository's public-distribution legal gate reports inherited WHOOP 4
-  implementation expression without an explicit software license. The exact
-  affected surface and resolution criteria are recorded in
-  [`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md).
+- The source-rights and dependency distribution gate now passes under the
+  owner-controlled consolidation record. NOOP's PolyForm license and required
+  independent dependency notices remain unchanged.
 - App Store Connect name availability, app-record existence, build-number
   availability, and required listing-field configuration are not established
   locally. The required public privacy and support endpoints are live.

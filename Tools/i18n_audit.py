@@ -277,7 +277,10 @@ _SIMPLE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*\Z")
 _LOCAL_VAL_PATTERN = re.compile(r"\bval\s+([A-Za-z_]\w*)\s*=\s*")
 
 
-def _mask_comments(text: str) -> str:
+def _mask_comments_with(
+    text: str,
+    skip_literal,
+) -> str:
     """`text` with `//...` and `/* ... */` comment BODIES blanked out (same
     length, spaces, newlines preserved) so a quoted-looking phrase inside a
     comment can never be mistaken for a real string literal — and so a stray
@@ -290,7 +293,7 @@ def _mask_comments(text: str) -> str:
     while i < n:
         ch = text[i]
         if ch == '"':
-            i = _skip_string_literal(text, i)
+            i = skip_literal(text, i)
             continue
         if ch == "/" and i + 1 < n and text[i + 1] == "/":
             j = i
@@ -312,6 +315,11 @@ def _mask_comments(text: str) -> str:
             continue
         i += 1
     return "".join(out)
+
+
+def _mask_comments(text: str) -> str:
+    """Kotlin/source-generic comment masking used by the Android scanner."""
+    return _mask_comments_with(text, _skip_string_literal)
 
 
 def _brace_stack_at(text: str, end: int) -> tuple[int, ...]:
@@ -872,6 +880,66 @@ def scan_ios() -> tuple[list[tuple[str, int, str]], dict[str, list[str]]]:
 
 FORBIDDEN_CUSTOMER_BRAND = re.compile(r"whoop", re.IGNORECASE)
 
+# These normal-UI files are intentionally outside the authored-literal ratchet.
+# Their rendered values are still covered by the catalog/resource checks above.
+#
+# - Today/Coupled are active parallel-work boundaries for this round.
+# - Test Centre is a developer surface where protocol terminology is required.
+# - AppChangelog stores historical source copy, but every customer renderer is
+#   required to pass it through CustomerFacingBrand and has dedicated tests.
+CUSTOMER_SOURCE_EXEMPT_PATHS = {
+    "ios": {
+        "Strand/Screens/CoupledView.swift",
+        "Strand/Screens/TestCentreView.swift",
+        "Strand/Screens/TodayView.swift",
+    },
+    "android": {
+        "android/app/src/main/java/com/noop/ui/AppChangelog.kt",
+        "android/app/src/main/java/com/noop/ui/CoupledScreen.kt",
+        "android/app/src/main/java/com/noop/ui/TestCentreScreen.kt",
+        "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
+    },
+}
+
+CUSTOMER_SOURCE_DIRS = {
+    "ios": [
+        ROOT / "Packages/StrandDesign/Sources/StrandDesign",
+        ROOT / "NOOPWatch",
+        ROOT / "NOOPWatchComplications",
+        ROOT / "Strand/App",
+        ROOT / "Strand/Liquid",
+        ROOT / "Strand/MenuBar",
+        ROOT / "Strand/Onboarding",
+        ROOT / "Strand/Screens",
+        ROOT / "Strand/UIv2",
+        ROOT / "Strand/UIv3",
+        ROOT / "Strand/UIv4",
+        ROOT / "StrandiOS",
+        ROOT / "StrandiOSShared",
+        ROOT / "StrandiOSWidgets",
+    ],
+    "android": [
+        ROOT / "android/app/src/main/java/com/noop/alarm",
+        ROOT / "android/app/src/main/java/com/noop/automation",
+        ROOT / "android/app/src/main/java/com/noop/location",
+        ROOT / "android/app/src/main/java/com/noop/notif",
+        ROOT / "android/app/src/main/java/com/noop/safety",
+        ROOT / "android/app/src/main/java/com/noop/social",
+        ROOT / "android/app/src/main/java/com/noop/ui",
+        ROOT / "android/app/src/main/java/com/noop/update",
+        ROOT / "android/app/src/main/java/com/noop/widget",
+    ],
+}
+
+# DevicesView's protocol probes are reachable only behind Test Centre mode.
+# Keep the exact diagnostic copy available to hardware developers while normal
+# device cards continue to render neutral product wording.
+APPLE_GATED_DIAGNOSTIC_PREFIXES = (
+    "WHOOP 4.0 reboot probe",
+    "The WHOOP 4.0 reboot frame isn't confirmed",
+    "Sends the read-only GET_BODY_LOCATION_AND_STATUS",
+)
+
 
 def _static_literal_text(literal: str, platform: str) -> str:
     """Remove interpolation expressions before checking authored visible text.
@@ -884,6 +952,115 @@ def _static_literal_text(literal: str, platform: str) -> str:
         value = re.sub(r"\$\{[^{}]*\}", "", literal)
         return re.sub(r"\$[A-Za-z_]\w*", "", value)
     return re.sub(r"\\\([^)]*\)", "", literal)
+
+
+def _all_source_string_literals(
+    raw: str,
+    platform: str,
+) -> list[tuple[int, str]]:
+    """Every ordinary quoted literal outside comments.
+
+    This deliberately scans more broadly than the localization extractor.
+    Customer copy also travels through custom view-model fields and helper
+    arguments, so limiting the brand gate to Text()/stringResource() calls
+    leaves real rendered paths invisible.
+    """
+    skip_literal = _skip_swift_string_literal if platform == "ios" else _skip_string_literal
+    text = _mask_comments_with(raw, skip_literal)
+    findings: list[tuple[int, str]] = []
+    i = 0
+    while i < len(text):
+        if text[i] != '"':
+            i += 1
+            continue
+        # Multiline/raw literals are not currently used for normal UI copy in
+        # these directories. Skip them as one unit so their delimiter quotes
+        # cannot be misread as several empty ordinary strings.
+        if text.startswith('"""', i):
+            end = text.find('"""', i + 3)
+            if end < 0:
+                break
+            findings.append((i, raw[i + 3:end]))
+            i = end + 3
+            continue
+        end = skip_literal(text, i)
+        findings.append((i, raw[i + 1:end - 1]))
+        i = end
+    return findings
+
+
+def _internal_vendor_literal(literal: str) -> bool:
+    """Compatibility token rather than authored prose.
+
+    Persisted source IDs, preference keys, enum/raw values, and device-family
+    identifiers must remain stable. A direct Text("WHOOP") would still fail the
+    existing rendered-UI scan; this exemption only prevents the broad source
+    ratchet from mistaking internal tokens for customer prose.
+    """
+    value = literal.strip()
+    if not value or re.search(r"\s", value):
+        return False
+    return bool(re.fullmatch(r"(?i)[A-Za-z0-9_.$:/(){}\\-]*whoop[A-Za-z0-9_.$:/(){}\\-]*", value))
+
+
+def _source_literal_is_exempt(
+    rel: str,
+    literal: str,
+    line_text: str,
+    platform: str,
+) -> bool:
+    if rel in CUSTOMER_SOURCE_EXEMPT_PATHS[platform]:
+        return True
+    if _internal_vendor_literal(literal):
+        return True
+    if platform == "ios" and "#Preview(" in line_text:
+        return True
+    if rel == "Strand/Screens/DevicesView.swift":
+        return literal.startswith(APPLE_GATED_DIAGNOSTIC_PREFIXES)
+    return False
+
+
+def source_file_brand_violations(
+    path: Path,
+    platform: str,
+    rel: str | None = None,
+) -> list[str]:
+    """Forbidden customer prose authored in one normal-UI source file."""
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    label = rel or str(path.relative_to(ROOT))
+    violations: list[str] = []
+    for offset, literal in _all_source_string_literals(raw, platform):
+        static = _static_literal_text(literal, platform)
+        if not FORBIDDEN_CUSTOMER_BRAND.search(static):
+            continue
+        line_no = raw.count("\n", 0, offset) + 1
+        line_start = raw.rfind("\n", 0, offset) + 1
+        line_end = raw.find("\n", offset)
+        if line_end < 0:
+            line_end = len(raw)
+        if _source_literal_is_exempt(
+            label,
+            literal,
+            raw[line_start:line_end],
+            platform,
+        ):
+            continue
+        violations.append(f"{label}:{line_no} customer UI source -> {literal!r}")
+    return violations
+
+
+def customer_source_brand_violations(platform: str = "all") -> list[str]:
+    """Vendor prose in authored normal-UI literals on either platform."""
+    violations: list[str] = []
+    platforms = ("ios", "android") if platform == "all" else (platform,)
+    for current in platforms:
+        for base in CUSTOMER_SOURCE_DIRS[current]:
+            if not base.exists():
+                continue
+            extension = "*.swift" if current == "ios" else "*.kt"
+            for path in sorted(base.rglob(extension)):
+                violations.extend(source_file_brand_violations(path, current))
+    return violations
 
 
 def apple_catalog_brand_violations(cat: dict, label: str = "<catalog>") -> list[str]:
@@ -951,6 +1128,7 @@ def customer_facing_brand_violations(platform: str = "all") -> list[str]:
         for path, line, literal in ios_literals:
             if FORBIDDEN_CUSTOMER_BRAND.search(_static_literal_text(literal, "ios")):
                 violations.append(f"{path}:{line} hardcoded UI -> {literal!r}")
+    violations.extend(customer_source_brand_violations(platform))
     return violations
 
 
@@ -1067,11 +1245,11 @@ def ci_check(base_ref: str) -> int:
     brand_violations = customer_facing_brand_violations()
     if brand_violations:
         failed = True
-        print(f"FAIL {len(brand_violations)} rendered value(s) contain retired vendor wording:")
+        print(f"FAIL {len(brand_violations)} rendered/authored value(s) contain retired vendor wording:")
         for violation in brand_violations[:30]:
             print(f"  {violation}")
     else:
-        print("  OK no retired vendor wording in rendered catalog, resource, or hardcoded UI values")
+        print("  OK no retired vendor wording in rendered or authored customer UI values")
 
     return 1 if failed else 0
 

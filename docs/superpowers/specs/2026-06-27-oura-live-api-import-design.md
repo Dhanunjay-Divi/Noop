@@ -17,7 +17,7 @@
 
 ## 0. v8.5.2 reconciliation (2026-06-30)
 
-This spec was written against v7.2.3; work now targets upstream **v8.5.2** (`ryanbr/noop`, on branch `oura-cloud-import`). Corrections below are verified against current code and **supersede the inline references** further down:
+This spec was written against v7.2.3; work now targets upstream **v8.5.2** (`Dhanunjay-Divi/Noop`, on branch `oura-cloud-import`). Corrections below are verified against current code and **supersede the inline references** further down:
 
 - **Migration number.** The WhoopStore migrator is at **v23** (not v18); the `ouraRaw` table (§4/§8.5/§14) is migration **v24** (not v19 — `v19-step-activity-class`…`v23-daily-spo2-raw` already exist).
 - **Provenance (§8.4).** Register the cloud source as `PairedDevice.sourceKind = .cloudImport` — it already exists (`PairedDevice.swift:42`) and is treated as non-day-owning (`IntelligenceEngine.swift:1369`), so **no new SourceKind is needed**. `deviceId = "oura-api"` stands; `DataSourceKind.ouraApi` is now *optional* (add only if a StrandImport-level provenance tag is actually consumed).

@@ -2,12 +2,14 @@ import XCTest
 import WhoopProtocol
 @testable import StrandAnalytics
 
-/// Scores `SleepStager` against EXPERT POLYSOMNOGRAPHY using the very dataset its own header cites.
+/// Scores the shipped default `SleepStagerV2` against EXPERT POLYSOMNOGRAPHY using the public
+/// Walch dataset cited by the legacy stager.
 ///
-/// `SleepStager.swift` says: *"the EEG-free 4-class ceiling is ~65-73% epoch agreement (Walch 2019)"*. That
-/// number was quoted from the literature but never measured against this implementation. This harness
-/// closes that loop with the actual Walch data (PhysioNet `sleep-accel`: Apple Watch motion + heart rate,
-/// with concurrent expert-scored PSG hypnograms).
+/// `SleepStager.swift` says: *"the EEG-free 4-class ceiling is ~65-73% epoch agreement (Walch 2019)"*.
+/// The first version of this harness measured legacy V1 even after V2 became the app default, so its
+/// 46.8% verdict did not describe the shipped recipe. This harness closes that provenance gap by calling
+/// V2 directly on the actual Walch data (PhysioNet `sleep-accel`: Apple Watch motion + heart rate, with
+/// concurrent expert-scored PSG hypnograms).
 ///
 /// OPT-IN, like `server/tests/test_twilio_staging.py`. The prepared data is ~2.5 MB per handful of subjects
 /// and is third-party research data, so it is NOT committed. Prepare the fixture described in
@@ -40,6 +42,28 @@ final class SleepStagerRealPSGTests: XCTestCase {
         let grav: [[Double]]
     }
 
+    private struct FixtureManifest: Decodable {
+        let dataset: String
+        let version: String
+        let requestedSubjects: Int
+        let subjects: [String]
+        let timeAnchor: Int
+    }
+
+    private enum FixtureError: LocalizedError {
+        case missingManifest
+        case invalidManifest(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingManifest:
+                return "Prepared Walch fixture is missing _manifest.json; rerun fetch_walch_sleep.py."
+            case .invalidManifest(let detail):
+                return "Prepared Walch fixture does not match its manifest: \(detail)"
+            }
+        }
+    }
+
     /// NOOP's four classes, plus a bucket for epochs the scorer excluded.
     private enum Stage: String, CaseIterable { case wake, light, deep, rem }
 
@@ -55,11 +79,32 @@ final class SleepStagerRealPSGTests: XCTestCase {
 
     private func subjects() throws -> [Subject] {
         guard let dir = ProcessInfo.processInfo.environment["NOOP_WALCH_DIR"] else { return [] }
+        let directory = URL(fileURLWithPath: dir)
+        let manifestURL = directory.appendingPathComponent("_manifest.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            throw FixtureError.missingManifest
+        }
+        let manifest = try JSONDecoder().decode(
+            FixtureManifest.self,
+            from: try Data(contentsOf: manifestURL)
+        )
+        guard manifest.dataset == "sleep-accel", manifest.version == "1.0.0",
+              manifest.requestedSubjects > 0, manifest.timeAnchor == 1_700_000_000,
+              !manifest.subjects.isEmpty, Set(manifest.subjects).count == manifest.subjects.count
+        else {
+            throw FixtureError.invalidManifest("dataset/version/selection metadata is invalid")
+        }
         let urls = try FileManager.default
-            .contentsOfDirectory(at: URL(fileURLWithPath: dir), includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
+            .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" && !$0.lastPathComponent.hasPrefix("_") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        return try urls.map { try JSONDecoder().decode(Subject.self, from: try Data(contentsOf: $0)) }
+        let subjects = try urls.map {
+            try JSONDecoder().decode(Subject.self, from: try Data(contentsOf: $0))
+        }
+        guard subjects.map(\.subject).sorted() == manifest.subjects.sorted() else {
+            throw FixtureError.invalidManifest("subject JSON files differ from the selected subjects")
+        }
+        return subjects
     }
 
     // MARK: - Scoring
@@ -78,6 +123,10 @@ final class SleepStagerRealPSGTests: XCTestCase {
             confusion[reference, default: [:]][predicted, default: 0] += 1
         }
         var agreement: Double { scored == 0 ? 0 : Double(agreed) / Double(scored) }
+        var referenceEpochs: Int { scored + uncovered }
+        var coverage: Double {
+            referenceEpochs == 0 ? 0 : Double(scored) / Double(referenceEpochs)
+        }
 
         func recall(_ s: Stage) -> Double? {
             let row = confusion[s] ?? [:]
@@ -118,8 +167,8 @@ final class SleepStagerRealPSGTests: XCTestCase {
         let grav = s.grav.map {
             GravitySample(ts: Int($0[0]), x: $0[1], y: $0[2], z: $0[3], unit: "g")
         }
-        let segments = SleepStager.stageSession(start: s.psgStart, end: s.psgEnd,
-                                                grav: grav, hr: hr, rr: [], resp: [])
+        let segments = SleepStagerV2.stageSession(start: s.psgStart, end: s.psgEnd,
+                                                  grav: grav, hr: hr, rr: [], resp: [])
         var byEpoch: [Int: Stage] = [:]
         for seg in segments {
             guard let stage = Stage(rawValue: seg.stage) else { continue }
@@ -169,14 +218,15 @@ final class SleepStagerRealPSGTests: XCTestCase {
             s.count >= w ? s : String(repeating: " ", count: w - s.count) + s
         }
 
-        print("\n=== SleepStager vs expert PSG (PhysioNet sleep-accel, Walch 2019) ===")
+        print("\n=== SleepStagerV2 (shipped default) vs expert PSG (PhysioNet sleep-accel, Walch 2019) ===")
         print("input: wrist motion @1Hz + heart rate only (no R-R, no respiration)\n")
         print(pad("subject", 11) + lpad("4-class", 10) + lpad("sleep/wake", 13) + lpad("uncovered", 12))
         for (name, four, binary, uncovered) in perSubject {
             print(pad(name, 11) + lpad(pct(four), 10) + lpad(pct(binary), 13) + lpad("\(uncovered)", 12))
         }
         print("\nPOOLED  4-class \(pct(pooled.agreement))   sleep/wake \(pct(pooled.sleepWakeAgreement))"
-              + "   scored \(pooled.scored)   uncovered \(pooled.uncovered)")
+              + "   scored \(pooled.scored)   uncovered \(pooled.uncovered)"
+              + "   coverage \(pct(pooled.coverage))")
 
         print("\nper-class (reference = PSG):")
         for stage in Stage.allCases {
@@ -198,6 +248,13 @@ final class SleepStagerRealPSGTests: XCTestCase {
         // belongs in dated validation evidence, because a unit test is the wrong place to litigate
         // accuracy.
         XCTAssertGreaterThan(pooled.scored, 3_000, "Too few scored epochs to say anything.")
+        XCTAssertEqual(
+            pooled.uncovered,
+            0,
+            "Direct staging must label every scored PSG epoch; excluding uncovered epochs inflates "
+                + "agreement and makes the recorded result non-reproducible."
+        )
+        XCTAssertEqual(pooled.coverage, 1.0, accuracy: 0.000_001)
         XCTAssertGreaterThan(pooled.agreement, 0.25,
                              "4-class agreement below chance-ish (4 classes, imbalanced) means the pipeline "
                              + "is broken, not merely imprecise.")
@@ -217,7 +274,10 @@ final class SleepStagerRealPSGTests: XCTestCase {
             var n = 0, ok = 0
             for row in s.labels {
                 guard row.count == 2, let reference = Self.mapPSG(row[1]) else { continue }
-                guard let p = predicted[row[0] - (row[0] % 30)] else { continue }
+                guard let p = predicted[row[0] - (row[0] % 30)] else {
+                    XCTFail("\(s.subject): uncovered PSG epoch in sleep/wake gate")
+                    continue
+                }
                 n += 1
                 if (reference == .wake) == (p == .wake) { ok += 1 }
             }
@@ -238,8 +298,8 @@ final class SleepStagerRealPSGTests: XCTestCase {
         for s in subjects {
             let hr = s.hr.map { HRSample(ts: $0[0], bpm: $0[1]) }
             let grav = s.grav.map { GravitySample(ts: Int($0[0]), x: $0[1], y: $0[2], z: $0[3], unit: "g") }
-            let segments = SleepStager.stageSession(start: s.psgStart, end: s.psgEnd,
-                                                    grav: grav, hr: hr, rr: [], resp: [])
+            let segments = SleepStagerV2.stageSession(start: s.psgStart, end: s.psgEnd,
+                                                      grav: grav, hr: hr, rr: [], resp: [])
             for seg in segments {
                 XCTAssertGreaterThanOrEqual(seg.start, s.psgStart - 30,
                                             "\(s.subject): segment starts before the session")

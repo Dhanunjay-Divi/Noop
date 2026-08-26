@@ -173,4 +173,54 @@ final class MigrationTests: XCTestCase {
             XCTAssertEqual(try Double.fetchOne(db, sql: "SELECT efficiency FROM dailyMetric WHERE day = '2026-01-02'"), 0.9)
         }
     }
+
+    func testCompatibilityRepairHealsDatabasesThatAlreadyAppliedV26() async throws {
+        let dbQueue = try DatabaseQueue()
+        try WhoopStore.makeMigrator().migrate(dbQueue)
+        try await dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO metricSeries (deviceId, day, key, value) VALUES
+                    ('wearable-import', '2026-01-01', 'sleep_efficiency', 91.5),
+                    ('wearable-import', '2026-01-02', 'sleep_efficiency', 0.88),
+                    ('wearable-import', '2026-01-01', 'sleep_performance', 91.5)
+                """)
+        }
+
+        try WhoopStore.repairImportedSleepEfficiencySeries(dbQueue)
+        try WhoopStore.repairImportedSleepEfficiencySeries(dbQueue)
+
+        try await dbQueue.read { db in
+            XCTAssertEqual(
+                try Double.fetchOne(
+                    db,
+                    sql: "SELECT value FROM metricSeries WHERE day = '2026-01-01' AND key = 'sleep_efficiency'"
+                ),
+                0.915
+            )
+            XCTAssertEqual(
+                try Double.fetchOne(
+                    db,
+                    sql: "SELECT value FROM metricSeries WHERE day = '2026-01-02' AND key = 'sleep_efficiency'"
+                ),
+                0.88
+            )
+            XCTAssertEqual(
+                try Double.fetchOne(
+                    db,
+                    sql: "SELECT value FROM metricSeries WHERE day = '2026-01-01' AND key = 'sleep_performance'"
+                ),
+                91.5
+            )
+            XCTAssertEqual(
+                try Int.fetchOne(
+                    db,
+                    sql: """
+                        SELECT COUNT(*) FROM cursors
+                        WHERE name = 'data-repair.metric-series-sleep-efficiency-fraction.v1'
+                        """
+                ),
+                1
+            )
+        }
+    }
 }

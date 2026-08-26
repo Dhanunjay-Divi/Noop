@@ -1,7 +1,9 @@
 package com.noop.ingest
 
+import com.noop.data.DailyMetric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,6 +20,15 @@ import org.junit.Test
  * across two daily rows (import day-shift, v8.2.1).
  */
 class WhoopCsvImporterTest {
+
+    @Test
+    fun csvDoubleRejectsNonFiniteValues() {
+        assertNull(mapOf("value" to "NaN").double("value"))
+        assertNull(mapOf("value" to "Infinity").double("value"))
+        assertNull(mapOf("value" to "-Infinity").double("value"))
+        assertNull(mapOf("value" to "1e999").double("value"))
+        assertEquals(62.0, mapOf("value" to "62 ms").double("value"))
+    }
 
     private val device = "my-whoop"
 
@@ -154,6 +165,65 @@ class WhoopCsvImporterTest {
         assertEquals(120.0, day.remMin!!, 1e-9)           // from the sleep row
     }
 
+    @Test
+    fun sleepOnlyDailyProjectionIsFillOnlyAndOwnsNoReplacementRange() {
+        val sleepDay = DailyMetric(
+            deviceId = device,
+            day = "2026-06-02",
+            totalSleepMin = 420.0,
+            efficiency = 0.91,
+        )
+
+        val projection = WhoopCsvImporter.officialDailyProjection(
+            cycles = emptyList(),
+            sleepDaily = listOf(sleepDay),
+            deviceId = device,
+        )
+
+        assertEquals(listOf(sleepDay), projection.allRows)
+        assertTrue(projection.authoritativeRows.isEmpty())
+        assertEquals(listOf(sleepDay), projection.fillOnlyRows)
+        assertNull(projection.authoritativeRange)
+    }
+
+    @Test
+    fun officialDailyProjectionRangeComesOnlyFromAcceptedCycleDays() {
+        val cycleDay = DailyMetric(
+            deviceId = device,
+            day = "2026-06-02",
+            recovery = 78.0,
+            restingHr = 51,
+        )
+        val matchingSleep = DailyMetric(
+            deviceId = device,
+            day = "2026-06-02",
+            totalSleepMin = 455.0,
+        )
+        val sleepOnlyDay = DailyMetric(
+            deviceId = device,
+            day = "2026-06-05",
+            totalSleepMin = 390.0,
+        )
+
+        val projection = WhoopCsvImporter.officialDailyProjection(
+            cycles = listOf(cycleDay),
+            sleepDaily = listOf(matchingSleep, sleepOnlyDay),
+            deviceId = device,
+        )
+
+        val range = projection.authoritativeRange!!
+        assertEquals(device, range.deviceId)
+        assertEquals("2026-06-02", range.fromDay)
+        assertEquals("2026-06-02", range.toDay)
+
+        val authoritative = projection.authoritativeRows.single()
+        assertEquals("2026-06-02", authoritative.day)
+        assertEquals(78.0, authoritative.recovery!!, 1e-9)
+        assertEquals(455.0, authoritative.totalSleepMin!!, 1e-9)
+        assertEquals(listOf("2026-06-05"), projection.fillOnlyRows.map { it.day })
+        assertEquals(2, projection.allRows.size)
+    }
+
     /** Naps are excluded from the daily fold entirely (no spurious daily row). */
     @Test
     fun napsAreNotFoldedIntoDaily() {
@@ -273,6 +343,217 @@ class WhoopCsvImporterTest {
         assertEquals(2, entries.size)
         assertEquals(true, entries[0].answeredYes)
         assertEquals(false, entries[1].answeredYes)
+    }
+
+    @Test
+    fun journalDeduplicatesExactRowsAndOmitsContradictoryDayQuestionAnswers() {
+        val entries = journal(
+            """
+            Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+            2026-06-05 22:00:00,UTC+00:00,Repeated exact row?,TRUE,same note
+            2026-06-05 22:00:00,UTC+00:00,Repeated exact row?,TRUE,same note
+            2026-06-05 22:00:00,UTC+00:00,Contradictory answer?,TRUE,
+            2026-06-05 23:00:00,UTC+00:00,Contradictory answer?,FALSE,
+            2026-06-05 22:00:00,UTC+00:00,Stable false answer?,FALSE,
+            """,
+            emptyMap(),
+        )
+
+        assertEquals(2, entries.size)
+        assertEquals(
+            setOf("Repeated exact row?", "Stable false answer?"),
+            entries.map { it.question }.toSet(),
+        )
+        assertEquals(true, entries.first { it.question == "Repeated exact row?" }.answeredYes)
+        assertEquals(false, entries.first { it.question == "Stable false answer?" }.answeredYes)
+        assertTrue(entries.none { it.question == "Contradictory answer?" })
+    }
+
+    @Test
+    fun journalDropsRowsWithoutCycleTimestamp() {
+        val entries = journal(
+            """
+            Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+            ,UTC+00:00,Missing timestamp?,TRUE,must not be assigned to today
+            2026-06-05 22:00:00,UTC+00:00,Timestamped row?,TRUE,kept
+            """,
+            emptyMap(),
+        )
+
+        assertEquals(listOf("Timestamped row?"), entries.map { it.question })
+        assertEquals("2026-06-05", entries.single().day)
+    }
+
+    @Test
+    fun journalReplacementRangeIncludesLegacyOnsetDayAndCurrentWakeDay() {
+        val cycleStart = WhoopTime.parseEpochSeconds("2026-06-05 22:00:00", 0)!!
+        val table = CsvTable.fromData(
+            """
+            Cycle start time,Cycle timezone,Question text,Answered yes
+            2026-06-05 22:00:00,UTC+00:00,Had caffeine?,TRUE
+            """.trimIndent().toByteArray(),
+        )
+
+        val result = WhoopCsvImporter.parseJournalResult(
+            table,
+            device,
+            mapOf(cycleStart to "2026-06-06"),
+        )
+
+        assertEquals("2026-06-05", result.firstDay)
+        assertEquals("2026-06-06", result.lastDay)
+        assertEquals("2026-06-06", result.entries.single().day)
+    }
+
+    @Test
+    fun journalDeduplicatesIdenticalEntriesAfterWakeDayProjection() {
+        val firstStart = WhoopTime.parseEpochSeconds("2026-06-05 21:00:00", 0)!!
+        val secondStart = WhoopTime.parseEpochSeconds("2026-06-05 23:00:00", 0)!!
+        val entries = journal(
+            """
+            Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+            2026-06-05 21:00:00,UTC+00:00,Same wake-day answer?,TRUE,same note
+            2026-06-05 23:00:00,UTC+00:00,Same wake-day answer?,TRUE,same note
+            """,
+            mapOf(firstStart to "2026-06-06", secondStart to "2026-06-06"),
+        )
+
+        assertEquals(1, entries.size)
+        assertEquals("2026-06-06", entries.single().day)
+        assertEquals("Same wake-day answer?", entries.single().question)
+    }
+
+    @Test
+    fun importBoundaryConvertsFahrenheitAndEfficiencyPercentToCanonicalUnits() {
+        val rows = cycles(
+            """
+            Cycle start time,Cycle end time,Cycle timezone,Skin temp (F),Sleep efficiency %
+            2026-06-01 22:00:00,2026-06-02 22:00:00,UTC+00:00,95,92.3
+            """
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals(35.0, rows.single().skinTempDevC!!, 1e-9)
+        assertEquals(0.923, rows.single().efficiency!!, 1e-9)
+    }
+
+    @Test
+    fun explicitCelsiusWinsAndInvalidEfficiencyIsOmitted() {
+        val table = CsvTable.fromData(
+            """
+            Cycle start time,Cycle end time,Cycle timezone,Skin temp (celsius),Skin temp (F),Sleep efficiency %
+            2026-06-01 22:00:00,2026-06-02 22:00:00,UTC+00:00,33.4,95,120
+            """.trimIndent().toByteArray(),
+        )
+        val row = WhoopCsvImporter.parseCycles(table, device).single()
+
+        assertEquals(33.4, row.skinTempDevC!!, 1e-9)
+        assertEquals(null, row.efficiency)
+    }
+
+    @Test
+    fun extremeFiniteValuesAreTreatedAsMissingWithoutOverflowing() {
+        val cycle = cycles(
+            """
+            Cycle start time,Cycle end time,Cycle timezone,Resting heart rate (bpm),Skin temp (F),Day strain
+            2026-06-01 22:00:00,2026-06-02 22:00:00,UTC+00:00,1e300,1.7976931348623157e308,1.7976931348623157e308
+            """
+        ).single()
+        assertNull(cycle.restingHr)
+        assertNull(cycle.skinTempDevC)
+        assertNull(cycle.strain)
+
+        val workout = WhoopCsvImporter.parseWorkouts(
+            CsvTable.fromData(
+                """
+                Workout start time,Workout end time,Cycle timezone,Activity name,Average HR (bpm),Max HR (bpm),Activity strain
+                2026-06-02 10:00:00,2026-06-02 11:00:00,UTC+00:00,Run,1e300,-1e300,1.7976931348623157e308
+                """.trimIndent().toByteArray()
+            ),
+            device,
+        ).single()
+        assertNull(workout.avgHr)
+        assertNull(workout.maxHr)
+        assertNull(workout.strain)
+
+        val sleep = sleepParse(
+            """
+            Cycle start time,Cycle timezone,Sleep onset,In bed duration (min)
+            2026-06-01 22:00:00,UTC+00:00,2026-06-01 22:30:00,1e300
+            """
+        ).sessions.single()
+        assertEquals(sleep.startTs, sleep.endTs)
+    }
+
+    @Test
+    fun awakeMinutesAreNotStoredAsADisturbanceCount() {
+        val cycle = cycles(
+            """
+            Cycle start time,Cycle end time,Cycle timezone,Awake duration (min)
+            2026-06-01 22:00:00,2026-06-02 22:00:00,UTC+00:00,37
+            """
+        ).single()
+        val sleep = sleepParse(
+            """
+            Cycle start time,Cycle timezone,Sleep onset,Wake onset,Nap,Awake duration (min)
+            2026-06-01 22:00:00,UTC+00:00,2026-06-01 22:30:00,2026-06-02 06:30:00,false,37
+            """
+        ).daily.single()
+
+        assertEquals(null, cycle.disturbances)
+        assertEquals(null, sleep.disturbances)
+    }
+
+    @Test
+    fun workoutReplacementRangeIncludesValidRowsWithoutZoneMetrics() {
+        val table = CsvTable.fromData(
+            """
+            Workout start time,Workout end time,Cycle timezone,Activity name
+            2026-06-01 23:30:00,2026-06-02 00:30:00,UTC+02:00,Mobility
+            2026-06-03 10:00:00,2026-06-03 09:00:00,UTC+00:00,Invalid
+            """.trimIndent().toByteArray(),
+        )
+
+        assertTrue(WhoopCsvImporter.parseWorkoutSeries(table, device).isEmpty())
+        assertEquals(setOf("2026-06-01"), WhoopCsvImporter.workoutSeriesDays(table))
+    }
+
+    @Test
+    fun workoutsRequireBothExplicitTimestampsAndStrictlyPositiveDuration() {
+        val table = CsvTable.fromData(
+            """
+            Cycle start time,Workout start time,Workout end time,Cycle timezone,Activity name
+            2026-06-01 08:00:00,,2026-06-01 10:00:00,UTC+00:00,Missing start
+            2026-06-01 08:00:00,2026-06-01 09:00:00,,UTC+00:00,Missing end
+            2026-06-01 08:00:00,2026-06-01 09:00:00,2026-06-01 09:00:00,UTC+00:00,Zero duration
+            2026-06-01 08:00:00,2026-06-01 10:00:00,2026-06-01 09:00:00,UTC+00:00,Reversed
+            2026-06-01 08:00:00,2026-06-01 09:00:00,2026-06-01 10:00:00,UTC+00:00,Valid
+            """.trimIndent().toByteArray(),
+        )
+
+        val rows = WhoopCsvImporter.parseWorkouts(table, device)
+
+        assertEquals(listOf("Valid"), rows.map { it.sport })
+        assertEquals(3_600.0, rows.single().durationS!!, 1e-9)
+        assertTrue(rows.single().endTs > rows.single().startTs)
+    }
+
+    @Test
+    fun journalMergesDistinctNotesForOnePersistedAnswer() {
+        val firstStart = WhoopTime.parseEpochSeconds("2026-06-05 21:00:00", 0)!!
+        val secondStart = WhoopTime.parseEpochSeconds("2026-06-05 23:00:00", 0)!!
+        val entries = journal(
+            """
+            Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+            2026-06-05 21:00:00,UTC+00:00,Same wake-day answer?,TRUE,Morning
+            2026-06-05 23:00:00,UTC+00:00,Same wake-day answer?,TRUE,Afternoon
+            2026-06-05 23:00:00,UTC+00:00,Same wake-day answer?,TRUE,Morning
+            """,
+            mapOf(firstStart to "2026-06-06", secondStart to "2026-06-06"),
+        )
+
+        assertEquals(1, entries.size)
+        assertEquals("Afternoon\nMorning", entries.single().notes)
     }
 
     // --- Localized (Brazilian Portuguese) headers, issue #692 ---------------------------------

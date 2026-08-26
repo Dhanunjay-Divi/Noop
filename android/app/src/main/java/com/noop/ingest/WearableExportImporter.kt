@@ -6,6 +6,7 @@ import com.noop.analytics.SleepStageVocabulary
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
+import com.noop.data.SleepEfficiencyUnits
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import org.json.JSONArray
@@ -660,7 +661,8 @@ object WearableExportImporter {
             DailyMetric(
                 deviceId = deviceId, day = d.day,
                 totalSleepMin = d.totalSleepMin,
-                efficiency = d.efficiencyPct ?: sleepEfficiency(d.totalSleepMin, d.awakeMin),
+                efficiency = SleepEfficiencyUnits.fractionFromFlexibleExport(d.efficiencyPct)
+                    ?: sleepEfficiency(d.totalSleepMin, d.awakeMin),
                 deepMin = d.deepMin, remMin = d.remMin, lightMin = d.lightMin,
                 restingHr = d.restingHr, avgHrv = d.avgHrvMs,
                 respRateBpm = d.respRateBpm,   // imported night resp now reaches the day rollup (#17)
@@ -675,7 +677,8 @@ object WearableExportImporter {
         val sleepRows = parsed.sleeps.map { s ->
             SleepSession(
                 deviceId = deviceId, startTs = s.startTs, endTs = s.endTs,
-                efficiency = s.efficiencyPct ?: efficiencyFromStages(s.stagesJson, s.startTs, s.endTs),
+                efficiency = SleepEfficiencyUnits.fractionFromFlexibleExport(s.efficiencyPct)
+                    ?: efficiencyFromStages(s.stagesJson, s.startTs, s.endTs),
                 restingHr = s.lowestHr ?: s.avgHr, avgHrv = s.avgHrvMs, stagesJSON = s.stagesJson,
             )
         }
@@ -712,7 +715,7 @@ object WearableExportImporter {
     private fun sleepEfficiency(total: Double?, awake: Double?): Double? {
         if (total == null || total <= 0) return null
         val inBed = total + (awake ?: 0.0)
-        return if (inBed > 0) minOf(100.0, total / inBed * 100.0) else null
+        return if (inBed > 0) minOf(1.0, total / inBed) else null
     }
 
     private fun efficiencyFromStages(stagesJson: String?, start: Long, end: Long): Double? {
@@ -724,7 +727,7 @@ object WearableExportImporter {
             if (SleepStageVocabulary.isWake(o.optString("stage"))) continue
             asleep += (o.optLong("end") - o.optLong("start")).coerceAtLeast(0)
         }
-        return minOf(100.0, asleep.toDouble() / (end - start) * 100.0)
+        return minOf(1.0, asleep.toDouble() / (end - start))
     }
 
     // ------------------------------------------------------------------------

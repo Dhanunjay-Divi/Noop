@@ -104,7 +104,7 @@ object SpotHrvReading {
                 "only a reading with enough clean beats is shown."
         return when (source) {
             Source.OPTICAL_PPG ->
-                base + " On a WHOOP 5.0/MG the intervals come from the optical pulse signal, which is " +
+                base + " On this band the intervals come from the optical pulse signal, which is " +
                     "noisier than a chest strap, so treat the number as a rough estimate."
             Source.CHEST_STRAP, Source.UNKNOWN -> base
         }

@@ -238,7 +238,8 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         XCTAssertNotNil(scored.avgHrv)
         XCTAssertEqual(
             RecoveryScorer.calibrationNights(
-                nightlyHrv: [scored.avgHrv], dayKeys: [scored.day], hasRecovery: false),
+                nightlyHrv: [scored.avgHrv], dayKeys: [scored.day],
+                before: scored.day, hasRecovery: false),
             1,
             "one valid slept night must advance Recovery from 0/4 to 1/4"
         )

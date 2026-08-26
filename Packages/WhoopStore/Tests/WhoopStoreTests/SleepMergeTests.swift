@@ -45,7 +45,7 @@ final class SleepMergeTests: XCTestCase {
         XCTAssertTrue(SleepMerge.merge(imported: [], computed: [], endDay: dayKey).isEmpty)
     }
 
-    // Richness exception (Swift twin of ryanbr/noop#240): a stage-less import must not blank a
+    // Richness exception (Swift twin of Dhanunjay-Divi/Noop#240): a stage-less import must not blank a
     // computed day that has stage data.
 
     func testStagelessImportYieldsToComputedDayWithStages() {

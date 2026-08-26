@@ -229,13 +229,10 @@ check does not imply that a public API exposes the raw signal.
 
 ### Distribution provenance
 
-The checked dependency inventory passes, but the release distribution gate
-intentionally fails closed: inherited WHOOP 4 protocol/store and collection
-expression is attributed to `johnmiddleton12/my-whoop` / `wearable`, whose pinned
-source has no explicit software license. Attribution is not redistribution
-permission. External source or binary publication requires either an explicit
-rights-holder license or an independently implemented replacement with a
-reviewed clean-room provenance audit.
+The repository owner has recorded control of the consolidated NOOP source and
+contribution rights. The release distribution gate validates that declaration,
+NOOP's PolyForm license, and the exact independent runtime dependency notices.
+It must pass for every external source or binary publication.
 
 ### Device/transport matrix
 

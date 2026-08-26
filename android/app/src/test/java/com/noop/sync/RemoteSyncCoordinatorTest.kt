@@ -246,7 +246,7 @@ class RemoteSyncCoordinatorTest {
         val coordinator = RemoteSyncCoordinator(FakeStore(), NoopUploader, state, state)
         val draft = coordinator.buildDraft(
             namespace.copy(
-                remoteDeviceId = "android:install-1:my-whoop-noop-cer-v1",
+                remoteDeviceId = "android:install-1:my-whoop-noop-cer-v2",
                 logicalSourceId = "my-whoop-noop",
                 localDeviceId = "my-whoop-noop",
                 role = "noop_computed",
@@ -292,7 +292,7 @@ class RemoteSyncCoordinatorTest {
         assertFalse(metrics.containsKey("whoop_strain"))
         assertFalse(metrics.containsKey("skin_temp_c"))
         assertEquals(
-            "noop-charge-v1+noop-effort-v1+noop-rest-v1",
+            "noop-charge-v2+noop-effort-v1+noop-rest-v1",
             draft.source.metadata["algorithm_revision"],
         )
         assertEquals("my-whoop-noop", draft.source.metadata["logical_source_id"])
@@ -308,7 +308,7 @@ class RemoteSyncCoordinatorTest {
         val coordinator = RemoteSyncCoordinator(FakeStore(), NoopUploader, state, state)
         val draft = coordinator.buildDraft(
             namespace.copy(
-                remoteDeviceId = "android:install:my-whoop-noop-cer-v1",
+                remoteDeviceId = "android:install:my-whoop-noop-cer-v2",
                 logicalSourceId = "my-whoop-noop",
                 localDeviceId = "my-whoop-noop",
                 role = "noop_computed",
@@ -389,7 +389,7 @@ class RemoteSyncCoordinatorTest {
             state,
         )
         val derivedNamespace = namespace.copy(
-            remoteDeviceId = "android:install-1:my-whoop-noop-cer-v1",
+            remoteDeviceId = "android:install-1:my-whoop-noop-cer-v2",
             logicalSourceId = "my-whoop-noop",
             localDeviceId = "my-whoop-noop",
             role = "noop_computed",
@@ -401,7 +401,7 @@ class RemoteSyncCoordinatorTest {
         assertTrue(first.hasMoreDerivedRows)
         assertEquals(
             base + 4_999,
-            state.derivedCursor("android:install-1:my-whoop-noop-cer-v1").sleepStartTs,
+            state.derivedCursor("android:install-1:my-whoop-noop-cer-v2").sleepStartTs,
         )
 
         // Deleting a row before the watermark would shift a persisted OFFSET and skip the final row.
@@ -412,7 +412,7 @@ class RemoteSyncCoordinatorTest {
         assertEquals(base + 5_000, uploads.last().draft.sleepSessions.single().startTs)
         assertEquals(
             RemoteDerivedCursor(),
-            state.derivedCursor("android:install-1:my-whoop-noop-cer-v1"),
+            state.derivedCursor("android:install-1:my-whoop-noop-cer-v2"),
         )
     }
 
@@ -604,7 +604,7 @@ class RemoteSyncCoordinatorTest {
         )
         assertTrue(
             byRole.getValue("noop_computed")
-                .any { it.remoteDeviceId == "android:install:my-whoop-noop-cer-v1" },
+                .any { it.remoteDeviceId == "android:install:my-whoop-noop-cer-v2" },
         )
         assertTrue(byRole.getValue("strap_measured").all { it.includeRaw && !it.includeDerived })
         assertTrue(

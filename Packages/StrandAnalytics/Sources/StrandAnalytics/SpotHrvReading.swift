@@ -89,7 +89,7 @@ public enum SpotHrvReading {
             "only a reading with enough clean beats is shown."
         switch source {
         case .opticalPPG:
-            return base + " On a WHOOP 5.0/MG the intervals come from the optical pulse signal, which is " +
+            return base + " On this band the intervals come from the optical pulse signal, which is " +
                 "noisier than a chest strap, so treat the number as a rough estimate."
         case .chestStrap, .unknown:
             return base

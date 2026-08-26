@@ -3,7 +3,7 @@ import OuraProtocol
 
 /// Reshapes an anchored Oura SleepNet hypnogram into the stage-rich session shape consumed by NOOP's
 /// sleep screens. This is ring-provided classification, not a NOOP-derived sleep score.
-/// Adapted from ryanbr/noop's clean-room Oura pipeline; see repository attribution and notice files.
+/// Adapted from Dhanunjay-Divi/Noop's clean-room Oura pipeline; see repository attribution and notice files.
 public enum OuraSleepSessionMapping {
     /// Marker embedded in stage segments so a source-neutral cache row can still disclose that the ring,
     /// rather than NOOP's local stager, supplied the phases. Unknown JSON keys are ignored by old readers.

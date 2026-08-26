@@ -74,11 +74,32 @@ object RecoveryDrivers {
         rhrBaseline: BaselineState?,
         respBaseline: BaselineState?,
         sleepPerf: Double?,
+        restQualityBaseline: BaselineState? = null,
         skinTempDev: Double? = null,
     ): List<ChargeDriver> {
         // Cold-start gate: no usable HRV baseline -> no score -> no drivers (honest empty, not faked rows).
         if (!hrvBaseline.usable) return emptyList()
         val validSkinTempDev = VitalBands.skinTempDeviation(skinTempDev)
+        val validRhrBaseline = rhrBaseline?.takeIf {
+            RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
+        val validRespBaseline = respBaseline?.takeIf {
+            RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
+        val usableRestBaseline = restQualityBaseline?.takeIf {
+            it.usable && RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
+        val full = RecoveryScorer.recovery(
+            hrv = hrv,
+            rhr = rhr,
+            resp = resp,
+            hrvBaseline = hrvBaseline,
+            rhrBaseline = validRhrBaseline,
+            respBaseline = validRespBaseline,
+            sleepPerf = sleepPerf,
+            restQualityBaseline = usableRestBaseline,
+            skinTempDev = validSkinTempDev,
+        ) ?: return emptyList()
 
         // Build the SAME (z, weight) term set recovery(...) builds, in the SAME append order, capturing
         // each term's identity so a single term can be neutralized to compute its marginal point swing.
@@ -93,24 +114,28 @@ object RecoveryDrivers {
 
         // RHR term: lower is better -> (mu - x) / sigma.
         var rhrIdx = -1
-        if (rhrBaseline != null) {
-            val z = RecoveryScorer.zScore(rhrBaseline.baseline, rhr, rhrBaseline.spread)
+        if (validRhrBaseline != null) {
+            val z = RecoveryScorer.zScore(validRhrBaseline.baseline, rhr, validRhrBaseline.spread)
             rhrIdx = terms.size
             terms.add(Term(z, RecoveryScorer.wRHR))
         }
 
         // Resp term: lower is better, needs BOTH the value and a baseline.
         var respIdx = -1
-        if (resp != null && respBaseline != null) {
-            val z = RecoveryScorer.zScore(respBaseline.baseline, resp, respBaseline.spread)
+        if (resp != null && resp.isFinite() && validRespBaseline != null) {
+            val z = RecoveryScorer.zScore(validRespBaseline.baseline, resp, validRespBaseline.spread)
             respIdx = terms.size
             terms.add(Term(z, RecoveryScorer.wResp))
         }
 
-        // Sleep-performance / Rest-quality term: no baseline, centered at sleepPerfCenter.
+        // Rest quality: personal center once usable, fixed center only during cold start.
         var sleepIdx = -1
-        if (sleepPerf != null) {
-            val z = (sleepPerf - RecoveryScorer.sleepPerfCenter) / RecoveryScorer.sleepPerfScale
+        val validRest = RecoveryScorer.validRestQuality(sleepPerf)
+        val restCenter = RecoveryScorer.restQualityCenter(
+            usableRestBaseline?.let { RecoveryScorer.DriverBaseline(it) },
+        )
+        if (validRest != null) {
+            val z = (validRest - restCenter) / RecoveryScorer.sleepPerfScale
             sleepIdx = terms.size
             terms.add(Term(z, RecoveryScorer.wSleep))
         }
@@ -126,7 +151,7 @@ object RecoveryDrivers {
         // The actual score, EXACTLY as recovery(...) computes it (so the rows can't disagree with the ring).
         val totalWeight = terms.sumOf { it.w }
         if (totalWeight <= 0.0) return emptyList()
-        val actual = scoreOf(terms.sumOf { it.z * it.w } / totalWeight)
+        val actual = full
 
         // Marginal point swing of term [idx]: actual score minus the score with that ONE term neutralized
         // to z = 0 (the signal sitting AT its personal baseline), the other terms and weights unchanged.
@@ -152,38 +177,46 @@ object RecoveryDrivers {
                     flat = "at baseline", bad = "below baseline, limiting recovery"),
             ),
         )
-        if (rhrIdx >= 0 && rhrBaseline != null) {
+        if (rhrIdx >= 0 && validRhrBaseline != null) {
             // RHR z is already oriented "higher z = better" (lower RHR), so a positive z is good.
             drivers.add(
                 ChargeDriver(
                     label = "Resting heart rate",
                     deltaPoints = delta(rhrIdx),
                     valueText = "${rhr.roundToInt()} bpm",
-                    baselineText = "${rhrBaseline.baseline.roundToInt()} bpm baseline",
+                    baselineText = "${validRhrBaseline.baseline.roundToInt()} bpm baseline",
                     verdict = directionVerdict(terms[rhrIdx].z, good = "below baseline, supporting recovery",
                         flat = "at baseline", bad = "above baseline, limiting recovery"),
                 ),
             )
         }
-        if (sleepIdx >= 0 && sleepPerf != null) {
+        if (sleepIdx >= 0 && validRest != null) {
             drivers.add(
                 ChargeDriver(
                     label = "Sleep quality",
                     deltaPoints = delta(sleepIdx),
-                    valueText = "${(sleepPerf * 100.0).roundToInt()}%",
-                    baselineText = "",   // centred on a fixed "good night", not a learned baseline
-                    verdict = directionVerdict(terms[sleepIdx].z, good = "a strong night, supporting recovery",
-                        flat = "a typical night", bad = "below a good night, limiting recovery"),
+                    valueText = "${(validRest * 100.0).roundToInt()}%",
+                    baselineText = if (usableRestBaseline == null) {
+                        ""
+                    } else {
+                        "${(restCenter * 100.0).roundToInt()}% baseline"
+                    },
+                    verdict = directionVerdict(
+                        terms[sleepIdx].z,
+                        good = "above baseline, supporting recovery",
+                        flat = "a typical night",
+                        bad = "below baseline, limiting recovery",
+                    ),
                 ),
             )
         }
-        if (respIdx >= 0 && resp != null && respBaseline != null) {
+        if (respIdx >= 0 && resp != null && validRespBaseline != null) {
             drivers.add(
                 ChargeDriver(
                     label = "Respiratory rate",
                     deltaPoints = delta(respIdx),
                     valueText = String.format(java.util.Locale.US, "%.1f br/min", resp),
-                    baselineText = String.format(java.util.Locale.US, "%.1f br/min baseline", respBaseline.baseline),
+                    baselineText = String.format(java.util.Locale.US, "%.1f br/min baseline", validRespBaseline.baseline),
                     verdict = directionVerdict(terms[respIdx].z, good = "below baseline, supporting recovery",
                         flat = "at baseline", bad = "above baseline, limiting recovery"),
                 ),

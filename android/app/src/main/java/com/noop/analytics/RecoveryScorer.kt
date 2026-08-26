@@ -124,10 +124,10 @@ object RecoveryScorer {
     const val bandRedMax: Double = 34.0
     const val bandYellowMax: Double = 67.0
 
-    /** Sleep-performance center ("good night" at ~85% efficiency). */
+    /** Cold-start Rest-quality center. Production personalizes the center once calibrated. */
     const val sleepPerfCenter: Double = 0.85
 
-    /** Sleep-performance scale (±2 z spans the normal range). */
+    /** Fixed Rest-quality scale; a flat personal history must not amplify tiny changes. */
     const val sleepPerfScale: Double = 0.12
 
     /** Rolling-mean HR window (seconds) for the resting-HR estimate. */
@@ -296,6 +296,17 @@ object RecoveryScorer {
         return (value - mean) / sigma
     }
 
+    /** Finite scorer baseline. Zero spread is valid; negative spread is corrupt input. */
+    internal fun validDriverBaseline(baseline: DriverBaseline?): DriverBaseline? =
+        baseline?.takeIf { it.mean.isFinite() && it.spread.isFinite() && it.spread >= 0.0 }
+
+    /** Fractional Rest-quality boundary. Percent-scale and non-finite values are missing. */
+    internal fun validRestQuality(value: Double?): Double? =
+        value?.takeIf { it.isFinite() && it in 0.0..1.0 }
+
+    internal fun restQualityCenter(baseline: DriverBaseline?): Double =
+        baseline?.mean?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: sleepPerfCenter
+
     /**
      * Z-score + logistic recovery score in [0, 100]. APPROXIMATE.
      *
@@ -311,6 +322,8 @@ object RecoveryScorer {
      * @param respBaseline respiration baseline; null drops the resp term.
      * @param sleepPerf sleep-performance proxy (Rest composite 0..1, or efficiency
      *   0..1 for legacy callers); null drops the term.
+     * @param restQualityBaseline optional personal fractional Rest-quality center.
+     *   Null/invalid uses the cold-start 0.85 center.
      * @param skinTempDev tonight's skin-temperature deviation from the personal
      *   baseline (raw ±°C, DailyMetric.skinTempDevC); applied as a SYMMETRIC penalty
      *   −|dev| / skinTempDevScale. null drops the term and renormalizes (score then
@@ -339,33 +352,36 @@ object RecoveryScorer {
         rhrBaseline: DriverBaseline?,
         respBaseline: DriverBaseline?,
         sleepPerf: Double?,
+        restQualityBaseline: DriverBaseline? = null,
         skinTempDev: Double? = null,
         hrvBaselineUsable: Boolean = true,
         recoveryIndexSlope: Double? = null,
         effortBaseline: DriverBaseline? = null,
         priorDayEffort: Double? = null,
     ): Double? {
-        // Cold-start gate: HRV is the dominant driver; if its baseline isn't
-        // usable, refuse to score (more honest than a fabricated value).
-        if (!hrvBaselineUsable) return null
+        // Required physiology fails closed. Non-finite imports must never reach
+        // the logistic as NaN or infinity.
+        if (!hrvBaselineUsable || !hrv.isFinite() || !rhr.isFinite()) return null
+        val validHrvBaseline = validDriverBaseline(hrvBaseline) ?: return null
 
         val terms = ArrayList<Pair<Double, Double>>() // (z, weight)
 
         // HRV term: higher is better.
-        hrvBaseline?.let { b ->
-            terms.add(zScore(hrv, b.mean, b.spread) to wHRV)
-        }
+        terms.add(zScore(hrv, validHrvBaseline.mean, validHrvBaseline.spread) to wHRV)
         // RHR term: lower is better → (μ − x) / σ.
-        rhrBaseline?.let { b ->
+        validDriverBaseline(rhrBaseline)?.let { b ->
             terms.add(zScore(b.mean, rhr, b.spread) to wRHR)
         }
         // Resp term: lower is better, optional.
-        if (resp != null && respBaseline != null) {
-            terms.add(zScore(respBaseline.mean, resp, respBaseline.spread) to wResp)
+        val validRespBaseline = validDriverBaseline(respBaseline)
+        if (resp != null && resp.isFinite() && validRespBaseline != null) {
+            terms.add(zScore(validRespBaseline.mean, resp, validRespBaseline.spread) to wResp)
         }
-        // Sleep-performance term: no baseline needed; centered at SLEEP_PERF_CENTER.
-        if (sleepPerf != null) {
-            terms.add(((sleepPerf - sleepPerfCenter) / sleepPerfScale) to wSleep)
+        // Rest quality uses the personal center once calibrated. Keep 0.85 only
+        // for cold start and retain the established fixed 0.12 scale.
+        validRestQuality(sleepPerf)?.let { rest ->
+            val center = restQualityCenter(restQualityBaseline)
+            terms.add(((rest - center) / sleepPerfScale) to wSleep)
         }
         // Skin-temp term: SYMMETRIC penalty, no baseline arg (skinTempDev is already a
         // deviation). Further from baseline in either direction → more negative z.
@@ -375,24 +391,29 @@ object RecoveryScorer {
         // Recovery-Index term: overnight HR-DECLINE slope (bpm/hour). No baseline needed (a
         // fixed, documented scale, same style as sleepPerf/skin-temp). Negative (declining)
         // supports recovery; positive (rising) limits it. Added only when supplied.
-        if (recoveryIndexSlope != null) {
+        if (recoveryIndexSlope != null && recoveryIndexSlope.isFinite()) {
             terms.add((-recoveryIndexSlope / recoveryIndexScaleBpmPerHr) to wRecoveryIndex)
         }
         // Activity-Balance / previous-day-Effort term: lower vs personal baseline is better,
         // same "lower is better" direction as RHR/resp → (μ − x) / σ. Needs BOTH the value
         // and a baseline, matching resp's pattern; added only when both are supplied.
-        if (priorDayEffort != null && effortBaseline != null) {
+        val validEffortBaseline = validDriverBaseline(effortBaseline)
+        if (priorDayEffort != null && priorDayEffort.isFinite() && validEffortBaseline != null) {
             terms.add(
-                zScore(effortBaseline.mean, priorDayEffort, effortBaseline.spread) to wActivityBalance,
+                zScore(validEffortBaseline.mean, priorDayEffort, validEffortBaseline.spread) to wActivityBalance,
             )
         }
 
-        if (terms.isEmpty()) return null
+        if (terms.isEmpty() || terms.any { !it.first.isFinite() || !it.second.isFinite() || it.second <= 0.0 }) {
+            return null
+        }
         val totalWeight = terms.sumOf { it.second }
-        if (totalWeight <= 0.0) return null
+        if (!totalWeight.isFinite() || totalWeight <= 0.0) return null
 
         val z = terms.sumOf { it.first * it.second } / totalWeight
+        if (!z.isFinite()) return null
         val score = 100.0 / (1.0 + exp(-logisticK * (z - logisticZ0)))
+        if (!score.isFinite()) return null
         return max(0.0, min(100.0, score))
     }
 
@@ -408,6 +429,7 @@ object RecoveryScorer {
         rhrBaseline: BaselineState?,
         respBaseline: BaselineState?,
         sleepPerf: Double?,
+        restQualityBaseline: BaselineState? = null,
         skinTempDev: Double? = null,
         recoveryIndexSlope: Double? = null,
         effortBaseline: BaselineState? = null,
@@ -420,6 +442,7 @@ object RecoveryScorer {
         rhrBaseline = rhrBaseline?.let { DriverBaseline(it) },
         respBaseline = respBaseline?.let { DriverBaseline(it) },
         sleepPerf = sleepPerf,
+        restQualityBaseline = restQualityBaseline?.takeIf { it.usable }?.let { DriverBaseline(it) },
         skinTempDev = skinTempDev,
         hrvBaselineUsable = hrvBaseline.usable,
         recoveryIndexSlope = recoveryIndexSlope,

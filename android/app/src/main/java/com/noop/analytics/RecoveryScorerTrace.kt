@@ -35,6 +35,7 @@ object RecoveryScorerTrace {
         rhrBaseline: BaselineState?,
         respBaseline: BaselineState?,
         sleepPerf: Double?,
+        restQualityBaseline: BaselineState? = null,
         skinTempDev: Double? = null,
     ): Pair<Double?, List<String>> {
         val lines = ArrayList<String>()
@@ -45,7 +46,8 @@ object RecoveryScorerTrace {
         val score = RecoveryScorer.recovery(
             hrv = hrv, rhr = rhr, resp = resp,
             hrvBaseline = hrvBaseline, rhrBaseline = rhrBaseline,
-            respBaseline = respBaseline, sleepPerf = sleepPerf, skinTempDev = validSkinTempDev,
+            respBaseline = respBaseline, sleepPerf = sleepPerf,
+            restQualityBaseline = restQualityBaseline, skinTempDev = validSkinTempDev,
         )
 
         // Cold-start gate: HRV baseline not usable -> recovery() returns null before any term is built.
@@ -57,21 +59,45 @@ object RecoveryScorerTrace {
             )
             return score to lines
         }
+        if (
+            score == null ||
+            !hrv.isFinite() ||
+            !rhr.isFinite() ||
+            RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(hrvBaseline)) == null
+        ) {
+            lines.add("charge nilScore reason=invalidRequiredInput")
+            return score to lines
+        }
+        val validRhrBaseline = rhrBaseline?.takeIf {
+            RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
+        val validRespBaseline = respBaseline?.takeIf {
+            RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
+        val validRestBaseline = restQualityBaseline?.takeIf {
+            it.usable && RecoveryScorer.validDriverBaseline(RecoveryScorer.DriverBaseline(it)) != null
+        }
 
         // Per-driver baseline state lines (mean / spread / nValid / status).
         lines.add(
             "charge baseline hrv mean=${r2(hrvBaseline.baseline)} spread=${r2(hrvBaseline.spread)} " +
                 "nValid=${hrvBaseline.nValid} status=${hrvBaseline.status.raw}",
         )
-        rhrBaseline?.let { b ->
+        validRhrBaseline?.let { b ->
             lines.add(
                 "charge baseline rhr mean=${r2(b.baseline)} spread=${r2(b.spread)} " +
                     "nValid=${b.nValid} status=${b.status.raw}",
             )
         }
-        respBaseline?.let { b ->
+        validRespBaseline?.let { b ->
             lines.add(
                 "charge baseline resp mean=${r2(b.baseline)} spread=${r2(b.spread)} " +
+                    "nValid=${b.nValid} status=${b.status.raw}",
+            )
+        }
+        validRestBaseline?.let { b ->
+            lines.add(
+                "charge baseline restQuality mean=${r2(b.baseline)} spread=${r2(b.spread)} " +
                     "nValid=${b.nValid} status=${b.status.raw}",
             )
         }
@@ -88,8 +114,8 @@ object RecoveryScorerTrace {
         lines.add("charge term hrv z=${r2(hrvZ)} w=${r2(RecoveryScorer.wHRV)} (higher HRV is better)")
 
         // RHR term: lower is better -> (mu - x) / sigma.
-        if (rhrBaseline != null) {
-            val z = RecoveryScorer.zScore(rhrBaseline.baseline, rhr, rhrBaseline.spread)
+        if (validRhrBaseline != null) {
+            val z = RecoveryScorer.zScore(validRhrBaseline.baseline, rhr, validRhrBaseline.spread)
             terms.add(z to RecoveryScorer.wRHR)
             lines.add("charge term rhr z=${r2(z)} w=${r2(RecoveryScorer.wRHR)} (lower RHR is better)")
         } else {
@@ -97,23 +123,26 @@ object RecoveryScorerTrace {
         }
 
         // Resp term: lower is better, optional (needs BOTH the value and a baseline).
-        if (resp != null && respBaseline != null) {
-            val z = RecoveryScorer.zScore(respBaseline.baseline, resp, respBaseline.spread)
+        if (resp != null && resp.isFinite() && validRespBaseline != null) {
+            val z = RecoveryScorer.zScore(validRespBaseline.baseline, resp, validRespBaseline.spread)
             terms.add(z to RecoveryScorer.wResp)
             lines.add("charge term resp z=${r2(z)} w=${r2(RecoveryScorer.wResp)} (lower resp is better)")
         } else {
             nilTerms.add("resp")
         }
 
-        // Sleep-performance / Rest-quality term: no baseline needed, centered at sleepPerfCenter.
-        if (sleepPerf != null) {
-            val z = (sleepPerf - RecoveryScorer.sleepPerfCenter) / RecoveryScorer.sleepPerfScale
+        // Rest quality uses the personal center when usable and the fixed center during cold start.
+        RecoveryScorer.validRestQuality(sleepPerf)?.let { rest ->
+            val restBaseline = validRestBaseline?.let { RecoveryScorer.DriverBaseline(it) }
+            val center = RecoveryScorer.restQualityCenter(restBaseline)
+            val z = (rest - center) / RecoveryScorer.sleepPerfScale
             terms.add(z to RecoveryScorer.wSleep)
             lines.add(
                 "charge term sleepPerf z=${r2(z)} w=${r2(RecoveryScorer.wSleep)} " +
-                    "(rest=${r2(sleepPerf)} center=${r2(RecoveryScorer.sleepPerfCenter)})",
+                    "(rest=${r2(rest)} center=${r2(center)} " +
+                    "centerSource=${if (restBaseline == null) "coldStart" else "personal"})",
             )
-        } else {
+        } ?: run {
             nilTerms.add("sleepPerf")
         }
 
@@ -144,15 +173,12 @@ object RecoveryScorerTrace {
                 "(z = sum(z*w)/sum(w))",
         )
 
-        // Final logistic score + band, read from recovery(...) verbatim.
-        if (score != null) {
-            lines.add(
-                "charge score=${r2(score)} band=${RecoveryScorer.band(score)} " +
-                    "(logistic k=${r2(RecoveryScorer.logisticK)} z0=${r2(RecoveryScorer.logisticZ0)})",
-            )
-        } else {
-            lines.add("charge nilScore reason=noValidTerms (no driver produced a usable term)")
-        }
+        // Final logistic score + band, read from recovery(...) verbatim. The
+        // invalid/nil paths returned above, so score is non-null here.
+        lines.add(
+            "charge score=${r2(score)} band=${RecoveryScorer.band(score)} " +
+                "(logistic k=${r2(RecoveryScorer.logisticK)} z0=${r2(RecoveryScorer.logisticZ0)})",
+        )
 
         return score to lines
     }

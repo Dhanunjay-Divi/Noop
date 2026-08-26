@@ -93,8 +93,8 @@ object Baselines {
     const val recoveryBaselineEpochKey: String = "noop.recoveryBaselineEpoch"
 
     /**
-     * Default per-metric configurations (HRV, resting HR, respiration, skin temp, daily
-     * Effort/strain).
+     * Default per-metric configurations (HRV, resting HR, respiration, skin temp, Rest
+     * quality, daily Effort/strain).
      *
      * "strain" backs the RecoveryScorer Activity-Balance / previous-day-Effort term: bounds
      * match `StrainScorer.maxStrain`'s 0-100 output scale (the Charge/Effort/Rest redesign's
@@ -121,6 +121,12 @@ object Baselines {
             minVal = 20.0, maxVal = 42.0, floorSpread = 0.3,
             halfLifeB = 14.0, halfLifeS = 21.0,
         ),
+        // Rest quality is a fraction at the scoring boundary. The EWMA center personalizes
+        // Recovery while RecoveryScorer deliberately retains its established fixed 0.12 scale.
+        "rest_quality" to MetricCfg(
+            minVal = 0.0, maxVal = 1.0, floorSpread = 0.04,
+            halfLifeB = 14.0, halfLifeS = 21.0,
+        ),
         "strain" to MetricCfg(
             minVal = 0.0, maxVal = 100.0, floorSpread = 5.0,
             halfLifeB = 14.0, halfLifeS = 21.0,
@@ -135,6 +141,9 @@ object Baselines {
 
     /** Convenience accessor for the standard respiration config. */
     val respCfg: MetricCfg get() = metricCfg.getValue("resp")
+
+    /** Baseline config for fractional Rest quality used by Recovery. */
+    val restQualityCfg: MetricCfg get() = metricCfg.getValue("rest_quality")
 
     /** Baseline config for the RecoveryScorer Activity-Balance / previous-day-Effort term. */
     val strainCfg: MetricCfg get() = metricCfg.getValue("strain")
@@ -344,6 +353,26 @@ object Baselines {
             baseline = seed, spread = cfg.floorSpread, nValid = 0,
             nightsSinceUpdate = 0, status = BaselineStatus.CALIBRATING,
         )
+    }
+
+    /**
+     * Build a causal baseline from calendar days strictly before [day].
+     *
+     * [valuesByDay] may already contain the scored day and later synced history; neither can influence
+     * the returned state. This keeps historical rescoring stable when future nights arrive.
+     */
+    fun foldHistory(
+        valuesByDay: Map<String, Double?>,
+        beforeDay: String,
+        cfg: MetricCfg,
+        baselineEpoch: Double,
+    ): BaselineState {
+        val dayKeys = valuesByDay.keys.asSequence()
+            .filter { it < beforeDay }
+            .sorted()
+            .toList()
+        val values = dayKeys.map(valuesByDay::get)
+        return foldHistory(values, dayKeys, cfg, baselineEpoch)
     }
 
     // ─────────────────────────────────────────────────────────────────────────

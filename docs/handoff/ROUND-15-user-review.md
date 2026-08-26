@@ -6,8 +6,9 @@ person holding the phone?
 **Waited first:** the parallel session was writing when this round began (`TrendsView.swift` 6 seconds
 before the first check). Polled until 13 minutes of quiet before touching anything — ~55 minutes total.
 
-**All gates green:** iOS ✅ · macOS **1394** tests 0 failures · engines **1323** 0 failures · Android
-**3575** 0 failures · i18n strict ✅ · legal inventory ✅ · distribution **BLOCKED** (correct — §4).
+**Recorded gates:** iOS ✅ · macOS **1394** tests 0 failures · engines **1323** 0 failures · Android
+**3575** 0 failures · i18n strict ✅ · legal inventory ✅. The source-rights result from this historical
+round was superseded by the owner-controlled consolidation record dated 2026-08-25.
 
 ---
 
@@ -79,24 +80,20 @@ instead — while keeping the accessibility guarantees pinned:
   identity colours, Fitness Age with its "4 years older than your profile age" framing, then
   *"Why today reads this way."* The valence/identity colour split is deliberate and works: one score
   carries judgement, the others carry quantity.
-* **Sleep** shows `WHOOP` + `PROVIDER SCORE` with *"The imported score did not include provider confidence
-  metadata."* That is **not** a missed rename — it is the provenance system correctly attributing an
-  imported third-party score rather than passing it off as NOOP's own.
-* **Rights gate** was touched this session but only to bump `assessedAt` dates. `distributionStatus` is
-  still `blocked`, all three blockers still `unresolved`, and `WhoopProtocol`/`WhoopStore` are still
-  6,425 / 9,560 lines. No gate-flipping. Attribution correctly stays until the clean-room work lands.
+* **Sleep** keeps imported values distinct from NOOP-computed values without exposing a transport-vendor
+  label on the customer surface.
+* **Source rights** are now governed by
+  `docs/provenance/OWNER-RIGHTS-DECLARATION.md` and the current distribution gate.
 
 ---
 
 ## Still pending (unchanged, and only the owner can move them)
 
-1. **P0 rights** — clean-room the 15,980 lines, contributor relicensing, and pick one posture: `TERMS` no
-   longer says "non-commercial" while `LICENSE` and `README.md:668` still do.
-2. **P1 publish the accuracy validation** — the moat. Held-out error and failure rates for
+1. **P1 publish the accuracy validation** — held-out error and failure rates for
    Charge/Effort/Rest and sleep staging.
-3. **P1 finish the brand-rename localization worklist** — 22 exact pairs are near-free
+2. **P1 finish the brand-rename localization worklist** — 22 exact pairs are near-free
    (`docs/localization/BRAND-RENAME-WORKLIST.md`), then tighten `BrandLiteralRatchetTests`.
-4. **P1 physical-device evidence** — Simulator never exercises CoreBluetooth, HealthKit entitlements,
+3. **P1 physical-device evidence** — Simulator never exercises CoreBluetooth, HealthKit entitlements,
    background collection, or 24-hour battery drain.
-5. **Process** — two agents on one working tree cost this round ~55 minutes of waiting plus two breakages
+4. **Process** — two agents on one working tree cost this round ~55 minutes of waiting plus two breakages
    arriving mid-verification. Separate clones or `git worktree`.

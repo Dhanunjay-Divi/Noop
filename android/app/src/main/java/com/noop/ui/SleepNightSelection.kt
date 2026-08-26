@@ -115,9 +115,11 @@ internal fun selectNight(
     val groupInBedMin = if (heroGroup.size > 1) {
         heroGroup.sumOf { (it.endTs - it.effectiveStartTs).coerceAtLeast(0L) } / 60.0
     } else null
+    val hasRREvidence = heroGroup.any { it.avgHrv?.isFinite() == true }
     val hasOuraStages = heroGroup.any { OuraSleepSessionMapping.hasOuraProvenance(it.stagesJSON) }
     return HeroNight(session, dayKey, segments, clockLabelFor(heroOnsetTs, heroWakeTs), napBlocks, groupStages,
-        groupSegments, groupMotion, groupInBedMin, heroOnsetTs, heroWakeTs, hasOuraStages)
+        groupSegments, groupMotion, groupInBedMin, heroOnsetTs, heroWakeTs,
+        hasRREvidence, hasOuraStages)
 }
 
 /**

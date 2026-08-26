@@ -168,7 +168,7 @@ struct ScoringGuideView: View {
                 Text("THE THREE SCORES").font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
-                Text("NOOP gives you three daily scores (Recovery, Effort and Sleep Score), each on a 0-100 scale. They're built from available wearable signals using published methods and computed on your device. They are not WHOOP's proprietary scores and won't match number-for-number; source and confidence stay visible so you can compare them honestly.")
+                Text("NOOP gives you three daily scores (Recovery, Effort and Sleep Score), each on a 0-100 scale. They're built from available wearable signals using published methods and computed on your device. They are NOOP estimates, not imported provider scores; source and confidence stay visible.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -230,7 +230,7 @@ struct ScoringGuideView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Divider().overlay(StrandPalette.hairline)
                 HStack(alignment: .top, spacing: 8) {
-                    Text("vs WHOOP").font(StrandFont.overline)
+                    Text("NOOP METHOD").font(StrandFont.overline)
                         .tracking(StrandFont.overlineTracking)
                         .textCase(.uppercase)
                         .foregroundStyle(section.accent)
@@ -299,7 +299,7 @@ struct ScoringGuideView: View {
     }
 
     private var footerNote: some View {
-        Text("These are independent approximations from a consumer strap, built on open science: not medical advice, and not WHOOP's official scores.")
+        Text("These are independent approximations from a consumer strap, built on open science: not medical advice, and not provider scores.")
             .font(StrandFont.footnote)
             .foregroundStyle(StrandPalette.textTertiary)
             .fixedSize(horizontal: false, vertical: true)

@@ -172,9 +172,8 @@ struct RootTabView: View {
 
     var body: some View {
         // Keep the custom bar over a full-bleed page and reserve its measured height only inside scroll
-        // content. Padding or shrinking the TabView cuts off page backdrops and exposes an opaque band;
-        // a scroll-content margin leaves every background edge-to-edge while allowing the final row to
-        // settle fully above the controls.
+        // content. Masking the entire TabView also removes page backgrounds and hit-testing under the bar,
+        // so endpoint clearance belongs to each scroll container while the backdrop remains edge-to-edge.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -1708,8 +1707,8 @@ private extension View {
         }
     }
 
-    /// Navigation-specific glass. `Glass.clear` preserves the page underneath on iOS 26; older iOS
-    /// versions get the closest material equivalent plus the same restrained adaptive tint.
+    /// Navigation-specific glass. Clear glass preserves the full-bleed page on iOS 26. Older iOS versions
+    /// get the closest material equivalent plus the same restrained adaptive tint.
     @ViewBuilder func navigationGlass(in shape: some Shape, tint: Color) -> some View {
         if #available(iOS 26.0, *) {
             self.glassEffect(.clear.tint(tint), in: shape)

@@ -31,6 +31,7 @@ extension RecoveryScorer {
                                      rhrBaseline: BaselineState?,
                                      respBaseline: BaselineState?,
                                      sleepPerf: Double?,
+                                     restQualityBaseline: BaselineState? = nil,
                                      skinTempDev: Double? = nil)
         -> (score: Double?, trace: [String]) {
 
@@ -44,6 +45,7 @@ extension RecoveryScorer {
         let score = recovery(hrv: hrv, rhr: rhr, resp: resp,
                              hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                              respBaseline: respBaseline, sleepPerf: sleepPerf,
+                             restQualityBaseline: restQualityBaseline,
                              skinTempDev: validSkinTempDev)
 
         // Cold-start gate: HRV baseline not usable -> recovery() returns nil before any term is built.
@@ -54,17 +56,37 @@ extension RecoveryScorer {
                 + "(need nValid>=\(Baselines.minNightsSeed))")
             return (score, lines)
         }
+        guard score != nil,
+              hrv.isFinite,
+              rhr.isFinite,
+              validDriverBaseline(DriverBaseline(hrvBaseline)) != nil else {
+            lines.append("charge nilScore reason=invalidRequiredInput")
+            return (score, lines)
+        }
+        let validRhrBaseline = rhrBaseline.flatMap {
+            validDriverBaseline(DriverBaseline($0)) == nil ? nil : $0
+        }
+        let validRespBaseline = respBaseline.flatMap {
+            validDriverBaseline(DriverBaseline($0)) == nil ? nil : $0
+        }
+        let validRestBaseline = restQualityBaseline.flatMap {
+            $0.usable && validDriverBaseline(DriverBaseline($0)) != nil ? $0 : nil
+        }
 
         // Per-driver baseline state lines (mean / spread / nValid / status). The skin-temp term carries no
         // baseline arg here (skinTempDev is already a deviation), so it has no baseline line.
         lines.append("charge baseline hrv mean=\(r2(hrvBaseline.baseline)) spread=\(r2(hrvBaseline.spread)) "
             + "nValid=\(hrvBaseline.nValid) status=\(hrvBaseline.status.rawValue)")
-        if let b = rhrBaseline {
+        if let b = validRhrBaseline {
             lines.append("charge baseline rhr mean=\(r2(b.baseline)) spread=\(r2(b.spread)) "
                 + "nValid=\(b.nValid) status=\(b.status.rawValue)")
         }
-        if let b = respBaseline {
+        if let b = validRespBaseline {
             lines.append("charge baseline resp mean=\(r2(b.baseline)) spread=\(r2(b.spread)) "
+                + "nValid=\(b.nValid) status=\(b.status.rawValue)")
+        }
+        if let b = validRestBaseline {
+            lines.append("charge baseline restQuality mean=\(r2(b.baseline)) spread=\(r2(b.spread)) "
                 + "nValid=\(b.nValid) status=\(b.status.rawValue)")
         }
 
@@ -81,7 +103,7 @@ extension RecoveryScorer {
         lines.append("charge term hrv z=\(r2(hrvZ)) w=\(r2(wHRV)) (higher HRV is better)")
 
         // RHR term: lower is better -> (mu - x) / sigma.
-        if let b = rhrBaseline {
+        if let b = validRhrBaseline {
             let z = zScore(b.baseline, mean: rhr, spread: b.spread)
             terms.append(("rhr", z, wRHR))
             lines.append("charge term rhr z=\(r2(z)) w=\(r2(wRHR)) (lower RHR is better)")
@@ -90,7 +112,7 @@ extension RecoveryScorer {
         }
 
         // Resp term: lower is better, optional (needs BOTH the value and a baseline).
-        if let r = resp, let b = respBaseline {
+        if let r = resp, r.isFinite, let b = validRespBaseline {
             let z = zScore(b.baseline, mean: r, spread: b.spread)
             terms.append(("resp", z, wResp))
             lines.append("charge term resp z=\(r2(z)) w=\(r2(wResp)) (lower resp is better)")
@@ -98,12 +120,15 @@ extension RecoveryScorer {
             nilTerms.append("resp")
         }
 
-        // Sleep-performance / Rest-quality term: no baseline needed, centered at sleepPerfCenter.
-        if let sp = sleepPerf {
-            let z = (sp - sleepPerfCenter) / sleepPerfScale
+        // Rest quality uses the personal center when usable and the fixed center during cold start.
+        if let sp = validRestQuality(sleepPerf) {
+            let restBaseline = validRestBaseline.map(DriverBaseline.init)
+            let center = restQualityCenter(restBaseline)
+            let z = (sp - center) / sleepPerfScale
             terms.append(("sleepPerf", z, wSleep))
             lines.append("charge term sleepPerf z=\(r2(z)) w=\(r2(wSleep)) "
-                + "(rest=\(r2(sp)) center=\(r2(sleepPerfCenter)))")
+                + "(rest=\(r2(sp)) center=\(r2(center)) "
+                + "centerSource=\(restBaseline == nil ? "coldStart" : "personal"))")
         } else {
             nilTerms.append("sleepPerf")
         }

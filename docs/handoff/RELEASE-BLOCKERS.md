@@ -1,190 +1,70 @@
-# Release blockers & production readiness
+# Release blockers and production readiness
 
 **Assessed:** 2026-08-25
-**Hosted implementation checkpoint:** `94661a17`; use `git log -1` for the
-current explainable-trends/profile/Rhythm implementation and handoff commit.
-**Verdict:** local code gates are green except for a current iOS UI rerun blocked
-before test launch by the host Xcode debugger store. Commercial distribution is
-blocked by the three unresolved rights entries in
-`docs/provenance/rights-status.json`; production operations are also blocked by
-unprovisioned identity, cloud, carrier, signing, monitoring, and release-control
-systems.
+**Source-rights status:** cleared by the owner-controlled consolidation record
+**Product verdict:** not yet production-ready
 
-Current continuation instructions:
-[`AGENT-HANDOFF-20260823.md`](AGENT-HANDOFF-20260823.md).
+NOOP's project license and runtime dependency notices are internally
+consistent. Both legal gate modes must remain green:
 
----
+```bash
+python3 Tools/release-legal-gate.py check
+python3 Tools/release-legal-gate.py distribution
+```
 
-## 0. Current local gates and external blockers
+The PolyForm Noncommercial License 1.0.0, NOOP Required Notice, and independent
+dependency notices remain mandatory. The legal gate does not replace review by
+qualified counsel for store terms, trademarks, privacy disclosures, safety
+claims, or a future commercial licensing posture.
 
-| Gate | Result | Command |
-|---|---|---|
-| iOS app (`NOOPiOS`, Debug) | BUILD SUCCEEDED at current source | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` |
-| iOS production-shell UI suite | Earlier 17/17 evidence remains; current rerun is host-blocked before launch by Xcode 26.6's debugger-version store on two simulators | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
-| Profile keyboard regression | PASS, 5/5 on iPhone 17 Pro and 5/5 on compact iPhone 17e | `testProfileMeasurementsCanBeClearedAndRetyped` with `-test-iterations 5` |
-| Charging fixture regression | PASS, 5/5 UI iterations and 2/2 focused unit contracts | Charging UI test on a new simulator plus `AppleDemoSeederTests` |
-| macOS app (`Strand`, Debug) | BUILD SUCCEEDED at current source | `xcodebuild -scheme Strand -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build` |
-| macOS app tests | **1430** executed, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
-| Swift engines | **1323** tests, 0 failures | `cd Packages/StrandAnalytics && swift test` |
-| **Android unit tests** | **3649** tests, 0 failures, 6 skipped | `cd android && ./gradlew :app:testFullDebugUnitTest` |
-| Android Full Debug APK | ASSEMBLED | `cd android && ./gradlew :app:assembleFullDebug` |
-| Android lint / instrumentation source | PASS | `cd android && ./gradlew lintFullDebug compileFullDebugAndroidTestKotlin` |
-| Self-hosted server | 142 normal-suite passes; 10 PostgreSQL-runtime and 1 live-Twilio test environment-gated; migration 013 focused PostgreSQL contract passes | See `docs/ops/rounds/2026-08-25-safety-escalation-contract.md` |
-| Safety localization parity | PASS, 221 keys in 9 locales | Apple and Android Safety localization contracts |
-| Release legal inventory | 152 runtime components, 3 container inputs | `python3 Tools/release-legal-gate.py check` |
+## P0 launch gates
 
-The repository has no Actions secrets or environments. Hosted jobs currently
-end in `startup_failure` because of the account Actions budget; protected
-private `main` requires a GitHub plan upgrade. This Mac has no valid signing
-identity or Android release keystore, Docker/TimescaleDB/k6/Twilio tooling is
-absent, and its configured AWS session is expired. The 10,000-user topology and
-carrier matrix in `server/PRODUCTION_OPERATIONS.md` therefore remain deployment
-work, not completed evidence.
+1. **Stabilize and publish the implementation.** Review the complete working
+   tree, run all Apple/Android/server/policy gates, commit intentional files,
+   push `main`, and verify a clean `HEAD == origin/main`.
+2. **Provision release identity.** Configure Apple Distribution/App Store
+   profiles for the app, widgets, Watch targets, and App Group. Create and
+   protect an Android upload key, Play App Signing identity, and production
+   package registration. Validate in-place upgrades with existing local data.
+3. **Complete store records.** Finish privacy labels, health-data disclosures,
+   encryption/export answers, age rating, content rights, review credentials,
+   descriptions, screenshots for every declared device class, support/privacy
+   URLs, and native-speaker review for all shipped locales.
+4. **Deploy and operate the server path.** Choose production regions, tenancy
+   and identity recovery, PostgreSQL/Timescale topology, secret management,
+   TLS/domain/DNS, backups, restore drills, RPO/RTO, monitoring, paging,
+   incident response, retention, cost limits, and capacity. Run the documented
+   10,000-user load, failover, and restore exercises.
+5. **Prove Safety paging delivery.** Complete sender procurement and US A2P
+   10DLC registration where applicable. Run controlled SMS, voice fallback,
+   DTMF acknowledgement, responder-link, cancel, expiry, provider-5xx, worker
+   restart, and all-contact-failure scenarios on real controlled phones.
+   Record provider IDs and p95 delivery latency.
+6. **Validate physical devices.** Exercise supported band generations,
+   overnight history, reconnect, clock correlation, background restoration,
+   haptics, charging state, low battery, alarms, HealthKit, Watch handoff,
+   widgets/Live Activities, Android OEM restrictions, and upgrade/data
+   retention on representative real hardware.
+7. **Finish measurement evidence.** Run held-out studies for workout
+   classification, sleep staging with wrist R-R/respiration plus PSG,
+   temperature conversion, SpO2/VO2-derived presentation, and Charge/Effort/
+   Rest calibration across representative participants and devices.
+8. **Keep automatic emergency inference disabled.** Manual app SOS and repeated
+   band SOS can use the acknowledged paging pipeline. Automatic medical,
+   Rhythm, anomaly, or fall paging remains blocked until a separately validated
+   detector, staged hard-negative testing, human-factors review, physical
+   firmware evidence, carrier evidence, and applicable regulatory review exist.
 
-Android was previously flagged as compiler-unverified in the earlier handoff. **That gap is now closed** —
-JDK 17 and the SDK were present at `~/Library/Android/sdk`; export `ANDROID_HOME` and the suite runs.
+## Current engineering evidence
 
-Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
-`94661a17`. Hosted app run `32668839522` is intentionally retained as a failed
-attempt: its macOS leg passed and its iOS leg failed only the charging-state UI
-assertion. Commit `94661a17` moves that DEBUG fixture ahead of first render;
-local full-suite, clean-simulator repetition, and unit-contract evidence all
-pass after the change. Final hosted app run `32670362286` passed both jobs at
-`94661a17`: universal macOS build and tests, plus iOS simulator build and 16/16
-production-shell tests including the charging assertion.
+Round 21 records the latest package, app, simulator, emulator, localization,
+privacy, and migration results in
+[`ROUND-21-validation-calibration-import-integrity.md`](ROUND-21-validation-calibration-import-integrity.md).
+Simulator, emulator, and unit evidence does not close any physical-device,
+carrier, signing, store, infrastructure, clinical, or regulatory gate above.
 
-At the current local HEAD, Round 14 adds the complete Today metric-catalog UI
-regression, bringing the iOS suite to 17/17. The macOS suite remains 1,390 tests
-with 0 failures and 1 skip, StrandDesign passes 44/44, and the Android Demo
-Debug unit suite passes. Visual and continuation evidence is in
-[`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md).
+## Release rule
 
-The current explainable-trends/profile/Rhythm round adds plain pattern evidence,
-iPhone trend inspection, local-only profile identity, consent-gated Android
-Rhythm loading, workout/resting-context gates, active/canonical source handling,
-tap precedence, and phone breathing haptics. Final iOS and macOS Debug builds,
-the 3,573-test Android Full Debug suite, Full Debug APK assembly, 1,323
-StrandAnalytics tests, 44 StrandDesign tests, focused profile/brand tests,
-i18n/claims/legal/private-data gates, and independent source review pass.
-Physical band/phone haptics, BLE/background behavior, medical accuracy, and
-commercial distribution are not established by those checks.
-
----
-
-## 1. BLOCKER — the current licence does not permit commercial distribution
-
-The owner selected a commercially independent product, with this tree retained
-as the non-commercial reference codebase. Qualified counsel still needs to
-review the completed provenance evidence and commercial terms.
-
-What is true in the tree right now:
-
-| Artefact | Says |
-|---|---|
-| `LICENSE` | **PolyForm Noncommercial License 1.0.0** ("Copyright 2026 NoopApp"); 7 noncommercial references |
-| `README.md:668` | "**Keep it non-commercial** … PolyForm Noncommercial — mirror and use freely, **just don't sell it or ship it in a paid product**" |
-| `TERMS.md` 2.3 | This codebase is non-commercial and not cleared for commercial distribution |
-| Apple and Android terms gates | Both require acknowledgment version `2.3`; CI verifies parity |
-| `DISCLAIMER.md` | PolyForm Noncommercial applies to this tree's original work |
-| `README`, `docs/CONTRIBUTING.md`, `docs/PRIVACY_SECURITY.md` | Describe this reference codebase as non-commercial |
-| `codex/day4-sync-performance` (**merged in**) | "Prepare first App Store preview release" |
-
-The earlier Terms/README mismatch was corrected in the repository-independence
-pass. This makes the current tree internally consistent; it does not grant
-commercial rights.
-
-### The harder half — inherited code you may not have permission to sell
-
-`NOTICE` states it plainly:
-
-> That mechanical dependency work does **not** cure NOOP's inherited `johnmiddleton12/my-whoop` (now
-> `johnmiddleton12/wearable`) provenance. The active base says that WHOOP 4 protocol/store and collection
-> expression was adapted from that repository, but **the pinned reference has no explicit software
-> licence. Attribution is not permission.**
-
-Relicensing your own code is your right as copyright holder. **Code adapted from a repository with no
-licence is not yours to relicense**, and "no licence" means no permission to redistribute at all, let alone
-commercially. A free App Store listing is a weaker version of the same question; a paid product or bundled
-hardware makes it sharper.
-
-**Scope (corrected 2026-08-23):** the **known minimum** replacement core is
-`Packages/WhoopProtocol/Sources` (6,425 Swift lines) plus
-`Packages/WhoopStore/Sources` (9,555 Swift lines), or **15,980 lines**. The
-complete classification surface also includes `Strand/BLE` (12,154),
-`Strand/Collect` (1,510), Android protocol (4,369 Kotlin lines), and Android BLE
-(15,155). That is a review ceiling of **49,168 source lines across 154 files**;
-some transport files may prove independently developed, but that must be shown
-file by file. Tests and fixtures require the same provenance treatment. An
-earlier ~209,000-line figure counted `.build/checkouts/` dependencies and was
-wrong. Observable wire constants can be documented independently, but source
-expression must not be copied.
-
-A rewrite of those packages does **not** by itself clear the fork lineage: the app is multi-author under
-PolyForm Noncommercial with no CLA. See `docs/handoff/OWNERSHIP-CLEANUP-CHECKLIST.md` §2.
-
-### What must happen before a commercial release
-
-1. Keep this reference tree non-commercial under its existing terms.
-2. For the separate commercial implementation, **establish provenance for the
-   inherited `my-whoop`/`wearable` behavior** — obtain a licence,
-   or clean-room reimplement the adapted parts, or remove them.
-3. Give the independently authored commercial repository its own deliberately
-   chosen licence and counsel-reviewed terms.
-4. Record contributor grants or independent replacement evidence for every
-   affected component, not only the protocol packages.
-5. Keep the new repository-rights gate green. It now rejects missing blockers,
-   deleted provenance entries, and removed markers while rights remain
-   unresolved.
-6. Put the commercial implementation in a genuinely new history containing
-   only independently authored or separately licensed code. Changing `origin`
-   is hosting migration, not source clearance.
-
-**Until 2–4 are done, this tree is not a commercial release candidate.**
-
----
-
-## 2. Also required before an App Store submission
-
-| # | Item | Why |
-|---|---|---|
-| 2.1 | **Trademark review of the WHOOP references** | The app still interoperates with WHOOP hardware and names it throughout. Nominative fair use is a real defence and the disclaimer is careful, but App Review and WHOOP's counsel are different audiences. `DISCLAIMER.md` is strong; have someone confirm the store listing matches it. |
-| 2.2 | **Privacy manifest / nutrition label must match the new usage strings** | This session corrected `NSHealthShareUsageDescription` to disclose all three destinations (local, self-hosted server, user-chosen AI provider) and `NSHealthUpdateUsageDescription` to name workouts + sleep. The App Store privacy answers must say the same. |
-| 2.3 | **HealthKit + reproductive-health review** | Cycle tracking reads Apple Health cycle-start dates behind a dedicated consent gate and stores optional user-typed flow/symptoms locally. Verified: `menstrualFlow` is **not** in general `readTypes`, the request is read-only, detail is independently erasable. Expect reviewer questions; the answers are in `docs/handoff/ROUND-13-principal-review.md` §3. |
-| 2.4 | **Native-speaker sign-off on 8 machine-translated locale values** | The cycle disclosure was machine-translated this round and is not approved for release. CI marks the four focus locales structurally complete, while the other four remain `needs_review`; neither state is native-speaker sign-off. |
-| 2.5 | **Fall response must stay visibly inert** | The server models a distinct, fail-closed `validated_fall` contract, but authenticated detector attestation is absent, every new automatic fall request is rejected, and no production client constructs a candidate. The preparatory flag and allowlist cannot activate transport. The UI remains "Not active" and "Supported band firmware required." Do not replace the hard block until detector, firmware, physical-device, staged-event, human-factors, carrier, legal, and regulatory gates pass. |
-| 2.6 | **"NOOP Band is in development"** | TERMS/DISCLAIMER now say this. Keep the store listing consistent — no implication that first-party hardware ships today. |
-| 2.7 | **Retire the imported i18n baseline** | Canonical CI now blocks new debt, but 247 Android and 166 Apple unique literals remain baseline-tracked and are not proof of translated UI. Migrate them to reviewed resources before claiming supported-language readiness. |
-
----
-
-## 3. Engineering follow-ups (not release blockers)
-
-1. **One agent per checkout.** Two agents shared this working tree; it produced phantom test failures and a
-   half-written file mid-build. Use separate clones or `git worktree`.
-2. **Decide WHY's driver engine** — the WHY section uses `ReadinessEngine`, the Charge breakdown uses
-   `ChargeDrivers`; they can name different drivers for the same day. Needs a product call plus a
-   no-contradiction test.
-3. **Move `UIv2/NoopV2Components.swift` + `NoopV2Tokens.swift`** out of `UIv2` — production code in a
-   prototype-named folder already caused one build break.
-4. **Real timing-based SRI**, then re-fit the sleep-regularity coefficient (currently marked
-   INTERNAL/UNCITED on purpose).
-5. **`StressHeatmap` has no consumer** — give it one or retire it.
-6. **Add a catalog-format guard** — a test asserting `Localizable.xcstrings` stays one-entry-per-line. The
-   five Ruby generators strip their namespace with a line-based regex; pretty-printing the file corrupts it.
-7. **Review the two captured concurrent-session commits** (`6242c995`, `86b6d17e`) — verified green, but
-   not code-reviewed.
-
----
-
-## 4. Repository migration
-
-The local `origin` now targets
-`https://github.com/Dhanunjay-Divi/Noop.git`. Cached remote-tracking refs from
-the prior server were removed. Authenticated GitHub inspection on 2026-08-24 verified
-the private canonical repository reports `isFork=false`, has no parent, and has
-zero child forks.
-
-Do not push this inherited `main` into an empty repository intended to be the
-commercial clean codebase. Follow
-`docs/REPOSITORY_INDEPENDENCE.md` and keep this checkout as the auditable
-reference until an independent implementation and rights review are complete.
+No production upload or public safety claim is complete until every applicable
+P0 item has named evidence, an owner, a date, and a rollback path. A successful
+build is necessary but is not release approval.

@@ -106,9 +106,12 @@ public enum RecoveryScorer {
     public static let bandRedMax: Double = 34.0
     public static let bandYellowMax: Double = 67.0
 
-    /// Sleep-performance center ("good night" at ~85% efficiency).
+    /// Cold-start Rest-quality center. Once a usable personal Rest baseline exists,
+    /// production callers pass its center instead.
     public static let sleepPerfCenter: Double = 0.85
-    /// Sleep-performance scale (±2 z spans the normal range).
+    /// Rest-quality scale (±2 z spans the normal range). This remains fixed even
+    /// when the center is personalized, so one unusually flat history cannot make
+    /// tiny Rest changes dominate Charge.
     public static let sleepPerfScale: Double = 0.12
 
     /// Rolling-mean HR window (seconds) for the resting-HR estimate.
@@ -246,9 +249,11 @@ public enum RecoveryScorer {
 
     /// The recovery baseline's real seed count while it still cold-starts — the honest
     /// "Calibrating - N of <seed> nights" progress the dashboard shows in place of a bare empty state;
-    /// nil once recovery exists or the baseline has crossed the seed gate. N is the HRV baseline's
-    /// `nValid` from folding the SAME day-keyed, epoch-aware history the recovery engine folds
-    /// (`Baselines.foldHistory(_:dayKeys:cfg:baselineEpoch:)`), NOT a looser per-night bounds count.
+    /// nil once recovery exists or the causal baseline was already seeded before the displayed day. N
+    /// is the HRV baseline's `nValid` through the displayed wake day, using the SAME day-keyed,
+    /// epoch-aware fold as the recovery engine, NOT a looser per-night bounds count. N can equal the
+    /// seed only when the displayed day's just-completed night crossed the gate; presentation must call
+    /// that boundary "Baseline ready", because the seed night cannot score against itself.
     ///
     /// The old count advanced on every in-range night, including nights the engine's fold DROPS after a
     /// manual "Recalibrate HRV baseline" (each night dated before the epoch is discarded, not
@@ -256,23 +261,32 @@ public enum RecoveryScorer {
     /// `count ≥ seed → nil` here, and the Today score side fell through to "Needs the strap" while the
     /// post-recalibration baseline was still seeding (Bug B, #393 follow-up). `nValid` is the exact count
     /// `Baselines.computeStatus` gates CALIBRATING on, so N now tracks the baseline the Charge ring rides
-    /// and can never over-state it. Never claims "calibrating" at/above the seed gate (a nil recovery
-    /// there is some other gap). `baselineEpoch` nil reads the persisted HRV epoch from UserDefaults,
-    /// exactly like the engine's fold. Mirrors Android TodayScreen.recoveryCalibrationNights
-    /// (RecoveryCalibrationTest is the oracle).
+    /// and can never over-state it. A baseline seeded before the displayed day returns nil (a nil recovery
+    /// there is some other gap). The displayed day's completed night advances visible progress, while
+    /// scoring still uses only the strictly-prior baseline. This distinction prevents a just-synced first
+    /// night from reading 0 of 4 without leaking that night into its own score. `baselineEpoch` nil reads
+    /// the persisted HRV epoch from UserDefaults, exactly like the engine's fold. Mirrors Android
+    /// TodayScreen.recoveryCalibrationNights (RecoveryCalibrationTest is the oracle).
     public static func calibrationNights(nightlyHrv: [Double?],
                                          dayKeys: [String],
+                                         before day: String,
                                          hasRecovery: Bool,
                                          seed: Int = Baselines.minNightsSeed,
                                          cfg: MetricCfg = Baselines.hrvCfg,
                                          baselineEpoch: Double? = nil) -> Int? {
         guard !hasRecovery else { return nil }
-        let n = Baselines.foldHistory(nightlyHrv, dayKeys: dayKeys, cfg: cfg,
+        let through = zip(dayKeys, nightlyHrv).filter { $0.0 <= day }
+        let prior = through.filter { $0.0 < day }
+        let priorN = Baselines.foldHistory(prior.map(\.1), dayKeys: prior.map(\.0), cfg: cfg,
+                                           baselineEpoch: baselineEpoch).nValid
+        guard priorN < seed else { return nil }
+        let n = Baselines.foldHistory(through.map(\.1), dayKeys: through.map(\.0), cfg: cfg,
                                       baselineEpoch: baselineEpoch).nValid
         // Include 0: a brand-new user (no banked nights yet) should read "Calibrating - 0 of N" on the
         // Charge ring, not a bare "No data" that looks broken (#335). Past days are gated to nil by the
-        // caller; >= seed (recovery should exist) still returns nil.
-        return (0..<seed).contains(n) ? n : nil
+        // caller. Exactly `seed` is the just-completed seed-night boundary; a baseline that was already
+        // seeded before this day returned nil above.
+        return (0...seed).contains(n) ? n : nil
     }
 
     // MARK: - Recovery score
@@ -295,6 +309,30 @@ public enum RecoveryScorer {
         return (value - mean) / sigma
     }
 
+    /// A baseline is usable by the scorer only when both stored parameters are finite.
+    /// Zero spread is valid and uses the z-score floor; negative spread is corrupt input.
+    static func validDriverBaseline(_ baseline: DriverBaseline?) -> DriverBaseline? {
+        guard let baseline,
+              baseline.mean.isFinite,
+              baseline.spread.isFinite,
+              baseline.spread >= 0 else { return nil }
+        return baseline
+    }
+
+    /// Validate the scorer's fractional Rest-quality boundary. Percent-scale or
+    /// non-finite values are missing data, not exceptional recovery.
+    static func validRestQuality(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, (0.0...1.0).contains(value) else { return nil }
+        return value
+    }
+
+    static func restQualityCenter(_ baseline: DriverBaseline?) -> Double {
+        guard let center = baseline?.mean,
+              center.isFinite,
+              (0.0...1.0).contains(center) else { return sleepPerfCenter }
+        return center
+    }
+
     /// Z-score + logistic recovery score in [0, 100]. APPROXIMATE.
     ///
     /// Returns nil when the HRV baseline (dominant driver) is not yet usable, or
@@ -310,6 +348,8 @@ public enum RecoveryScorer {
     ///   - respBaseline: respiration baseline; nil drops the resp term.
     ///   - sleepPerf: Rest quality (Rest composite ÷100, 0..1; was raw efficiency);
     ///     nil drops the term.
+    ///   - restQualityBaseline: optional personal Rest-quality baseline (fractional
+    ///     center). When absent or invalid, the cold-start 0.85 center is used.
     ///   - skinTempDev: skin-temperature deviation from the personal baseline (±°C,
     ///     `DailyMetric.skinTempDevC`). Entered as a SYMMETRIC penalty −|dev|/scale,
     ///     weight wSkinTemp. nil drops the term and the weights renormalize so the
@@ -335,32 +375,36 @@ public enum RecoveryScorer {
                                 rhrBaseline: DriverBaseline?,
                                 respBaseline: DriverBaseline?,
                                 sleepPerf: Double?,
+                                restQualityBaseline: DriverBaseline? = nil,
                                 skinTempDev: Double? = nil,
                                 hrvBaselineUsable: Bool = true,
                                 recoveryIndexSlope: Double? = nil,
                                 effortBaseline: DriverBaseline? = nil,
                                 priorDayEffort: Double? = nil) -> Double? {
-        // Cold-start gate: HRV is the dominant driver; if its baseline isn't
-        // usable, refuse to score (more honest than a fabricated value).
-        if !hrvBaselineUsable { return nil }
+        // HRV, RHR and the HRV baseline are required inputs. Corrupt imports must
+        // fail closed rather than becoming NaN (or 100 after Swift's min/max).
+        guard hrvBaselineUsable,
+              hrv.isFinite,
+              rhr.isFinite,
+              let hrvBaseline = validDriverBaseline(hrvBaseline) else { return nil }
 
         var terms: [(z: Double, w: Double)] = []
 
         // HRV term: higher is better.
-        if let b = hrvBaseline {
-            terms.append((zScore(hrv, mean: b.mean, spread: b.spread), wHRV))
-        }
+        terms.append((zScore(hrv, mean: hrvBaseline.mean, spread: hrvBaseline.spread), wHRV))
         // RHR term: lower is better → (μ − x) / σ.
-        if let b = rhrBaseline {
+        if let b = validDriverBaseline(rhrBaseline) {
             terms.append((zScore(b.mean, mean: rhr, spread: b.spread), wRHR))
         }
         // Resp term: lower is better, optional.
-        if let r = resp, let b = respBaseline {
+        if let r = resp, r.isFinite, let b = validDriverBaseline(respBaseline) {
             terms.append((zScore(b.mean, mean: r, spread: b.spread), wResp))
         }
-        // Sleep-performance / Rest-quality term: no baseline needed; centered at SLEEP_PERF_CENTER.
-        if let sp = sleepPerf {
-            terms.append(((sp - sleepPerfCenter) / sleepPerfScale, wSleep))
+        // Rest quality uses the wearer's own center once calibrated. The fixed 0.85
+        // center is cold-start only; the established 0.12 scale remains unchanged.
+        if let sp = validRestQuality(sleepPerf) {
+            let center = restQualityCenter(restQualityBaseline)
+            terms.append(((sp - center) / sleepPerfScale, wSleep))
         }
         // Skin-temp term: SYMMETRIC penalty on |deviation| (illness/overreach). Any
         // drift from the personal baseline lowers Charge; added only when supplied.
@@ -370,22 +414,25 @@ public enum RecoveryScorer {
         // Recovery-Index term: overnight HR-DECLINE slope (bpm/hour). No baseline needed (a
         // fixed, documented scale, same style as sleepPerf/skin-temp). Negative (declining)
         // supports recovery; positive (rising) limits it. Added only when supplied.
-        if let slope = recoveryIndexSlope {
+        if let slope = recoveryIndexSlope, slope.isFinite {
             terms.append((-slope / recoveryIndexScaleBpmPerHr, wRecoveryIndex))
         }
         // Activity-Balance / previous-day-Effort term: lower vs personal baseline is better,
         // same "lower is better" direction as RHR/resp → (μ − x) / σ. Needs BOTH the value
         // and a baseline, matching resp's pattern; added only when both are supplied.
-        if let e = priorDayEffort, let b = effortBaseline {
+        if let e = priorDayEffort, e.isFinite, let b = validDriverBaseline(effortBaseline) {
             terms.append((zScore(b.mean, mean: e, spread: b.spread), wActivityBalance))
         }
 
-        guard !terms.isEmpty else { return nil }
+        guard !terms.isEmpty,
+              terms.allSatisfy({ $0.z.isFinite && $0.w.isFinite && $0.w > 0 }) else { return nil }
         let totalWeight = terms.reduce(0) { $0 + $1.w }
-        guard totalWeight > 0 else { return nil }
+        guard totalWeight.isFinite, totalWeight > 0 else { return nil }
 
         let z = terms.reduce(0) { $0 + $1.z * $1.w } / totalWeight
+        guard z.isFinite else { return nil }
         let score = 100.0 / (1.0 + exp(-logisticK * (z - logisticZ0)))
+        guard score.isFinite else { return nil }
         return max(0.0, min(100.0, score))
     }
 
@@ -398,6 +445,7 @@ public enum RecoveryScorer {
                                 rhrBaseline: BaselineState?,
                                 respBaseline: BaselineState?,
                                 sleepPerf: Double?,
+                                restQualityBaseline: BaselineState? = nil,
                                 skinTempDev: Double? = nil,
                                 recoveryIndexSlope: Double? = nil,
                                 effortBaseline: BaselineState? = nil,
@@ -409,6 +457,9 @@ public enum RecoveryScorer {
                  rhrBaseline: rhrBaseline.map(DriverBaseline.init),
                  respBaseline: respBaseline.map(DriverBaseline.init),
                  sleepPerf: sleepPerf,
+                 restQualityBaseline: restQualityBaseline.flatMap {
+                     $0.usable ? DriverBaseline($0) : nil
+                 },
                  skinTempDev: skinTempDev,
                  hrvBaselineUsable: hrvBaseline.usable,
                  recoveryIndexSlope: recoveryIndexSlope,

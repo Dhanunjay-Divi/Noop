@@ -324,7 +324,7 @@ object XiaomiBandImporter {
     private fun sleepEfficiency(total: Double?, awake: Double?): Double? {
         if (total == null || total <= 0) return null
         val inBed = total + (awake ?: 0.0)
-        return if (inBed > 0) minOf(100.0, total / inBed * 100.0) else null
+        return if (inBed > 0) minOf(1.0, total / inBed) else null
     }
 
     private fun efficiency(stagesJson: String?, start: Long, end: Long): Double? {
@@ -336,7 +336,7 @@ object XiaomiBandImporter {
             if (SleepStageVocabulary.isWake(o.optString("stage"))) continue
             asleep += (o.optLong("end") - o.optLong("start")).coerceAtLeast(0)
         }
-        return minOf(100.0, asleep.toDouble() / (end - start) * 100.0)
+        return minOf(1.0, asleep.toDouble() / (end - start))
     }
 
     private fun dayKey(time: Long, zoneOffset: Long): String =

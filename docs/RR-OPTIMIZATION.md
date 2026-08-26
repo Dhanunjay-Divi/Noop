@@ -6,7 +6,7 @@ The R-R optimization work improves the beat-to-beat interval processing that fee
 
 `HrvAnalyzer` gained gap-aware RMSSD and pNN50 (`cleanRRGapAware`, `rmssdGapAware`, `pnn50GapAware`). When cleaning drops an out-of-range or ectopic beat, its two neighbours become adjacent in the cleaned list, and the plain successive-difference RMSSD counts the difference across that splice as a real beat-to-beat delta. Because RMSSD squares each delta, one removed beat can bias RMSSD high. The gap-aware path skips any difference that straddles a dropped beat. On a series with no drops it is identical to the plain path, so clean data and the existing golden vectors are unchanged. Wired into `analyzeRaw` (spot and daytime and windowed HRV) and the nightly `SleepStager.sessionHrvWindows`.
 
-The gap-aware analysis path shipped as PR ryanbr/noop#204 (iOS/macOS twin #208). It composes with the seq storage fix (PR ryanbr/noop#163): the PK `(deviceId, ts, rrMs, seq)` stops two equal same-second intervals from colliding under INSERT IGNORE and being dropped, which also biased RMSSD high. The two fixes cover the same class of defect from opposite sides, one at storage and one at analysis.
+The gap-aware analysis path shipped as PR Dhanunjay-Divi/Noop#204 (iOS/macOS twin #208). It composes with the seq storage fix (PR Dhanunjay-Divi/Noop#163): the PK `(deviceId, ts, rrMs, seq)` stops two equal same-second intervals from colliding under INSERT IGNORE and being dropped, which also biased RMSSD high. The two fixes cover the same class of defect from opposite sides, one at storage and one at analysis.
 
 ## The harness
 

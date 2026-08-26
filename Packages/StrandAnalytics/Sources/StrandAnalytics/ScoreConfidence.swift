@@ -1,4 +1,5 @@
 import Foundation
+import WhoopProtocol
 
 // ScoreConfidence.swift — per-score certainty tier for Charge / Effort / Rest.
 //
@@ -23,6 +24,35 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
     case building
     case solid
 
+    // These keys are durable storage contracts shared with Android. Never rename an existing key.
+    public static let sleepPerformanceSeriesKey = "sleep_performance"
+    public static let restConfidenceSeriesKey = "rest_confidence"
+    public static let restEvidenceSeriesKey = "rest_evidence_flags"
+    public static let managedRestSeriesKeys: Set<String> = [
+        sleepPerformanceSeriesKey,
+        restConfidenceSeriesKey,
+        restEvidenceSeriesKey,
+    ]
+
+    /// Stable numeric projection used only for the local `rest_confidence` metric series.
+    public var persistedValue: Double {
+        switch self {
+        case .calibrating: return 0
+        case .building: return 1
+        case .solid: return 2
+        }
+    }
+
+    public init?(persistedValue: Double?) {
+        guard let persistedValue, persistedValue.isFinite else { return nil }
+        switch persistedValue {
+        case 0: self = .calibrating
+        case 1: self = .building
+        case 2: self = .solid
+        default: return nil
+        }
+    }
+
     /// Why a Rest read did not earn the highest input-confidence tier. These are evidence limits,
     /// not diagnoses, and never alter the Rest score itself.
     public enum RestLimitation: String, Equatable, Sendable, Codable {
@@ -30,6 +60,8 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
         case noStagedSleep
         case motionUnavailable
         case sparseMotion
+        case missingRREvidence
+        case missingRespirationEvidence
         case implausibleStageMix
     }
 
@@ -42,6 +74,98 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
         public init(confidence: ScoreConfidence, limitations: [RestLimitation]) {
             self.confidence = confidence
             self.limitations = limitations
+        }
+    }
+
+    /// Independently persisted evidence behind a Rest confidence tier. The bit positions are a durable,
+    /// cross-platform storage contract; unknown or internally inconsistent masks are rejected so a newer
+    /// writer cannot be misread by an older UI.
+    public struct RestEvidenceFlags: OptionSet, Equatable, Sendable {
+        public let rawValue: UInt8
+
+        public init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        public static let sessionPresent = Self(rawValue: 1 << 0)
+        public static let stagedSleepPresent = Self(rawValue: 1 << 1)
+        public static let motionAvailable = Self(rawValue: 1 << 2)
+        public static let sparseMotion = Self(rawValue: 1 << 3)
+        public static let rrEvidencePresent = Self(rawValue: 1 << 4)
+        public static let respirationEvidencePresent = Self(rawValue: 1 << 5)
+        public static let implausibleStageMix = Self(rawValue: 1 << 6)
+
+        private static let knownMask: UInt8 =
+            sessionPresent.rawValue
+            | stagedSleepPresent.rawValue
+            | motionAvailable.rawValue
+            | sparseMotion.rawValue
+            | rrEvidencePresent.rawValue
+            | respirationEvidencePresent.rawValue
+            | implausibleStageMix.rawValue
+
+        public var persistedValue: Double { Double(rawValue) }
+
+        public init?(persistedValue: Double?) {
+            guard let persistedValue,
+                  persistedValue.isFinite,
+                  persistedValue >= 0,
+                  persistedValue <= Double(UInt8.max),
+                  persistedValue.rounded(.towardZero) == persistedValue else { return nil }
+            let rawValue = UInt8(persistedValue)
+            guard rawValue & ~Self.knownMask == 0 else { return nil }
+            let flags = Self(rawValue: rawValue)
+            guard !flags.contains(.stagedSleepPresent) || flags.contains(.sessionPresent),
+                  !flags.contains(.sparseMotion) || flags.contains(.motionAvailable),
+                  !flags.contains(.implausibleStageMix)
+                    || flags.isSuperset(of: [.sessionPresent, .stagedSleepPresent]) else { return nil }
+            self = flags
+        }
+    }
+
+    /// Raw, main-night-scoped cardiorespiratory evidence retained across the user-edit recompute seam.
+    public struct RestRawEvidence: Equatable, Sendable {
+        public let hasRREvidence: Bool
+        public let hasRespirationEvidence: Bool
+        public let mainSessionStarts: Set<Int>
+        private let countsBySessionStart: [Int: AnalyticsEngine.RestEvidenceCounts]
+
+        public init(hasRREvidence: Bool, hasRespirationEvidence: Bool,
+                    mainSessionStarts: Set<Int> = []) {
+            self.hasRREvidence = hasRREvidence
+            self.hasRespirationEvidence = hasRespirationEvidence
+            self.mainSessionStarts = mainSessionStarts
+            self.countsBySessionStart = [:]
+        }
+
+        fileprivate init(mainSessionStarts: Set<Int>,
+                         countsBySessionStart: [Int: AnalyticsEngine.RestEvidenceCounts]) {
+            let counts = mainSessionStarts.reduce(AnalyticsEngine.RestEvidenceCounts.zero) {
+                $0 + (countsBySessionStart[$1] ?? .zero)
+            }
+            let resolved = counts.resolved
+            self.hasRREvidence = resolved.hasRREvidence
+            self.hasRespirationEvidence = resolved.hasRespirationEvidence
+            self.mainSessionStarts = mainSessionStarts
+            self.countsBySessionStart = countsBySessionStart
+        }
+
+        /// Resolve evidence for the final main-night group after user edits. A legacy/manually-created
+        /// value has no per-session counts, so it may preserve its original selection but cannot lend
+        /// evidence to a different block.
+        public func selecting(mainSessionStarts: Set<Int>) -> RestRawEvidence {
+            guard !countsBySessionStart.isEmpty else {
+                guard mainSessionStarts == self.mainSessionStarts else {
+                    return RestRawEvidence(
+                        hasRREvidence: false,
+                        hasRespirationEvidence: false,
+                        mainSessionStarts: mainSessionStarts)
+                }
+                return self
+            }
+            return RestRawEvidence(
+                mainSessionStarts: mainSessionStarts,
+                countsBySessionStart: countsBySessionStart)
         }
     }
 
@@ -91,14 +215,16 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
     /// suspicious case — high efficiency (lots of measured sleep) but implausibly little restorative.
     public static let highEfficiencyThreshold: Double = 0.85
 
-    /// Rest confidence WITH the H9 stage-quality check AND the sparse-motion guard. Starts from
+    /// Rest confidence WITH the H9 stage-quality check and evidence-availability guards. Starts from
     /// `rest(hasSession:hasStagedSleep:)`, then DOWNGRADES a `.solid` tier to `.building` (low-confidence)
-    /// when EITHER:
+    /// when ANY of these apply:
     ///  - the night was staged on SPARSE gravity (`gravitySparse`) — a WHOOP 4.0 synced/offload night banks
     ///    motion coarsely, too sparse to reliably stage sleep (#345), so a confident 85–100 Rest is unearned
     ///    however the engine filled the stages. This catches the case H9 MISSES: a sparse night whose staging
     ///    manufactures HIGH efficiency AND HIGH restorative reads SOLID under H9 alone (the #319 signature),
     ///    yet the underlying data can't support it; OR
+    ///  - R-R or respiration evidence was unavailable, leaving the staged night without one of the
+    ///    cardiorespiratory lanes used to distinguish deep and REM; OR
     ///  - the night is high-efficiency yet its restorative (deep+REM) share is below
     ///    `restorativeLowConfidenceShare` — a likely staging miss (#H9).
     /// `asleepSeconds`/`restorativeSeconds` are the night's totals; efficiency is asleep/in-bed in [0,1].
@@ -106,10 +232,13 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
     /// the Rest score or invents stages. Engine output only; the UI surfaces the tier later. (#H9, #345)
     public static func rest(hasSession: Bool, hasStagedSleep: Bool,
                             asleepSeconds: Double, restorativeSeconds: Double,
-                            efficiency: Double, gravitySparse: Bool = false) -> ScoreConfidence {
+                            efficiency: Double, gravitySparse: Bool = false,
+                            hasRREvidence: Bool = true,
+                            hasRespirationEvidence: Bool = true) -> ScoreConfidence {
         let base = rest(hasSession: hasSession, hasStagedSleep: hasStagedSleep)
         if base != .solid { return base }
         if gravitySparse { return .building }   // #345: sparse-motion staging can't earn a SOLID Rest
+        if !hasRREvidence || !hasRespirationEvidence { return .building }
         if asleepSeconds <= 0 { return base }
         let restorativeShare = restorativeSeconds / asleepSeconds
         if efficiency >= highEfficiencyThreshold && restorativeShare < restorativeLowConfidenceShare {
@@ -124,28 +253,107 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
     public static func restAssessment(hasSession: Bool, hasStagedSleep: Bool,
                                       asleepSeconds: Double, restorativeSeconds: Double,
                                       efficiency: Double, gravitySparse: Bool = false,
-                                      motionUnavailable: Bool = false) -> RestAssessment {
-        let confidence = rest(hasSession: hasSession, hasStagedSleep: hasStagedSleep,
-                              asleepSeconds: asleepSeconds,
-                              restorativeSeconds: restorativeSeconds,
-                              efficiency: efficiency,
-                              gravitySparse: gravitySparse || motionUnavailable)
+                                      motionUnavailable: Bool = false,
+                                      hasRREvidence: Bool = true,
+                                      hasRespirationEvidence: Bool = true) -> RestAssessment {
+        restAssessment(evidence: restEvidenceFlags(
+            hasSession: hasSession,
+            hasStagedSleep: hasStagedSleep,
+            asleepSeconds: asleepSeconds,
+            restorativeSeconds: restorativeSeconds,
+            efficiency: efficiency,
+            motionAvailable: !motionUnavailable,
+            gravitySparse: gravitySparse,
+            hasRREvidence: hasRREvidence,
+            hasRespirationEvidence: hasRespirationEvidence))
+    }
+
+    /// Build the durable evidence record after all user-edited sleep aggregates have been applied.
+    public static func restEvidenceFlags(hasSession: Bool, hasStagedSleep: Bool,
+                                         asleepSeconds: Double, restorativeSeconds: Double,
+                                         efficiency: Double, motionAvailable: Bool,
+                                         gravitySparse: Bool,
+                                         hasRREvidence: Bool,
+                                         hasRespirationEvidence: Bool) -> RestEvidenceFlags {
+        var evidence: RestEvidenceFlags = []
+        if hasSession { evidence.insert(.sessionPresent) }
+        if hasSession && hasStagedSleep { evidence.insert(.stagedSleepPresent) }
+        if motionAvailable { evidence.insert(.motionAvailable) }
+        if motionAvailable && gravitySparse { evidence.insert(.sparseMotion) }
+        if hasRREvidence { evidence.insert(.rrEvidencePresent) }
+        if hasRespirationEvidence { evidence.insert(.respirationEvidencePresent) }
+        if hasSession, hasStagedSleep, asleepSeconds > 0,
+           efficiency >= highEfficiencyThreshold,
+           restorativeSeconds / asleepSeconds < restorativeLowConfidenceShare {
+            evidence.insert(.implausibleStageMix)
+        }
+        return evidence
+    }
+
+    /// Decode a persisted evidence record into both the tier and its independent limitations.
+    public static func restAssessment(evidence: RestEvidenceFlags) -> RestAssessment {
+        let hasSession = evidence.contains(.sessionPresent)
+        let hasStagedSleep = evidence.contains(.stagedSleepPresent)
+        let motionAvailable = evidence.contains(.motionAvailable)
+        let gravitySparse = evidence.contains(.sparseMotion)
+        let hasRREvidence = evidence.contains(.rrEvidencePresent)
+        let hasRespirationEvidence = evidence.contains(.respirationEvidencePresent)
+        let implausibleStageMix = evidence.contains(.implausibleStageMix)
+
+        let confidence: ScoreConfidence
+        if !hasSession {
+            confidence = .calibrating
+        } else if !hasStagedSleep {
+            confidence = .building
+        } else if !motionAvailable || gravitySparse || !hasRREvidence
+                    || !hasRespirationEvidence || implausibleStageMix {
+            confidence = .building
+        } else {
+            confidence = .solid
+        }
         var limitations: [RestLimitation] = []
         if !hasSession {
             limitations.append(.noSession)
         } else if !hasStagedSleep {
             limitations.append(.noStagedSleep)
         }
-        if motionUnavailable {
+        if !motionAvailable {
             limitations.append(.motionUnavailable)
         } else if gravitySparse {
             limitations.append(.sparseMotion)
         }
-        if hasSession, hasStagedSleep, asleepSeconds > 0,
-           efficiency >= highEfficiencyThreshold,
-           restorativeSeconds / asleepSeconds < restorativeLowConfidenceShare {
+        if !hasRREvidence {
+            limitations.append(.missingRREvidence)
+        }
+        if !hasRespirationEvidence {
+            limitations.append(.missingRespirationEvidence)
+        }
+        if implausibleStageMix {
             limitations.append(.implausibleStageMix)
         }
         return RestAssessment(confidence: confidence, limitations: limitations)
+    }
+
+    /// Capture the same sustained five-minute evidence verdict `AnalyticsEngine` used for this main night.
+    /// Keeping this wrapper here exposes only the stable booleans needed by persistence; formulas remain in
+    /// the existing canonical evaluator.
+    public static func restRawEvidence(sessions: [SleepSession],
+                                       rr: [RRInterval],
+                                       resp: [RespSample],
+                                       offsetSec: Int,
+                                       habitualMidsleepSec: Int?) -> RestRawEvidence {
+        let indices = SleepStageTotals.mainNightGroupIndices(
+            sessions.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) },
+            offsetSec: offsetSec,
+            habitualMidsleepSec: habitualMidsleepSec) ?? []
+        let mainSessionStarts = Set(indices.map { sessions[$0].start })
+        var countsBySessionStart: [Int: AnalyticsEngine.RestEvidenceCounts] = [:]
+        for session in sessions {
+            countsBySessionStart[session.start] = AnalyticsEngine.mainSleepEvidenceCounts(
+                mainGroup: [session], rr: rr, resp: resp)
+        }
+        return RestRawEvidence(
+            mainSessionStarts: mainSessionStarts,
+            countsBySessionStart: countsBySessionStart)
     }
 }

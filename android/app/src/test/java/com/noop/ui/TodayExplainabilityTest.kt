@@ -57,10 +57,16 @@ class TodayExplainabilityTest {
     }
 
     @Test
-    fun scoreState_calibrating_flooredAtOne_neverZeroOrNegative() {
-        // At/above the seed the count would be 0 or negative; floor at 1 so it never reads "ready".
+    fun scoreState_completedSeed_isBaselineReady() {
+        // The fourth valid night completes the baseline but cannot score against itself. Do not turn
+        // that boundary back into a misleading "1 more night" countdown.
         val state = scoreStateForToday(todayRecovery = null, calibratingNights = 4, carriedDay = null, seed = 4)
-        assertEquals(ScoreState.Calibrating(1), state)
+        assertEquals(ScoreState.BaselineReady, state)
+        assertEquals("Baseline ready", state.title)
+        assertEquals(
+            "4 of 4 valid HRV nights complete. The next qualifying night can produce your first Recovery.",
+            state.detail,
+        )
     }
 
     @Test

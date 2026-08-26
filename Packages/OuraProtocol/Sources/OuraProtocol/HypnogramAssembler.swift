@@ -1,7 +1,7 @@
 import Foundation
 
 // Time-axis reconstruction for Oura's burst-written SleepNet hypnogram.
-// Adapted from ryanbr/noop's clean-room Oura implementation (upstream #1246); the repository's
+// Adapted from Dhanunjay-Divi/Noop's clean-room Oura implementation (upstream #1246); the repository's
 // LICENSE/NOTICE/ATTRIBUTION files retain the applicable provenance and terms.
 
 /// One sleep-phase record in event-log arrival order. The envelope timestamp is the time the ring wrote

@@ -22,7 +22,7 @@ public enum BodyLocationProbe {
     /// is no decodable payload). `cmdOff` is the response-command byte offset (6 on WHOOP4, 10 on 5/MG);
     /// the 4-byte CRC32 trailer both families carry is excluded from the payload.
     public static func format(frame: [UInt8], cmdOff: Int, isWhoop5: Bool, prevPayloadHex: String?) -> (text: String, payloadHex: String?) {
-        let fam = isWhoop5 ? "WHOOP 5/MG" : "WHOOP 4.0"
+        let fam = isWhoop5 ? "newer band" : "legacy band"
         let payStart = cmdOff + 1
         let payEnd = frame.count - 4
         let hasPayload = payEnd > payStart

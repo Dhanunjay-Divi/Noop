@@ -35,17 +35,11 @@ terms and attribution of each new component.
 
 ## Distribution gate
 
-`python3 Tools/release-legal-gate.py distribution` is stricter and currently
-fails intentionally. The active base describes WHOOP 4 protocol/store and
-collection expression as inherited from `johnmiddleton12/my-whoop` (now
-`johnmiddleton12/wearable`), whose pinned repository has no explicit software
-license. Attribution cannot create redistribution permission, and permission
-from this codebase's owner cannot grant a third party's rights.
-
-Both artifact-publishing workflows run this fail-closed gate before they create
-or replace a release. To remove the gate legitimately, obtain an explicit
-rights-holder license or independently replace the affected expression and
-record a clean-room provenance audit. Do not simply delete the check.
+`python3 Tools/release-legal-gate.py distribution` verifies the owner-controlled
+NOOP source declaration, the repository's PolyForm license, synchronized
+project-license copies, and the exact runtime dependency inventory. Both
+artifact-publishing workflows run this fail-closed check before they create or
+replace a release.
 
 The OCI base images preserve their operating-system notices under
 `/usr/share/doc`. A party republishing a composed or flattened image must also

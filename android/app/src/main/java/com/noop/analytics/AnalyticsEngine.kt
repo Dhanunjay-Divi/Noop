@@ -128,6 +128,151 @@ object AnalyticsEngine {
         }
     }
 
+    /** Cardiorespiratory evidence supporting the selected main night's Rest-confidence verdict. */
+    internal data class RestEvidence(
+        val hasRREvidence: Boolean,
+        val hasRespirationEvidence: Boolean,
+    )
+
+    /** Compact counts that can be recomposed when a sleep edit changes the selected main-night group. */
+    data class RestEvidenceCounts(
+        val eligibleWindows: Int,
+        val validRRWindows: Int,
+        val validRespirationWindows: Int,
+    ) {
+        operator fun plus(other: RestEvidenceCounts): RestEvidenceCounts =
+            RestEvidenceCounts(
+                eligibleWindows = eligibleWindows + other.eligibleWindows,
+                validRRWindows = validRRWindows + other.validRRWindows,
+                validRespirationWindows =
+                    validRespirationWindows + other.validRespirationWindows,
+            )
+
+        internal val resolved: RestEvidence
+            get() = RestEvidence(
+                hasRREvidence = hasSustainedRestEvidence(
+                    validRRWindows,
+                    eligibleWindows,
+                ),
+                hasRespirationEvidence = hasSustainedRestEvidence(
+                    validRespirationWindows,
+                    eligibleWindows,
+                ),
+            )
+
+        companion object {
+            val ZERO = RestEvidenceCounts(0, 0, 0)
+        }
+    }
+
+    /** Evidence windows mirror the HRV/RSA analyzers' five-minute windows. */
+    internal const val REST_EVIDENCE_WINDOW_SECONDS: Long = 5L * 60L
+    /** Require one detector-minimum sleep run; a shorter fragment cannot support a day-level verdict. */
+    internal const val REST_EVIDENCE_MINIMUM_WINDOWS: Int = SleepStager.minSleepMin / 5
+    /** Long nights additionally require evidence across at least a quarter of eligible windows. */
+    internal const val REST_EVIDENCE_MINIMUM_COVERAGE: Double = 0.25
+    /** The estimator assumes 1 Hz input, so timestamps must prove dense end-to-end coverage first. */
+    internal const val REST_RESPIRATION_MINIMUM_COVERAGE: Double = 0.80
+    internal const val REST_RESPIRATION_EDGE_TOLERANCE_SECONDS: Long = 2L
+    internal const val REST_RESPIRATION_MAXIMUM_GAP_SECONDS: Long = 2L
+
+    internal fun hasSustainedRestEvidence(
+        validWindowCount: Int,
+        eligibleWindowCount: Int,
+    ): Boolean {
+        if (eligibleWindowCount <= 0) return false
+        val coverageWindows =
+            kotlin.math.ceil(eligibleWindowCount * REST_EVIDENCE_MINIMUM_COVERAGE).toInt()
+        return validWindowCount >= maxOf(REST_EVIDENCE_MINIMUM_WINDOWS, coverageWindows)
+    }
+
+    /** Return one value per unique timestamp only for a genuinely dense nominal 1 Hz window. */
+    internal fun denseRespirationWindow(
+        samples: List<RespSample>,
+        start: Long,
+        end: Long,
+    ): List<Double>? {
+        if (end <= start) return null
+        val unique = samples.asSequence()
+            .filter { it.ts >= start && it.ts < end }
+            .sortedBy { it.ts }
+            .distinctBy { it.ts }
+            .toList()
+        val expectedSamples = end - start
+        val minimumSamples =
+            kotlin.math.ceil(expectedSamples * REST_RESPIRATION_MINIMUM_COVERAGE).toInt()
+        if (unique.size < minimumSamples) return null
+        val first = unique.firstOrNull()?.ts ?: return null
+        val last = unique.lastOrNull()?.ts ?: return null
+        if (first - start > REST_RESPIRATION_EDGE_TOLERANCE_SECONDS ||
+            (end - 1L) - last > REST_RESPIRATION_EDGE_TOLERANCE_SECONDS
+        ) {
+            return null
+        }
+        for (index in 1 until unique.size) {
+            if (unique[index].ts - unique[index - 1].ts >
+                REST_RESPIRATION_MAXIMUM_GAP_SECONDS
+            ) {
+                return null
+            }
+        }
+        return unique.map { it.raw.toDouble() }
+    }
+
+    /**
+     * Evaluate only the fragments selected for the day's main-night group. Naps and other matched sessions
+     * cannot upgrade the main night's confidence. Each lane must also cover enough full five-minute windows
+     * that one short fragment cannot make an otherwise unsupported night read as solid.
+     */
+    internal fun mainSleepEvidenceCounts(
+        mainGroup: List<DetectedSleep>,
+        rr: List<RrInterval>,
+        resp: List<RespSample>,
+    ): RestEvidenceCounts {
+        val eligibleWindows = mainGroup.sumOf { session ->
+            ((session.end - session.start).coerceAtLeast(0L) / REST_EVIDENCE_WINDOW_SECONDS).toInt()
+        }
+        if (eligibleWindows <= 0) {
+            return RestEvidenceCounts.ZERO
+        }
+
+        val rrSorted = rr.sortedBy { it.ts }
+        val validRRWindows = mainGroup.sumOf { session ->
+            SleepStager.sessionHrvWindows(session.start, session.end, rrSorted, session.stages)
+                .count {
+                    it.startTs + REST_EVIDENCE_WINDOW_SECONDS <= session.end &&
+                        it.rmssd?.isFinite() == true
+                }
+        }
+
+        var validRespirationWindows = 0
+        for (session in mainGroup) {
+            var windowStart = session.start
+            while (windowStart + REST_EVIDENCE_WINDOW_SECONDS <= session.end) {
+                val windowEnd = windowStart + REST_EVIDENCE_WINDOW_SECONDS
+                denseRespirationWindow(resp, windowStart, windowEnd)?.let { raw ->
+                    val evidence = SleepStager.respRateAndRRV(raw)
+                    if (evidence.first.isFinite() && evidence.second.isFinite()) {
+                        validRespirationWindows += 1
+                    }
+                }
+                windowStart = windowEnd
+            }
+        }
+
+        return RestEvidenceCounts(
+            eligibleWindows = eligibleWindows,
+            validRRWindows = validRRWindows,
+            validRespirationWindows = validRespirationWindows,
+        )
+    }
+
+    internal fun mainSleepEvidence(
+        mainGroup: List<DetectedSleep>,
+        rr: List<RrInterval>,
+        resp: List<RespSample>,
+    ): RestEvidence = mainSleepEvidenceCounts(mainGroup, rr, resp).resolved
+
     /**
      * Analyze one day's streams into a [DayResult].
      *
@@ -417,6 +562,10 @@ object AnalyticsEngine {
                 .filter { it.isFinite() }
             if (perSession.isEmpty()) null else HrvAnalyzer.median(perSession)
         }
+        // Rest describes the selected main night, so an unrelated nap cannot supply its R-R/raw-respiration
+        // lanes. V2 can derive RSA respiration from R-R, but that stream cannot count twice as independent
+        // confidence evidence. The helper also requires sustained coverage.
+        val restEvidence = mainSleepEvidence(mainGroup, rr, resp)
 
         // sleepStart/sleepEnd available for callers wiring sleep_start/end columns.
         @Suppress("UNUSED_VARIABLE") val sleepStart = matched.minOfOrNull { it.start }
@@ -501,6 +650,7 @@ object AnalyticsEngine {
                 rhrBaseline = baselines.restingHR,
                 respBaseline = baselines.resp,
                 sleepPerf = sleepPerf,
+                restQualityBaseline = baselines.restQuality,
                 skinTempDev = skinTempDevC, // symmetric penalty; term drops + renormalizes when null
             )
         }
@@ -628,6 +778,8 @@ object AnalyticsEngine {
             restorativeSeconds = deepS + remS,
             efficiency = efficiency,
             gravitySparse = gravitySparse,
+            hasRREvidence = restEvidence.hasRREvidence,
+            hasRespirationEvidence = restEvidence.hasRespirationEvidence,
         )
 
         // ── Per-session per-epoch motion (H8) ─────────────────────────────────
@@ -1071,12 +1223,26 @@ object RestScorer {
     fun restFromDaily(daily: DailyMetric, consistency: Double? = null): Double? {
         val tstMin = daily.totalSleepMin ?: return null
         val eff = daily.efficiency ?: return null
-        if (tstMin <= 0.0) return null
+        if (!tstMin.isFinite() || tstMin <= 0.0 || tstMin > 24.0 * 60.0 ||
+            !eff.isFinite() || eff <= 0.0 || eff > 1.0 ||
+            consistency?.let { !it.isFinite() || it !in 0.0..1.0 } == true
+        ) {
+            return null
+        }
+        val deepMin = daily.deepMin ?: 0.0
+        val remMin = daily.remMin ?: 0.0
+        if (!deepMin.isFinite() || !remMin.isFinite() ||
+            deepMin < 0.0 || remMin < 0.0 ||
+            deepMin > tstMin || remMin > tstMin ||
+            deepMin + remMin > tstMin
+        ) {
+            return null
+        }
         return rest(
             asleepSeconds = tstMin * 60.0,
             efficiency = eff,
-            deepSeconds = (daily.deepMin ?: 0.0) * 60.0,
-            remSeconds = (daily.remMin ?: 0.0) * 60.0,
+            deepSeconds = deepMin * 60.0,
+            remSeconds = remMin * 60.0,
             sleepNeedHours = null,
             consistency = consistency,
         )

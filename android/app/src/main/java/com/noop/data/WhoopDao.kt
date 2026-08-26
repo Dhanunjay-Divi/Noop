@@ -225,8 +225,30 @@ interface WhoopDao : DeviceRegistryDao {
     @Upsert
     suspend fun upsertDailyMetrics(rows: List<DailyMetric>)
 
+    @Query(
+        "DELETE FROM dailyMetric WHERE deviceId = :deviceId " +
+            "AND day >= :fromDay AND day <= :toDay"
+    )
+    suspend fun deleteDailyMetricRange(deviceId: String, fromDay: String, toDay: String): Int
+
     @Upsert
     suspend fun upsertSleepSessions(rows: List<SleepSession>)
+
+    @Query(
+        "SELECT * FROM sleepSession WHERE deviceId = :deviceId AND startTs = :startTs LIMIT 1"
+    )
+    suspend fun sleepSessionByKey(deviceId: String, startTs: Long): SleepSession?
+
+    @Query(
+        "DELETE FROM sleepSession WHERE deviceId = :deviceId " +
+            "AND startTs >= :fromTs AND startTs <= :toTs AND userEdited = 0 " +
+            "AND motionJSON IS NULL AND sleepStateJSON IS NULL"
+    )
+    suspend fun deleteImportedSleepSessionRange(
+        deviceId: String,
+        fromTs: Long,
+        toTs: Long,
+    ): Int
 
     /** Reconciliation insert that cannot overwrite a hand-edited Health Connect night. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -302,11 +324,170 @@ interface WhoopDao : DeviceRegistryDao {
     @Upsert
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetricSeriesIgnoringConflicts(rows: List<MetricSeriesRow>): List<Long>
+
+    @Query(
+        "DELETE FROM metricSeries WHERE deviceId = :deviceId " +
+            "AND day >= :fromDay AND day <= :toDay AND `key` IN (:managedKeys)"
+    )
+    suspend fun deleteManagedMetricSeriesRange(
+        deviceId: String,
+        fromDay: String,
+        toDay: String,
+        managedKeys: List<String>,
+    ): Int
+
+    /**
+     * Atomically replace importer-owned metric keys in one inclusive day range. A later, narrower
+     * export can therefore remove a value instead of leaving the previous import's row behind.
+     */
+    @Transaction
+    suspend fun replaceMetricSeriesRange(
+        deviceId: String,
+        fromDay: String,
+        toDay: String,
+        managedKeys: List<String>,
+        rows: List<MetricSeriesRow>,
+    ) {
+        if (managedKeys.isEmpty()) return
+        deleteManagedMetricSeriesRange(deviceId, fromDay, toDay, managedKeys)
+        if (rows.isNotEmpty()) upsertMetricSeries(rows)
+    }
+
     @Upsert
     suspend fun upsertJournal(rows: List<JournalEntry>)
 
     @Upsert
     suspend fun upsertWorkouts(rows: List<WorkoutRow>)
+
+    @Query(
+        "DELETE FROM workout WHERE deviceId = :deviceId " +
+            "AND source = :source AND startTs >= :fromTs AND startTs <= :toTs"
+    )
+    suspend fun deleteWorkoutRange(
+        deviceId: String,
+        source: String,
+        fromTs: Long,
+        toTs: Long,
+    ): Int
+
+    @Query(
+        "DELETE FROM workout WHERE deviceId = :deviceId AND startTs = :startTs " +
+            "AND sport = :sport AND source = :source"
+    )
+    suspend fun deleteWorkoutKeyForSource(
+        deviceId: String,
+        startTs: Long,
+        sport: String,
+        source: String,
+    ): Int
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertWorkoutsIgnoringConflicts(rows: List<WorkoutRow>): List<Long>
+
+    /**
+     * Commit one complete CSV projection in a single Room transaction. Official rows retain their
+     * authoritative upsert/range-replacement semantics. Sleep-only and local daily rows fill null
+     * fields and absent rows; local sleep, metric-series, and workout rows remain insert-only.
+     */
+    @Transaction
+    suspend fun applyWhoopCsvImport(batch: WhoopCsvImportBatch) {
+        batch.officialDailyMetricRange?.let { range ->
+            if (range.fromDay <= range.toDay) {
+                deleteDailyMetricRange(range.deviceId, range.fromDay, range.toDay)
+            }
+        }
+        if (batch.officialDailyMetrics.isNotEmpty()) {
+            upsertDailyMetrics(batch.officialDailyMetrics)
+        }
+        for ((deviceId, incoming) in batch.fillOnlyDailyMetrics.groupBy { it.deviceId }) {
+            val existing = dailyMetricsRange(
+                deviceId,
+                incoming.minOf { it.day },
+                incoming.maxOf { it.day },
+            )
+            val merged = mergeFillOnlyDailyMetrics(existing, incoming)
+            if (merged.isNotEmpty()) upsertDailyMetrics(merged)
+        }
+        batch.officialSleepSessionRange?.let { range ->
+            if (range.fromTs <= range.toTs) {
+                deleteImportedSleepSessionRange(range.deviceId, range.fromTs, range.toTs)
+            }
+        }
+        if (batch.officialSleepSessions.isNotEmpty()) {
+            val merged = batch.officialSleepSessions.map { incoming ->
+                mergeOfficialSleepSession(
+                    sleepSessionByKey(incoming.deviceId, incoming.startTs),
+                    incoming,
+                )
+            }
+            upsertSleepSessions(merged)
+        }
+        if (batch.fillOnlySleepSessions.isNotEmpty()) {
+            insertSleepSessionsIgnoringConflicts(batch.fillOnlySleepSessions)
+        }
+
+        for (replacement in batch.officialMetricSeriesReplacements) {
+            if (replacement.fromDay > replacement.toDay || replacement.managedKeys.isEmpty()) continue
+            deleteManagedMetricSeriesRange(
+                replacement.deviceId,
+                replacement.fromDay,
+                replacement.toDay,
+                replacement.managedKeys,
+            )
+            if (replacement.rows.isNotEmpty()) upsertMetricSeries(replacement.rows)
+        }
+        if (batch.fillOnlyMetricSeries.isNotEmpty()) {
+            insertMetricSeriesIgnoringConflicts(batch.fillOnlyMetricSeries)
+        }
+
+        batch.journalReplacement?.let { replacement ->
+            if (replacement.fromDay <= replacement.toDay) {
+                deleteJournalRange(
+                    replacement.deviceId,
+                    replacement.fromDay,
+                    replacement.toDay,
+                )
+                if (replacement.rows.isNotEmpty()) upsertJournal(replacement.rows)
+            }
+        }
+
+        // Keep workouts last so a persistence failure still rolls back all earlier projection writes.
+        // The source is part of importer ownership even though it is not part of WorkoutRow's PK:
+        // replacing a CSV range must never delete a manual/native row sharing the same device and span.
+        val officialWorkoutSource = batch.officialWorkoutSource.trim()
+            .ifEmpty { WHOOP_CSV_IMPORTED_WORKOUT_SOURCE }
+        batch.officialWorkoutRange?.let { range ->
+            if (range.fromTs <= range.toTs) {
+                deleteWorkoutRange(
+                    range.deviceId,
+                    officialWorkoutSource,
+                    range.fromTs,
+                    range.toTs,
+                )
+            }
+        }
+        if (batch.officialWorkouts.isNotEmpty()) {
+            val normalized = batch.officialWorkouts.map {
+                it.copy(source = officialWorkoutSource)
+            }
+            // `source` is not part of the workout primary key. Remove only the importer's prior
+            // version, then insert with IGNORE so a manual/native row at the same natural key wins.
+            for (row in normalized) {
+                deleteWorkoutKeyForSource(
+                    row.deviceId,
+                    row.startTs,
+                    row.sport,
+                    officialWorkoutSource,
+                )
+            }
+            insertWorkoutsIgnoringConflicts(normalized)
+        }
+        if (batch.fillOnlyWorkouts.isNotEmpty()) {
+            insertWorkoutsIgnoringConflicts(batch.fillOnlyWorkouts)
+        }
+    }
 
     @Upsert
     suspend fun upsertAppleDaily(rows: List<AppleDaily>)

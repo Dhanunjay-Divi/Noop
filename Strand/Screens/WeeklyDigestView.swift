@@ -95,7 +95,7 @@ struct WeeklyDigestView: View {
                        lazy: true) {
             if repo.days.isEmpty {
                 ComingSoon(what: repo.loaded
-                    ? "A weekly digest needs a few days of history. Wear your strap or import your WHOOP export in Data Sources."
+                    ? "A weekly digest needs a few days of history. Wear your strap or import your wearable export in Data Sources."
                     : "Loading your history…")
             } else {
                 let digest = WeeklyDigestSource.digest(from: repo.days, anchorDay: Repository.localDayKey(Date()))

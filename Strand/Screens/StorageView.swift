@@ -106,7 +106,7 @@ struct StorageView: View {
     private var explainerCard: some View {
         DataPendingNote(
             title: "Why does this grow?",
-            message: "When you import an Apple Health or WHOOP export, iOS hands NOOP a private copy of the file. NOOP reads it, saves your data into the health database, then deletes the copy. Older builds didn't delete every copy. This screen reclaims any that were left behind.",
+            message: "When you import an Apple Health or wearable export, iOS hands NOOP a private copy of the file. NOOP reads it, saves your data into the health database, then deletes the copy. Older builds didn't delete every copy. This screen reclaims any that were left behind.",
             symbol: "questionmark.circle")
     }
 

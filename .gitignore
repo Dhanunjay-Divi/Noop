@@ -96,6 +96,9 @@ Fixtures/
 *.feather
 *.arrow
 *.jsonl
+# Validation harness outputs contain dated row-level health data even though they are JSON.
+prepared_cycles.json
+export-[0-9]*.json
 # Health exports are overwhelmingly archives. Synthetic committed fixtures are
 # plain text under the explicit StrandImport test-resource allowlist.
 *.zip

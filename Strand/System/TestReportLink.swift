@@ -5,7 +5,7 @@ import StrandAnalytics
 /// the bug form's existing id fields (version, platform, os_version, test_profile, title) and
 /// self-applies the "bug,test:<id>" labels so a submission lands pre-labelled on the right cluster.
 /// No network, no cloud: this only composes a URL the caller opens in the browser. Repo is
-/// ryanbr/noop (confirmed in bug_report.yml).
+/// Dhanunjay-Divi/Noop (confirmed in bug_report.yml).
 ///
 /// CAPTURE-A (#812): a report submitted WITHOUT the .zip attached used to land empty, because the form's
 /// `log` / `what_happens` textareas were blank and the user often forgot the paperclip. We now PREFILL

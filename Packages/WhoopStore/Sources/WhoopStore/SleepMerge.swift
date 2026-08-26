@@ -14,7 +14,7 @@ public enum SleepMerge {
     /// clobber a computed day that HAS stage data — otherwise a stage-less WHOOP/Apple re-import blanks
     /// the stage breakdown for a night the strap fully staged. Days where the import carries stages, or
     /// where neither side does, keep the imported-over-computed rule unchanged. (Swift twin of the
-    /// Android HealthConnectImporter richness fix, ryanbr/noop#240.)
+    /// Android HealthConnectImporter richness fix, Dhanunjay-Divi/Noop#240.)
     ///
     /// - Parameter endDay: maps a session to its canonical LOCAL end-day key (callers inject their
     ///   timezone-aware keyer so this stays pure and testable).

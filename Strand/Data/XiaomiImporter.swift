@@ -69,7 +69,7 @@ enum XiaomiImporter {
         // Generic metric series — every scalar keyed, for the Metric Explorer + correlations.
         var points: [MetricPoint] = []
         func add(_ day: String, _ key: String, _ v: Double?) {
-            if let v { points.append(MetricPoint(day: day, key: key, value: v)) }
+            if let v, v.isFinite { points.append(MetricPoint(day: day, key: key, value: v)) }
         }
         for d in result.days {
             add(d.day, "steps", d.steps.map(Double.init))
@@ -121,15 +121,16 @@ enum XiaomiImporter {
     }
 
     /// Asleep fraction of in-bed time, from the daily stage minutes.
-    private static func sleepEfficiency(total: Double?, awake: Double?) -> Double? {
-        guard let total, total > 0 else { return nil }
+    static func sleepEfficiency(total: Double?, awake: Double?) -> Double? {
+        guard let total, total.isFinite, total > 0 else { return nil }
         let awake = awake ?? 0
+        guard awake.isFinite, awake >= 0 else { return nil }
         let inBed = total + awake
-        return inBed > 0 ? min(100, total / inBed * 100) : nil
+        return inBed > 0 ? min(1, max(0, total / inBed)) : nil
     }
 
     /// Asleep fraction from the hypnogram segments (non-wake ÷ in-bed span).
-    private static func efficiency(segs: [[String: Any]], start: Int, end: Int) -> Double? {
+    static func efficiency(segs: [[String: Any]], start: Int, end: Int) -> Double? {
         guard end > start, !segs.isEmpty else { return nil }
         var asleep = 0
         for seg in segs {
@@ -137,6 +138,6 @@ enum XiaomiImporter {
                   let stage = seg["stage"] as? String, !SleepStageVocabulary.isWake(stage) else { continue }
             asleep += max(0, e - s)
         }
-        return min(100, Double(asleep) / Double(end - start) * 100)
+        return min(1, max(0, Double(asleep) / Double(end - start)))
     }
 }

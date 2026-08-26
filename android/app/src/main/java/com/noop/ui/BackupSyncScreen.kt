@@ -49,6 +49,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.noop.NoopApplication
 import com.noop.ble.WhoopBleClient
+import com.noop.brand.CustomerFacingBrand
 import com.noop.data.DataBackup
 import com.noop.data.BackupEnvelope
 import com.noop.data.BackupPassphraseStore
@@ -146,7 +147,11 @@ fun BackupSyncScreen() {
                     }
                 }
                 is DataBackup.ImportResult.Failed ->
-                    Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        CustomerFacingBrand.text(r.message),
+                        Toast.LENGTH_LONG,
+                    ).show()
             }
         }
     }

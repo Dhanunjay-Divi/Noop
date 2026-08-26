@@ -33,6 +33,7 @@ public enum WalkForwardExportEmulator {
         var hrvState: BaselineState?
         var rhrState: BaselineState?
         var respState: BaselineState?
+        var restState: BaselineState?
         var chargeByDay: [String: Double] = [:]
         var restByDay: [String: Double] = [:]
 
@@ -53,6 +54,7 @@ public enum WalkForwardExportEmulator {
                    rhrBaseline: rhrState?.usable == true ? rhrState : nil,
                    respBaseline: respState?.usable == true ? respState : nil,
                    sleepPerf: rest.map { $0 / 100.0 },
+                   restQualityBaseline: restState?.usable == true ? restState : nil,
                    skinTempDev: nil
                ) {
                 chargeByDay[row.day] = score
@@ -68,6 +70,11 @@ public enum WalkForwardExportEmulator {
                 respState,
                 value: row.respiratoryRate,
                 cfg: Baselines.respCfg
+            )
+            restState = Baselines.update(
+                restState,
+                value: rest.map { $0 / 100.0 },
+                cfg: Baselines.restQualityCfg
             )
         }
 

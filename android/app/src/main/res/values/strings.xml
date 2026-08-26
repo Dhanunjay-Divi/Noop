@@ -841,7 +841,7 @@
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP gives you three daily scores (Recovery, Effort and Sleep Score), each on a 0-100 </string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">scoreCardHighlight</string>
     <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">These are independent approximations from a consumer strap, built on open science: not </string>
-    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">VS compatible band</string>
+    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP METHOD</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">advancedChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
     <string name="l10n_settings_screen_repo_note_0a694b50">%1$s, %2$s</string>
@@ -2127,4 +2127,5 @@
     <string name="smart_alarm_tap_lengthen_action">Lengthen %1$s</string>
     <string name="smart_alarm_tap_window_accessibility">alarm tap window</string>
     <string name="smart_alarm_tap_snooze_accessibility">alarm snooze length</string>
+    <string name="today_calibration_valid_hrv_progress">Valid HRV %1$d/%2$d</string>
 </resources>

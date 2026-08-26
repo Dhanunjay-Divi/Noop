@@ -161,11 +161,11 @@ final class ExtremePhysiologyScenarioTests: XCTestCase {
 
         // Ordered best -> worst on EVERY driver simultaneously.
         let ladder: [(name: String, hrv: Double, rhr: Double, resp: Double, sleep: Double)] = [
-            ("rested",     120, 45, 12.5, 96),
-            ("normal",      60, 56, 14.5, 85),
-            ("tired",       35, 65, 16.0, 68),
-            ("very tired",  18, 78, 18.5, 50),
-            ("unwell",       8, 95, 22.0, 32),
+            ("rested",     120, 45, 12.5, 0.96),
+            ("normal",      60, 56, 14.5, 0.85),
+            ("tired",       35, 65, 16.0, 0.68),
+            ("very tired",  18, 78, 18.5, 0.50),
+            ("unwell",       8, 95, 22.0, 0.32),
         ]
 
         var previous: Double?
@@ -197,7 +197,7 @@ final class ExtremePhysiologyScenarioTests: XCTestCase {
             hrvBaseline: .init(mean: 60, spread: 18),
             rhrBaseline: .init(mean: 56, spread: 6),
             respBaseline: .init(mean: 14.5, spread: 1.2),
-            sleepPerf: 85,
+            sleepPerf: 0.85,
             hrvBaselineUsable: false
         )
         XCTAssertNil(score, "With no usable HRV baseline the engine must decline, not estimate.")
@@ -215,7 +215,7 @@ final class ExtremePhysiologyScenarioTests: XCTestCase {
             let score = RecoveryScorer.recovery(
                 hrv: hrv, rhr: rhr, resp: scenario.respRate,
                 hrvBaseline: hrvBase, rhrBaseline: rhrBase, respBaseline: respBase,
-                sleepPerf: scenario.sleepHours.map { min(100, max(0, $0 / 8 * 100)) },
+                sleepPerf: scenario.sleepHours.map { min(1, max(0, $0 / 8)) },
                 skinTempDev: scenario.skinTempDev
             )
             guard let score else { continue }        // declining is always acceptable
@@ -236,7 +236,7 @@ final class ExtremePhysiologyScenarioTests: XCTestCase {
                 hrvBaseline: .init(mean: 60, spread: spread),
                 rhrBaseline: .init(mean: 56, spread: spread),
                 respBaseline: .init(mean: 14.5, spread: spread),
-                sleepPerf: 85
+                sleepPerf: 0.85
             )
             if let score {
                 XCTAssertTrue(score.isFinite && score >= 0 && score <= 100,
@@ -249,7 +249,7 @@ final class ExtremePhysiologyScenarioTests: XCTestCase {
                 hrvBaseline: .init(mean: 60, spread: 18),
                 rhrBaseline: .init(mean: 56, spread: 6),
                 respBaseline: .init(mean: 14.5, spread: 1.2),
-                sleepPerf: 85
+                sleepPerf: 0.85
             )
             if let score {
                 XCTAssertTrue(score.isFinite && score >= 0 && score <= 100,

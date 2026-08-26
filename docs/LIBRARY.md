@@ -14,23 +14,16 @@ independently of the reference macOS app.
 
 > **Not affiliated with WHOOP.** "WHOOP" is used nominatively only to identify
 > the hardware these packages interoperate with. NOOP ships no WHOOP firmware
-> or vendor assets and works only with the user's own device and data. Protocol
-> redistribution remains subject to the repository legal gate. **NOOP is not a medical device.** Every derived metric (HR,
+> or vendor assets and works only with the user's own device and data.
+> Redistribution remains subject to the repository legal gate. **NOOP is not a medical device.** Every derived metric (HR,
 > HRV, recovery, strain, sleep, SpO₂, temperature) is an approximation and is
 > not clinically validated.
 
 ## Credits
 
-These packages build on prior community reverse-engineering and
-interoperability work:
-
-- **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE framing, command/decode,
-  and collection logic that `WhoopProtocol` and `WhoopStore` are adapted from.
-- **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (the
-  `fd4b0001-…` service family, CRC16-Modbus header, `CLIENT_HELLO`, and the
-  "puffin" packet types). Its repository has no explicit software license; this
-  lineage remains under distribution-rights review.
-- **`groue/GRDB.swift`** — SQLite persistence used by `WhoopStore`.
+The protocol, storage, and collection packages are NOOP-controlled source in
+the canonical repository. `groue/GRDB.swift` provides SQLite persistence under
+its own license.
 
 ---
 
@@ -45,7 +38,7 @@ interoperability work:
 | **StrandDesign** | SwiftUI design system (palette, components, charts) | SwiftUI only | SwiftUI | none |
 | **NoopRemoteSync** | Optional authenticated self-hosted v1 upload client | Explicit network I/O | none | WhoopStore |
 
-All six listed packages declare **macOS 13+**. The five inherited packages
+All six listed packages declare **macOS 13+**. The five core packages
 declare **iOS 16+**; `NoopRemoteSync` declares **iOS 17+**. The first four are
 platform-pure: they
 never import `CoreBluetooth`, `UIKit`, or `AppKit`, so they run unchanged in CLI
@@ -75,9 +68,9 @@ owns the CoreBluetooth transport, wraps the protocol library's UUID *strings* in
 an Android app ships alongside them; the pure packages run unchanged across macOS
 and iOS.
 
-See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for lineage and
-[`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md) for the open
-redistribution blocker and acceptance criteria.
+See [`ATTRIBUTION.md`](../ATTRIBUTION.md), [`NOTICE`](../NOTICE), and
+[`REPOSITORY_INDEPENDENCE.md`](REPOSITORY_INDEPENDENCE.md) for source rights
+and dependency terms.
 
 ---
 

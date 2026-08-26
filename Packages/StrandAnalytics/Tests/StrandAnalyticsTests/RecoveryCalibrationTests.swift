@@ -31,6 +31,7 @@ final class RecoveryCalibrationTests: XCTestCase {
     /// regardless of any UserDefaults `hrvBaselineEpoch` set by another test in the process.
     private func nights(_ hrv: [Double?], hasRecovery: Bool) -> Int? {
         RecoveryScorer.calibrationNights(nightlyHrv: hrv, dayKeys: keys(hrv.count),
+                                         before: "2026-02-01",
                                          hasRecovery: hasRecovery, baselineEpoch: 0)
     }
 
@@ -79,7 +80,8 @@ final class RecoveryCalibrationTests: XCTestCase {
         // and returned nil, which stranded the score side on "Needs the strap". N must now read 2.
         let hrv: [Double?] = Array(repeating: 55.0, count: 6)
         let result = RecoveryScorer.calibrationNights(
-            nightlyHrv: hrv, dayKeys: keys(6), hasRecovery: false, baselineEpoch: epoch("2026-01-05"))
+            nightlyHrv: hrv, dayKeys: keys(6), before: "2026-02-01",
+            hasRecovery: false, baselineEpoch: epoch("2026-01-05"))
         XCTAssertEqual(result, 2)
     }
 
@@ -89,7 +91,34 @@ final class RecoveryCalibrationTests: XCTestCase {
         // at/above-seed case). Epoch at 2026-01-02 drops one night; five post-epoch nights → nValid 5.
         let hrv: [Double?] = Array(repeating: 55.0, count: 6)
         let result = RecoveryScorer.calibrationNights(
-            nightlyHrv: hrv, dayKeys: keys(6), hasRecovery: false, baselineEpoch: epoch("2026-01-02"))
+            nightlyHrv: hrv, dayKeys: keys(6), before: "2026-02-01",
+            hasRecovery: false, baselineEpoch: epoch("2026-01-02"))
         XCTAssertNil(result)
+    }
+
+    func testDisplayedCompletedNightAdvancesVisibleProgressOnly() {
+        let hrv: [Double?] = [56, 57, 58, 59]
+        XCTAssertEqual(
+            RecoveryScorer.calibrationNights(
+                nightlyHrv: hrv,
+                dayKeys: keys(4),
+                before: "2026-01-04",
+                hasRecovery: false,
+                baselineEpoch: 0),
+            4
+        )
+    }
+
+    func testFutureNightDoesNotAdvanceDisplayedProgress() {
+        let hrv: [Double?] = [56, 57]
+        XCTAssertEqual(
+            RecoveryScorer.calibrationNights(
+                nightlyHrv: hrv,
+                dayKeys: keys(2),
+                before: "2026-01-01",
+                hasRecovery: false,
+                baselineEpoch: 0),
+            1
+        )
     }
 }

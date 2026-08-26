@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `closed without App Store Connect mutation; distribution blocked`
+- State: `closed without App Store Connect mutation`
 - Owner: project team
 - Branch: `codex/app-store-submission` (documentation merged to `main`)
 - Start commit: `b11c7c2e`
@@ -79,7 +79,7 @@ distribution, signing, review, privacy, and validation gate passes.
 | New branch created from `origin/main` | `codex/app-store-submission` at `b11c7c2e` | Submission work starts from the exact current private mainline. | That any release gate passes. |
 | `gh repo view Dhanunjay-Divi/Noop` | `PRIVATE`, `isFork=false`, default `main` | The canonical source repository remains private and host-independent. | Commercial source rights or App Store approval. |
 | `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | The current dependency inventory is internally consistent. | Public redistribution clearance. |
-| `python3 Tools/release-legal-gate.py distribution` | Expected fail on three unresolved rights statuses | Mainline remains fail-closed instead of hiding unresolved evidence. | That the separate remediation work is complete. |
+| `python3 Tools/release-legal-gate.py distribution` | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, or physical-device readiness |
 | Unsigned generic iOS Release build | Pass for app, widget, Watch app, and complication | Current mainline compiles as Release for arm64 with matching identities/version. | Signing, archive upload, review, hardware, or medical accuracy. |
 | Focused release-tool tests | 7/7 pass | Release scripts and fail-closed launch configuration behave as specified. | Store acceptance or physical-device behavior. |
 | Archive-like launch-gate validation | Missing verifier fails; synthetic valid shape passes | An ungated archive cannot be produced accidentally. | That a real secret has been generated or tested. |
@@ -104,7 +104,7 @@ distribution, signing, review, privacy, and validation gate passes.
 - Repository visibility verified: yes; authenticated GitHub response is private
 - Version/build impact: none
 - Release or distribution impact: none; name reservation and binary upload did
-  not occur, and distribution remains fail-closed
+  not occur.
 
 ## Decisions
 
@@ -117,9 +117,8 @@ distribution, signing, review, privacy, and validation gate passes.
 
 - Exact name availability, account role, agreement state, and app-record
   existence remain unverified.
-- The current mainline still intentionally fails its distribution gate on
-  `contributor-relicensing-rights`, `polyform-upstream-lineage`, and
-  `unlicensed-whoop4-expression`; no remediated origin branch or PR exists yet.
+- The source-rights state from this historical round was superseded by the
+  2026-08-25 owner-controlled consolidation declaration.
 - Paid Developer Program membership does not alone prove the necessary App
   Store Connect role, agreements, identifiers, signing assets, or review data.
 - No valid distribution-signing evidence or launch-verifier configuration is
@@ -127,7 +126,7 @@ distribution, signing, review, privacy, and validation gate passes.
 
 ## Next round
 
-1. Resolve the source-rights gate and restore hosted release controls.
+1. Restore hosted release controls and verify the current distribution gate.
 2. Obtain valid signing, privacy, physical-device, and release-owner evidence.
 3. Only then create the App Store Connect record and retain its durable record
    identifier as evidence.

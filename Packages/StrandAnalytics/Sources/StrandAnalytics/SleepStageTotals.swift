@@ -541,7 +541,7 @@ public enum SleepStageTotals {
         // user's real bedtime, not a fixed clock band. nil = cold-start (fall back to the overnight-band
         // bonus). Existing callers compile unchanged. (#547)
         habitualMidsleepSec: Int? = nil
-    ) -> (sleep: DailySleep, editApplied: Bool)? {
+    ) -> (sleep: DailySleep, editApplied: Bool, selectedStartTimestamps: Set<Int>?)? {
         // Substitute an edited block's stages ONLY when the edit has usable (non-nil) stages — an edit
         // that reshaped to nil must fall back to the detected stages, never drop the block (which would
         // collapse the night's sleep total). `editApplied` likewise reflects a real substitution. We keep
@@ -603,13 +603,13 @@ public enum SleepStageTotals {
                 }
                 let gapAwakeS = interFragmentAwakeSeconds(spans)
                 if let agg = dailyAggregate(clampedStages, interFragmentAwakeSeconds: gapAwakeS) {
-                    return (agg, applied)
+                    return (agg, applied, Set(group.map { blocks[$0].startTs }))
                 }
             }
             return nil
         }
         guard let agg = dailyAggregate(blocks.map(\.stagesJSON)) else { return nil }
-        return (agg, applied)
+        return (agg, applied, nil)
     }
 
     /// The original-index group (ascending) of the day's MAIN night on the STAGES path: the main night plus

@@ -14,8 +14,10 @@ import java.util.Locale
 
 /**
  * The recovery baseline's real seed count while it still cold-starts, the honest "calibrating N of
- * <seed>" progress shown in place of "No Data"; null once recovery exists or the baseline has crossed
- * the seed gate. N is the HRV baseline's `nValid` from folding the SAME day-keyed, epoch-aware history
+ * <seed>" progress shown in place of "No Data"; null once recovery exists or the baseline was already
+ * seeded before the displayed day. N can equal the seed only when the displayed day's completed night
+ * crossed the gate; presentation calls that boundary "Baseline ready" because it cannot score itself.
+ * N is the HRV baseline's `nValid` from folding the SAME day-keyed, epoch-aware history
  * the recovery engine folds ([Baselines.foldHistory] with [hrvBaselineEpoch]), NOT a looser per-night
  * bounds count.
  *
@@ -30,44 +32,65 @@ import java.util.Locale
  */
 internal fun recoveryCalibrationNights(
     days: List<DailyMetric>,
+    beforeDay: String,
     hasRecovery: Boolean,
     hrvBaselineEpoch: Double,
     seed: Int = Baselines.minNightsSeed,
 ): Int? {
     if (hasRecovery) return null
+    val through = days.filter { it.day <= beforeDay }
+    val prior = through.filter { it.day < beforeDay }
+    val priorN = Baselines.foldHistory(
+        prior.map { it.avgHrv }, prior.map { it.day }, Baselines.hrvCfg, hrvBaselineEpoch,
+    ).nValid
+    if (priorN >= seed) return null
     val n = Baselines.foldHistory(
-        days.map { it.avgHrv }, days.map { it.day }, Baselines.hrvCfg, hrvBaselineEpoch,
+        through.map { it.avgHrv }, through.map { it.day }, Baselines.hrvCfg, hrvBaselineEpoch,
     ).nValid
     // Include 0: a brand-new user (no banked nights) reads "Calibrating, 0 of N" on Charge, not a
-    // bare "No data" that looks broken (#335). Caller gates past days to null; >= seed -> null.
-    return n.takeIf { it in 0 until seed }
+    // bare "No data" that looks broken (#335). Exactly `seed` is the just-completed seed-night boundary;
+    // a baseline already seeded before this day returned null above.
+    return n.takeIf { it in 0..seed }
 }
 
 /**
  * The ordered "What shaped it" Charge driver rows for [displayDay], rebuilt PURELY from the visible
  * [days] history (the same in-memory rows the dashboard already shows, imports win field-by-field in
  * the merge), so no engine round-trip is needed and the bars match the Charge ring's own inputs. Folds
- * the whole history (oldest first) into the four-plus-one personal baselines with [Baselines.foldHistory]
- * (byte-identical to the engine's whole-history fold when no manual Recalibrate epoch is set, the common
- * case), then defers to [RecoveryDrivers.chargeDrivers], which scores each row against the SAME inputs
- * [RestScorer] reads through the Today recovery path. Empty when the displayed day can't score
- * (cold-start / missing input), so the section hides rather than faking rows. Mirrors the iOS
- * chargeDrivers wiring.
+ * only rows strictly before the displayed day and honors both manual recalibration epochs, exactly like
+ * historical scoring. Future syncs and the displayed value itself therefore cannot rewrite the baseline
+ * used to explain that score. Empty when the displayed day can't score (cold-start / missing input), so
+ * the section hides rather than faking rows. Mirrors the iOS chargeDrivers wiring.
  */
 internal fun recoveryChargeDrivers(
     days: List<DailyMetric>,
     displayDay: DailyMetric?,
+    hrvBaselineEpoch: Double = 0.0,
+    recoveryBaselineEpoch: Double = 0.0,
 ): List<ChargeDriver> {
     val day = displayDay ?: return emptyList()
     val hrv = day.avgHrv ?: return emptyList()
     val rhr = day.restingHr?.toDouble() ?: return emptyList()
 
-    // Whole-history fold (oldest first), exactly as the engine seeds baselines2.
-    val ordered = days.sortedBy { it.day }
-    val hrvBase = Baselines.foldHistory(ordered.map { it.avgHrv }, Baselines.hrvCfg)
+    val ordered = days.filter { it.day < day.day }.sortedBy { it.day }
+    val dayKeys = ordered.map { it.day }
+    val hrvBase = Baselines.foldHistory(
+        ordered.map { it.avgHrv }, dayKeys, Baselines.hrvCfg, hrvBaselineEpoch,
+    )
     if (!hrvBase.usable) return emptyList()
-    val rhrBase = Baselines.foldHistory(ordered.map { it.restingHr?.toDouble() }, Baselines.restingHRCfg)
-    val respBase = Baselines.foldHistory(ordered.map { it.respRateBpm }, Baselines.respCfg).takeIf { it.usable }
+    val rhrBase = Baselines.foldHistory(
+        ordered.map { it.restingHr?.toDouble() }, dayKeys,
+        Baselines.restingHRCfg, recoveryBaselineEpoch,
+    )
+    val respBase = Baselines.foldHistory(
+        ordered.map { it.respRateBpm }, dayKeys, Baselines.respCfg, recoveryBaselineEpoch,
+    ).takeIf { it.usable }
+    val restBase = Baselines.foldHistory(
+        ordered.map { RestScorer.restFromDaily(it)?.div(100.0) },
+        dayKeys,
+        Baselines.restQualityCfg,
+        recoveryBaselineEpoch,
+    ).takeIf { it.usable }
 
     // sleepPerf: the Rest COMPOSITE (/100) when stages exist, else raw efficiency, the SAME derivation
     // recomputeRecovery uses, so the Sleep driver scores against the headline's own input.
@@ -78,9 +101,10 @@ internal fun recoveryChargeDrivers(
         rhr = rhr,
         resp = day.respRateBpm,
         hrvBaseline = hrvBase,
-        rhrBaseline = rhrBase,
+        rhrBaseline = rhrBase.takeIf { it.usable },
         respBaseline = respBase,
         sleepPerf = sleepPerf,
+        restQualityBaseline = restBase,
         skinTempDev = day.skinTempDevC,
     )
 }
@@ -94,11 +118,25 @@ internal fun recoveryChargeDrivers(
 internal fun chargeConfidenceTier(
     days: List<DailyMetric>,
     displayDay: DailyMetric?,
+    hrvBaselineEpoch: Double = 0.0,
 ): ScoreConfidence {
+    val day = displayDay
+    val ordered = if (day == null) emptyList() else {
+        days.filter { it.day < day.day }.sortedBy { it.day }
+    }
     val hrvBase: BaselineState =
-        Baselines.foldHistory(days.sortedBy { it.day }.map { it.avgHrv }, Baselines.hrvCfg)
-    return ScoreConfidence.forCharge(displayDay?.recovery, hrvBase)
+        Baselines.foldHistory(
+            ordered.map { it.avgHrv },
+            ordered.map { it.day },
+            Baselines.hrvCfg,
+            hrvBaselineEpoch,
+        )
+    return ScoreConfidence.forCharge(day?.recovery, hrvBase)
 }
+
+/** Local Recovery drivers can explain only a score emitted by NOOP's computed namespace. Imported
+ * and unknown sources fail closed so a provider score is never paired with reconstructed local causes. */
+internal fun canExplainRecovery(source: String?): Boolean = source?.endsWith("-noop") == true
 
 /**
  * The most recent fully-SCORED recovery day to carry over on TODAY while tonight's recovery hasn't been
@@ -187,9 +225,9 @@ internal fun carriedCaption(priorDayKey: String, today: String = LocalDate.now()
 /**
  * The honest state of one score/tile on Today, one state per score, never a bare blank. Derived from
  * baseline readiness + data presence + the #543 carry-over, so a tile that has no own value for the day
- * still says WHY and WHAT to do, and shows no fabricated number. Mirrors Swift `ScoreState` 1:1 (same
- * three cases, same [title] / [detail] copy). [Scored] carries the real value the tile renders normally;
- * the other three are the no-own-number states this layer explains.
+ * still says WHY and WHAT to do, and shows no fabricated number. Mirrors Swift `MetricTileState` 1:1.
+ * [Scored] carries the real value the tile renders normally; the other states are the no-own-number
+ * states this layer explains.
  */
 sealed class ScoreState {
     /** Today's own value exists, the tile renders the number as usual; this layer adds nothing. */
@@ -198,6 +236,9 @@ sealed class ScoreState {
     /** Baselines still cold-start: [nightsRemaining] more nights of wear until scores get personal.
      *  Shows NO number (calibrating never fakes a value). */
     data class Calibrating(val nightsRemaining: Int) : ScoreState()
+
+    /** The seed window is complete, but its final night cannot score against itself. Shows no number. */
+    object BaselineReady : ScoreState()
 
     /** A prior scored day shown before tonight is scored (#543 carry-over), stamped with [dateLabel]
      *  ("d MMM") so the prior read is never passed off as today's. [stale] is true when that day is older
@@ -213,6 +254,7 @@ sealed class ScoreState {
         get() = when (this) {
             is Scored -> ""
             is Calibrating -> "Calibrating"
+            BaselineReady -> "Baseline ready"
             is CarriedLastNight -> if (stale) "Latest sleep · $dateLabel" else "Last night · $dateLabel"
             NeedsStrap -> "Needs wearable data"
         }
@@ -226,6 +268,9 @@ sealed class ScoreState {
                 val nights = if (nightsRemaining == 1) "night" else "nights"
                 "Building your baseline. About $nightsRemaining more $nights until your scores are personal."
             }
+            BaselineReady ->
+                "${Baselines.minNightsSeed} of ${Baselines.minNightsSeed} valid HRV nights complete. " +
+                    "The next qualifying night can produce your first Recovery."
             is CarriedLastNight ->
                 // A fresh post-rollover carry tells you tonight's score is on its way; a stale carry (an
                 // older import, #779) instead explains the number is from that earlier session, not today.
@@ -240,9 +285,10 @@ sealed class ScoreState {
  * so the explainer is the EXACT truth on screen (never a separate guess). Pure + unit-tested. Order of
  * precedence mirrors the tile waterfall:
  *   1. [todayRecovery] present                -> [ScoreState.Scored] (the tile shows its real number);
- *   2. mid-calibration ([calibratingNights])  -> [ScoreState.Calibrating] (N more nights, no number);
- *   3. a prior scored day to carry (#543)     -> [ScoreState.CarriedLastNight] (stamped with its date);
- *   4. otherwise                              -> [ScoreState.NeedsStrap] (no data, no number).
+ *   2. seed just completed                     -> [ScoreState.BaselineReady] (ready for next night);
+ *   3. mid-calibration ([calibratingNights])  -> [ScoreState.Calibrating] (N more nights, no number);
+ *   4. a prior scored day to carry (#543)     -> [ScoreState.CarriedLastNight] (stamped with its date);
+ *   5. otherwise                              -> [ScoreState.NeedsStrap] (no data, no number).
  * Mirrors Swift `scoreStateForToday`.
  */
 internal fun scoreStateForToday(
@@ -253,8 +299,7 @@ internal fun scoreStateForToday(
     today: String = LocalDate.now().toString(),
 ): ScoreState = when {
     todayRecovery != null -> ScoreState.Scored(todayRecovery)
-    // "About N more nights" = the seed gate minus the nights banked so far, floored at 1 (zero would read
-    // as "ready" when it isn't). Calibrating never fakes a value.
+    calibratingNights != null && calibratingNights >= seed -> ScoreState.BaselineReady
     calibratingNights != null -> ScoreState.Calibrating((seed - calibratingNights).coerceAtLeast(1))
     // #779: a carry older than the freshness cap is still shown (not a bare blank) but relabelled to
     // "Latest sleep" so a weeks-old import is never passed off as "Last night".

@@ -23,6 +23,55 @@ import java.util.zip.ZipInputStream
 class WhoopCsvExporterTest {
 
     @Test
+    fun dailyExportSelectsWholeRowsWithoutPromotingComputedFieldsToImport() {
+        val computedActive = DailyMetric(
+            deviceId = "active-noop",
+            day = "2026-06-02",
+            totalSleepMin = 420.0,
+            recovery = 61.0,
+        )
+        val computedCanonical = DailyMetric(
+            deviceId = "my-whoop-noop",
+            day = "2026-06-02",
+            efficiency = 0.88,
+            avgHrv = 55.0,
+        )
+        val importedActive = DailyMetric(
+            deviceId = "active",
+            day = "2026-06-02",
+            recovery = 79.0,
+        )
+        val importedCanonical = DailyMetric(
+            deviceId = "my-whoop",
+            day = "2026-06-02",
+            totalSleepMin = 390.0,
+            restingHr = 52,
+        )
+        val computedOnly = DailyMetric(
+            deviceId = "active-noop",
+            day = "2026-06-01",
+            totalSleepMin = 400.0,
+        )
+
+        val selected = WhoopCsvExporter.selectDailyRowsForExport(
+            importedBySource = listOf(listOf(importedActive), listOf(importedCanonical)),
+            computedBySource = listOf(
+                listOf(computedActive, computedOnly),
+                listOf(computedCanonical),
+            ),
+        )
+
+        assertEquals(listOf("2026-06-01", "2026-06-02"), selected.map { it.metric.day })
+        assertEquals("noop (APPROXIMATE)", selected[0].source)
+        assertEquals(computedOnly, selected[0].metric)
+        assertEquals("import", selected[1].source)
+        assertEquals(importedActive, selected[1].metric)
+        assertNull(selected[1].metric.totalSleepMin)
+        assertNull(selected[1].metric.efficiency)
+        assertNull(selected[1].metric.avgHrv)
+    }
+
+    @Test
     fun cyclesRoundTripThroughRealParser() {
         val daily = listOf(
             DailyMetric(
@@ -62,12 +111,14 @@ class WhoopCsvExporterTest {
         assertEquals("92.3", row["sleep_efficiency_pct"])
         // Source column is present but ignored on import.
         assertEquals("import", row["source"])
-        // The four sleep figures re-parse as metricSeries rows under their original keys.
+        // The complete cycle projection re-parses, including these four figures and canonical
+        // fractional efficiency.
         val s = WhoopCsvImporter.parseCycleSeries(table, "my-whoop").associate { it.key to it.value }
-        assertEquals(mapOf(
-            "sleep_performance" to 85.0, "sleep_consistency" to 88.0,
-            "sleep_need_min" to 480.0, "sleep_debt_min" to 60.0,
-        ), s)
+        assertEquals(85.0, s.getValue("sleep_performance"), 1e-9)
+        assertEquals(88.0, s.getValue("sleep_consistency"), 1e-9)
+        assertEquals(480.0, s.getValue("sleep_need_min"), 1e-9)
+        assertEquals(60.0, s.getValue("sleep_debt_min"), 1e-9)
+        assertEquals(0.923, s.getValue("sleep_efficiency"), 1e-9)
     }
 
     @Test

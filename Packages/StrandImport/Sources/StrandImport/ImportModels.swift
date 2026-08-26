@@ -729,6 +729,9 @@ public struct WhoopImportResult: Sendable, Equatable {
     public var sleeps: [WhoopSleepRow]
     public var workouts: [WhoopWorkoutRow]
     public var journal: [WhoopJournalRow]
+    /// Inclusive wake-day span represented by source journal rows before invalid or contradictory
+    /// answers were omitted. Persistence replaces this whole range so stale answers cannot survive.
+    public var journalImportRange: ClosedRange<String>?
     /// NOOP's optional versioned sidecar for records that do not fit WHOOP's CSV schema.
     public var portableUserData: PortableUserData?
     public var summary: ImportSummary
@@ -738,6 +741,7 @@ public struct WhoopImportResult: Sendable, Equatable {
         sleeps: [WhoopSleepRow],
         workouts: [WhoopWorkoutRow],
         journal: [WhoopJournalRow],
+        journalImportRange: ClosedRange<String>? = nil,
         portableUserData: PortableUserData? = nil,
         summary: ImportSummary
     ) {
@@ -745,6 +749,7 @@ public struct WhoopImportResult: Sendable, Equatable {
         self.sleeps = sleeps
         self.workouts = workouts
         self.journal = journal
+        self.journalImportRange = journalImportRange
         self.portableUserData = portableUserData
         self.summary = summary
     }

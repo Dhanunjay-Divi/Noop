@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 33
+const val NOOP_DATABASE_SCHEMA_VERSION = 34
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -848,6 +848,42 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v33 -> v34: repair importer values without modifying already-shipped migrations.
+         *
+         * Every statement is data-only and idempotent. Temperature conversion is restricted to a
+         * physiologically impossible Celsius range that is plausible Fahrenheit. Disturbances are
+         * cleared only where the old importer duplicated the matching awake-minute series.
+         */
+        internal const val METRIC_SERIES_EFFICIENCY_HEAL_MIGRATION_SQL =
+            "UPDATE `metricSeries` SET `value` = `value` / 100.0 " +
+                "WHERE `key` = 'sleep_efficiency' AND `value` > 1.0 AND `value` <= 100.0"
+
+        internal val CSV_IMPORT_INTEGRITY_HEAL_MIGRATION_SQL: List<String> = listOf(
+            METRIC_SERIES_EFFICIENCY_HEAL_MIGRATION_SQL,
+            "UPDATE `dailyMetric` SET `skinTempDevC` = " +
+                "(`skinTempDevC` - 32.0) * 5.0 / 9.0 " +
+                "WHERE `deviceId` LIKE 'my-whoop%' " +
+                "AND `skinTempDevC` > 60.0 AND `skinTempDevC` <= 140.0",
+            "UPDATE `metricSeries` SET `value` = (`value` - 32.0) * 5.0 / 9.0 " +
+                "WHERE `deviceId` LIKE 'my-whoop%' " +
+                "AND `key` = 'skin_temp' AND `value` > 60.0 AND `value` <= 140.0",
+            "UPDATE `dailyMetric` SET `disturbances` = NULL " +
+                "WHERE `deviceId` LIKE 'my-whoop%' AND `disturbances` IS NOT NULL " +
+                "AND EXISTS (SELECT 1 FROM `metricSeries` AS `m` " +
+                "WHERE `m`.`deviceId` = `dailyMetric`.`deviceId` " +
+                "AND `m`.`day` = `dailyMetric`.`day` AND `m`.`key` = 'awake_min' " +
+                "AND ABS(`m`.`value` - `dailyMetric`.`disturbances`) <= 0.500001)",
+        )
+
+        internal val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in CSV_IMPORT_INTEGRITY_HEAL_MIGRATION_SQL) {
+                    db.execSQL(statement)
+                }
+            }
+        }
+
         internal fun strengthBuiltInInsertSQL(): List<String> =
             StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
                 "INSERT OR IGNORE INTO `strengthExercise` " +
@@ -881,6 +917,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
                     MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
                     MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
+                    MIGRATION_33_34,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

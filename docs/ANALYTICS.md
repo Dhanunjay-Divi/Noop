@@ -164,7 +164,15 @@ Each metric is standardized to a **robust z-score** against the personal baselin
 z = (value − mean) / (1.253 · spread)
 ```
 
-The `1.253` converts an EWMA mean-absolute-deviation into an approximate Gaussian σ (`E[|X−μ|] = σ·√(2/π) ≈ σ/1.253`). For "lower is better" drivers (RHR, resp) the z is inverted by swapping value and mean. The sleep term is centered directly: `(sleepPerf − 0.85) / 0.12`.
+The `1.253` converts an EWMA mean-absolute-deviation into an approximate Gaussian σ (`E[|X−μ|] = σ·√(2/π) ≈ σ/1.253`). For "lower is better" drivers (RHR, resp) the z is inverted by swapping value and mean.
+
+The Rest-quality term keeps a fixed `0.12` scale but uses the wearer's causal EWMA Rest baseline as its center once that baseline is usable:
+
+```
+restZ = (sleepPerf − personalRestBaseline) / 0.12
+```
+
+Only nights strictly before the scored day enter that baseline. Before enough prior Rest history exists, the internal cold-start center is `0.85`. The fixed scale prevents a very flat personal history from making tiny Rest changes dominate Recovery.
 
 Missing terms are dropped and weights renormalized. The weighted-mean z is squashed:
 
@@ -174,11 +182,11 @@ score = 100 / (1 + exp(−logisticK · (z − logisticZ0)))
         logisticZ0 = −0.20   (anchors z = 0 → ~58 %)
 ```
 
-The `58%` anchor matches WHOOP's published population-average recovery (`populationMean = 58.0`).
+The resulting `~58%` value at `z = 0` is an internal model anchor created by `logisticZ0`. The matching `populationMean = 58.0` constant is an internal, uncited cold-start fallback, not a provider population norm and not a user-facing comparison.
 
 ### Cold-start ("Calibrating")
 
-HRV is the dominant driver, and NOOP needs a few nights to learn your personal baseline first. If that baseline isn't usable yet (`BaselineState.usable == false`, i.e. fewer than `minNightsSeed` valid nights), `recovery(...)` returns `nil` and the UI shows **"Calibrating"** — more honest than fabricating a number. Callers may fall back to `populationMean` but should flag it.
+HRV is the dominant driver, and NOOP needs a few nights to learn your personal baseline first. If that baseline isn't usable yet (`BaselineState.usable == false`, i.e. fewer than `minNightsSeed` valid nights), `recovery(...)` returns `nil` and the UI shows **"Calibrating"** — more honest than fabricating a number. Any explicit non-production use of `populationMean` must label it as an internal fallback rather than measured recovery or a population comparison.
 
 ### Bands (`band(_:)`)
 
@@ -296,7 +304,7 @@ The rule: **elevated HR alone is insufficient to call wake.** An epoch or run at
 - **`confirmSleepWithHR` (V1 detection).** When a run is deeply motion-quiescent (≥ ~90% of its dense-gravity minutes posture-stable), the HR sleep band widens from **×1.05 → ×1.30** so a supplement-elevated but motionless run is not rejected. The band keeps a **floor** (genuine all-night in-bed wakefulness is still dropped); with no gravity evidence the strict ×1.05 band stands.
 - **`adaptiveOvernightHRBaseline`.** A personalised sleep band derived from recent overnight medians (self-calibrating across a supplement/fitness era), with a floor. Threaded through `detectSleep` as an optional argument that defaults to `nil` (byte-identical when unset); live cross-night wiring in `IntelligenceEngine` is a follow-up.
 
-Source: `SleepStager.swift` (`confirmSleepWithHR`, `adaptiveOvernightHRBaseline`) and `SleepStagerV2.swift` (motion-quiescent clamp), both in `Packages/StrandAnalytics`. Filed upstream as [ryanbr/noop#462](https://github.com/ryanbr/noop/issues/462). The Kotlin analytics twin (`com.noop.analytics`) is a deliberate follow-up (Swift-only contributor) — the parity contract requires the two stagers to stay byte-identical once transcribed.
+Source: `SleepStager.swift` (`confirmSleepWithHR`, `adaptiveOvernightHRBaseline`) and `SleepStagerV2.swift` (motion-quiescent clamp), both in `Packages/StrandAnalytics`. Filed upstream as [Dhanunjay-Divi/Noop#462](https://github.com/Dhanunjay-Divi/Noop/issues/462). The Kotlin analytics twin (`com.noop.analytics`) is a deliberate follow-up (Swift-only contributor) — the parity contract requires the two stagers to stay byte-identical once transcribed.
 ### Displayed sleep onset — the headline "Asleep at" spans the whole bridged night
 
 The Sleep screen headline ("Asleep at …") reports the onset of the **whole bridged night**, not the main session's start. A night stored as a short first-sleep fragment + a brief walk + the main session bridges into one group when the gap is under `gapBridgeMaxMin` (60 min). The display onset walk (`SleepView.nightOnsetTs` → `isPreOnsetAwakeStub`) previously mis-classified such a fragment as a spurious pre-onset lead through two stacked defects: (1) the #259 relative "minor lead" test compared the fragment's asleep minutes against 15% of the main block, so on a long main sleep a genuine short first sleep was skipped and the headline jumped forward to the main session's start; (2) the stub test read asleep minutes via the dict-only `decodeStages`, which returns nil for the segment-array `stagesJSON` an on-device **computed** night stores — so every fragment counted as 0 asleep minutes and tripped the "essentially sleepless stub" branch, bypassing defect (1)'s floor entirely.
@@ -499,4 +507,6 @@ Apple Health XML ──┘                                         │
 - **Robust statistics.** z-scores use EWMA mean-absolute-deviation (`× 1.253` to a Gaussian σ); resting HR uses 5-minute bin minima; HR display uses windowed medians — all chosen to resist single-sample outliers.
 - **Cold-start honesty.** When a baseline isn't trustworthy yet, the recovery scorer returns `nil` rather than a fabricated number.
 - **Not a medical device.** None of this is diagnostic or medical advice. The illness early-warning is a wellness nudge from your own baselines, not a clinical screen.
-- **Not affiliated with WHOOP.** NOOP interoperates with hardware and exports you already own, entirely on-device. Protocol decoding builds on community reverse-engineering of the WHOOP 4.0 (project *my-whoop*, `johnmiddleton12/my-whoop`) and WHOOP 5.0 (project *goose*, `b-nnett/goose`) protocols.
+- **Not affiliated with WHOOP.** NOOP interoperates with hardware and exports
+  you already own, entirely on-device. Its protocol decoding is maintained as
+  NOOP-controlled source from observed interoperability facts.

@@ -49,8 +49,8 @@ testers must download the IPA in an authenticated browser and import that local
 file into their sideloader.
 
 Historical manifest entries are not release authority. Use only an artifact
-associated with a reviewed canonical-project commit, and do not distribute it
-while the repository's distribution legal gate is blocked.
+associated with a reviewed canonical-project commit and require a passing
+distribution gate.
 
 > ### Two honest limitations of free-Apple-ID sideloading
 > - **7-day expiry.** Apps signed with a *free* Apple ID stop launching after 7 days and need
@@ -132,16 +132,14 @@ the package manifests are authoritative where an older planning example differs.
 > nominatively only to identify the hardware the app interoperates with — your own
 > device and your own data. NOOP performs no DRM circumvention and ships no WHOOP
 > firmware or vendor assets. Its protocol implementation remains subject to the
-> [redistribution-rights gate](PROTOCOL_RIGHTS_REMEDIATION.md). **NOOP is not a medical device;** all
+> repository distribution gate. **NOOP is not a medical device;** all
 > metrics (HR, HRV, recovery, strain, sleep, SpO₂, temperature) are approximations
 > and not clinically validated.
 
-The reverse-engineering that makes any of this possible is built on prior
-community work: the WHOOP 4.0 implementation from
-**`johnmiddleton12/my-whoop`** and observed WHOOP 5.0 / MG protocol facts
-documented by **`b-nnett/goose`**. See [`../ATTRIBUTION.md`](../ATTRIBUTION.md)
-for lineage and [`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md)
-for the unresolved redistribution plan.
+The protocol implementation is maintained as NOOP-controlled source in the
+canonical repository. See [`../ATTRIBUTION.md`](../ATTRIBUTION.md),
+[`NOTICE`](../NOTICE), and
+[`REPOSITORY_INDEPENDENCE.md`](REPOSITORY_INDEPENDENCE.md).
 
 ---
 

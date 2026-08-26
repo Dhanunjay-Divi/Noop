@@ -939,4 +939,28 @@ extension WhoopStore {
         }
         return migrator
     }
+
+    /// One-time compatibility repair for databases that had already applied v26 before its
+    /// `metricSeries` omission was found. The cursor marker avoids a full-series scan on every launch;
+    /// the guarded UPDATE is independently idempotent, so deleting the marker or retrying after a
+    /// transaction rollback still cannot divide an already-correct fraction twice.
+    static func repairImportedSleepEfficiencySeries(_ dbWriter: any DatabaseWriter) throws {
+        let marker = "data-repair.metric-series-sleep-efficiency-fraction.v1"
+        try dbWriter.write { db in
+            guard try Int.fetchOne(
+                db,
+                sql: "SELECT value FROM cursors WHERE name = ?",
+                arguments: [marker]
+            ) == nil else { return }
+
+            try db.execute(sql: """
+                UPDATE metricSeries SET value = value / 100.0
+                WHERE key = 'sleep_efficiency' AND value > 1.0 AND value <= 100.0
+                """)
+            try db.execute(
+                sql: "INSERT INTO cursors (name, value) VALUES (?, 1)",
+                arguments: [marker]
+            )
+        }
+    }
 }

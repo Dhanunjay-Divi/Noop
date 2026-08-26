@@ -26,6 +26,24 @@ private enum ManualWorkoutSaveError: LocalizedError {
     }
 }
 
+/// Upgrade boundary for formula changes that do not alter raw-input fingerprints.
+///
+/// A revision string, rather than a one-shot boolean, makes every future Charge revision fail open into
+/// a full-history rescore. Completion is persisted only after `analyzeRecent` returns a receipt.
+enum ChargeFormulaUpgradeGate {
+    static let completedRevisionKey = "noop.analysis.completedChargeFormulaRevision"
+    static let historyDays = 4_000
+    static var currentRevision: String { NoopScoreAlgorithmRevision.charge }
+
+    static func needsRescore(completedRevision: String?) -> Bool {
+        completedRevision != currentRevision
+    }
+
+    static func revisionToPersist(passCompleted: Bool, wasRequired: Bool) -> String? {
+        passCompleted && wasRequired ? currentRevision : nil
+    }
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -598,12 +616,24 @@ final class AppModel: ObservableObject {
                 // the one-shot done flag is set, purges any pollution, and rescores the affected days , so a
                 // wandering-clock strap can't keep re-polluting. A no-op when nothing's pending.
                 await self.intelligence.runTimestampHealIfNeeded()
-                // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh — every real update
-                // (sync backfill, import, edit, recalibrate, heal) already rescores via its own forced call.
-                // `force: false` skips the heavy 21-day rescore when the raw HR stream is unchanged since the
-                // last run, instead of re-reading ~21×54 h of HR every backstop tick on a big-import library. A new
-                // sample (the heal above, or a sync) moves the fingerprint and the tick rescores as before.
-                await self.intelligence.analyzeRecent(force: false)
+                // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh. A formula-only app
+                // upgrade does not move the raw-input fingerprint, though, so its explicit revision marker
+                // overrides that skip exactly once. Use the full history before labeling any local/remote row
+                // Charge v2; a failed or overlapping pass returns nil and leaves the marker stale for retry.
+                let completedChargeRevision = UserDefaults.standard.string(
+                    forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
+                let chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
+                    completedRevision: completedChargeRevision)
+                let receipt = await self.intelligence.analyzeRecent(
+                    maxDays: chargeUpgradePending ? ChargeFormulaUpgradeGate.historyDays : 21,
+                    force: chargeUpgradePending)
+                if let revision = ChargeFormulaUpgradeGate.revisionToPersist(
+                    passCompleted: receipt != nil,
+                    wasRequired: chargeUpgradePending) {
+                    UserDefaults.standard.set(
+                        revision,
+                        forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
+                }
                 // v5: recompute the skin-temp suite snapshots (cycle phase + body clock) from the
                 // freshly-scored history so the Health hub cards read a ready result.
                 await self.refreshV5Signals()

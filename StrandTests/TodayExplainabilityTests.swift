@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import StrandAnalytics
 @testable import Strand
 
 /// Renders a `LocalizedStringKey` to its user-visible string so tests can keep pinning verbatim copy.
@@ -90,27 +91,26 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertEqual(s, .needsStrap)
     }
 
-    func testScoreState_calibratingRemainingClampsToAtLeastOne() {
-        // Canonical contract: while calibrating, never render "0 more nights" — clamp to >= 1.
+    func testScoreState_completedSeedIsBaselineReady() {
+        // The completed seed night cannot score against itself. It is ready for the next qualifying
+        // night, not "1 more night" away from completing the baseline.
         let zero = MetricTileState.resolve(hasTodayValue: false,
                                    calibratingNightsRemaining: 0,
                                    carriedDate: nil)
-        XCTAssertEqual(zero, .calibrating(nightsRemaining: 1))
+        XCTAssertEqual(zero, .baselineReady)
 
         let negative = MetricTileState.resolve(hasTodayValue: false,
                                    calibratingNightsRemaining: -3,
                                    carriedDate: nil)
-        XCTAssertEqual(negative, .calibrating(nightsRemaining: 1))
+        XCTAssertEqual(negative, .baselineReady)
     }
 
-    func testScoreState_calibratingClampedValueDrivesSingularNightCopy() {
-        // The clamped-to-1 boundary must read the SINGULAR "1 more night", proving the plural rule
-        // reads the clamped payload, not the raw caller value.
+    func testScoreState_baselineReadyCopyExplainsTheFirstScoreBoundary() {
         let s = MetricTileState.resolve(hasTodayValue: false,
                                    calibratingNightsRemaining: 0,
                                    carriedDate: nil)
         XCTAssertEqual(s.accessibilityText,
-                       "Calibrating. Building your baseline. About 1 more night until your scores are personal.")
+                       "Baseline ready. 4 of 4 valid HRV nights complete. The next qualifying night can produce your first Recovery.")
     }
 
     // MARK: - Component 2 — verbatim copy (via the VoiceOver text, which surfaces the visible words)
@@ -150,12 +150,106 @@ final class TodayExplainabilityTests: XCTestCase {
 
     func testScoreState_copy_hasNoEmDash() {
         let states: [MetricTileState] = [.calibrating(nightsRemaining: 2),
+                                    .baselineReady,
                                     .carriedLastNight(date: "14 Jun", stale: false),
                                     .carriedLastNight(date: "14 May", stale: true),
                                     .needsStrap]
         for s in states {
             XCTAssertFalse(s.accessibilityText!.contains("\u{2014}"),
                            "MetricTileState \(s) must not contain an em-dash")
+        }
+    }
+
+    // MARK: - Fourth-night parity across Today variants
+
+    func testCoupledCalibrationSuppressesPriorScoreThroughCompletedSeedNight() {
+        XCTAssertNil(
+            CoupledView.displayedRecovery(
+                today: nil, carried: 81, calibrationNights: 2),
+            "a prior score must not displace active calibration")
+        XCTAssertNil(
+            CoupledView.displayedRecovery(
+                today: nil, carried: 81,
+                calibrationNights: Baselines.minNightsSeed),
+            "the just-completed seed night must show Baseline ready, not a prior score")
+        XCTAssertEqual(
+            CoupledView.displayedRecovery(
+                today: nil, carried: 81, calibrationNights: nil),
+            81,
+            "carry-over resumes once calibration no longer owns the state")
+        XCTAssertEqual(
+            CoupledView.displayedRecovery(
+                today: 72, carried: 81,
+                calibrationNights: Baselines.minNightsSeed),
+            72,
+            "a real current score always wins")
+    }
+
+    func testV2HeroVoiceOverUsesCompleteLocalizedFormats() {
+        XCTAssertEqual(
+            V2HeroArc.accessibilityReadout(
+                value: nil, maximum: 100, caption: "Valid HRV 2/4"),
+            "Not yet calculated, Valid HRV 2/4")
+        XCTAssertEqual(
+            V2HeroArc.accessibilityReadout(
+                value: 64, maximum: 100, caption: "Moderate"),
+            "64 out of 100, Moderate")
+        XCTAssertEqual(
+            V2HeroArc.accessibilityReadout(
+                value: 64, maximum: 100, caption: nil),
+            "64 out of 100")
+        XCTAssertEqual(
+            V2HeroArc.accessibilityReadout(
+                value: 7.5, maximum: 21, caption: nil, decimals: 1),
+            "7.5 out of 21")
+    }
+
+    func testRevisedPresentationCatalogKeysCoverEverySupportedLocale() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent(
+            "Strand/Resources/Localizable.xcstrings"))
+        let catalog = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+        let locales = [
+            "en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"
+        ]
+        let keys = [
+            "Baseline ready",
+            "Valid HRV %lld/%lld",
+            "Learning your baseline, %lld of %lld valid HRV nights.",
+            "Sleep synced, but HRV was unavailable or did not pass the baseline quality and range checks. Calibration remains at %lld of %lld valid HRV nights.",
+            "Usable beat-to-beat timing evidence was unavailable for this night, limiting confidence in the on-device stage estimates and Rest.",
+            "Usable breathing-rate evidence was unavailable for this night, limiting confidence in the on-device stage estimates and Rest.",
+            "A transparent cardiorespiratory recipe for estimating deep and REM, now used by default. It changes how already-detected nights are split into stages. Sleep detection is unchanged, but Rest and Recovery may change because stage estimates feed those scores. Turn it off to fall back to V1. Takes effect on the next nights staged.",
+            "Whole night is NOOP's default measure; Deep sleep pools HRV over slow-wave sleep only, reading lower and using the deep-sleep window. Switching re-scores your recent nights over the new window and takes effect right away once you have a few nights of data.",
+            "appwide.v4.not_calculated_with_context_format",
+            "appwide.v4.value_out_of_format",
+            "appwide.v4.value_out_of_with_context_format",
+        ]
+
+        for key in keys {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any], key)
+            let english = try XCTUnwrap(
+                ((localizations["en"] as? [String: Any])?["stringUnit"]
+                    as? [String: Any])?["value"] as? String,
+                "\(key) en")
+            for locale in locales {
+                let value = try XCTUnwrap(
+                    ((localizations[locale] as? [String: Any])?["stringUnit"]
+                        as? [String: Any])?["value"] as? String,
+                    "\(key) \(locale)")
+                XCTAssertFalse(value.isEmpty, "\(key) \(locale)")
+                if locale != "en" {
+                    XCTAssertNotEqual(
+                        value, english,
+                        "\(key) must not fall back to English in \(locale)")
+                }
+            }
         }
     }
 

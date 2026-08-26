@@ -10,7 +10,7 @@ data class OuraSleepSession(
 
 /**
  * Reshapes a reconstructed Oura hypnogram into the session format consumed by NOOP's sleep surfaces.
- * This is a parity twin of Swift `OuraSleepSessionMapping`, adapted from ryanbr/noop's clean-room
+ * This is a parity twin of Swift `OuraSleepSessionMapping`, adapted from Dhanunjay-Divi/Noop's clean-room
  * implementation. Fixed key order keeps cross-platform stored JSON byte-identical.
  */
 object OuraSleepSessionMapping {

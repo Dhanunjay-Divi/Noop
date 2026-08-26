@@ -555,7 +555,7 @@ struct StressView: View {
                     methodologyFact("Confidence", model.confidenceTitle)
                     methodologyFact("Baseline", "\(model.baselineDays)d")
                 }
-                Text("Inputs used: \(model.observedInputsTitle). This is a wellness estimate, not emotional stress, a diagnosis, or WHOOP score parity. Illness, alcohol, training, sleep, breathing, posture, medication and sensor quality can all affect these signals.")
+                Text("Inputs used: \(model.observedInputsTitle). This is a wellness estimate, not emotional stress, a diagnosis, or third-party score parity. Illness, alcohol, training, sleep, breathing, posture, medication and sensor quality can all affect these signals.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -636,7 +636,7 @@ struct StressView: View {
                 }
             }
             NoopCard(tint: StressRamp.calm) {
-                Text("NOOP waits for enough personal history and real baseline variation rather than inventing a score. The estimate is experimental, non-clinical, and is not emotional stress or WHOOP score parity.")
+                Text("NOOP waits for enough personal history and real baseline variation rather than inventing a score. The estimate is experimental, non-clinical, and is not emotional stress or third-party score parity.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -973,8 +973,8 @@ struct StressModel {
         case .noopComputed:
             return (String(localized: "Noop Band"), nil)
         case .whoopImport:
-            return (String(localized: "WHOOP export reference"),
-                    String(localized: "Derived by NOOP from a single WHOOP export series; not WHOOP score parity."))
+            return (String(localized: "Wearable export reference"),
+                    String(localized: "Derived by NOOP from a single wearable export series; not provider-score parity."))
         case .appleHealth:
             return (String(localized: "Apple Health reference"),
                     String(localized: "Apple Health HRV sampling and method may differ from strap RMSSD, so compare trends within this source only."))

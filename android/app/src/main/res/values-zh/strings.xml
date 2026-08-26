@@ -789,7 +789,7 @@
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP 每天会为您提供三个维度的评分（恢复、负荷与睡眠评分），每项满分为 100。</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">评分卡高亮色</string>
     <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">这些是基于公开科学研究、从消费级手环数据中推算出的独立评估值：并非绝对权威，仅供参考。</string>
-    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">对比 Noop Band</string>
+    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP 方法</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">高级选项</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
     <string name="l10n_settings_screen_repo_note_0a694b50">%1$s, %2$s</string>
@@ -2091,4 +2091,5 @@
     <string name="hydration_adaptive_timing_help">根据今天的运动负荷和已确认饮水量调整间隔。不会估算缺失数据。</string>
     <string name="hydration_adaptive_timing_status">当前每 %1$d 分钟一次。仅在今天的数据充分支持时调整时间。</string>
     <string name="hydration_base_interval_label">基础间隔</string>
+    <string name="today_calibration_valid_hrv_progress">有效 HRV %1$d/%2$d</string>
 </resources>

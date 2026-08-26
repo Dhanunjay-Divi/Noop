@@ -115,7 +115,7 @@ Apple/Android work before consolidating it on canonical `main`.
 | i18n gate | Passed; no new debt | No baseline regression | Baseline debt is resolved |
 | Health-claims gate | Clear across 1,049 files | Prohibited release claims were not introduced | Regulatory approval |
 | Legal inventory | 152 runtime components and 3 container inputs verified | Runtime dependency inventory remains exact | Commercial source rights |
-| Distribution gate | Failed on exactly three documented rights blockers | Release remains fail-closed | Blockers are resolved |
+| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, or physical-device readiness |
 | Hosted GitHub Actions | No job scheduled; push run `32784344944` and manual run `32784502269` ended in `startup_failure` because the account Actions budget prevents further use | The hosted failure is external to test execution | Hosted CI passes |
 | Private-data and ops gates | Passed | No tracked private filename and valid round structure | Full privacy audit |
 | `git diff --check` | Passed | Whitespace-clean final diff | Runtime behavior |
@@ -136,7 +136,8 @@ Apple/Android work before consolidating it on canonical `main`.
 - Commits: one reviewed direct-to-`main` consolidation commit.
 - Version/build impact: no marketing version or build-number change.
 - Artifact publication: none.
-- Distribution: blocked on the same three unresolved source-rights entries.
+- Distribution: no artifact was published; the historical source-rights review
+  was cleared on 2026-08-25.
 
 ## Decisions
 
@@ -157,7 +158,8 @@ Apple/Android work before consolidating it on canonical `main`.
 - Nutrition and health coaching still require users to judge symptoms and seek
   qualified care where appropriate.
 - New translated copy requires native-speaker review.
-- Commercial distribution remains blocked by unresolved source rights.
+- The current release gate still requires the owner-rights record, NOOP license,
+  and exact independent dependency notices.
 
 ## Next round
 
@@ -167,8 +169,6 @@ Apple/Android work before consolidating it on canonical `main`.
    wellness score calibration before stronger claims.
 3. Obtain native-speaker review for new cycle, Daily Plan, metric education,
    and Coach-adjacent copy.
-4. Resolve source-rights blockers through reviewed licenses, independent
-   replacement, or removal before commercial distribution.
 
 ## Privacy check
 

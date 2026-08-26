@@ -539,11 +539,8 @@ authoritatively in `Database.swift`.
 
 ## Provenance
 
-NOOP's strap interoperability is built on community reverse-engineering work, which it credits and
-builds upon:
-
-- **WHOOP 4.0 protocol** — [`johnmiddleton12/my-whoop`](https://github.com/johnmiddleton12/my-whoop)
-- **WHOOP 5.0 protocol** — [`b-nnett/goose`](https://github.com/b-nnett/goose)
+NOOP's strap interoperability implementation is owner-controlled source in the
+canonical repository and is based on observed wire behavior.
 
 The frame parsing, CRC, and command/event/packet decode that feed the decoded-stream tables above
 live in the `WhoopProtocol` package; persistence is `WhoopStore`; the local recovery / strain /

@@ -2,6 +2,8 @@ package com.noop.ui
 
 import com.noop.analytics.ScoreConfidence
 import com.noop.data.DailyMetric
+import java.time.LocalDate
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,5 +67,53 @@ class RecoveryDriversUiTest {
 
     @Test fun nullDayProducesNoRows() {
         assertTrue(recoveryChargeDrivers(scoredHistory(), null).isEmpty())
+    }
+
+    @Test fun explanationRequiresComputedRecoveryProvenance() {
+        assertTrue(canExplainRecovery("my-whoop-noop"))
+        assertTrue(canExplainRecovery("strap-42-noop"))
+        assertTrue(!canExplainRecovery("my-whoop"))
+        assertTrue(!canExplainRecovery("apple-health"))
+        assertTrue(!canExplainRecovery(null))
+    }
+
+    @Test fun displayedAndFutureRowsCannotRewriteExplanationBaseline() {
+        val prior = (1..6).map { day("2026-01-%02d".format(it), hrv = 50.0, rhr = 60) }
+        val displayed = day("2026-01-10", hrv = 100.0, rhr = 40, recovery = 70.0)
+        val future = day("2026-01-11", hrv = 200.0, rhr = 30)
+
+        val drivers = recoveryChargeDrivers(prior + displayed + future, displayed)
+
+        assertEquals(
+            "50 ms baseline",
+            drivers.first { it.label == "Heart rate variability" }.baselineText,
+        )
+        assertEquals(
+            "60 bpm baseline",
+            drivers.first { it.label == "Resting heart rate" }.baselineText,
+        )
+    }
+
+    @Test fun explanationHonorsManualRecalibrationEpoch() {
+        val old = (1..5).map { day("2026-01-%02d".format(it), hrv = 40.0, rhr = 70) }
+        val currentEra = (6..10).map { day("2026-01-%02d".format(it), hrv = 70.0, rhr = 55) }
+        val displayed = day("2026-01-11", hrv = 75.0, rhr = 52, recovery = 70.0)
+        val epoch = LocalDate.parse("2026-01-06").atStartOfDay(ZoneOffset.UTC).toEpochSecond().toDouble()
+
+        val drivers = recoveryChargeDrivers(
+            old + currentEra + displayed,
+            displayed,
+            hrvBaselineEpoch = epoch,
+            recoveryBaselineEpoch = epoch,
+        )
+
+        assertEquals(
+            "70 ms baseline",
+            drivers.first { it.label == "Heart rate variability" }.baselineText,
+        )
+        assertEquals(
+            "55 bpm baseline",
+            drivers.first { it.label == "Resting heart rate" }.baselineText,
+        )
     }
 }

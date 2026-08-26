@@ -55,7 +55,7 @@ Strand/
 
 ### Packages and platforms
 
-All six packages declare `.macOS(.v13)`. The five inherited packages declare
+All six packages declare `.macOS(.v13)`. The five core packages declare
 `.iOS(.v16)`, while `NoopRemoteSync` declares `.iOS(.v17)`, so every shared
 layer compiles for the app target's iOS 17 floor.
 Any framework-specific code is guarded with `#if canImport(AppKit) / #elseif canImport(UIKit)`
@@ -235,7 +235,7 @@ isn't yet fully validated. It shares the same analytics packages, so once data i
 macOS.
 
 The `NOOPiOS` app target (plus the `NOOPiOSWidgets` WidgetKit / Live Activity extension) already
-exists in `project.yml` — you don't need to add it. The five inherited packages
+exists in `project.yml` — you don't need to add it. The five core packages
 target `.iOS(.v16)`; the sixth, `NoopRemoteSync`, and the app target require
 iOS 17. The iOS app shell lives in `StrandiOS/` with shared iOS code in
 `StrandiOSShared/`.
@@ -263,7 +263,7 @@ open Strand.xcodeproj
 Notes:
 
 - The `NOOPiOS` and `NOOPiOSWidgets` targets deploy to **iOS 17.0**. Five
-  inherited packages retain an iOS 16 floor; `NoopRemoteSync` matches the app at
+  core packages retain an iOS 16 floor; `NoopRemoteSync` matches the app at
   iOS 17.
 - Running on a physical iPhone needs a signing identity selected in Xcode (a free personal Apple ID
   works for on-device builds). Set `DEVELOPMENT_TEAM` in `Config/BundleIdSecrets.xcconfig` (see
@@ -321,18 +321,11 @@ xcodebuild -project Strand.xcodeproj -scheme Strand -destination 'platform=macOS
 
 ---
 
-## Credits
+## Credits and licenses
 
-NOOP builds on prior community reverse-engineering and interoperability work:
-
-- **`johnmiddleton12/my-whoop`** — WHOOP 4.0 BLE protocol; the `WhoopProtocol` and `WhoopStore`
-  packages are adapted from this work.
-- **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (service family
-  `fd4b0001-…`, CRC16-Modbus header). Its repository has no explicit software
-  license; its lineage remains part of the distribution-rights review.
-- **`groue/GRDB.swift`** — SQLite persistence.
-- **`weichsel/ZIPFoundation`** — zip handling for Apple Health exports.
-
-See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for full detail and
-[`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md) for the open
-redistribution blocker and acceptance criteria.
+NOOP's protocol, storage, and collection implementations are maintained in the
+canonical repository under the owner-rights record. Independent runtime
+components, including `groue/GRDB.swift` and `weichsel/ZIPFoundation`, retain
+their own licenses. See [`ATTRIBUTION.md`](../ATTRIBUTION.md),
+[`NOTICE`](../NOTICE), and
+[`REPOSITORY_INDEPENDENCE.md`](REPOSITORY_INDEPENDENCE.md).

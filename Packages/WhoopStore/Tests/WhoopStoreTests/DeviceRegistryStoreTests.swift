@@ -223,7 +223,7 @@ final class DeviceRegistryStoreTests: XCTestCase {
 
         try store.deleteAllData(deviceId: "apple-health")
 
-        // The apple-health rows are gone everywhere; my-whoop's rows survive.
+        // The Apple Health rows are gone everywhere; rows under the compatible-wearable ID survive.
         XCTAssertEqual(try count("appleDaily", "apple-health"), 0)
         XCTAssertEqual(try count("metricSeries", "apple-health"), 0)
         XCTAssertEqual(try count("appleDaily", "my-whoop"), 1)

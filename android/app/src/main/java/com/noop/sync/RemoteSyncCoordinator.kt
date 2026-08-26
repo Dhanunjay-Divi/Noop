@@ -9,10 +9,17 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 import kotlin.math.roundToInt
 
-/** Wire identity for the current on-device Charge/Effort/Rest formulas. Bump both values together. */
+/**
+ * Wire identity for the current on-device Charge/Effort/Rest formulas.
+ *
+ * [CHARGE] is the cross-platform contract and must match Apple's
+ * `NoopScoreAlgorithmRevision.charge`. Bump [METADATA] and [ID_SUFFIX] together so a formula revision
+ * cannot overwrite derived rows or resume a cursor from an older remote namespace.
+ */
 internal object RemoteNoopAlgorithmRevision {
-    const val METADATA = "noop-charge-v1+noop-effort-v1+noop-rest-v1"
-    const val ID_SUFFIX = "cer-v1"
+    const val CHARGE = "noop-charge-v2"
+    const val METADATA = "$CHARGE+noop-effort-v1+noop-rest-v1"
+    const val ID_SUFFIX = "cer-v2"
 }
 
 data class RemoteNamespace(

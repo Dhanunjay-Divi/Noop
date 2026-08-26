@@ -135,8 +135,8 @@ while Noop Band history is syncing.
 - Branch and remote state: local `main` is pushed to canonical `origin/main`
   only after all recorded gates pass.
 - Version/build impact: no marketing version or build number change.
-- Release or distribution impact: no artifact published. The distribution gate
-  remains blocked on the same three source-rights entries.
+- Release or distribution impact: no artifact published. The source-rights
+  review active during this round was cleared on 2026-08-25.
 
 ## Decisions
 
@@ -157,8 +157,8 @@ while Noop Band history is syncing.
 - Simulator evidence does not establish physical band sync, haptic, background,
   battery, or sensor behavior.
 - The app still needs representative-device and participant accuracy studies.
-- Commercial distribution remains blocked by the three unresolved rights
-  entries in `docs/provenance/rights-status.json`.
+- The current release gate still requires the owner-rights record, NOOP license,
+  and exact independent dependency notices.
 
 ## Next round
 
@@ -167,8 +167,6 @@ while Noop Band history is syncing.
 2. Obtain native-speaker review for every reproductive-health string.
 3. Execute participant/device studies before changing cycle awareness into any
    more assertive prediction.
-4. Resolve source-rights blockers through reviewed licences, independent
-   replacement, or removal before commercial distribution.
 
 ## Privacy check
 

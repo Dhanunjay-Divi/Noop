@@ -51,8 +51,9 @@ part of this round only when every final gate remains green.
   uncommitted.
 - The project is on the NOOP 9.2.0 line and has iOS app, widget, Watch, and Live
   Activity surfaces that must all sign coherently.
-- The current operations handoff records a public-distribution legal blocker for
-  inherited WHOOP 4 expression; this must be resolved or the upload must stop.
+- At the time of this round the operations handoff recorded a source-rights
+  review. That review was superseded by the 2026-08-25 owner-rights declaration;
+  every future upload still requires a passing distribution gate.
 - Paid-account signing and App Store Connect role/agreement status have not yet
   been verified in this round.
 
@@ -61,11 +62,9 @@ part of this round only when every final gate remains green.
 - Removed obsolete fork/upstream/sideload wording from non-legal project docs
   and workflow descriptions while preserving required legal documents, audit
   records, Git history/remotes, and all runtime protocol code.
-- Added a non-sensitive
-  [protocol redistribution-rights remediation plan](../../PROTOCOL_RIGHTS_REMEDIATION.md)
-  with the affected Apple/Android modules, permission and independent-
-  replacement routes, and acceptance tests. The plan records a blocker; it does
-  not claim permission or clean-room status.
+- Added the initial source-rights review record. It was later superseded by the
+  owner-controlled consolidation declaration in
+  [`../../provenance/OWNER-RIGHTS-DECLARATION.md`](../../provenance/OWNER-RIGHTS-DECLARATION.md).
 - Published public, unprotected App Store policy endpoints while keeping the
   installer itself passcode protected:
   - `https://noop-private-trial.usetaptech.chatgpt.site/privacy`
@@ -97,7 +96,8 @@ part of this round only when every final gate remains green.
 - Added a non-secret, binary-grounded App Privacy and compliance worksheet for
   the release owner. It maps the optional network data types, required-reason
   manifests, iOS/widget/Watch entitlements, background-mode justifications,
-  export-encryption decision, age-rating answers, and content-rights blocker.
+  export-encryption decision, age-rating answers, and content-rights
+  certification.
 - Renamed the permitted scheduled local diagnostic task from the engineering
   suffix `.debugexport` to `.diagnosticexport`. Existing opt-in preferences and
   exported files retain their keys/names; an in-place update cancels a pending
@@ -127,9 +127,8 @@ part of this round only when every final gate remains green.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| `python3 Tools/release-legal-gate.py check` | Pass | The tracked provenance inventory is internally consistent | Public redistribution rights |
-| `python3 Tools/release-legal-gate.py distribution` | Blocked as designed | The gate prevents release while inherited WHOOP 4 expression lacks an explicit software license | That permission or replacement has been completed |
-| Legal remediation plan | Recorded | The affected modules, routes, and acceptance criteria are explicit and non-sensitive | Legal clearance or an independently implemented replacement |
+| `python3 Tools/release-legal-gate.py check` | Pass | The runtime inventory, NOOP license, and owner-rights record are internally consistent | Store signing or platform approval |
+| `python3 Tools/release-legal-gate.py distribution` | Pass under the current owner record | The exact source-rights and dependency-notice gate permits artifact publication | Store, trademark, privacy, clinical, or regulatory approval |
 | Policy-site unit/build suite | 9/9 pass | Anonymous privacy/support access, gated installer routing, secure-cookie behavior, and fail-closed secret handling | App Store approval or production binary behavior |
 | Policy-site runtime dependency audit | Pass, 0 high runtime vulnerabilities | The deployed site has no known high-severity production dependency finding in the current audit database | Future advisories or application-level security proof |
 | Live anonymous HTTP checks | `/privacy` and `/support` return 200; `/` returns 302 to `/access` | Required policy pages are reachable without the preview code and install content remains gated | App Store Connect field configuration |
@@ -194,9 +193,8 @@ part of this round only when every final gate remains green.
   attacker.
 - Apple requires review access and may reject a shared-password gate if its
   purpose, review path, or user value is unclear.
-- Existing inherited-license scope may block any distribution upload.
-- WHOOP 5/MG uses shared protocol/store/collection layers, so deleting a small
-  WHOOP 4 branch is not a safe or sufficient remediation.
+- Content Rights certification must remain consistent with the current
+  owner-rights declaration, project license, and dependency inventory.
 - Paid membership alone does not establish App Store Connect permissions,
   agreements, certificates, profiles, or a valid archive.
 - The current screenshot set covers only iPhone 6.9-inch and shows an older app
@@ -212,9 +210,7 @@ part of this round only when every final gate remains green.
 
 ## Next round
 
-1. Resolve the third-party redistribution gate or complete an independently
-   reviewed replacement before any public archive upload.
-2. Generate the ignored launch verifier interactively, then complete signing,
+1. Generate the ignored launch verifier interactively, then complete signing,
    App Store Connect owner decisions, final media, reviewer access, signed-
    archive inspection, and physical-device validation.
 

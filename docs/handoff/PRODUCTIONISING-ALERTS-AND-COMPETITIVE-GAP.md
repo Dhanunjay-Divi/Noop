@@ -25,22 +25,18 @@ Apple and Android now also show unique-contact delivery receipts, give a direct
 call path when every contact explicitly fails, and include bounded local
 notification lifecycle evidence in diagnostics. What remains is **real-world
 evidence**, **a delivery path that survives a sleeping app**, **consumer
-identity and production infrastructure**, and **the rights to ship at all**.
+identity and production infrastructure**.
 
 ---
 
 ## 1. What actually blocks a launch, in order
 
-### P0 — Distribution is blocked, and no amount of feature work changes that
+### P0 - Distribution and dependency gates must stay green
 
-```
-$ python3 Tools/release-legal-gate.py distribution
-ERROR: DISTRIBUTION BLOCKED: repository independence is not established
-(contributor-relicensing-rights, polyform-upstream-lineage, unlicensed-whoop4-expression).
-```
-
-Productionising alerts for an app that cannot legally ship is motion without progress. See
-`docs/handoff/RELEASE-BLOCKERS.md`. Everything below assumes this is being worked in parallel.
+The 2026-08-25 owner-controlled consolidation record clears the prior
+source-rights review. `python3 Tools/release-legal-gate.py distribution` must
+still run for every release so NOOP's license and independent dependency
+notices cannot drift.
 
 ### P0 — The safety page has never reached a real phone
 

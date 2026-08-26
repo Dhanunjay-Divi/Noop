@@ -50,7 +50,7 @@ struct HowNoopWorksView: View {
             case .recording:
                 return String(localized: "When Noop Band is connected, NOOP saves data live. \"Last synced\" tells you how fresh it is. If it says \"Not recording\", reconnect.")
             case .provenance:
-                return String(localized: "A badge shows whether a number was scored on-device by NOOP, or imported from WHOOP or Apple Health.")
+                return String(localized: "A badge shows whether a number was scored on-device by NOOP, or imported from a wearable export or Apple Health.")
             }
         }
 

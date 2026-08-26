@@ -595,28 +595,14 @@ backup/export.
 
 ## Attribution
 
-NOOP stands on community interoperability and protocol-documentation work. With
-thanks:
+NOOP-controlled source and contributions are consolidated in this canonical
+repository under the PolyForm Noncommercial License 1.0.0. The owner
+authorization is recorded in
+[`docs/provenance/OWNER-RIGHTS-DECLARATION.md`](docs/provenance/OWNER-RIGHTS-DECLARATION.md).
 
-- **[`ryanbr/noop`](https://github.com/ryanbr/noop)** — the cross-platform
-  source baseline from which this codebase derives, with its license, history,
-  and contributor attribution preserved.
-- **[`tigercraft4/goose`](https://github.com/tigercraft4/goose)** — the
-  self-hosting direction that inspired NOOP's independently implemented
-  server and client sync. No source from that repository is copied here.
-- **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE protocol; the `WhoopProtocol`
-  and `WhoopStore` packages and the collection logic are adapted from this work.
-- **[`b-nnett/goose`](https://github.com/b-nnett/goose)** — documented observed
-  WHOOP 5.0 / MG interoperability facts (the `fd4b0001-…` service family,
-  CRC16-Modbus header, and "puffin" packet types). Its repository has no explicit
-  software license. See [`ATTRIBUTION.md`](ATTRIBUTION.md) for exact provenance
-  and [`docs/reference-repositories.lock.json`](docs/reference-repositories.lock.json)
-  for the pinned audit record.
-- **`groue/GRDB.swift`** — SQLite persistence.
-- **`weichsel/ZIPFoundation`** — export unzipping.
-
-NOOP contains no WHOOP proprietary code, firmware, logos, or assets, and performs
-no DRM circumvention. Full detail in [`ATTRIBUTION.md`](ATTRIBUTION.md).
+Independent runtime dependencies retain their own licenses. The exact resolved
+inventory and required texts are generated in [`NOTICE`](NOTICE); research and
+interoperability boundaries are recorded in [`ATTRIBUTION.md`](ATTRIBUTION.md).
 
 ---
 
@@ -656,19 +642,15 @@ under the same terms — see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
 ### Source redistribution
 
-Private development clones do not by themselves grant redistribution rights.
 Before publishing a source mirror or binary, run
-`python3 Tools/release-legal-gate.py distribution` and resolve every reported
-third-party provenance or license blocker.
-
-Where redistribution is authorized:
+`python3 Tools/release-legal-gate.py distribution`. The gate verifies the
+owner-rights record, NOOP's project license, and the exact required dependency
+notices.
 
 - **Keep it non-commercial** and retain the [`LICENSE`](LICENSE), [`NOTICE`](NOTICE),
   [`ATTRIBUTION.md`](ATTRIBUTION.md), and copyright notices.
 - **Identify the canonical project home:**
   [github.com/Dhanunjay-Divi/Noop](https://github.com/Dhanunjay-Divi/Noop).
-
-The repository's own license cannot grant rights held by third-party authors.
 
 ---
 

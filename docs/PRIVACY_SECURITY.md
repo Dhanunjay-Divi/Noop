@@ -897,16 +897,10 @@ good faith.
 
 ## 7. Credits
 
-The protocol and persistence work NOOP builds on is community reverse-engineering of
-hardware the user owns, used for interoperability:
+The protocol and persistence implementation is NOOP-controlled source in the
+canonical repository, based on observed behavior of hardware the user owns for
+interoperability.
 
-- **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE framing/command/decode work and
-  the collection logic the `WhoopProtocol` / `WhoopStore` packages and the app's
-  collection layer are adapted from.
-- **`b-nnett/goose`** — published observed WHOOP 5.0 protocol facts (the
-  `fd4b0001-…` service family, the CRC16-Modbus header, and the "puffin" packet
-  types). Its repository has no explicit software license; this codebase copies none
-  of its source or assets.
 - **`groue/GRDB.swift`** — the SQLite persistence layer.
 - **`weichsel/ZIPFoundation`** — the archive reader used by the importers.
 

@@ -141,8 +141,8 @@ stress and breathing haptic behavior, and make band-tap precedence clear.
 - Repository visibility verified: private at the preceding authenticated
   repository audit.
 - Version/build impact: no marketing version or build number change.
-- Release or distribution impact: no artifact published. The distribution gate
-  remains closed on the existing three source-rights blockers.
+- Release or distribution impact: no artifact published. The source-rights
+  review active during this round was cleared on 2026-08-25.
 
 ## Decisions
 
@@ -162,17 +162,15 @@ stress and breathing haptic behavior, and make band-tap precedence clear.
 - Choosing among duplicate R-R namespaces improves data completeness; it does
   not establish medical-quality beat timing.
 - The 22 translated keys remain subject to native-speaker review.
-- Commercial distribution remains blocked by the three unresolved rights
-  entries in `docs/provenance/rights-status.json`.
+- The current release gate still requires the owner-rights record, NOOP license,
+  and exact independent dependency notices.
 
 ## Next round
 
 1. Complete physical-device validation for tap precedence, phone/band haptics,
    re-paired canonical history, overnight Rhythm refresh, and real workout
    overlap without resetting user data.
-2. Resolve source-rights blockers through reviewed licences, independent
-   replacement, or removal before commercial distribution.
-3. Continue native-speaker localization review, accuracy studies, Safety
+2. Continue native-speaker localization review, accuracy studies, Safety
    provider staging, store signing, and release metadata under their existing
    release gates.
 

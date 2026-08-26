@@ -53,6 +53,28 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertEqual(AppModel.analysisBackstopNanoseconds, 30 * 60 * 1_000_000_000)
     }
 
+    func testChargeV2UpgradeForcesFullHistoryUntilPassCompletes() {
+        XCTAssertEqual(ChargeFormulaUpgradeGate.currentRevision, "noop-charge-v2")
+        XCTAssertEqual(ChargeFormulaUpgradeGate.historyDays, 4_000)
+        XCTAssertTrue(ChargeFormulaUpgradeGate.needsRescore(completedRevision: nil))
+        XCTAssertTrue(ChargeFormulaUpgradeGate.needsRescore(
+            completedRevision: "noop-charge-v1"))
+        XCTAssertFalse(ChargeFormulaUpgradeGate.needsRescore(
+            completedRevision: "noop-charge-v2"))
+
+        XCTAssertNil(ChargeFormulaUpgradeGate.revisionToPersist(
+            passCompleted: false,
+            wasRequired: true))
+        XCTAssertNil(ChargeFormulaUpgradeGate.revisionToPersist(
+            passCompleted: true,
+            wasRequired: false))
+        XCTAssertEqual(
+            ChargeFormulaUpgradeGate.revisionToPersist(
+                passCompleted: true,
+                wasRequired: true),
+            "noop-charge-v2")
+    }
+
     func testMacRestorePickerHasNonCollapsingFrame() throws {
         let source = try sourceText("Strand/Screens/BackupSyncView.swift")
         let picker = try slice(source, from: "private struct RestorePickerSheet", to: "private func primaryLabel")

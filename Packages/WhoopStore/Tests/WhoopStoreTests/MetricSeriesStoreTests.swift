@@ -93,6 +93,39 @@ final class MetricSeriesStoreTests: XCTestCase {
         XCTAssertEqual(n, 2)
     }
 
+    func testSleepEfficiencyUpsertNormalizesPercentAndRejectsInvalidValues() async throws {
+        let store = try await WhoopStore.inMemory()
+        let n = try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-01", key: "sleep_efficiency", value: 92.3),
+            MetricPoint(day: "2026-05-02", key: "sleep_efficiency", value: 0.875),
+            MetricPoint(day: "2026-05-03", key: "sleep_efficiency", value: -1),
+            MetricPoint(day: "2026-05-04", key: "sleep_efficiency", value: 101),
+            MetricPoint(day: "2026-05-05", key: "sleep_performance", value: 92.3),
+            MetricPoint(day: "2026-05-06", key: "sleep_performance", value: .infinity),
+            MetricPoint(day: "2026-05-07", key: "recovery", value: .nan),
+        ], deviceId: "wearable-import")
+
+        XCTAssertEqual(n, 3)
+        let efficiency = try await store.metricSeries(
+            deviceId: "wearable-import",
+            key: "sleep_efficiency",
+            from: "2026-05-01",
+            to: "2026-05-31"
+        )
+        XCTAssertEqual(efficiency.map(\.day), ["2026-05-01", "2026-05-02"])
+        XCTAssertEqual(efficiency[0].value, 0.923, accuracy: 1e-12)
+        XCTAssertEqual(efficiency[1].value, 0.875, accuracy: 1e-12)
+
+        let unrelated = try await store.metricSeries(
+            deviceId: "wearable-import",
+            key: "sleep_performance",
+            from: "2026-05-01",
+            to: "2026-05-31"
+        )
+        XCTAssertEqual(unrelated.count, 1)
+        XCTAssertEqual(unrelated.first?.value, 92.3)
+    }
+
     func testDeviceIsolation() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertMetricSeries([
@@ -107,6 +140,119 @@ final class MetricSeriesStoreTests: XCTestCase {
         XCTAssertEqual(a.map { $0.value }, [1], "must not bleed devB's row")
         let keys = try await store.metricKeys(deviceId: "devB")
         XCTAssertEqual(keys, ["steps"])
+    }
+
+    func testReplaceRangeRemovesStaleManagedValuesAndPreservesEverythingElse() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-01", key: "recovery", value: 60),
+            MetricPoint(day: "2026-05-02", key: "recovery", value: 70),
+            MetricPoint(day: "2026-05-02", key: "hrv", value: 55),
+            MetricPoint(day: "2026-05-02", key: "steps", value: 8_000),
+            MetricPoint(day: "2026-05-03", key: "recovery", value: 80),
+        ], deviceId: "wearable-import")
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-02", key: "recovery", value: 99),
+        ], deviceId: "other-device")
+
+        try await store.replaceMetricSeriesRange(
+            [MetricPoint(day: "2026-05-01", key: "recovery", value: 61)],
+            deviceId: "wearable-import",
+            from: "2026-05-01",
+            to: "2026-05-02",
+            managedKeys: ["recovery", "hrv"]
+        )
+
+        let recovery = try await store.metricSeries(
+            deviceId: "wearable-import", key: "recovery",
+            from: "2026-05-01", to: "2026-05-31")
+        let hrv = try await store.metricSeries(
+            deviceId: "wearable-import", key: "hrv",
+            from: "2026-05-01", to: "2026-05-31")
+        let steps = try await store.metricSeries(
+            deviceId: "wearable-import", key: "steps",
+            from: "2026-05-01", to: "2026-05-31")
+        let other = try await store.metricSeries(
+            deviceId: "other-device", key: "recovery",
+            from: "2026-05-01", to: "2026-05-31")
+
+        XCTAssertEqual(recovery.map(\.day), ["2026-05-01", "2026-05-03"])
+        XCTAssertEqual(recovery.map(\.value), [61, 80])
+        XCTAssertTrue(hrv.isEmpty)
+        XCTAssertEqual(steps.map(\.value), [8_000])
+        XCTAssertEqual(other.map(\.value), [99])
+    }
+
+    func testReplaceRangeNormalizesRowsAtTheSamePersistenceBoundaryAsUpsert() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.replaceMetricSeriesRange(
+            [
+                MetricPoint(day: "2026-05-01", key: "sleep_efficiency", value: 92.3),
+                MetricPoint(day: "2026-05-02", key: "sleep_efficiency", value: .infinity),
+                MetricPoint(day: "2026-06-01", key: "sleep_efficiency", value: 88),
+                MetricPoint(day: "2026-05-01", key: "unmanaged", value: 1),
+            ],
+            deviceId: "wearable-import",
+            from: "2026-05-01",
+            to: "2026-05-31",
+            managedKeys: ["sleep_efficiency"]
+        )
+
+        let rows = try await store.metricSeries(
+            deviceId: "wearable-import", key: "sleep_efficiency",
+            from: "0000-01-01", to: "9999-12-31")
+        let unmanaged = try await store.metricSeries(
+            deviceId: "wearable-import", key: "unmanaged",
+            from: "0000-01-01", to: "9999-12-31")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].value, 0.923, accuracy: 1e-12)
+        XCTAssertTrue(unmanaged.isEmpty)
+    }
+
+    func testEmptyRestReplacementClearsExactRangeAndPreservesUnmanagedRows() async throws {
+        let store = try await WhoopStore.inMemory()
+        let managed = ["sleep_performance", "rest_confidence", "rest_evidence_flags"]
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-01", key: "sleep_performance", value: 80),
+            MetricPoint(day: "2026-05-02", key: "sleep_performance", value: 81),
+            MetricPoint(day: "2026-05-02", key: "rest_confidence", value: 2),
+            MetricPoint(day: "2026-05-02", key: "rest_evidence_flags", value: 55),
+            MetricPoint(day: "2026-05-02", key: "sleep_debt_min", value: 30),
+            MetricPoint(day: "2026-05-03", key: "rest_confidence", value: 1),
+        ], deviceId: "my-whoop-noop")
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-02", key: "rest_confidence", value: 2),
+        ], deviceId: "other-device")
+
+        try await store.replaceMetricSeriesRange(
+            [],
+            deviceId: "my-whoop-noop",
+            from: "2026-05-02",
+            to: "2026-05-02",
+            managedKeys: Set(managed))
+
+        for key in managed {
+            let rows = try await store.metricSeries(
+                deviceId: "my-whoop-noop", key: key,
+                from: "2026-05-02", to: "2026-05-02")
+            XCTAssertTrue(rows.isEmpty, "\(key) should be deleted inside the exact range")
+        }
+        let prior = try await store.metricSeries(
+            deviceId: "my-whoop-noop", key: "sleep_performance",
+            from: "2026-05-01", to: "2026-05-01")
+        let later = try await store.metricSeries(
+            deviceId: "my-whoop-noop", key: "rest_confidence",
+            from: "2026-05-03", to: "2026-05-03")
+        let unrelated = try await store.metricSeries(
+            deviceId: "my-whoop-noop", key: "sleep_debt_min",
+            from: "2026-05-02", to: "2026-05-02")
+        let otherDevice = try await store.metricSeries(
+            deviceId: "other-device", key: "rest_confidence",
+            from: "2026-05-02", to: "2026-05-02")
+        XCTAssertEqual(prior.count, 1)
+        XCTAssertEqual(later.count, 1)
+        XCTAssertEqual(unrelated.count, 1)
+        XCTAssertEqual(otherDevice.count, 1)
     }
 
     // MARK: - distinct metricKeys (sorted)

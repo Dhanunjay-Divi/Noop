@@ -145,8 +145,8 @@ public enum Baselines {
     /// so the whole Charge build-up restarts cleanly. Same string on iOS UserDefaults + Android prefs.
     public static let recoveryBaselineEpochKey: String = "noop.recoveryBaselineEpoch"
 
-    /// Default per-metric configurations (HRV, resting HR, respiration, skin temp, daily
-    /// Effort/strain).
+    /// Default per-metric configurations (HRV, resting HR, respiration, skin temp, Rest
+    /// quality, daily Effort/strain).
     ///
     /// "strain" backs the RecoveryScorer Activity-Balance / previous-day-Effort term: bounds
     /// match `StrainScorer.maxStrain`'s 0-100 output scale (the Charge/Effort/Rest redesign's
@@ -164,6 +164,11 @@ public enum Baselines {
                           halfLifeB: 14.0, halfLifeS: 21.0),
         "skin_temp": MetricCfg(minVal: 20.0, maxVal: 42.0, floorSpread: 0.3,
                                halfLifeB: 14.0, halfLifeS: 21.0),
+        // Rest quality is stored as a fraction at the scoring boundary. Its EWMA center
+        // personalizes the Recovery sleep term; the scorer intentionally keeps its established
+        // fixed 0.12 scale instead of using this tracked spread.
+        "rest_quality": MetricCfg(minVal: 0.0, maxVal: 1.0, floorSpread: 0.04,
+                                  halfLifeB: 14.0, halfLifeS: 21.0),
         "strain": MetricCfg(minVal: 0.0, maxVal: 100.0, floorSpread: 5.0,
                             halfLifeB: 14.0, halfLifeS: 21.0),
     ]
@@ -172,6 +177,7 @@ public enum Baselines {
     public static var hrvCfg: MetricCfg { metricCfg["hrv"]! }
     public static var restingHRCfg: MetricCfg { metricCfg["resting_hr"]! }
     public static var respCfg: MetricCfg { metricCfg["resp"]! }
+    public static var restQualityCfg: MetricCfg { metricCfg["rest_quality"]! }
     /// Baseline config for the RecoveryScorer Activity-Balance / previous-day-Effort term.
     public static var strainCfg: MetricCfg { metricCfg["strain"]! }
 
@@ -378,6 +384,20 @@ public enum Baselines {
         let seed = (cfg.minVal + cfg.maxVal) / 2.0
         return BaselineState(baseline: seed, spread: cfg.floorSpread, nValid: 0,
                              nightsSinceUpdate: 0, status: .calibrating)
+    }
+
+    /// Build a causal baseline from calendar days strictly before `day`.
+    ///
+    /// The dictionary may contain the scored day and later synced history; neither can influence the
+    /// returned state. This is the production scoring boundary used when historical days are rescored,
+    /// so adding a future night cannot revise an older day's baseline.
+    public static func foldHistory(_ valuesByDay: [String: Double?],
+                                   before day: String,
+                                   cfg: MetricCfg,
+                                   baselineEpoch: Double? = nil) -> BaselineState {
+        let dayKeys = valuesByDay.keys.filter { $0 < day }.sorted()
+        let values = dayKeys.map { valuesByDay[$0]! }
+        return foldHistory(values, dayKeys: dayKeys, cfg: cfg, baselineEpoch: baselineEpoch)
     }
 
     // MARK: - Device-era boundary (#459)

@@ -1224,7 +1224,7 @@ class WhoopBleClient(
             isWhoop5: Boolean,
             prevPayloadHex: String?,
         ): Pair<String, String?> {
-            val fam = if (isWhoop5) "WHOOP 5/MG" else "WHOOP 4.0"
+            val fam = if (isWhoop5) "newer band" else "legacy band"
             val payStart = cmdOff + 1
             val payEnd = frame.size - 4
             val hasPayload = payEnd > payStart
@@ -1333,7 +1333,7 @@ class WhoopBleClient(
             isWhoop5: Boolean,
             prevPayloadHex: String?,
         ): Pair<String, String?> {
-            val fam = if (isWhoop5) "WHOOP 5/MG" else "WHOOP 4.0"
+            val fam = if (isWhoop5) "newer band" else "legacy band"
             val payStart = cmdOff + 1
             val payEnd = frame.size - 4
             val hasPayload = payEnd > payStart

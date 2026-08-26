@@ -94,7 +94,7 @@ public enum TestModeRegistry {
         captures: ["connectTiming", "bondState", "frameTiming", "reconnectChurn", "offloadProgress",
                    "offloadStalls", "firmwareDecode", "clockDrift", "otherCentral"],
         questionnaire: [
-            Question(id: "otherDevicePaired", prompt: "Is another phone or the WHOOP app paired to the strap right now?", kind: .yesNo),
+            Question(id: "otherDevicePaired", prompt: "Is another phone or the other band app paired to the strap right now?", kind: .yesNo),
         ],
         liveReadout: ["connectionUptime", "reconnectCount", "lastOffloadResult"],
         capture: .toggle,
@@ -163,7 +163,7 @@ public enum TestModeRegistry {
         captures: ["socSeries", "chargeSteps", "dischargeRun", "fittedSlope",
                    "sourceMeasuredVsRated", "batteryGates"],
         questionnaire: [
-            Question(id: "whoopAppInstalled", prompt: "Is the official WHOOP app installed?", kind: .yesNo),
+            Question(id: "whoopAppInstalled", prompt: "Is the other band app installed?", kind: .yesNo),
             Question(id: "otherPhonePaired", prompt: "Is another phone paired to the strap?", kind: .yesNo),
             Question(id: "chargedInWindow", prompt: "Did you charge during the capture?", kind: .yesNo),
             Question(id: "batterySaverApps", prompt: "Any battery-saver apps running?", kind: .text),

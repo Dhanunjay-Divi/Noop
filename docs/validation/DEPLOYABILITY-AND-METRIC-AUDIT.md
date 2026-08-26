@@ -6,16 +6,13 @@ Foster 1998 (monotony) · Banister/Coggan impulse-response (ATL/CTL/TSB) · Walc
 
 ---
 
-## 1. Is it good to deploy? **No — and not because of the code.**
+## 1. Is it good to deploy? **Not yet.**
 
-```
-$ python3 Tools/release-legal-gate.py distribution
-ERROR: DISTRIBUTION BLOCKED: repository independence is not established
-(contributor-relicensing-rights, polyform-upstream-lineage, unlicensed-whoop4-expression)
-```
-
-The three rights blockers are unresolved and `WhoopProtocol`/`WhoopStore` are unchanged. **Nothing that
-follows changes this.** Any deploy conversation is premature until those clear.
+The prior source-rights review was superseded on 2026-08-25 by the repository
+owner's consolidation declaration. The legal inventory and distribution modes
+now validate NOOP's license, the owner record, and independent dependency
+notices. Deployment still requires signing, store, infrastructure, carrier,
+physical-device, accuracy, localization, and regulatory evidence.
 
 **Code readiness, assessed separately, is good:**
 
@@ -78,8 +75,8 @@ user is not scored against a baseline that does not exist yet.
   has since arrived.
 
 ### Also good, and worth protecting
-Delivery visibility (`safety.page.delivery_counts_format`), transport-vendor abstraction, `pagingEnabled` /
-`pagingConfigured` as first-class states, and — most importantly — **it did not touch the rights gate**.
+Delivery visibility (`safety.page.delivery_counts_format`), transport-vendor abstraction, and
+`pagingEnabled` / `pagingConfigured` as first-class states are worth protecting.
 
 ---
 
@@ -179,14 +176,13 @@ replaces rather than duplicates. No silent failures, no duplicates found.
 
 ## 4. Ranked recommendations
 
-1. **Rights blockers.** Nothing ships until these clear.
-2. **Gate REM/deep minutes on R-R availability.** Highest honesty-per-line item outstanding.
-3. **Resolve the 58 anchor** — the last ~3–10 points of systematic pessimism. Drive
+1. **Gate REM/deep minutes on R-R availability.** Highest honesty-per-line item outstanding.
+2. **Resolve the 58 anchor** — the last ~3–10 points of systematic pessimism. Drive
    `PersonalCalibrationModel`, which already exists for this.
-4. **Uncouple the ACWR** (chronic over days 8–28) or drop it. Also reconcile the strain-as-load
+3. **Uncouple the ACWR** (chronic over days 8–28) or drop it. Also reconcile the strain-as-load
    disagreement between `ReadinessEngine` and `TrainingLoadModel`.
-5. **Align watch HRV with the phone** (RMSSD) or document why SDNN differs there.
-6. **Carrier delivery evidence.** Still no real SMS has been sent; A2P/10DLC registration is the long-lead
+4. **Align watch HRV with the phone** (RMSSD) or document why SDNN differs there.
+5. **Carrier delivery evidence.** Still no real SMS has been sent; A2P/10DLC registration is the long-lead
    item.
 
 ## 5. Do I want another dataset pass?

@@ -75,6 +75,40 @@ object WhoopCsvExporter {
 
     internal fun num(v: Int?): String = v?.toString() ?: ""
 
+    internal data class DailyExportRow(
+        val metric: DailyMetric,
+        val source: String,
+    )
+
+    /**
+     * Select complete daily rows for a portable CSV export.
+     *
+     * Source lists are ordered by precedence (active device before canonical fallback). The first
+     * complete row in each bucket wins that day, then an imported row replaces a computed row as a
+     * whole. Deliberately do not use the dashboard's field-wise union here: doing so can copy
+     * computed fields into a row labelled "import", which promotes approximate values to official
+     * provenance when the CSV is re-imported. This is the Android twin of CsvExport.swift.
+     */
+    internal fun selectDailyRowsForExport(
+        importedBySource: List<List<DailyMetric>>,
+        computedBySource: List<List<DailyMetric>>,
+    ): List<DailyExportRow> {
+        fun firstWholeRowByDay(sources: List<List<DailyMetric>>): Map<String, DailyMetric> {
+            val rows = LinkedHashMap<String, DailyMetric>()
+            for (source in sources) {
+                for (row in source) rows.putIfAbsent(row.day, row)
+            }
+            return rows
+        }
+
+        val imported = firstWholeRowByDay(importedBySource)
+        val computed = firstWholeRowByDay(computedBySource)
+        return (imported.keys + computed.keys).toSortedSet().map { day ->
+            imported[day]?.let { DailyExportRow(it, "import") }
+                ?: DailyExportRow(computed.getValue(day), "noop (APPROXIMATE)")
+        }
+    }
+
     // --- Tolerant decoders for the cache's polymorphic JSON columns ---
 
     internal data class StageMinutes(
@@ -352,14 +386,15 @@ object WhoopCsvExporter {
         val importedIds = repo.importedSourceIds(deviceId)
         val computedIds = repo.computedSourceIds(deviceId)
 
-        // Daily: the same imported-wins merge the dashboards show (daysMerged resolves the union
-        // internally); a day present under ANY imported source is "import", otherwise it came from
-        // the on-device computed source.
-        val daily = repo.daysMerged(deviceId)
-        val importedDays = importedIds.flatMap { repo.days(it) }.map { it.day }.toHashSet()
-        val sourceByDay = daily.associate { d ->
-            d.day to if (d.day in importedDays) "import" else "noop (APPROXIMATE)"
-        }
+        // Daily export uses whole source rows, matching Apple. Dashboard reads intentionally
+        // coalesce fields for presentation; exporting that hybrid and labelling it "import" would
+        // turn computed fields into official values on re-import.
+        val selectedDaily = selectDailyRowsForExport(
+            importedBySource = importedIds.map { repo.days(it) },
+            computedBySource = computedIds.map { repo.days(it) },
+        )
+        val daily = selectedDaily.map(DailyExportRow::metric)
+        val sourceByDay = selectedDaily.associate { it.metric.day to it.source }
 
         val sleeps = repo.sleepSessionsMerged(deviceId, 0L, hi)
         // Workouts: imported WHOOP ∪ on-device detected (which carries the "-noop" device id), each

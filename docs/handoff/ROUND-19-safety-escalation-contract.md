@@ -62,8 +62,8 @@ results are:
   instrumentation-source compilation passed; the final 221-key Safety
   localization contract passed.
 - Policy: strict i18n, health claims, legal inventory, private-data, ops, Ruff,
-  tool tests, and diff-whitespace checks passed. Distribution remains
-  intentionally blocked on the three recorded source-rights entries.
+  tool tests, and diff-whitespace checks passed. The source-rights review was
+  later cleared by the 2026-08-25 owner-controlled consolidation declaration.
 
 Carrier delivery, physical-device behavior, detector performance, production
 infrastructure, signing, stores, source-rights clearance, and regulatory review

@@ -45,6 +45,9 @@ struct CoupledView: View {
     /// (`repo.workoutRows`), not `DailyMetric.exerciseCount` (strap-DETECTED only — a Health-Connect import
     /// with auto-detect off read as 0 while the Workouts screen showed it). Loaded in `.task`.
     @State private var workoutsToday: Int = 0
+    /// Source of the exact Recovery row shown by the hero. Local driver explanations are valid only
+    /// for a computed `-noop` score, never for an imported provider score.
+    @State private var breakdownRecoverySource: String?
 
     /// The day the coupled read describes, today's resolved row (the same `resolveToday` #304/#144 boundary
     /// Today anchors on), never a second store read.
@@ -58,6 +61,7 @@ struct CoupledView: View {
     private var calibrationNights: Int? {
         RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
                                          dayKeys: repo.days.map(\.day),
+                                         before: todayKey,
                                          hasRecovery: day?.recovery != nil)
     }
 
@@ -67,12 +71,27 @@ struct CoupledView: View {
         repo.days.last(where: { $0.recovery != nil && $0.day < todayKey })
     }
 
-    /// The recovery value the ring shows: today's if scored, else the carried prior day's (never fabricated).
-    private var recovery: Double? { day?.recovery ?? carriedRecoveryDay?.recovery }
+    /// The recovery value the ring shows: today's if scored, otherwise a prior score only after calibration
+    /// has cleared. A seed-in-progress or just-completed seed night owns the empty state and its guidance.
+    private var recovery: Double? {
+        Self.displayedRecovery(
+            today: day?.recovery,
+            carried: carriedRecoveryDay?.recovery,
+            calibrationNights: calibrationNights)
+    }
+
+    static func displayedRecovery(today: Double?, carried: Double?,
+                                  calibrationNights: Int?) -> Double? {
+        if let today { return today }
+        guard calibrationNights == nil else { return nil }
+        return carried
+    }
 
     /// True when the hero is showing the CARRIED prior score rather than today's own, which drives the
     /// dimmed ring + the "Last night · <date>" stamp so an old number is never passed off as new (#543/#779).
-    private var isCarryingRecovery: Bool { day?.recovery == nil && carriedRecoveryDay?.recovery != nil }
+    private var isCarryingRecovery: Bool {
+        calibrationNights == nil && day?.recovery == nil && carriedRecoveryDay?.recovery != nil
+    }
 
     /// Effort strain on NOOP's 0–100 axis for the day (stored row; no live recompute here, this is a
     /// glance screen, not the primary Today hero). nil when the day has no scored Effort.
@@ -151,6 +170,12 @@ struct CoupledView: View {
             workoutsToday = await repo.workoutRows(days: 2).filter {
                 Repository.logicalDayKey(Date(timeIntervalSince1970: TimeInterval($0.startTs))) == key
             }.count
+            let sourceDay = breakdownRow?.day
+            let resolved = await repo.resolvedSeries(
+                key: "recovery", source: Repository.whoopSource)
+            breakdownRecoverySource = sourceDay.flatMap { day in
+                resolved.points.last(where: { $0.day == day })?.source
+            }
         }
     }
 
@@ -240,12 +265,14 @@ struct CoupledView: View {
     /// seeds. Nothing when today's own score is showing.
     @ViewBuilder
     private var heroCaption: some View {
-        if isCarryingRecovery, let prior = carriedRecoveryDay {
-            Text(TodayView.carriedCaption(priorDayKey: prior.day, todayKey: todayKey))
+        if recovery == nil, let banked = calibrationNights {
+            Text(TodayView.calibrationHeadline(
+                validHrvNights: banked,
+                seed: Baselines.minNightsSeed))
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
-        } else if recovery == nil, let banked = calibrationNights {
-            Text(ChargeBreakdownFormat.calibrationProgress(banked: banked, seed: Baselines.minNightsSeed))
+        } else if isCarryingRecovery, let prior = carriedRecoveryDay {
+            Text(TodayView.carriedCaption(priorDayKey: prior.day, todayKey: todayKey))
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
@@ -254,7 +281,14 @@ struct CoupledView: View {
     private var heroAccessibilityLabel: String {
         if let r = recovery { return String(localized: "Recovery \(Int(r.rounded())) percent") }
         if let banked = calibrationNights {
-            return String(localized: "Recovery calibrating, \(banked) of \(Baselines.minNightsSeed) nights")
+            let seed = Baselines.minNightsSeed
+            let headline = TodayView.calibrationHeadline(validHrvNights: banked, seed: seed)
+            let detail = banked >= seed
+                ? TodayView.calibrationDetailCopy(
+                    validHrvNights: banked, seed: seed,
+                    evidence: .validHrv, staleDays: nil)
+                : TodayView.calibrationProgress(validHrvNights: banked, seed: seed)
+            return [String(localized: "Recovery"), headline, detail].joined(separator: ". ")
         }
         return String(localized: "Recovery, no data yet")
     }
@@ -515,31 +549,38 @@ struct CoupledView: View {
     /// last-scored day, so the sheet always matches the ring above it.
     private var breakdownRow: DailyMetric? {
         if let t = day, t.recovery != nil { return t }
+        guard calibrationNights == nil else { return nil }
         return carriedRecoveryDay
     }
 
-    /// The ordered Charge drivers for the displayed ring PLUS the confidence tier from the SAME folded HRV
-    /// baseline — the exact TodayView derivation (pure engine scoring against the folded personal
-    /// baselines). nil for a calibrating / cold-start night, which gates the sheet through to the countdown
+    /// The ordered Charge drivers for the displayed ring PLUS the confidence tier from the SAME causal,
+    /// epoch-aware baseline as TodayView. nil for a calibrating / cold-start night, which gates the countdown
     /// instead. PERF: mirrors TodayView.chargeBreakdown() — the old `chargeDrivers` property plus the
     /// sheet's inline confidence fold re-folded the full `repo.days` history four times per body eval of
     /// the open sheet; one call now folds each series exactly once, guards before any fold.
     private func chargeBreakdown() -> (drivers: [ChargeDriver], confidence: ScoreConfidence)? {
-        guard let row = breakdownRow, let hrv = row.avgHrv, let rhr = row.restingHr else { return nil }
-        let hrvBase = Baselines.foldHistory(repo.days.map(\.avgHrv), cfg: Baselines.hrvCfg)
+        guard let displayedRow = breakdownRow,
+              TodayView.canExplainRecovery(source: breakdownRecoverySource) else { return nil }
+        let sourceRows = repo.vitalMetricRows
+        guard let row = TodayView.locallyComputedDay(
+            day: displayedRow.day, sourceRows: sourceRows),
+              let hrv = row.avgHrv, let rhr = row.restingHr else { return nil }
+        let baselines = TodayView.chargeBreakdownBaselines(sourceRows: sourceRows, before: row.day)
+        let hrvBase = baselines.hrv
         guard hrvBase.usable else { return nil }
-        let rhrBase = Baselines.foldHistory(repo.days.map { $0.restingHr.map(Double.init) },
-                                            cfg: Baselines.restingHRCfg)
-        let respBase = Baselines.foldHistory(repo.days.map(\.respRateBpm), cfg: Baselines.respCfg)
-        // Rest-quality term = the same sleep performance the sleep row shows, ÷100 (AnalyticsEngine's form).
-        let sleepPerf = sleepPerformance.map { $0 / 100.0 }
+        let rowRestScore = TodayView.locallyDerivedRestScore(day: row.day, sourceRows: sourceRows)
+        let sleepPerf = rowRestScore.map { $0 / 100.0 }
         let drivers = RecoveryScorer.chargeDrivers(
             hrv: hrv, rhr: Double(rhr), resp: row.respRateBpm,
             hrvBaseline: hrvBase,
-            rhrBaseline: rhrBase.usable ? rhrBase : nil,
-            respBaseline: respBase.usable ? respBase : nil,
-            sleepPerf: sleepPerf, skinTempDev: row.skinTempDevC)
-        return (drivers, ScoreConfidence.charge(recovery: row.recovery, hrvBaseline: hrvBase))
+            rhrBaseline: baselines.rhr.usable ? baselines.rhr : nil,
+            respBaseline: baselines.resp.usable ? baselines.resp : nil,
+            sleepPerf: sleepPerf,
+            restQualityBaseline: baselines.rest.usable ? baselines.rest : nil,
+            skinTempDev: row.skinTempDevC)
+        return (drivers, ScoreConfidence.charge(
+            recovery: displayedRow.recovery,
+            hrvBaseline: hrvBase))
     }
 
     @ViewBuilder
@@ -555,7 +596,25 @@ struct CoupledView: View {
                             ChargeBreakdownSection(
                                 drivers: breakdown.drivers,
                                 confidence: breakdown.confidence,
-                                skinTempRel: RecoveryScorer.skinTempRelative(deviationC: breakdownRow?.skinTempDevC))
+                                skinTempRel: RecoveryScorer.skinTempRelative(
+                                    deviationC: breakdownRow.flatMap {
+                                        TodayView.locallyComputedDay(
+                                            day: $0.day,
+                                            sourceRows: repo.vitalMetricRows)
+                                    }?.skinTempDevC))
+                        }
+                    } else if breakdownRow?.recovery != nil,
+                              !TodayView.canExplainRecovery(source: breakdownRecoverySource) {
+                        NoopCard(padding: 18, tint: StrandPalette.chargeColor) {
+                            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                                Text("Imported")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text("The method behind the score, not today's values.")
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     } else {
                         if let banked = calibrationNights {
@@ -629,10 +688,14 @@ struct CoupledView: View {
     /// The calibrating countdown card, the same pure `ChargeBreakdownFormat` copy the Today sheet shows,
     /// so the two breakdowns read identically while the baseline seeds.
     private func calibrationCard(banked: Int) -> some View {
-        let remaining = max(1, Baselines.minNightsSeed - banked)
-        let countdown = ChargeBreakdownFormat.calibrationCountdown(nightsRemaining: remaining)
+        let seed = Baselines.minNightsSeed
+        let seedComplete = banked >= seed
+        let headline = TodayView.calibrationHeadline(validHrvNights: banked, seed: seed)
         let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Recovery"))
-        let progress = ChargeBreakdownFormat.calibrationProgress(banked: banked, seed: Baselines.minNightsSeed)
+        let progress = TodayView.calibrationProgress(validHrvNights: banked, seed: seed)
+        let readyDetail = TodayView.calibrationDetailCopy(
+            validHrvNights: banked, seed: seed,
+            evidence: .validHrv, staleDays: nil)
         return NoopCard(padding: 14, tint: StrandPalette.chargeColor) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "gauge.with.dots.needle.bottom.50percent")
@@ -641,24 +704,39 @@ struct CoupledView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(countdown)
+                        Text(headline)
                             .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
                         Spacer(minLength: 0)
-                        ConfidenceTierChip(confidence: .calibrating)
+                        if !seedComplete {
+                            ConfidenceTierChip(confidence: .calibrating)
+                        }
                     }
-                    Text(unlock)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(progress)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    if seedComplete {
+                        Text(readyDetail)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(unlock)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(progress)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                 }
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Recovery baseline calibrating. \(countdown), \(unlock). \(progress).")
+        .accessibilityLabel(
+            (seedComplete
+                ? [String(localized: "Recovery"), headline, readyDetail]
+                : [String(localized: "Recovery"), String(localized: "Calibrating"),
+                   headline, unlock, progress])
+                .joined(separator: ". ")
+        )
     }
 
     // MARK: Shared helpers

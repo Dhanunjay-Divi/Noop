@@ -51,6 +51,7 @@ private actor StoreOpenGate {
         WhoopStore.quarantineIncompatibleDatabase(at: path)
         let pool = try DatabasePool(path: path, configuration: config)
         try WhoopStore.makeMigrator().migrate(pool)
+        try WhoopStore.repairImportedSleepEfficiencySeries(pool)
         return pool
     }
 }
@@ -79,6 +80,7 @@ public actor WhoopStore {
     private init(dbWriter: any DatabaseWriter) throws {
         self.dbWriter = dbWriter
         try WhoopStore.makeMigrator().migrate(dbWriter)
+        try WhoopStore.repairImportedSleepEfficiencySeries(dbWriter)
     }
 
     /// Store an already-open, already-migrated writer WITHOUT re-running the migrator: the

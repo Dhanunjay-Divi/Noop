@@ -68,8 +68,10 @@ final class OnboardingUnitsPickerTests: XCTestCase {
     func testOnboardingKeepsContentScrollableAndCTAKeyboardSafe() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Onboarding/OnboardingWizard.swift"))
-        XCTAssertTrue(source.contains(".safeAreaInset(edge: .bottom"),
-                      "The primary action must sit above the home indicator and keyboard.")
+        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"noop.onboarding.footer\")"),
+                      "The primary action must remain a distinct footer below the clipped page viewport.")
+        XCTAssertTrue(source.contains("if step != .profile || !profileEditing"),
+                      "The footer must yield to profile measurement entry while the keyboard is active.")
         XCTAssertTrue(source.contains("ScrollView(.vertical, showsIndicators: false)"),
                       "Every onboarding page must remain vertically reachable on compact phones.")
         XCTAssertTrue(source.contains(".scrollDismissesKeyboard(.interactively)"),
@@ -91,7 +93,7 @@ final class OnboardingUnitsPickerTests: XCTestCase {
         XCTAssertFalse(onboarding.contains("Delivered through Apple"))
         XCTAssertFalse(changelog.contains("WHOOP 4.0 is the supported path"))
         XCTAssertTrue(onboarding.contains("StepShell(title: String(localized: \"Bring your history\")"))
-        XCTAssertTrue(onboarding.contains("Import WHOOP export"))
+        XCTAssertTrue(onboarding.contains("Import wearable export"))
         XCTAssertTrue(onboarding.contains("Import Apple Health export"))
     }
 }

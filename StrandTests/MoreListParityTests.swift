@@ -137,6 +137,10 @@ final class MoreListParityTests: XCTestCase {
                        "Outer padding creates an opaque band behind the floating controls.")
         XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
                        "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
+        XCTAssertTrue(shell.contains("colors: [.white, .clear]"),
+                      "Foreground must fade at the reserved-strip boundary instead of clipping text sharply.")
+        XCTAssertTrue(shell.contains("Color.clear.frame(height: max(0, visibleTabBarHeight - 24))"),
+                      "The controls still need a fully clear foreground strip over the full-bleed backdrop.")
         let interactionEnvironment = try XCTUnwrap(
             shell.range(of: #".environment(\.liquidInteractionInProgress"#)
         )
@@ -230,7 +234,8 @@ final class MoreListParityTests: XCTestCase {
                       "The shell must retain its largest reservation while the bar compacts.")
         XCTAssertTrue(shell.contains("--demo-compact-tab-bar"),
                       "The real compact state needs a deterministic visual-regression route.")
-        XCTAssertTrue(shell.contains(".glassEffect(.clear.tint(tint)"))
+        XCTAssertTrue(shell.contains(".glassEffect(.regular.tint(tint)"),
+                      "Floating controls must diffuse content beneath their shapes without adding an opaque band.")
         XCTAssertTrue(shell.contains(".matchedGeometryEffect(\n                            id: \"selected-tab-indicator\""),
                       "The selected capsule must morph between expanded tabs and the compact control.")
         XCTAssertTrue(shell.contains("value: selection"),

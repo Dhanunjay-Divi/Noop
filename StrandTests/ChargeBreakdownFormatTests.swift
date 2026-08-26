@@ -1,12 +1,96 @@
 import XCTest
 import StrandAnalytics
 import StrandDesign
+import WhoopStore
 @testable import Strand
 
 /// LANE 2 (iOS UI) presentation helpers behind the "What shaped it" Charge breakdown, the score-
 /// confidence tier chip, the calibrating countdown and the relative skin-temp label. Every helper is
 /// PURE, so these assert the exact strings/colours the views render. No em-dashes.
 final class ChargeBreakdownFormatTests: XCTestCase {
+
+    private func day(_ key: String, hrv: Double, rhr: Int) -> DailyMetric {
+        DailyMetric(
+            day: key, totalSleepMin: nil, efficiency: nil, deepMin: nil, remMin: nil,
+            lightMin: nil, disturbances: nil, restingHr: rhr, avgHrv: hrv,
+            recovery: nil, strain: nil, exerciseCount: nil)
+    }
+
+    private func computedRows(_ days: [DailyMetric]) -> [SourcedDailyMetric] {
+        days.map { SourcedDailyMetric(metric: $0, source: .noopComputed) }
+    }
+
+    func testBreakdownBaselinesExcludeDisplayedAndFutureRows() {
+        let prior = (1...6).map { day(String(format: "2026-01-%02d", $0), hrv: 50, rhr: 60) }
+        let displayed = day("2026-01-10", hrv: 100, rhr: 40)
+        let future = day("2026-01-11", hrv: 200, rhr: 30)
+
+        let baselines = TodayView.chargeBreakdownBaselines(
+            sourceRows: computedRows(prior + [displayed, future]),
+            before: displayed.day,
+            hrvBaselineEpoch: 0,
+            recoveryBaselineEpoch: 0)
+
+        XCTAssertEqual(baselines.hrv.baseline, 50, accuracy: 0.0001)
+        XCTAssertEqual(baselines.hrv.nValid, 6)
+        XCTAssertEqual(baselines.rhr.baseline, 60, accuracy: 0.0001)
+        XCTAssertEqual(baselines.rhr.nValid, 6)
+    }
+
+    func testBreakdownBaselinesHonorManualRecalibrationEpochs() throws {
+        let old = (1...5).map { day(String(format: "2026-01-%02d", $0), hrv: 40, rhr: 70) }
+        let currentEra = (6...10).map { day(String(format: "2026-01-%02d", $0), hrv: 70, rhr: 55) }
+        let displayed = day("2026-01-11", hrv: 75, rhr: 52)
+        let epoch = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-01-06T00:00:00Z")
+        ).timeIntervalSince1970
+
+        let baselines = TodayView.chargeBreakdownBaselines(
+            sourceRows: computedRows(old + currentEra + [displayed]),
+            before: displayed.day,
+            hrvBaselineEpoch: epoch,
+            recoveryBaselineEpoch: epoch)
+
+        XCTAssertEqual(baselines.hrv.baseline, 70, accuracy: 0.0001)
+        XCTAssertEqual(baselines.hrv.nValid, 5)
+        XCTAssertEqual(baselines.rhr.baseline, 55, accuracy: 0.0001)
+        XCTAssertEqual(baselines.rhr.nValid, 5)
+    }
+
+    func testBreakdownRestUsesOnlyLocallyComputedRow() throws {
+        func sleepDay(_ day: String, total: Double, deep: Double, rem: Double) -> DailyMetric {
+            DailyMetric(
+                day: day, totalSleepMin: total, efficiency: 0.9, deepMin: deep, remMin: rem,
+                lightMin: total - deep - rem, disturbances: 2, restingHr: 55, avgHrv: 50,
+                recovery: 70, strain: nil, exerciseCount: nil)
+        }
+        let imported = sleepDay("2026-01-10", total: 480, deep: 120, rem: 120)
+        let computed = sleepDay("2026-01-10", total: 360, deep: 40, rem: 60)
+        let sourceRows = [
+            SourcedDailyMetric(metric: imported, source: .whoopImport),
+            SourcedDailyMetric(metric: computed, source: .noopComputed),
+        ]
+
+        XCTAssertEqual(
+            try XCTUnwrap(TodayView.locallyDerivedRestScore(
+                day: "2026-01-10", sourceRows: sourceRows)),
+            try XCTUnwrap(AnalyticsEngine.Rest.composite(daily: computed)),
+            accuracy: 1e-9)
+        XCTAssertEqual(
+            TodayView.locallyComputedDay(day: "2026-01-10", sourceRows: sourceRows),
+            computed)
+        XCTAssertNil(TodayView.locallyDerivedRestScore(
+            day: "2026-01-11",
+            sourceRows: [SourcedDailyMetric(metric: imported, source: .whoopImport)]))
+    }
+
+    func testRecoveryExplanationRequiresComputedProvenance() {
+        XCTAssertTrue(TodayView.canExplainRecovery(source: "my-whoop-noop"))
+        XCTAssertTrue(TodayView.canExplainRecovery(source: "strap-42-noop"))
+        XCTAssertFalse(TodayView.canExplainRecovery(source: "my-whoop"))
+        XCTAssertFalse(TodayView.canExplainRecovery(source: "apple-health"))
+        XCTAssertFalse(TodayView.canExplainRecovery(source: nil))
+    }
 
     // MARK: - A1: signed point-delta chip
 

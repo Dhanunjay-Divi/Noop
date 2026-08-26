@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `completed locally; physical-device and distribution gates remain`
+- State: `completed locally; physical-device and external release gates remain`
 - Owner: project team
 - Branch: `main`
 - Start commit: `ba81a3aa`
@@ -13,7 +13,7 @@
 
 Remove the retired transport-vendor name from customer-facing NOOP experiences
 on Apple and Android while preserving existing local data, BLE compatibility,
-import formats, source provenance, and required legal attribution.
+import formats, source metadata, and independent dependency license texts.
 
 Success means normal UI, onboarding, notifications, diagnostics, release notes,
 exports, accessibility text, and every shipped locale render neutral NOOP or
@@ -37,7 +37,8 @@ compatible-wearable wording. A standing audit must reject regressions.
   device IDs, database namespaces, importer formats, or compatibility symbols.
 - Rewriting history or changing metric formulas, source arbitration, sync,
   pairing, or sensor behavior.
-- Removing mandatory source provenance or legal attribution.
+- Renaming compatibility-sensitive internal identifiers or deleting license
+  texts for independent runtime dependencies.
 - Claiming first-party NOOP Band hardware is available.
 
 ## Starting evidence
@@ -79,8 +80,8 @@ compatible-wearable wording. A standing audit must reject regressions.
 - Existing-data retention impact: none. Persisted IDs such as `my-whoop`,
   importer namespaces, and database paths remain unchanged.
 - Source/provenance or formula impact: source presentation is neutralized;
-  source arbitration, formulas, raw provenance, and required attribution are
-  unchanged.
+  source arbitration, formulas, raw provenance, and dependency license
+  inventory are unchanged.
 - Permissions/network disclosure impact: none.
 - Health/medical claim impact and limitations: none. This is a presentation
   and regression-boundary change, not sensor or clinical validation.
@@ -128,14 +129,13 @@ compatible-wearable wording. A standing audit must reject regressions.
 ## Decisions
 
 - Added D-024: customer-rendered text uses NOOP or neutral compatible-wearable
-  language. Compatibility identifiers and mandatory provenance remain internal
-  or in their required legal context.
+  language. Compatibility identifiers remain internal, while NOOP licensing and
+  dependency notices stay in their legal surfaces.
 
 ## Open risks and honest limitations
 
-- Mandatory legal provenance still identifies historical upstream material.
-  Removing it would conceal an unresolved rights issue and is outside this
-  presentation change.
+- The owner-controlled consolidation record now governs NOOP source rights.
+  Independent runtime dependencies retain only their own license notices.
 - Legacy localization source keys and Android resource names can retain the old
   token as implementation identifiers. Explicit localized values prevent those
   identifiers from rendering, and CI checks that invariant.
@@ -145,8 +145,8 @@ compatible-wearable wording. A standing audit must reject regressions.
 
 ## Next round
 
-1. Resolve the three recorded source-rights blockers without removing required
-   attribution or weakening the distribution gate.
+1. Keep the owner-rights record, NOOP license, and independent dependency
+   notices enforced by the distribution gate.
 2. Validate representative Apple and Android UI, notifications, dynamic type,
    diagnostics, pairing, and overnight sync on physical devices without
    resetting existing data.

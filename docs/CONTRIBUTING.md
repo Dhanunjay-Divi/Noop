@@ -53,9 +53,10 @@ A few principles run through the whole codebase. Internalize them before opening
    [The BLE safety contract](#the-ble-safety-contract-read-this-before-touching-bluetooth).
 4. **Transparent math.** Analytics are approximations of published methods, documented file by file.
    No black boxes, no claims of clinical accuracy, no reproduction of any proprietary model.
-5. **Credit upstream.** The protocol work is built on prior community reverse-engineering —
-   `johnmiddleton12/my-whoop` (WHOOP 4.0) and `b-nnett/goose` (WHOOP 5.0). Preserve those credits in
-   code comments and in [`../ATTRIBUTION.md`](../ATTRIBUTION.md).
+5. **Preserve release rights.** NOOP-controlled source stays under the project
+   license and owner-rights record. Independent dependencies retain their own
+   licenses and required notices. Keep `LICENSE`, `NOTICE`,
+   `ThirdPartyNotices/`, and [`../ATTRIBUTION.md`](../ATTRIBUTION.md) coherent.
 
 ---
 
@@ -529,8 +530,8 @@ remains authoritative; the optional local skill is only a workflow aid.
   commits/PRs where practical.
 - **Show your verification.** For anything on the BLE path, state what you tested on real hardware.
   For analytics, cite the method and add a test. For UI, confirm it uses only `StrandDesign` tokens.
-- **Anonymous, project-voice.** Documentation and comments are written in a neutral, third-person
-  project voice. Keep upstream credits (`my-whoop`, `goose`, `GRDB.swift`, `ZIPFoundation`) intact.
+- **Project voice.** Documentation and comments are written in a neutral, third-person
+  project voice. Keep NOOP licensing and the generated runtime dependency inventory coherent.
 - **No proprietary material.** Don't add WHOOP firmware, decompiled app code, logos, or assets, and
   don't introduce DRM circumvention. Keep contributions to clean-room interoperability with hardware
   the user owns.

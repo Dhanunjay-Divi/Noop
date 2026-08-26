@@ -191,7 +191,7 @@ import kotlin.math.roundToInt
  * composition (Strand/Screens/TodayView.swift) with the same locked components.
  *
  * Sparkline series are built off the view model's `recentDays` (oldest → newest,
- * all from the my-whoop source). Missing current-day values render as explicit
+ * all from the compatible-wearable import source). Missing current-day values render as explicit
  * "No Data" states instead of raw dashes, so old imports do not look like today.
  */
 
@@ -999,7 +999,12 @@ fun TodayScreen(
         // epoch-aware history the recovery engine folds — otherwise a post-recalibration user's pre-epoch
         // nights inflate the count past the seed gate and the score side wrongly reads NeedsStrap (Bug B).
         val hrvEpoch = NoopPrefs.of(context).getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble()
-        recoveryCalibrationNights(days, displayMetric?.recovery != null, hrvEpoch)
+        recoveryCalibrationNights(
+            days,
+            beforeDay = selectedDayKey,
+            hasRecovery = displayMetric?.recovery != null,
+            hrvBaselineEpoch = hrvEpoch,
+        )
     } else {
         null
     }
@@ -1355,9 +1360,12 @@ fun TodayScreen(
                     }
                 }
             }
-            // #827: the dismissible calibrating note. Hidden once dismissed into the inbox; a "Restore to
-            // Today" tap there flips calibratingDismissed back via the shared restore path above.
-            if (selectedDayOffset == 0 && scoreState is ScoreState.Calibrating && !calibratingDismissed) {
+            // #827: recurring baseline guidance is dismissible into the inbox. The completed seed night
+            // has its own BaselineReady state rather than being coerced back to "1 more night".
+            if (selectedDayOffset == 0 &&
+                (scoreState is ScoreState.Calibrating || scoreState is ScoreState.BaselineReady) &&
+                !calibratingDismissed
+            ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     ScoreStateNote(scoreState)
                     if (updateStore != null) {
@@ -1366,8 +1374,8 @@ fun TodayScreen(
                             onClick = {
                                 dismissTodayCard(
                                     CARD_CALIBRATING,
-                                    "Building your baseline",
-                                    "Recovery, Effort and Sleep become personal after a few nights of wear.",
+                                    scoreState.title,
+                                    scoreState.detail,
                                 )
                             },
                         )
@@ -1749,6 +1757,11 @@ fun TodayScreen(
                 days = days,
                 displayDay = displayMetric,
                 carriedDay = lastScoredRecoveryDay,
+                recoverySource = if (lastScoredRecoveryDay != null) {
+                    carriedRecoverySource
+                } else {
+                    provenanceByMetric["recovery"]
+                },
                 showReadiness = selectedDayOffset == 0,
                 onClose = { showChargeBreakdown = false },
                 // "How Charge is calculated" → close the breakdown and open the scoring guide at the Charge
@@ -3762,6 +3775,8 @@ private fun SynthesisHeroCard(
     // as today's. today's own read wins the instant tonight is scored.
     val readDay = carriedDay ?: day
     val recovery = readDay?.recovery
+    val seedComplete = recoveryCalibration != null &&
+        recoveryCalibration >= Baselines.minNightsSeed
     Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         // The greeting + SOLID/CALIBRATING data-confidence pill ride in their OWN header row ABOVE the
         // card, not as a top-end overlay over it (#527). The old overlay sat over the card's "SYNTHESIS"
@@ -3799,23 +3814,37 @@ private fun SynthesisHeroCard(
             // honestly still CALIBRATING for today, matching the iOS pill (keyed on displayDay.recovery).
             val todayRecovery = day?.recovery
             StatePill(
-                title = if (todayRecovery != null) "SOLID" else "CALIBRATING",
+                title = when {
+                    todayRecovery != null -> "SOLID"
+                    seedComplete -> ScoreState.BaselineReady.title.uppercase()
+                    else -> "CALIBRATING"
+                },
                 tone = if (todayRecovery != null) StrandTone.Accent else StrandTone.Neutral,
             )
         }
         // S4: the Synthesis card collapses to a one-liner that expands on tap. The headline (the status) is
         // the SAME in both states, only the detail body and chrome fold, never the read (#506).
-        val status = if (recoveryCalibration != null) "Calibrating" else synthesisWord(recovery)
+        val status = when {
+            seedComplete -> ScoreState.BaselineReady.title
+            recoveryCalibration != null -> "Calibrating"
+            else -> synthesisWord(recovery)
+        }
         val detail = if (recoveryCalibration != null) {
-            // #612: if the baseline aged out silently — connected, but no new night for > staleDays — say WHY
-            // it's calibrating instead of only "learning your baseline". `stale` is always > staleDays (14).
-            val stale = Baselines.nightsSinceNewestValidNight(days.map { it.day }, days.map { it.avgHrv }, logicalDayKeyNow())
-            if (stale != null && stale > Baselines.staleDays) {
-                uiString(R.string.l10n_today_screen_no_new_nights_from_your_strap_for_stale_days_8863bcfe, stale)
+            if (seedComplete) {
+                ScoreState.BaselineReady.detail
             } else {
-                // Comma (not the old em-dash) to match the Swift canonical synthesis copy VERBATIM
-                // (TodayView "Learning your baseline, N of M nights.") and the no-em-dash standing rule.
-                "Learning your baseline, $recoveryCalibration of ${Baselines.minNightsSeed} nights."
+                // #612: if the baseline aged out silently, say why rather than only "learning".
+                val stale = Baselines.nightsSinceNewestValidNight(
+                    days.map { it.day },
+                    days.map { it.avgHrv },
+                    logicalDayKeyNow(),
+                )
+                if (stale != null && stale > Baselines.staleDays) {
+                    uiString(R.string.l10n_today_screen_no_new_nights_from_your_strap_for_stale_days_8863bcfe, stale)
+                } else {
+                    "Learning your baseline, $recoveryCalibration of " +
+                        "${Baselines.minNightsSeed} valid HRV nights."
+                }
             }
         } else if (carriedDay != null) {
             // Carried prior-day read, summarise that day + stamp it so it isn't passed off as today's.
@@ -3917,10 +3946,22 @@ private fun RingEmptyOverlay(
     diameter: Dp,
 ) {
     if (calibratingNights != null) {
+        val seedComplete = calibratingNights >= Baselines.minNightsSeed
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(uiString(R.string.l10n_today_screen_calibrating_37c2c9bd), style = NoopType.headline, color = Palette.textTertiary, maxLines = 1)
             Text(
-                uiString(R.string.l10n_today_screen_calibratingnights_of_baselines_minnightsseed_3b76e55c, calibratingNights, Baselines.minNightsSeed),
+                if (seedComplete) ScoreState.BaselineReady.title
+                else uiString(R.string.l10n_today_screen_calibrating_37c2c9bd),
+                style = NoopType.headline,
+                color = Palette.textTertiary,
+                maxLines = if (seedComplete) 2 else 1,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                uiString(
+                    R.string.today_calibration_valid_hrv_progress,
+                    calibratingNights,
+                    Baselines.minNightsSeed,
+                ),
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
                 maxLines = 1,
@@ -4981,6 +5022,7 @@ internal fun ChargeBreakdownSheet(
     days: List<DailyMetric>,
     displayDay: DailyMetric?,
     carriedDay: DailyMetric?,
+    recoverySource: String?,
     showReadiness: Boolean,
     onClose: () -> Unit,
     onHowCalculated: () -> Unit,
@@ -5013,8 +5055,32 @@ internal fun ChargeBreakdownSheet(
             ) {
                 // The breakdown self-gates: a calibrating night (empty drivers) renders nothing here, the
                 // Contributors + Readiness below still give an honest read, never a blank sheet.
-                RecoveryDriversSection(days = days, displayDay = displayDay, carriedDay = carriedDay)
-                RecoveryContributorsSection(day = displayDay, carriedDay = carriedDay)
+                val readDay = carriedDay ?: displayDay
+                if (canExplainRecovery(recoverySource)) {
+                    RecoveryDriversSection(
+                        days = days,
+                        displayDay = displayDay,
+                        carriedDay = carriedDay,
+                    )
+                    RecoveryContributorsSection(day = displayDay, carriedDay = carriedDay)
+                } else if (readDay?.recovery != null) {
+                    NoopCard {
+                        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
+                            Text(
+                                stringResource(R.string.appwide_source_imported),
+                                style = NoopType.headline,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                uiString(
+                                    R.string.l10n_today_screen_the_method_behind_the_score_not_5bc68508,
+                                ),
+                                style = NoopType.subhead,
+                                color = Palette.textSecondary,
+                            )
+                        }
+                    }
+                }
                 // S4: the SEPARATE Readiness block now lives here behind the Charge-ring tap (today-only,
                 // matching the old inline gate). A one-word read (Push / Maintain / Rest) stays on the hero.
                 if (showReadiness) ReadinessSection(days, carriedDay = carriedDay)
@@ -5090,10 +5156,16 @@ private fun RecoveryDriversSection(
     // Read the row the Charge ring itself reads: today's own when scored, else the carried last-scored
     // day (#543) so the breakdown matches the carried ring instead of vanishing at the rollover.
     val readDay = carriedDay ?: displayDay
-    val drivers = remember(days, readDay) { recoveryChargeDrivers(days, readDay) }
+    val context = LocalContext.current
+    val prefs = NoopPrefs.of(context)
+    val hrvEpoch = prefs.getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble()
+    val recoveryEpoch = prefs.getLong(Baselines.recoveryBaselineEpochKey, 0L).toDouble()
+    val drivers = remember(days, readDay, hrvEpoch, recoveryEpoch) {
+        recoveryChargeDrivers(days, readDay, hrvEpoch, recoveryEpoch)
+    }
     if (drivers.isEmpty()) return
 
-    val tier = remember(days, readDay) { chargeConfidenceTier(days, readDay) }
+    val tier = remember(days, readDay, hrvEpoch) { chargeConfidenceTier(days, readDay, hrvEpoch) }
     val overline = carriedDay?.let { "Recovery · ${carriedCaption(it.day)}" } ?: "Recovery"
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
@@ -5294,12 +5366,14 @@ private fun ScoreStateNote(state: ScoreState) {
     if (state is ScoreState.Scored) return
     val icon = when (state) {
         is ScoreState.Calibrating -> Icons.Filled.Tune
+        ScoreState.BaselineReady -> Icons.Filled.CheckCircle
         is ScoreState.CarriedLastNight -> Icons.Filled.History
         ScoreState.NeedsStrap -> Icons.Filled.Warning
         is ScoreState.Scored -> Icons.Filled.Info
     }
     val tint = when (state) {
         ScoreState.NeedsStrap -> Palette.statusWarning
+        ScoreState.BaselineReady -> Palette.statusPositive
         else -> Palette.textTertiary
     }
     NoopCard {

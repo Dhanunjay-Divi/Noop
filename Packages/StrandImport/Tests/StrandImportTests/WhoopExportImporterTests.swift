@@ -3,6 +3,14 @@ import XCTest
 
 final class WhoopExportImporterTests: XCTestCase {
 
+    func testCsvDoubleRejectsNonFiniteValues() {
+        XCTAssertNil(["value": "NaN"].double("value"))
+        XCTAssertNil(["value": "Infinity"].double("value"))
+        XCTAssertNil(["value": "-Infinity"].double("value"))
+        XCTAssertNil(["value": "1e999"].double("value"))
+        XCTAssertEqual(["value": "62 ms"].double("value"), 62)
+    }
+
     // MARK: - Header normalization
 
     func testHeaderNormalization() {
@@ -132,6 +140,28 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(row.skinTempCelsius), 34.2, accuracy: 1e-9)
     }
 
+    func testCycleSkinTemperatureAcceptsNormalizedFahrenheitAlias() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Skin temp fahrenheit
+        2026-01-01 06:00:00,UTC+00:00,95
+        """
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first
+        )
+        XCTAssertEqual(try XCTUnwrap(row.skinTempCelsius), 35, accuracy: 1e-9)
+    }
+
+    func testCycleSkinTemperatureDropsFiniteFahrenheitThatOverflowsConversion() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Skin temp (F)
+        2026-01-01 06:00:00,UTC+00:00,1.7976931348623157e308
+        """
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first
+        )
+        XCTAssertNil(row.skinTempCelsius)
+    }
+
     // MARK: - workouts.csv WITHOUT GPS columns
 
     func testWorkoutsWithoutGPSColumnsStillParse() throws {
@@ -245,8 +275,111 @@ final class WhoopExportImporterTests: XCTestCase {
         let table = CSVTable(data: Data(csv.utf8))
         let rows = WhoopExportImporter().parseJournal(table)
         XCTAssertEqual(rows.count, 2)
-        XCTAssertEqual(rows[0].answer, "TRUE")
-        XCTAssertEqual(rows[1].answer, "FALSE")
+        XCTAssertEqual(rows[0].answer, "true")
+        XCTAssertEqual(rows[1].answer, "false")
+    }
+
+    func testJournalDeduplicatesOnlyExactRows() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,TRUE,Morning
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,TRUE,Morning
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,TRUE,Afternoon
+        """
+        let rows = WhoopExportImporter().parseJournal(CSVTable(text: csv))
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.map(\.notes), ["Morning", "Afternoon"])
+    }
+
+    func testJournalOmitsContradictoryCycleQuestionKeyWithoutAffectingOtherCycles() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,TRUE,
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,false,Conflicting duplicate
+        2026-07-01 22:00:00,UTC+00:00,Had alcohol?,FALSE,
+        2026-07-02 22:00:00,UTC+00:00,Had caffeine?,TRUE,
+        """
+        let rows = WhoopExportImporter().parseJournal(CSVTable(text: csv))
+
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].question, "Had alcohol?")
+        XCTAssertEqual(rows[0].answer, "false")
+        XCTAssertEqual(rows[1].question, "Had caffeine?")
+        XCTAssertEqual(rows[1].cycleStart, Fixtures.utc(2026, 7, 2, 22, 0, 0))
+    }
+
+    func testJournalOmitsRowsWithoutValidTimestampQuestionOrBooleanAnswer() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+        ,UTC+00:00,Had caffeine?,TRUE,Missing timestamp
+        2026-07-01 22:00:00,UTC+00:00,,TRUE,Missing question
+        2026-07-01 22:00:00,UTC+00:00,   ,TRUE,Blank question
+        2026-07-01 22:00:00,UTC+00:00,Had caffeine?,maybe,Unknown answer
+        2026-07-01 22:00:00,UTC+00:00,Had alcohol?,FALSE,Valid
+        """
+
+        let rows = WhoopExportImporter().parseJournal(CSVTable(text: csv))
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.question, "Had alcohol?")
+        XCTAssertEqual(rows.first?.answer, "false")
+    }
+
+    func testImportOmitsContradictoryWakeDayQuestionAcrossDistinctCycles() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wearable-journal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let cycles = """
+        Cycle start time,Cycle end time,Cycle timezone,Wake onset
+        2026-06-30 22:00:00,2026-07-01 22:00:00,UTC+00:00,2026-07-01 06:00:00
+        2026-07-01 00:30:00,2026-07-01 23:00:00,UTC+00:00,2026-07-01 07:00:00
+        """
+        let journal = """
+        Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+        2026-06-30 22:00:00,UTC+00:00,Had caffeine?,TRUE,
+        2026-07-01 00:30:00,UTC+00:00,Had caffeine?,FALSE,
+        2026-07-01 00:30:00,UTC+00:00,Had alcohol?,FALSE,
+        """
+        try Data(cycles.utf8).write(to: folder.appendingPathComponent("physiological_cycles.csv"))
+        try Data(journal.utf8).write(to: folder.appendingPathComponent("journal_entries.csv"))
+
+        let result = try WhoopExportImporter().import(from: folder)
+
+        XCTAssertEqual(result.journal.count, 1)
+        XCTAssertEqual(result.journal.first?.question, "Had alcohol?")
+        XCTAssertEqual(result.journal.first?.answer, "false")
+        XCTAssertEqual(result.summary.countsByCategory["journal"], 1)
+        XCTAssertEqual(result.journalImportRange, "2026-06-30"..."2026-07-01")
+    }
+
+    func testImportMergesDistinctNotesForOnePersistedJournalAnswer() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wearable-journal-notes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let cycles = """
+        Cycle start time,Cycle end time,Cycle timezone,Wake onset
+        2026-06-30 22:00:00,2026-07-01 22:00:00,UTC+00:00,2026-07-01 06:00:00
+        2026-07-01 00:30:00,2026-07-01 23:00:00,UTC+00:00,2026-07-01 07:00:00
+        """
+        let journal = """
+        Cycle start time,Cycle timezone,Question text,Answered yes,Notes
+        2026-06-30 22:00:00,UTC+00:00,Had caffeine?,TRUE,Morning
+        2026-07-01 00:30:00,UTC+00:00,Had caffeine?,TRUE,Afternoon
+        2026-07-01 00:30:00,UTC+00:00,Had caffeine?,TRUE,Morning
+        """
+        try Data(cycles.utf8).write(to: folder.appendingPathComponent("physiological_cycles.csv"))
+        try Data(journal.utf8).write(to: folder.appendingPathComponent("journal_entries.csv"))
+
+        let result = try WhoopExportImporter().import(from: folder)
+
+        XCTAssertEqual(result.journal.count, 1)
+        XCTAssertEqual(result.journal.first?.answer, "true")
+        XCTAssertEqual(result.journal.first?.notes, "Afternoon\nMorning")
     }
 
     // MARK: - Folder import end to end

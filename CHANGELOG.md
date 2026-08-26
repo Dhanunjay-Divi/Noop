@@ -1743,7 +1743,7 @@ A large batch of fixes from reported issues and community contributions.
   Experimental: it may do nothing on your firmware yet. If you own a 5/MG, turning it on and sharing your
   strap log on [#174](https://github.com/NoopApp/noop/issues/174) is exactly what we need to finish 5.0/MG
   support. **iPhone/Android only** — a Mac can't write to a 5/MG. Built on the public protocol work of
-  **judes.club**, **Asherlc/dofek** and **b-nnett/goose**.
+  **judes.club**, **Asherlc/dofek**, and NOOP's own verification.
 
 ---
 

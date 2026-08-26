@@ -4,6 +4,12 @@ import WhoopStore
 
 final class WhoopReferenceCalibrationTests: XCTestCase {
 
+    func testCurrentChargeAlgorithmContractIsV2() {
+        XCTAssertEqual(NoopScoreAlgorithmRevision.charge, "noop-charge-v2")
+        XCTAssertEqual(NoopScoreAlgorithmRevision.effort, "noop-effort-v1")
+        XCTAssertEqual(NoopScoreAlgorithmRevision.rest, "noop-rest-v1")
+    }
+
     private func day(_ offset: Int) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

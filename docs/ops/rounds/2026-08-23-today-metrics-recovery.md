@@ -118,8 +118,8 @@ test failures.
 - Repository visibility verified: private at the preceding authenticated
   repository audit.
 - Version/build impact: no marketing version or build number change.
-- Release or distribution impact: no artifact published. The distribution gate
-  remains closed on the existing three source-rights blockers.
+- Release or distribution impact: no artifact published. The source-rights
+  review active during this round was cleared on 2026-08-25.
 
 ## Decisions
 
@@ -137,16 +137,14 @@ test failures.
   canonical metric catalog; tests must expand when a metric is added.
 - Updated locale copy remains subject to the repository's native-speaker
   review requirement.
-- Commercial distribution remains blocked by
-  `docs/provenance/rights-status.json`.
+- The current release gate still requires the owner-rights record, NOOP license,
+  and exact independent dependency notices.
 
 ## Next round
 
-1. Resolve the source-rights blockers through reviewed licenses, independent
-   replacement, or removal before commercial distribution.
-2. Validate the current app on representative physical Apple and Android
+1. Validate the current app on representative physical Apple and Android
    devices without resetting existing user data.
-3. Continue localization review, physical wearable testing, accuracy studies,
+2. Continue localization review, physical wearable testing, accuracy studies,
    safety-provider staging, store signing, and release metadata only under
    their existing release gates.
 

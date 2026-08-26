@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-25  
 **Status:** implementation and local verification complete; physical-device and
-distribution gates remain
+external release gates remain
 
 ## Product contract
 
@@ -13,8 +13,8 @@ distribution gates remain
   context, or customer exports.
 - Internal BLE symbols, GATT-family names, database paths, persisted IDs,
   importer formats, and test fixtures remain stable for compatibility.
-- Required legal provenance remains truthful and available. It must not be
-  removed to create the appearance of independent source rights.
+- NOOP ownership remains recorded by the canonical owner declaration. Exact
+  license texts for independent runtime dependencies remain available.
 - NOOP Band remains in development; neutral product wording does not claim that
   first-party hardware is available.
 
@@ -39,8 +39,8 @@ distribution gates remain
   customer-facing scrubber.
 - Do not permit a legacy catalog source key to render by removing its explicit
   neutral English localization.
-- Do not remove legal provenance or claim that hosting independence resolves
-  source rights.
+- Do not reclassify NOOP-controlled source as third-party work or delete license
+  texts that belong to independent runtime dependencies.
 - Do not represent currently compatible third-party hardware as an available
   first-party NOOP Band product.
 

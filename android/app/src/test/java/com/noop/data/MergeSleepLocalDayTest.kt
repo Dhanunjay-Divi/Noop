@@ -87,7 +87,7 @@ class MergeSleepLocalDayTest {
         assertEquals(95.0, merged.first().efficiency!!, 1e-9)
     }
 
-    // Richness exception (Android twin of ryanbr/noop#241): a stage-less import must not blank a
+    // Richness exception (Android twin of Dhanunjay-Divi/Noop#241): a stage-less import must not blank a
     // computed day that has stage data. Mirrors the Swift SleepMergeTests richness cases.
 
     private val wake = 1_781_389_800L // 2026-06-14 01:30 local (UTC+3)

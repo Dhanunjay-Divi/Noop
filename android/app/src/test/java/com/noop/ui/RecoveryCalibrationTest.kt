@@ -28,7 +28,12 @@ class RecoveryCalibrationTest {
 
     /** Call helper pinning `hrvBaselineEpoch = 0.0` (no recalibration → plain fold). */
     private fun nights(days: List<DailyMetric>, hasRecovery: Boolean): Int? =
-        recoveryCalibrationNights(days, hasRecovery = hasRecovery, hrvBaselineEpoch = 0.0)
+        recoveryCalibrationNights(
+            days,
+            beforeDay = "2026-02-01",
+            hasRecovery = hasRecovery,
+            hrvBaselineEpoch = 0.0,
+        )
 
     @Test
     fun nullWhenRecoveryAlreadyExists() {
@@ -94,7 +99,15 @@ class RecoveryCalibrationTest {
         // The old per-night bounds count was 6 (>= seed) and returned null, stranding the score side on
         // "Needs the strap"; N must now read 2 (a genuinely-calibrating baseline).
         val days = (1..6).map { day("2026-01-0$it", 55.0) }
-        assertEquals(2, recoveryCalibrationNights(days, hasRecovery = false, hrvBaselineEpoch = epoch("2026-01-05")))
+        assertEquals(
+            2,
+            recoveryCalibrationNights(
+                days,
+                beforeDay = "2026-02-01",
+                hasRecovery = false,
+                hrvBaselineEpoch = epoch("2026-01-05"),
+            ),
+        )
     }
 
     @Test
@@ -103,6 +116,41 @@ class RecoveryCalibrationTest {
         // null recovery is some OTHER gap — so we must not claim "calibrating". Epoch 2026-01-02 drops one
         // night; five post-epoch nights → nValid 5.
         val days = (1..6).map { day("2026-01-0$it", 55.0) }
-        assertNull(recoveryCalibrationNights(days, hasRecovery = false, hrvBaselineEpoch = epoch("2026-01-02")))
+        assertNull(
+            recoveryCalibrationNights(
+                days,
+                beforeDay = "2026-02-01",
+                hasRecovery = false,
+                hrvBaselineEpoch = epoch("2026-01-02"),
+            ),
+        )
+    }
+
+    @Test
+    fun displayedCompletedNightAdvancesVisibleProgressOnly() {
+        val days = (1..4).map { day("2026-01-0$it", 55.0 + it) }
+        assertEquals(
+            4,
+            recoveryCalibrationNights(
+                days,
+                beforeDay = "2026-01-04",
+                hasRecovery = false,
+                hrvBaselineEpoch = 0.0,
+            ),
+        )
+    }
+
+    @Test
+    fun futureNightDoesNotAdvanceDisplayedProgress() {
+        val days = listOf(day("2026-01-01", 56.0), day("2026-01-02", 57.0))
+        assertEquals(
+            1,
+            recoveryCalibrationNights(
+                days,
+                beforeDay = "2026-01-01",
+                hasRecovery = false,
+                hrvBaselineEpoch = 0.0,
+            ),
+        )
     }
 }

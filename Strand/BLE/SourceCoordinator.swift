@@ -62,8 +62,9 @@ final class SourceCoordinator: ObservableObject {
     /// Pin the WHOOP connection to a specific strap (nil = first WHOOP found = single-WHOOP default).
     /// Wraps `BLEManager.setPreferredPeripheral`. Called only on a WHOOP transition.
     private let setWhoopPreferredPeripheral: (String?) -> Void
-    /// Re-point which device id live WHOOP samples store under. Wraps `BLEManager.setActiveDeviceId`.
-    /// Called only when the active WHOOP is NOT the seeded "my-whoop" - the legacy path never invokes it.
+    /// Re-point which device id live band samples store under. Wraps `BLEManager.setActiveDeviceId`.
+    /// Called on every band transition, including a return to the seeded source, so a prior multi-band
+    /// selection cannot keep receiving writes after it is no longer active.
     private let setWhoopActiveDeviceId: (String) -> Void
     /// The most-recently-connected WHOOP peripheral's uuid, from `BLEManager.$connectedPeripheralUUID`.
     private let connectedPeripheralUUID: AnyPublisher<String?, Never>
@@ -231,8 +232,8 @@ final class SourceCoordinator: ObservableObject {
         } else if activeWhoopId == nil {
             // First WHOOP activation of the session (the normal launch path). Set the targeting so the
             // existing WHOOP flow — already kicked off elsewhere on launch — uses it. For the single
-            // seeded "my-whoop" (peripheralId nil, id "my-whoop") this is setPreferredPeripheral(nil)
-            // and NO setActiveDeviceId / NO scan / NO disconnect: byte-for-byte today's behaviour.
+            // seeded source (peripheralId nil) this is setPreferredPeripheral(nil), an idempotent writer
+            // re-point, and no scan/disconnect.
             pointWhoop(at: id, peripheralId: peripheralId)
         } else if let peripheralId, peripheralId.caseInsensitiveCompare(connectedWhoopUuid ?? "") == .orderedSame {
             // WHOOP → the SAME physical strap (make-active on the row we're already connected to): adopt IN
@@ -247,15 +248,12 @@ final class SourceCoordinator: ObservableObject {
         }
     }
 
-    /// Apply the WHOOP targeting for the now-active WHOOP `id`. Always sets the preferred peripheral
-    /// (nil for the legacy "my-whoop" → connect to any WHOOP, unchanged). Re-points the sample deviceId
-    /// ONLY for a non-legacy WHOOP - the seeded "my-whoop" keeps the bootstrap-set id, so the single-
-    /// WHOOP path never calls `setActiveDeviceId`. Records `activeWhoopId` for future change detection.
+    /// Apply the band targeting for the now-active `id`. Always sets both the preferred peripheral and
+    /// sample owner. The latter is idempotent on a single-band launch and essential when switching back
+    /// from a newer registry id to the seeded source.
     private func pointWhoop(at id: String, peripheralId: String?) {
         setWhoopPreferredPeripheral(peripheralId)
-        if id != "my-whoop" {
-            setWhoopActiveDeviceId(id)
-        }
+        setWhoopActiveDeviceId(id)
         activeWhoopId = id
     }
 

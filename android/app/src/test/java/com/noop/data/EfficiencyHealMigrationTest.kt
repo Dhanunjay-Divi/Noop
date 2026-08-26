@@ -7,15 +7,15 @@ import org.junit.Test
 /**
  * Guards the v18 -> v19 Room migration (#376): the Oura/WHOOP efficiency-unit HEAL, the byte-parity twin
  * of the Swift WhoopStore `v26-efficiency-heal` GRDB migration. UPDATE-only, NO schema change — divides
- * `sleepSession.efficiency` / `dailyMetric.efficiency` by 100 for every row where it's > 1.5 (a
- * percent-scale leftover from before the importer write-boundary fix), the threshold no genuine 0-1
- * fraction can exceed and no genuine percent can fall under, so the predicate is idempotent.
+ * `sleepSession.efficiency` and `dailyMetric.efficiency` by 100 for legacy percentage-scale values.
+ * The later generic-series omission is repaired in its own v33 -> v34 migration so this already-shipped
+ * migration remains immutable.
  *
- * This environment has no Robolectric / Room-testing / JDBC-SQLite (see the other migration tests in this
- * package), so the migration SQL is pinned as a string, the same convention as every other Room migration
- * test here. Unlike the additive migrations elsewhere in this suite (which assert the SQL is ONLY
- * ALTER/CREATE, never UPDATE/DELETE/INSERT), this migration is intentionally UPDATE-only with no schema
- * mutation, so the polarity of the "what's allowed" check is inverted here on purpose.
+ * This JVM test pins the migration SQL as a fast contract check. Its instrumentation companion creates an
+ * actual v33 Room database, executes v33 -> v34, validates the resulting schema, and queries the repaired
+ * values. Unlike the additive migrations elsewhere in this suite (which assert the SQL is ONLY ALTER/CREATE,
+ * never UPDATE/DELETE/INSERT), this migration is intentionally UPDATE-only with no schema mutation, so the
+ * polarity of the "what's allowed" check is inverted here on purpose.
  */
 class EfficiencyHealMigrationTest {
 
@@ -68,6 +68,36 @@ class EfficiencyHealMigrationTest {
             assertTrue("must divide by exactly 100.0: $s", s.contains("/ 100.0"))
             assertTrue("must gate on > 1.5: $s", s.contains("> 1.5"))
             assertTrue("must not scope to a deviceId: $s", !s.uppercase().contains("DEVICEID"))
+        }
+    }
+
+    @Test
+    fun genericSeriesRepairUsesAnewIdempotentMigration() {
+        assertEquals(33, WhoopDatabase.MIGRATION_33_34.startVersion)
+        assertEquals(34, WhoopDatabase.MIGRATION_33_34.endVersion)
+        val series = WhoopDatabase.METRIC_SERIES_EFFICIENCY_HEAL_MIGRATION_SQL
+        assertTrue(series.contains("`key` = 'sleep_efficiency'"))
+        assertTrue(series.contains("`value` > 1.0"))
+        assertTrue(series.contains("`value` <= 100.0"))
+        assertTrue(series.contains("/ 100.0"))
+        assertTrue(!series.uppercase().contains("DEVICEID"))
+    }
+
+    @Test
+    fun newMigrationAlsoRepairsOnlyEvidenceBackedLegacyImportValues() {
+        val statements = WhoopDatabase.CSV_IMPORT_INTEGRITY_HEAL_MIGRATION_SQL
+        assertEquals(4, statements.size)
+        assertEquals(
+            WhoopDatabase.METRIC_SERIES_EFFICIENCY_HEAL_MIGRATION_SQL,
+            statements.first(),
+        )
+        assertTrue(statements[1].contains("`skinTempDevC` > 60.0"))
+        assertTrue(statements[1].contains("`skinTempDevC` <= 140.0"))
+        assertTrue(statements[2].contains("`key` = 'skin_temp'"))
+        assertTrue(statements[3].contains("`m`.`key` = 'awake_min'"))
+        assertTrue(statements[3].contains("ABS("))
+        for (statement in statements.drop(1)) {
+            assertTrue(statement.contains("`deviceId` LIKE 'my-whoop%'"))
         }
     }
 }

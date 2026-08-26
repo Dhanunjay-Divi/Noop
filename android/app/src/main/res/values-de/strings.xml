@@ -828,7 +828,7 @@
     <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP bietet Ihnen drei tägliche Werte (Erholung, Anstrengung und Schlafwert), jeweils auf einer Skala von 0–100.</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">scoreCardHighlight</string>
     <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">Dies sind unabhängige Annäherungen an ein Verbraucherband, die auf Open Science aufbauen: nicht</string>
-    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">VS Noop Band</string>
+    <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">NOOP-METHODE</string>
     <string name="l10n_settings_screen_advancedchevron_f22dfa01">AdvancedChevron</string>
     <string name="l10n_settings_screen_note_a2481d6c">· %1$s</string>
     <string name="l10n_settings_screen_repo_note_0a694b50">%1$s, %2$s</string>
@@ -2113,4 +2113,5 @@
     <string name="hydration_adaptive_timing_help">Passt das heutige Intervall anhand von Effort und bestätigter Flüssigkeitsaufnahme an. Fehlende Daten werden nie geschätzt.</string>
     <string name="hydration_adaptive_timing_status">Derzeit alle %1$d Min. Die Zeitplanung ändert sich nur, wenn die heutigen Daten dies stützen.</string>
     <string name="hydration_base_interval_label">Grundintervall</string>
+    <string name="today_calibration_valid_hrv_progress">Gültige HRV %1$d/%2$d</string>
 </resources>

@@ -6,7 +6,8 @@ import WhoopStore
 /// Explicit revisions for the current transparent on-device score families. Bump the relevant value
 /// whenever its formula changes; a personal model is never reused across revisions.
 public enum NoopScoreAlgorithmRevision {
-    public static let charge = "noop-charge-v1"
+    /// Charge v2 personalizes the Rest-quality center and uses causal per-day baselines.
+    public static let charge = "noop-charge-v2"
     public static let effort = "noop-effort-v1"
     public static let rest = "noop-rest-v1"
 }

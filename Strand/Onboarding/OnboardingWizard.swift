@@ -93,33 +93,32 @@ public struct OnboardingWizard: View {
                     }
                 }
                 .frame(maxWidth: 620, maxHeight: .infinity)
+                .clipped()
                 .transition(stepTransition)
                 .id(step)                       // re-runs the transition per step
                 .padding(.horizontal, 20)
+
+                // This must be a real sibling of the paged viewport. A root safe-area inset adjusts the
+                // ScrollView's endpoint, but iOS still renders partially visible controls under the inset;
+                // on an SE at accessibility sizes the Scan help row sat behind progress and Continue.
+                if step != .profile || !profileEditing {
+                    bottomBar
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+                        .background(
+                            StrandPalette.surfaceBase
+                                .ignoresSafeArea()
+                        )
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("noop.onboarding.footer")
+                        .transition(.opacity)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
-        // Keep the progress + primary action in the physical bottom safe area.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if step != .profile || !profileEditing {
-                bottomBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-                    .background(
-                        LinearGradient(
-                            colors: [StrandPalette.surfaceBase.opacity(0),
-                                     StrandPalette.surfaceBase.opacity(0.96)],
-                            startPoint: .top,
-                            endPoint: .center
-                        )
-                        .ignoresSafeArea()
-                    )
-                    .transition(.opacity)
-            }
-        }
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
         .onAppear { if !reduceMotion { glow = true } }
         // Isolated live observation — a hidden watcher slides Scan → celebration on bond
@@ -198,6 +197,7 @@ public struct OnboardingWizard: View {
             HStack(spacing: 14) {
                 PrimaryButton(title: ctaTitle, systemImage: ctaIcon, action: primaryAction)
                     .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("noop.onboarding.primary")
             }
             .frame(maxWidth: 620)
         }
@@ -351,7 +351,7 @@ private struct WhatItDoesStep: View {
         .init(icon: "waveform.path.ecg",
               tint: StrandPalette.accent,
               title: String(localized: "Watch your heart, live"),
-              body: String(localized: "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit, or Garmin.")),
+              body: String(localized: "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import a wearable export, or use Apple Health, Oura, Fitbit, or Garmin.")),
         .init(icon: "lock.shield",
               tint: StrandPalette.statusPositive,
               title: String(localized: "Private by default"),
@@ -604,6 +604,7 @@ private struct ScanStep: View {
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 360)
+                        .accessibilityIdentifier("noop.onboarding.scan-footnote")
                 }
             }
         }
@@ -1263,7 +1264,7 @@ private struct ImportStep: View {
                     icon: "clock.arrow.circlepath",
                     tint: StrandPalette.accent,
                     title: String(localized: "History fills the dashboard immediately"),
-                    message: String(localized: "A WHOOP export backfills recovery, strain, sleep and workouts. Apple Health can add HR, HRV, sleep, SpO₂, steps, workouts, weight, and body or sleeping-wrist temperature when a source records them.")
+                    message: String(localized: "A wearable export backfills recovery, strain, sleep and workouts. Apple Health can add HR, HRV, sleep, SpO₂, steps, workouts, weight, and body or sleeping-wrist temperature when a source records them.")
                 )
 
                 StrandCard {
@@ -1299,7 +1300,7 @@ private struct ImportStep: View {
                         #endif
 
                         ImportActionButton(
-                            title: model.isImporting(.whoop) ? String(localized: "Importing…") : String(localized: "Import WHOOP export"),
+                            title: model.isImporting(.whoop) ? String(localized: "Importing…") : String(localized: "Import wearable export"),
                             systemImage: "tray.and.arrow.down",
                             disabled: model.hasActiveImport
                         ) {

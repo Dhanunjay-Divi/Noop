@@ -119,7 +119,7 @@ private struct HealthFirstRunContent: View {
                 // Even with no history yet, a freshly-connected strap can be told to sync now (#364) —
                 // so the control is reachable before the screen has any data to show.
                 SyncStatusSection()
-                ComingSoon(what: "No biometrics yet. Import your WHOOP export (and Apple Health if you have it) in Data Sources to fill this in.")
+                ComingSoon(what: "No biometrics yet. Import your wearable export (and Apple Health if you have it) in Data Sources to fill this in.")
                 // Reproductive-health setup must not disappear just because a new user has no band rows.
                 // Profile remains the primary entry point; Health also exposes the same private opt-in.
                 if profile.cycleAwarenessApplies || model.cycleAwarenessEnabled {
@@ -1340,7 +1340,7 @@ private struct VitalitySection: View {
             Text("Approx. model range ± \(modelBand) yr · not a confidence interval.")
                 .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
                 .accessibilityIdentifier("noop.wellness-age.model-range")
-            Text("Experimental lifestyle estimate · not biological, medical, or WHOOP Age.")
+            Text("Experimental lifestyle estimate · not biological or medical age.")
                 .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         }
         .padding(NoopMetrics.space5)

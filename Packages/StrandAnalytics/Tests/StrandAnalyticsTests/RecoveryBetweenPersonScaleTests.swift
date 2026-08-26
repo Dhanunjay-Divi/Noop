@@ -24,7 +24,8 @@ final class RecoveryBetweenPersonScaleTests: XCTestCase {
             hrvBaseline: .init(mean: hrv, spread: max(hrv * 0.15, 1)),
             rhrBaseline: .init(mean: rhr, spread: max(rhr * 0.08, 1)),
             respBaseline: .init(mean: resp, spread: 1.0),
-            sleepPerf: sleepPerf
+            sleepPerf: sleepPerf,
+            restQualityBaseline: .init(mean: sleepPerf, spread: 0.04)
         )
         return score ?? -1
     }
@@ -39,8 +40,7 @@ final class RecoveryBetweenPersonScaleTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(value, 0, "\(name): engine declined on a complete input set")
         }
 
-        // Each is ON their own baseline, so the three baseline-relative drivers contribute ~0 for all of
-        // them. Any spread that remains comes from the SLEEP term, which is the one absolute driver.
+        // Each is ON their own baseline, so all four baseline-relative drivers contribute ~0.
         let spread = max(athlete, typical, unfit) - min(athlete, typical, unfit)
         XCTAssertLessThan(spread, 25.0, """
             Recovery spread across three physiologically different wearers who are each exactly on their own \
@@ -51,8 +51,8 @@ final class RecoveryBetweenPersonScaleTests: XCTestCase {
             See docs/validation/THREE-WEARER-VERDICT-AND-AGENT-REVIEW.md.
             """)
 
-        // The residual spread should be attributable to the sleep term alone: hold it constant and the
-        // three wearers must collapse onto essentially the same score.
+        // Hold Rest constant as a second explicit check that physiology does not make this a
+        // between-person comparison.
         let sameSleep = [
             meanScore(hrv: 110, rhr: 42, resp: 12.5, sleepPerf: 0.80),
             meanScore(hrv: 50,  rhr: 60, resp: 15.0, sleepPerf: 0.80),
@@ -66,19 +66,11 @@ final class RecoveryBetweenPersonScaleTests: XCTestCase {
             """)
     }
 
-    /// The absolute sleep centre is the only driver that can bias a whole population. Three real wearers
-    /// averaged 73-76% sleep performance against a 0.85 centre, so all three carried a permanent penalty.
-    func testSleepTermPenalisesTypicalRealWorldSleepPerformance() {
+    /// Three real wearers averaged 73-76% Rest against the old 0.85 center. A personal
+    /// center removes that permanent penalty while preserving 0.85 for cold start.
+    func testPersonalRestCenterRemovesTypicalRealWorldPenalty() {
         let atCentre = meanScore(hrv: 50, rhr: 60, resp: 15.0, sleepPerf: RecoveryScorer.sleepPerfCenter)
         let atObservedNorm = meanScore(hrv: 50, rhr: 60, resp: 15.0, sleepPerf: 0.75)
-        XCTAssertLessThan(atObservedNorm, atCentre,
-                          "A wearer at the observed real-world norm (~75%) should score below one at the "
-                          + "hard-coded 0.85 centre; that gap is the population-wide penalty.")
-        let penalty = atCentre - atObservedNorm
-        XCTAssertGreaterThan(penalty, 1.0,
-                             "Expected a measurable penalty from the absolute sleep centre; got \(penalty). "
-                             + "If this vanished, the sleep term was made baseline-relative - update "
-                             + "docs/validation/THREE-WEARER-VERDICT-AND-AGENT-REVIEW.md Finding D.")
-        print("\nabsolute sleep-centre penalty at the observed 75% norm: \(String(format: "%.1f", penalty)) points")
+        XCTAssertEqual(atObservedNorm, atCentre, accuracy: 1e-9)
     }
 }

@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.AnalyticsEngine
+import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.SleepDebtLedger
 import com.noop.analytics.SleepEditGuard
 import com.noop.analytics.SleepStageTotals
@@ -127,6 +128,23 @@ import kotlin.math.roundToInt
  * shows an honest empty state, and a navigated night with no usable stage data says so
  * instead of silently showing another night (#160).
  */
+internal fun hasEngineStagedSleep(stages: Stages): Boolean =
+    stages.deep + stages.rem > 0.0
+
+/** A tier can lower a validated evidence result, but cannot imply evidence on its own. */
+internal fun resolvedRestAssessment(
+    persistedConfidence: ScoreConfidence?,
+    persistedEvidence: ScoreConfidence.RestEvidenceFlags?,
+    legacyAssessment: ScoreConfidence.RestAssessment,
+): ScoreConfidence.RestAssessment {
+    val base = persistedEvidence?.let { ScoreConfidence.restAssessment(it) } ?: legacyAssessment
+    return if (persistedConfidence != null && persistedConfidence.ordinal < base.confidence.ordinal) {
+        base.copy(confidence = persistedConfidence)
+    } else {
+        base
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SleepScreen(
@@ -241,6 +259,12 @@ fun SleepScreen(
     // headline tiles prefer them over the on-device approximations. Keyed on `days` so a
     // fresh import (which always rewrites dailyMetric too) reloads; metricSeries has no Flow.
     var imported by remember { mutableStateOf(ImportedSleepSeries()) }
+    var restConfidenceByDay by remember {
+        mutableStateOf<Map<String, ScoreConfidence>>(emptyMap())
+    }
+    var restEvidenceByDay by remember {
+        mutableStateOf<Map<String, ScoreConfidence.RestEvidenceFlags>>(emptyMap())
+    }
     LaunchedEffect(days) {
         suspend fun load(key: String) = runCatching {
             vm.repo.metricSeries("my-whoop", key, "0000-00-00", "9999-99-99")
@@ -251,6 +275,27 @@ fun SleepScreen(
             needMin = load("sleep_need_min"),
             debtMin = load("sleep_debt_min"),
         )
+        restConfidenceByDay = runCatching {
+            vm.repo.metricSeriesComputedUnion(
+                vm.activeStrapId,
+                ScoreConfidence.restConfidenceSeriesKey,
+                "0000-00-00",
+                "9999-99-99",
+            )
+        }.getOrDefault(emptyList()).mapNotNull { row ->
+            ScoreConfidence.fromPersistedValue(row.value)?.let { row.day to it }
+        }.toMap()
+        restEvidenceByDay = runCatching {
+            vm.repo.metricSeriesComputedUnion(
+                vm.activeStrapId,
+                ScoreConfidence.restEvidenceSeriesKey,
+                "0000-00-00",
+                "9999-99-99",
+            )
+        }.getOrDefault(emptyList()).mapNotNull { row ->
+            ScoreConfidence.RestEvidenceFlags.fromPersistedValue(row.value)
+                ?.let { row.day to it }
+        }.toMap()
     }
 
     val context = LocalContext.current
@@ -496,6 +541,29 @@ fun SleepScreen(
             // The score is a full-history latest (series.last), so it reads from `tilesModel` when
             // the selected day's model failed to build (#940): real data over a zeroed gauge.
             item {
+                val wakeDay = night?.dayKey ?: days.lastOrNull()?.day
+                val importedScore = wakeDay != null && imported.performance[wakeDay] != null
+                val assessment = if (!importedScore && night != null && display != null) {
+                    val stages = display.stages
+                    val efficiency = if (stages.total > 0.0) stages.asleep / stages.total else 0.0
+                    val persisted = restConfidenceByDay[night.dayKey]
+                    val evidence = restEvidenceByDay[night.dayKey]
+                    // Legacy summaries cannot prove raw five-minute main-night coverage. Missing evidence
+                    // keeps both lanes unavailable even when an old confidence tier survived.
+                    val legacy = ScoreConfidence.restAssessment(
+                        hasSession = true,
+                        hasStagedSleep = hasEngineStagedSleep(stages),
+                        asleepSeconds = stages.asleep * 60.0,
+                        restorativeSeconds = (stages.deep + stages.rem) * 60.0,
+                        efficiency = efficiency,
+                        motionUnavailable = night.groupMotion.isEmpty(),
+                        hasRREvidence = false,
+                        hasRespirationEvidence = false,
+                    )
+                    resolvedRestAssessment(persisted, evidence, legacy)
+                } else {
+                    null
+                }
                 RestHero(
                     // The DISPLAYED night's score (keyed by its wake-day), so the hero tracks the
                     // ◀/▶-navigated night instead of freezing on the full-history latest. When no night
@@ -506,11 +574,12 @@ fun SleepScreen(
                     asleepMin = model?.stages?.asleep,
                     source = restHeroSource(
                         imported = imported,
-                        wakeDay = night?.dayKey ?: days.lastOrNull()?.day,
+                        wakeDay = wakeDay,
                         importedLabel = uiString(R.string.appwide_source_imported),
                         onDeviceLabel = uiString(R.string.appwide_source_on_device),
                     ),
                     overline = nightRelativeLabel(nightOffset),
+                    confidence = assessment?.confidence,
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -858,7 +927,13 @@ private val LIQUID_HERO_RADIUS: Dp = 26.dp
 // fraction math and Rest tint are UNCHANGED from the BevelGauge this replaced — presentation-only.
 
 @Composable
-private fun RestHero(score: Double?, asleepMin: Double?, source: String, overline: String) {
+private fun RestHero(
+    score: Double?,
+    asleepMin: Double?,
+    source: String,
+    overline: String,
+    confidence: ScoreConfidence?,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Sleep performance", overline = overline, trailing = "Sleep Score")
         Box(
@@ -907,7 +982,30 @@ private fun RestHero(score: Double?, asleepMin: Double?, source: String, overlin
                         Text(uiString(R.string.l10n_sleep_screen_asleep_last_night_b969b068), style = NoopType.subhead, color = Palette.textSecondary)
                     }
                 }
-                SourceBadge(text = source, tint = Palette.restColor)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SourceBadge(text = source, tint = Palette.restColor)
+                    confidence?.let {
+                        val label = when (it) {
+                            ScoreConfidence.CALIBRATING ->
+                                stringResource(R.string.daily_plan_confidence_calibrating)
+                            ScoreConfidence.BUILDING ->
+                                stringResource(R.string.daily_plan_confidence_building)
+                            ScoreConfidence.SOLID ->
+                                stringResource(R.string.daily_plan_confidence_solid)
+                        }
+                        SourceBadge(
+                            text = label,
+                            tint = if (it == ScoreConfidence.SOLID) {
+                                Palette.statusPositive
+                            } else {
+                                Palette.statusWarning
+                            },
+                        )
+                    }
+                }
             }
         }
     }

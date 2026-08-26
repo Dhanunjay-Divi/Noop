@@ -135,11 +135,11 @@ struct DataSourcesView: View {
 
     private var whoopCard: some View {
         let hasWhoop = !repo.days.isEmpty
-        return card(title: String(localized: "WHOOP Export"), icon: "square.and.arrow.down.fill",
+        return card(title: String(localized: "Wearable Export"), icon: "square.and.arrow.down.fill",
              tint: StrandPalette.accent,
              status: StatePill(hasWhoop ? "Imported" : "Nothing imported",
                                tone: hasWhoop ? .accent : .neutral),
-             subtitle: String(localized: "Import your full WHOOP history (recovery, strain, sleep, workouts) from a data export (.zip). Works for WHOOP 4.0, 5.0 and MG. Get one at app.whoop.com → Data Management.")) {
+             subtitle: String(localized: "Import recovery, strain, sleep and workout history from your original wearable data export (.zip). Request the export from your wearable account, then choose the ZIP here.")) {
             let importingWhoop = model.isImporting(.whoop)
             HStack(spacing: NoopMetrics.space3) {
                 Button {

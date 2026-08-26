@@ -239,6 +239,7 @@ data class ProfileBaselines(
     val restingHR: BaselineState? = null,
     val resp: BaselineState? = null,
     val skinTemp: BaselineState? = null,
+    val restQuality: BaselineState? = null,
 )
 
 /**

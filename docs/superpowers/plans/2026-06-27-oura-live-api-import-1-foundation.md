@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **⚠️ v8.5.2 reconciliation (2026-06-30).** Written against v7.2.3; this branch (`oura-cloud-import`) is rebased onto upstream **v8.5.2** (`ryanbr/noop`). Deltas verified against current code:
+> **⚠️ v8.5.2 reconciliation (2026-06-30).** Written against v7.2.3; this branch (`oura-cloud-import`) is rebased onto upstream **v8.5.2** (`Dhanunjay-Divi/Noop`). Deltas verified against current code:
 > 1. **Migration is `v24`, not `v19`.** The migrator is at **v23** (`v19-step-activity-class` … `v23-daily-spo2-raw`); append `v24-oura-raw` after the v23 block. (Fixed inline in Task 1.)
 > 2. **Provenance (Plan 3):** register the source with `PairedDevice.sourceKind = .cloudImport` — it already exists (`PairedDevice.swift:42`) and is treated as non-day-owning (`IntelligenceEngine.swift:1369`). Do **not** invent a new SourceKind; keep `deviceId = "oura-api"`.
 > 3. **`motionJSON` (Plan 3)** is written via the dedicated `persistSessionMotion(deviceId:sessionStart:motionEpochs:[Double])` (`MetricsCache.swift:234`) after the sleep upsert (not through it); map `movement30s` `[Int]→[Double]`.

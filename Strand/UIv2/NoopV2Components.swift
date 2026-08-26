@@ -193,13 +193,59 @@ struct V2HeroArc: View {
         .accessibilityValue(Text(accessibilityReadout))
     }
 
-    /// Spoken value: "64 out of 100, moderate" / "not yet calculated, calibrating".
+    /// Spoken value, built from complete localized format strings rather than English fragments.
     private var accessibilityReadout: String {
+        Self.accessibilityReadout(value: value, maximum: max, caption: caption)
+    }
+
+    static func accessibilityReadout(value: Double?, maximum: Double,
+                                     caption: String?, decimals: Int = 0) -> String {
+        let locale = Locale.current
         guard let v = value else {
-            return caption.map { "not yet calculated, \($0)" } ?? "not yet calculated"
+            guard let caption else {
+                return String(localized: "appwide.v4.not_calculated")
+            }
+            return String(
+                format: String(localized: "appwide.v4.not_calculated_with_context_format"),
+                locale: locale,
+                caption
+            )
         }
-        let head = "\(Int(v.rounded())) out of \(Int(max))"
-        return caption.map { "\(head), \($0)" } ?? head
+        if decimals > 0 {
+            let precision = Swift.max(0, decimals)
+            let valueText = v.formatted(
+                .number.precision(.fractionLength(0...precision))
+            )
+            let maximumText = maximum.formatted(
+                .number.precision(.fractionLength(0...precision))
+            )
+            guard let caption else {
+                return String(
+                    format: String(localized: "appwide.v4.value_text_out_of_text_format"),
+                    locale: locale,
+                    valueText, maximumText
+                )
+            }
+            return String(
+                format: String(localized: "appwide.v4.value_text_out_of_text_with_context_format"),
+                locale: locale,
+                valueText, maximumText, caption
+            )
+        }
+        let roundedValue = Int64(v.rounded())
+        let roundedMaximum = Int64(maximum.rounded())
+        guard let caption else {
+            return String(
+                format: String(localized: "appwide.v4.value_out_of_format"),
+                locale: locale,
+                roundedValue, roundedMaximum
+            )
+        }
+        return String(
+            format: String(localized: "appwide.v4.value_out_of_with_context_format"),
+            locale: locale,
+            roundedValue, roundedMaximum, caption
+        )
     }
 }
 
@@ -253,7 +299,18 @@ struct V2SatelliteRing: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
-        .accessibilityValue(Text(value.map { "\(formatted($0)) out of \(formatted(max))" } ?? "no data"))
+        .accessibilityValue(
+            Text(
+                value.map {
+                    V2HeroArc.accessibilityReadout(
+                        value: $0,
+                        maximum: max,
+                        caption: nil,
+                        decimals: decimals
+                    )
+                } ?? String(localized: "No data")
+            )
+        )
     }
 
     private func formatted(_ value: Double) -> String {

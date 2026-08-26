@@ -167,7 +167,7 @@ enum MetricKnowledge {
 
         case "body_age":
             return item(
-                what: "Wellness Age is the age-shaped readout of NOOP's experimental Vitality model. It is not biological, medical, or WHOOP Age.",
+                what: "Wellness Age is the age-shaped readout of NOOP's experimental Vitality model. It is not biological, medical, or a provider's proprietary age score.",
                 why: "It offers one slow-moving comparison between supported lifestyle signals and your profile age.",
                 method: "Derived on device from at least 14 observed days per included factor and at least three physiological domains. It is not read directly from any sensor.",
                 limits: "The literature-inspired factors were not validated together as a clinical model, and NOOP has no validated personal confidence interval. Do not use it to estimate ageing, disease risk, or lifespan.",
@@ -235,7 +235,7 @@ enum MetricKnowledge {
             return item(
                 what: "Body temperature is an absolute temperature reading imported from Apple Health.",
                 why: "A repeated change can add context to how you feel, but one consumer-device reading should not be interpreted alone.",
-                method: "NOOP preserves Apple Health's absolute body-temperature value in its own series. It is never substituted for WHOOP skin temperature or baseline deviation.",
+                method: "NOOP preserves Apple Health's absolute body-temperature value in its own series. It is never substituted for imported skin temperature or baseline deviation.",
                 limits: "Source devices, measurement site and timing vary. NOOP is not a thermometer or medical device.",
                 influences: ["Measurement method", "Time of day", "Recent activity", "Environment", "Illness", "Medications"],
                 actions: ["Check the original source and time in Apple Health.", "Confirm an unexpected value with a suitable thermometer.", "Seek medical advice when symptoms or a confirmed concerning temperature warrant it."],
@@ -246,7 +246,7 @@ enum MetricKnowledge {
             return item(
                 what: "Sleeping wrist temperature is an absolute peripheral-temperature reading imported from Apple Health.",
                 why: "Its overnight trend can add context to recovery, environment and cycle-aware patterns.",
-                method: "NOOP stores it in a dedicated Apple Health series, separate from body temperature and WHOOP skin-temperature deviation.",
+                method: "NOOP stores it in a dedicated Apple Health series, separate from body temperature and imported skin-temperature deviation.",
                 limits: "Wrist temperature is not core body temperature. Fit, bedding, room conditions and circulation affect it.",
                 influences: ["Room and bedding temperature", "Sensor fit", "Menstrual-cycle phase", "Alcohol", "Travel", "Illness"],
                 actions: ["Compare readings from the same device over several nights.", "Check fit and sleeping conditions when the trend changes.", "Use a clinical thermometer when body temperature itself matters."],
@@ -299,7 +299,7 @@ enum MetricKnowledge {
                 method: imported
                     ? "Imported from the source named on the reading; NOOP preserves it separately from strap estimates."
                     : (metric.key == "steps"
-                        ? "Estimated on device from WHOOP 5/MG @57 motion-counter deltas divided by your step-scale setting. It is not a validated pedometer count."
+                        ? "Estimated on device from newer band motion-counter deltas divided by your step-scale setting. It is not a validated pedometer count."
                         : "Estimated on device from strap motion and personal calibration. It is not a validated pedometer count."),
                 limits: motionDerived
                     ? "Strap motion can differ from footfalls, and the scale is a user preference rather than a validated step calibration. Treat the number as an estimate."

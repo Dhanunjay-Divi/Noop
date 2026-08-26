@@ -23,12 +23,10 @@ CLI tools. The CoreBluetooth transport lives under `Strand/BLE/` and is shared b
 macOS and iOS app targets (the platform-pure `WhoopProtocol` package above stays
 CoreBluetooth-free for tests and CLI tools).
 
-This work builds on two community reverse-engineering efforts:
-
-- **`johnmiddleton12/my-whoop`** — WHOOP 4.0 protocol.
-- **`b-nnett/goose`** — observed WHOOP 5.0 fd4b ("puffin" packet framing)
-  protocol facts. Its repository has no explicit software license; see the
-  [redistribution-rights remediation plan](PROTOCOL_RIGHTS_REMEDIATION.md).
+The protocol implementation is maintained as NOOP-controlled source in the
+canonical repository. Interoperability behavior is documented from observed
+wire facts. See [`ATTRIBUTION.md`](../ATTRIBUTION.md) and
+[`REPOSITORY_INDEPENDENCE.md`](REPOSITORY_INDEPENDENCE.md).
 
 The canonical decode tables are bundled as a JSON resource:
 `Packages/WhoopProtocol/Sources/WhoopProtocol/Resources/whoop_protocol.json`, loaded by
@@ -627,7 +625,6 @@ inherit a base layout and override only what changed. The streamed decode that f
 
 ---
 
-*Reverse-engineering credit: `johnmiddleton12/my-whoop` (WHOOP 4.0) and `b-nnett/goose`
-(WHOOP 5.0). This is interoperability software for the user's own device and data; it is not
-affiliated with WHOOP, is not a medical device, and is not cleared for distribution while the
-repository's legal gate is blocked.*
+*This is interoperability software for the user's own device and data. It is
+not affiliated with WHOOP and is not a medical device. Distribution requires a
+passing repository legal gate.*

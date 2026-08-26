@@ -75,6 +75,9 @@ struct SleepView: View {
     /// night, only read the already-chosen group's stored motion. A block with no stored series stays absent
     /// (honest empty state for older rows whose `motionJSON` is NULL). Refreshed with `allSessions`.
     @State private var motionByStart: [Int: [Double]] = [:]
+    /// Exact day-level Rest tier and independent evidence bits persisted by the analytics pass.
+    @State private var restConfidenceByDay: [String: ScoreConfidence] = [:]
+    @State private var restEvidenceByDay: [String: ScoreConfidence.RestEvidenceFlags] = [:]
 
     /// Draw-in fraction for the Rest hero gauge — owned here so the gauge animates the arc on appear /
     /// when the sleep-performance score changes, exactly as TodayView drives its rings. Presentation-only.
@@ -197,6 +200,21 @@ struct SleepView: View {
                 // Per-epoch motion for every block (#407), keyed by detected start. mergeDay reads only the
                 // already-resolved group's entries — this just pre-fetches them all so the model build is sync.
                 motionByStart = await repo.sessionMotions(starts: allSessions.map { $0.startTs })
+                restConfidenceByDay = Dictionary(
+                    uniqueKeysWithValues: await repo
+                        .exploreSeries(key: ScoreConfidence.restConfidenceSeriesKey,
+                                       source: "my-whoop")
+                        .compactMap { point in
+                            ScoreConfidence(persistedValue: point.value).map { (point.day, $0) }
+                        })
+                restEvidenceByDay = Dictionary(
+                    uniqueKeysWithValues: await repo
+                        .exploreSeries(key: ScoreConfidence.restEvidenceSeriesKey,
+                                       source: "my-whoop")
+                        .compactMap { point in
+                            ScoreConfidence.RestEvidenceFlags(persistedValue: point.value)
+                                .map { (point.day, $0) }
+                        })
                 nightOffset = 0
                 navNight = nil
                 modelKey = dataKey
@@ -454,7 +472,7 @@ struct SleepView: View {
                     .foregroundStyle(StrandPalette.onDarkTertiary)
                 if let limitation = isProviderScore
                     ? String(localized: "The imported score did not include provider confidence metadata.")
-                    : restLimitationText(assessment.limitations.first) {
+                    : Self.restLimitationText(assessment.limitations.first) {
                     HStack(alignment: .top, spacing: NoopMetrics.space2) {
                         Image(systemName: "info.circle")
                             .font(StrandFont.footnote)
@@ -497,16 +515,60 @@ struct SleepView: View {
         if isImportedPerformance(for: night) {
             return .init(confidence: .solid, limitations: [])
         }
-        let staged = night.realSegments?.isEmpty == false || night.stages.deep + night.stages.rem > 0
+        let staged = Self.hasEngineStagedSleep(
+            deepMin: night.stages.deep, remMin: night.stages.rem)
         let efficiency = efficiencyPct(night).map { $0 / 100.0 } ?? 0
-        return Self.localRestAssessment(
+        let wakeDay = Repository.localDayKey(
+            Date(timeIntervalSince1970: TimeInterval(night.session.endTs)))
+        let persisted = restConfidenceByDay[wakeDay]
+        let evidence = restEvidenceByDay[wakeDay]
+        // Cached avgHrv/respRate values cannot prove sustained main-night coverage. A legacy tier without
+        // the independent evidence row therefore keeps both lanes unavailable instead of inferring them.
+        let legacy = Self.localRestAssessment(
             hasSession: !night.sourceBlocks.isEmpty,
             hasStagedSleep: staged,
             asleepSeconds: night.stages.asleep * 60,
             restorativeSeconds: (night.stages.deep + night.stages.rem) * 60,
             efficiency: efficiency,
             motionEpochCount: night.motionEpochs.count,
-            gravitySparse: night.gravitySparse)
+            gravitySparse: night.gravitySparse,
+            hasRREvidence: false,
+            hasRespirationEvidence: false)
+        return Self.resolvedRestAssessment(
+            persistedConfidence: persisted,
+            persistedEvidence: evidence,
+            legacyAssessment: legacy)
+    }
+
+    /// Prefer the validated evidence record. A tier can only lower that result; it can never manufacture
+    /// evidence. Missing/invalid evidence is a legacy row and falls back to the conservative local read.
+    static func resolvedRestAssessment(
+        persistedConfidence: ScoreConfidence?,
+        persistedEvidence: ScoreConfidence.RestEvidenceFlags?,
+        legacyAssessment: ScoreConfidence.RestAssessment
+    ) -> ScoreConfidence.RestAssessment {
+        let evidenceAssessment = persistedEvidence.map {
+            ScoreConfidence.restAssessment(evidence: $0)
+        }
+        let base = evidenceAssessment ?? legacyAssessment
+        guard let persistedConfidence else { return base }
+        let rank: (ScoreConfidence) -> Int = {
+            switch $0 {
+            case .calibrating: return 0
+            case .building: return 1
+            case .solid: return 2
+            }
+        }
+        return .init(
+            confidence: rank(persistedConfidence) < rank(base.confidence)
+                ? persistedConfidence : base.confidence,
+            limitations: base.limitations)
+    }
+
+    /// Keep the legacy presentation fallback on the engine's exact staging contract. A real segment array
+    /// containing only awake/light epochs is not restorative stage evidence.
+    static func hasEngineStagedSleep(deepMin: Double, remMin: Double) -> Bool {
+        deepMin + remMin > 0
     }
 
     /// Pure presentation seam for the on-device Rest read. A populated motion array proves only that a
@@ -516,7 +578,10 @@ struct SleepView: View {
     static func localRestAssessment(hasSession: Bool, hasStagedSleep: Bool,
                                     asleepSeconds: Double, restorativeSeconds: Double,
                                     efficiency: Double, motionEpochCount: Int,
-                                    gravitySparse: Bool?) -> ScoreConfidence.RestAssessment {
+                                    gravitySparse: Bool?,
+                                    hasRREvidence: Bool = true,
+                                    hasRespirationEvidence: Bool = true)
+        -> ScoreConfidence.RestAssessment {
         ScoreConfidence.restAssessment(
             hasSession: hasSession,
             hasStagedSleep: hasStagedSleep,
@@ -524,7 +589,9 @@ struct SleepView: View {
             restorativeSeconds: restorativeSeconds,
             efficiency: efficiency,
             gravitySparse: gravitySparse == true,
-            motionUnavailable: motionEpochCount == 0 || gravitySparse == nil)
+            motionUnavailable: motionEpochCount == 0 || gravitySparse == nil,
+            hasRREvidence: hasRREvidence,
+            hasRespirationEvidence: hasRespirationEvidence)
     }
 
     /// Combine the engine verdicts for every fragment that contributes to a merged main night. Any known
@@ -550,12 +617,16 @@ struct SleepView: View {
         }
     }
 
-    private func restLimitationText(_ limitation: ScoreConfidence.RestLimitation?) -> String? {
+    static func restLimitationText(_ limitation: ScoreConfidence.RestLimitation?) -> String? {
         switch limitation {
         case .noSession: return String(localized: "No complete sleep session supports this read yet.")
         case .noStagedSleep: return String(localized: "Stage detail is unavailable, so read the score as an estimate.")
         case .motionUnavailable: return String(localized: "Movement detail is unavailable for this night, limiting confidence in on-device stages and Rest.")
         case .sparseMotion: return String(localized: "Motion coverage was sparse, limiting confidence in on-device stages and Rest.")
+        case .missingRREvidence:
+            return String(localized: "Usable beat-to-beat timing evidence was unavailable for this night, limiting confidence in the on-device stage estimates and Rest.")
+        case .missingRespirationEvidence:
+            return String(localized: "Usable breathing-rate evidence was unavailable for this night, limiting confidence in the on-device stage estimates and Rest.")
         case .implausibleStageMix: return String(localized: "The stage mix may be an estimation miss; interpret deep and REM with care.")
         case nil: return nil
         }

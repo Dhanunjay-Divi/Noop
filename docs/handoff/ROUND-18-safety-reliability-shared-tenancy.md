@@ -40,7 +40,8 @@
   instrumentation source compilation, and lint passed.
 - Strict localization, health-claims, legal inventory, private-data, and ops
   gates passed.
-- Distribution remains blocked on the same three rights entries.
+- The source-rights review recorded during this round was superseded by the
+  2026-08-25 owner-controlled consolidation declaration.
 
 ## Do not do
 

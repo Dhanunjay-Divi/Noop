@@ -51,9 +51,9 @@ public struct WhoopExportImporter {
     /// 0–1 fraction the native pipeline writes (`AnalyticsEngine`: actual-sleep ÷ in-bed). Convert at
     /// the WRITE boundary (WhoopImporter → store), NOT at parse time, so the verbatim parsed value
     /// (`sleepEfficiencyPct`) and the CSV round-trip contract are preserved — the same shape as the
-    /// Day Strain ⇄ Effort pair above. Keep byte-identical to the Android importer (WhoopCsvImporter.kt).
+    /// Day Strain ⇄ Effort pair above. Out-of-range/non-finite input is omitted rather than clamped.
     public static func fractionFromImportedEfficiencyPct(_ pct: Double?) -> Double? {
-        guard let pct else { return nil }
+        guard let pct, pct.isFinite, (0...100).contains(pct) else { return nil }
         return pct / 100.0
     }
 
@@ -132,6 +132,7 @@ public struct WhoopExportImporter {
         var sleeps: [WhoopSleepRow] = []
         var workouts: [WhoopWorkoutRow] = []
         var journal: [WhoopJournalRow] = []
+        var journalImportRange: ClosedRange<String>?
 
         if let data = csvData[Self.cyclesName] {
             cycles = parseCycles(CSVTable(data: data))
@@ -143,7 +144,26 @@ public struct WhoopExportImporter {
             workouts = parseWorkouts(CSVTable(data: data))
         }
         if let data = csvData[Self.journalName] {
-            journal = parseJournal(CSVTable(data: data))
+            let rawJournal = parseJournalRows(CSVTable(data: data))
+            let wakeDayByStart = journalWakeDayByStart(cycles)
+            let sourceDays = rawJournal.flatMap { row -> [String] in
+                guard let start = row.cycleStart, row.question != nil else { return [] }
+                let onsetDay = WhoopDayKeying.wakeDayKey(
+                    wake: nil,
+                    end: nil,
+                    start: start,
+                    tzOffsetMin: row.tzOffsetMin
+                )
+                let wakeDay = journalWakeDay(for: row, wakeDayByStart: wakeDayByStart)
+                // Include both keying schemes. Older builds persisted the same source row on its
+                // onset day; replacing only wake days left the earliest legacy row behind.
+                return [onsetDay, wakeDay].compactMap { $0 }
+            }
+            if let first = sourceDays.min(), let last = sourceDays.max() {
+                journalImportRange = first...last
+            }
+            journal = sanitizedJournalRows(rawJournal)
+            journal = removingContradictoryWakeDayAnswers(journal, cycles: cycles)
         }
 
         let summary = makeSummary(cycles: cycles, sleeps: sleeps, workouts: workouts, journal: journal)
@@ -152,6 +172,7 @@ public struct WhoopExportImporter {
             sleeps: sleeps,
             workouts: workouts,
             journal: journal,
+            journalImportRange: journalImportRange,
             portableUserData: portable,
             summary: summary
         )
@@ -351,8 +372,9 @@ public struct WhoopExportImporter {
             // future export happens to carry both columns.
             if let celsius = row.double("skin_temp_celsius") {
                 r.skinTempCelsius = celsius
-            } else if let fahrenheit = row.double("skin_temp_f") {
-                r.skinTempCelsius = (fahrenheit - 32.0) * 5.0 / 9.0
+            } else if let fahrenheit = row.double("skin_temp_f", "skin_temp_fahrenheit") {
+                let celsius = (fahrenheit - 32.0) * 5.0 / 9.0
+                r.skinTempCelsius = celsius.isFinite ? celsius : nil
             }
             r.bloodOxygenPct   = row.double("blood_oxygen_pct", "blood_oxygen_pct_pct")
             r.dayStrain        = row.double("day_strain")
@@ -462,7 +484,7 @@ public struct WhoopExportImporter {
 
     // MARK: - journal_entries.csv
 
-    func parseJournal(_ table: CSVTable) -> [WhoopJournalRow] {
+    private func parseJournalRows(_ table: CSVTable) -> [WhoopJournalRow] {
         var out: [WhoopJournalRow] = []
         out.reserveCapacity(table.rows.count)
         for row in table.rows {
@@ -484,6 +506,157 @@ public struct WhoopExportImporter {
             out.append(r)
         }
         return out
+    }
+
+    func parseJournal(_ table: CSVTable) -> [WhoopJournalRow] {
+        sanitizedJournalRows(parseJournalRows(table))
+    }
+
+    /// Exports can repeat the exact same journal row, and one audited export also contained both
+    /// `true` and `false` for the same cycle/question key. Repeating an identical row adds no
+    /// information. A contradictory pair has no defensible winner, so omit that whole key instead
+    /// of letting CSV row order silently choose the answer later at the store's natural-key upsert.
+    private func sanitizedJournalRows(_ rows: [WhoopJournalRow]) -> [WhoopJournalRow] {
+        struct ExactRow: Hashable {
+            let cycleStart: Date?
+            let tzOffsetMin: Int
+            let question: String?
+            let answer: String?
+            let notes: String?
+        }
+        struct CycleQuestion: Hashable {
+            let cycleStart: Date
+            let question: String
+        }
+
+        // Persistence has a Boolean column. Notes-only, blank, or malformed answers are unknown,
+        // not "No"; omit them rather than fabricating a negative behavior signal. Canonicalizing
+        // aliases before deduplication also makes `yes` and `true` the same source answer.
+        let normalized = rows.compactMap { row -> WhoopJournalRow? in
+            guard row.cycleStart != nil,
+                  let question = row.question?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !question.isEmpty,
+                  let answer = Self.journalBoolean(row.answer)
+            else { return nil }
+            var normalized = row
+            normalized.question = question
+            normalized.answer = answer ? "true" : "false"
+            return normalized
+        }
+
+        var seen = Set<ExactRow>()
+        let unique = normalized.filter { row in
+            seen.insert(ExactRow(
+                cycleStart: row.cycleStart,
+                tzOffsetMin: row.tzOffsetMin,
+                question: row.question,
+                answer: row.answer,
+                notes: row.notes
+            )).inserted
+        }
+
+        var answersByKey: [CycleQuestion: Set<Bool>] = [:]
+        for row in unique {
+            guard let cycleStart = row.cycleStart,
+                  let question = row.question,
+                  let answer = Self.journalBoolean(row.answer)
+            else { continue }
+            answersByKey[CycleQuestion(cycleStart: cycleStart, question: question), default: []]
+                .insert(answer)
+        }
+        let contradictory = Set(answersByKey.compactMap { key, answers in
+            answers.count > 1 ? key : nil
+        })
+
+        return unique.filter { row in
+            guard let cycleStart = row.cycleStart, let question = row.question else { return false }
+            return !contradictory.contains(CycleQuestion(cycleStart: cycleStart, question: question))
+        }
+    }
+
+    private static func journalBoolean(_ raw: String?) -> Bool? {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "true", "yes", "1", "y": return true
+        case "false", "no", "0", "n": return false
+        default: return nil
+        }
+    }
+
+    private func journalWakeDayByStart(_ cycles: [WhoopCycleRow]) -> [Int: String] {
+        var result: [Int: String] = [:]
+        for cycle in cycles {
+            guard let start = cycle.cycleStart,
+                  let day = WhoopDayKeying.wakeDayKey(
+                      wake: cycle.wakeOnset,
+                      end: cycle.cycleEnd,
+                      start: cycle.cycleStart,
+                      tzOffsetMin: cycle.tzOffsetMin)
+            else { continue }
+            result[Int(start.timeIntervalSince1970)] = day
+        }
+        return result
+    }
+
+    private func journalWakeDay(for row: WhoopJournalRow,
+                                wakeDayByStart: [Int: String]) -> String? {
+        guard let start = row.cycleStart, row.question != nil else { return nil }
+        return wakeDayByStart[Int(start.timeIntervalSince1970)]
+            ?? WhoopDayKeying.wakeDayKey(
+                wake: nil,
+                end: nil,
+                start: start,
+                tzOffsetMin: row.tzOffsetMin)
+    }
+
+    /// The store's journal key is wake-day + question, not cycle-start + question. Two distinct cycle
+    /// starts can resolve onto the same wake day, so repeat the contradiction check after cycles are
+    /// available and use the same keying policy as the app's persistence adapter.
+    private func removingContradictoryWakeDayAnswers(
+        _ rows: [WhoopJournalRow],
+        cycles: [WhoopCycleRow]
+    ) -> [WhoopJournalRow] {
+        struct DayQuestion: Hashable {
+            let day: String
+            let question: String
+        }
+
+        let wakeDayByStart = journalWakeDayByStart(cycles)
+
+        func key(for row: WhoopJournalRow) -> DayQuestion? {
+            guard let question = row.question else { return nil }
+            let day = journalWakeDay(for: row, wakeDayByStart: wakeDayByStart)
+            return day.map { DayQuestion(day: $0, question: question) }
+        }
+
+        var answersByKey: [DayQuestion: Set<Bool>] = [:]
+        for row in rows {
+            guard let key = key(for: row), let answer = Self.journalBoolean(row.answer) else {
+                continue
+            }
+            answersByKey[key, default: []].insert(answer)
+        }
+        let contradictory = Set(answersByKey.compactMap { key, answers in
+            answers.count > 1 ? key : nil
+        })
+
+        var grouped: [DayQuestion: [WhoopJournalRow]] = [:]
+        for row in rows {
+            guard let rowKey = key(for: row), !contradictory.contains(rowKey) else { continue }
+            grouped[rowKey, default: []].append(row)
+        }
+        let orderedKeys = grouped.keys.sorted {
+            $0.day == $1.day ? $0.question < $1.question : $0.day < $1.day
+        }
+        return orderedKeys.compactMap { rowKey in
+            guard let group = grouped[rowKey], var result = group.min(by: {
+                ($0.cycleStart ?? .distantFuture) < ($1.cycleStart ?? .distantFuture)
+            }) else { return nil }
+            let notes = Set(group.compactMap {
+                $0.notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty }).sorted()
+            result.notes = notes.isEmpty ? nil : notes.joined(separator: "\n")
+            return result
+        }
     }
 
     // MARK: - Summary

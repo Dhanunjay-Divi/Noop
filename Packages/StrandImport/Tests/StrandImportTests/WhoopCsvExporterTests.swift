@@ -132,6 +132,10 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(roundTripped ?? -1, 0.6569, accuracy: 1e-9)
         XCTAssertNil(WhoopExportImporter.whoopEfficiencyPctFromFraction(nil))
         XCTAssertNil(WhoopExportImporter.fractionFromImportedEfficiencyPct(nil))
+        XCTAssertNil(WhoopExportImporter.fractionFromImportedEfficiencyPct(-1))
+        XCTAssertNil(WhoopExportImporter.fractionFromImportedEfficiencyPct(100.1))
+        XCTAssertNil(WhoopExportImporter.fractionFromImportedEfficiencyPct(.infinity))
+        XCTAssertNil(WhoopExportImporter.fractionFromImportedEfficiencyPct(.nan))
     }
 
     func testNumbersAreLocaleProof() {

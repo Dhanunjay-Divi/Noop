@@ -84,7 +84,7 @@ object TestModeRegistry {
         captures = listOf("connectTiming", "bondState", "frameTiming", "reconnectChurn", "offloadProgress",
             "offloadStalls", "firmwareDecode", "clockDrift", "otherCentral"),
         questionnaire = listOf(
-            Question("otherDevicePaired", "Is another phone or the WHOOP app paired to the strap right now?", Question.Kind.YES_NO),
+            Question("otherDevicePaired", "Is another phone or the other band app paired to the strap right now?", Question.Kind.YES_NO),
         ),
         liveReadout = listOf("connectionUptime", "reconnectCount", "lastOffloadResult"),
         capture = CaptureKind.Toggle,
@@ -158,7 +158,7 @@ object TestModeRegistry {
         captures = listOf("socSeries", "chargeSteps", "dischargeRun", "fittedSlope",
             "sourceMeasuredVsRated", "batteryGates"),
         questionnaire = listOf(
-            Question("whoopAppInstalled", "Is the official WHOOP app installed?", Question.Kind.YES_NO),
+            Question("whoopAppInstalled", "Is the other band app installed?", Question.Kind.YES_NO),
             Question("otherPhonePaired", "Is another phone paired to the strap?", Question.Kind.YES_NO),
             Question("chargedInWindow", "Did you charge during the capture?", Question.Kind.YES_NO),
             Question("batterySaverApps", "Any battery-saver apps running?", Question.Kind.TEXT),
