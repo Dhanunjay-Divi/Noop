@@ -23,6 +23,13 @@ dependency notices remain mandatory. The legal gate does not replace review by
 qualified counsel for store terms, trademarks, privacy disclosures, safety
 claims, or a future commercial licensing posture.
 
+**Launch sequence: India first, then USA.** Gates 4 and 5 below are written for US carriers and are
+NOT the India path: India requires TRAI DLT entity, header and content-template registration rather than
+A2P 10DLC, and the Noop Band additionally needs BIS and WPC/ETA approval. India coverage in this
+repository is currently zero and no Indian locale ships. See
+[`INDIA-FIRST-LAUNCH-PATH.md`](INDIA-FIRST-LAUNCH-PATH.md), which also recommends descoping v1 to
+local-only so gates 4 and 5 leave the critical path entirely.
+
 ## P0 launch gates
 
 1. **Stabilize and publish the implementation.** Review the complete working
