@@ -40,8 +40,7 @@
   instrumentation source compilation, and lint passed.
 - Strict localization, health-claims, legal inventory, private-data, and ops
   gates passed.
-- The source-rights review recorded during this round was superseded by the
-  2026-08-25 owner-controlled consolidation declaration.
+- The current NOOP owner declaration governs source rights.
 
 ## Do not do
 
@@ -57,7 +56,7 @@
 
 ## Next work
 
-1. Resolve source rights.
+1. Preserve the cleared owner-rights record and passing distribution gate.
 2. Start A2P 10DLC and launch-country sender procurement.
 3. Choose identity/recovery, cloud/regions, RPO/RTO, monitoring/on-call, and
    budget.

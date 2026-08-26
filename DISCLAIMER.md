@@ -21,7 +21,7 @@ agreed to; how you use hardware you own is your responsibility.
 
 This repository does not intentionally include WHOOP proprietary application source or assets.
 Protocol facts were investigated for interoperability. The repository owner's
-rights and consolidation authorization are recorded in
+source-ownership and distribution authorization are recorded in
 `docs/provenance/OWNER-RIGHTS-DECLARATION.md`; independent dependencies and
 their required terms are recorded in `NOTICE`. Specifically, this repository
 does **NOT** intentionally contain or bundle any of the following:
@@ -61,7 +61,7 @@ development.
 NOOP-controlled source code and documentation in this repository are made available under the **PolyForm Noncommercial
 License 1.0.0** (see [`LICENSE`](LICENSE)): free for personal and other **non-commercial** use —
 you may read, run, fork, and contribute, but commercial use is not granted. The license covers
-the source consolidated into canonical NOOP; protocol facts are uncopyrightable, and bundled
+NOOP-controlled source in the canonical repository; protocol facts are uncopyrightable, and bundled
 dependencies keep their own licenses (see [`NOTICE`](NOTICE)).
 
 The software is provided **as-is**, with **no warranty of any kind**, express or implied. You use it

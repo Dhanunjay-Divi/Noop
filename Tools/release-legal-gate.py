@@ -41,7 +41,7 @@ PROJECT_LICENSE_MARKERS = (
 OWNER_DECLARATION_MARKERS = (
     "Recorded:** 2026-08-25",
     CANONICAL_REPOSITORY,
-    "source and contribution rights required",
+    "all NOOP-controlled source and contribution rights",
     "PolyForm Noncommercial License 1.0.0",
     "Independent third-party dependencies remain under their own terms",
     "engineering provenance record",
@@ -395,7 +395,7 @@ def verified_rights_status() -> dict[str, object]:
         raise GateError("rights status lacks ownerRightsBasis")
     expected_basis = {
         "declaration": str(OWNER_DECLARATION_PATH.relative_to(ROOT)),
-        "representation": "owner-controlled-consolidation",
+        "representation": "noop-owner-controlled-source",
         "sourceAndContributionRightsControlled": True,
         "authorizedLicense": "PolyForm-Noncommercial-1.0.0",
     }

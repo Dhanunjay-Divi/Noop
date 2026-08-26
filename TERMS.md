@@ -64,7 +64,7 @@ device, its data, and its connection to official services. **You assume that ris
 NOOP does not intentionally bundle third-party application binaries, firmware,
 logos, artwork, credentials, or extracted proprietary source. Protocol
 interoperability work is based on observed wire behavior and public facts. The
-repository owner's consolidation and distribution authorization is recorded in
+repository owner's source-ownership and distribution authorization is recorded in
 `docs/provenance/OWNER-RIGHTS-DECLARATION.md`. Independent package dependencies
 remain under their own terms and are inventoried with their required license
 texts in `NOTICE`.

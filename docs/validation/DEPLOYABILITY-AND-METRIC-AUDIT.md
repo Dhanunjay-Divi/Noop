@@ -8,11 +8,11 @@ Foster 1998 (monotony) · Banister/Coggan impulse-response (ATL/CTL/TSB) · Walc
 
 ## 1. Is it good to deploy? **Not yet.**
 
-The prior source-rights review was superseded on 2026-08-25 by the repository
-owner's consolidation declaration. The legal inventory and distribution modes
-now validate NOOP's license, the owner record, and independent dependency
-notices. Deployment still requires signing, store, infrastructure, carrier,
-physical-device, accuracy, localization, and regulatory evidence.
+The NOOP owner declaration records source and contribution rights. The legal
+inventory and distribution modes validate NOOP's license, the owner record, and
+independent dependency notices. Deployment still requires signing, store,
+infrastructure, carrier, physical-device, accuracy, localization, and
+regulatory evidence.
 
 **Code readiness, assessed separately, is good:**
 

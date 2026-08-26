@@ -6,7 +6,7 @@
   "distributionStatus": "cleared",
   "ownerRightsBasis": {
     "declaration": "docs/provenance/OWNER-RIGHTS-DECLARATION.md",
-    "representation": "owner-controlled-consolidation",
+    "representation": "noop-owner-controlled-source",
     "sourceAndContributionRightsControlled": true,
     "authorizedLicense": "PolyForm-Noncommercial-1.0.0"
   },

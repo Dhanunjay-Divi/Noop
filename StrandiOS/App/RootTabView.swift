@@ -172,8 +172,8 @@ struct RootTabView: View {
 
     var body: some View {
         // Keep the custom bar over a full-bleed page and reserve its measured height only inside scroll
-        // content. Masking the entire TabView also removes page backgrounds and hit-testing under the bar,
-        // so endpoint clearance belongs to each scroll container while the backdrop remains edge-to-edge.
+        // content. The short alpha ramp masks only the foreground as it enters that reserved strip; the
+        // shell-owned backdrop remains edge-to-edge behind the glass instead of becoming an opaque band.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -206,6 +206,18 @@ struct RootTabView: View {
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
             .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
+            .mask(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    Color.white
+                    LinearGradient(
+                        colors: [.white, .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 24)
+                    Color.clear.frame(height: max(0, visibleTabBarHeight - 24))
+                }
+            }
 
             if !keyboardVisible {
                 HStack(alignment: .center, spacing: 8) {
@@ -1707,11 +1719,11 @@ private extension View {
         }
     }
 
-    /// Navigation-specific glass. Clear glass preserves the full-bleed page on iOS 26. Older iOS versions
-    /// get the closest material equivalent plus the same restrained adaptive tint.
+    /// Navigation-specific glass. Regular glass diffuses foreground detail beneath the controls while the
+    /// full-bleed page stays visible around them. Older iOS versions get the closest material equivalent.
     @ViewBuilder func navigationGlass(in shape: some Shape, tint: Color) -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.clear.tint(tint), in: shape)
+            self.glassEffect(.regular.tint(tint), in: shape)
         } else {
             // Tint overlays the sampled material. Putting the tint behind the material made the
             // fallback read as a flat plate, especially when Light mode used a dark tint.

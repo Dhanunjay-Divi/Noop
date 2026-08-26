@@ -17,6 +17,7 @@ import re
 import secrets
 import sys
 import tempfile
+from typing import NoReturn
 import unicodedata
 
 
@@ -27,7 +28,7 @@ POLICY = ROOT / "Config" / "LaunchGate.xcconfig"
 VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
-def fail(message: str) -> "NoReturn":
+def fail(message: str) -> NoReturn:
     print(f"launch-gate: {message}", file=sys.stderr)
     raise SystemExit(2)
 

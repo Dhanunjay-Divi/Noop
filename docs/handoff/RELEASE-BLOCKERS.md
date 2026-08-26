@@ -1,7 +1,7 @@
 # Release blockers and production readiness
 
 **Assessed:** 2026-08-25
-**Source-rights status:** cleared by the owner-controlled consolidation record
+**Source-rights status:** cleared by the NOOP owner declaration
 **Product verdict:** not yet production-ready
 
 NOOP's project license and runtime dependency notices are internally

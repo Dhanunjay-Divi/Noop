@@ -229,8 +229,8 @@ check does not imply that a public API exposes the raw signal.
 
 ### Distribution provenance
 
-The repository owner has recorded control of the consolidated NOOP source and
-contribution rights. The release distribution gate validates that declaration,
+The repository owner has recorded control of NOOP's source and contribution
+rights. The release distribution gate validates that declaration,
 NOOP's PolyForm license, and the exact independent runtime dependency notices.
 It must pass for every external source or binary publication.
 

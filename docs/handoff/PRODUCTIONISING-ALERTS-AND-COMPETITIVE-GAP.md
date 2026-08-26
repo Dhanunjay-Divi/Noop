@@ -33,10 +33,9 @@ identity and production infrastructure**.
 
 ### P0 - Distribution and dependency gates must stay green
 
-The 2026-08-25 owner-controlled consolidation record clears the prior
-source-rights review. `python3 Tools/release-legal-gate.py distribution` must
-still run for every release so NOOP's license and independent dependency
-notices cannot drift.
+The 2026-08-25 NOOP owner declaration records source and contribution rights.
+`python3 Tools/release-legal-gate.py distribution` must still run for every
+release so NOOP's license and independent dependency notices cannot drift.
 
 ### P0 — The safety page has never reached a real phone
 

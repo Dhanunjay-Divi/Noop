@@ -15,12 +15,12 @@ checked-in Apple SwiftPM, Android Gradle, and server Python runtime graphs.
 missing license text, stale generated notices, or unsynchronized NOOP license
 copies.
 
-NOOP source rights
-------------------
+NOOP source ownership
+---------------------
 
-The repository owner's consolidation and distribution authorization is recorded
-in `docs/provenance/OWNER-RIGHTS-DECLARATION.md`. The release gate verifies that
-record independently from this dependency inventory.
+The repository owner's source-ownership and distribution authorization is
+recorded in `docs/provenance/OWNER-RIGHTS-DECLARATION.md`. The release gate
+verifies that record independently from this dependency inventory.
 
 Container boundary
 ------------------

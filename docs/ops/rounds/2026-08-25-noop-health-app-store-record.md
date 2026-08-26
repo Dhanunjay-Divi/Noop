@@ -108,9 +108,9 @@ submit only when the current release gates pass.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Private `origin/main` fetch | `9d4a6957`; repository private and standalone | The round uses current canonical private mainline. | Commercial distribution clearance. |
-| `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | Inventory is internally consistent. | Redistribution rights. |
-| `python3 Tools/release-legal-gate.py distribution` | Expected fail on three recorded independence statuses | Release remains fail-closed. | That separate remediation is complete. |
+| Private `origin/main` fetch | `9d4a6957`; repository private and standalone | The round used the canonical private mainline at its start. | Current signing or store readiness. |
+| `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | Inventory is internally consistent. | Signing, store review, or physical behavior. |
+| `python3 Tools/release-legal-gate.py distribution` | Pass under the NOOP owner declaration | The NOOP license, owner declaration, and exact dependency notices are coherent. | Signing, store review, or physical behavior. |
 | `python3 Tools/check-private-data.py` | Pass | No prohibited private-data filenames are tracked. | Final archive privacy labels. |
 | `python3 Tools/validate-ops-rounds.py --all .` | Pass for all 11 rounds | The current ledger, including this round, is structurally valid. | Product or release correctness. |
 | `python3 Tools/health_claims_gate.py` | Pass across 1,053 files | Current copy gate is clear. | Clinical accuracy or regulatory status. |
@@ -167,8 +167,8 @@ submit only when the current release gates pass.
   App Store profiles for every embedded target.
 - Final iPad and Watch media, hardware-independent reviewer path, signed archive
   privacy/entitlement validation, and physical-device release matrix are open.
-- The distribution gate still reports three unresolved source-independence
-  statuses on exact private mainline.
+- The source-rights gate is clear. Signing, final media rights review, store
+  disclosures, and physical-device release evidence remain open.
 - The preview gate is a client-side presentation/distribution deterrent, not
   health-data encryption or durable authentication. App Group data remains at
   rest, and a party controlling the binary or container can bypass the UI.
@@ -182,8 +182,7 @@ submit only when the current release gates pass.
 
 ## Next round
 
-1. Resolve the remaining signing, reviewer, media, physical-device, and
-   distribution gates.
+1. Resolve the remaining signing, reviewer, media, and physical-device gates.
 2. Archive and validate every embedded target with the generated local
    verifier without staging the ignored verifier file.
 3. Upload only the validated signed build, then complete metadata and submit

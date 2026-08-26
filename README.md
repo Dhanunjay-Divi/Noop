@@ -595,9 +595,9 @@ backup/export.
 
 ## Attribution
 
-NOOP-controlled source and contributions are consolidated in this canonical
-repository under the PolyForm Noncommercial License 1.0.0. The owner
-authorization is recorded in
+NOOP-controlled source and contributions in this canonical repository are
+offered under the PolyForm Noncommercial License 1.0.0. The owner authorization
+is recorded in
 [`docs/provenance/OWNER-RIGHTS-DECLARATION.md`](docs/provenance/OWNER-RIGHTS-DECLARATION.md).
 
 Independent runtime dependencies retain their own licenses. The exact resolved

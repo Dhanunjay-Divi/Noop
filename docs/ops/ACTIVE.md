@@ -20,8 +20,10 @@ Last updated: **2026-08-25**
 
 Round 21 validates and hardens recovery calibration, sleep evidence,
 cross-platform wearable import, data repair, compact-device layouts, and
-localization. Its implementation and canonical repository cleanup are committed
-on `main`.
+localization. Its final continuation records the NOOP owner declaration,
+removes obsolete prior-repository blocker wording, preserves the PolyForm
+project license and exact dependency notices, and verifies the regular-glass
+bottom navigation treatment. The implementation is complete on `main`.
 
 The
 [NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
@@ -38,8 +40,10 @@ tests pass, and the name-only build-setting isolation gate passes. Signed
 archive, upload, physical validation, and the recorded release gates remain
 open.
 
-The remaining work is to integrate and verify the protected App Store surface,
-refresh final evidence, push `main`, and remove the merged feature branch.
+Repository-local closeout is complete: local gates are green, the merged
+feature branch is removed, and `main` is synchronized with `origin/main`.
+Remaining release work requires external accounts, infrastructure, carriers,
+physical devices, participant evidence, or store review.
 
 ## Decisions that remain binding
 

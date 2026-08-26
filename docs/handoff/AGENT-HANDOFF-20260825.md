@@ -3,11 +3,11 @@
 ## Authority
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
-- Work directly from `main`; do not create a replacement lineage.
+- Work directly from canonical `main`.
 - Preserve NOOP's PolyForm Noncommercial License 1.0.0, Required Notice, and
   exact independent dependency notices.
-- The repository owner has recorded control of the consolidated NOOP source and
-  contribution rights in
+- The repository owner has recorded control of NOOP's source and contribution
+  rights in
   [`../provenance/OWNER-RIGHTS-DECLARATION.md`](../provenance/OWNER-RIGHTS-DECLARATION.md).
 
 ## Product constraints
@@ -31,27 +31,34 @@ UI tests. Its detailed decisions and prior evidence are in
 
 This continuation also:
 
-- clears the owner-controlled source-rights state without changing NOOP's
-  public license;
-- removes obsolete repository identifiers and upstream-monitor automation;
-- retains generated third-party dependency notices;
+- records the owner's control of NOOP source without changing NOOP's PolyForm
+  license;
+- removes obsolete prior-repository blocker wording and upstream-monitor
+  automation;
+- retains exact independent dependency notices under their original licenses;
 - restores and tests the pink/white liquid pull-to-sync feedback; and
-- closes with complete verification, a direct `main` commit, push, and clean
-  local/remote equality check.
+- uses regular navigation glass with a short foreground fade instead of an
+  opaque bottom strip.
 
-## Required closeout
+## Final local evidence
 
-1. Run every relevant Swift package suite.
-2. Run the complete macOS app suite and generic iOS Simulator build.
-3. Run production-shell UI tests on compact and larger iPhone classes, including
-   pull-to-sync and navigation endpoint screenshots.
-4. Run Android Full Debug unit, APK, lint, and instrumentation compilation;
-   run managed-device migration/import tests when the emulator is available.
-5. Run server tests, strict localization, health claims, private-data, legal
-   check/distribution, ops, and whitespace gates.
-6. Update this handoff and the matching ops round with exact final evidence.
-7. Commit all intentional changes to `main`, push, and verify a clean
-   `HEAD == origin/main`.
+- macOS app suite: 1,465 executed, 1 skipped, 0 failures.
+- Focused localization and Bluetooth-launch contracts: 5 of 5 passed.
+- Generic iOS Simulator build, widgets, Watch dependencies, and the 20-scenario
+  iPhone 17e bottom-glass visual pass succeeded. The prior compact/larger
+  production-shell matrix remains 23 of 23 on both simulator classes.
+- Android Full Debug: 3,712 passed, 7 skipped; APK, lint, instrumentation
+  compilation, and 12 API 35 migration/import device tests passed.
+- Swift packages: StrandAnalytics 1,390 passed; StrandImport 232; WhoopStore
+  386; WhoopProtocol 406, with only their documented fixture skips.
+- Server: 142 passed, 11 environment-dependent skips; Ruff check and format
+  check passed.
+- Repository policy: 77 Python unit tests, strict i18n, health claims across
+  1,061 files, private-data, ops, legal inventory, distribution, and whitespace
+  gates passed.
+- GitHub reports the private canonical repository as standalone with no parent.
+  Final remote inventory is `origin/main` only, and clean local/remote equality
+  is verified after push.
 
 ## External gates
 

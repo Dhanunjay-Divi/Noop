@@ -113,7 +113,7 @@ stress and breathing haptic behavior, and make band-tap precedence clear.
 | macOS Debug build | Passed | Final shared Apple source compiles for macOS | Full app-suite behavior or notarization |
 | Focused macOS profile and brand-ratchet tests | Passed | Local profile persistence and existing brand-localization debt ratchet remain intact | Every profile workflow |
 | `python3 Tools/i18n_audit.py --ci origin/main` | Passed; no new debt | Focus locales are complete and no baseline debt was added | Native-speaker approval of translations |
-| Health-claims, legal-inventory, and private-data gates | Passed; 1,041 source files scanned by the claims gate | This diff adds no prohibited claim, missing legal inventory item, or private-data filename | Commercial distribution clearance |
+| Health-claims, legal-inventory, and private-data gates | Passed; 1,041 source files scanned by the claims gate | This diff adds no prohibited claim, missing legal inventory item, or private-data filename | Signing, store, or physical-device readiness |
 | Independent source review | All findings resolved | A separate reviewer found no remaining concrete issue in the changed source | Physical-device or medical validation |
 | `git diff --check` | Passed | The implementation diff is whitespace-clean | Behavioral correctness |
 

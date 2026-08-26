@@ -127,8 +127,8 @@ manual release is selected.
   membership, App Store Connect role, agreements, or portal capability state.
 - Only an Apple Development signing identity is locally available; no Apple
   Distribution identity or App Store provisioning profile is installed.
-- The source-rights and dependency distribution gate now passes under the
-  owner-controlled consolidation record. NOOP's PolyForm license and required
+- The source-rights and dependency distribution gate passes under the NOOP
+  owner declaration. NOOP's PolyForm license and required
   independent dependency notices remain unchanged.
 - App Store Connect name availability, app-record existence, build-number
   availability, and required listing-field configuration are not established

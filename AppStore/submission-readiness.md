@@ -8,11 +8,11 @@ Review.
 
 ## Current disposition
 
-**No-go for upload or submission.** The distribution-rights gate, reviewer
-sample path, App Store Connect answers, iPad/Watch media, distribution signing,
-and physical-device release validation are not complete. The existing iPhone
-screenshots have valid dimensions and are now opaque, but show an older UI and
-are only provisional layout references.
+**No-go for upload or submission.** The reviewer sample path, App Store Connect
+answers, iPad/Watch media, distribution signing, and physical-device release
+validation are not complete. The source-rights and dependency gate passes. The
+existing iPhone screenshots have valid dimensions and are now opaque, but show
+an older UI and are only provisional layout references.
 
 ## Submission matrix
 
@@ -27,7 +27,7 @@ are only provisional layout references.
 | Encryption / export compliance | Complete Apple's questionnaire for the exact archive. The app contains CryptoKit/CommonCrypto uses for encrypted backups, credential protection, and optional integrations in addition to ordinary TLS. Do not add `ITSAppUsesNonExemptEncryption = NO` without a documented exemption determination. | Release owner with legal/export review. | Decision required |
 | Age rating | Start from the binary-grounded answers in `privacy-and-compliance-draft.md`: not Kids, health/wellness present, infrequent medical/treatment information, no broad UGC/social/chat/ads/unrestricted browser. Re-answer if public community or treatment guidance ships. | Product and safety owners enter the current questionnaire. | Draft complete; portal entry pending |
 | Medical / regulated-device declaration | Select “not a regulated medical device” only if final behavior and copy remain general wellness, non-diagnostic, and non-emergency. Do not claim ECG/AFib/BP diagnosis, clinical fall detection, treatment, or guaranteed alerts. | Medical/safety and legal owners review binary and metadata. | Confirmation required |
-| Content rights | Answer only after every bundled asset, protocol implementation, brand reference, screenshot, font, and dependency has documented redistribution rights. | `python3 Tools/release-legal-gate.py distribution` and legal evidence. | **Blocked** |
+| Content rights | Keep the owner declaration, NOOP license, dependency inventory, and final asset/media review aligned with the submitted archive. | `python3 Tools/release-legal-gate.py distribution`, owner declaration, and final media review. | Source gate passed; final media review pending |
 | Third-party marks and hardware imagery | Avoid WHOOP/Apple/vendor logos and product renders in storefront media unless use is authorized. Plain compatibility text must be accurate and non-affiliating. | Rights review of every final image and metadata field. | Pending final media |
 | Availability | Start with a deliberate territory list and manual release. A US-only first review is the lowest-complexity proposal, not an automatic choice. Complete trader/DSA and local regulatory requirements for every selected territory. | Account holder in App Store Connect. | Decision required |
 | Pricing | Product-owner decision. Password protection is not a substitute for a private distribution method after public release. | Account holder. | Decision required |

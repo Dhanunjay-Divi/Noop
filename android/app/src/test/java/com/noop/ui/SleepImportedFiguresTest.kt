@@ -21,7 +21,7 @@ class SleepImportedFiguresTest {
 
     private fun day(d: String, asleep: Double?) = DailyMetric(
         deviceId = "my-whoop", day = d, totalSleepMin = asleep,
-        deepMin = 80.0, remMin = 90.0, lightMin = 200.0, efficiency = 90.0,
+        deepMin = 80.0, remMin = 90.0, lightMin = 200.0, efficiency = 0.90,
     )
 
     @Test
@@ -154,7 +154,7 @@ class SleepImportedFiguresTest {
         val days = listOf(day("2026-06-01", 420.0), day("2026-06-02", 410.0))
         // endTs = 2026-06-02 08:00 UTC; onset 600 min earlier → 600 min IN BED, but asleep = 410.
         val session = SleepSession(
-            deviceId = "my-whoop", startTs = 1780351200L, endTs = 1780387200L, efficiency = 90.0,
+            deviceId = "my-whoop", startTs = 1780351200L, endTs = 1780387200L, efficiency = 0.90,
         )
         val m = buildSleepModel(days, session = session)!!
         // need = max(450, mean asleep[420,410]=415) = 450. hours-vs-needed reads ASLEEP 410, not 600.
@@ -171,7 +171,7 @@ class SleepImportedFiguresTest {
     fun passingASessionDoesNotChangeTheTiles() {
         val days = listOf(day("2026-06-01", 420.0), day("2026-06-02", 410.0))
         val session = SleepSession(
-            deviceId = "my-whoop", startTs = 1780351200L, endTs = 1780387200L, efficiency = 90.0,
+            deviceId = "my-whoop", startTs = 1780351200L, endTs = 1780387200L, efficiency = 0.90,
         )
         val withSession = buildSleepModel(days, session = session)!!
         val noSession = buildSleepModel(days, session = null)!!

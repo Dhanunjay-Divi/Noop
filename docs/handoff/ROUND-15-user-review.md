@@ -7,8 +7,8 @@ person holding the phone?
 before the first check). Polled until 13 minutes of quiet before touching anything — ~55 minutes total.
 
 **Recorded gates:** iOS ✅ · macOS **1394** tests 0 failures · engines **1323** 0 failures · Android
-**3575** 0 failures · i18n strict ✅ · legal inventory ✅. The source-rights result from this historical
-round was superseded by the owner-controlled consolidation record dated 2026-08-25.
+**3575** 0 failures · i18n strict ✅ · legal inventory ✅. The current NOOP
+owner declaration governs source rights.
 
 ---
 

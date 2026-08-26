@@ -8,10 +8,10 @@ The canonical repository is
 configured Git remote is that repository. Authenticated GitHub inspection on
 2026-08-24 reported `isFork=false`, no parent, and `main` as the default branch.
 
-On 2026-08-25 the repository owner represented that they own or control the
-source and contribution rights required for the code consolidated into NOOP and
-authorized its distribution under NOOP's PolyForm Noncommercial License 1.0.0.
-The signed-in-session engineering record is
+On 2026-08-25 the repository owner represented that they own or control all
+NOOP-controlled source and contribution rights in the repository and authorized
+its distribution under NOOP's PolyForm Noncommercial License 1.0.0. The
+signed-in-session engineering record is
 [`provenance/OWNER-RIGHTS-DECLARATION.md`](provenance/OWNER-RIGHTS-DECLARATION.md);
 the machine-readable state is
 [`provenance/rights-status.json`](provenance/rights-status.json).

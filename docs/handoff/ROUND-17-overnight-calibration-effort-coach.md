@@ -97,8 +97,7 @@ change.
 - i18n regression gate: **passed** with no new baseline debt.
 - Health-claims gate: **clear across 1,049 files**.
 - Runtime legal inventory: **152 components and 3 container inputs verified**.
-- The source-rights review recorded during this round was superseded by the
-  2026-08-25 owner-controlled consolidation declaration.
+- The current NOOP owner declaration governs source rights.
 - Hosted GitHub Actions did not execute. Push run `32784344944` and manual
   health-claims run `32784502269` both ended in `startup_failure` with no jobs;
   GitHub's existing job annotation identifies the account Actions budget as
@@ -128,5 +127,4 @@ clinically accurate.
 - Daily Effort and Coach output are wellness planning support, not diagnosis,
   prescription, treatment, safety clearance, or emergency monitoring.
 - Machine-translated copy still requires native-speaker review.
-- NOOP's project license and independent dependency notices remain mandatory
-  after the source-rights review was cleared.
+- NOOP's project license and independent dependency notices remain mandatory.

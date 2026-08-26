@@ -96,6 +96,12 @@ build/test/policy gate is recorded.
   foreground mask below its measured bar, retained visible labels at
   Accessibility Dynamic Type, and verified compact and larger simulator
   classes.
+- Replaced stale prior-repository blocker wording with the current NOOP owner
+  declaration while preserving NOOP's PolyForm license and exact independent
+  dependency notices.
+- Finished the bottom shell with regular navigation glass and a 24-point
+  foreground fade into reserved scroll clearance, then verified every final
+  tab-shell scenario on a compact simulator.
 
 ## Data, privacy, and medical truth
 
@@ -127,13 +133,15 @@ build/test/policy gate is recorded.
 | WhoopProtocol | 406 passed; 1 explicit corpus-dependent skip | Changed diagnostic presentation preserves protocol tests | Live BLE or new firmware behavior |
 | Study harness | 12 passed | Walk-forward causality and validation split controls pass | A completed prospective study |
 | Corrected external-data harnesses | PSG V2 and all three private cohorts passed; aggregate verdicts recorded | The fixed harnesses reproduce the reported associations and limits | Ground truth, population validity, or first-party band accuracy |
-| macOS app suite | 1,463 passed; 1 explicit fixture-dependent skip | Complete Apple app graph and source contracts pass | iPhone, BLE, or background behavior |
+| macOS app suite | 1,465 executed; 1 explicit fixture-dependent skip; 0 failures | Complete Apple app graph and source contracts pass | iPhone, BLE, or background behavior |
 | iPhone production-shell suite | 23 of 23 passed on both compact and larger simulator classes | Navigation, large text, key flows, and endpoint clearance work in both simulated layouts | Physical-device rendering or every accessibility combination |
+| Final bottom-glass visual QA | 20 of 20 iPhone 17e tab-shell scenarios passed | Regular glass, endpoint fade, labels, and compact navigation render coherently | Physical-device rendering or every possible page state |
 | Generic iOS Simulator build | Passed unsigned | App, widgets, Watch dependencies, resources, and current source compile | Signing, installation, or App Review |
 | Android Full Debug | 3,712 passed; 7 explicit skips; APK, lint, and instrumentation compilation passed | Android logic, resources, migration source, localization, and artifact construction are coherent | OEM, signed Play, battery, or background behavior |
 | Android managed device | 12 of 12 API 35 migration/import tests passed | Room `33 -> 34` and atomic replacement execute on a managed emulator | Upgrade behavior on every OEM/device |
-| Localization | 285 generated app-wide keys have exact parity across nine locales | Generated resources are structurally complete | Native-speaker quality |
-| Repository policy | Final strict i18n, claims, private-data, legal inventory, distribution, ops, tool, and whitespace gates run after this record | Tracked-source policy contracts are coherent | Signing, store, carrier, or physical-device readiness |
+| Localization | 290 generated app-wide keys have exact parity across nine locales; strict i18n passed | Generated resources are structurally complete | Native-speaker quality |
+| Server | 142 passed; 11 environment-dependent skips; Ruff check and format check passed | Local API, paging, tenancy, retention, and deployment contracts are coherent | Managed production infrastructure or real carrier delivery |
+| Repository policy | 77 Python unit tests, claims across 1,061 files, private-data, legal inventory, distribution, ops, and whitespace gates passed | Tracked-source policy contracts are coherent | Signing, store, carrier, or physical-device readiness |
 
 ## Physical device and deployment
 
@@ -154,12 +162,15 @@ build/test/policy gate is recorded.
   localization, tests, and validation/operations documentation.
 - Commits: the direct-to-`main` commit containing this record.
 - Branch and remote state: local `main` is pushed and checked against
-  `origin/main` after all gates pass.
-- Repository visibility verified: not rechecked in this round.
+  `origin/main` after all gates pass; the merged App Store feature branch is
+  removed so `origin/main` is the only remote branch.
+- Repository visibility verified: authenticated GitHub inspection reports
+  private, `isFork=false`, and no parent.
 - Version/build impact: Android database schema 34 and wearable CSV importer
   revision 5; no marketing version or build-number change.
-- Release or distribution impact: no artifact publication. The owner-controlled
-  source-rights record now passes the distribution gate.
+- Release or distribution impact: no artifact publication. The NOOP owner
+  declaration, project license, and dependency notices pass the distribution
+  gate.
 
 ## Decisions
 

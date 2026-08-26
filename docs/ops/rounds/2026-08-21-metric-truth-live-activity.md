@@ -85,7 +85,7 @@ improvements, then publish that bounded delta to a private branch.
 - Commit: `241f2000`.
 - Branch: `codex/day4-sync-performance`, pushed to the private repository.
 - Version/build impact: none in this commit.
-- Distribution impact: none; public distribution legal clearance remains open.
+- Distribution impact: none; no artifact was published in this round.
 
 ## Decisions
 

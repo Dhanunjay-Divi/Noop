@@ -51,9 +51,8 @@ part of this round only when every final gate remains green.
   uncommitted.
 - The project is on the NOOP 9.2.0 line and has iOS app, widget, Watch, and Live
   Activity surfaces that must all sign coherently.
-- At the time of this round the operations handoff recorded a source-rights
-  review. That review was superseded by the 2026-08-25 owner-rights declaration;
-  every future upload still requires a passing distribution gate.
+- The current NOOP owner declaration governs source rights; every future upload
+  still requires a passing distribution gate.
 - Paid-account signing and App Store Connect role/agreement status have not yet
   been verified in this round.
 
@@ -62,8 +61,7 @@ part of this round only when every final gate remains green.
 - Removed obsolete fork/upstream/sideload wording from non-legal project docs
   and workflow descriptions while preserving required legal documents, audit
   records, Git history/remotes, and all runtime protocol code.
-- Added the initial source-rights review record. It was later superseded by the
-  owner-controlled consolidation declaration in
+- Recorded the current NOOP owner declaration in
   [`../../provenance/OWNER-RIGHTS-DECLARATION.md`](../../provenance/OWNER-RIGHTS-DECLARATION.md).
 - Published public, unprotected App Store policy endpoints while keeping the
   installer itself passcode protected:

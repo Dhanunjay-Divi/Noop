@@ -8,13 +8,20 @@ import XCTest
 final class BluetoothConsentContractTests: XCTestCase {
     func testWhoopCentralIsLazyForFreshInstalls() throws {
         let source = try text("Strand/BLE/BLEManager.swift")
-        let initializer = try slice(source, from: "public init(state: LiveState", to: "/// Build the WhoopStore")
+        let initializer = try slice(
+            source,
+            from: "public init(\n        state: LiveState,",
+            to: "/// Build the WhoopStore"
+        )
         let iosInitializer = try slice(initializer, from: "#if os(iOS)", to: "#else")
 
         XCTAssertTrue(initializer.contains("Self.shouldResumeBluetoothRuntime"))
+        XCTAssertTrue(initializer.contains("if resumeRememberedRuntimeAtLaunch, Self.shouldResumeBluetoothRuntime {"))
         XCTAssertTrue(initializer.contains("activateCentralIfNeeded(recordUserIntent: false)"))
         XCTAssertFalse(iosInitializer.contains("central = CBCentralManager"),
                        "A fresh AppModel must not directly construct CoreBluetooth before rationale.")
+        XCTAssertTrue(source.contains("func resumeRememberedRuntimeAfterLaunchAccess() {\n        guard Self.shouldResumeBluetoothRuntime else { return }"),
+                      "A locked launch must be able to resume a remembered runtime after data access unlocks.")
         XCTAssertTrue(source.contains("activateCentralIfNeeded(recordUserIntent: true)"),
                       "Explicit Connect/Scan entry points must prime the lazy runtime.")
         XCTAssertTrue(source.contains("noop.bluetooth.explicitlyReleased"),
@@ -23,12 +30,18 @@ final class BluetoothConsentContractTests: XCTestCase {
 
     func testWeightScaleCentralRequiresPairingOrExplicitAction() throws {
         let source = try text("Strand/BLE/WeightScaleSource.swift")
-        let initializer = try slice(source, from: "init(defaults: UserDefaults", to: "var isScanning")
+        let initializer = try slice(
+            source,
+            from: "init(\n        defaults: UserDefaults",
+            to: "var isScanning"
+        )
         let iosInitializer = try slice(initializer, from: "#if os(iOS)", to: "#else")
 
-        XCTAssertTrue(initializer.contains("if restoredPeripheralID != nil { activateCentralIfNeeded() }"))
+        XCTAssertTrue(initializer.contains("if resumeRememberedRuntimeAtLaunch, restoredPeripheralID != nil {"))
         XCTAssertFalse(iosInitializer.contains("central = CBCentralManager"),
                        "An unpaired scale source must not directly construct CoreBluetooth at launch.")
+        XCTAssertTrue(source.contains("func resumePairedScale() {\n        guard pairedPeripheralID != nil else { return }\n        activateCentralIfNeeded()"),
+                      "A locked launch must be able to resume a previously paired scale after unlock.")
         XCTAssertTrue(source.contains("func scan() {\n        activateCentralIfNeeded()"))
         XCTAssertTrue(source.contains("func connect(_ id: UUID) {\n        activateCentralIfNeeded()"))
     }

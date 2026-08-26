@@ -35,7 +35,8 @@ Apple/Android work before consolidating it on canonical `main`.
   monitoring, or training clearance.
 - Physical-device BLE, overnight, background, haptic, battery, or accuracy
   validation.
-- Store signing, public distribution, or weakening source-rights gates.
+- Store signing, public release, or changing NOOP's license and dependency
+  inventory.
 
 ## Starting evidence
 
@@ -114,8 +115,8 @@ Apple/Android work before consolidating it on canonical `main`.
 | Localization generators | 278 app-wide and 59 Daily Plan keys, nine locales, stable rerun | Generated parity and reproducibility | Translation quality |
 | i18n gate | Passed; no new debt | No baseline regression | Baseline debt is resolved |
 | Health-claims gate | Clear across 1,049 files | Prohibited release claims were not introduced | Regulatory approval |
-| Legal inventory | 152 runtime components and 3 container inputs verified | Runtime dependency inventory remains exact | Commercial source rights |
-| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, or physical-device readiness |
+| Legal inventory | 152 runtime components and 3 container inputs verified | Runtime dependency inventory remains exact | Signing, store, or physical-device readiness |
+| Distribution gate | Current gate passes under the 2026-08-25 NOOP owner declaration | The NOOP license, owner record, and dependency notices are coherent | Current signing, store, or physical-device readiness |
 | Hosted GitHub Actions | No job scheduled; push run `32784344944` and manual run `32784502269` ended in `startup_failure` because the account Actions budget prevents further use | The hosted failure is external to test execution | Hosted CI passes |
 | Private-data and ops gates | Passed | No tracked private filename and valid round structure | Full privacy audit |
 | `git diff --check` | Passed | Whitespace-clean final diff | Runtime behavior |
@@ -136,8 +137,8 @@ Apple/Android work before consolidating it on canonical `main`.
 - Commits: one reviewed direct-to-`main` consolidation commit.
 - Version/build impact: no marketing version or build-number change.
 - Artifact publication: none.
-- Distribution: no artifact was published; the historical source-rights review
-  was cleared on 2026-08-25.
+- Distribution: no artifact was published; the current NOOP owner declaration
+  governs source rights.
 
 ## Decisions
 

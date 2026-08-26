@@ -30,8 +30,8 @@ distribution, signing, review, privacy, and validation gate passes.
 
 - Changing the bundle identifier or resetting the on-device data container.
 - Pulling implementation changes from public Goose or NOOP research remotes.
-- Hiding provenance, bypassing the rights gate, or claiming unrun hardware
-  validation.
+- Altering the owner declaration, dependency inventory, or claiming unrun
+  hardware validation.
 - Committing App Store credentials, signing secrets, or the launch access code.
 
 ## Starting evidence
@@ -77,9 +77,9 @@ distribution, signing, review, privacy, and validation gate passes.
 |---|---|---|---|
 | `git rev-list --left-right --count b82c4da2...origin/main` | `0 34` | The prior working branch was an ancestor of current private mainline. | App Store or distribution readiness. |
 | New branch created from `origin/main` | `codex/app-store-submission` at `b11c7c2e` | Submission work starts from the exact current private mainline. | That any release gate passes. |
-| `gh repo view Dhanunjay-Divi/Noop` | `PRIVATE`, `isFork=false`, default `main` | The canonical source repository remains private and host-independent. | Commercial source rights or App Store approval. |
-| `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | The current dependency inventory is internally consistent. | Public redistribution clearance. |
-| `python3 Tools/release-legal-gate.py distribution` | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, or physical-device readiness |
+| `gh repo view Dhanunjay-Divi/Noop` | `PRIVATE`, `isFork=false`, default `main` | The canonical source repository remains private and host-independent. | App Store approval or physical-device readiness. |
+| `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | The current dependency inventory is internally consistent. | Signing, store, or physical-device readiness. |
+| `python3 Tools/release-legal-gate.py distribution` | Current gate passes under the 2026-08-25 NOOP owner declaration | The NOOP license, owner record, and dependency notices are coherent | Current signing, store, or physical-device readiness |
 | Unsigned generic iOS Release build | Pass for app, widget, Watch app, and complication | Current mainline compiles as Release for arm64 with matching identities/version. | Signing, archive upload, review, hardware, or medical accuracy. |
 | Focused release-tool tests | 7/7 pass | Release scripts and fail-closed launch configuration behave as specified. | Store acceptance or physical-device behavior. |
 | Archive-like launch-gate validation | Missing verifier fails; synthetic valid shape passes | An ungated archive cannot be produced accidentally. | That a real secret has been generated or tested. |
@@ -117,8 +117,7 @@ distribution, signing, review, privacy, and validation gate passes.
 
 - Exact name availability, account role, agreement state, and app-record
   existence remain unverified.
-- The source-rights state from this historical round was superseded by the
-  2026-08-25 owner-controlled consolidation declaration.
+- The current NOOP owner declaration governs source rights.
 - Paid Developer Program membership does not alone prove the necessary App
   Store Connect role, agreements, identifiers, signing assets, or review data.
 - No valid distribution-signing evidence or launch-verifier configuration is

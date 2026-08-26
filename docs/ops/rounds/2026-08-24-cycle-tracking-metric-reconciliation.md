@@ -111,7 +111,7 @@ while Noop Band history is syncing.
 | Shared localization generator | 183 keys across nine locales; idempotent | Apple/Android resource parity | Native-speaker approval |
 | i18n gate | Passed; no new debt | Focus locales are complete and baseline debt did not increase | Translation quality |
 | Health-claims gate | Clear across 1,042 files | No prohibited wording was introduced | Regulatory clearance |
-| Legal inventory | 152 runtime components and 3 container inputs verified | Runtime inventory remains exact | Commercial source rights |
+| Legal inventory | 152 runtime components and 3 container inputs verified | Runtime inventory remains exact | Signing, store, or physical-device readiness |
 | Independent source review | Persistence finding fixed; follow-up review clear | Cancellation, captured source, stale-target, partial publication, and retry paths received separate review | Hardware or medical validation |
 | `git diff --check` | Passed | Final diff is whitespace-clean | Behavioral correctness |
 

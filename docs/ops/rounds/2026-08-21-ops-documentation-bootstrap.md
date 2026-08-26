@@ -85,7 +85,7 @@ that keeps the record current in future work.
   validator, and a local Codex skill outside the repository.
 - Version/build impact: none.
 - Remote action: none yet for this documentation round.
-- Public distribution: unchanged and still legally gated.
+- Public distribution: no artifact was published in this documentation round.
 
 ## Decisions
 

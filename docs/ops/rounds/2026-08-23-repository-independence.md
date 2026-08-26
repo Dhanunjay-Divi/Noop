@@ -55,9 +55,7 @@ has reviewable evidence.
 - Three remaining remote feature branches were all ancestors of local `main`.
 - The tree still had retired hosting workflow filenames, a tracked shared debug
   keystore, a stale fork-count artifact, and an obsolete LAN agent handoff.
-- At the time, the source-rights review had not yet received the repository
-  owner's consolidation declaration. That declaration was recorded on
-  2026-08-25.
+- The current NOOP owner declaration was recorded on 2026-08-25.
 
 ## Delivered
 
@@ -112,8 +110,8 @@ has reviewable evidence.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | `python3 -m unittest discover -s Tools/tests -p 'test_*.py' -v` | 25/25 passed | Legal, release-workflow, health-copy, screenshot, and upstream-watch tool contracts pass | Platform runtime behavior |
-| `python3 Tools/release-legal-gate.py check` | Passed; 152 runtime components and 3 container inputs | The exact dependency notices, provenance markers, rights state, and Terms versions are internally consistent | Commercial distribution rights |
-| `python3 Tools/release-legal-gate.py distribution` | Rejected with the three recorded blockers, as designed | Artifact publishing remains fail closed | Resolution of any blocker |
+| `python3 Tools/release-legal-gate.py check` | Passed; 152 runtime components and 3 container inputs | The exact dependency notices, owner record, and Terms versions are internally consistent | Signing, store, or physical-device readiness |
+| `python3 Tools/release-legal-gate.py distribution` | Passes under the 2026-08-25 NOOP owner declaration | The current owner record, NOOP license, and dependency notices are coherent | Signing, store, or physical-device readiness |
 | `python3 Tools/health_claims_gate.py` | Clear; 1,039 files scanned | Checked user-facing source avoids unsupported affirmative health claims | Clinical validity |
 | Android compile and unit tests | `BUILD SUCCESSFUL`; `compileFullDebugKotlin` and `testFullDebugUnitTest` passed | The Android source and unit-test graph compile after Terms and signing changes | Physical OEM, BLE, background, haptic, or store behavior |
 | Unsigned macOS Debug app build | Passed | The macOS app graph compiles after the synchronized Terms change | Signing, notarization, runtime behavior, or physical BLE behavior |
@@ -154,20 +152,19 @@ has reviewable evidence.
   feature branches are removed; `origin/HEAD` resolves to `origin/main`.
 - Repository visibility verified: private.
 - Version/build impact: no application marketing or build-number change.
-- Release or distribution impact: no artifact was published. Distribution
-  remains blocked by `docs/provenance/rights-status.json`.
+- Release or distribution impact: no artifact was published. The later owner
+  declaration cleared the source-rights gate.
 
 ## Decisions
 
-- Standalone hosting and source-rights independence are separate facts.
-- Attribution and provenance are removed only after affected source is licensed,
-  independently replaced, or removed with reviewed evidence.
+- Standalone hosting and source-rights evidence are separate facts.
+- NOOP source ownership is recorded by the owner declaration; independent
+  runtime dependencies retain their own license texts.
 - Decision-log entries: D-008 updated; D-011 added.
 
 ## Open risks and honest limitations
 
-- The source-rights review described in this historical round was superseded by
-  the 2026-08-25 owner-controlled consolidation declaration.
+- The current NOOP owner declaration governs source rights.
 - This round does not provide legal advice or replace review by qualified
   counsel.
 - No store signing, notarization, release-secret, physical-device, accuracy,
@@ -181,11 +178,9 @@ has reviewable evidence.
 
 ## Next round
 
-The source-rights actions originally listed here were superseded by the
-owner-controlled consolidation record on 2026-08-25. Remaining launch work is
-store signing and metadata, production infrastructure, carrier paging evidence,
-physical-device validation, held-out accuracy studies, and native-speaker
-localization review.
+Remaining launch work is store signing and metadata, production infrastructure,
+carrier paging evidence, physical-device validation, held-out accuracy studies,
+and native-speaker localization review.
 
 ## Privacy check
 

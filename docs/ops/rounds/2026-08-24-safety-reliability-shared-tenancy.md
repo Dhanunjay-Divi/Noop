@@ -38,7 +38,7 @@ and data lifecycle controls, and state exactly what remains before a
 - Selecting or provisioning cloud, identity, recovery, carrier, monitoring,
   signing, or store accounts.
 - Physical-device, real-carrier, participant-accuracy, or clinical evidence.
-- Weakening the fail-closed source-rights distribution gate.
+- Changing NOOP's license, owner declaration, or exact dependency inventory.
 
 ## Starting evidence
 
@@ -51,8 +51,7 @@ and data lifecycle controls, and state exactly what remains before a
 - The repository already contained local Apple, Android, and server test
   coverage plus a fail-closed distribution gate.
 - Carrier delivery, managed-cloud failover, 10,000-user capacity, physical
-  device behavior, signing, and commercial source rights remain unknown until
-  measured or resolved through external evidence.
+  device behavior, signing, and store behavior remain unknown until measured.
 
 ## Delivered
 
@@ -119,8 +118,8 @@ and data lifecycle controls, and state exactly what remains before a
 | iOS simulator build | Passed unsigned; current UI action host-blocked before test launch by Xcode debugger-store failure | Current iOS source/resources compile | A fresh UI result, signing, archive, or physical phone behavior |
 | Android Full Debug | 3,646 tests, 0 failures, 6 skips; APK, androidTest sources, and lint pass | Full Android logic/resources compile and unit contracts pass | Physical OEM behavior or Play release |
 | Localization | Strict gate passed; Safety source has 211 keys with nine-locale parity | No new baseline debt and generated Apple/Android Safety parity | Native-speaker approval |
-| Tool/policy suite | 62/62 passed; private-data, ops, legal inventory, and claims gates pass | Repository policy contracts remain intact | Commercial rights |
-| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, store, carrier, or physical-device readiness |
+| Tool/policy suite | 62/62 passed; private-data, ops, legal inventory, and claims gates pass | Repository policy contracts remain intact | Signing, store, carrier, or physical-device readiness |
+| Distribution gate | Current gate passes under the 2026-08-25 NOOP owner declaration | The NOOP license, owner record, and dependency notices are coherent | Current signing, store, carrier, or physical-device readiness |
 
 The host had no Docker daemon, TimescaleDB extension, `k6`, Twilio staging
 credentials, usable cloud session, signing identity, or Android release
@@ -165,8 +164,8 @@ managed staging topology.
 
 ## Open risks and honest limitations
 
-- Commercial source rights remain blocked on the three machine-recorded
-  provenance entries.
+- The current NOOP owner declaration governs source rights without changing
+  this round's carrier or infrastructure limitations.
 - No real Twilio page, carrier receipt, provider outage, or human response has
   been observed.
 - A shared authorization boundary is not consumer signup, identity proof,
@@ -184,7 +183,8 @@ managed staging topology.
 
 ## Next round
 
-1. Resolve source rights; restore hosted CI and protected-main controls.
+1. Preserve the cleared owner-rights record; restore hosted CI and
+   protected-main controls.
 2. Procure Twilio senders, complete A2P/country registration, and run the
    controlled carrier matrix with median/p95 delivery evidence.
 3. Select identity/recovery, cloud/regions, RPO/RTO, monitoring/on-call, push

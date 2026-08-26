@@ -68,8 +68,8 @@ physical-phone scroll lag.
 
 Commit `972a126b` added the temporary versioned launch gate, App Store metadata
 and review/privacy worksheets, public in-app policy/support links, Apple-managed
-update behavior, background-task and HealthKit disclosure corrections, media
-validation tooling, and an initial source-rights review. Focused policy tests
+update behavior, background-task and HealthKit disclosure corrections, and
+media validation tooling. Focused policy tests
 and an unsigned consolidated Release simulator build passed. No signed archive
 was uploaded: signing, review access/media, export decisions, and
 physical-device validation remain

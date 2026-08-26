@@ -6,9 +6,9 @@ manufacturer. Third-party marks identify compatible hardware only.
 
 ## NOOP source
 
-The source and contributions consolidated in this repository are controlled by
-the NOOP repository owner and distributed under the repository's PolyForm
-Noncommercial License 1.0.0. The dated owner authorization is recorded in
+The NOOP-controlled source and contributions in this repository are owned or
+controlled by the NOOP repository owner and distributed under the repository's
+PolyForm Noncommercial License 1.0.0. The dated owner authorization is recorded in
 [`docs/provenance/OWNER-RIGHTS-DECLARATION.md`](docs/provenance/OWNER-RIGHTS-DECLARATION.md).
 
 NOOP's device protocol, storage, analytics, Apple, Android, and self-hosted

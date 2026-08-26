@@ -107,8 +107,8 @@ paging until acknowledgement, and share latest-only location for a user-selected
 | iOS simulator build | Passed unsigned from regenerated `project.yml` | Current iOS sources, resources, permission copy, widgets, and Watch dependencies compile | Signing, archive, App Review, or physical-device behavior |
 | Android Full Debug | 3,649 tests, 0 failures, 6 skips; APK, lint, and instrumentation-source compilation passed; final 221-key Safety localization contract rerun passed | Android logic, resources, and build graph remain coherent | OEM background behavior, band haptics, Play signing, or carrier delivery |
 | Localization and claims | Strict i18n gate passed; Safety source has 221 keys with nine-locale parity; health-claims gate clear across 1,052 files | No new baseline debt, generated parity, and no prohibited affirmative health claim | Native-speaker approval or clinical validity |
-| Repository policy | 62/62 tool tests, ops validator, private-data guard, legal inventory, Ruff check/format, and `git diff --check` passed | Repository policy, documentation, inventory, Python formatting, and whitespace contracts pass | Commercial rights or distribution approval |
-| Distribution gate | Failed under the source-rights state recorded at that time; superseded 2026-08-25 | The historical gate failed closed | Current signing, carrier, store, or physical-device readiness |
+| Repository policy | 62/62 tool tests, ops validator, private-data guard, legal inventory, Ruff check/format, and `git diff --check` passed | Repository policy, documentation, inventory, Python formatting, and whitespace contracts pass | Signing, carrier, store, or physical-device readiness |
+| Distribution gate | Current gate passes under the 2026-08-25 NOOP owner declaration | The NOOP license, owner record, and dependency notices are coherent | Current signing, carrier, store, or physical-device readiness |
 
 ## Physical device and deployment
 

@@ -39,7 +39,7 @@ class ReleaseLegalGateTests(unittest.TestCase):
         self.assertEqual(status["distributionStatus"], "cleared")
         self.assertEqual(
             status["ownerRightsBasis"]["representation"],
-            "owner-controlled-consolidation",
+            "noop-owner-controlled-source",
         )
         self.assertTrue(
             status["ownerRightsBasis"]["sourceAndContributionRightsControlled"]

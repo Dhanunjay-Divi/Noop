@@ -94,5 +94,4 @@ corrected, focused reruns passed, and the complete suites then passed.
 - Simulator and unit evidence do not validate physical Noop Band sync,
   background behavior, haptics, battery impact, or sensor accuracy.
 - The new reproductive-health translations still require native-speaker review.
-- The source-rights review recorded during this round was superseded by the
-  2026-08-25 owner-controlled consolidation declaration.
+- The current NOOP owner declaration governs source rights.

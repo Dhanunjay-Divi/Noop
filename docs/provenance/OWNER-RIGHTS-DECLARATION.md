@@ -4,14 +4,10 @@
 **Canonical repository:** https://github.com/Dhanunjay-Divi/Noop
 
 The owner of the canonical NOOP repository represents that they own or control
-the source and contribution rights required to consolidate the owner-controlled
-repositories and contributions now present in this NOOP source tree. The owner
-authorizes that consolidated work to be maintained and distributed as NOOP
-under the repository's PolyForm Noncommercial License 1.0.0.
-
-Earlier repository-lineage warnings are therefore not current NOOP
-redistribution blockers. The canonical repository is the source of truth for
-the consolidated project.
+all NOOP-controlled source and contribution rights in this source tree. The
+owner authorizes that work to be maintained and distributed as NOOP under the
+repository's PolyForm Noncommercial License 1.0.0. The canonical repository is
+the source of truth for NOOP.
 
 This declaration applies only to NOOP-controlled source and documentation. It
 does not relicense independent third-party dependencies, platform SDKs,

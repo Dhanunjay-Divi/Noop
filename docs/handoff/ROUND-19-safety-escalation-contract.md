@@ -62,9 +62,9 @@ results are:
   instrumentation-source compilation passed; the final 221-key Safety
   localization contract passed.
 - Policy: strict i18n, health claims, legal inventory, private-data, ops, Ruff,
-  tool tests, and diff-whitespace checks passed. The source-rights review was
-  later cleared by the 2026-08-25 owner-controlled consolidation declaration.
+  tool tests, and diff-whitespace checks passed. The current NOOP owner
+  declaration governs source rights.
 
 Carrier delivery, physical-device behavior, detector performance, production
-infrastructure, signing, stores, source-rights clearance, and regulatory review
-remain external work. Do not infer any of them from local test results.
+infrastructure, signing, stores, and regulatory review remain external work. Do
+not infer any of them from local test results.

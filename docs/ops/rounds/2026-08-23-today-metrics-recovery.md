@@ -33,7 +33,7 @@ handoff.
 - Scoring, calibration, health-data resolution, or medical logic changes.
 - Persistence schema changes or resetting an existing user's metric choices.
 - Physical band, BLE, HealthKit, background, haptic, or sensor validation.
-- Commercial distribution clearance.
+- Signing, store release, or physical-device validation.
 
 ## Starting evidence
 

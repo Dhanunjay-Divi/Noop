@@ -134,7 +134,7 @@ compatible-wearable wording. A standing audit must reject regressions.
 
 ## Open risks and honest limitations
 
-- The owner-controlled consolidation record now governs NOOP source rights.
+- The NOOP owner declaration governs source rights.
   Independent runtime dependencies retain only their own license notices.
 - Legacy localization source keys and Android resource names can retain the old
   token as implementation identifiers. Explicit localized values prevent those
