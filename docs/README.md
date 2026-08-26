@@ -15,8 +15,7 @@ points rather than listing every file, because an exhaustive list goes stale the
 
 ## Can we ship? Read in this order
 
-1. [`handoff/RELEASE-BLOCKERS.md`](handoff/RELEASE-BLOCKERS.md) — the P0 gates. **Gate 0 is source
-   rights and it is currently unresolved**; nothing else matters until it is.
+1. [`handoff/RELEASE-BLOCKERS.md`](handoff/RELEASE-BLOCKERS.md) — the P0 launch gates.
 2. [`handoff/INDIA-FIRST-LAUNCH-PATH.md`](handoff/INDIA-FIRST-LAUNCH-PATH.md) — India-then-USA
    sequencing. DPDP, TRAI DLT for SMS, BIS and WPC/ETA for the band, and the case for a local-only v1.
 3. [`handoff/HARDWARE-AND-PREMIUM-STRATEGY.md`](handoff/HARDWARE-AND-PREMIUM-STRATEGY.md) — what paid
@@ -34,20 +33,13 @@ scripts in `Tools/validation/`.
 | [`validation/MULTI-DATASET-VERDICTS.md`](validation/MULTI-DATASET-VERDICTS.md) | Sleep staging vs PSG, sleep detection on sparse data, and why each verdict holds |
 | [`validation/THREE-WEARER-VERDICT-AND-AGENT-REVIEW.md`](validation/THREE-WEARER-VERDICT-AND-AGENT-REVIEW.md) | Recovery vs WHOOP across three real wearers, and the between-person compression finding |
 | [`validation/DEPLOYABILITY-AND-METRIC-AUDIT.md`](validation/DEPLOYABILITY-AND-METRIC-AUDIT.md) | HRV against Task Force 1996, training load against the ACWR literature, notification integrity |
-| [`validation/AGENT-REVIEW-AND-COMPETITIVE-GAPS.md`](validation/AGENT-REVIEW-AND-COMPETITIVE-GAPS.md) | Competitive metric gap analysis, and the shared-root-commit provenance finding |
+| [`validation/COMPETITIVE-METRIC-GAPS.md`](validation/COMPETITIVE-METRIC-GAPS.md) | Competitive metric gap analysis across the wearable field |
 | [`validation/RHYTHM-REAL-DATA-FINDINGS.md`](validation/RHYTHM-REAL-DATA-FINDINGS.md) | Rhythm screener against real MIT-BIH AF and NSR recordings |
 | [`validation/SLEEP-PSG-HARNESS.md`](validation/SLEEP-PSG-HARNESS.md) | How to reproduce the PSG comparison |
 
 Two conventions worth knowing before reading any of these: a missing input renders as an em-dash and
 **never** as zero, and the engines are kept byte-identical between Swift and Kotlin.
 
-## Provenance and rights
-
-[`provenance/`](provenance/) carries the rights record. Related tooling:
-
-- `Tools/release-legal-gate.py` — the distribution gate
-- `Tools/provenance_ratchet.py` — counts source lines still attributable to the shared root commit and
-  fails if the number rises. `--list` names every remaining file.
 
 ## Protocol and devices
 

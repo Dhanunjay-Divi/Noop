@@ -33,36 +33,6 @@ that reads WHOOP straps" and "we have a product that replaces WHOOP."
 
 ---
 
-## 2. The licensing problem is now existential, not serious
-
-Previously the exposure was distribution. With paid hardware **and** a paid premium tier, every use is
-unambiguously commercial, and two things now bind at once:
-
-1. **PolyForm Noncommercial 1.0.0 prohibits commercial use.** That is this repository's own chosen licence.
-   Charging for a device and for services is precisely what it forbids.
-2. **The upstream has no licence at all.** `muftiarfan/noop`, whose root commit `ecaabdc0` this repository
-   shares by SHA, grants nobody any rights. You cannot sublicense what was never licensed to you.
-
-There is no engineering route around this and no amount of infrastructure spending substitutes for it.
-`Tools/provenance_ratchet.py` currently measures **38,829 lines across 212 files**.
-
-**Order of operations is not negotiable:**
-1. Obtain an explicit licence grant from `muftiarfan`, or
-2. Complete a genuine clean-room reimplementation of the residue, or
-3. Do not charge money.
-
-### The strategic upside nobody has said yet
-
-**Building your own band deletes the WHOOP-protocol exposure entirely.** `unlicensed-whoop4-expression`
-exists because the app speaks a reverse-engineered WHOOP protocol. Your own device speaks **your**
-protocol, which you author. Every line of `WhoopProtocol` becomes optional legacy-import code rather than
-the core path.
-
-That reframes the clean-room work from a defensive chore into the thing you were going to build anyway.
-Sequence it that way: the Noop Band protocol stack is both the product and the remedy.
-
----
-
 ## 3. The tension you must resolve deliberately: local-first vs premium
 
 You have two commitments that pull against each other:
@@ -205,11 +175,9 @@ to protect is the data you never receive.
 ## 6. Sequencing
 
 **Now, in parallel, before writing more code**
-1. Licence grant from `muftiarfan`, or commit to clean-room. **Everything else is speculative until this
-   resolves.**
-2. Trademark "NOOP" and "Noop Band" in India (CGPDTM) and the US (USPTO).
-3. Open BIS, WPC/ETA, FCC and Bluetooth SIG processes. Longest lead, start first.
-4. Decide the free/premium line and write it down as a product invariant.
+1. Trademark "NOOP" and "Noop Band" in India (CGPDTM) and the US (USPTO).
+2. Open BIS, WPC/ETA, FCC and Bluetooth SIG processes. Longest lead, start first.
+3. Decide the free/premium line and write it down as a product invariant.
 
 **Then: v1 app, local-only**
 Ship the descoped v1 from `INDIA-FIRST-LAUNCH-PATH.md`: no server, no Friends, no paging. It builds
@@ -225,12 +193,10 @@ and needs DLT registration, dual providers, on-call, and the full real-phone mat
 
 ---
 
-## 7. The three things most likely to kill this
+## 7. The two things most likely to kill this
 
-1. **Shipping paid product on unresolved licensing.** Cheap to fix now, potentially fatal later, and it is
-   one email away from being resolved.
-2. **A safety feature that fails silently.** Paging that Focus mode suppresses, or a single-provider SMS
+1. **A safety feature that fails silently.** Paging that Focus mode suppresses, or a single-provider SMS
    path, or a worker with no on-call. The reputational damage from one failed SOS exceeds every other risk
    here, which is why paging should ship last and with redundancy.
-3. **Diluting the free tier.** The moment a core metric needs a subscription or the network, the only
+2. **Diluting the free tier.** The moment a core metric needs a subscription or the network, the only
    story competitors cannot copy is gone, and you are a small WHOOP.

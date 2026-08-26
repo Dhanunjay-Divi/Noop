@@ -218,7 +218,6 @@ Worth protecting, because these are the reasons to choose it:
 ## 5. Ordered plan
 
 **Now (unblocks everything)**
-1. Rights: clean-room the 15,980 lines, contributor consent, pick a posture.
 2. Twilio procurement + A2P/10DLC registration — long lead, start before you need it.
 3. Choose cloud/regions, identity and recovery provider, launch countries,
    RPO/RTO, on-call/monitoring vendor, and infrastructure budget.

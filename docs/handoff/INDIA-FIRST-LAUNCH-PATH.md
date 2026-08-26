@@ -27,10 +27,6 @@ is the real cost of the server path, and it is a governance cost, not a hosting 
 
 ## P0 India gates, in dependency order
 
-### 0. Source rights (unchanged, and jurisdiction-independent)
-Copyright is territorial but India is a Berne Convention signatory, so the unlicensed-upstream problem
-travels. See `RELEASE-BLOCKERS.md` gate 0. **Nothing below matters until this is resolved.**
-
 ### 1. Hindi locale (missing, and cheap)
 Shipped locales are `de, en, es, fr, it, pt-PT, ru, zh-Hans, zh-Hant`. **There is no `hi`.** The app ships
 Russian and European Portuguese but not the majority language of its first market.
