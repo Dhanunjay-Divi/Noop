@@ -261,6 +261,8 @@ data class DayResult(
     val recovery: Double?,
     /** Effort (strain) score [0,100] or null (insufficient HR samples / invalid HRR). */
     val strain: Double?,
+    /** Gap-aware moderate/vigorous activity observed in the calendar-day HR stream. */
+    val activeZoneMinutes: ActiveZoneMinutes? = null,
     /**
      * Rest (sleep_performance) composite [0,100] or null (no in-bed session). The persistence /
      * series layer stores this under the `sleep_performance` key. Replaces the bare efficiency

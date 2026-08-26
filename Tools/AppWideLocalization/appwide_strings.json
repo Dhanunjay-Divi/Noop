@@ -3167,6 +3167,105 @@
     "zh-Hans": "可重命名、重新分组或移除项目来整理列表。重命名后，原始问题仍会在内部保留，以便继续匹配导入的参考数据。自定义项目会被删除；内置项目会被隐藏，并可在下方恢复。",
     "zh-Hant": "可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。"
   },
+  "appwide.workouts.active_minutes_title": {
+    "de": "Aktive Minuten",
+    "en": "Active minutes",
+    "es": "Minutos activos",
+    "fr": "Minutes actives",
+    "it": "Minuti attivi",
+    "pt-PT": "Minutos ativos",
+    "ru": "Активные минуты",
+    "zh-Hans": "活跃分钟",
+    "zh-Hant": "活躍分鐘"
+  },
+  "appwide.workouts.active_minutes_guideline": {
+    "de": "Wöchentliches Aktivitätsziel",
+    "en": "Weekly activity guideline",
+    "es": "Objetivo semanal de actividad",
+    "fr": "Objectif d’activité hebdomadaire",
+    "it": "Obiettivo settimanale di attività",
+    "pt-PT": "Objetivo semanal de atividade",
+    "ru": "Недельная цель активности",
+    "zh-Hans": "每周活动目标",
+    "zh-Hant": "每週活動目標"
+  },
+  "appwide.workouts.active_minutes_progress_format": {
+    "de": "%1$d / %2$d Min.",
+    "en": "%1$d / %2$d min",
+    "es": "%1$d / %2$d min",
+    "fr": "%1$d / %2$d min",
+    "it": "%1$d / %2$d min",
+    "pt-PT": "%1$d / %2$d min",
+    "ru": "%1$d / %2$d мин",
+    "zh-Hans": "%1$d / %2$d 分钟",
+    "zh-Hant": "%1$d / %2$d 分鐘"
+  },
+  "appwide.workouts.active_minutes_value_format": {
+    "de": "%1$d Min.",
+    "en": "%1$d min",
+    "es": "%1$d min",
+    "fr": "%1$d min",
+    "it": "%1$d min",
+    "pt-PT": "%1$d min",
+    "ru": "%1$d мин",
+    "zh-Hans": "%1$d 分钟",
+    "zh-Hant": "%1$d 分鐘"
+  },
+  "appwide.workouts.active_minutes_moderate": {
+    "de": "Moderat",
+    "en": "Moderate",
+    "es": "Moderada",
+    "fr": "Modérée",
+    "it": "Moderata",
+    "pt-PT": "Moderada",
+    "ru": "Умеренная",
+    "zh-Hans": "中等强度",
+    "zh-Hant": "中等強度"
+  },
+  "appwide.workouts.active_minutes_vigorous": {
+    "de": "Intensiv",
+    "en": "Vigorous",
+    "es": "Intensa",
+    "fr": "Intense",
+    "it": "Intensa",
+    "pt-PT": "Intensa",
+    "ru": "Высокая",
+    "zh-Hans": "高强度",
+    "zh-Hant": "高強度"
+  },
+  "appwide.workouts.active_minutes_coverage_format": {
+    "de": "%1$s HF-Abdeckung · %2$d/7 Tage",
+    "en": "%1$s HR coverage · %2$d/7 days",
+    "es": "%1$s de cobertura de FC · %2$d/7 días",
+    "fr": "%1$s de couverture FC · %2$d/7 jours",
+    "it": "%1$s di copertura FC · %2$d/7 giorni",
+    "pt-PT": "%1$s de cobertura de FC · %2$d/7 dias",
+    "ru": "%1$s данных ЧСС · %2$d/7 дней",
+    "zh-Hans": "%1$s 心率覆盖 · %2$d/7 天",
+    "zh-Hant": "%1$s 心率涵蓋 · %2$d/7 天"
+  },
+  "appwide.workouts.active_minutes_note": {
+    "de": "Intensive Minuten zählen doppelt. Nicht getragene Zeit bleibt ungemessen.",
+    "en": "Vigorous minutes count double. Missing wear time stays unmeasured.",
+    "es": "Los minutos intensos cuentan doble. El tiempo sin uso queda sin medir.",
+    "fr": "Les minutes intenses comptent double. Le temps sans port reste non mesuré.",
+    "it": "I minuti intensi contano doppio. Il tempo senza dispositivo resta non misurato.",
+    "pt-PT": "Os minutos intensos contam a dobrar. O tempo sem uso fica por medir.",
+    "ru": "Минуты высокой интенсивности считаются вдвойне. Время без устройства не измеряется.",
+    "zh-Hans": "高强度分钟按双倍计算。未佩戴时段保持未测量状态。",
+    "zh-Hant": "高強度分鐘按雙倍計算。未佩戴時段維持未測量狀態。"
+  },
+  "appwide.workouts.active_minutes_no_data": {
+    "de": "In den letzten 7 Tagen wurde keine Herzfrequenzabdeckung aufgezeichnet.",
+    "en": "No recorded heart-rate coverage in the last 7 days.",
+    "es": "No hay cobertura de frecuencia cardiaca registrada en los últimos 7 días.",
+    "fr": "Aucune couverture de fréquence cardiaque enregistrée sur les 7 derniers jours.",
+    "it": "Nessuna copertura della frequenza cardiaca registrata negli ultimi 7 giorni.",
+    "pt-PT": "Sem cobertura de frequência cardíaca registada nos últimos 7 dias.",
+    "ru": "За последние 7 дней нет записанных данных о частоте пульса.",
+    "zh-Hans": "最近 7 天没有记录到心率覆盖数据。",
+    "zh-Hant": "最近 7 天沒有記錄到心率涵蓋資料。"
+  },
   "appwide.workouts.imported_zones": {
     "de": "Importierte Zonen",
     "en": "Imported zones",

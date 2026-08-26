@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.automirrored.filled.MergeType
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
@@ -56,6 +57,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -98,8 +100,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.noop.analytics.WorkoutSport
 import com.noop.analytics.HeartRateRecovery
+import com.noop.analytics.ActiveZoneMinutes
+import com.noop.analytics.ActiveZoneMinutesCalculator
+import com.noop.data.MetricSeriesRow
 import com.noop.data.WorkoutRow
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -171,6 +177,8 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // solid/building ActivityCost entry - "Sessions like this usually …" (#439). Auto-clears.
     var postLogNote by remember { mutableStateOf<String?>(null) }
     var recoveryTrend by remember { mutableStateOf<List<WorkoutRecoveryTrendPoint>>(emptyList()) }
+    var activeZoneWeek by remember { mutableStateOf<ActiveZoneWeekSnapshot?>(null) }
+    var activeZoneLoaded by remember { mutableStateOf(false) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
     // / relabelDetected reload `vm.workouts` asynchronously, so we wait for `allRows` to update before
     // computing the note (otherwise it would read the pre-save list). Cleared once consumed.
@@ -206,6 +214,11 @@ fun WorkoutsScreen(vm: AppViewModel) {
             built += WorkoutRecoveryTrendPoint(row.startTs, result)
         }
         recoveryTrend = built
+    }
+    LaunchedEffect(vm.activeStrapId, lastHistorySyncAt) {
+        activeZoneLoaded = false
+        activeZoneWeek = runCatching { loadActiveZoneWeek(vm) }.getOrNull()
+        activeZoneLoaded = true
     }
 
     LaunchedEffect(Unit) {
@@ -257,6 +270,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 fullWidth = true,
             ) { showStrengthTrainer = true }
         }
+        item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
 
         if (allRows.isEmpty()) {
             item {
@@ -374,6 +388,194 @@ private data class WorkoutRecoveryTrendPoint(
     val startTs: Long,
     val result: HeartRateRecovery.Result,
 )
+
+internal data class ActiveZoneWeekSnapshot(
+    val minutes: ActiveZoneMinutes,
+    val daysWithData: Int,
+)
+
+internal fun activeZoneWeekSnapshot(
+    moderate: List<MetricSeriesRow>,
+    vigorous: List<MetricSeriesRow>,
+    observed: List<MetricSeriesRow>,
+    includedDays: Set<String>,
+): ActiveZoneWeekSnapshot? {
+    fun values(rows: List<MetricSeriesRow>, allowZero: Boolean): Map<String, Double> =
+        rows.asSequence()
+            .filter {
+                it.day in includedDays && it.value.isFinite() &&
+                    if (allowZero) it.value >= 0 else it.value > 0
+            }
+            .associate { it.day to it.value }
+
+    val moderateByDay = values(moderate, allowZero = true)
+    val vigorousByDay = values(vigorous, allowZero = true)
+    val observedByDay = values(observed, allowZero = false)
+    val completeDays = moderateByDay.keys
+        .intersect(vigorousByDay.keys)
+        .intersect(observedByDay.keys)
+    if (completeDays.isEmpty()) return null
+    return ActiveZoneWeekSnapshot(
+        minutes = ActiveZoneMinutes(
+            moderateMinutes = completeDays.sumOf { moderateByDay.getValue(it) },
+            vigorousMinutes = completeDays.sumOf { vigorousByDay.getValue(it) },
+            weeklyTarget = ActiveZoneMinutesCalculator.DEFAULT_WEEKLY_TARGET,
+            observedMinutes = completeDays.sumOf { observedByDay.getValue(it) },
+        ),
+        daysWithData = completeDays.size,
+    )
+}
+
+private suspend fun loadActiveZoneWeek(vm: AppViewModel): ActiveZoneWeekSnapshot? {
+    val today = LocalDate.now()
+    val from = today.minusDays(6).toString()
+    val to = today.toString()
+    val includedDays = (0L..6L).mapTo(linkedSetOf()) { today.minusDays(it).toString() }
+    val moderate = vm.repo.metricSeriesComputedUnion(
+        vm.activeStrapId,
+        ActiveZoneMinutesCalculator.MODERATE_SERIES_KEY,
+        from,
+        to,
+    )
+    val vigorous = vm.repo.metricSeriesComputedUnion(
+        vm.activeStrapId,
+        ActiveZoneMinutesCalculator.VIGOROUS_SERIES_KEY,
+        from,
+        to,
+    )
+    val observed = vm.repo.metricSeriesComputedUnion(
+        vm.activeStrapId,
+        ActiveZoneMinutesCalculator.OBSERVED_SERIES_KEY,
+        from,
+        to,
+    )
+    return activeZoneWeekSnapshot(moderate, vigorous, observed, includedDays)
+}
+
+@Composable
+private fun ActiveZoneSection(summary: ActiveZoneWeekSnapshot?, loaded: Boolean) {
+    val coverage = summary?.let {
+        uiString(
+            R.string.appwide_workouts_active_minutes_coverage_format,
+            durationLabel(it.minutes.observedMinutes * 60.0),
+            it.daysWithData,
+        )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            title = uiString(R.string.appwide_workouts_active_minutes_title),
+            overline = uiString(R.string.appwide_trends_last_7_days),
+        )
+        NoopCard(tint = Palette.statusPositive) {
+            when {
+                summary != null -> {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.semantics(mergeDescendants = true) {},
+                    ) {
+                        Text(
+                            uiString(R.string.appwide_workouts_active_minutes_guideline),
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                        )
+                        Text(
+                            uiString(
+                                R.string.appwide_workouts_active_minutes_progress_format,
+                                summary.minutes.creditedMinutes.roundToInt(),
+                                summary.minutes.weeklyTarget.roundToInt(),
+                            ),
+                            style = NoopType.number(30f),
+                            color = Palette.textPrimary,
+                        )
+                        val fraction = summary.minutes.targetFraction.coerceIn(0.0, 1.0).toFloat()
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Palette.surfaceInset),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(fraction)
+                                    .height(10.dp)
+                                    .background(Palette.statusPositive),
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            ActiveZoneStat(
+                                uiString(R.string.appwide_workouts_active_minutes_moderate),
+                                summary.minutes.moderateMinutes,
+                                Palette.hrZoneColor(3),
+                                Modifier.weight(1f),
+                            )
+                            ActiveZoneStat(
+                                uiString(R.string.appwide_workouts_active_minutes_vigorous),
+                                summary.minutes.vigorousMinutes,
+                                Palette.hrZoneColor(4),
+                                Modifier.weight(1f),
+                            )
+                        }
+                        if (coverage != null) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.MonitorHeart,
+                                    contentDescription = null,
+                                    tint = Palette.textSecondary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    coverage,
+                                    style = NoopType.footnote,
+                                    color = Palette.textSecondary,
+                                )
+                            }
+                        }
+                        CardDivider()
+                        Text(
+                            uiString(R.string.appwide_workouts_active_minutes_note),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                }
+                loaded -> Text(
+                    uiString(R.string.appwide_workouts_active_minutes_no_data),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+                else -> CircularProgressIndicator(
+                    color = Palette.statusPositive,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveZoneStat(label: String, minutes: Double, tint: Color, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Overline(label)
+        Text(
+            uiString(
+                R.string.appwide_workouts_active_minutes_value_format,
+                minutes.roundToInt(),
+            ),
+            style = NoopType.number(18f),
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 // MARK: - Empty / loading state
 

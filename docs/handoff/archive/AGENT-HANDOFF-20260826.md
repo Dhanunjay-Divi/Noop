@@ -88,7 +88,7 @@ Preserve these decisions:
 ## Verified local evidence
 
 - StrandAnalytics: 1,419 total, 7 skipped, 0 failures.
-- macOS app: 1,490 total, 1 skipped, 0 failures.
+- macOS app: 1,495 total, 1 skipped, 0 failures.
 - Android Full Debug: 3,791 total, 3,784 passed, 7 skipped, 0 failures.
 - Android Demo Debug: 3,791 total, 3,784 passed, 7 skipped, 0 failures.
 - Focused Apple stage/Watch integration: 27 executed, 0 failures.

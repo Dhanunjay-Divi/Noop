@@ -44,6 +44,25 @@ enum ChargeFormulaUpgradeGate {
     }
 }
 
+/// Upgrade boundary for the persisted Active Minutes series.
+///
+/// Existing installs may already have an unchanged raw-input watermark from a build that did not write
+/// these rows. One bounded 21-day pass is enough to populate the seven-day card without reprocessing the
+/// user's full history.
+enum ActiveZoneUpgradeGate {
+    static let completedRevisionKey = "noop.analysis.completedActiveZoneRevision"
+    static let historyDays = 21
+    static let currentRevision = "noop-active-zone-v1"
+
+    static func needsRescore(completedRevision: String?) -> Bool {
+        completedRevision != currentRevision
+    }
+
+    static func revisionToPersist(passCompleted: Bool, wasRequired: Bool) -> String? {
+        passCompleted && wasRequired ? currentRevision : nil
+    }
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -681,15 +700,28 @@ final class AppModel: ObservableObject {
                     forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
                 let chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
                     completedRevision: completedChargeRevision)
+                let completedActiveZoneRevision = UserDefaults.standard.string(
+                    forKey: ActiveZoneUpgradeGate.completedRevisionKey)
+                let activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
+                    completedRevision: completedActiveZoneRevision)
                 let receipt = await self.intelligence.analyzeRecent(
-                    maxDays: chargeUpgradePending ? ChargeFormulaUpgradeGate.historyDays : 21,
-                    force: chargeUpgradePending)
+                    maxDays: chargeUpgradePending
+                        ? ChargeFormulaUpgradeGate.historyDays
+                        : ActiveZoneUpgradeGate.historyDays,
+                    force: chargeUpgradePending || activeZoneUpgradePending)
                 if let revision = ChargeFormulaUpgradeGate.revisionToPersist(
                     passCompleted: receipt != nil,
                     wasRequired: chargeUpgradePending) {
                     UserDefaults.standard.set(
                         revision,
                         forKey: ChargeFormulaUpgradeGate.completedRevisionKey)
+                }
+                if let revision = ActiveZoneUpgradeGate.revisionToPersist(
+                    passCompleted: receipt != nil,
+                    wasRequired: activeZoneUpgradePending) {
+                    UserDefaults.standard.set(
+                        revision,
+                        forKey: ActiveZoneUpgradeGate.completedRevisionKey)
                 }
                 // v5: recompute the skin-temp suite snapshots (cycle phase + body clock) from the
                 // freshly-scored history so the Health hub cards read a ready result.

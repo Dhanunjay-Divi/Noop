@@ -289,6 +289,15 @@
     <string name="appwide_v4_value_text_out_of_text_with_context_format">%1$s de %2$s, %3$s</string>
     <string name="appwide_v4_watch">CONVIENE VIGILAR</string>
     <string name="appwide_v4_why">POR QUÉ</string>
+    <string name="appwide_workouts_active_minutes_coverage_format">%1$s de cobertura de FC · %2$d/7 días</string>
+    <string name="appwide_workouts_active_minutes_guideline">Objetivo semanal de actividad</string>
+    <string name="appwide_workouts_active_minutes_moderate">Moderada</string>
+    <string name="appwide_workouts_active_minutes_no_data">No hay cobertura de frecuencia cardiaca registrada en los últimos 7 días.</string>
+    <string name="appwide_workouts_active_minutes_note">Los minutos intensos cuentan doble. El tiempo sin uso queda sin medir.</string>
+    <string name="appwide_workouts_active_minutes_progress_format">%1$d / %2$d min</string>
+    <string name="appwide_workouts_active_minutes_title">Minutos activos</string>
+    <string name="appwide_workouts_active_minutes_value_format">%1$d min</string>
+    <string name="appwide_workouts_active_minutes_vigorous">Intensa</string>
     <string name="appwide_workouts_imported_zone_split">Distribución importada por zonas para esta sesión.</string>
     <string name="appwide_workouts_imported_zones">Zonas importadas</string>
 </resources>

@@ -602,6 +602,12 @@ object IntelligenceEngine {
         // the cheap recovery composite. The raw hr/rr/... lists are freed after each analyzeDay,
         // keeping memory bounded over a full multi-night offload history.
         val scoredNights = ArrayList<ScoredNight>()
+        val activeZoneRows = ArrayList<MetricSeriesRow>()
+        val activeZoneSet = (
+            maxHROverride ?: profile.age.takeIf { it > 0 }?.let(StrainScorer::tanakaHRmax)
+        )?.takeIf { it.isFinite() && it > 0 }?.let { maxHR ->
+            HrZones.zones(maxHR = maxHR)
+        }
 
         // In-memory nightly values harvested in pass 1, used to seed the pass-2 baseline.
         // Keyed by day so the union with imported history de-dupes cleanly per UTC day.
@@ -674,6 +680,25 @@ object IntelligenceEngine {
             val owner = resolveDayOwner(repo, ownerSource, candidatePriorities, day, from, to, importedDeviceId)
 
             val hr = repo.hrSamples(owner, from, to, STREAM_LIMIT)
+            // Active Minutes belongs to the calendar day, not the sleep score. Load and summarize the
+            // day's HR before the overnight minimum-sample gate so daytime exercise survives a night
+            // when the band was not worn.
+            val dayMidnight = midnightLocal(dayStart, tzOffsetSeconds)
+            val dayEnd = dayMidnight + SECONDS_PER_DAY - 1
+            val dayHr = repo.hrSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
+            val activeMinutes = activeZoneSet?.let {
+                ActiveZoneMinutesCalculator.minutes(hr = dayHr, zoneSet = it)
+            }
+            for ((key, value) in ActiveZoneMinutesCalculator.seriesValues(activeMinutes)) {
+                activeZoneRows.add(
+                    MetricSeriesRow(
+                        deviceId = computedId,
+                        day = day,
+                        key = key,
+                        value = value,
+                    ),
+                )
+            }
             // CAPTURE-B: capture this day's resolved read owner + HR-row count so PASS 2 can emit the
             // verbatim universal `dayOwner …` line per SCORED day (matching the iOS emit, which is in the
             // scored-days loop, NOT here). Only when the universal sink is on. A day skipped below for too
@@ -736,11 +761,8 @@ object IntelligenceEngine {
             // MIN_HR_SAMPLES gate above stays on the night window so empty days are still skipped.
             // `dayStart` is already a LOCAL midnight; midnightLocal is idempotent on it (the DAO range
             // is inclusive, so end at +86400-1s; analyzeDay also filters to the day). (#277)
-            val dayMidnight = midnightLocal(dayStart, tzOffsetSeconds)
-            val dayEnd = dayMidnight + SECONDS_PER_DAY - 1
-            // Same [owner] as the night window above (I2): the additive day totals must come from the one
-            // device that owns the day, never a mix.
-            val dayHr = repo.hrSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
+            // Calendar-day HR was loaded above for Active Minutes. Steps and gravity remain behind the
+            // overnight gate because they feed the existing daily/sleep scoring path.
             val daySteps = repo.stepSamples(owner, dayMidnight, dayEnd, STREAM_LIMIT)
             // Full calendar-day gravity for WORKOUT detection. The night window above ends at
             // dayStart+12h (≈ noon), so an afternoon/evening workout sits outside it and was only
@@ -1116,7 +1138,6 @@ object IntelligenceEngine {
                     value = restEvidence.persistedValue,
                 ),
             )
-
             out.add(
                 Computed(
                     day = daily.day,
@@ -1316,6 +1337,15 @@ object IntelligenceEngine {
                 toDay = newestDay,
                 managedKeys = ScoreConfidence.managedRestSeriesKeys,
                 rows = restRows,
+            )
+        }
+        if (activeZoneRows.isNotEmpty()) {
+            repo.replaceMetricSeriesRange(
+                deviceId = computedId,
+                fromDay = oldestDay,
+                toDay = newestDay,
+                managedKeys = ActiveZoneMinutesCalculator.MANAGED_SERIES_KEYS,
+                rows = activeZoneRows,
             )
         }
 

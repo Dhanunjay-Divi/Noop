@@ -11,6 +11,44 @@ private struct WorkoutRecoveryTrendPoint: Identifiable, Equatable {
     var id: Int { startTs }
 }
 
+struct ActiveZoneWeekSnapshot: Equatable {
+    let minutes: ActiveZoneMinutes
+    let daysWithData: Int
+
+    static func resolve(
+        moderate: [(day: String, value: Double)],
+        vigorous: [(day: String, value: Double)],
+        observed: [(day: String, value: Double)],
+        includedDays: Set<String>
+    ) -> Self? {
+        func values(_ points: [(day: String, value: Double)],
+                    allowZero: Bool) -> [String: Double] {
+            Dictionary(uniqueKeysWithValues: points.compactMap { point in
+                guard includedDays.contains(point.day), point.value.isFinite,
+                      allowZero ? point.value >= 0 : point.value > 0 else { return nil }
+                return (point.day, point.value)
+            })
+        }
+        let moderateByDay = values(moderate, allowZero: true)
+        let vigorousByDay = values(vigorous, allowZero: true)
+        let observedByDay = values(observed, allowZero: false)
+        let completeDays = Set(moderateByDay.keys)
+            .intersection(vigorousByDay.keys)
+            .intersection(observedByDay.keys)
+        guard !completeDays.isEmpty else { return nil }
+        let moderateTotal = completeDays.reduce(0.0) { $0 + (moderateByDay[$1] ?? 0) }
+        let vigorousTotal = completeDays.reduce(0.0) { $0 + (vigorousByDay[$1] ?? 0) }
+        let observedTotal = completeDays.reduce(0.0) { $0 + (observedByDay[$1] ?? 0) }
+        return Self(
+            minutes: ActiveZoneMinutes(
+                moderateMinutes: moderateTotal,
+                vigorousMinutes: vigorousTotal,
+                weeklyTarget: ActiveZoneMinutesCalculator.defaultWeeklyTarget,
+                observedMinutes: observedTotal),
+            daysWithData: completeDays.count)
+    }
+}
+
 /// A half-open, calendar-aware workout window. Calendar arithmetic keeps a "day" honest across daylight
 /// saving transitions, and overlap semantics include sessions that begin before midnight and finish after
 /// it. This is shared by Today and the Workouts log so the two screens cannot disagree about day scope.
@@ -210,6 +248,8 @@ struct WorkoutsView: View {
     /// workout ranges intentionally keep this trend capped at 90 days so opening a deep history never
     /// launches hundreds of raw-HR reads.
     @State private var recoveryTrend: [WorkoutRecoveryTrendPoint] = []
+    @State private var activeZoneWeek: ActiveZoneWeekSnapshot?
+    @State private var activeZoneLoaded = false
 
     // MARK: - Filters + selection (#64)
 
@@ -300,6 +340,7 @@ struct WorkoutsView: View {
                             strengthTrainerButton
                         }
                         activityCalendarSection(rows: [])
+                        activeZoneSection
                     }
                 }
             } else {
@@ -327,6 +368,7 @@ struct WorkoutsView: View {
                 }
                 rangeBar(rows: windowRows)
                 activityCalendarSection(rows: allRows)
+                activeZoneSection
                 if let postLogNote { postLogBanner(postLogNote) }
                 if windowRows.isEmpty {
                     emptySelectedRange
@@ -375,6 +417,13 @@ struct WorkoutsView: View {
         }
         .task(id: recoveryTrendInputKey) {
             await loadRecoveryTrend()
+        }
+        .task(id: repo.refreshSeq) {
+            guard !usesPreviewRows else {
+                activeZoneLoaded = true
+                return
+            }
+            await loadActiveZoneWeek()
         }
         .sheet(item: $sheet) { target in
             ManualWorkoutSheet(editing: target.editing) { row, replacing in
@@ -494,6 +543,132 @@ struct WorkoutsView: View {
         }
         guard !Task.isCancelled else { return }
         recoveryTrend = built
+    }
+
+    private func loadActiveZoneWeek() async {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let days = Set((0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: today).map(Repository.dayString)
+        })
+        async let moderate = repo.exploreSeries(
+            key: ActiveZoneMinutesCalculator.moderateSeriesKey,
+            source: "my-whoop",
+            days: 8)
+        async let vigorous = repo.exploreSeries(
+            key: ActiveZoneMinutesCalculator.vigorousSeriesKey,
+            source: "my-whoop",
+            days: 8)
+        async let observed = repo.exploreSeries(
+            key: ActiveZoneMinutesCalculator.observedSeriesKey,
+            source: "my-whoop",
+            days: 8)
+        let snapshot = await ActiveZoneWeekSnapshot.resolve(
+            moderate: moderate,
+            vigorous: vigorous,
+            observed: observed,
+            includedDays: days)
+        guard !Task.isCancelled else { return }
+        activeZoneWeek = snapshot
+        activeZoneLoaded = true
+    }
+
+    @ViewBuilder private var activeZoneSection: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "appwide.workouts.active_minutes_title",
+                overline: "appwide.trends.last_7_days")
+            NoopCard(tint: StrandPalette.statusPositive) {
+                if let summary = activeZoneWeek {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        Text("appwide.workouts.active_minutes_guideline")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        Text(
+                            String(
+                                format: String(localized: "appwide.workouts.active_minutes_progress_format"),
+                                Int(summary.minutes.creditedMinutes.rounded()),
+                                Int(summary.minutes.weeklyTarget.rounded()))
+                        )
+                        .font(StrandFont.number(30))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .contentTransition(.numericText())
+                        GeometryReader { geometry in
+                            let progress = min(
+                                max(summary.minutes.targetFraction, 0),
+                                1)
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(StrandPalette.surfaceInset)
+                                Capsule()
+                                    .fill(StrandPalette.statusPositive)
+                                    .frame(width: geometry.size.width * progress)
+                            }
+                        }
+                        .frame(height: 10)
+                        .accessibilityHidden(true)
+                        HStack(spacing: NoopMetrics.space4) {
+                            activeZoneStat(
+                                String(localized: "appwide.workouts.active_minutes_moderate"),
+                                minutes: summary.minutes.moderateMinutes,
+                                tint: StrandPalette.zone3)
+                            activeZoneStat(
+                                String(localized: "appwide.workouts.active_minutes_vigorous"),
+                                minutes: summary.minutes.vigorousMinutes,
+                                tint: StrandPalette.zone4)
+                        }
+                        Label {
+                            Text(
+                                String(
+                                    format: String(
+                                        localized: "appwide.workouts.active_minutes_coverage_format"),
+                                    durationLabel(summary.minutes.observedMinutes * 60),
+                                    summary.daysWithData)
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
+                        } icon: {
+                            Image(systemName: "heart.text.square")
+                                .accessibilityHidden(true)
+                        }
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        Divider().overlay(StrandPalette.hairline)
+                        Text("appwide.workouts.active_minutes_note")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("noop.workouts.active-minutes")
+                } else if activeZoneLoaded {
+                    Text("appwide.workouts.active_minutes_no_data")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(
+                            String(localized: "appwide.workouts.active_minutes_title"))
+                }
+            }
+        }
+    }
+
+    private func activeZoneStat(_ label: String, minutes: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).strandOverline()
+            Text(
+                String(
+                    format: String(localized: "appwide.workouts.active_minutes_value_format"),
+                    Int(minutes.rounded()))
+            )
+                .font(StrandFont.number(18))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private var recoveryTrendSection: some View {

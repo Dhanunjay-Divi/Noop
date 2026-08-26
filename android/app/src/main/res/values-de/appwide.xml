@@ -289,6 +289,15 @@
     <string name="appwide_v4_value_text_out_of_text_with_context_format">%1$s von %2$s, %3$s</string>
     <string name="appwide_v4_watch">WEITER BEOBACHTEN</string>
     <string name="appwide_v4_why">WARUM</string>
+    <string name="appwide_workouts_active_minutes_coverage_format">%1$s HF-Abdeckung · %2$d/7 Tage</string>
+    <string name="appwide_workouts_active_minutes_guideline">Wöchentliches Aktivitätsziel</string>
+    <string name="appwide_workouts_active_minutes_moderate">Moderat</string>
+    <string name="appwide_workouts_active_minutes_no_data">In den letzten 7 Tagen wurde keine Herzfrequenzabdeckung aufgezeichnet.</string>
+    <string name="appwide_workouts_active_minutes_note">Intensive Minuten zählen doppelt. Nicht getragene Zeit bleibt ungemessen.</string>
+    <string name="appwide_workouts_active_minutes_progress_format">%1$d / %2$d Min.</string>
+    <string name="appwide_workouts_active_minutes_title">Aktive Minuten</string>
+    <string name="appwide_workouts_active_minutes_value_format">%1$d Min.</string>
+    <string name="appwide_workouts_active_minutes_vigorous">Intensiv</string>
     <string name="appwide_workouts_imported_zone_split">Importierte Aufteilung nach Herzfrequenzzonen für diese Einheit.</string>
     <string name="appwide_workouts_imported_zones">Importierte Zonen</string>
 </resources>

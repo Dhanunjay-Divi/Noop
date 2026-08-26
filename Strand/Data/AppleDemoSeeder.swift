@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import StrandAnalytics
 import WhoopStore
 
 // MARK: - DEBUG-only demo seed (Apple parity with Android's DemoSeeder)
@@ -72,16 +73,20 @@ enum AppleDemoSeeder {
         let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
         guard existing.isEmpty else {
             // Screenshot databases survive app reinstalls between UI-test runs. Repair only the
-            // DEBUG fixture's versioned marker when an older demo dataset is already present, so a
-            // newly tightened production provenance gate does not make repeated captures flaky.
+            // DEBUG fixture's additive/versioned data when an older demo dataset is already present,
+            // so new surfaces remain testable without resetting or duplicating the seeded history.
             do {
                 _ = try await repairFitnessAgeProfileMarkers(
                     in: store,
                     profileAge: profileAge,
                     profileSex: profileSex
                 )
+                _ = try await repairActiveZoneFixtures(
+                    in: store,
+                    existingDays: existing
+                )
             } catch {
-                NSLog("AppleDemoSeeder: profile-marker repair failed - \(error)")
+                NSLog("AppleDemoSeeder: fixture repair failed - \(error)")
             }
             return
         }
@@ -132,6 +137,55 @@ enum AppleDemoSeeder {
         }
         guard !repairs.isEmpty else { return 0 }
         return try await store.upsertMetricSeries(repairs, deviceId: whoop)
+    }
+
+    /// Adds Active Minutes to a persisted DEBUG fixture created before that metric existed.
+    /// The repair is presence-gated and writes only the computed metric keys, so repeated launches
+    /// are no-ops and the rest of the synthetic history remains byte-for-byte unchanged.
+    @discardableResult
+    static func repairActiveZoneFixtures(
+        in store: WhoopStore,
+        existingDays: [DailyMetric]
+    ) async throws -> Int {
+        let computedDevice = "\(whoop)-noop"
+        let existingCoverage = try await store.metricSeries(
+            deviceId: computedDevice,
+            key: ActiveZoneMinutesCalculator.observedSeriesKey,
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )
+        guard existingCoverage.isEmpty else { return 0 }
+        let points = activeZoneFixturePoints(for: existingDays)
+        guard !points.isEmpty else { return 0 }
+        return try await store.upsertMetricSeries(points, deviceId: computedDevice)
+    }
+
+    /// Deterministic fallback for fixture upgrades. Existing effort and workout count keep activity
+    /// correlated with the demo's own training history; coverage remains synthetic but plausible.
+    static func activeZoneFixturePoints(for days: [DailyMetric]) -> [MetricPoint] {
+        days.flatMap { daily -> [MetricPoint] in
+            let effort = (daily.strain ?? 0).clamped(0, 100)
+            let sessions = max(daily.exerciseCount ?? 0, 0)
+            let moderate = sessions == 0
+                ? (effort * 0.14 - 1).clamped(0, 12)
+                : (18 + effort * 0.45 + Double(sessions - 1) * 12).clamped(8, 100)
+            let vigorous = sessions == 0
+                ? 0
+                : ((effort - 35) * 0.22 + Double(sessions) * 4).clamped(0, 45)
+            let dayVariation = Double(
+                daily.day.utf8.reduce(0) { ($0 + Int($1)) % 91 }
+            )
+            let observed = (930 + dayVariation).clamped(600, 1_300)
+            let minutes = ActiveZoneMinutes(
+                moderateMinutes: round1(moderate),
+                vigorousMinutes: round1(vigorous),
+                weeklyTarget: ActiveZoneMinutesCalculator.defaultWeeklyTarget,
+                observedMinutes: round1(observed)
+            )
+            return ActiveZoneMinutesCalculator.seriesValues(minutes)
+                .sorted(by: { $0.key < $1.key })
+                .map { MetricPoint(day: daily.day, key: $0.key, value: $0.value) }
+        }
     }
 
     /// Deterministic mixed-source day plus reusable prior manual meals for provenance and quick-repeat
@@ -277,6 +331,7 @@ enum AppleDemoSeeder {
         var daily: [DailyMetric] = []
         var sleeps: [CachedSleepSession] = []
         var series: [MetricPoint] = []
+        var computedSeries: [MetricPoint] = []
         var appleRows: [AppleDaily] = []
         var workouts: [WorkoutRow] = []
         var journal: [JournalEntry] = []
@@ -363,6 +418,26 @@ enum AppleDemoSeeder {
             series.append(MetricPoint(day: day, key: "sleep_need_min", value: round1(demoNeedMin)))
             series.append(MetricPoint(day: day, key: "sleep_debt_min",
                 value: round1((demoNeedMin - totalSleep).atLeast(0.0))))
+            let moderateMinutes = nWorkouts == 0
+                ? gauss(&rng, 4.0, 3.0).clamped(0.0, 12.0)
+                : gauss(&rng, 31.0 * Double(nWorkouts), 7.0).clamped(8.0, 100.0)
+            let vigorousMinutes = nWorkouts == 0
+                ? 0
+                : gauss(&rng, 9.0 * Double(nWorkouts), 4.0).clamped(0.0, 45.0)
+            let creditedMinutes = moderateMinutes + 2 * vigorousMinutes
+            let observedMinutes = gauss(&rng, 1_050.0, 90.0).clamped(600.0, 1_300.0)
+            computedSeries.append(MetricPoint(
+                day: day, key: ActiveZoneMinutesCalculator.moderateSeriesKey,
+                value: round1(moderateMinutes)))
+            computedSeries.append(MetricPoint(
+                day: day, key: ActiveZoneMinutesCalculator.vigorousSeriesKey,
+                value: round1(vigorousMinutes)))
+            computedSeries.append(MetricPoint(
+                day: day, key: ActiveZoneMinutesCalculator.creditedSeriesKey,
+                value: round1(creditedMinutes)))
+            computedSeries.append(MetricPoint(
+                day: day, key: ActiveZoneMinutesCalculator.observedSeriesKey,
+                value: round1(observedMinutes)))
 
             // --- Apple Health daily aggregate ---
             let steps = Int(gauss(&rng, 8500.0, 2600.0).clamped(1200.0, 19000.0))
@@ -444,6 +519,7 @@ enum AppleDemoSeeder {
         _ = try await store.upsertDailyMetrics(daily, deviceId: whoop)
         _ = try await store.upsertSleepSessions(sleeps, deviceId: whoop)
         _ = try await store.upsertMetricSeries(series, deviceId: whoop)
+        _ = try await store.upsertMetricSeries(computedSeries, deviceId: "\(whoop)-noop")
         _ = try await store.upsertAppleDaily(appleRows, deviceId: apple)
         if !workouts.isEmpty { _ = try await store.upsertWorkouts(workouts, deviceId: whoop) }
         if !journal.isEmpty { _ = try await store.upsertJournal(journal, deviceId: whoop) }

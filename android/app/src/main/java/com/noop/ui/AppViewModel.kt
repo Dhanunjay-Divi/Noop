@@ -106,6 +106,15 @@ internal object ChargeFormulaUpgradeGate {
         completedRevision != CURRENT_REVISION
 }
 
+internal object ActiveZoneUpgradeGate {
+    const val COMPLETED_REVISION_KEY = "noop.analysis.completedActiveZoneRevision"
+    const val HISTORY_DAYS = 21
+    const val CURRENT_REVISION = "noop-active-zone-v1"
+
+    fun needsRescore(completedRevision: String?): Boolean =
+        completedRevision != CURRENT_REVISION
+}
+
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
  * repository, re-publishes the BLE [LiveState], maintains a spike-filtered/smoothed
@@ -976,8 +985,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val chargeUpgradePending = ChargeFormulaUpgradeGate.needsRescore(
                     prefs.getString(ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY, null),
                 )
+                val activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
+                    prefs.getString(ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY, null),
+                )
                 val analyzeFp = repository.analysisFingerprint(deviceId)
                 if (chargeUpgradePending ||
+                    activeZoneUpgradePending ||
                     analyzeFp != NoopPrefs.analyzeWatermark(appContext)
                 ) runCatching {
                     IntelligenceEngine.analyzeRecent(
@@ -986,7 +999,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         maxDays = if (chargeUpgradePending) {
                             ChargeFormulaUpgradeGate.HISTORY_DAYS
                         } else {
-                            21
+                            ActiveZoneUpgradeGate.HISTORY_DAYS
                         },
                         importedDeviceId = deviceId,
                         maxHROverride = profileStore.hrMaxOverride
@@ -1093,6 +1106,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             .putString(
                                 ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
                                 ChargeFormulaUpgradeGate.CURRENT_REVISION,
+                            )
+                            .apply()
+                    }
+                    if (activeZoneUpgradePending) {
+                        prefs.edit()
+                            .putString(
+                                ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY,
+                                ActiveZoneUpgradeGate.CURRENT_REVISION,
                             )
                             .apply()
                     }

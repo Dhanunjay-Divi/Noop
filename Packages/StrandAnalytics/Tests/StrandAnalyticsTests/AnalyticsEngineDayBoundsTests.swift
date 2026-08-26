@@ -115,8 +115,10 @@ final class AnalyticsEngineDayBoundsTests: XCTestCase {
                                                  profile: profile, tzOffsetSeconds: off)
 
             XCTAssertEqual(full.daily, pre.daily, "off=\(off)")
+            XCTAssertEqual(full.activeZoneMinutes, pre.activeZoneMinutes, "off=\(off)")
             XCTAssertNotNil(full.daily.steps)          // the pin is vacuous if the day computed nothing
             XCTAssertNotNil(full.daily.activeKcalEst)
+            XCTAssertNotNil(full.activeZoneMinutes)
         }
     }
 }

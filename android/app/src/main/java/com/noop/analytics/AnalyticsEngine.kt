@@ -736,6 +736,14 @@ object AnalyticsEngine {
                 restingHR = restingHRDaily?.toDouble(),
             )
         }
+        val activeZoneMinutes = effMaxHR
+            ?.takeIf { it.isFinite() && it > 0 }
+            ?.let { maxHR ->
+                ActiveZoneMinutesCalculator.minutes(
+                    hr = dayHrFiltered,
+                    zoneSet = HrZones.zones(maxHR = maxHR),
+                )
+            }
 
         // ── Assemble DailyMetric ──────────────────────────────────────────────
         // deviceId is stamped by the caller (IntelligenceEngine persists under
@@ -815,6 +823,7 @@ object AnalyticsEngine {
             workouts = workouts,
             recovery = recovery,
             strain = strain,
+            activeZoneMinutes = activeZoneMinutes,
             rest = rest,
             nightlySkinTempC = nightlySkinTempC,
             chargeConfidence = chargeConfidence,

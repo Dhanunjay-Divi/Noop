@@ -39,7 +39,7 @@ class AppWideLocalizationContractTest {
         assumeTrue("App-wide locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { appWideStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(290, base.size)
+        assertEquals(299, base.size)
         assertEquals("NOOP Band is coming", base["appwide_terms_title"])
         assertTrue(
             base.getValue("appwide_terms_subtitle")

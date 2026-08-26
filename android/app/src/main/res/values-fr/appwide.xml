@@ -289,6 +289,15 @@
     <string name="appwide_v4_value_text_out_of_text_with_context_format">%1$s sur %2$s, %3$s</string>
     <string name="appwide_v4_watch">À SURVEILLER</string>
     <string name="appwide_v4_why">POURQUOI</string>
+    <string name="appwide_workouts_active_minutes_coverage_format">%1$s de couverture FC · %2$d/7 jours</string>
+    <string name="appwide_workouts_active_minutes_guideline">Objectif d’activité hebdomadaire</string>
+    <string name="appwide_workouts_active_minutes_moderate">Modérée</string>
+    <string name="appwide_workouts_active_minutes_no_data">Aucune couverture de fréquence cardiaque enregistrée sur les 7 derniers jours.</string>
+    <string name="appwide_workouts_active_minutes_note">Les minutes intenses comptent double. Le temps sans port reste non mesuré.</string>
+    <string name="appwide_workouts_active_minutes_progress_format">%1$d / %2$d min</string>
+    <string name="appwide_workouts_active_minutes_title">Minutes actives</string>
+    <string name="appwide_workouts_active_minutes_value_format">%1$d min</string>
+    <string name="appwide_workouts_active_minutes_vigorous">Intense</string>
     <string name="appwide_workouts_imported_zone_split">Répartition importée par zone pour cette séance.</string>
     <string name="appwide_workouts_imported_zones">Zones importées</string>
 </resources>

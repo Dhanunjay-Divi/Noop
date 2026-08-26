@@ -289,6 +289,15 @@
     <string name="appwide_v4_value_text_out_of_text_with_context_format">%1$s из %2$s, %3$s</string>
     <string name="appwide_v4_watch">СТОИТ НАБЛЮДАТЬ</string>
     <string name="appwide_v4_why">ПОЧЕМУ</string>
+    <string name="appwide_workouts_active_minutes_coverage_format">%1$s данных ЧСС · %2$d/7 дней</string>
+    <string name="appwide_workouts_active_minutes_guideline">Недельная цель активности</string>
+    <string name="appwide_workouts_active_minutes_moderate">Умеренная</string>
+    <string name="appwide_workouts_active_minutes_no_data">За последние 7 дней нет записанных данных о частоте пульса.</string>
+    <string name="appwide_workouts_active_minutes_note">Минуты высокой интенсивности считаются вдвойне. Время без устройства не измеряется.</string>
+    <string name="appwide_workouts_active_minutes_progress_format">%1$d / %2$d мин</string>
+    <string name="appwide_workouts_active_minutes_title">Активные минуты</string>
+    <string name="appwide_workouts_active_minutes_value_format">%1$d мин</string>
+    <string name="appwide_workouts_active_minutes_vigorous">Высокая</string>
     <string name="appwide_workouts_imported_zone_split">Импортированное распределение по зонам для этой тренировки.</string>
     <string name="appwide_workouts_imported_zones">Импортированные зоны</string>
 </resources>

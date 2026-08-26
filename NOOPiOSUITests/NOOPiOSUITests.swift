@@ -132,6 +132,71 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "se-accessibility-workouts-clear-navigation")
     }
 
+    func testActiveMinutesCardExplainsCreditAndCoverageAtLargeText() {
+        let app = launchApp(
+            tab: "workouts",
+            preferredContentSize: PreferredContentSize.accessibilityLarge
+        )
+        let activeMinutes = app.descendants(matching: .any)["noop.workouts.active-minutes"]
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+
+        // The Workouts body is lazy. Move in short steps so this card is materialized and inspected
+        // instead of jumping from above it to below it on the compact SE viewport.
+        for _ in 0..<24 where !activeMinutes.isHittable {
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0
+            )
+        }
+
+        XCTAssertTrue(activeMinutes.isHittable)
+        let summary = activeMinutes.label
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("weekly activity guideline"))
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("moderate"))
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("vigorous"))
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("HR coverage"))
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("missing wear time stays unmeasured"))
+
+        // `isHittable` becomes true as soon as the combined card clips the viewport edge. Move it into
+        // the readable area before retaining visual evidence, otherwise the screenshot proves only that
+        // the accessibility tree contains the copy while the card itself remains behind the floating bar.
+        let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+        let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.28))
+        start.press(
+            forDuration: 0.05,
+            thenDragTo: end,
+            withVelocity: .slow,
+            thenHoldForDuration: 0
+        )
+        XCTAssertGreaterThan(activeMinutes.frame.intersection(app.frame).height, 120)
+        keepScreenshot(app, name: "workouts-active-minutes-accessibility-summary")
+
+        // The complete card is taller than one SE viewport at this text size. Verify that the scaffold's
+        // bottom inset lets the final coverage note scroll above the floating navigation instead of being
+        // permanently obscured by it, and retain that lower-card state separately.
+        let navigation = app.buttons["noop.tab.2"]
+        XCTAssertTrue(navigation.exists)
+        for _ in 0..<4 where activeMinutes.frame.maxY >= navigation.frame.minY {
+            let lowerStart = scroll.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            let lowerEnd = scroll.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: 0.52))
+            lowerStart.press(
+                forDuration: 0.05,
+                thenDragTo: lowerEnd,
+                withVelocity: .slow,
+                thenHoldForDuration: 0
+            )
+        }
+        XCTAssertLessThan(activeMinutes.frame.maxY, navigation.frame.minY)
+        keepScreenshot(app, name: "workouts-active-minutes-accessibility-details")
+    }
+
     func testTodayCalendarButtonOpensMonthHistory() {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]

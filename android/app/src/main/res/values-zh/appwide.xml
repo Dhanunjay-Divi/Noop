@@ -289,6 +289,15 @@
     <string name="appwide_v4_value_text_out_of_text_with_context_format">%1$s，共 %2$s，%3$s</string>
     <string name="appwide_v4_watch">值得留意</string>
     <string name="appwide_v4_why">原因</string>
+    <string name="appwide_workouts_active_minutes_coverage_format">%1$s 心率覆盖 · %2$d/7 天</string>
+    <string name="appwide_workouts_active_minutes_guideline">每周活动目标</string>
+    <string name="appwide_workouts_active_minutes_moderate">中等强度</string>
+    <string name="appwide_workouts_active_minutes_no_data">最近 7 天没有记录到心率覆盖数据。</string>
+    <string name="appwide_workouts_active_minutes_note">高强度分钟按双倍计算。未佩戴时段保持未测量状态。</string>
+    <string name="appwide_workouts_active_minutes_progress_format">%1$d / %2$d 分钟</string>
+    <string name="appwide_workouts_active_minutes_title">活跃分钟</string>
+    <string name="appwide_workouts_active_minutes_value_format">%1$d 分钟</string>
+    <string name="appwide_workouts_active_minutes_vigorous">高强度</string>
     <string name="appwide_workouts_imported_zone_split">此训练的已导入心率区间分布。</string>
     <string name="appwide_workouts_imported_zones">已导入的心率区间</string>
 </resources>

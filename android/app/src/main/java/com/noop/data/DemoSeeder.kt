@@ -1,6 +1,8 @@
 package com.noop.data
 
 import com.noop.analytics.AgeMetricProfile
+import com.noop.analytics.ActiveZoneMinutes
+import com.noop.analytics.ActiveZoneMinutesCalculator
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -48,9 +50,60 @@ object DemoSeeder {
 
     /** Seed only if the demo (and the user) has no daily history yet. Safe to call on every launch. */
     suspend fun seedIfEmpty(repo: WhoopRepository, vitalityAge: Double) {
-        if (repo.days(WHOOP).isNotEmpty()) return
+        val existingDays = repo.days(WHOOP)
+        if (existingDays.isNotEmpty()) {
+            repairActiveZoneFixtures(repo, existingDays)
+            return
+        }
         seed(repo, vitalityAge)
     }
+
+    /**
+     * Add Active Minutes to a persisted demo fixture created before the metric existed.
+     * Presence-gated and confined to computed metric keys; repeated launches are no-ops.
+     */
+    private suspend fun repairActiveZoneFixtures(
+        repo: WhoopRepository,
+        existingDays: List<DailyMetric>,
+    ) {
+        val coverage = repo.metricSeries(
+            WHOOP_NOOP,
+            ActiveZoneMinutesCalculator.OBSERVED_SERIES_KEY,
+            "0000-00-00",
+            "9999-99-99",
+        )
+        if (coverage.isNotEmpty()) return
+        repo.upsertMetricSeries(activeZoneFixtureRows(existingDays))
+    }
+
+    /** Deterministic fallback for fixture upgrades, correlated with the demo's saved training history. */
+    internal fun activeZoneFixtureRows(days: List<DailyMetric>): List<MetricSeriesRow> =
+        days.flatMap { daily ->
+            val effort = (daily.strain ?: 0.0).coerceIn(0.0, 100.0)
+            val sessions = (daily.exerciseCount ?: 0).coerceAtLeast(0)
+            val moderate = if (sessions == 0) {
+                (effort * 0.14 - 1.0).coerceIn(0.0, 12.0)
+            } else {
+                (18.0 + effort * 0.45 + (sessions - 1) * 12.0).coerceIn(8.0, 100.0)
+            }
+            val vigorous = if (sessions == 0) {
+                0.0
+            } else {
+                ((effort - 35.0) * 0.22 + sessions * 4.0).coerceIn(0.0, 45.0)
+            }
+            val dayVariation = (daily.day.sumOf(Char::code) % 91).toDouble()
+            val minutes = ActiveZoneMinutes(
+                moderateMinutes = round1(moderate),
+                vigorousMinutes = round1(vigorous),
+                weeklyTarget = ActiveZoneMinutesCalculator.DEFAULT_WEEKLY_TARGET,
+                observedMinutes = round1((930.0 + dayVariation).coerceIn(600.0, 1_300.0)),
+            )
+            ActiveZoneMinutesCalculator.seriesValues(minutes)
+                .toSortedMap()
+                .map { (key, value) ->
+                    MetricSeriesRow(WHOOP_NOOP, daily.day, key, value)
+                }
+        }
 
     /**
      * Demo-only: seed a SECOND paired device (a Polar H10) into the registry so the Devices screen shows
@@ -185,6 +238,34 @@ object DemoSeeder {
             series.add(MetricSeriesRow(WHOOP, day, "sleep_need_min", round1(demoNeedMin)))
             series.add(MetricSeriesRow(WHOOP, day, "sleep_debt_min",
                 round1((demoNeedMin - totalSleep).coerceAtLeast(0.0))))
+            val moderateMinutes = if (nWorkouts == 0) {
+                gauss(rng, 4.0, 3.0).coerceIn(0.0, 12.0)
+            } else {
+                gauss(rng, 31.0 * nWorkouts, 7.0).coerceIn(8.0, 100.0)
+            }
+            val vigorousMinutes = if (nWorkouts == 0) {
+                0.0
+            } else {
+                gauss(rng, 9.0 * nWorkouts, 4.0).coerceIn(0.0, 45.0)
+            }
+            val creditedMinutes = moderateMinutes + 2.0 * vigorousMinutes
+            val observedMinutes = gauss(rng, 1_050.0, 90.0).coerceIn(600.0, 1_300.0)
+            series.add(MetricSeriesRow(
+                WHOOP_NOOP, day, ActiveZoneMinutesCalculator.MODERATE_SERIES_KEY,
+                round1(moderateMinutes),
+            ))
+            series.add(MetricSeriesRow(
+                WHOOP_NOOP, day, ActiveZoneMinutesCalculator.VIGOROUS_SERIES_KEY,
+                round1(vigorousMinutes),
+            ))
+            series.add(MetricSeriesRow(
+                WHOOP_NOOP, day, ActiveZoneMinutesCalculator.CREDITED_SERIES_KEY,
+                round1(creditedMinutes),
+            ))
+            series.add(MetricSeriesRow(
+                WHOOP_NOOP, day, ActiveZoneMinutesCalculator.OBSERVED_SERIES_KEY,
+                round1(observedMinutes),
+            ))
 
             // --- Apple Health daily aggregate ---
             val steps = gauss(rng, 8500.0, 2600.0).coerceIn(1200.0, 19000.0).toInt()

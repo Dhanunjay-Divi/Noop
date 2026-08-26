@@ -1,5 +1,6 @@
 import XCTest
 @testable import StrandAnalytics
+import WhoopProtocol
 
 /// Pins the WHO/AHA guideline arithmetic and, more importantly, the no-fabrication contract:
 /// an absent week must not render as "0 of 150", which reads as a failed week rather than an unmeasured one.
@@ -71,6 +72,7 @@ final class ActiveZoneMinutesTests: XCTestCase {
         XCTAssertEqual(m?.moderateMinutes ?? 0, 30, accuracy: 0.001)
         XCTAssertEqual(m?.vigorousMinutes ?? 0, 15, accuracy: 0.001)
         XCTAssertEqual(m?.creditedMinutes ?? 0, 60, accuracy: 0.001)  // 30 + 2*15
+        XCTAssertEqual(m?.observedMinutes ?? 0, 45, accuracy: 0.001)
     }
 
     // MARK: Target reporting
@@ -94,5 +96,72 @@ final class ActiveZoneMinutesTests: XCTestCase {
     func testZone2IsNotCreditedEvenThoughItOverlapsAcsmModerate() {
         let m = ActiveZoneMinutesCalculator.minutes(from: tiz(z2: 100 * 60))
         XCTAssertEqual(m?.creditedMinutes ?? -1, 0, accuracy: 0.001)
+    }
+
+    // MARK: Raw-HR evidence boundary
+
+    func testRawHrCreditsOnlyBoundedObservedIntervals() {
+        let moderate = (0..<60).map { HRSample(ts: $0, bpm: 150) }
+        let vigorous = (60...90).map { HRSample(ts: $0, bpm: 170) }
+        let result = ActiveZoneMinutesCalculator.minutes(
+            from: moderate + vigorous,
+            zoneSet: HRZones.zones(maxHR: 200))
+
+        XCTAssertEqual(result?.moderateMinutes ?? 0, 1, accuracy: 0.0001)
+        XCTAssertEqual(result?.vigorousMinutes ?? 0, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(result?.creditedMinutes ?? 0, 2, accuracy: 0.0001)
+        XCTAssertEqual(result?.observedMinutes ?? 0, 1.5, accuracy: 0.0001)
+    }
+
+    func testRawHrDoesNotFillLongSensorGapOrInventTail() {
+        let result = ActiveZoneMinutesCalculator.minutes(
+            from: [
+                HRSample(ts: 0, bpm: 170),
+                HRSample(ts: 1, bpm: 170),
+                HRSample(ts: 3_601, bpm: 170)
+            ],
+            zoneSet: HRZones.zones(maxHR: 200))
+
+        XCTAssertEqual(result?.vigorousMinutes ?? 0, 1.0 / 60.0, accuracy: 0.0001)
+        XCTAssertEqual(result?.observedMinutes ?? 0, 1.0 / 60.0, accuracy: 0.0001)
+    }
+
+    func testRawHrWithOnlyDisconnectedSamplesIsMissing() {
+        XCTAssertNil(ActiveZoneMinutesCalculator.minutes(
+            from: [HRSample(ts: 0, bpm: 170), HRSample(ts: 3_600, bpm: 170)],
+            zoneSet: HRZones.zones(maxHR: 200)))
+    }
+
+    func testCorruptTimestampSpanAndWeeklyTargetStayMissing() {
+        XCTAssertNil(ActiveZoneMinutesCalculator.minutes(
+            from: [HRSample(ts: .min, bpm: 170), HRSample(ts: .max, bpm: 170)],
+            zoneSet: HRZones.zones(maxHR: 200)))
+        XCTAssertNil(ActiveZoneMinutesCalculator.minutes(
+            from: tiz(z3: 60),
+            weeklyTarget: .nan))
+        XCTAssertNil(ActiveZoneMinutesCalculator.minutes(
+            from: tiz(z3: 60),
+            weeklyTarget: 0))
+    }
+
+    func testSeriesProjectionIncludesCoverageAndMeasuredZero() {
+        let result = ActiveZoneMinutesCalculator.minutes(from: tiz(z1: 600))
+        let values = ActiveZoneMinutesCalculator.seriesValues(result)
+
+        XCTAssertEqual(values[ActiveZoneMinutesCalculator.moderateSeriesKey], 0)
+        XCTAssertEqual(values[ActiveZoneMinutesCalculator.vigorousSeriesKey], 0)
+        XCTAssertEqual(values[ActiveZoneMinutesCalculator.creditedSeriesKey], 0)
+        XCTAssertEqual(values[ActiveZoneMinutesCalculator.observedSeriesKey], 10)
+        XCTAssertEqual(Set(values.keys), ActiveZoneMinutesCalculator.managedSeriesKeys)
+    }
+
+    func testSeriesProjectionOmitsMissingOrCorruptCoverage() {
+        XCTAssertTrue(ActiveZoneMinutesCalculator.seriesValues(nil).isEmpty)
+        let corrupt = ActiveZoneMinutes(
+            moderateMinutes: 1,
+            vigorousMinutes: 1,
+            weeklyTarget: 150,
+            observedMinutes: .nan)
+        XCTAssertTrue(ActiveZoneMinutesCalculator.seriesValues(corrupt).isEmpty)
     }
 }

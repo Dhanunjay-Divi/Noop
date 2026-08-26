@@ -835,6 +835,12 @@ final class IntelligenceEngine: ObservableObject {
                              stepTicksPerStep: profile.stepTicksPerStep)
 
         let maxHR = profile.hrMaxOverride > 0 ? Double(profile.hrMaxOverride) : nil
+        let activeZoneSet: HRZoneSet? = {
+            let effectiveMaxHR = maxHR ?? (up.age > 0
+                ? StrainScorer.tanakaHRmax(age: up.age)
+                : nil)
+            return effectiveMaxHR.map { HRZones.zones(maxHR: $0) }
+        }()
         let now = Int(Date().timeIntervalSince1970)
         // Device wall-clock offset (seconds east of UTC) for the sleep detector's daytime
         // false-sleep guard (#90): the stager places each window's center on the LOCAL clock
@@ -952,12 +958,14 @@ final class IntelligenceEngine: ObservableObject {
         // the 5/MG cumulative @57 series + wrap-aware deltas + dropped deltas, replayed below tagged `.steps`.
         // The trace recomputes the SAME wrap-aware sum analyzeDay already did, so the steps total is unchanged.
         let stepsTraceActive = TestCentre.active(.steps)
-        let (scanned, skippedDayLines): ([DayScan], [String]) = await Task.detached(priority: .utility) {
+        let (scanned, skippedDayLines, activeZoneByDay):
+            ([DayScan], [String], [String: ActiveZoneMinutes]) = await Task.detached(priority: .utility) {
             var out: [DayScan] = []
             // Days skipped below (too few HR samples) never get a DayScan, so this diagnostic can't ride
             // along on one; carried out alongside `out` and replayed through `diagnosticSink` on the main
             // actor below, same as `rhrLine`/the trace arrays. Mirrors the Kotlin `diag` sink.
             var skippedDayLines: [String] = []
+            var activeZoneByDay: [String: ActiveZoneMinutes] = [:]
             // #938: the WHOOP 4.0 ADC offset is per-device, not per-night. Learn one anchor per owner
             // from the whole scan window and reuse it for every night so cross-night deviations survive.
             let skinAnchorScanFrom = nowLocalMidnight - (maxDays - 1) * 86_400 - 30 * 3_600
@@ -987,6 +995,26 @@ final class IntelligenceEngine: ObservableObject {
                                                        registry: registry, fallbackDeviceId: ownerFallbackId)
 
                 let hr = (try? await store.hrSamples(deviceId: owner, from: from, to: to, limit: 200_000)) ?? []
+                // Active Minutes is a calendar-day activity measure, not a sleep output. Read and summarize
+                // the day's HR before the overnight eligibility gate so a daytime workout still counts when
+                // the band was not worn to bed.
+                let dayMid = Self.midnightLocal(dayStart, offsetSec: tzOffset)
+                let dayEnd = dayMid + 86_400 - 1
+                let dayHr: [HRSample]
+                if let slice = AnalyticsEngine.daySliceFromNight(
+                    hr, nightLo: from, nightHi: to,
+                    dayLo: dayMid, dayHi: dayEnd, ts: { $0.ts }
+                ) {
+                    dayHr = slice
+                } else {
+                    dayHr = (try? await store.hrSamples(
+                        deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
+                }
+                if let activeZoneSet,
+                   let minutes = ActiveZoneMinutesCalculator.minutes(
+                    from: dayHr, zoneSet: activeZoneSet) {
+                    activeZoneByDay[day] = minutes
+                }
                 guard hr.count >= 200 else {
                     skippedDayLines.append("sleep day=\(day) SKIPPED hrSamples=\(hr.count) (need ≥200)")
                     continue
@@ -1040,33 +1068,8 @@ final class IntelligenceEngine: ObservableObject {
                 let wristEvents = (try? await store.events(deviceId: owner, from: from, to: to, limit: 50_000)) ?? []
                 let wristOff = AnalyticsEngine.offWristIntervals(events: wristEvents, windowEnd: to)
 
-                // Calendar-day window for the ADDITIVE daily totals (steps + calories). The night window
-                // above is anchored to the current time-of-day and ends at dayStart+12h, so for a PAST
-                // day whose late hours sit after that bound those hours are never read and the totals
-                // undercount. Read exactly [localMidnight(day), localMidnight(day)+86400) and hand it to
-                // analyzeDay's dayHr/daySteps, which use it ONLY for those totals. `dayStart` is already a
-                // LOCAL midnight; midnightLocal is idempotent on it (the store range is inclusive, so end
-                // at -1 s). (#277 , local-day bucketing.)
-                let dayMid = Self.midnightLocal(dayStart, offsetSec: tzOffset)
-                let dayEnd = dayMid + 86_400 - 1
-                // Same `owner` as the night window above (I2): the additive day totals must come from the
-                // one device that owns the day, never a mix.
-                // #997 (ryanbr): for a PAST day (20 of 21 in the default scan) the night window above reads
-                // through to nextMidnight, so the calendar day [dayMid, dayEnd] is a strict subset of the
-                // hr/steps/grav lists already in memory — derive the day streams by filtering them
-                // (AnalyticsEngine.daySliceFromNight) instead of a second store read (~60 redundant reads
-                // per pass, incl. the big HR ones). TODAY (its day runs past the 18 h night cap) and a
-                // night read that hit the 200_000 limit DECLINE (nil) and read directly, so the shortcut
-                // can only ever skip work, never change data. Byte-identical: same owner, same inclusive
-                // bounds, same ts-ASC order as the direct read. (`??` can't take an `await` right-hand
-                // side, hence the explicit if/else at each site.)
-                let dayHr: [HRSample]
-                if let slice = AnalyticsEngine.daySliceFromNight(hr, nightLo: from, nightHi: to,
-                                                                 dayLo: dayMid, dayHi: dayEnd, ts: { $0.ts }) {
-                    dayHr = slice
-                } else {
-                    dayHr = (try? await store.hrSamples(deviceId: owner, from: dayMid, to: dayEnd, limit: 200_000)) ?? []
-                }
+                // Calendar-day HR was loaded above for Active Minutes. Steps and gravity remain behind
+                // the overnight gate because they feed the existing daily/sleep scoring path.
                 let daySteps: [StepSample]
                 if let slice = AnalyticsEngine.daySliceFromNight(steps, nightLo: from, nightHi: to,
                                                                  dayLo: dayMid, dayHi: dayEnd, ts: { $0.ts }) {
@@ -1239,7 +1242,7 @@ final class IntelligenceEngine: ObservableObject {
                                    hrvDiag: hrvDiag,
                                    restRawEvidence: restRawEvidence))
             }
-            return (out, skippedDayLines)
+            return (out, skippedDayLines, activeZoneByDay)
         }.value
 
         // #714: replay each skipped day's diagnostic now that we're back on the main actor (diagnosticSink
@@ -1325,6 +1328,15 @@ final class IntelligenceEngine: ObservableObject {
         // Rest composite (0–100) per computed night, persisted as the `sleep_performance` metric
         // series so the dashboard's Rest score reflects the new composite, not raw efficiency.
         var restPoints: [MetricPoint] = []
+        // Gap-aware moderate/vigorous activity from the already-loaded full calendar-day HR stream.
+        // These small daily rows let every UI render a seven-day total without rescanning raw HR.
+        let activeZonePoints: [MetricPoint] = activeZoneByDay
+            .sorted(by: { $0.key < $1.key })
+            .flatMap { day, minutes in
+                ActiveZoneMinutesCalculator.seriesValues(minutes)
+                    .sorted(by: { $0.key < $1.key })
+                    .map { MetricPoint(day: day, key: $0.key, value: $0.value) }
+            }
         // User-corrected sleep windows override the detected sleep when scoring a day's sleep aggregates,
         // so Rest + recovery honor the edit , not just the Sleep tab's session view. An edited block
         // substitutes its detected twin (matched by the stable detected startTs) before totals recompute.
@@ -1705,6 +1717,21 @@ final class IntelligenceEngine: ObservableObject {
                 diagnosticSink?("Rest series reconciliation failed: \(error.localizedDescription)", nil)
             }
         }
+        var activeZonePersisted = false
+        if !activeZonePoints.isEmpty {
+            do {
+                _ = try await store.replaceMetricSeriesRange(
+                    activeZonePoints,
+                    deviceId: computedId,
+                    from: oldestDay,
+                    to: newestDay,
+                    managedKeys: ActiveZoneMinutesCalculator.managedSeriesKeys)
+                activeZonePersisted = true
+            } catch {
+                diagnosticSink?(
+                    "Active-minute series reconciliation failed: \(error.localizedDescription)", nil)
+            }
+        }
 
         // ── Fitness Age (Phase 2) , weekly, keyed to the week's Saturday ────────────────────────────
         // Roll the last 7 computed days into the Nes/HUNT inputs and upsert a weekly Fitness Age (+ an
@@ -2048,7 +2075,9 @@ final class IntelligenceEngine: ObservableObject {
         // Reload the dashboard caches so the freshly computed scores show up immediately. A heal-only
         // pass (#899 dedup deleted stale session rows but no daily changed) must refresh too, so the
         // Sleep tab stops showing the removed duplicates right away.
-        if !dailies.isEmpty || !healDropped.isEmpty { await repo.refresh() }
+        if !dailies.isEmpty || !healDropped.isEmpty || activeZonePersisted {
+            await repo.refresh()
+        }
 
         // #836: record the scoring-input fingerprint this run scored against, so a later NON-forced tick can
         // short-circuit while it's unchanged. Written ONLY here at the end of a completed run (never on an

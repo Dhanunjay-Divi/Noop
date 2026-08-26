@@ -77,6 +77,8 @@ public enum AnalyticsEngine {
         public let skinTempRelative: SkinTempRelative?
         /// Day strain / "Effort" [0,100] or nil (insufficient HR samples / invalid HRR).
         public let strain: Double?
+        /// Gap-aware moderate/vigorous activity observed in the calendar-day HR stream.
+        public let activeZoneMinutes: ActiveZoneMinutes?
         /// Rest composite [0,100] or nil (no in-bed data). This is the value the
         /// `sleep_performance` metric key carries (duration-vs-need 0.50 + efficiency
         /// 0.20 + restorative share 0.20 + consistency 0.10). The downstream metric-series
@@ -109,6 +111,7 @@ public enum AnalyticsEngine {
         public init(daily: DailyMetric, sleepSessions: [SleepSession],
                     cachedSleep: [CachedSleepSession], workouts: [ExerciseSession],
                     recovery: Double?, strain: Double?, nightlySkinTempC: Double? = nil,
+                    activeZoneMinutes: ActiveZoneMinutes? = nil,
                     restScore: Double? = nil,
                     chargeConfidence: ScoreConfidence = .calibrating,
                     effortConfidence: ScoreConfidence = .calibrating,
@@ -120,6 +123,7 @@ public enum AnalyticsEngine {
             self.daily = daily; self.sleepSessions = sleepSessions
             self.cachedSleep = cachedSleep; self.workouts = workouts
             self.recovery = recovery; self.strain = strain
+            self.activeZoneMinutes = activeZoneMinutes
             self.chargeDrivers = chargeDrivers
             self.skinTempRelative = skinTempRelative
             self.nightlySkinTempC = nightlySkinTempC
@@ -853,6 +857,12 @@ public enum AnalyticsEngine {
         let activeKcalEst: Double? = dayHrFiltered.isEmpty ? nil : Calories.estimateDayCalories(
             dayHrFiltered, profile: profile, hrmax: effMaxHR,
             restingHR: restingHRDaily.map(Double.init))
+        let activeZoneMinutes: ActiveZoneMinutes? = {
+            guard let maxHR = effMaxHR, maxHR.isFinite, maxHR > 0 else { return nil }
+            return ActiveZoneMinutesCalculator.minutes(
+                from: dayHrFiltered,
+                zoneSet: HRZones.zones(maxHR: maxHR))
+        }()
 
         // ── Assemble DailyMetric ──────────────────────────────────────────────
         let daily = DailyMetric(
@@ -938,6 +948,7 @@ public enum AnalyticsEngine {
         return DayResult(daily: daily, sleepSessions: matched, cachedSleep: cachedSleep,
                          workouts: workouts, recovery: recovery, strain: strain,
                          nightlySkinTempC: nightlySkinTempC,
+                         activeZoneMinutes: activeZoneMinutes,
                          restScore: restScore,
                          chargeConfidence: chargeConfidence,
                          effortConfidence: effortConfidence,
