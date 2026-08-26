@@ -59,10 +59,75 @@ surfaces* is good trademark hygiene, and I praised that change (`ac66de4b`) on i
 2. Deleting upstream *source attribution* from `NOTICE` while the derived code remains — not the same thing.
 3. Removing a deliberate distribution tripwire and replacing it with a self-declaration — a governance change.
 
-**What only you can answer:** was NOOP ever a fork or derivative of `ryanbr/noop` or
-`johnmiddleton12/my-whoop`? If yes, that lineage survives the removal of the line naming it. If those
-were only facts-only references and the expression is genuinely NOOP's, the removal is defensible and
-the declaration is the right mechanism.
+**RESOLVED 2026-08-26 — the owner confirms NOOP was never a fork of either repository, and the git
+evidence corroborates it.** This section stands as the audit trail; the conclusion has changed.
+
+| Check | Verdict |
+|---|---|
+| Root commit `ecaabdc0` (2026-06-07) | NOOP's own squashed import, 288 files. **No fork parent.** |
+| `mp3geek@gmail.com` (ryanbr / Fanboynz) commits | dated **2026-07-07 to 2026-07-23**, i.e. *after* the root |
+| Direction of contribution | **inbound to NOOP**, not NOOP forking outward |
+| `polyform-upstream-lineage` | **not substantiated** — removal was correct |
+
+So the fork premise was wrong, and deleting that check was defensible. The `my-whoop` mentions in 308
+commits are reference and comparison notes, consistent with the facts-only posture, not evidence of a fork.
+
+**`contributor-relicensing-rights` also holds up, on a clean timeline:**
+
+```
+2026-06-07  root commit
+2026-06-08  PolyForm Noncommercial 1.0.0 adopted  (838d919a)
+2026-07-07  first external contribution
+```
+
+`CONTRIBUTING.md:89` states inbound=outbound explicitly: *"By opening a pull request you agree your
+contribution is licensed under the same terms as the project."* Because PolyForm was already in force a
+month before the first external commit, **no relicensing event ever occurred** — the licence never
+changed from permissive to restrictive after contributions landed. There was nothing to relicense, so
+that blocker was guarding a risk that did not materialise.
+
+**I raised this as a critical finding and it did not survive contact with the evidence. The gate change
+was substantially justified on two of three counts.** Recording that plainly matters more than being
+seen to have been right.
+
+### FINDING 1b (the real risk, and it is forward-looking): PolyForm Noncommercial blocks your hardware launch
+
+The past is clean. The future is not, and this is the finding that actually threatens the product.
+
+- **24 distinct external authors** contributed beyond the owner's three accounts. Largest:
+  `mp3geek@gmail.com` **427 commits**, `schaedlich.max@gmail.com` 58, `ryan.borsix@gmail.com` 42,
+  `kavemang` 24, `vishk23` 21, `admin@tanarchy.org` 18, `pipiche38` 15, `rbrown@brave.com` 13.
+- They touched core code, not the periphery: `android/` (551 files), `Strand/` (286), `Packages/` (129).
+  `AppModel.swift` and `BLEManager.swift` each carry **9 distinct authors**.
+- **No CLA. Zero DCO sign-offs** across the entire history.
+- They licensed inbound under **PolyForm Noncommercial 1.0.0**, which permits noncommercial use only.
+
+**Consequence:** each of those 24 retains copyright in their contribution, licensed to the project for
+noncommercial use. Inbound=outbound gives NOOP the right to *use* it; it does **not** assign ownership and
+does **not** grant commercial rights. Selling a Noop Band, or shipping a paid app, is commercial use.
+
+**On the declaration's own wording this is a genuine gap.** It states the owner *"owns or controls all
+NOOP-controlled source and contribution rights"* and authorises distribution under PolyForm
+Noncommercial. That is accurate for noncommercial distribution. It does not establish the commercial
+rights a hardware launch requires, and the declaration does not claim to.
+
+**What to do, in order:**
+1. **Decide the commercial model now, before launch.** If NOOP ships commercially, the current licence
+   does not permit it for the 24 contributors' code.
+2. **Get a CLA or explicit relicensing consent** from the significant contributors, `mp3geek@gmail.com`
+   above all at 427 commits. Retroactive consent is normal and usually granted, but it takes time and
+   cannot be done after shipping.
+3. **Or isolate and replace** their contributions, which given `AppModel.swift` and `BLEManager.swift`
+   authorship is a large undertaking.
+4. **Add a DCO or CLA gate to CI now** so this does not keep accruing with every new contribution.
+5. Independently of contributors, `unlicensed-whoop4-expression` remains partly open: rewrite
+   `DeviceFamily.swift:245` so the CRC32 trailer is not "transcribed verbatim", or attribute it honestly.
+6. Have the declaration **signed by the owner**, not authored by an agent on the owner's behalf, and
+   consider renaming the `OpenWhoop` storage directory with a migration.
+
+This needs a real lawyer, not a gate script. But the specific question to bring them is now precise:
+*can we commercialise a PolyForm-Noncommercial codebase with 24 uncontracted contributors, and what
+consent do we need?*
 
 **Recommendation.** I am not counsel and this is the one item in the repo that no test can settle. Before
 distributing: (a) get an actual legal opinion on the fork-lineage question, (b) either rewrite
