@@ -161,6 +161,11 @@ struct LiquidTodayView: View {
     /// the other caches. It composes `TodayView.lastScoredRecoveryDay`, which is O(days) — exactly the scan
     /// this cache exists to keep out of body. Never resolved in body.
     @State private var cachedChargeDisplay: ChargeDisplay = .noData
+    /// Fire the score-arrival cue once per logical day, only when today's own Charge resolves. Persisting
+    /// the delivered day prevents tab/view reconstruction from replaying it; carried and historical scores
+    /// keep their existing day-navigation selection tick instead of producing a second impact.
+    @AppStorage("liquidToday.chargeLandingHapticDay") private var chargeLandingHapticDay = ""
+    @State private var chargeLandingHapticTrigger = 0
     /// Flips true once the first load() completes. Until then the hero gauges + sky render STATIC so the
     /// launch data-churn (refresh publish + BLE/HR notifies) isn't fighting 4 live canvases + CoreMotion.
     @State private var dataLoaded = false
@@ -330,6 +335,13 @@ struct LiquidTodayView: View {
     private static let keyMetricsAnchorID = "liquidToday.keyMetrics"
 
     var body: some View {
+        liquidBody
+            // A neutral one-shot cue means "today's number has arrived." Historical-day changes already
+            // have a selection tick, and a carried prior-night value is not a newly resolved Charge.
+            .strandHaptic(.light, trigger: chargeLandingHapticTrigger)
+    }
+
+    private var liquidBody: some View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 0) {
@@ -2606,7 +2618,7 @@ struct LiquidTodayView: View {
                                                before: tkey,
                                                hasRecovery: day?.recovery != nil)
             : nil
-        cachedChargeDisplay = ChargeDisplay.resolve(
+        let resolvedChargeDisplay = ChargeDisplay.resolve(
             todayRecovery: day?.recovery,
             priorScored: TodayView.lastScoredRecoveryDay(days: repo.days, selectedDayKey: tkey,
                                                          isToday: selectedDayOffset == 0,
@@ -2614,6 +2626,13 @@ struct LiquidTodayView: View {
                                                          isCalibrating: calNights != nil),
             calibrationNights: calNights,
             todayKey: tkey)
+        cachedChargeDisplay = resolvedChargeDisplay
+        if selectedDayOffset == 0,
+           case .scored = resolvedChargeDisplay,
+           chargeLandingHapticDay != tkey {
+            chargeLandingHapticDay = tkey
+            chargeLandingHapticTrigger += 1
+        }
 
         let cal = Calendar.current
         let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: selectedDayKey, calendar: cal)
