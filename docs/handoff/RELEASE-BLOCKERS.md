@@ -1,7 +1,13 @@
 # Release blockers and production readiness
 
 **Assessed:** 2026-08-25
-**Source-rights status:** cleared by the NOOP owner declaration
+**Source-rights status:** **NOT cleared.** The owner declaration does not settle it. This repository's
+root commit `ecaabdc0` is present under the same SHA in the public `ryanbr/noop`, whose origin
+`muftiarfan/noop` carries **no licence at all** (76 stars, 1,046 forks, actively pushed). Absent a
+licence, all rights are reserved, so no downstream licence choice can grant what upstream never did.
+`Tools/provenance_ratchet.py` measures the residue: **38,829 lines across 212 files, 6.9% of the tree.**
+See `docs/validation/AGENT-REVIEW-AND-COMPETITIVE-GAPS.md` finding 1c. **This is now P0 gate 0 and it
+precedes every gate below.**
 **Product verdict:** not yet production-ready
 
 NOOP's project license and runtime dependency notices are internally
