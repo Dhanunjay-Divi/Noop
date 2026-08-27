@@ -59,6 +59,16 @@ class FramingTest {
         assertEquals(0x57, battery?.percent)   // 87%
     }
 
+    @Test
+    fun testParseSyncTimeResponse() {
+        val frame = OuraFraming.parseOuterFrame(bytes("13057856341200"))
+        assertEquals(OuraFraming.syncTimeResponseOp, frame?.op)
+        val response = OuraFraming.parseSyncTimeResponse(frame!!.body)
+        assertEquals(0x1234_5678L, response?.deviceTimestamp)
+        assertEquals(0, response?.status)
+        assertNull(OuraFraming.parseSyncTimeResponse(intArrayOf(1, 2, 3, 4)))
+    }
+
     // MARK: - GetEvents response (0x11, s5.2)
 
     @Test

@@ -113,6 +113,32 @@ public enum OuraStreamMapping {
         return out
     }
 
+    /// Fold timestamped event groups into one transaction-sized `Streams` value while preserving each
+    /// row's own timestamp and arrival order. A reconstructed full-night hypnogram can contain roughly
+    /// 960 30-second stages; persisting those as 960 separate transactions can outlive the history cursor
+    /// barrier. This keeps all rows distinct but lets the store commit them together.
+    public static func mergedStreams(
+        from batches: [(events: [OuraEvent], ts: Int)]
+    ) -> Streams {
+        var merged = Streams()
+        for batch in batches {
+            let next = streams(from: batch.events, at: batch.ts)
+            merged.hr.append(contentsOf: next.hr)
+            merged.rr.append(contentsOf: next.rr)
+            merged.spo2.append(contentsOf: next.spo2)
+            merged.skinTemp.append(contentsOf: next.skinTemp)
+            merged.resp.append(contentsOf: next.resp)
+            merged.gravity.append(contentsOf: next.gravity)
+            merged.steps.append(contentsOf: next.steps)
+            merged.sleepState.append(contentsOf: next.sleepState)
+            merged.ppgHr.append(contentsOf: next.ppgHr)
+            merged.ppgWaveform.append(contentsOf: next.ppgWaveform)
+            merged.events.append(contentsOf: next.events)
+            merged.battery.append(contentsOf: next.battery)
+        }
+        return merged
+    }
+
     /// Group already-stamped events into one insert per timestamp while preserving arrival order.
     /// StreamStore's R-R `ord` counter is batch-local, so per-beat inserts would reset it to zero.
     public static func batched(_ stamped: [(event: OuraEvent, ts: Int)])

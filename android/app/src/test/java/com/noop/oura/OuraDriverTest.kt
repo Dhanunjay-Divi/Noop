@@ -192,12 +192,12 @@ class OuraDriverTest {
             start[1].bytes,
         )
 
-        // More data -> ack-fetch (max 0) at the advanced cursor.
-        val ack = d.nextStep(OuraTransition.HistoryCursorAdvanced(cursor = 0x12345678L, moreData = true))
-        assertEquals(1, ack.size)
+        // More data -> fetch the next bounded batch. max=0 re-serves this window on hardware.
+        val next = d.nextStep(OuraTransition.HistoryCursorAdvanced(cursor = 0x12345678L, moreData = true))
+        assertEquals(1, next.size)
         assertArrayEquals(
-            intArrayOf(0x10, 0x09, 0x78, 0x56, 0x34, 0x12, 0x00, 0xFF, 0xFF, 0xFF, 0xFF),
-            ack[0].bytes,
+            intArrayOf(0x10, 0x09, 0x78, 0x56, 0x34, 0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF),
+            next[0].bytes,
         )
 
         // No more -> back to streaming.
@@ -669,13 +669,42 @@ class OuraDriverTest {
     }
 
     @Test
-    fun testSyncTimeCommandCounter() {
-        // counter = floor(unix / 256). For unix = 256 -> counter 1 -> bytes 01 00 00, trailer 0xF6.
+    fun testSyncTimeCommandCarriesUnixSecondsAndTimezone() {
         val cmd = OuraCommands.syncTime(unixSeconds = 256L)
         assertArrayEquals(
-            intArrayOf(0x12, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF6),
+            intArrayOf(0x12, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
             cmd.bytes,
         )
+        assertArrayEquals(
+            intArrayOf(0x12, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFD),
+            OuraCommands.syncTime(unixSeconds = 1L, tzHalfHours = -3).bytes,
+        )
+    }
+
+    @Test
+    fun testLiveHRTeardownUsesOffAndUnsubscribe() {
+        assertArrayEquals(intArrayOf(0x2F, 0x03, 0x22, 0x02, 0x00), OuraCommands.liveHRDisable().bytes)
+        assertArrayEquals(intArrayOf(0x2F, 0x03, 0x26, 0x02, 0x00), OuraCommands.liveHRUnsubscribe().bytes)
+    }
+
+    @Test
+    fun testSyncTimeAnchorCandidateIsConservative() {
+        assertEquals(1_000_100L, OuraDriver.syncTimeAnchorCandidate(1_000_100L, 1_000_000L))
+        assertEquals(1_000_100L, OuraDriver.syncTimeAnchorCandidate(100_010L, 1_000_000L))
+        assertNull(OuraDriver.syncTimeAnchorCandidate(100_000L, 100_000L))
+        assertNull(OuraDriver.syncTimeAnchorCandidate(1_000L, 0L))
+    }
+
+    @Test
+    fun testAdoptSyncTimeAnchorConvertsRingTicks() {
+        val now = 1_800_000_000L
+        val d = OuraDriver(
+            ringGen = OuraRingGen.GEN3,
+            authKey = key,
+            nowMsProvider = { now * 1000L },
+        )
+        assertTrue(d.adoptSyncTimeAnchor(ringTimestamp = 50_000L, unixSeconds = now))
+        assertEquals(now - 10L, d.unixSeconds(forRingTimestamp = 49_900L))
     }
 
     // MARK: - Dangerous commands are isolated and labelled

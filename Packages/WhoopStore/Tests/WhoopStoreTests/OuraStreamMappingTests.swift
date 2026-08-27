@@ -31,6 +31,19 @@ final class OuraStreamMappingTests: XCTestCase {
         XCTAssertTrue(s.hr.isEmpty)
     }
 
+    func testBankedIBIMaterializationReachesHRAndRRStreams() {
+        let history: [OuraEvent] = [
+            .ibi(OuraIBI(ringTimestamp: 100, ibiMs: 1_000)),
+            .ibi(OuraIBI(ringTimestamp: 100, ibiMs: 1_020)),
+        ]
+        let events = OuraIbiHr.appendingDerivedHR(toHistoryEvents: history)
+        let streams = OuraStreamMapping.streams(from: events, at: ts)
+
+        XCTAssertEqual(streams.hr.map(\.bpm), [59])
+        XCTAssertEqual(streams.hr.map(\.ts), [ts])
+        XCTAssertEqual(streams.rr.map(\.rrMs), [1_000, 1_020])
+    }
+
     // MARK: - HRV 0x5D -> events[OURA_HRV] with validated HR/RMSSD units
 
     func testHRVMapsToEventWithHrAndRmssd() {
@@ -124,6 +137,25 @@ final class OuraStreamMappingTests: XCTestCase {
         XCTAssertEqual(s.events.count, 1)
         XCTAssertEqual(s.events[0].payload["phase"], .int(OuraSleepStage.light.rawValue))
         XCTAssertEqual(s.events[0].payload["index"], .int(1))
+    }
+
+    func testFullNightHypnogramMergesIntoOneTransactionSizedStream() {
+        let stages = (0..<960).map { index in
+            (
+                events: [OuraEvent.sleepPhase(OuraSleepPhase(
+                    ringTimestamp: 100,
+                    index: index,
+                    stage: index.isMultiple(of: 2) ? .light : .deep
+                ))],
+                ts: ts + index * 30
+            )
+        }
+        let streams = OuraStreamMapping.mergedStreams(from: stages)
+
+        XCTAssertEqual(streams.events.count, 960)
+        XCTAssertEqual(Set(streams.events.map(\.ts)).count, 960)
+        XCTAssertEqual(streams.events.first?.ts, ts)
+        XCTAssertEqual(streams.events.last?.ts, ts + 959 * 30)
     }
 
     // MARK: - Battery -> battery:[BatterySample]

@@ -627,11 +627,12 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         let generation = gate.begin()
         XCTAssertTrue(gate.register(generation: generation))
         XCTAssertNil(gate.requestFinish(drainCompleted: true))
-        XCTAssertTrue(gate.shouldStartTimeout)
+        XCTAssertFalse(gate.shouldStartTimeout)
 
         let result = gate.completeWrite(generation: generation, succeeded: true)
         XCTAssertTrue(result.accepted)
-        XCTAssertEqual(result.resolution, .init(drainCompleted: true, allWritesSucceeded: true))
+        XCTAssertNil(result.resolution)
+        XCTAssertEqual(gate.seal(), .init(drainCompleted: true, allWritesSucceeded: true))
     }
 
     func testOneFailureBlocksWholeOutOfOrderDrain() {
@@ -642,8 +643,9 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         XCTAssertNil(gate.requestFinish(drainCompleted: true))
 
         XCTAssertNil(gate.completeWrite(generation: generation, succeeded: true).resolution)
+        XCTAssertNil(gate.completeWrite(generation: generation, succeeded: false).resolution)
         XCTAssertEqual(
-            gate.completeWrite(generation: generation, succeeded: false).resolution,
+            gate.seal(),
             .init(drainCompleted: true, allWritesSucceeded: false)
         )
     }
@@ -653,8 +655,9 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         let generation = gate.begin()
         XCTAssertTrue(gate.register(generation: generation))
         XCTAssertNil(gate.requestFinish(drainCompleted: false))
+        XCTAssertNil(gate.completeWrite(generation: generation, succeeded: true).resolution)
         XCTAssertEqual(
-            gate.completeWrite(generation: generation, succeeded: true).resolution,
+            gate.seal(),
             .init(drainCompleted: false, allWritesSucceeded: true)
         )
     }
@@ -673,8 +676,9 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         XCTAssertEqual(gate.pendingWriteCount, 1)
         XCTAssertFalse(gate.sawWriteFailure)
 
+        XCTAssertNil(gate.completeWrite(generation: currentGeneration, succeeded: true).resolution)
         XCTAssertEqual(
-            gate.completeWrite(generation: currentGeneration, succeeded: true).resolution,
+            gate.seal(),
             .init(drainCompleted: true, allWritesSucceeded: true)
         )
     }
@@ -684,12 +688,29 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         let generation = gate.begin()
         XCTAssertTrue(gate.register(generation: generation))
         XCTAssertNil(gate.requestFinish(drainCompleted: true))
+        XCTAssertNil(gate.seal())
+        XCTAssertTrue(gate.shouldStartTimeout)
         XCTAssertTrue(gate.timeOut(generation: generation))
         XCTAssertFalse(gate.isActive)
 
         let late = gate.completeWrite(generation: generation, succeeded: true)
         XCTAssertFalse(late.accepted)
         XCTAssertNil(late.resolution)
+    }
+
+    func testLateWriteAfterSummaryJoinsBeforeRequestBoundary() {
+        var gate = OuraHistoryPersistenceGate()
+        let generation = gate.begin()
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.requestFinish(drainCompleted: true))
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.seal())
+
+        XCTAssertNil(gate.completeWrite(generation: generation, succeeded: true).resolution)
+        XCTAssertEqual(
+            gate.completeWrite(generation: generation, succeeded: true).resolution,
+            .init(drainCompleted: true, allWritesSucceeded: true)
+        )
     }
 
     func testPendingHypnogramKeepsOldGenerationAcrossNewDrain() {
@@ -712,5 +733,83 @@ final class OuraHistoryPersistenceGateTests: XCTestCase {
         XCTAssertFalse(gate.register(generation: staleReceipt?.historyGeneration ?? 0))
         XCTAssertEqual(receipts.pendingReceipt?.historyGeneration, newGeneration)
         XCTAssertEqual(gate.pendingWriteCount, 0)
+    }
+}
+
+final class OuraCommandWriteQueueTests: XCTestCase {
+    func testCommandsRemainSingleFileUntilPacingCompletes() {
+        var queue = OuraCommandWriteQueue()
+        let first = OuraCommands.getBattery()
+        let second = OuraCommands.getProductHardware()
+        queue.enqueue([first, second])
+
+        XCTAssertEqual(queue.beginNext(), first)
+        XCTAssertNil(queue.beginNext(), "a second no-response write must wait for the active pacing slot")
+        XCTAssertEqual(queue.completeActive(), first)
+        XCTAssertEqual(queue.beginNext(), second)
+        XCTAssertEqual(queue.completeActive(), second)
+        XCTAssertTrue(queue.isDrained)
+    }
+
+    func testTeardownPreservesActiveWriteAndReplacesBackgroundQueue() {
+        var queue = OuraCommandWriteQueue()
+        let active = OuraCommands.getBattery()
+        let staleBackground = OuraCommands.getProductHardware()
+        let disable = OuraCommands.liveHRDisable()
+        let unsubscribe = OuraCommands.liveHRUnsubscribe()
+        queue.enqueue([active, staleBackground])
+        XCTAssertEqual(queue.beginNext(), active)
+
+        queue.replacePendingForTeardown(with: [disable, unsubscribe])
+        XCTAssertEqual(queue.completeActive(), active)
+        XCTAssertEqual(queue.beginNext(), disable)
+        XCTAssertEqual(queue.completeActive(), disable)
+        XCTAssertEqual(queue.beginNext(), unsubscribe)
+        XCTAssertEqual(queue.completeActive(), unsubscribe)
+        XCTAssertTrue(queue.isDrained)
+    }
+
+    func testHistoryNeverPublishesIntoLiveState() {
+        XCTAssertTrue(OuraLivePublication.permits(historyEnvelope: false))
+        XCTAssertFalse(OuraLivePublication.permits(historyEnvelope: true))
+        XCTAssertTrue(
+            OuraLivePublication.requiresLiveHRShutdown(
+                reachedStreaming: false,
+                driverPhase: .enablingLiveHR
+            )
+        )
+        XCTAssertFalse(
+            OuraLivePublication.requiresLiveHRShutdown(
+                reachedStreaming: false,
+                driverPhase: .authenticating
+            )
+        )
+        XCTAssertTrue(
+            OuraLivePublication.permitsCurrentState(
+                historyEnvelope: true,
+                eventUnixSeconds: 1_010,
+                now: 1_000
+            )
+        )
+        XCTAssertFalse(
+            OuraLivePublication.permitsCurrentState(
+                historyEnvelope: true,
+                eventUnixSeconds: 800,
+                now: 1_000
+            )
+        )
+        XCTAssertNil(
+            OuraPendingAnchorPolicy.fallbackTimestamp(
+                historyEnvelope: true,
+                liveArrivalTimestamp: 123
+            )
+        )
+        XCTAssertEqual(
+            OuraPendingAnchorPolicy.fallbackTimestamp(
+                historyEnvelope: false,
+                liveArrivalTimestamp: 123
+            ),
+            123
+        )
     }
 }

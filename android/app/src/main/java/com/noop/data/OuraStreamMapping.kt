@@ -142,6 +142,25 @@ object OuraStreamMapping {
         return out
     }
 
+    /**
+     * Fold timestamped event groups into one transaction-sized [Streams] value. Each event keeps the
+     * supplied batch timestamp, but a full-night hypnogram no longer requires one Room transaction per
+     * 30-second stage.
+     */
+    fun mergedStreams(batches: List<Pair<List<OuraEvent>, Int>>): Streams {
+        val merged = Streams()
+        for ((events, ts) in batches) {
+            val next = streams(events) { ts }
+            merged.hr.addAll(next.hr)
+            merged.rr.addAll(next.rr)
+            merged.events.addAll(next.events)
+            merged.battery.addAll(next.battery)
+            merged.spo2.addAll(next.spo2)
+            merged.skinTemp.addAll(next.skinTemp)
+        }
+        return merged
+    }
+
     /** Group stamped events by second while retaining first-timestamp and event arrival order. */
     fun batched(stamped: List<Pair<OuraEvent, Int>>): List<Pair<Int, List<OuraEvent>>> {
         val byTs = LinkedHashMap<Int, MutableList<OuraEvent>>()

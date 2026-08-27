@@ -1,7 +1,8 @@
 # NOOP - Oura Ring BLE Protocol Specification (Clean-Room)
 
 **Status:** Internal decoder foundation, v0.1 (2026-06-29)
-**Scope:** Oura Ring Gen 3 (Horizon), Gen 4, Gen 5. Foundation for NOOP's own Swift (`StrandiOSShared` / `Strand`) and Kotlin decoders.
+**Last implementation review:** 2026-08-27
+**Scope:** Oura Ring Gen 3 (Horizon), Gen 4, Gen 5. Gen 3 transport has physical-device evidence; Gen 4/5 remain software-compatible experimental paths pending representative hardware validation. Foundation for NOOP's own Swift (`StrandiOSShared` / `Strand`) and Kotlin decoders.
 **Authorship:** This is NOOP's own original specification. Every protocol *fact* (UUID, opcode, byte layout, tag value) is cited to a reverse-engineering reference read for facts only. No source code was copied from any RE repo. NOOP decodes raw signals plus the ring's own HRV/sleep tags and runs NOOP's own scoring; NOOP never touches Oura's encrypted PyTorch scores.
 
 **Citation keys used below:**
@@ -235,7 +236,8 @@ Gen 5 example `0912 020100 020103 010001 090329 665544332211`. [open_oura-r5]
 ```
 [open_ring][ringverse]
 - `ringTimestamp` - cursor; ring streams records with `rt > cursor`. `0x00000000` = full dump. [open_ring]
-- `max_events` - up to 255 records to fetch; `0x00` = ack-only (advance cursor without data). [open_ring]
+- `max_events` - up to 255 records to fetch. NOOP uses `0xFF`; `0x00` re-serves the current hardware
+  window and is not an acknowledgement. [open_oura]
 - `flags` - phone sends `0xFFFFFFFF`. [open_ring][open_oura-r3]
 - Canonical example: `10 09 00 00 00 00 08 ff ff ff ff` (cursor 0, max 8). [open_oura-r3]
 
@@ -258,17 +260,26 @@ Gen 5 example `0912 020100 020103 010001 090329 665544332211`. [open_oura-r5]
 1. SyncTime (§5.4). 2. Optionally flush flash-buffered events with `28 01 00`. 3. Send `0x10` with the
 sanitized durable cursor and `max=255`. 4. Receive inner TLV records (§6) and the `0x11` early summary.
 5. After 1.5 seconds of record silence, if `bytes_left > 0` and the batch made strict timestamp progress,
-send the ack-fetch (`max=0`) from `max_seen_ring_timestamp + 1`; repeat. 6. If `bytes_left == 0`, finish
-after the same quiet window and commit only the newest stored, anchor-resolved ring timestamp. A flat
-`bytes_left` sequence, empty/non-advancing batch or five-minute deadline stops safely without inventing a
-cursor. [open_oura][open_ring]
+send another bounded fetch (`max=255`) from `max_seen_ring_timestamp + 1`; repeat. 6. If `bytes_left == 0`,
+flush the short final batch and request completion after the same quiet window, but keep the request's
+transport generation open for a delayed TLV. 7. At the next real GetEvents request boundary, seal that
+generation and commit only after every associated stream write and reconstructed sleep-session upsert
+succeeds. Any failed write, timeout, disconnect, stale callback, or unresolved time anchor leaves the
+durable cursor behind for an idempotent retry. Unresolved history is omitted rather than stamped at
+sync-arrival time. A flat `bytes_left` sequence, empty/non-advancing batch, or five-minute deadline stops
+safely without inventing a cursor. [open_oura][open_ring]
 
 ### 5.4 SyncTime (`0x12`)
 ```
-12 09 <token:1> <counter:3 LE> 00 00 00 00 f6
+12 09 <unix_seconds:8 LE> <tz_half_hours:i8>
 ```
-where `counter = floor(unix_seconds / 256)`, trailer `0xf6` fixed. [open_ring]
-Response: `13 05 <ack> <counter_echo:3 LE> 00`. [open_ring]
+`unix_seconds` is host UTC. The signed timezone byte is measured in half-hours; NOOP sends zero because
+local-calendar grouping happens downstream. This layout is hardware-validated; the older token/counter
+layout did not produce a usable anchor.
+
+Response: `13 05 <device_timestamp:4 LE> <status:1>`. The timestamp may be raw 100 ms ticks or seconds;
+NOOP accepts exactly one interpretation near the durable cursor and otherwise waits for a `0x42`/`0x85`
+anchor rather than guessing.
 
 ### 5.5 Ring-time → UTC anchoring
 - The ring clock is in **ticks**: default **100 ms/tick** (10 Hz); burst mode **1 ms/tick** (`factor_flag=1`). [open_ring]
@@ -292,7 +303,9 @@ Three writes to `…0002`, each gated on its ACK; daytime-HR feature id = `0x02`
 - **`bpm = round(60000 / ibi_ms)`** [relue]
 - Example `[08,09] = 01 04` → `ibi = 1025 ms` → ≈ 59 BPM. [relue]
 
-**Disable:** `2f 03 22 02 01` → ACK `2f 03 23 02 00`. Stream stops on ACK. [relue][open_oura-r3]
+**Disable and unsubscribe:** `2f 03 22 02 00` → ACK `2f 03 23 02 00`, then
+`2f 03 26 02 00` → ACK `2f 03 27 02 00`. Mode `0x00` is off; `0x01` is automatic sampling, so it must
+not be used as a disable command.
 
 > Behaviour caveat: [open_oura-r3] reports that on its Ring-3 unit, realtime `0x06`-based enabling ACK'd but emitted no stream within 60–90 s, whereas the `0x2F`/feature-`0x02` path above produced ~1 Hz IBI. **NOOP must use the feature-`0x02` (`0x2F`) path, not `0x06`,** and treat absence of `0x28` pushes within ~10 s as "not streaming → retry/reseat."
 
@@ -340,29 +353,33 @@ placing the high byte in the LOW bits — a bit-order error (real-capture within
 high-byte-first layout with the `quality == 1` gate yields a clean beat train (45 ms jitter) and keeps more
 good beats. Matches `open_oura`'s `parse_api_green_ibi_quality_event`. (Same class of fix as `0x60`, §6.1.)
 
-**IBI → HR (NOOP research, Tier-B):** each accepted sample is a per-beat interval, so an instantaneous HR
-follows as `60000 / IBI_ms`. open_oura feeds this record's per-minute HR (`hr_bpm`) into its activity
-classifier (`oura-cli/src/activity_model.rs`, alongside `met`←`0x50`, motion←`0x47`, temp←`0x46`) — i.e. HR
-comes from THIS record, not from the `0x50` MET record. NOOP already decodes these IBIs for HRV; a diagnostic
-sidecar (`oura-ibihr-<id>.jsonl`, records tagged by source event `0x80`/`0x60`/`0x6E`/`0x44`) also
-reconstructs an HR history from the banked stream for offline study — NEVER scored. **Result (2026-07-16,
-first full overnight):** the earlier "sparse + ~15 % impossible-HR" daytime reading was largely the DECODE
-BUG above (wrong bit layout), not a ring limitation. With the corrected layout, one full night decoded to
-**94 % minute coverage, ~10 % beat-to-beat artifact, a clean ~56 bpm resting level with a real nocturnal dip
-that tracks the reconstructed hypnogram** — i.e. usable as an overnight HR/HRV source. Daytime/activity is
-sparser (~43 % coverage — wrist motion thins the banked beats) but the surviving beats are clean and HR
-tracks effort (rest ≈ 59 → moderate ≈ 100 bpm). Still Tier-B, never scored; promotion to
-`restingHr`/`avgHrv` is gated on multi-night validation against a reference. [open_oura-act]
+**IBI → historical HR (production history lane):** each accepted sample is a per-beat interval, so HR
+follows as `60000 / IBI_ms`. open_oura feeds this record's HR into its activity classifier
+(`oura-cli/src/activity_model.rs`, alongside `met`←`0x50`, motion←`0x47`, temp←`0x46`) — i.e. HR comes
+from this record, not from the `0x50` MET record. NOOP groups accepted IBIs by event-envelope ring time,
+takes the median physiological interval for that record, and materializes one HR row with
+`round(60000 / median_ibi)`. Invalid intervals and implausible rates are omitted, never clamped. The derived
+HR row and original R-R rows share one anchored persistence batch and one cursor barrier. This runs only
+for banked history; a live push already carries HR, and an unanchored record never receives a fabricated
+wall-clock timestamp.
+
+**Evidence (2026-07-16, first full overnight):** the earlier "sparse + ~15 % impossible-HR" daytime reading
+was largely the decode bug above, not a ring limitation. With the corrected layout, one full night decoded
+to **94 % minute coverage, ~10 % beat-to-beat artifact, a clean ~56 bpm resting level with a real nocturnal
+dip that tracks the reconstructed hypnogram**. Daytime/activity is sparser (~43 % coverage because wrist
+motion thins the banked beats), but the surviving beats track effort (rest ≈ 59 → moderate ≈ 100 bpm).
+This evidence supports conservative history materialization on the physically exercised Gen 3 path; it
+does not validate Gen 4/5, guarantee nightly coverage, or turn the `0x50` activity/MET lane into a scored
+signal. [open_oura-act]
 
 **Caveats (2026-07-20):** two things bound "usable overnight HR". (a) It is CONDITIONAL on the ring being
 worn — a night on the charger still banks a hypnogram + skin-temp but essentially no IBIs (the whole
 banked window sits inside a `"chg. detected"`→`"chg. stopped"` interval, §6.15), so overnight HR exists
 only on worn nights. (b) A banked IBI must be persisted at its OWN anchored ring-time
 (`unixSeconds(forRingTimestamp:)`), never the drain-arrival wall-clock: because a night is drained the next
-day, stamping the beat at arrival misfiles every overnight beat to the daytime sync moment — the deep-night
-hours (00–06 local) come out empty while the sync hour piles up an implausible density. So the `oura-ibihr`
-sidecar (anchored correctly) is right, but the datastore's `rrInterval` is not, until `.ibi` is anchored
-like its sibling banked streams (`.hrv`/`.temp`/`.spo2`/`.sleepPhase`) — the fix in PR #677 (pending merge).
+day, stamping the beat at arrival misfiles every overnight beat to the daytime sync moment. Production now
+anchors IBI, derived HR, HRV, temperature, SpO2, and sleep-phase history consistently; if no trustworthy
+anchor exists, the rows are omitted and the resume cursor remains behind for retry.
 
 ### 6.5 SpO2 per-sample - `0x6F` `spo2_event` (5–18 B, 1 s spacing)
 - Byte 6: bits `[7:4]` = SpO2 base (<<7); bits `[3:0]` = status flag. [ringverse]

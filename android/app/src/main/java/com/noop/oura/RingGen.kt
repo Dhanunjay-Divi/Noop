@@ -83,12 +83,32 @@ enum class OuraRingGen(val raw: String) {
          */
         fun recognise(advertisedName: String?): OuraRingGen? {
             val name = advertisedName?.lowercase() ?: return null
-            // Only treat as an Oura ring at all if the name carries the brand token.
             if (!name.contains("oura") && !name.contains("ring")) return null
-            if (name.contains("5")) return GEN5
-            if (name.contains("4")) return GEN4
-            if (name.contains("3") || name.contains("horizon")) return GEN3
-            return null
+            if (name.contains("horizon")) return GEN3
+
+            fun generation(after: String): OuraRingGen? {
+                val index = name.indexOf(after)
+                if (index < 0) return null
+                return when (name.drop(index + after.length).trimStart().firstOrNull()) {
+                    '3' -> GEN3
+                    '4' -> GEN4
+                    '5' -> GEN5
+                    else -> null
+                }
+            }
+            return generation("gen") ?: generation("ring")
+        }
+
+        /** Generation reported by GetProductInfo hardware identity. */
+        fun fromHardwareId(hardwareId: String): OuraRingGen? {
+            val underscore = hardwareId.lastIndexOf('_')
+            if (underscore < 0) return null
+            return when (hardwareId.substring(underscore + 1).takeWhile(Char::isDigit).toIntOrNull()) {
+                3 -> GEN3
+                4 -> GEN4
+                5 -> GEN5
+                else -> null
+            }
         }
 
         /**

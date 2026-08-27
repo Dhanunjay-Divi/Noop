@@ -57,21 +57,21 @@ public enum OuraCommands {
 
     // MARK: - Time sync
 
-    /// SyncTime: `12 09 <token:1> <counter:3 LE> 00 00 00 00 f6` where counter = floor(unix_s / 256)
-    /// and the trailer 0xf6 is fixed. Per OURA_PROTOCOL.md s5.4. `token` defaults to 0.
-    public static func syncTime(unixSeconds: Int, token: UInt8 = 0x00) -> OuraCommand {
-        let counter = unixSeconds / 256
-        let c0 = UInt8(counter & 0xFF)
-        let c1 = UInt8((counter >> 8) & 0xFF)
-        let c2 = UInt8((counter >> 16) & 0xFF)
-        return OuraCommand(label: "sync_time",
-                           bytes: [0x12, 0x09, token, c0, c1, c2, 0x00, 0x00, 0x00, 0x00, 0xF6])
+    /// SyncTime: `12 09 <unix seconds:u64 LE> <timezone:i8 half-hours>`.
+    ///
+    /// This is the hardware-validated layout that causes the ring to publish a usable clock anchor.
+    /// `tzHalfHours` defaults to UTC because NOOP applies the user's local calendar downstream.
+    public static func syncTime(unixSeconds: Int, tzHalfHours: Int8 = 0) -> OuraCommand {
+        let seconds = UInt64(bitPattern: Int64(unixSeconds))
+        var body = (0..<8).map { UInt8((seconds >> (UInt64($0) * 8)) & 0xFF) }
+        body.append(UInt8(bitPattern: tzHalfHours))
+        return OuraCommand(label: "sync_time", bytes: [0x12, UInt8(body.count)] + body)
     }
 
     // MARK: - Event fetch (cursor)
 
     /// GetEvents request: `10 09 <ringTimestamp:4 LE> <max:1> <flags:4 LE>`. cursor 0 = full dump;
-    /// max 0 = ack-only (advance cursor without data); flags = 0xFFFFFFFF. Per OURA_PROTOCOL.md s5.1.
+    /// max 1...255 bounds returned events; max 0 is not used because hardware re-serves the window.
     public static func getEvents(cursor: UInt32, maxEvents: UInt8) -> OuraCommand {
         let c0 = UInt8(cursor & 0xFF)
         let c1 = UInt8((cursor >> 8) & 0xFF)
@@ -111,10 +111,15 @@ public enum OuraCommands {
         OuraCommand(label: "dhr_subscribe", bytes: [0x2F, 0x03, 0x26, featureDaytimeHR, 0x02])
     }
 
-    /// Disable live HR: `2f 03 22 02 01`. ACK: `2f 03 23 02 00`; stream stops on ACK.
-    /// Per OURA_PROTOCOL.md s5.6.
+    /// Disable live HR: `2f 03 22 02 00`. ACK: `2f 03 23 02 00`.
+    /// Mode 0 is off; mode 1 is the ring's automatic sampling mode.
     public static func liveHRDisable() -> OuraCommand {
-        OuraCommand(label: "dhr_disable", bytes: [0x2F, 0x03, 0x22, featureDaytimeHR, 0x01])
+        OuraCommand(label: "dhr_disable", bytes: [0x2F, 0x03, 0x22, featureDaytimeHR, 0x00])
+    }
+
+    /// Remove the live-HR "latest" subscription left by the enable triplet.
+    public static func liveHRUnsubscribe() -> OuraCommand {
+        OuraCommand(label: "dhr_unsubscribe", bytes: [0x2F, 0x03, 0x26, featureDaytimeHR, 0x00])
     }
 
     // MARK: - Feature-status diagnostics (READ-ONLY; s5.6 / s7.1)

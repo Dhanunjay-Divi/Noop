@@ -812,6 +812,9 @@ public final class BLEManager: NSObject, ObservableObject {
     /// can re-subscribe them AFTER bonding - the strap refuses them ("Authentication is insufficient")
     /// until the link is encrypted (issue #17).
     private var whoop5NotifyCharacteristics: [CBCharacteristic] = []
+    /// True only between submitting this connection's CLIENT_HELLO confirmed write and receiving its
+    /// callback. Other confirmed writes must never be mistaken for the secure-session acknowledgment.
+    private var whoop5ClientHelloWritePending = false
     private var reassembler = Reassembler()
     private var seq: UInt8 = 0
     private var didBond = false
@@ -1585,7 +1588,7 @@ public final class BLEManager: NSObject, ObservableObject {
         central.stopScan()
         // Allow duplicates so the wizard's RSSI/signal readout updates as straps move.
         central.scanForPeripherals(
-            withServices: WhoopModel.allCases.map(\.scanService),
+            withServices: WhoopModel.compatibleServices,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
         log("Add-a-band scan: presenting nearby compatible straps")
@@ -2121,9 +2124,11 @@ public final class BLEManager: NSObject, ObservableObject {
             // 5/MG case isn't a failure — live HR is streaming fine over 0x2A37, the history offload is
             // just experimental/empty on that firmware. "Banked" = this offload made ANY offload progress
             // (chunks acked, rows persisted, or deep packets seen); an empty 5/MG offload has none.
-            let bankedThisOffload = state.syncChunksThisSession > 0
-                || (backfiller?.sessionRowsPersisted ?? 0) > 0
-                || state.deepPacketsThisSession > 0
+            let bankedThisOffload = BLEManager.offloadBankedAnything(
+                chunks: state.syncChunksThisSession,
+                rows: rowsThisSession,
+                deepPackets: state.deepPacketsThisSession
+            )
             if selectedModel.deviceFamily == .whoop5 {
                 let crossed = whoop5EmptyOffload.recordOffload(bankedRecords: bankedThisOffload)
                 if whoop5EmptyOffload.historyEmpty {
@@ -2144,8 +2149,14 @@ public final class BLEManager: NSObject, ObservableObject {
                 // #324/#928: a future-dated strap TIMES OUT on its deep future-dated backlog — that's not
                 // "the strap went quiet", it's the clock being set ahead. Prefer the honest future-clock
                 // banner so the reporter's timeout case (the common one) names the real cause + remedy.
-                state.lastSyncError = futureClockBanner
-                    ?? "Sync interrupted - the strap went quiet. It will retry on the next sync."
+                //
+                // A productive legacy-band transfer can also finish on the idle timeout instead of
+                // HISTORY_COMPLETE. Reporting that successful transfer as interrupted makes the sync state
+                // contradict the rows that just landed.
+                state.lastSyncError = BLEManager.timeoutSyncError(
+                    futureClockBanner: futureClockBanner,
+                    bankedThisOffload: bankedThisOffload
+                )
             }
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
@@ -2285,6 +2296,27 @@ public final class BLEManager: NSObject, ObservableObject {
     /// (that flag guards the once-per-connect INITIAL kick); the periodic re-trigger is separate.
     static func shouldRunPeriodicBackfill(connected: Bool, bonded: Bool, backfilling: Bool) -> Bool {
         connected && bonded && !backfilling
+    }
+
+    /// Did this offload make durable progress? Deliberately excludes raw frame count: a stalled session can
+    /// still receive frames while persisting no rows and acknowledging no chunks.
+    nonisolated static func offloadBankedAnything(chunks: Int, rows: Int, deepPackets: Int) -> Bool {
+        chunks > 0 || rows > 0 || deepPackets > 0
+    }
+
+    /// User-visible error for a non-5/MG offload that ended on the idle timeout.
+    ///
+    /// A future-dated clock remains actionable even when rows landed. Otherwise, a productive timeout is
+    /// a successful transfer and should stay quiet; the generic interruption warning is reserved for a
+    /// session that handed over nothing.
+    nonisolated static func timeoutSyncError(
+        futureClockBanner: String?,
+        bankedThisOffload: Bool
+    ) -> String? {
+        if let futureClockBanner { return futureClockBanner }
+        return bankedThisOffload
+            ? nil
+            : "Sync interrupted - the strap went quiet. It will retry on the next sync."
     }
 
     /// Pure classification of a COMPLETED (HISTORY_COMPLETE) offload, extracted from exitBackfilling so
@@ -3374,6 +3406,7 @@ public final class BLEManager: NSObject, ObservableObject {
         disSerial = nil
         disHwRev = nil
         whoop5NotifyCharacteristics.removeAll()
+        whoop5ClientHelloWritePending = false
     }
 
     /// Start a service-filtered scan for `model`, re-framing the inbound stream for its family (so a
@@ -3989,7 +4022,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             cancelScanFallback()
             central.stopScan()
             central.scanForPeripherals(
-                withServices: WhoopModel.allCases.map(\.scanService),
+                withServices: WhoopModel.compatibleServices,
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
             )
             log("Add-a-band scan: presenting nearby compatible straps")
@@ -4014,9 +4047,15 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         // The user-facing add flow is generation-agnostic. Retain the observed transport family here so
         // registration and the first real connection still use the correct framing and capabilities.
         if isPresentingScan {
-            let observedModel = WhoopModel.allCases.first { candidate in
-                advertisedServiceUUIDs.contains(candidate.scanService.uuidString.lowercased())
-            } ?? selectedModel
+            let observedServices = advertisedServiceUUIDs.map(CBUUID.init(string:))
+            guard let observedModel = WhoopModel.fromAdvertisedServiceUUIDs(observedServices) else {
+                // A combined service-filtered scan proves only that CoreBluetooth matched one requested
+                // service; when it omits advertisement UUIDs it does not tell us which one. Never stamp the
+                // device with a stale selected family. A later advertisement carrying explicit service
+                // evidence will surface it.
+                log("Add-a-band scan: compatible peripheral omitted service identity - waiting for explicit family evidence")
+                return
+            }
             let uuid = peripheral.identifier.uuidString
             let row = (uuid: uuid, name: name, rssi: RSSI.intValue, model: observedModel)
             if let i = discoveredWhoops.firstIndex(where: { $0.uuid == uuid }) {
@@ -4227,6 +4266,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         state.clearBiometrics()       // and a stale HR / R-R must not outlive the link either
         state.liveFeedActive = false  // a drop while Live is open must not leave a stale "Stop live feed"
         didBond = false
+        whoop5ClientHelloWritePending = false
         whoop5RealtimeArmed = false
         // The strap forgets the realtime-HR toggle across a disconnect; the post-bond branch re-arms it
         // from `wantsRealtime`. Clear only the "what we last sent" flag - `screenWantsRealtime` /
@@ -4509,10 +4549,9 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 peripheral.writeValue(Data(bondFrame), for: c, type: .withResponse)
             case BLEManager.whoop5CmdWriteChar:
                 // EXPERIMENTAL WHOOP 5.0/MG: a 5/MG strap starts a session with the static CLIENT_HELLO
-                // frame, not the WHOOP4 confirmed-write bond. We write it UNacknowledged (it is a
-                // complete framed command), so the WHOOP4 didWriteValueFor bond+handshake path never
-                // fires for a 5/MG strap. Live HR/battery come from the standard profiles; this just
-                // opens the puffin session. Unverified on real MG hardware.
+                // frame, not the WHOOP4 GET_BATTERY_LEVEL bond frame. CLIENT_HELLO itself is a confirmed
+                // write so its callback can prove which session opener established the encrypted link.
+                // Live HR/battery also arrive over the standard profiles. Unverified on real MG hardware.
                 cmdCharacteristic = c
                 if let hello = selectedModel.deviceFamily.clientHello {
                     // CONTRIBUTOR FIX (issue #17 — diagnosed from the logs, unverified on hardware here):
@@ -4524,6 +4563,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     // "Finishing the secure pairing handshake…".
                     log("WHOOP 5/MG: writing CLIENT_HELLO to fd4b0002 with response (to trigger bonding, experimental).")
                     state.pairingHint = nil   // fresh attempt; clear any stale pairing-mode guidance
+                    whoop5ClientHelloWritePending = true
                     peripheral.writeValue(Data(hello), for: c, type: .withResponse)
                 }
                 // The realtime-HR stream is armed POST-bond (in didWriteValueFor / startRealtime) with
@@ -4577,6 +4617,17 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?) {
+        let callbackMatchesHelloCharacteristic =
+            self.peripheral === peripheral && characteristic.uuid == BLEManager.whoop5CmdWriteChar
+        let wasClientHelloWrite = Whoop5ClientHelloAck.shouldEstablishBond(
+            family: selectedModel.deviceFamily,
+            alreadyBonded: didBond,
+            helloPending: whoop5ClientHelloWritePending,
+            callbackMatchesCommandCharacteristic: callbackMatchesHelloCharacteristic
+        )
+        if whoop5ClientHelloWritePending && callbackMatchesHelloCharacteristic {
+            whoop5ClientHelloWritePending = false
+        }
         if let error = error {
             log("Confirmed write failed: \(error.localizedDescription)")
             // #78 hole-1: classify by ATT code first (locale-proof), English string fallback second.
@@ -4595,7 +4646,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             // still bonded to the official WHOOP app, so the CLIENT_HELLO .withResponse write fails with
             // "Encryption/Authentication is insufficient" and the link never authenticates. Surface
             // actionable pairing-mode guidance instead of failing silently (issue #17).
-            if selectedModel.deviceFamily == .whoop5, !didBond, insufficient {
+            if wasClientHelloWrite, insufficient {
                 bondRefusalStreak += 1
                 // #78: surface the pairing-mode guidance once refusals are PERSISTENT — the strap is
                 // genuinely refusing the encrypted bond (held by the official WHOOP app, or iOS holds a
@@ -4638,6 +4689,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             // the pin off to the live-bonding strap so the registry re-adopts it (handoff republishes the
             // working uuid on the connectedPeripheralUUID seam SourceCoordinator already observes).
             if insufficient, !didBond,
+               selectedModel.deviceFamily != .whoop5 || wasClientHelloWrite,
                let pinned = preferredPeripheralUUID, peripheral.identifier == pinned {
                 pinnedBondRefusals += 1
                 if pinnedBondRefusals >= pinBondRefusalLimit,
@@ -4655,6 +4707,12 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         // which the strap refused before the link was encrypted. Do NOT run the WHOOP4 command handshake
         // below — a 5/MG strap rejects WHOOP4-framed commands (the send() guard drops them anyway).
         if selectedModel.deviceFamily == .whoop5 {
+            // Before bonding, only the outstanding CLIENT_HELLO can establish the secure link. Later
+            // confirmed writes may still enter the idempotent post-bond maintenance below.
+            guard didBond || wasClientHelloWrite else {
+                log("WHOOP 5/MG: ignoring unrelated confirmed-write callback before CLIENT_HELLO")
+                return
+            }
             if !didBond {
                 didBond = true
                 state.bonded = true

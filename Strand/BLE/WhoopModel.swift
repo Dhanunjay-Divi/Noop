@@ -61,4 +61,32 @@ public enum WhoopModel: String, CaseIterable, Identifiable, Hashable {
         case .whoop5mg: return CBUUID(string: "fd4b0001-cce1-4033-93ce-002d5875f58a")
         }
     }
+
+    /// Every validated service used by the generation-agnostic setup scan.
+    public static var compatibleServices: [CBUUID] {
+        allCases.map(\.scanService)
+    }
+
+    /// Resolve the actual transport family from advertisement evidence, never a stale preference.
+    public static func fromAdvertisedServiceUUIDs(_ serviceUUIDs: [CBUUID]) -> WhoopModel? {
+        serviceUUIDs.lazy.compactMap { advertised in
+            allCases.first { $0.scanService == advertised }
+        }.first
+    }
+}
+
+/// Pure correlation gate for the WHOOP 5/MG secure-session opener. CoreBluetooth's write callback carries
+/// only the characteristic, so the transport must also prove that its own CLIENT_HELLO is outstanding.
+enum Whoop5ClientHelloAck {
+    static func shouldEstablishBond(
+        family: DeviceFamily,
+        alreadyBonded: Bool,
+        helloPending: Bool,
+        callbackMatchesCommandCharacteristic: Bool
+    ) -> Bool {
+        family == .whoop5
+            && !alreadyBonded
+            && helloPending
+            && callbackMatchesCommandCharacteristic
+    }
 }

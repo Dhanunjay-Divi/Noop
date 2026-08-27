@@ -1,4 +1,5 @@
 import XCTest
+import CoreBluetooth
 @testable import Strand
 
 /// Pins the dual SET_CLOCK payload forms behind the WHOOP 4 fw-41.17.x clock fix (#120). An un-clocked
@@ -51,5 +52,57 @@ final class WhoopModelFallbackTests: XCTestCase {
     func testFallbackIsInvolution() {
         XCTAssertEqual(WhoopModel.whoop4.fallbackScanModel.fallbackScanModel, .whoop4)
         XCTAssertEqual(WhoopModel.whoop5mg.fallbackScanModel.fallbackScanModel, .whoop5mg)
+    }
+
+    func testSetupDiscoveryIncludesAndResolvesBothValidatedFamilies() {
+        XCTAssertEqual(
+            Set(WhoopModel.compatibleServices.map(\.uuidString)),
+            Set([WhoopModel.whoop4.scanService.uuidString, WhoopModel.whoop5mg.scanService.uuidString])
+        )
+        XCTAssertEqual(
+            WhoopModel.fromAdvertisedServiceUUIDs([WhoopModel.whoop4.scanService]),
+            .whoop4
+        )
+        XCTAssertEqual(
+            WhoopModel.fromAdvertisedServiceUUIDs([WhoopModel.whoop5mg.scanService]),
+            .whoop5mg
+        )
+        XCTAssertNil(
+            WhoopModel.fromAdvertisedServiceUUIDs([]),
+            "setup must never substitute a stale selected family when advertisement evidence is absent"
+        )
+        XCTAssertNil(WhoopModel.fromAdvertisedServiceUUIDs([CBUUID(string: "180D")]))
+    }
+}
+
+final class TimeoutSyncErrorTests: XCTestCase {
+    private let interrupted = "Sync interrupted - the strap went quiet. It will retry on the next sync."
+
+    func testProductiveTimeoutRaisesNoBanner() {
+        XCTAssertNil(BLEManager.timeoutSyncError(futureClockBanner: nil, bankedThisOffload: true))
+    }
+
+    func testStalledTimeoutStillWarns() {
+        XCTAssertEqual(
+            BLEManager.timeoutSyncError(futureClockBanner: nil, bankedThisOffload: false),
+            interrupted
+        )
+    }
+
+    func testBankedPredicateUsesProgressCounters() {
+        XCTAssertFalse(BLEManager.offloadBankedAnything(chunks: 0, rows: 0, deepPackets: 0))
+        XCTAssertTrue(BLEManager.offloadBankedAnything(chunks: 0, rows: 17_205, deepPackets: 0))
+        XCTAssertTrue(BLEManager.offloadBankedAnything(chunks: 3, rows: 0, deepPackets: 0))
+        XCTAssertTrue(BLEManager.offloadBankedAnything(chunks: 0, rows: 0, deepPackets: 5))
+    }
+
+    func testFutureClockWarningOutranksTimeoutClassification() {
+        XCTAssertEqual(
+            BLEManager.timeoutSyncError(
+                futureClockBanner: "clock is ahead",
+                bankedThisOffload: true
+            ),
+            "clock is ahead"
+        )
     }
 }

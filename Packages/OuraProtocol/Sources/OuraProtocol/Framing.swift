@@ -47,6 +47,20 @@ public enum OuraFraming {
     /// caller fails to special-case it.
     public static let batteryResponseOp: UInt8 = 0x0D
 
+    /// SyncTime response opcode. Body: ring clock value (u32 LE) followed by status.
+    public static let syncTimeResponseOp: UInt8 = 0x13
+
+    public static func parseSyncTimeResponse(
+        _ body: [UInt8]
+    ) -> (deviceTimestamp: UInt32, status: UInt8)? {
+        guard body.count >= 5 else { return nil }
+        let timestamp = UInt32(body[0])
+            | (UInt32(body[1]) << 8)
+            | (UInt32(body[2]) << 16)
+            | (UInt32(body[3]) << 24)
+        return (timestamp, body[4])
+    }
+
     /// Parse a 0x11 GetEvents response body per open_oura's `EventBatchSummary`:
     /// `events_received:1  sleep_analysis_progress:1  bytes_left:4LE  [pad:2]`. The drain loop runs
     /// until `bytes_left == 0`; there is NO resume cursor in this packet — the resume position is a

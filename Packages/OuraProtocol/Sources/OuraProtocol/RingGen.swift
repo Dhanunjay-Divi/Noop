@@ -70,17 +70,37 @@ public enum OuraRingGen: String, Sendable, CaseIterable, Codable {
         }
     }
 
-    /// Best-effort generation guess from an advertised peripheral name. Oura does not reliably encode
-    /// the generation in the BLE name, so this is a hint only; the wizard confirms via the model the
-    /// user picks. Returns nil when nothing matches. Per architecture plan s5 (detection is best-effort).
+    /// Best-effort generation guess from an advertised peripheral name. Only an explicit generation
+    /// token is accepted: factory-reset rings can advertise a serial such as "Oura 2H3B2405003655", and
+    /// digits inside that serial are not generation evidence.
     public static func recognise(advertisedName: String?) -> OuraRingGen? {
         guard let name = advertisedName?.lowercased() else { return nil }
-        // Only treat as an Oura ring at all if the name carries the brand token.
         guard name.contains("oura") || name.contains("ring") else { return nil }
-        if name.contains("5") { return .gen5 }
-        if name.contains("4") { return .gen4 }
-        if name.contains("3") || name.contains("horizon") { return .gen3 }
-        return nil
+        if name.contains("horizon") { return .gen3 }
+
+        func generation(after token: String) -> OuraRingGen? {
+            guard let range = name.range(of: token) else { return nil }
+            switch name[range.upperBound...].drop(while: { $0 == " " }).first {
+            case "3": return .gen3
+            case "4": return .gen4
+            case "5": return .gen5
+            default: return nil
+            }
+        }
+        return generation(after: "gen") ?? generation(after: "ring")
+    }
+
+    /// Generation reported by GetProductInfo hardware identity. `BLB_03` is hardware-validated; later
+    /// suffixes are recognized for forward compatibility but still require their own physical matrix.
+    public static func from(hardwareId: String) -> OuraRingGen? {
+        guard let underscore = hardwareId.lastIndex(of: "_") else { return nil }
+        let digits = hardwareId[hardwareId.index(after: underscore)...].prefix(while: \.isNumber)
+        switch Int(digits) {
+        case 3: return .gen3
+        case 4: return .gen4
+        case 5: return .gen5
+        default: return nil
+        }
     }
 
     /// Recover the generation from a stored PairedDevice.model string ("Oura Ring 3/4/5"). Defaults

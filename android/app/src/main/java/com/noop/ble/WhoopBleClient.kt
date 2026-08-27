@@ -538,6 +538,18 @@ class WhoopBleClient(
          */
         const val DEFAULT_DEVICE_ID = "my-whoop"
 
+        /** A confirmed write establishes a 5/MG bond only when it completes this session's CLIENT_HELLO. */
+        internal fun shouldEstablishWhoop5Bond(
+            family: DeviceFamily,
+            alreadyBonded: Boolean,
+            purpose: WritePurpose,
+            callbackMatchesCommandCharacteristic: Boolean,
+        ): Boolean =
+            family == DeviceFamily.WHOOP5 &&
+                !alreadyBonded &&
+                purpose == WritePurpose.CLIENT_HELLO &&
+                callbackMatchesCommandCharacteristic
+
 
         // MARK: GATT UUIDs (authoritative, from BLEManager.swift / FINDINGS.md).
         //
@@ -1147,6 +1159,24 @@ class WhoopBleClient(
                 pairingHint = null, scanning = false,
                 statusNote = null,
             )
+
+        /**
+         * Did this offload make durable progress? Deliberately excludes raw frame count: a stalled session
+         * can still receive frames while persisting no rows and acknowledging no chunks. Swift twin:
+         * `BLEManager.offloadBankedAnything`.
+         */
+        fun offloadBankedAnything(chunks: Int, rows: Int, deepPackets: Int): Boolean =
+            chunks > 0 || rows > 0 || deepPackets > 0
+
+        /**
+         * User-visible error for a non-5/MG offload that ended on the idle timeout. A future-dated clock
+         * remains actionable even when rows landed. Otherwise a productive timeout is a successful transfer,
+         * and the generic interruption warning is reserved for a session that handed over nothing.
+         */
+        fun timeoutSyncError(futureClockBanner: String?, bankedThisOffload: Boolean): String? =
+            futureClockBanner
+                ?: if (bankedThisOffload) null
+                else "Sync interrupted - the strap went quiet. It will retry on the next sync."
 
         /**
          * Pure classification of a COMPLETED (HISTORY_COMPLETE) offload, extracted from exitBackfilling
@@ -1932,6 +1962,8 @@ class WhoopBleClient(
 
     /** Address of the strap we last connected to — for persisting it + auto-reconnecting on launch (#67). */
     val lastDeviceAddress: String? get() = lastDevice?.address
+    /** True only after this connection's service discovery resolved [connectedFamily]. */
+    @Volatile private var familyEstablished = false
     /// The family actually discovered on the connected peripheral. Drives family-aware frame
     /// parsing and gates the WHOOP4-only bond/handshake. Set in onServicesDiscovered.
     /// @Volatile: written on the binder thread at service discovery, read in send() on main (user
@@ -2461,7 +2493,14 @@ class WhoopBleClient(
      * leaned on CoreBluetooth's internal queue; here we serialise writes ourselves. Each queued
      * item is the fully-framed byte array + its write type (with/without response).
      */
-    private data class PendingWrite(val frame: ByteArray, val withResponse: Boolean, val cmd: CommandNumber? = null)
+    internal enum class WritePurpose { COMMAND, CLIENT_HELLO }
+
+    private data class PendingWrite(
+        val frame: ByteArray,
+        val withResponse: Boolean,
+        val cmd: CommandNumber? = null,
+        val purpose: WritePurpose = WritePurpose.COMMAND,
+    )
     private val writeQueue = ConcurrentLinkedQueue<PendingWrite>()
     /**
      * One active submission per GATT connection. Unlike the old `writeInFlight + pendingRetry` pair, this
@@ -3641,9 +3680,16 @@ class WhoopBleClient(
             log("refreshBattery ignored - not connected")
             return
         }
-        if (connectedFamily == DeviceFamily.WHOOP4) {
-            send(CommandNumber.GET_BATTERY_LEVEL)
-            return
+        when (batterySource(familyEstablished, connectedFamily)) {
+            BatterySource.DEFER -> {
+                log("refreshBattery deferred - band family is not established yet")
+                return
+            }
+            BatterySource.CUSTOM_COMMAND -> {
+                send(CommandNumber.GET_BATTERY_LEVEL)
+                return
+            }
+            BatterySource.STANDARD_CHARACTERISTIC -> Unit
         }
         val ops = gattOps ?: return
         val batt = g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)
@@ -4458,6 +4504,7 @@ class WhoopBleClient(
                 // notifications ever enable, so HR/battery/events stay empty (issue #12). The bond write
                 // is deferred to startSession(), which runs once every notification is on.
                 connectedFamily = DeviceFamily.WHOOP4
+                familyEstablished = true
                 reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP4, g.device.address)
                 cmdCharacteristic = whoop4.getCharacteristic(CMD_WRITE_CHAR)
                 whoop4.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
@@ -4467,6 +4514,7 @@ class WhoopBleClient(
                 // EXPERIMENTAL WHOOP 5.0/MG: opens with CLIENT_HELLO (sent in startSession, after the
                 // standard HR/battery notifications are enabled), not the WHOOP4 confirmed-write bond.
                 connectedFamily = DeviceFamily.WHOOP5
+                familyEstablished = true
                 reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP5, g.device.address)
                 log("WHOOP 5/MG detected - will send CLIENT_HELLO after subscribing (experimental).")
                 _state.update { it.copy(
@@ -4518,6 +4566,14 @@ class WhoopBleClient(
                 log("Ignoring stale characteristic-write callback from a replaced GATT")
                 return
             }
+            val callbackMatchesCommandCharacteristic =
+                characteristic.uuid == cmdCharacteristic?.uuid
+            if (!callbackMatchesCommandCharacteristic) {
+                // Do not consume the active write gate. The real CLIENT_HELLO/command callback may still
+                // arrive, and a completion from another characteristic is not evidence about that write.
+                log("Ignoring characteristic-write callback from an unrelated characteristic")
+                return
+            }
             val completedWrite = writeDeliveryGate.callback()
             if (completedWrite == null) {
                 // Duplicate/unsolicited callback. In particular, do not let it consume the next command.
@@ -4525,6 +4581,12 @@ class WhoopBleClient(
                 return
             }
             handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+            val clientHelloAck = shouldEstablishWhoop5Bond(
+                family = connectedFamily,
+                alreadyBonded = didBond,
+                purpose = completedWrite.purpose,
+                callbackMatchesCommandCharacteristic = callbackMatchesCommandCharacteristic,
+            )
 
             // Port of didWriteValueFor: a CONFIRMED-write completion (no error) == bonding succeeded.
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -4537,11 +4599,17 @@ class WhoopBleClient(
                 // pin (encryptedBond never turns true, which also kills buzz/haptics that gate on it).
                 // Count consecutive refusals on the PINNED strap; after the limit, hand the pin to the
                 // live-bonding strap so the registry re-adopts it. (Reimplemented under NoopApp, #52.)
-                noteBondRefusalIfPinned(g.device.address, status)
+                if (connectedFamily != DeviceFamily.WHOOP5 ||
+                    completedWrite.purpose == WritePurpose.CLIENT_HELLO
+                ) {
+                    noteBondRefusalIfPinned(g.device.address, status)
+                }
                 // Separately (#78): count the refusal toward the user-facing pairing hint. A 5/MG still
                 // bonded to the official WHOOP app keeps refusing the just-works bond; after two refusals
                 // we surface concrete pairing-mode guidance. Independent of the pin recovery above.
-                noteBondRefusalForPairingHint(status, g.device.address)
+                if (completedWrite.purpose == WritePurpose.CLIENT_HELLO) {
+                    noteBondRefusalForPairingHint(status, g.device.address)
+                }
                 // Connection test mode: surface the failed-encrypt / "held by another central" hint as an
                 // upfront tagged line. INSUFFICIENT_AUTHENTICATION (5) / INSUFFICIENT_ENCRYPTION (15) ==
                 // the strap is still bonded to the official WHOOP app or a stale OS pairing. Gated
@@ -4561,7 +4629,7 @@ class WhoopBleClient(
                 // one-shot physical effects remain single execution.
                 failClosedAfterWrite(completedWrite, "confirmed callback status=$status")
                 return
-            } else if (!didBond && connectedFamily == DeviceFamily.WHOOP5) {
+            } else if (clientHelloAck) {
                 // EXPERIMENTAL (issue #17): the CLIENT_HELLO is now a confirmed write, so this ACK means
                 // just-works bonding completed. Now subscribe the puffin notify chars (realtime HR rides
                 // these as REALTIME_DATA — the strap rejected them on the unauthenticated link), then arm
@@ -4691,7 +4759,10 @@ class WhoopBleClient(
             // 0x2A19 = percent — 5/MG ONLY. On a WHOOP 4.0 this characteristic is a stub constant 100
             // (the real value is the GET_BATTERY_LEVEL COMMAND_RESPONSE, u16/10), and it's also
             // SUBSCRIBED, so an unsolicited stub notification could flip the display back to 100 (#77).
-            uuid == BATTERY_CHAR -> if (connectedFamily != DeviceFamily.WHOOP4) {
+            uuid == BATTERY_CHAR -> if (
+                batterySource(familyEstablished, connectedFamily) ==
+                BatterySource.STANDARD_CHARACTERISTIC
+            ) {
                 bytes.firstOrNull()?.let { setBattery((it.toInt() and 0xFF).toDouble()) }
             } else Unit
             // #520 DIS identity. NUL-terminated ASCII per the DIS spec, so trim padding. The serial
@@ -5792,7 +5863,12 @@ class WhoopBleClient(
         submitGattWrite(
             ops,
             ch,
-            PendingWrite(hello, withResponse = true, cmd = null),
+            PendingWrite(
+                hello,
+                withResponse = true,
+                cmd = null,
+                purpose = WritePurpose.CLIENT_HELLO,
+            ),
             "writeClientHello",
         )
     }
@@ -6359,8 +6435,18 @@ class WhoopBleClient(
                 // error (it's just the empty offload), and surface the experimental flag instead.
                 // #324/#928: a future-dated WHOOP-4 TIMES OUT on its deep future-dated backlog — prefer the
                 // honest future-clock banner over "strap went quiet" (the reporter's #324 case timed out).
+                // A productive legacy-band transfer can finish on the idle timeout instead of
+                // HISTORY_COMPLETE. Use acknowledged chunks/rows/deep packets, not raw frame count: stalled
+                // sessions still receive frames. `it` is the same state snapshot this copy is built from.
                 lastSyncError = if (isWhoop5) null
-                    else futureClockBanner ?: "Sync interrupted - the strap went quiet. It will retry on the next sync.",
+                    else timeoutSyncError(
+                        futureClockBanner = futureClockBanner,
+                        bankedThisOffload = offloadBankedAnything(
+                            chunks = ackedChunksThisSession,
+                            rows = rowsThisSession,
+                            deepPackets = it.deepPacketsThisSession,
+                        ),
+                    ),
                 historySyncExperimental = whoop5HistoryExperimental,
             )
             else -> it.copy(
@@ -6850,6 +6936,7 @@ class WhoopBleClient(
     private fun reset() {
         didBond = false
         connectHandshakeDone = false
+        familyEstablished = false
         seq.set(0)
         writeQueue.clear()
         cccdQueue.clear()

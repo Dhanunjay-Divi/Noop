@@ -218,8 +218,9 @@ class OuraDriver(
                 phase = OuraDriverPhase.Streaming
                 emptyList()
             } else {
-                // Ack-fetch (max=0) at the new cursor advances without re-pulling data (s5.3 step 4).
-                listOf(OuraCommands.getEvents(cursor = after.cursor, maxEvents = 0))
+                // Continue from the advanced client-managed cursor. max=0 re-serves the same window on
+                // hardware instead of draining the next batch.
+                listOf(OuraCommands.getEvents(cursor = after.cursor, maxEvents = 255))
             }
         }
     }
@@ -306,6 +307,14 @@ class OuraDriver(
         if (seconds < MIN_PLAUSIBLE_EPOCH_SECONDS ||
             seconds > nowSeconds + SAMPLE_FUTURE_TOLERANCE_SECONDS) return null
         return seconds
+    }
+
+    /** Adopt the host-time/ring-time pair from a successful SyncTime response. */
+    fun adoptSyncTimeAnchor(ringTimestamp: Long, unixSeconds: Long): Boolean {
+        val milliseconds = plausibleAnchorMs(unixSeconds) ?: return false
+        anchorUtcMs = milliseconds
+        anchorRingTime = ringTimestamp
+        return true
     }
 
     /**
@@ -593,5 +602,18 @@ class OuraDriver(
 
         /** Allows ordinary clock skew and anchor rounding without accepting samples banked far ahead. */
         private const val SAMPLE_FUTURE_TOLERANCE_SECONDS = 300L
+
+        /**
+         * Resolve a SyncTime response into the 100 ms ring-tick domain. Accept exactly one of raw ticks
+         * or seconds x10 near the durable history cursor; refuse cold-start and ambiguous guesses.
+         */
+        fun syncTimeAnchorCandidate(responseValue: Long, historyCursor: Long): Long? {
+            if (historyCursor <= 0) return null
+            val lower = historyCursor
+            val upper = lower + 6_048_000L
+            val candidates = listOf(responseValue, responseValue * 10)
+                .filter { it in lower..upper && it <= 0xFFFF_FFFFL }
+            return candidates.singleOrNull()
+        }
     }
 }

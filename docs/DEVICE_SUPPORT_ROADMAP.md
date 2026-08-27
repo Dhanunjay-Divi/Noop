@@ -1,16 +1,16 @@
 # Device support — roadmap & protocol notes
 
-Last reviewed: **2026-08-11**
+Last reviewed: **2026-08-27**
 
-NOOP's north star is **WHOOP**. WHOOP 4 is the stable path; WHOOP 5/MG remains explicitly experimental
-until the physical-device release checklist is complete. Everything else is an opportunistic, easy-first
-expansion that must never regress the WHOOP experience. This file records where each additional
-source stands and the protocol facts we've verified, so the next build can pick up cleanly.
+NOOP keeps every device integration behind an evidence-scoped transport boundary. A model is supported
+only for the signals and workflows that its validated direct, platform-exchange, or import lane actually
+provides. A shared service UUID, successful build, or compatible protocol fixture does not establish
+future-model support. This file records the current boundary and the protocol facts already verified.
 
 | Source | Status | How |
 |--------|--------|-----|
-| **WHOOP 4** | ✅ Shipped, primary | Local BLE decode |
-| **WHOOP 5 / MG** | 🧪 Experimental | Local BLE decode; software regression coverage passes, real-device validation remains required |
+| **WHOOP 4** | ✅ Stable | Local BLE live data and history; established production transport |
+| **WHOOP 5 / MG** | 🧪 Implemented, experimental | Local BLE discovery, secure-session opener, standard HR/battery, and experimental history; representative physical-device validation remains required |
 | **Generic BLE heart-rate straps** (Polar / Wahoo / Coospo / Garmin HRM / Amazfit Helio HR-broadcast) | ✅ Shipped (v3.8.0), live HR + RR | Standard HR service `0x180D` / `0x2A37` |
 | **Foreground Live mode** | ✅ Shipped, explicit opt-in | User-started high-rate HR (plus R-R when the source exposes it) while the Live surface/session is active; higher battery use is disclosed and the foreground demand is released on exit |
 | **Continuous HRV background mode** | 🧪 Advanced opt-in, off by default | Separate from Live: keeps the detailed stream armed with background connection enabled, either overnight-only (fresh-install default) or 24/7; OS/device limits still apply |
@@ -21,9 +21,11 @@ source stands and the protocol facts we've verified, so the next build can pick 
 | **Xiaomi Smart Band 8 / 9 / 10** (Mi Band) | ✅ Shipped, **import lane** | Read the Mi Fitness iOS app's own SQLite, on-device (below) |
 | **Xiaomi Smart Band — live BLE sync** | 🔬 Protocol researched, decoder not built | Mi protobuf-v2 over BLE GATT + `encryptKey` handshake (below) — hardware-gated |
 | **Polar deep streams** (ECG / PPG / ACC / PPI) | 🔬 Pure PPI decoder built (`Packages/PolarProtocol` + `com.noop.polar`, tests green both platforms); live `PolarPMDSource` + ECG/PPG decode still to build | PMD service (below) — alpha, hardware-gated |
-| **Garmin** | ✅ Export import; 🧪 broadcast Live | Garmin wellness JSON and FIT/GPX/TCX activity files import locally. A Garmin/HRM that advertises standard `0x180D` can use the experimental live-Broadcast lane. Proprietary deep BLE history, Body Battery recreation, and Garmin cloud sync are not implemented. |
+| **Garmin** | ✅ Export import; 🧪 standard-HR Live | Garmin wellness JSON and FIT/GPX/TCX activity files import locally. A Garmin/HRM that advertises standard `0x180D` can use the experimental live-broadcast lane. Proprietary deep BLE history, Body Battery recreation, device control, and Garmin cloud sync are not implemented. |
 | **Amazfit / Zepp / Helio** | 🧪 Best-effort live HR only | Experimental isolated Huami driver reads standard `0x180D` when exposed, then the documented readable Huami HR characteristic. Models requiring vendor authentication remain unsupported; there is no deep history/sleep sync and NOOP never logs into the vendor cloud. |
-| **Oura** (Gen 3/4/5) | 🔬 Cloud import shipped; local BLE ring **experimental** | Cloud API v2 (off-by-default OAuth backfill) **+** clean-room BLE ring — auth, live HR/IBI, history drain, sleep hypnogram, activity/HR research (below) |
+| **Oura cloud import** | ✅ Shipped, opt-in | Cloud API v2 OAuth backfill with source provenance; separate from direct ring control |
+| **Oura Gen 3 local BLE** | 🧪 Experimental, physically exercised | Clean-room auth, live HR/IBI, durable history drain, battery, and raw on-device sleep staging on a real Gen 3 |
+| **Oura Gen 4 / 5 local BLE** | 🔬 Software-compatible, unvalidated | Shared clean-room framing and generation-aware GATT are implemented; representative physical-device validation remains required before either generation is called supported |
 | **RingConn Gen 3** | 🧭 Apple Health bridge only; direct BLE unavailable | Import standard records that the RingConn app writes to HealthKit, preserving its source and delay. No public BLE SDK/GATT or documented Health Connect lane; proprietary apnea/vascular/readiness outputs are not recreated. |
 | **Hume Band 2.0** | 🧭 Apple Health bridge only; direct BLE unavailable | Import only verified HealthKit categories written by the Hume app. No public BLE SDK/GATT, stable export schema, or documented Health Connect lane; Hume Pod body composition is not attributed to the band. |
 | **Fitbit / Google** | ✅ Fitbit export import; no direct live lane | Local Google Takeout/Fitbit JSON import for sleep and stages, resting HR, and steps. Missing Fitbit fields remain absent rather than inferred. Automatic Google Health/cloud integration and proprietary Fitbit BLE are not implemented. |
@@ -49,6 +51,19 @@ stages, or another vendor's proprietary score from an unrelated signal. A wearab
 while the phone is away and upload them later **only when that device/protocol actually exposes a history
 offload or its vendor/platform later writes the records**; NOOP cannot trigger unsupported sensors or
 recover history that the device never exposes.
+
+### Current direct-device boundary
+
+- WHOOP 4 is the stable direct transport.
+- WHOOP 5 and MG discovery, session opening, live HR, battery routing, and experimental history are
+  implemented. They still require the physical overnight, reconnect, background, haptic, battery, and
+  firmware matrix. A future WHOOP family is unsupported until its advertising, GATT, framing, and storage
+  behavior are measured.
+- Oura Gen 3 is the only direct Oura lane exercised on physical hardware. Gen 4 and Gen 5 retain
+  generation-aware software paths but remain experimental until validated on those devices.
+- Garmin support means local owner-data import and standard Bluetooth Heart Rate Service broadcast when a
+  device exposes it. It does not mean proprietary Garmin history sync, Body Battery parity, cloud account
+  integration, or control of every Garmin watch.
 
 Platform references: [Apple HealthKit](https://developer.apple.com/documentation/healthkit),
 [Apple Watch workout sessions](https://developer.apple.com/documentation/healthkit/running-workout-sessions),
@@ -201,9 +216,15 @@ ring's raw signals and **never** reads Oura's encrypted readiness/sleep scores. 
 [`OURA_PROTOCOL.md`](OURA_PROTOCOL.md); this is the where-we-stand summary.
 
 **Working (validated on a live Gen 3):** app-auth handshake (nonce → AES-128 proof), live HR + IBI stream,
-SyncTime (`0x12`/`0x13`) handshake plus the ring-emitted `0x42` time-sync event as the UTC anchor (§6.11),
-and a history drain aligned with open_oura `drain_events` (per-batch
-cursor advance + quiet window → converges to `bytes_left 0`, no re-serve loop). Decoded signals: HR/IBI, HRV
+hardware-validated SyncTime (`0x12`/`0x13`) plus the ring-emitted `0x42` time-sync event as UTC anchors
+(§6.11), hardware-generation correction from GetProductInfo, and a history drain aligned with open_oura
+`drain_events` (per-batch cursor advance, `max=255`, quiet window → converges to `bytes_left 0`, no
+re-serve loop). On both Apple and Android, terminal summaries request completion but keep the current
+transport generation open for delayed TLVs. The barrier seals at the next real GetEvents request boundary,
+and the durable cursor advances only after every associated stream write and sleep-session upsert succeeds.
+A failed write, timeout, disconnect, stale callback, or unresolved time anchor leaves the cursor behind for
+an idempotent retry. Unanchored history is never stamped with sync-arrival time. Teardown explicitly disables
+and unsubscribes daytime HR. Decoded signals: HR/IBI, HRV
 (`0x5D` + reconstructed), skin temp (`0x46`), SpO₂, battery. Own central/GATT — never the WHOOP path.
 
 **Sleep — hypnogram persist (DRAFT PR #446).** The ring writes the whole night's SleepNet phase codes in one
@@ -224,13 +245,11 @@ underreads water, and the stream is sparse with **ring-side** cadence gaps (~86 
 undercount. **NOOP has no MET field** in its HR/strain model, so `0x50` stays research only — the ring's path
 into NOOP activity is HR, never MET, and it is never a step count.
 
-**Banked IBI → HR — `0x80` (research instrumentation).** open_oura derives per-minute HR (`hr_bpm = 60000/ibi`)
-from the `0x80` green-IBI record, not from `0x50`. NOOP already decodes those IBIs for HRV; a tagged JSONL
-sidecar (`oura-ibihr-<id>.jsonl`) also reconstructs an HR history from the banked stream for offline study.
-**First daytime sample was sparse + noisy** (~7 usable beats/min, ~15 % impossible-HR artifacts) — looks like a
-quality-sampled subset, not a full beat record. **Decisive test pending:** overnight density (ring still →
-cleanest optics), per source tag. If a clean+dense stream emerges it becomes a real sleep-HR/RHR source (own
-branch/PR); if not, it is a documented dead-end and MET stays the daytime proxy.
+**Banked IBI → HR — `0x80`.** The ring banks IBI records without a matching HR row. NOOP retains every
+physiological IBI for R-R/HRV and materializes one conservative HR sample per record from the median valid
+IBI (`round(60000 / median_ibi)`). Invalid intervals and implausible rates are omitted, never clamped.
+Materialization is history-only, requires a real ring-time anchor, and participates in the same durable
+cursor barrier as its R-R rows; live IBI and unanchored teardown fallbacks never mint historical HR.
 
 **Analysis tooling:** `diagnostics/oura_met_crosscheck.py` cross-checks the MET + IBI-HR corpora against the
 app SQLite (workouts/sleep) and, with `--suunto`, a `.fit` export — per-minute MET/HR profiles + correlations.

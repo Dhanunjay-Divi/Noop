@@ -95,6 +95,8 @@ data class GetEventsSummary(
     val moreData: Boolean,
 )
 
+data class SyncTimeResponse(val deviceTimestamp: Long, val status: Int)
+
 object OuraFraming {
     /** The secure-session / extended opcode. Per OURA_PROTOCOL.md s2.2 / s4.1. */
     const val secureSessionOp = 0x2F
@@ -113,6 +115,18 @@ object OuraFraming {
      * caller fails to special-case it. Kotlin twin of Swift's batteryResponseOp.
      */
     const val batteryResponseOp = 0x0D
+
+    /** SyncTime response opcode. Body: ring clock value (u32 LE) followed by status. */
+    const val syncTimeResponseOp = 0x13
+
+    fun parseSyncTimeResponse(body: IntArray): SyncTimeResponse? {
+        if (body.size < 5) return null
+        val timestamp = (body[0].toLong() and 0xFF) or
+            ((body[1].toLong() and 0xFF) shl 8) or
+            ((body[2].toLong() and 0xFF) shl 16) or
+            ((body[3].toLong() and 0xFF) shl 24)
+        return SyncTimeResponse(timestamp, body[4] and 0xFF)
+    }
 
     /** The minimum legal TLV `len` field: it must cover the 4 timestamp bytes. Per OURA_PROTOCOL.md s2.3. */
     const val minRecordLen = 4

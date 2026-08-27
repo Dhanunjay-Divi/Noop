@@ -5,6 +5,7 @@ import com.noop.oura.OuraHR
 import com.noop.oura.OuraHRV
 import com.noop.oura.OuraIBI
 import com.noop.oura.OuraIbiChannel
+import com.noop.oura.OuraIbiHr
 import com.noop.oura.OuraHypnogramBurst
 import com.noop.oura.OuraHypnogramRecord
 import com.noop.oura.OuraSleepPhase
@@ -45,6 +46,20 @@ class OuraStreamMappingTest {
         assertEquals(listOf(base + 10), s.hr.map { it.ts })
         assertEquals(listOf(833, 820), s.rr.map { it.rrMs })
         assertEquals(listOf(base + 10, base + 11), s.rr.map { it.ts })
+    }
+
+    @Test
+    fun bankedIbiMaterializationReachesHrAndRrStreams() {
+        val history = listOf<OuraEvent>(
+            OuraEvent.Ibi(OuraIBI(ringTimestamp = 10, ibiMs = 1_000)),
+            OuraEvent.Ibi(OuraIBI(ringTimestamp = 10, ibiMs = 1_020)),
+        )
+        val events = OuraIbiHr.appendingDerivedHrToHistoryEvents(history)
+        val streams = OuraStreamMapping.streams(events, anchor)
+
+        assertEquals(listOf(59), streams.hr.map { it.bpm })
+        assertEquals(listOf(base + 10), streams.hr.map { it.ts })
+        assertEquals(listOf(1_000, 1_020), streams.rr.map { it.rrMs })
     }
 
     @Test
@@ -137,6 +152,27 @@ class OuraStreamMappingTest {
         assertEquals(4, persisted.size)
         assertEquals(4, keys.toSet().size)
         assertEquals(listOf(9_880L, 9_910L, 9_940L, 9_970L), persisted.map { it.ts })
+    }
+
+    @Test
+    fun fullNightHypnogramMergesIntoOneTransactionSizedStream() {
+        val batches = (0 until 960).map { index ->
+            listOf<OuraEvent>(
+                OuraEvent.SleepPhaseEvent(
+                    OuraSleepPhase(
+                        ringTimestamp = 100,
+                        index = index,
+                        stage = if (index % 2 == 0) OuraSleepStage.LIGHT else OuraSleepStage.DEEP,
+                    ),
+                ),
+            ) to (base + index * 30)
+        }
+        val streams = OuraStreamMapping.mergedStreams(batches)
+
+        assertEquals(960, streams.events.size)
+        assertEquals(960, streams.events.map { it.ts }.toSet().size)
+        assertEquals(base, streams.events.first().ts)
+        assertEquals(base + 959 * 30, streams.events.last().ts)
     }
 
     @Test

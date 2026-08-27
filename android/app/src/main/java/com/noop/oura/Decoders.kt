@@ -19,6 +19,14 @@ package com.noop.oura
 
 object OuraDecoders {
 
+    /** Decode a GetProductInfo body: status byte followed by printable, NUL-terminated ASCII. */
+    fun productInfoString(body: IntArray): String? {
+        if (body.size <= 1 || body[0] != 0) return null
+        val ascii = body.drop(1).takeWhile { it != 0 }
+        if (ascii.isEmpty() || ascii.any { it !in 0x20..0x7E }) return null
+        return ascii.map(Int::toChar).joinToString("")
+    }
+
     // MARK: - Little-endian helpers (body offset == spec offset - 6)
 
     private fun u16le(b: IntArray, i: Int): Int = b[i] or (b[i + 1] shl 8)

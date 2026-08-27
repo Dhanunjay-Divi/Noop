@@ -9,6 +9,7 @@ import com.noop.data.StreamBatch
 import com.noop.data.WhoopRepository
 import com.noop.oura.OuraRingGen
 import com.noop.oura.OuraWearState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -428,14 +429,24 @@ class SourceCoordinator(
             // path (no faked data). Read fresh on each connect so a key provisioned mid-session (the adopt
             // install) is picked up on the post-install re-auth.
             authKey = { OuraInstallKeyStore.load(ctx, id) },
-            persist = { batch: StreamBatch, deviceId: String ->
-                scope.launch { runCatching { repo.insert(batch, deviceId) } }
+            persist = { batch: StreamBatch, deviceId: String, done: (Boolean) -> Unit ->
+                scope.launch {
+                    try {
+                        repo.insert(batch, deviceId)
+                        done(true)
+                    } catch (cancelled: CancellationException) {
+                        done(false)
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        done(false)
+                    }
+                }
             },
-            persistSleepSession = { session, deviceId ->
+            persistSleepSession = { session, deviceId, done ->
                 // Ring-provided SleepNet staging is imported/measured data under the ring's own id. The
                 // repository's normal richness merge can then prefer it over a computed sparse-motion night.
                 scope.launch {
-                    runCatching {
+                    try {
                         repo.upsertSleepSessions(
                             listOf(
                                 com.noop.data.SleepSession(
@@ -447,11 +458,18 @@ class SourceCoordinator(
                                 ),
                             ),
                         )
+                        done(true)
+                    } catch (cancelled: CancellationException) {
+                        done(false)
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        done(false)
                     }
                 }
             },
             log = straplog,           // Oura connect/auth/stream lifecycle → the SAME exported strap log (#421)
             onBattery = batterySink,  // ring battery → the same live state the WHOOP strap battery uses
+            onModel = { model -> scope.launch { registry.setModel(id, model) } },
         )
         // CONSUME the one-shot adopt-intent the wizard armed after its irreversible-consent gate AND its
         // second "Take over" confirm (and ONLY then). True permits the DANGEROUS post-factory-reset key

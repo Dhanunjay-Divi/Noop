@@ -63,26 +63,21 @@ object OuraCommands {
 
     // MARK: - Time sync
 
-    /**
-     * SyncTime: `12 09 <token:1> <counter:3 LE> 00 00 00 00 f6` where counter = floor(unix_s / 256)
-     * and the trailer 0xf6 is fixed. Per OURA_PROTOCOL.md s5.4. `token` defaults to 0.
-     */
-    fun syncTime(unixSeconds: Long, token: Int = 0x00): OuraCommand {
-        val counter = unixSeconds / 256
-        val c0 = (counter and 0xFFL).toInt()
-        val c1 = ((counter shr 8) and 0xFFL).toInt()
-        val c2 = ((counter shr 16) and 0xFFL).toInt()
-        return OuraCommand(
-            "sync_time",
-            intArrayOf(0x12, 0x09, token and 0xFF, c0, c1, c2, 0x00, 0x00, 0x00, 0x00, 0xF6),
-        )
+    /** SyncTime: `12 09 <unix seconds:u64 LE> <timezone:i8 half-hours>`. */
+    fun syncTime(unixSeconds: Long, tzHalfHours: Int = 0): OuraCommand {
+        val bytes = IntArray(11)
+        bytes[0] = 0x12
+        bytes[1] = 0x09
+        for (i in 0 until 8) bytes[2 + i] = ((unixSeconds ushr (i * 8)) and 0xFF).toInt()
+        bytes[10] = tzHalfHours and 0xFF
+        return OuraCommand("sync_time", bytes)
     }
 
     // MARK: - Event fetch (cursor)
 
     /**
      * GetEvents request: `10 09 <ringTimestamp:4 LE> <max:1> <flags:4 LE>`. cursor 0 = full dump;
-     * max 0 = ack-only (advance cursor without data); flags = 0xFFFFFFFF. Per OURA_PROTOCOL.md s5.1.
+     * max 1..255 bounds returned events; max 0 is not used because hardware re-serves the window.
      * `cursor` is the unsigned-32 ring timestamp carried as a Long; `maxEvents` is 0..255.
      */
     fun getEvents(cursor: Long, maxEvents: Int): OuraCommand {
@@ -127,12 +122,13 @@ object OuraCommands {
     fun liveHRSubscribe(): OuraCommand =
         OuraCommand("dhr_subscribe", intArrayOf(0x2F, 0x03, 0x26, featureDaytimeHR, 0x02))
 
-    /**
-     * Disable live HR: `2f 03 22 02 01`. ACK: `2f 03 23 02 00`; stream stops on ACK.
-     * Per OURA_PROTOCOL.md s5.6.
-     */
+    /** Disable live HR. Mode 0 is off; mode 1 is automatic sampling. */
     fun liveHRDisable(): OuraCommand =
-        OuraCommand("dhr_disable", intArrayOf(0x2F, 0x03, 0x22, featureDaytimeHR, 0x01))
+        OuraCommand("dhr_disable", intArrayOf(0x2F, 0x03, 0x22, featureDaytimeHR, 0x00))
+
+    /** Remove the "latest" subscription left by the live-HR enable triplet. */
+    fun liveHRUnsubscribe(): OuraCommand =
+        OuraCommand("dhr_unsubscribe", intArrayOf(0x2F, 0x03, 0x26, featureDaytimeHR, 0x00))
 
     // Feature-status diagnostics (READ-ONLY; s5.6 / s7.1)
 

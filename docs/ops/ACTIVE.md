@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-08-26**
+Last updated: **2026-08-27**
 
 ## Repository
 
@@ -12,18 +12,19 @@ Last updated: **2026-08-26**
 - Current source-rights record:
   [`../provenance/OWNER-RIGHTS-DECLARATION.md`](../provenance/OWNER-RIGHTS-DECLARATION.md)
 - Current agent handoff:
-  [`../handoff/AGENT-HANDOFF-20260826.md`](../handoff/archive/AGENT-HANDOFF-20260826.md)
+  [`../handoff/archive/AGENT-HANDOFF-20260827.md`](../handoff/archive/AGENT-HANDOFF-20260827.md)
 - Current release blockers:
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
 
-Round 22 closes the metric-audit findings without fitting NOOP to proprietary
-reference scores. Local detailed sleep stages now require persisted sustained
-R-R evidence, ACWR is removed, bounded Effort stays outside additive load math,
-Recovery cold start remains nil, and Apple Health SDNN cannot enter a strap
-RMSSD baseline. The implementation and local evidence are recorded in
-[Metric evidence and training-load boundaries](rounds/2026-08-26-metric-evidence-boundaries.md).
+Round 23 closes the device-transport restoration and lifecycle pass. WHOOP
+family discovery and session correlation are evidence-based, Oura history
+cursor movement is transactionally fail-closed, delayed callbacks cannot
+resurrect or overwrite replacement sources, and the support matrix explicitly
+separates stable, implemented, experimental, import, and standard-broadcast
+lanes. The implementation and local evidence are recorded in
+[Device transport durability and support boundaries](rounds/2026-08-27-device-transport-durability.md).
 
 The
 [NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
@@ -40,7 +41,7 @@ tests pass, and the name-only build-setting isolation gate passes. Signed
 archive, upload, physical validation, and the recorded release gates remain
 open.
 
-Repository-local closeout for Round 22 is complete when the commit containing
+Repository-local closeout for Round 23 is complete when the commit containing
 the round record is synchronized with `origin/main`. Remaining release work
 requires external accounts, infrastructure, carriers, physical devices,
 participant evidence, or store review.
@@ -53,6 +54,7 @@ participant evidence, or store review.
 - Automatic medical, Rhythm, anomaly, and unvalidated fall paging remains
   disabled.
 - Physical-device behavior cannot be claimed from simulator or unit evidence.
+- A shared protocol or service UUID does not establish future-model support.
 - Existing app identity and local data must be preserved during in-place
   upgrades.
 - NOOP's PolyForm license and independent dependency notices remain intact.

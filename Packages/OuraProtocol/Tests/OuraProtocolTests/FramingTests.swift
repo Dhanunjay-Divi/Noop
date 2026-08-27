@@ -53,6 +53,15 @@ final class FramingTests: XCTestCase {
         XCTAssertEqual(battery?.percent, 0x57)   // 87%
     }
 
+    func testParseSyncTimeResponse() {
+        let frame = OuraFraming.parseOuterFrame(bytes("13057856341200"))
+        XCTAssertEqual(frame?.op, OuraFraming.syncTimeResponseOp)
+        let response = OuraFraming.parseSyncTimeResponse(frame!.body)
+        XCTAssertEqual(response?.deviceTimestamp, 0x1234_5678)
+        XCTAssertEqual(response?.status, 0)
+        XCTAssertNil(OuraFraming.parseSyncTimeResponse([0x01, 0x02, 0x03, 0x04]))
+    }
+
     // MARK: - GetEvents response (0x11, s5.2)
 
     func testParseGetEventsResponseMoreDataWhileBytesLeft() {

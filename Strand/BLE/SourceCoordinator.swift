@@ -97,6 +97,8 @@ final class SourceCoordinator: ObservableObject {
     private var pendingAdoptDeviceId: String?
     /// The deviceId the active non-WHOOP source (`activeSource`) runs for.
     private var activeStrapId: String?
+    /// Ownership token for callbacks that can outlive a graceful source teardown.
+    private var sourceGeneration: UInt64 = 0
     /// True once we've transitioned onto a generic strap. While false (the default / WHOOP-active
     /// state), switching to WHOOP is a pure no-op — we never issue a redundant WHOOP (re)scan.
     private var onStrap = false
@@ -362,6 +364,7 @@ final class SourceCoordinator: ObservableObject {
     /// rather than in the plain `makeStandard/FTMS/Huami` factories.
     private func makeOuraSource(id: String) -> any LiveHRSource {
         let ringGen = OuraRingGen.from(model: model(for: id) ?? "")
+        let ownerGeneration = sourceGeneration
         // Adopt consent is consumed for exactly this build: only the session the user explicitly granted may
         // install a key (s3.2). Clearing it here means a later reconnect of the SAME ring is a normal
         // read-only session that re-authenticates with the now-stored key and never re-installs.
@@ -409,6 +412,8 @@ final class SourceCoordinator: ObservableObject {
             },
             log: straplog,
             onBattery: { [live] pct in live.setBattery(Double(pct)) },
+            onModel: { [weak registry] model in registry?.setModel(id, model: model) },
+            isLiveOwner: { [weak self] in self?.sourceGeneration == ownerGeneration },
             adoptIntent: adoptIntent)
         if adoptIntent { straplog("Oura: adopt consent granted - this session may install NOOP's key") }
         ouraSource = source   // the published typed handle for the adopt mirror (same object as activeSource)
@@ -429,6 +434,7 @@ final class SourceCoordinator: ObservableObject {
     /// `activeSource`; otherwise it is already nil and this is a no-op).
     private func tearDownNonWhoopSource(clearMonitoringExpectation: Bool = true) {
         activeSource?.stop()
+        sourceGeneration &+= 1
         activeSource = nil
         ouraSource = nil
         if clearMonitoringExpectation {

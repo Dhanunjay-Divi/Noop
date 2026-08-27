@@ -33,6 +33,16 @@ public enum OuraDecoders {
         Int(b[i]) | (Int(b[i + 1]) << 8) | (Int(b[i + 2]) << 16) | (Int(b[i + 3]) << 24)
     }
 
+    // MARK: - Product identity
+
+    /// Decode a GetProductInfo body: status byte followed by printable, NUL-terminated ASCII.
+    public static func productInfoString(_ body: [UInt8]) -> String? {
+        guard body.count > 1, body[0] == 0 else { return nil }
+        let ascii = body.dropFirst().prefix(while: { $0 != 0 })
+        guard !ascii.isEmpty, ascii.allSatisfy({ (0x20...0x7E).contains($0) }) else { return nil }
+        return String(bytes: ascii, encoding: .ascii)
+    }
+
     // MARK: - Live-HR realtime push (0x2F sub-op 0x28; s5.6)
 
     /// Decode a live-HR push body (the bytes AFTER `2f 0f 28`). Per OURA_PROTOCOL.md s5.6 the wire

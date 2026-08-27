@@ -163,10 +163,10 @@ final class OuraDriverTests: XCTestCase {
         // get_events cursor 0, max 255, flags FFFFFFFF.
         XCTAssertEqual(start[1].bytes, [0x10, 0x09, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 
-        // More data -> ack-fetch (max 0) at the advanced cursor.
-        let ack = d.nextStep(after: .historyCursorAdvanced(cursor: 0x12345678, moreData: true))
-        XCTAssertEqual(ack.count, 1)
-        XCTAssertEqual(ack[0].bytes, [0x10, 0x09, 0x78, 0x56, 0x34, 0x12, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])
+        // More data -> fetch the next bounded batch at the advanced cursor. max=0 re-serves this window.
+        let next = d.nextStep(after: .historyCursorAdvanced(cursor: 0x12345678, moreData: true))
+        XCTAssertEqual(next.count, 1)
+        XCTAssertEqual(next[0].bytes, [0x10, 0x09, 0x78, 0x56, 0x34, 0x12, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
 
         // No more -> back to streaming.
         let stop = d.nextStep(after: .historyCursorAdvanced(cursor: 0x12345678, moreData: false))
@@ -571,10 +571,42 @@ final class OuraDriverTests: XCTestCase {
         XCTAssertTrue(OuraRingGen.gen3.capabilities.contains(.hrv))
     }
 
-    func testSyncTimeCommandCounter() {
-        // counter = floor(unix / 256). For unix = 256 -> counter 1 -> bytes 01 00 00, trailer 0xF6.
+    func testSyncTimeCommandCarriesUnixSecondsAndTimezone() {
         let cmd = OuraCommands.syncTime(unixSeconds: 256)
-        XCTAssertEqual(cmd.bytes, [0x12, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF6])
+        XCTAssertEqual(cmd.bytes, [0x12, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        XCTAssertEqual(
+            OuraCommands.syncTime(unixSeconds: 1, tzHalfHours: -3).bytes,
+            [0x12, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFD]
+        )
+    }
+
+    func testLiveHRTeardownUsesOffAndUnsubscribe() {
+        XCTAssertEqual(OuraCommands.liveHRDisable().bytes, [0x2F, 0x03, 0x22, 0x02, 0x00])
+        XCTAssertEqual(OuraCommands.liveHRUnsubscribe().bytes, [0x2F, 0x03, 0x26, 0x02, 0x00])
+    }
+
+    func testSyncTimeAnchorCandidateIsConservative() {
+        XCTAssertEqual(
+            OuraDriver.syncTimeAnchorCandidate(responseValue: 1_000_100, historyCursor: 1_000_000),
+            1_000_100
+        )
+        XCTAssertEqual(
+            OuraDriver.syncTimeAnchorCandidate(responseValue: 100_010, historyCursor: 1_000_000),
+            1_000_100
+        )
+        XCTAssertNil(OuraDriver.syncTimeAnchorCandidate(responseValue: 100_000, historyCursor: 100_000))
+        XCTAssertNil(OuraDriver.syncTimeAnchorCandidate(responseValue: 1_000, historyCursor: 0))
+    }
+
+    func testAdoptSyncTimeAnchorConvertsRingTicks() {
+        let now: Int64 = 1_800_000_000
+        let d = OuraDriver(
+            ringGen: .gen3,
+            authKey: key,
+            nowMsProvider: { now * 1000 }
+        )
+        XCTAssertTrue(d.adoptSyncTimeAnchor(ringTimestamp: 50_000, unixSeconds: now))
+        XCTAssertEqual(d.unixSeconds(forRingTimestamp: 49_900), Int(now - 10))
     }
 
     // MARK: - Dangerous commands are isolated and labelled

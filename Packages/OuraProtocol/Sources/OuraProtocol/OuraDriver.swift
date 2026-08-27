@@ -165,8 +165,9 @@ public final class OuraDriver {
                 phase = .streaming
                 return []
             }
-            // Ack-fetch (max=0) at the new cursor advances without re-pulling data (s5.3 step 4).
-            return [OuraCommands.getEvents(cursor: cursor, maxEvents: 0)]
+            // Continue from the advanced client-managed cursor. A max=0 request re-serves the same
+            // window on hardware instead of draining the next batch.
+            return [OuraCommands.getEvents(cursor: cursor, maxEvents: 255)]
         }
     }
 
@@ -234,6 +235,31 @@ public final class OuraDriver {
         guard seconds >= Self.minPlausibleEpochSeconds,
               seconds <= nowSeconds + Self.sampleFutureToleranceSeconds else { return nil }
         return Int(seconds)
+    }
+
+    /// Resolve the 0x13 response value to the ring's 100 ms tick domain. Firmware documentation calls
+    /// the value seconds, while captures can expose ticks, so accept exactly one interpretation near the
+    /// durable history cursor and refuse ambiguous or cold-start guesses.
+    public static func syncTimeAnchorCandidate(
+        responseValue: UInt32,
+        historyCursor: UInt32
+    ) -> UInt32? {
+        guard historyCursor > 0 else { return nil }
+        let lower = Int64(historyCursor)
+        let upper = lower + 6_048_000 // seven days of 100 ms ticks
+        let candidates = [Int64(responseValue), Int64(responseValue) * 10]
+            .filter { $0 >= lower && $0 <= upper && $0 <= Int64(UInt32.max) }
+        guard candidates.count == 1 else { return nil }
+        return UInt32(candidates[0])
+    }
+
+    /// Adopt the host-time/ring-time pair from a successful SyncTime response.
+    @discardableResult
+    public func adoptSyncTimeAnchor(ringTimestamp: UInt32, unixSeconds: Int64) -> Bool {
+        guard let milliseconds = Self.plausibleAnchorMs(fromEpochSeconds: unixSeconds) else { return false }
+        anchorUtcMs = milliseconds
+        anchorRingTime = ringTimestamp
+        return true
     }
 
     /// Bounds for a plausible anchor epoch (unix seconds): 2020-01-01 to 2035-01-01. A decoded 0x42/0x85
