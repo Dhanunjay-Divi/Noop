@@ -66,6 +66,9 @@ Preserve these invariants:
 - OuraProtocol: 143 tests, 0 failures.
 - WhoopStore: 399 tests, 0 failures.
 - macOS app: 1,508 tests, 1 skipped, 0 failures.
+- Universal macOS app: exact CI build passed for `x86_64 arm64`; keep the
+  timestamp collection in `Backfiller` split into typed appends so clean Swift
+  builds do not regress into a type-checker timeout.
 - NOOPiOS unsigned simulator build: passed on iPhone 17 Pro.
 - Android Full plus Demo: 7,652 tests, 14 skipped, 0 failures/errors.
 - Android Full plus Demo debug APK assembly: passed.

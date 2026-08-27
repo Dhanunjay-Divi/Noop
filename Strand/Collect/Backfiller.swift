@@ -564,12 +564,18 @@ final class Backfiller {
             }
             // Success-side observability (#150): tally what actually persisted so the session can emit
             // "persisted N rows (M with motion) across K night(s)" - the win-rate signal a log never had.
-            let scoreBearingTimestamps =
-                decoded.hr.map(\.ts) + decoded.rr.map(\.ts) + decoded.events.map(\.ts)
-                + decoded.spo2.map(\.ts) + decoded.skinTemp.map(\.ts) + decoded.resp.map(\.ts)
-                + decoded.gravity.map(\.ts) + decoded.steps.map(\.ts)
-                + decoded.sleepState.map(\.ts) + decoded.ppgHr.map(\.ts)
-                + decoded.ppgWaveform.map(\.ts)
+            var scoreBearingTimestamps: [Int] = []
+            scoreBearingTimestamps.append(contentsOf: decoded.hr.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.rr.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.events.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.spo2.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.skinTemp.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.resp.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.gravity.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.steps.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.sleepState.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.ppgHr.map(\.ts))
+            scoreBearingTimestamps.append(contentsOf: decoded.ppgWaveform.map(\.ts))
             let tally = Backfiller.chunkTally(counts: counts, timestamps: scoreBearingTimestamps)
             sessionRowsPersisted += tally.rows
             sessionMotionRows += tally.motion

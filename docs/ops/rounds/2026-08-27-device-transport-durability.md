@@ -83,6 +83,10 @@ implementations build and pass their full local test suites.
   callbacks cannot clear a replacement source. Android scan replay runs inline
   on its main owner so a queued callback cannot reconnect after stop, and stop
   invalidates the history barrier before a late Room completion can move it.
+- The hosted clean universal macOS build exposed a Swift type-checker timeout in
+  an existing chained timestamp expression. The expression is now split into
+  explicitly typed appends; behavior is unchanged and both `x86_64` and `arm64`
+  compile in the exact CI configuration.
 - Documentation now records the exact support boundary: WHOOP 4 stable; WHOOP
   5/MG implemented but physically unvalidated; future WHOOP families
   unsupported until measured; Oura Gen 3 physically exercised while Gen 4/5
@@ -109,6 +113,7 @@ implementations build and pass their full local test suites.
 | OuraProtocol package | 143 tests; 0 failures | Framing, SyncTime, generation, history, IBI-HR, and driver contracts pass | Physical Gen 4/5 behavior |
 | WhoopStore package | 399 tests; 0 failures | Oura stream batching and persistence mapping remain coherent | Live radio behavior |
 | macOS app suite | 1,508 tests; 1 fixture skip; 0 failures | Apple integration, persistence, and lifecycle tests pass | Physical iPhone or wearable behavior |
+| Universal macOS build | Passed with `x86_64 arm64` in the exact hosted-CI configuration | A clean dual-architecture build no longer exceeds the Swift type-checker limit | Notarization or Intel runtime behavior |
 | Unsigned iOS simulator build | Passed on iPhone 17 Pro destination | The consolidated iOS, Watch, widget, package, and localization graph compiles | Signing, background execution, battery, or physical BLE |
 | Android Full and Demo unit tests | 7,652 tests; 14 skips; 0 failures/errors | Both variants compile and the final lifecycle regressions pass | Android OEM or physical BLE behavior |
 | Android Full and Demo APK assembly | Passed | Both debug application variants package successfully | Play signing or store acceptance |
