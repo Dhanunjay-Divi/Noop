@@ -69,7 +69,9 @@ Preserve these invariants:
 - Universal macOS app: exact CI build passed for `x86_64 arm64`; keep the
   timestamp collection in `Backfiller` split into typed appends so clean Swift
   builds do not regress into a type-checker timeout.
-- NOOPiOS unsigned simulator build: passed on iPhone 17 Pro.
+- NOOPiOS unsigned simulator build and 25 production-shell UI tests: passed on
+  iPhone 17 Pro. Pull-to-sync assertions intentionally accept active feedback
+  or an explicit terminal outcome because completion may outrun UI automation.
 - Android Full plus Demo: 7,652 tests, 14 skipped, 0 failures/errors.
 - Android Full plus Demo debug APK assembly: passed.
 - Final policy, privacy, localization, legal, and ops gates are recorded in the

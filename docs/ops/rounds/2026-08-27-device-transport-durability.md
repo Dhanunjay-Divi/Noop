@@ -87,6 +87,9 @@ implementations build and pass their full local test suites.
   an existing chained timestamp expression. The expression is now split into
   explicitly typed appends; behavior is unchanged and both `x86_64` and `arm64`
   compile in the exact CI configuration.
+- The iOS pull-to-sync UI test now accepts both active feedback and the
+  state machine's explicit terminal outcomes. It still rejects the untriggered
+  pull state, but no longer races a fast refresh completion on a slow runner.
 - Documentation now records the exact support boundary: WHOOP 4 stable; WHOOP
   5/MG implemented but physically unvalidated; future WHOOP families
   unsupported until measured; Oura Gen 3 physically exercised while Gen 4/5
@@ -114,7 +117,7 @@ implementations build and pass their full local test suites.
 | WhoopStore package | 399 tests; 0 failures | Oura stream batching and persistence mapping remain coherent | Live radio behavior |
 | macOS app suite | 1,508 tests; 1 fixture skip; 0 failures | Apple integration, persistence, and lifecycle tests pass | Physical iPhone or wearable behavior |
 | Universal macOS build | Passed with `x86_64 arm64` in the exact hosted-CI configuration | A clean dual-architecture build no longer exceeds the Swift type-checker limit | Notarization or Intel runtime behavior |
-| Unsigned iOS simulator build | Passed on iPhone 17 Pro destination | The consolidated iOS, Watch, widget, package, and localization graph compiles | Signing, background execution, battery, or physical BLE |
+| Unsigned iOS simulator build and production-shell UI suite | Build passed; 25 UI tests passed on iPhone 17 Pro | The consolidated iOS, Watch, widget, package, localization, and principal UI flows compile and execute | Signing, background execution, battery, or physical BLE |
 | Android Full and Demo unit tests | 7,652 tests; 14 skips; 0 failures/errors | Both variants compile and the final lifecycle regressions pass | Android OEM or physical BLE behavior |
 | Android Full and Demo APK assembly | Passed | Both debug application variants package successfully | Play signing or store acceptance |
 | Independent lifecycle review | Nine transport races found, fixed, and regression-covered | The changed async boundaries received a separate adversarial pass | Exhaustive concurrency or hardware validation |
