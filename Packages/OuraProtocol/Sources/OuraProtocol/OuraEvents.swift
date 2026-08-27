@@ -33,11 +33,45 @@ public struct OuraIBI: Equatable, Sendable, Codable {
 
 /// One decoded heart-rate value in BPM (derived from a live-HR push IBI, OURA_PROTOCOL.md s5.6).
 public struct OuraHR: Equatable, Sendable, Codable {
+    /// How a heart-rate row came to exist.
+    ///
+    /// The ring pushes HR directly during a live session but banks only IBI records overnight, so the
+    /// history transport materializes HR from each record's median physiological IBI (`OuraIbiHr`). Both
+    /// kinds land in the same HR series, and overnight history is exactly where resting HR is drawn from,
+    /// so a row must be able to say which it is.
+    ///
+    /// This mirrors the reasoning behind `WatchRecovery.HRVProvenance`: two numerically plausible values
+    /// produced by different methods must not become indistinguishable once they are in a series, because a
+    /// baseline then shifts when the mix of sources changes rather than when the wearer does. Recovery
+    /// weights resting HR at 0.20, so that shift would be visible in the headline score.
+    public enum Derivation: String, Equatable, Sendable, Codable {
+        /// The ring reported this rate itself, in a live push.
+        case ringReported
+        /// Materialized from the median physiological IBI of one banked history record.
+        case medianOfRecordIntervals
+    }
+
     public let ringTimestamp: UInt32
     public let bpm: Int
     public let ibiMs: Int
-    public init(ringTimestamp: UInt32, bpm: Int, ibiMs: Int) {
+    /// Defaults to `.ringReported` so existing decode sites and call sites stay valid; only `OuraIbiHr`
+    /// declares the derived case.
+    public let derivation: Derivation
+
+    public init(ringTimestamp: UInt32, bpm: Int, ibiMs: Int,
+                derivation: Derivation = .ringReported) {
         self.ringTimestamp = ringTimestamp; self.bpm = bpm; self.ibiMs = ibiMs
+        self.derivation = derivation
+    }
+
+    // Explicit decode so a payload written before `derivation` existed still reads, rather than failing and
+    // silently dropping a night of heart rate.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ringTimestamp = try container.decode(UInt32.self, forKey: .ringTimestamp)
+        bpm = try container.decode(Int.self, forKey: .bpm)
+        ibiMs = try container.decode(Int.self, forKey: .ibiMs)
+        derivation = try container.decodeIfPresent(Derivation.self, forKey: .derivation) ?? .ringReported
     }
 }
 

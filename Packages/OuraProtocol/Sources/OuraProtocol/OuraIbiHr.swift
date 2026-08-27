@@ -39,7 +39,8 @@ public enum OuraIbiHr {
             let medianIbi = median(intervals)
             let bpm = Int((60_000.0 / Double(medianIbi)).rounded())
             guard (30...220).contains(bpm) else { return nil }
-            return OuraHR(ringTimestamp: ringTimestamp, bpm: bpm, ibiMs: medianIbi)
+            return OuraHR(ringTimestamp: ringTimestamp, bpm: bpm, ibiMs: medianIbi,
+                          derivation: .medianOfRecordIntervals)
         }
     }
 
