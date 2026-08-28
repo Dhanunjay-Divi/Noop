@@ -870,32 +870,40 @@ struct LiquidTodayView: View {
     #endif
 
     /// One-tap Live Session start (silent guardian, beta) — sits directly under the hero scores, the
-    /// Charge its band is gated on. Same translucent chrome as the hero card so it reads as part of the
-    /// sky scene, quiet by design.
+    /// Recovery its band is gated on. The plain-language title and detail explain the feature before
+    /// introducing its Silent Guardian name on the in-session screen.
     private var liveSessionStartRow: some View {
         Button { showLiveSession = true } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Image(systemName: "shield.lefthalf.filled")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(StrandPalette.metricCyan)
-                // The session-start row shares the hero card's pinned-dark `heroFill`, so its text/chevron
-                // use the on-dark tokens — textPrimary/Secondary/Tertiary flip to dark ink in Light mode and
-                // went dark-on-near-black here too (#1013).
-                Text("appwide.live_session.start")
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.onDarkPrimary)
-                Text("BETA")
-                    .font(StrandFont.overlineScaled(8.5)).tracking(0)
-                    .foregroundStyle(StrandPalette.onDarkSecondary)
-                    .padding(.horizontal, 8).padding(.vertical, 2.5)
-                    .background(Capsule().fill(.white.opacity(0.05))
-                        .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text("appwide.live_session.start")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.onDarkPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                        Text("BETA")
+                            .font(StrandFont.overlineScaled(8.5)).tracking(0)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                            .padding(.horizontal, 8).padding(.vertical, 2.5)
+                            .background(Capsule().fill(.white.opacity(0.05))
+                                .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 1)))
+                    }
+                    Text("appwide.live_session.start_detail")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.onDarkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(StrandPalette.onDarkTertiary)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
+            .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(heroFill)

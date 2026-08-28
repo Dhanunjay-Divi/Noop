@@ -187,8 +187,9 @@
     <string name="appwide_journal_editing_help">可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。</string>
     <string name="appwide_legal_summary">專案條款和原始碼授權。可離線查看。</string>
     <string name="appwide_live_session_manually_started">手動啟動</string>
-    <string name="appwide_live_session_start">啟動 Silent Guardian</string>
-    <string name="appwide_live_session_start_accessibility">手動啟動 Silent Guardian。測試版。Noop Band 會根據今天的恢復狀況提供指導。</string>
+    <string name="appwide_live_session_start">啟動訓練教練</string>
+    <string name="appwide_live_session_start_accessibility">啟動訓練教練。測試版。手環根據今天的恢復狀況和心率，透過振動引導訓練強度。</string>
+    <string name="appwide_live_session_start_detail">手環根據今天的恢復狀況和心率，透過振動引導訓練強度。</string>
     <string name="appwide_live_session_summary_title">Silent Guardian 摘要</string>
     <string name="appwide_live_session_title">Silent Guardian</string>
     <string name="appwide_metric_education_body_temp_action">查看原始來源和測量方法。使用合適的體溫計確認異常數值；如症狀需要，請及時就醫。</string>

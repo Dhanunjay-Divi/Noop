@@ -781,26 +781,37 @@
     "zh-Hant": "Silent Guardian 摘要"
   },
   "appwide.live_session.start": {
-    "de": "Silent Guardian starten",
-    "en": "Start Silent Guardian",
-    "es": "Iniciar Silent Guardian",
-    "fr": "Démarrer Silent Guardian",
-    "it": "Avvia Silent Guardian",
-    "pt-PT": "Iniciar Silent Guardian",
-    "ru": "Запустить Silent Guardian",
-    "zh-Hans": "启动 Silent Guardian",
-    "zh-Hant": "啟動 Silent Guardian"
+    "de": "Workout-Coach starten",
+    "en": "Start workout coach",
+    "es": "Iniciar coach de entrenamiento",
+    "fr": "Démarrer le coach d’entraînement",
+    "it": "Avvia coach di allenamento",
+    "pt-PT": "Iniciar orientação de treino",
+    "ru": "Запустить тренера для тренировки",
+    "zh-Hans": "启动训练教练",
+    "zh-Hant": "啟動訓練教練"
+  },
+  "appwide.live_session.start_detail": {
+    "de": "Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.",
+    "en": "Band vibrations guide effort using today's Recovery and heart rate.",
+    "es": "Las vibraciones de la pulsera guían tu esfuerzo según la Recuperación y la frecuencia cardiaca de hoy.",
+    "fr": "Les vibrations du bracelet guident votre effort selon la Récupération et la fréquence cardiaque du jour.",
+    "it": "Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.",
+    "pt-PT": "As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.",
+    "ru": "Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.",
+    "zh-Hans": "手环根据今天的恢复状况和心率，通过振动引导训练强度。",
+    "zh-Hant": "手環根據今天的恢復狀況和心率，透過振動引導訓練強度。"
   },
   "appwide.live_session.start_accessibility": {
-    "de": "Silent Guardian manuell starten. Beta. Noop Band-Coaching auf Grundlage der heutigen Erholung.",
-    "en": "Manually start Silent Guardian. Beta. Noop Band coaching against today's Recovery.",
-    "es": "Iniciar Silent Guardian manualmente. Beta. Orientación de Noop Band según la Recuperación de hoy.",
-    "fr": "Démarrer Silent Guardian manuellement. Bêta. Conseils Noop Band basés sur la Récupération du jour.",
-    "it": "Avvia manualmente Silent Guardian. Beta. Guida Noop Band basata sul Recupero di oggi.",
-    "pt-PT": "Iniciar manualmente o Silent Guardian. Beta. Orientação da Noop Band com base na Recuperação de hoje.",
-    "ru": "Запустить Silent Guardian вручную. Бета. Подсказки Noop Band с учётом сегодняшнего Восстановления.",
-    "zh-Hans": "手动启动 Silent Guardian。测试版。Noop Band 会根据今天的恢复状况提供指导。",
-    "zh-Hant": "手動啟動 Silent Guardian。測試版。Noop Band 會根據今天的恢復狀況提供指導。"
+    "de": "Workout-Coach starten. Beta. Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.",
+    "en": "Start workout coach. Beta. Band vibrations guide effort using today's Recovery and heart rate.",
+    "es": "Iniciar coach de entrenamiento. Beta. Las vibraciones de la pulsera guían tu esfuerzo según la Recuperación y la frecuencia cardiaca de hoy.",
+    "fr": "Démarrer le coach d’entraînement. Bêta. Les vibrations du bracelet guident votre effort selon la Récupération et la fréquence cardiaque du jour.",
+    "it": "Avvia coach di allenamento. Beta. Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.",
+    "pt-PT": "Iniciar orientação de treino. Beta. As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.",
+    "ru": "Запустить тренера для тренировки. Бета. Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.",
+    "zh-Hans": "启动训练教练。测试版。手环根据今天的恢复状况和心率，通过振动引导训练强度。",
+    "zh-Hant": "啟動訓練教練。測試版。手環根據今天的恢復狀況和心率，透過振動引導訓練強度。"
   },
   "appwide.automations.tap_guide.alarm_body": {
     "de": "Stoppt den aktiven Bandalarm, wenn die Reaktion auf Tippen unter „Alarme“ aktiviert ist.",

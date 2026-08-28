@@ -187,8 +187,9 @@
     <string name="appwide_journal_editing_help">Benenne einen Eintrag um, gruppiere ihn neu oder entferne ihn, um deine Liste aufzuräumen. Beim Umbenennen bleibt die ursprüngliche Frage intern erhalten, damit importierte Referenzen weiterhin zugeordnet werden. Eigene Einträge werden gelöscht; integrierte werden ausgeblendet und können unten wiederhergestellt werden.</string>
     <string name="appwide_legal_summary">Projektbedingungen und Quellcodelizenz. Offline verfügbar.</string>
     <string name="appwide_live_session_manually_started">MANUELL GESTARTET</string>
-    <string name="appwide_live_session_start">Silent Guardian starten</string>
-    <string name="appwide_live_session_start_accessibility">Silent Guardian manuell starten. Beta. Noop Band-Coaching auf Grundlage der heutigen Erholung.</string>
+    <string name="appwide_live_session_start">Workout-Coach starten</string>
+    <string name="appwide_live_session_start_accessibility">Workout-Coach starten. Beta. Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.</string>
+    <string name="appwide_live_session_start_detail">Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.</string>
     <string name="appwide_live_session_summary_title">Silent Guardian-Zusammenfassung</string>
     <string name="appwide_live_session_title">Silent Guardian</string>
     <string name="appwide_metric_education_body_temp_action">Prüfe die ursprüngliche Quelle und Messmethode. Bestätige einen unerwarteten Wert mit einem geeigneten Thermometer und hole bei entsprechenden Beschwerden medizinischen Rat ein.</string>

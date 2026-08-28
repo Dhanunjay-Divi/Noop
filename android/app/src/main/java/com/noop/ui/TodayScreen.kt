@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.SwapVert
@@ -2749,15 +2750,17 @@ private fun LiveSessionEntryCard(onOpen: () -> Unit) {
         elapsed = elapsedClock(snap.elapsedSec.toLong())
     }
     val teal = Palette.metricCyan
+    val startTitle = stringResource(R.string.appwide_live_session_start)
+    val startDetail = stringResource(R.string.appwide_live_session_start_detail)
     val title = when {
         running -> "Silent Guardian running"
         summaryWaiting -> "Silent Guardian ended"
-        else -> "Start Silent Guardian"
+        else -> startTitle
     }
     val detail = when {
         running -> "Guarding - silence means you're on track."
         summaryWaiting -> "See the summary of your last session."
-        else -> "Manually start band-guided effort coaching. It vibrates only when you drift off today's zone."
+        else -> startDetail
     }
 
     // liquidPress on the whole tappable card (same interactionSource on clickable + press), matching the
@@ -2778,7 +2781,7 @@ private fun LiveSessionEntryCard(onOpen: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(
-                Icons.Filled.TrackChanges,
+                Icons.Filled.Shield,
                 contentDescription = null,
                 tint = teal,
                 modifier = Modifier.size(20.dp),

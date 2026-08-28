@@ -187,8 +187,9 @@
     <string name="appwide_journal_editing_help">Muda o nome, reagrupa ou remove um item para organizar a lista. A pergunta original fica associada internamente, para que as referências importadas continuem alinhadas. Os itens personalizados são eliminados; os integrados ficam ocultos e podem ser restaurados abaixo.</string>
     <string name="appwide_legal_summary">Termos do projeto e licença do código-fonte. Disponível offline.</string>
     <string name="appwide_live_session_manually_started">INICIADO MANUALMENTE</string>
-    <string name="appwide_live_session_start">Iniciar Silent Guardian</string>
-    <string name="appwide_live_session_start_accessibility">Iniciar manualmente o Silent Guardian. Beta. Orientação da Noop Band com base na Recuperação de hoje.</string>
+    <string name="appwide_live_session_start">Iniciar orientação de treino</string>
+    <string name="appwide_live_session_start_accessibility">Iniciar orientação de treino. Beta. As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.</string>
+    <string name="appwide_live_session_start_detail">As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.</string>
     <string name="appwide_live_session_summary_title">Resumo do Silent Guardian</string>
     <string name="appwide_live_session_title">Silent Guardian</string>
     <string name="appwide_metric_education_body_temp_action">Verifique a fonte original e o método de medição. Confirme um valor inesperado com um termómetro adequado e procure cuidados se os sintomas o justificarem.</string>

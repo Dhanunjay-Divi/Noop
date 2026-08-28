@@ -187,8 +187,9 @@
     <string name="appwide_journal_editing_help">Rename, regroup, or remove an item to tidy your list. Renaming keeps the original question behind the scenes, so imported references still line up. Custom items are deleted; built-in ones are hidden and can be restored below.</string>
     <string name="appwide_legal_summary">Project terms and source license. Available offline.</string>
     <string name="appwide_live_session_manually_started">MANUALLY STARTED</string>
-    <string name="appwide_live_session_start">Start Silent Guardian</string>
-    <string name="appwide_live_session_start_accessibility">Manually start Silent Guardian. Beta. Noop Band coaching against today\'s Recovery.</string>
+    <string name="appwide_live_session_start">Start workout coach</string>
+    <string name="appwide_live_session_start_accessibility">Start workout coach. Beta. Band vibrations guide effort using today\'s Recovery and heart rate.</string>
+    <string name="appwide_live_session_start_detail">Band vibrations guide effort using today\'s Recovery and heart rate.</string>
     <string name="appwide_live_session_summary_title">Silent Guardian summary</string>
     <string name="appwide_live_session_title">Silent Guardian</string>
     <string name="appwide_metric_education_body_temp_action">Check the original source and measurement method. Confirm an unexpected value with an appropriate thermometer and seek care when symptoms warrant it.</string>
