@@ -430,6 +430,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
         WorkoutDayOverviewSheet(
             day = day,
             scope = DayOverviewScope.ACTIVITY,
+            focusValue = daily?.strain,
             daily = daily,
             workouts = dayWorkouts,
             metricRows = emptyList(),
@@ -679,9 +680,54 @@ internal fun dayOverviewSleepScore(daily: DailyMetric?): Double? {
     return RestScorer.restFromDaily(daily.copy(efficiency = efficiency))
 }
 
-internal enum class DayOverviewScope(val includesWholeDayMetrics: Boolean) {
-    ALL(true),
-    ACTIVITY(false),
+internal enum class DayOverviewScope(
+    val includesWholeDayMetrics: Boolean = false,
+    val includesSleepMetrics: Boolean = false,
+    val includesRecoveryMetrics: Boolean = false,
+    val includesStressSignals: Boolean = false,
+    val includesActivityMetrics: Boolean = false,
+    val includesEnergyMetrics: Boolean = false,
+    val includesSessions: Boolean = false,
+) {
+    ALL(
+        includesWholeDayMetrics = true,
+        includesSleepMetrics = true,
+        includesRecoveryMetrics = true,
+        includesActivityMetrics = true,
+        includesSessions = true,
+    ),
+    ACTIVITY(
+        includesActivityMetrics = true,
+        includesSessions = true,
+    ),
+    RECOVERY(includesRecoveryMetrics = true),
+    SLEEP(includesSleepMetrics = true),
+    STRESS(includesStressSignals = true),
+    ENERGY(
+        includesEnergyMetrics = true,
+        includesSessions = true,
+    ),
+    NUTRITION,
+    ;
+
+    val loadsMetricRows: Boolean
+        get() = this !in setOf(ACTIVITY)
+
+    fun includesSupplementalMetric(key: String): Boolean = when (this) {
+        ALL -> true
+        RECOVERY, STRESS, ACTIVITY -> false
+        SLEEP -> key in setOf(
+            "in_bed_min",
+            "hours_vs_needed_pct",
+            "sleep_consistency",
+            "restorative_pct",
+            "restorative_min",
+            "sleep_need_min",
+            "sleep_debt_min",
+        )
+        ENERGY -> key in setOf("basal_kcal", "total_kcal")
+        NUTRITION -> key in setOf("protein_g", "carbs_g", "fat_g", "hydration")
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -689,6 +735,7 @@ internal enum class DayOverviewScope(val includesWholeDayMetrics: Boolean) {
 internal fun WorkoutDayOverviewSheet(
     day: LocalDate,
     scope: DayOverviewScope,
+    focusValue: Double?,
     daily: DailyMetric?,
     workouts: List<WorkoutRow>,
     metricRows: List<MetricSeriesRow>,
@@ -810,13 +857,91 @@ internal fun WorkoutDayOverviewSheet(
                 ?: noData,
         ),
     )
-    val supplementalItems = if (scope.includesWholeDayMetrics) {
+    val stressSignalItems = vitalItems.take(2)
+    val energyItems = listOf(
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_workout_calories),
+            workoutCalories.takeIf { it.isNotEmpty() }
+                ?.sum()?.let { "${dayOverviewGrouped(it)} kcal" } ?: noData,
+            Palette.metricAmber,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_active_time),
+            dayOverviewDurationSeconds(durationSeconds),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_workout_count),
+            workouts.size.toString(),
+            Palette.effortColor,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_steps),
+            daily?.steps?.let { dayOverviewGrouped(it.toDouble()) } ?: noData,
+            Palette.statusPositive,
+        ),
+    )
+
+    val resolvedFocusValue = focusValue?.takeIf(Double::isFinite) ?: when (scope) {
+        DayOverviewScope.ALL -> null
+        DayOverviewScope.ACTIVITY -> daily?.strain
+        DayOverviewScope.RECOVERY -> daily?.recovery
+        DayOverviewScope.SLEEP -> dayOverviewSleepScore(daily)
+        DayOverviewScope.STRESS,
+        DayOverviewScope.ENERGY,
+        DayOverviewScope.NUTRITION -> null
+    }
+
+    val primaryTitle = when (scope) {
+        DayOverviewScope.ALL -> uiString(R.string.appwide_day_overview_daily_scores)
+        DayOverviewScope.ACTIVITY -> uiString(R.string.appwide_day_overview_effort)
+        DayOverviewScope.RECOVERY -> uiString(R.string.appwide_day_overview_recovery)
+        DayOverviewScope.SLEEP -> uiString(R.string.appwide_day_overview_sleep_score)
+        DayOverviewScope.STRESS -> uiString(R.string.nav_stress)
+        DayOverviewScope.ENERGY -> uiString(R.string.l10n_health_screen_active_energy_2d3288f9)
+        DayOverviewScope.NUTRITION -> uiString(R.string.explore_metric_calories_in)
+    }
+    val primaryOverline = when (scope) {
+        DayOverviewScope.ACTIVITY, DayOverviewScope.ENERGY ->
+            uiString(R.string.appwide_day_overview_activity)
+        DayOverviewScope.SLEEP -> uiString(R.string.appwide_day_overview_sleep)
+        DayOverviewScope.NUTRITION -> uiString(R.string.nav_nutrition)
+        else -> uiString(R.string.appwide_day_overview_overall)
+    }
+    val primaryLabel = when (scope) {
+        DayOverviewScope.ALL, DayOverviewScope.ACTIVITY ->
+            uiString(R.string.appwide_day_overview_effort)
+        DayOverviewScope.RECOVERY -> uiString(R.string.appwide_day_overview_recovery)
+        DayOverviewScope.SLEEP -> uiString(R.string.appwide_day_overview_sleep_score)
+        DayOverviewScope.STRESS -> uiString(R.string.nav_stress)
+        DayOverviewScope.ENERGY -> uiString(R.string.l10n_health_screen_active_energy_2d3288f9)
+        DayOverviewScope.NUTRITION -> uiString(R.string.explore_metric_calories_in)
+    }
+    val primaryValue = when (scope) {
+        DayOverviewScope.ALL, DayOverviewScope.ACTIVITY ->
+            resolvedFocusValue?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: noData
+        DayOverviewScope.RECOVERY, DayOverviewScope.SLEEP -> score(resolvedFocusValue)
+        DayOverviewScope.STRESS ->
+            decimal(resolvedFocusValue)?.let { "$it /3" } ?: noData
+        DayOverviewScope.ENERGY, DayOverviewScope.NUTRITION ->
+            resolvedFocusValue?.let { "${dayOverviewGrouped(it)} kcal" } ?: noData
+    }
+    val primaryAccent = when (scope) {
+        DayOverviewScope.ALL, DayOverviewScope.ACTIVITY -> Palette.effortColor
+        DayOverviewScope.RECOVERY -> Palette.chargeColor
+        DayOverviewScope.SLEEP -> Palette.restColor
+        DayOverviewScope.STRESS -> Palette.metricAmber
+        DayOverviewScope.ENERGY -> Palette.statusWarning
+        DayOverviewScope.NUTRITION -> Palette.statusPositive
+    }
+
+    val supplementalItems = if (scope.loadsMetricRows) {
         dayOverviewSupplementalMetrics(
             metricRows,
             activeStrapId,
             unitSystem,
             temperatureUnit,
             locale,
+            scope,
         )
     } else {
         emptyList()
@@ -876,17 +1001,10 @@ internal fun WorkoutDayOverviewSheet(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                if (scope.includesWholeDayMetrics) {
-                    SectionHeader(
-                        title = uiString(R.string.appwide_day_overview_daily_scores),
-                        overline = uiString(R.string.appwide_day_overview_overall),
-                    )
-                } else {
-                    SectionHeader(
-                        title = uiString(R.string.appwide_day_overview_effort),
-                        overline = uiString(R.string.appwide_day_overview_activity),
-                    )
-                }
+                SectionHeader(
+                    title = primaryTitle,
+                    overline = primaryOverline,
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
                     if (scope.includesWholeDayMetrics) {
                         Row(
@@ -906,53 +1024,110 @@ internal fun WorkoutDayOverviewSheet(
                                 modifier = Modifier.weight(1f),
                             )
                         }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                    ) {
-                        StatTile(
-                            label = uiString(R.string.appwide_day_overview_effort),
-                            value = daily?.strain?.takeIf(Double::isFinite)
-                                ?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: noData,
-                            accent = Palette.effortColor,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.weight(1f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                        ) {
+                            StatTile(
+                                label = uiString(R.string.appwide_day_overview_effort),
+                                value = daily?.strain?.takeIf(Double::isFinite)
+                                    ?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: noData,
+                                accent = Palette.effortColor,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                        ) {
+                            StatTile(
+                                label = primaryLabel,
+                                value = primaryValue,
+                                accent = primaryAccent,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
                     }
                 }
             }
 
-            if (scope.includesWholeDayMetrics) {
-                DayOverviewMetricSection(
-                    title = uiString(R.string.appwide_day_overview_sleep),
-                    items = sleepItems,
-                    noData = noData,
-                )
-                DayOverviewMetricSection(
-                    title = uiString(R.string.appwide_day_overview_vitals),
-                    items = vitalItems,
-                    noData = noData,
-                )
+            when (scope) {
+                DayOverviewScope.ALL -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_sleep),
+                        items = sleepItems,
+                        noData = noData,
+                    )
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_vitals),
+                        items = vitalItems,
+                        noData = noData,
+                    )
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_activity),
+                        items = activityItems,
+                        noData = noData,
+                    )
+                    if (supplementalItems.isNotEmpty()) {
+                        DayOverviewMetricSection(
+                            title = uiString(R.string.appwide_day_overview_more_metrics),
+                            items = supplementalItems,
+                            noData = noData,
+                        )
+                    }
+                    if (journal.isNotEmpty()) DayOverviewJournalSection(journal)
+                    DayOverviewSessions(workouts = workouts)
+                }
+                DayOverviewScope.ACTIVITY -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_activity),
+                        items = activityItems,
+                        noData = noData,
+                    )
+                    DayOverviewSessions(workouts = workouts)
+                }
+                DayOverviewScope.RECOVERY -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_vitals),
+                        items = vitalItems + supplementalItems,
+                        noData = noData,
+                    )
+                }
+                DayOverviewScope.SLEEP -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_sleep),
+                        items = sleepItems + supplementalItems,
+                        noData = noData,
+                    )
+                }
+                DayOverviewScope.STRESS -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_vitals),
+                        items = stressSignalItems,
+                        noData = noData,
+                    )
+                }
+                DayOverviewScope.ENERGY -> {
+                    DayOverviewMetricSection(
+                        title = uiString(R.string.appwide_day_overview_activity),
+                        items = supplementalItems + energyItems,
+                        noData = noData,
+                    )
+                    DayOverviewSessions(workouts = workouts)
+                }
+                DayOverviewScope.NUTRITION -> {
+                    if (supplementalItems.isNotEmpty()) {
+                        DayOverviewMetricSection(
+                            title = uiString(R.string.nav_nutrition),
+                            items = supplementalItems,
+                            noData = noData,
+                        )
+                    }
+                }
             }
-            DayOverviewMetricSection(
-                title = uiString(R.string.appwide_day_overview_activity),
-                items = activityItems,
-                noData = noData,
-            )
-            if (scope.includesWholeDayMetrics && supplementalItems.isNotEmpty()) {
-                DayOverviewMetricSection(
-                    title = uiString(R.string.appwide_day_overview_more_metrics),
-                    items = supplementalItems,
-                    noData = noData,
-                )
-            }
-            if (scope.includesWholeDayMetrics && journal.isNotEmpty()) {
-                DayOverviewJournalSection(journal)
-            }
-            DayOverviewSessions(
-                workouts = workouts,
-            )
         }
     }
 }
@@ -1015,10 +1190,12 @@ private fun dayOverviewSupplementalMetrics(
     unitSystem: UnitSystem,
     temperatureUnit: TemperatureUnit,
     locale: Locale,
+    scope: DayOverviewScope,
 ): List<DayOverviewMetric> {
     val grouped = rows.asSequence()
         .filter { it.value.isFinite() }
         .filterNot { dayOverviewHiddenMetric(it.deviceId, it.key) }
+        .filter { scope.includesSupplementalMetric(dayOverviewCanonicalKey(it.key)) }
         .groupBy { dayOverviewCanonicalKey(it.key) }
 
     return grouped.mapNotNull { (key, candidates) ->

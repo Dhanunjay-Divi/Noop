@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">%1$s wurde gespeichert. Die ZIP-Datei lässt sich auf Mac, iPhone oder Android wieder in NOOP importieren. Der Vergleichsordner ist für die Gegenüberstellung bereit; bewahre die unveränderte Original-ZIP-Datei deines Anbieters separat auf und teile beide Dateien zusammen.</string>
     <string name="appwide_breathe_phone_haptics">Telefonhaptik</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Tag %1$d, keine Daten</string>
-    <string name="appwide_calendar_a11y_day_value_format">Tag %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">Tag %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Heute, Tag %1$d, keine Daten</string>
-    <string name="appwide_calendar_a11y_today_value_format">Heute, Tag %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">Heute, Tag %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">Aktive Energie stammt aus dem Gesundheitsspeicher des Smartphones. Die kombinierte, herzfrequenzbasierte Kalorienschätzung des Noop Band ist eine andere Größe und wird in diesem Kalender nicht damit vermischt.</string>
     <string name="appwide_calendar_legend_calm">Ruhig</string>
     <string name="appwide_calendar_legend_easy">Leicht</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">Ernährung zeigt die Kalorien, die du protokolliert hast. Ein leerer Tag bedeutet nicht protokolliert, niemals null Aufnahme.</string>
     <string name="appwide_calendar_previous_month">Vorheriger Monat</string>
     <string name="appwide_calendar_stress_provenance">Importierter täglicher Stress wird verwendet, wenn verfügbar. Andere Tage erfordern eine zuverlässige experimentelle Schätzung aus zwei Signalen, Ruhepuls und HRV; begrenzte Schätzungen bleiben leer.</string>
-    <string name="appwide_calendar_subtitle">Ein Ring pro Tag</string>
+    <string name="appwide_calendar_subtitle">Tägliche Werte und Summen</string>
     <string name="appwide_calendar_summary_empty_format">Für %1$s wurde diesen Monat noch kein Wert berechnet.</string>
     <string name="appwide_calendar_summary_gaps">Tage ohne Daten bleiben leer und werden nicht als null gezählt.</string>
     <string name="appwide_calendar_summary_overline">DIESER MONAT</string>

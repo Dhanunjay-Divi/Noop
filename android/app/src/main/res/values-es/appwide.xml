@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">Se guardó %1$s. El ZIP se puede volver a importar en NOOP desde Mac, iPhone o Android. La carpeta de comparación está lista para el análisis paralelo; conserva el ZIP original del proveedor sin modificar y comparte ambos archivos juntos.</string>
     <string name="appwide_breathe_phone_haptics">Vibración del teléfono</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Día %1$d, sin datos</string>
-    <string name="appwide_calendar_a11y_day_value_format">Día %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">Día %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Hoy, día %1$d, sin datos</string>
-    <string name="appwide_calendar_a11y_today_value_format">Hoy, día %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">Hoy, día %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">La energía activa procede del repositorio de salud del teléfono. La estimación combinada de calorías del Noop Band basada en la frecuencia cardiaca es una magnitud diferente y no se mezcla en este calendario.</string>
     <string name="appwide_calendar_legend_calm">Calma</string>
     <string name="appwide_calendar_legend_easy">Suave</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">Nutrición muestra las calorías que registraste. Un día en blanco significa que no se registró, nunca una ingesta cero.</string>
     <string name="appwide_calendar_previous_month">Mes anterior</string>
     <string name="appwide_calendar_stress_provenance">Se usa el estrés diario importado cuando está disponible. Los demás días requieren una estimación autonómica experimental fiable de dos señales, frecuencia cardiaca en reposo y VFC; las estimaciones limitadas quedan en blanco.</string>
-    <string name="appwide_calendar_subtitle">Un anillo por día</string>
+    <string name="appwide_calendar_subtitle">Puntuaciones y totales diarios</string>
     <string name="appwide_calendar_summary_empty_format">Aún no se ha calculado %1$s este mes.</string>
     <string name="appwide_calendar_summary_gaps">Los días sin datos quedan vacíos; no se cuentan como cero.</string>
     <string name="appwide_calendar_summary_overline">ESTE MES</string>

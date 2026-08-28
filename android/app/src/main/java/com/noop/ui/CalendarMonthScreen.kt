@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -62,7 +63,6 @@ import com.noop.analytics.DailyAutonomicLoad
 import com.noop.analytics.RecoveryScorer
 import com.noop.analytics.RestScorer
 import com.noop.data.DailyMetric
-import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
@@ -76,6 +76,7 @@ import java.time.format.TextStyle
 import java.time.temporal.WeekFields
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.async
@@ -118,6 +119,15 @@ internal enum class CalendarMetric(
         Icons.Filled.Restaurant,
         CalendarMetricValence.NEUTRAL_QUANTITY,
     ),
+}
+
+internal fun CalendarMetric.dayOverviewScope(): DayOverviewScope = when (this) {
+    CalendarMetric.EFFORT -> DayOverviewScope.ACTIVITY
+    CalendarMetric.RECOVERY -> DayOverviewScope.RECOVERY
+    CalendarMetric.SLEEP -> DayOverviewScope.SLEEP
+    CalendarMetric.STRESS -> DayOverviewScope.STRESS
+    CalendarMetric.ENERGY -> DayOverviewScope.ENERGY
+    CalendarMetric.NUTRITION -> DayOverviewScope.NUTRITION
 }
 
 internal enum class CalendarMetricValence {
@@ -198,11 +208,16 @@ internal fun calendarStressByDay(
     return merged
 }
 
-private data class CalendarDayOverviewContent(
+private data class CalendarDayOverviewTarget(
     val day: LocalDate,
+    val metric: CalendarMetric,
+    val focusValue: Double?,
+)
+
+private data class CalendarDayOverviewContent(
+    val target: CalendarDayOverviewTarget,
     val daily: DailyMetric?,
     val metricRows: List<MetricSeriesRow>,
-    val journal: List<JournalEntry>,
 )
 
 @Composable
@@ -220,7 +235,7 @@ internal fun CalendarMonthScreen(
     var snapshot by remember { mutableStateOf(CalendarMonthSnapshot()) }
     var loading by remember { mutableStateOf(true) }
     var loadFailed by remember { mutableStateOf(false) }
-    var selectedDay by remember { mutableStateOf<LocalDate?>(null) }
+    var selectedOverview by remember { mutableStateOf<CalendarDayOverviewTarget?>(null) }
     var overviewContent by remember { mutableStateOf<CalendarDayOverviewContent?>(null) }
 
     LaunchedEffect(vm.activeStrapId, workoutDataVersion) {
@@ -335,63 +350,68 @@ internal fun CalendarMonthScreen(
             snapshot = snapshot,
             loading = loading,
             loadFailed = loadFailed,
-            onSelectDay = { selectedDay = it },
+            onSelectDay = { day ->
+                selectedOverview = CalendarDayOverviewTarget(
+                    day = day,
+                    metric = metric,
+                    focusValue = calendarMetricValue(metric, day.toString(), snapshot),
+                )
+            },
         )
         CalendarLegend(metric)
         CalendarMonthSummary(month, metric, snapshot)
     }
 
-    selectedDay?.let { day ->
-        LaunchedEffect(day, vm.activeStrapId, metricDataVersion, dailyDataSignature) {
+    selectedOverview?.let { target ->
+        val scope = target.metric.dayOverviewScope()
+        LaunchedEffect(target, vm.activeStrapId, metricDataVersion, dailyDataSignature) {
             overviewContent = null
-            val key = day.toString()
+            val key = target.day.toString()
             overviewContent = try {
                 coroutineScope {
                     val daily = async {
                         vm.repo.daysMerged(vm.activeStrapId, key, key)
                             .lastOrNull { it.day == key }
                     }
-                    val metrics = async { vm.repo.metricSeriesForDay(key) }
-                    val importedJournal = async {
-                        vm.repo.importedSourceIds(vm.activeStrapId).flatMap {
-                            vm.repo.journal(it, key, key)
-                        }
-                    }
-                    val nativeJournal = async {
-                        vm.repo.journal(JOURNAL_DEVICE_ID, key, key)
+                    val metrics = async {
+                        if (scope.loadsMetricRows) vm.repo.metricSeriesForDay(key) else emptyList()
                     }
                     CalendarDayOverviewContent(
-                        day = day,
+                        target = target,
                         daily = daily.await(),
                         metricRows = metrics.await(),
-                        journal = mergeJournalEntries(
-                            importedJournal.await(),
-                            nativeJournal.await(),
-                        ),
                     )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
-                CalendarDayOverviewContent(day, null, emptyList(), emptyList())
+                CalendarDayOverviewContent(target, null, emptyList())
             }
         }
 
-        val exact = overviewContent?.takeIf { it.day == day }
+        val exact = overviewContent?.takeIf { it.target == target }
         val zone = ZoneId.systemDefault()
-        val dayWorkouts = allWorkouts.filter {
-            Instant.ofEpochSecond(it.startTs).atZone(zone).toLocalDate() == day
+        val dayWorkouts = if (scope.includesSessions) {
+            allWorkouts.filter {
+                Instant.ofEpochSecond(it.startTs).atZone(zone).toLocalDate() == target.day
+            }
+        } else {
+            emptyList()
         }
         WorkoutDayOverviewSheet(
-            day = day,
-            scope = DayOverviewScope.ALL,
+            day = target.day,
+            scope = scope,
+            focusValue = target.focusValue,
             daily = exact?.daily,
             workouts = dayWorkouts,
             metricRows = exact?.metricRows.orEmpty(),
-            journal = exact?.journal.orEmpty(),
+            journal = emptyList(),
             activeStrapId = vm.activeStrapId,
             loading = exact == null,
-            onDismiss = { selectedDay = null },
+            onDismiss = {
+                selectedOverview = null
+                overviewContent = null
+            },
         )
     }
 }
@@ -529,6 +549,35 @@ private fun CalendarMonthGrid(
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    metric.icon,
+                    contentDescription = null,
+                    tint = metric.calendarTint(),
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    stringResource(metric.titleRes),
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    calendarMetricUnit(metric),
+                    style = NoopType.captionNumber,
+                    color = Palette.textSecondary,
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Palette.hairline),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
             ) {
                 weekdayInitials.forEach {
@@ -548,7 +597,7 @@ private fun CalendarMonthGrid(
                 ) {
                     week.forEach { day ->
                         if (day == null) {
-                            Spacer(Modifier.weight(1f).height(44.dp))
+                            Spacer(Modifier.weight(1f).height(52.dp))
                         } else {
                             CalendarDayCell(
                                 day = day,
@@ -561,7 +610,7 @@ private fun CalendarMonthGrid(
                         }
                     }
                     repeat(7 - week.size) {
-                        Spacer(Modifier.weight(1f).height(44.dp))
+                        Spacer(Modifier.weight(1f).height(52.dp))
                     }
                 }
             }
@@ -609,13 +658,13 @@ private fun CalendarDayCell(
             else R.string.appwide_calendar_a11y_day_value_format,
             day.dayOfMonth,
             metricTitle,
-            value.roundToInt(),
+            calendarMetricFormat(metric, value),
         )
     }
 
     Column(
         modifier = modifier
-            .height(44.dp)
+            .height(52.dp)
             .clickable(onClick = onClick)
             .semantics(mergeDescendants = true) {
                 contentDescription = spoken
@@ -625,32 +674,53 @@ private fun CalendarDayCell(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Canvas(Modifier.size(28.dp)) {
-            val stroke = 4.dp.toPx()
-            drawCircle(
-                color = Palette.hairlineStrong.copy(alpha = 0.48f),
-                style = Stroke(width = stroke),
-            )
-            progress?.let {
-                drawArc(
-                    color = calendarStepColor(it, metric),
-                    startAngle = -90f,
-                    sweepAngle = max(9.0, it * 3.6).toFloat(),
-                    useCenter = false,
-                    style = Stroke(width = stroke, cap = StrokeCap.Round),
-                )
-            }
-            if (today) {
+        Box(
+            modifier = Modifier.size(34.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = 4.dp.toPx()
                 drawCircle(
-                    color = Palette.textPrimary.copy(alpha = 0.88f),
-                    radius = size.minDimension / 2f + 2.dp.toPx(),
-                    style = Stroke(width = 1.4.dp.toPx()),
+                    color = Palette.hairlineStrong.copy(alpha = 0.48f),
+                    style = Stroke(width = stroke),
+                )
+                progress?.let {
+                    drawArc(
+                        color = calendarStepColor(it, metric),
+                        startAngle = -90f,
+                        sweepAngle = max(9.0, it * 3.6).toFloat(),
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+                if (today) {
+                    drawCircle(
+                        color = Palette.textPrimary.copy(alpha = 0.88f),
+                        radius = size.minDimension / 2f + 2.dp.toPx(),
+                        style = Stroke(width = 1.4.dp.toPx()),
+                    )
+                }
+            }
+            value?.let {
+                Text(
+                    calendarMetricCellValue(metric, it),
+                    style = NoopType.number(
+                        if (metric == CalendarMetric.ENERGY ||
+                            metric == CalendarMetric.NUTRITION
+                        ) {
+                            8f
+                        } else {
+                            9f
+                        },
+                    ),
+                    color = Palette.textPrimary,
+                    maxLines = 1,
                 )
             }
         }
         Text(
             day.dayOfMonth.toString(),
-            style = NoopType.overline,
+            style = NoopType.number(10f),
             color = if (today) Palette.textPrimary else Palette.textTertiary,
             maxLines = 1,
         )
@@ -834,4 +904,36 @@ private fun calendarMetricFormat(metric: CalendarMetric, value: Double): String 
     CalendarMetric.STRESS -> String.format(Locale.getDefault(), "%.1f /3", value)
     CalendarMetric.ENERGY,
     CalendarMetric.NUTRITION -> "${value.roundToInt()} kcal"
+}
+
+private fun calendarMetricUnit(metric: CalendarMetric): String = when (metric) {
+    CalendarMetric.EFFORT -> "/100"
+    CalendarMetric.RECOVERY, CalendarMetric.SLEEP -> "%"
+    CalendarMetric.STRESS -> "/3"
+    CalendarMetric.ENERGY, CalendarMetric.NUTRITION -> "kcal"
+}
+
+internal fun calendarMetricCellValue(
+    metric: CalendarMetric,
+    value: Double,
+    locale: Locale = Locale.getDefault(),
+): String = when (metric) {
+    CalendarMetric.EFFORT,
+    CalendarMetric.RECOVERY,
+    CalendarMetric.SLEEP -> value.roundToInt().toString()
+    CalendarMetric.STRESS -> String.format(locale, "%.1f", value)
+    CalendarMetric.ENERGY,
+    CalendarMetric.NUTRITION -> {
+        val rounded = value.roundToInt()
+        if (abs(rounded) < 1_000) {
+            rounded.toString()
+        } else {
+            val thousands = (value / 100.0).roundToInt() / 10.0
+            if (thousands == thousands.roundToInt().toDouble()) {
+                "${thousands.roundToInt()}k"
+            } else {
+                String.format(locale, "%.1fk", thousands)
+            }
+        }
+    }
 }

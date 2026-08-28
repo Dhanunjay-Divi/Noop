@@ -109,4 +109,22 @@ class WorkoutActivityCalendarSummaryTest {
         assertFalse(DayOverviewScope.ACTIVITY.includesWholeDayMetrics)
         assertTrue(DayOverviewScope.ALL.includesWholeDayMetrics)
     }
+
+    @Test
+    fun focusedOverviewScopesLoadAndFilterOnlyRelevantData() {
+        assertTrue(DayOverviewScope.ACTIVITY.includesSessions)
+        assertFalse(DayOverviewScope.ACTIVITY.loadsMetricRows)
+        assertFalse(DayOverviewScope.RECOVERY.includesSessions)
+        assertTrue(DayOverviewScope.RECOVERY.loadsMetricRows)
+        assertTrue(DayOverviewScope.ENERGY.includesSessions)
+        assertTrue(DayOverviewScope.ENERGY.loadsMetricRows)
+
+        assertTrue(DayOverviewScope.SLEEP.includesSupplementalMetric("sleep_consistency"))
+        assertFalse(DayOverviewScope.SLEEP.includesSupplementalMetric("protein_g"))
+        assertFalse(DayOverviewScope.RECOVERY.includesSupplementalMetric("sleep_consistency"))
+        assertTrue(DayOverviewScope.ENERGY.includesSupplementalMetric("basal_kcal"))
+        assertFalse(DayOverviewScope.ENERGY.includesSupplementalMetric("active_kcal"))
+        assertTrue(DayOverviewScope.NUTRITION.includesSupplementalMetric("protein_g"))
+        assertFalse(DayOverviewScope.NUTRITION.includesSupplementalMetric("calories_in"))
+    }
 }

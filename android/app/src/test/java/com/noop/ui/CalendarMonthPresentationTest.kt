@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.data.DailyMetric
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,6 +9,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CalendarMonthPresentationTest {
+    @Test
+    fun everyCalendarMetricOpensItsMatchingDayOverview() {
+        assertEquals(DayOverviewScope.ACTIVITY, CalendarMetric.EFFORT.dayOverviewScope())
+        assertEquals(DayOverviewScope.RECOVERY, CalendarMetric.RECOVERY.dayOverviewScope())
+        assertEquals(DayOverviewScope.SLEEP, CalendarMetric.SLEEP.dayOverviewScope())
+        assertEquals(DayOverviewScope.STRESS, CalendarMetric.STRESS.dayOverviewScope())
+        assertEquals(DayOverviewScope.ENERGY, CalendarMetric.ENERGY.dayOverviewScope())
+        assertEquals(DayOverviewScope.NUTRITION, CalendarMetric.NUTRITION.dayOverviewScope())
+    }
+
+    @Test
+    fun calendarCellsShowTheMetricAndCompactLargeTotals() {
+        assertEquals("72", calendarMetricCellValue(CalendarMetric.RECOVERY, 71.6, Locale.US))
+        assertEquals("1.4", calendarMetricCellValue(CalendarMetric.STRESS, 1.36, Locale.US))
+        assertEquals("1.2k", calendarMetricCellValue(CalendarMetric.ENERGY, 1_249.0, Locale.US))
+        assertEquals("2k", calendarMetricCellValue(CalendarMetric.NUTRITION, 2_000.0, Locale.US))
+        assertEquals("1k", calendarMetricCellValue(CalendarMetric.ENERGY, 999.6, Locale.US))
+    }
+
     @Test
     fun fixedScaleMetricsKeepTheirOwnMeaning() {
         assertEquals(

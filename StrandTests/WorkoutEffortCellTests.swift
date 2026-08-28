@@ -188,4 +188,83 @@ final class DailyOverviewPresentationTests: XCTestCase {
         XCTAssertFalse(DailyOverviewScope.activity.includesWholeDayMetrics)
         XCTAssertTrue(DailyOverviewScope.all.includesWholeDayMetrics)
     }
+
+    func testMonthMetricsOpenTheirMatchingDayOverview() {
+        let expected: [(CalendarMonthView.Metric, DailyOverviewScope)] = [
+            (.effort, .activity),
+            (.recovery, .recovery),
+            (.sleep, .sleep),
+            (.stress, .stress),
+            (.energy, .energy),
+            (.nutrition, .nutrition),
+        ]
+
+        for (metric, scope) in expected {
+            XCTAssertEqual(metric.overviewScope, scope, metric.rawValue)
+        }
+    }
+
+    func testMonthCellValuesShowTheMetricAndCompactLargeTotals() {
+        let locale = Locale(identifier: "en_US_POSIX")
+
+        XCTAssertEqual(CalendarMonthView.Metric.recovery.cellValue(71.6, locale: locale), "72")
+        XCTAssertEqual(CalendarMonthView.Metric.stress.cellValue(1.36, locale: locale), "1.4")
+        XCTAssertEqual(CalendarMonthView.Metric.energy.cellValue(1_249, locale: locale), "1.2k")
+        XCTAssertEqual(CalendarMonthView.Metric.nutrition.cellValue(2_000, locale: locale), "2k")
+        XCTAssertEqual(CalendarMonthView.Metric.energy.cellValue(999.6, locale: locale), "1k")
+    }
+
+    func testFocusedOverviewScopesLoadAndFilterOnlyRelevantData() {
+        XCTAssertTrue(DailyOverviewScope.activity.loadsWorkouts)
+        XCTAssertFalse(DailyOverviewScope.activity.loadsTrackedMetrics)
+        XCTAssertFalse(DailyOverviewScope.recovery.loadsWorkouts)
+        XCTAssertTrue(DailyOverviewScope.recovery.loadsTrackedMetrics)
+        XCTAssertTrue(DailyOverviewScope.energy.loadsWorkouts)
+        XCTAssertTrue(DailyOverviewScope.energy.loadsTrackedMetrics)
+        XCTAssertTrue(DailyOverviewScope.nutrition.loadsHydration)
+        XCTAssertFalse(DailyOverviewScope.nutrition.loadsJournal)
+
+        XCTAssertTrue(
+            DailyOverviewScope.sleep.includesSupplementalMetric(
+                key: "sleep_consistency",
+                category: "Rest"
+            )
+        )
+        XCTAssertFalse(
+            DailyOverviewScope.sleep.includesSupplementalMetric(
+                key: "protein_g",
+                category: "Nutrition"
+            )
+        )
+        XCTAssertFalse(
+            DailyOverviewScope.recovery.includesSupplementalMetric(
+                key: "sleep_consistency",
+                category: "Rest"
+            )
+        )
+        XCTAssertTrue(
+            DailyOverviewScope.energy.includesSupplementalMetric(
+                key: "basal_kcal",
+                category: "Effort"
+            )
+        )
+        XCTAssertFalse(
+            DailyOverviewScope.energy.includesSupplementalMetric(
+                key: "active_kcal",
+                category: "Effort"
+            )
+        )
+        XCTAssertTrue(
+            DailyOverviewScope.nutrition.includesSupplementalMetric(
+                key: "protein_g",
+                category: "Nutrition"
+            )
+        )
+        XCTAssertFalse(
+            DailyOverviewScope.nutrition.includesSupplementalMetric(
+                key: "calories_in",
+                category: "Nutrition"
+            )
+        )
+    }
 }

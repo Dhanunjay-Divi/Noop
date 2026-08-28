@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">已儲存 %1$s。此 ZIP 可在 Mac、iPhone 或 Android 上重新匯入 NOOP。比較資料夾已可用於並排分析；請保留未經修改的原始供應商 ZIP，並一起分享這兩個檔案。</string>
     <string name="appwide_breathe_phone_haptics">手機觸覺回饋</string>
     <string name="appwide_calendar_a11y_day_no_data_format">第 %1$d 天，無數據</string>
-    <string name="appwide_calendar_a11y_day_value_format">第 %1$d 天，%2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">第 %1$d 天，%2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">今天，第 %1$d 天，無數據</string>
-    <string name="appwide_calendar_a11y_today_value_format">今天，第 %1$d 天，%2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">今天，第 %1$d 天，%2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">活動能量來自手機的健康資料儲存。Noop Band 基於心率的綜合卡路里估算屬於不同指標，不會混入此日曆。</string>
     <string name="appwide_calendar_legend_calm">平穩</string>
     <string name="appwide_calendar_legend_easy">輕鬆</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">營養顯示你記錄的卡路里。空白日期表示未記錄，絕不代表攝取量為零。</string>
     <string name="appwide_calendar_previous_month">上個月</string>
     <string name="appwide_calendar_stress_provenance">有匯入的每日壓力資料時會優先使用。其他日期必須由靜息心率和心率變異性兩種信號得出可靠的實驗性自律神經估算；證據有限的估算保持空白。</string>
-    <string name="appwide_calendar_subtitle">每天一個圓環</string>
+    <string name="appwide_calendar_subtitle">每日評分和總量</string>
     <string name="appwide_calendar_summary_empty_format">本月尚未計算 %1$s 評分。</string>
     <string name="appwide_calendar_summary_gaps">沒有資料的日期保持空白，不會以零計入。</string>
     <string name="appwide_calendar_summary_overline">本月</string>

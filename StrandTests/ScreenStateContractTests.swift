@@ -432,13 +432,18 @@ final class ReferenceSurfaceContractTests: XCTestCase {
             #"String(localized: "appwide.workouts.activity_calendar.recorded_activities")"#
         ))
         XCTAssertTrue(fitness.contains(
-            "DailyOverviewSheet(date: target.date, scope: .activity)"
+            "scope: target.scope"
         ))
+        XCTAssertTrue(fitness.contains("scope: .activity,"))
         XCTAssertTrue(calendar.contains(
-            "DailyOverviewSheet(date: target.date, scope: .all)"
+            "scope: metric.overviewScope"
         ))
+        XCTAssertTrue(calendar.contains("focusValue: raw"))
+        XCTAssertFalse(calendar.contains("scope: .all"))
         XCTAssertTrue(androidFitness.contains("scope = DayOverviewScope.ACTIVITY"))
-        XCTAssertTrue(androidCalendar.contains("scope = DayOverviewScope.ALL"))
+        XCTAssertTrue(androidCalendar.contains("scope = target.metric.dayOverviewScope()"))
+        XCTAssertTrue(androidCalendar.contains("focusValue = target.focusValue"))
+        XCTAssertFalse(androidCalendar.contains("scope = DayOverviewScope.ALL"))
         XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Workouts""#))
         XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))

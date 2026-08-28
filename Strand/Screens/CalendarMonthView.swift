@@ -20,7 +20,7 @@ struct CalendarMonthView: View {
     @EnvironmentObject private var model: AppModel
 
     /// Which metric colours the grid.
-    private enum Metric: String, CaseIterable, Identifiable {
+    enum Metric: String, CaseIterable, Identifiable {
         case effort, recovery, sleep, stress, energy, nutrition
         var id: String { rawValue }
 
@@ -78,6 +78,17 @@ struct CalendarMonthView: View {
             }
         }
 
+        var overviewScope: DailyOverviewScope {
+            switch self {
+            case .effort: return .activity
+            case .recovery: return .recovery
+            case .sleep: return .sleep
+            case .stress: return .stress
+            case .energy: return .energy
+            case .nutrition: return .nutrition
+            }
+        }
+
         /// The three legend words, lowest bucket first, matching this metric's valence.
         var legendWords: [String] {
             switch valence {
@@ -123,12 +134,33 @@ struct CalendarMonthView: View {
             }
         }
 
-        func format(_ value: Double) -> String {
+        func format(_ value: Double, locale: Locale = .current) -> String {
             switch self {
+            case .effort:
+                return "\(Int(value.rounded())) /100"
+            case .recovery, .sleep:
+                return "\(Int(value.rounded()))%"
             case .stress:
-                return String(format: "%.1f %@", value, unit)
-            default:
-                return "\(Int(value.rounded())) \(unit)"
+                return String(format: "%.1f /3", locale: locale, value)
+            case .energy, .nutrition:
+                return "\(Int(value.rounded())) kcal"
+            }
+        }
+
+        func cellValue(_ value: Double, locale: Locale = .current) -> String {
+            switch self {
+            case .effort, .recovery, .sleep:
+                return "\(Int(value.rounded()))"
+            case .stress:
+                return String(format: "%.1f", locale: locale, value)
+            case .energy, .nutrition:
+                let rounded = value.rounded()
+                guard abs(rounded) >= 1_000 else { return "\(Int(rounded))" }
+                let thousands = ((value / 1_000) * 10).rounded() / 10
+                if thousands.rounded() == thousands {
+                    return "\(Int(thousands))k"
+                }
+                return String(format: "%.1fk", locale: locale, thousands)
             }
         }
     }
@@ -178,7 +210,11 @@ struct CalendarMonthView: View {
         .task(id: "\(monthKey)|\(model.repo.refreshSeq)") { await load() }
         .sheet(item: $dayOverview) { target in
             NavigationStack {
-                DailyOverviewSheet(date: target.date, scope: .all)
+                DailyOverviewSheet(
+                    date: target.date,
+                    scope: target.scope,
+                    focusValue: target.focusValue
+                )
                     .environmentObject(model.repo)
             }
             #if os(iOS)
@@ -287,6 +323,17 @@ struct CalendarMonthView: View {
     private var grid: some View {
         NoopCard {
             VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    MetricGlyph(metric.glyph, size: 16)
+                    Text(metric.title)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Spacer()
+                    Text(metric.unit)
+                        .font(StrandFont.captionNumber)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+                Divider().overlay(StrandPalette.hairline)
                 HStack(spacing: 6) {
                     ForEach(Array(weekdayInitials.enumerated()), id: \.offset) { entry in
                         Text(entry.element)
@@ -307,7 +354,7 @@ struct CalendarMonthView: View {
                                 if day >= 1 && day <= days {
                                     dayCell(day)
                                 } else {
-                                    Color.clear.frame(maxWidth: .infinity).frame(height: 44)
+                                    Color.clear.frame(maxWidth: .infinity).frame(height: 52)
                                 }
                             }
                         }
@@ -326,7 +373,11 @@ struct CalendarMonthView: View {
         let isToday = isToday(day)
         return Button {
             guard let date = dayDate(day) else { return }
-            dayOverview = DayOverviewTarget(date: date)
+            dayOverview = DayOverviewTarget(
+                date: date,
+                scope: metric.overviewScope,
+                focusValue: raw
+            )
         } label: {
             VStack(spacing: 3) {
                 ZStack {
@@ -346,14 +397,24 @@ struct CalendarMonthView: View {
                             .strokeBorder(StrandPalette.textPrimary.opacity(0.88), lineWidth: 1.4)
                             .padding(-3)
                     }
+                    if let raw {
+                        Text(metric.cellValue(raw))
+                            .font(StrandFont.number(
+                                metric == .energy || metric == .nutrition ? 8 : 9
+                            ))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .frame(width: 26)
+                    }
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: 34, height: 34)
                 Text("\(day)")
-                    .font(StrandFont.overline)
+                    .font(StrandFont.overlineScaled(10))
                     .foregroundStyle(isToday ? StrandPalette.textPrimary : StrandPalette.textTertiary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 44)
+            .frame(height: 52)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -567,7 +628,7 @@ struct CalendarMonthView: View {
                    : "appwide.calendar.a11y.day_value_format"),
             day,
             metric.title,
-            Int(value.rounded())
+            metric.format(value)
         )
     }
 

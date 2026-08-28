@@ -152,16 +152,61 @@ struct WorkoutActivityCalendarSummary: Equatable {
     }
 }
 
-struct DayOverviewTarget: Identifiable {
-    let date: Date
-    var id: Date { Calendar.current.startOfDay(for: date) }
-}
-
 enum DailyOverviewScope: String {
     case all
     case activity
+    case recovery
+    case sleep
+    case stress
+    case energy
+    case nutrition
 
     var includesWholeDayMetrics: Bool { self == .all }
+
+    var includesSleepMetrics: Bool { self == .all || self == .sleep }
+    var includesRecoveryMetrics: Bool { self == .all || self == .recovery }
+    var includesStressSignals: Bool { self == .stress }
+    var includesActivityMetrics: Bool { self == .all || self == .activity }
+    var includesEnergyMetrics: Bool { self == .energy }
+    var includesSessions: Bool { self == .all || self == .activity || self == .energy }
+    var loadsWorkouts: Bool { includesSessions }
+    var loadsTrackedMetrics: Bool {
+        switch self {
+        case .all, .recovery, .sleep, .stress, .energy, .nutrition: return true
+        case .activity: return false
+        }
+    }
+    var loadsHydration: Bool { self == .all || self == .nutrition }
+    var loadsJournal: Bool { self == .all }
+
+    func includesSupplementalMetric(key: String, category: String) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .recovery:
+            return false
+        case .sleep:
+            return category == "Rest"
+        case .stress:
+            return false
+        case .energy:
+            return key == "basal_kcal" || key == "total_kcal"
+        case .nutrition:
+            return category == "Nutrition" && key != "calories_in"
+        case .activity:
+            return false
+        }
+    }
+}
+
+struct DayOverviewTarget: Identifiable {
+    let date: Date
+    let scope: DailyOverviewScope
+    let focusValue: Double?
+
+    var id: String {
+        "\(Int(date.timeIntervalSince1970))|\(scope.rawValue)"
+    }
 }
 
 enum DailyOverviewPresentation {
@@ -513,7 +558,11 @@ struct WorkoutsView: View {
         }
         .sheet(item: $dayOverview) { target in
             NavigationStack {
-                DailyOverviewSheet(date: target.date, scope: .activity)
+                DailyOverviewSheet(
+                    date: target.date,
+                    scope: target.scope,
+                    focusValue: target.focusValue
+                )
                     .environmentObject(repo)
             }
             #if os(iOS)
@@ -989,7 +1038,11 @@ struct WorkoutsView: View {
             }
         }()
         return Button {
-            dayOverview = DayOverviewTarget(date: date)
+            dayOverview = DayOverviewTarget(
+                date: date,
+                scope: .activity,
+                focusValue: nil
+            )
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -2450,6 +2503,7 @@ struct DailyOverviewSheet: View {
 
     let date: Date
     let scope: DailyOverviewScope
+    let focusValue: Double?
 
     @State private var daily: DailyMetric?
     @State private var workouts: [WorkoutRow] = []
@@ -2493,30 +2547,7 @@ struct DailyOverviewSheet: View {
                         .foregroundStyle(StrandPalette.textSecondary)
 
                     scoreTiles
-                    if scope.includesWholeDayMetrics {
-                        metricSection(
-                            title: "appwide.day_overview.sleep",
-                            items: sleepItems
-                        )
-                        metricSection(
-                            title: "appwide.day_overview.vitals",
-                            items: vitalItems
-                        )
-                    }
-                    metricSection(
-                        title: "appwide.day_overview.activity",
-                        items: activityItems
-                    )
-                    if scope.includesWholeDayMetrics, !supplementalItems.isEmpty {
-                        metricSection(
-                            title: "appwide.day_overview.more_metrics",
-                            items: supplementalItems
-                        )
-                    }
-                    if scope.includesWholeDayMetrics, !journal.isEmpty {
-                        journalSection
-                    }
-                    sessionsSection
+                    categorySections
                 }
                 .padding(.horizontal, NoopMetrics.screenPadding)
                 .padding(.bottom, NoopMetrics.sectionGap)
@@ -2533,6 +2564,7 @@ struct DailyOverviewSheet: View {
         }
         .task(id: [
             scope.rawValue,
+            focusValue.map { String($0) } ?? "none",
             Repository.localDayKey(date),
             String(repo.refreshSeq),
             String(repo.ageMetricsSeq),
@@ -2543,19 +2575,73 @@ struct DailyOverviewSheet: View {
         }
     }
 
-    private var scoreTiles: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            if scope.includesWholeDayMetrics {
-                SectionHeader(
-                    "appwide.day_overview.daily_scores",
-                    overline: "appwide.day_overview.overall"
-                )
-            } else {
-                SectionHeader(
-                    "appwide.day_overview.effort",
-                    overline: "appwide.day_overview.activity"
+    @ViewBuilder
+    private var categorySections: some View {
+        switch scope {
+        case .all:
+            metricSection(
+                title: "appwide.day_overview.sleep",
+                items: sleepItems
+            )
+            metricSection(
+                title: "appwide.day_overview.vitals",
+                items: vitalItems
+            )
+            metricSection(
+                title: "appwide.day_overview.activity",
+                items: activityItems
+            )
+            if !supplementalItems.isEmpty {
+                metricSection(
+                    title: "appwide.day_overview.more_metrics",
+                    items: supplementalItems
                 )
             }
+            if !journal.isEmpty {
+                journalSection
+            }
+            sessionsSection
+        case .activity:
+            metricSection(
+                title: "appwide.day_overview.activity",
+                items: activityItems
+            )
+            sessionsSection
+        case .recovery:
+            metricSection(
+                title: "appwide.day_overview.vitals",
+                items: vitalItems + supplementalItems
+            )
+        case .sleep:
+            metricSection(
+                title: "appwide.day_overview.sleep",
+                items: sleepItems + supplementalItems
+            )
+        case .stress:
+            metricSection(
+                title: "appwide.day_overview.vitals",
+                items: stressSignalItems
+            )
+        case .energy:
+            metricSection(
+                title: "appwide.day_overview.activity",
+                items: supplementalItems + energyItems
+            )
+            sessionsSection
+        case .nutrition:
+            if !supplementalItems.isEmpty {
+                metricSection(
+                    title: "Nutrition",
+                    items: supplementalItems
+                )
+            }
+        }
+    }
+
+    private var scoreTiles: some View {
+        let header = scoreHeader
+        return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(header.title, overline: header.overline)
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 148), spacing: NoopMetrics.gap)],
                 spacing: NoopMetrics.gap
@@ -2571,15 +2657,111 @@ struct DailyOverviewSheet: View {
                         value: score(DailyOverviewPresentation.sleepScore(daily)),
                         accent: StrandPalette.restColor
                     )
+                    StatTile(
+                        label: "appwide.day_overview.effort",
+                        value: daily?.strain.map {
+                            UnitFormatter.effortDisplay($0, scale: effortScale)
+                        } ?? noData,
+                        accent: StrandPalette.effortColor
+                    )
+                } else {
+                    let tile = focusedScoreTile
+                    StatTile(
+                        label: tile.label,
+                        value: tile.value,
+                        accent: tile.accent
+                    )
                 }
-                StatTile(
-                    label: "appwide.day_overview.effort",
-                    value: daily?.strain.map {
-                        UnitFormatter.effortDisplay($0, scale: effortScale)
-                    } ?? noData,
-                    accent: StrandPalette.effortColor
-                )
             }
+        }
+    }
+
+    private var scoreHeader: (
+        title: LocalizedStringKey,
+        overline: LocalizedStringKey
+    ) {
+        switch scope {
+        case .all:
+            return ("appwide.day_overview.daily_scores", "appwide.day_overview.overall")
+        case .activity:
+            return ("appwide.day_overview.effort", "appwide.day_overview.activity")
+        case .recovery:
+            return ("appwide.day_overview.recovery", "appwide.day_overview.overall")
+        case .sleep:
+            return ("appwide.day_overview.sleep_score", "appwide.day_overview.sleep")
+        case .stress:
+            return ("Stress", "appwide.day_overview.overall")
+        case .energy:
+            return ("Active energy", "appwide.day_overview.activity")
+        case .nutrition:
+            return ("Calories In", "Nutrition")
+        }
+    }
+
+    private var focusedScoreTile: (
+        label: LocalizedStringKey,
+        value: String,
+        accent: Color
+    ) {
+        switch scope {
+        case .all, .activity:
+            return (
+                "appwide.day_overview.effort",
+                resolvedFocusValue.map {
+                    UnitFormatter.effortDisplay($0, scale: effortScale)
+                } ?? noData,
+                StrandPalette.effortColor
+            )
+        case .recovery:
+            return (
+                "appwide.day_overview.recovery",
+                score(resolvedFocusValue),
+                StrandPalette.chargeColor
+            )
+        case .sleep:
+            return (
+                "appwide.day_overview.sleep_score",
+                score(resolvedFocusValue),
+                StrandPalette.restColor
+            )
+        case .stress:
+            return (
+                "Stress",
+                resolvedFocusValue.map {
+                    String(format: "%.1f /3", locale: Locale.current, $0)
+                } ?? noData,
+                StrandPalette.metricAmber
+            )
+        case .energy:
+            return (
+                "Active energy",
+                resolvedFocusValue.map { "\(grouped($0)) kcal" } ?? noData,
+                StrandPalette.statusWarning
+            )
+        case .nutrition:
+            return (
+                "Calories In",
+                resolvedFocusValue.map { "\(grouped($0)) kcal" } ?? noData,
+                StrandPalette.statusPositive
+            )
+        }
+    }
+
+    private var resolvedFocusValue: Double? {
+        if let focusValue, focusValue.isFinite {
+            return focusValue
+        }
+        switch scope {
+        case .all:
+            return nil
+        case .activity:
+            return daily?.strain
+        case .recovery:
+            return daily?.recovery
+        case .sleep:
+            return DailyOverviewPresentation.sleepScore(daily)
+        case .stress, .energy, .nutrition:
+            return nil
         }
     }
 
@@ -2654,12 +2836,22 @@ struct DailyOverviewSheet: View {
         ]
     }
 
+    private var stressSignalItems: [MetricItem] {
+        [
+            MetricItem(
+                label: "appwide.day_overview.resting_heart_rate",
+                value: daily?.restingHr.map { "\($0) bpm" } ?? noData,
+                tint: StrandPalette.metricRose
+            ),
+            MetricItem(
+                label: "appwide.day_overview.hrv",
+                value: daily?.avgHrv.map { "\(decimal($0)) ms" } ?? noData,
+                tint: StrandPalette.metricPurple
+            ),
+        ]
+    }
+
     private var activityItems: [MetricItem] {
-        let duration = workouts.reduce(0.0) {
-            $0 + ($1.durationS ?? Double(max(0, $1.endTs - $1.startTs)))
-        }
-        let calories = workouts.compactMap(\.energyKcal)
-        let distances = workouts.compactMap(\.distanceM).filter { $0 > 0 }
         return [
             MetricItem(
                 label: "appwide.day_overview.steps",
@@ -2678,28 +2870,78 @@ struct DailyOverviewSheet: View {
             ),
             MetricItem(
                 label: "appwide.day_overview.active_time",
-                value: durationSeconds(duration),
+                value: durationSeconds(workoutDurationSeconds),
                 tint: nil
             ),
             MetricItem(
                 label: "appwide.day_overview.workout_calories",
-                value: calories.isEmpty ? noData : "\(grouped(calories.reduce(0, +))) kcal",
+                value: workoutCalories.isEmpty
+                    ? noData
+                    : "\(grouped(workoutCalories.reduce(0, +))) kcal",
                 tint: nil
             ),
             MetricItem(
                 label: "appwide.day_overview.distance",
-                value: distances.isEmpty
+                value: workoutDistances.isEmpty
                     ? noData
-                    : UnitFormatter.distanceFromMeters(distances.reduce(0, +), system: unitSystem),
+                    : UnitFormatter.distanceFromMeters(
+                        workoutDistances.reduce(0, +),
+                        system: unitSystem
+                    ),
                 tint: nil
             ),
         ]
+    }
+
+    private var energyItems: [MetricItem] {
+        [
+            MetricItem(
+                label: "appwide.day_overview.workout_calories",
+                value: workoutCalories.isEmpty
+                    ? noData
+                    : "\(grouped(workoutCalories.reduce(0, +))) kcal",
+                tint: StrandPalette.metricAmber
+            ),
+            MetricItem(
+                label: "appwide.day_overview.active_time",
+                value: durationSeconds(workoutDurationSeconds),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.workout_count",
+                value: "\(workouts.count)",
+                tint: StrandPalette.effortColor
+            ),
+            MetricItem(
+                label: "appwide.day_overview.steps",
+                value: daily?.steps.map { grouped(Double($0)) } ?? noData,
+                tint: StrandPalette.statusPositive
+            ),
+        ]
+    }
+
+    private var workoutDurationSeconds: Double {
+        workouts.reduce(0.0) {
+            $0 + ($1.durationS ?? Double(max(0, $1.endTs - $1.startTs)))
+        }
+    }
+
+    private var workoutCalories: [Double] {
+        workouts.compactMap(\.energyKcal).filter(\.isFinite)
+    }
+
+    private var workoutDistances: [Double] {
+        workouts.compactMap(\.distanceM).filter { $0.isFinite && $0 > 0 }
     }
 
     private var supplementalItems: [MetricItem] {
         var seen = Set<String>()
         var items = trackedMetrics.compactMap { metric -> MetricItem? in
             guard !Self.coreMetricKeys.contains(metric.descriptor.key) else { return nil }
+            guard scope.includesSupplementalMetric(
+                key: metric.descriptor.key,
+                category: metric.descriptor.category
+            ) else { return nil }
             let identity = metric.descriptor.title.lowercased()
                 + "\u{1F}" + metric.descriptor.unit.lowercased()
             guard seen.insert(identity).inserted else { return nil }
@@ -2714,7 +2956,7 @@ struct DailyOverviewSheet: View {
                 tint: metricTint(metric.descriptor.category)
             )
         }
-        if let hydration {
+        if scope.loadsHydration, let hydration {
             items.append(MetricItem(
                 label: "appwide.day_overview.hydration",
                 value: "\(grouped(hydration.valueML)) ml",
@@ -2872,34 +3114,11 @@ struct DailyOverviewSheet: View {
         loading = true
         let key = Repository.localDayKey(date)
         let window = WorkoutDateWindow.localDay(containing: date)
-        if !scope.includesWholeDayMetrics {
-            async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
-            async let exactWorkouts = repo.workoutRows(
-                overlappingFrom: window.lowerBound,
-                to: window.upperBound
-            )
-            let (resolvedDaily, resolvedWorkouts) = await (dailyRows, exactWorkouts)
-            daily = resolvedDaily.last(where: { $0.day == key })
-            workouts = resolvedWorkouts.filter {
-                Repository.localDayKey(
-                    Date(timeIntervalSince1970: TimeInterval($0.startTs))
-                ) == key
-            }
-            trackedMetrics = []
-            hydration = nil
-            journal = []
-            loading = false
-            return
-        }
-
         async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
-        async let exactWorkouts = repo.workoutRows(
-            overlappingFrom: window.lowerBound,
-            to: window.upperBound
-        )
-        async let exactMetrics = repo.trackedMetrics(day: key)
-        async let exactHydration = repo.hydrationReading(day: key)
-        async let exactJournal = repo.journalEntries(day: key)
+        async let exactWorkouts = loadWorkouts(window: window)
+        async let exactMetrics = loadTrackedMetrics(day: key)
+        async let exactHydration = loadHydration(day: key)
+        async let exactJournal = loadJournal(day: key)
         let (
             resolvedDaily,
             resolvedWorkouts,
@@ -2923,6 +3142,29 @@ struct DailyOverviewSheet: View {
         hydration = resolvedHydration
         journal = resolvedJournal
         loading = false
+    }
+
+    private func loadWorkouts(window: WorkoutDateWindow) async -> [WorkoutRow] {
+        guard scope.loadsWorkouts else { return [] }
+        return await repo.workoutRows(
+            overlappingFrom: window.lowerBound,
+            to: window.upperBound
+        )
+    }
+
+    private func loadTrackedMetrics(day: String) async -> [DayTrackedMetric] {
+        guard scope.loadsTrackedMetrics else { return [] }
+        return await repo.trackedMetrics(day: day)
+    }
+
+    private func loadHydration(day: String) async -> HydrationReading? {
+        guard scope.loadsHydration else { return nil }
+        return await repo.hydrationReading(day: day)
+    }
+
+    private func loadJournal(day: String) async -> [JournalEntry] {
+        guard scope.loadsJournal else { return [] }
+        return await repo.journalEntries(day: day)
     }
 
     private func journalValue(_ entry: JournalEntry) -> String {

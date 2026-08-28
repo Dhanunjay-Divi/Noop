@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">%1$s a été enregistré. Le ZIP se réimporte dans NOOP sur Mac, iPhone ou Android. Son dossier de comparaison est prêt pour l’analyse côte à côte ; conservez le ZIP d’origine du fournisseur intact et partagez les deux fichiers ensemble.</string>
     <string name="appwide_breathe_phone_haptics">Vibrations du téléphone</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Jour %1$d, aucune donnée</string>
-    <string name="appwide_calendar_a11y_day_value_format">Jour %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">Jour %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Aujourd’hui, jour %1$d, aucune donnée</string>
-    <string name="appwide_calendar_a11y_today_value_format">Aujourd’hui, jour %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">Aujourd’hui, jour %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">L’énergie active provient du registre de santé du téléphone. L’estimation combinée des calories du Noop Band basée sur la fréquence cardiaque est une autre mesure et n’est pas mélangée dans ce calendrier.</string>
     <string name="appwide_calendar_legend_calm">Calme</string>
     <string name="appwide_calendar_legend_easy">Léger</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">Nutrition affiche les calories que vous avez enregistrées. Un jour vide signifie non enregistré, jamais un apport nul.</string>
     <string name="appwide_calendar_previous_month">Mois précédent</string>
     <string name="appwide_calendar_stress_provenance">Le stress quotidien importé est utilisé lorsqu’il est disponible. Les autres jours nécessitent une estimation autonome expérimentale fiable à deux signaux, fréquence cardiaque au repos et VFC ; les estimations limitées restent vides.</string>
-    <string name="appwide_calendar_subtitle">Un anneau par jour</string>
+    <string name="appwide_calendar_subtitle">Scores et totaux quotidiens</string>
     <string name="appwide_calendar_summary_empty_format">Aucun score %1$s n’a encore été calculé ce mois-ci.</string>
     <string name="appwide_calendar_summary_gaps">Les jours sans données restent vides ; ils ne sont pas comptés comme zéro.</string>
     <string name="appwide_calendar_summary_overline">CE MOIS-CI</string>

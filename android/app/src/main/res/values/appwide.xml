@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">Saved %1$s. The ZIP re-imports into NOOP on Mac, iPhone, or Android. Its comparison folder is ready for side-by-side analysis; keep the original provider ZIP unchanged and share both files together.</string>
     <string name="appwide_breathe_phone_haptics">Phone haptics</string>
     <string name="appwide_calendar_a11y_day_no_data_format">Day %1$d, no data</string>
-    <string name="appwide_calendar_a11y_day_value_format">Day %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">Day %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Today, day %1$d, no data</string>
-    <string name="appwide_calendar_a11y_today_value_format">Today, day %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">Today, day %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">Active energy comes from the phone health store. Noop Band\'s combined HR-based calorie estimate is a different quantity and is not mixed into this calendar.</string>
     <string name="appwide_calendar_legend_calm">Calm</string>
     <string name="appwide_calendar_legend_easy">Easy</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">Nutrition shows calories you logged. A blank day means not logged, never zero intake.</string>
     <string name="appwide_calendar_previous_month">Previous month</string>
     <string name="appwide_calendar_stress_provenance">Imported daily stress is used when available. Other days require a reliable two-signal experimental autonomic estimate from resting heart rate and HRV; limited estimates stay blank.</string>
-    <string name="appwide_calendar_subtitle">One ring per day</string>
+    <string name="appwide_calendar_subtitle">Daily scores and totals</string>
     <string name="appwide_calendar_summary_empty_format">No %1$s scored this month yet.</string>
     <string name="appwide_calendar_summary_gaps">Days without data are left empty; they are not counted as zero.</string>
     <string name="appwide_calendar_summary_overline">THIS MONTH</string>

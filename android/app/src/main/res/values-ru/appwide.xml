@@ -18,9 +18,9 @@
     <string name="appwide_backup_portable_export_success">Файл %1$s сохранён. ZIP можно повторно импортировать в NOOP на Mac, iPhone или Android. Папка сравнения готова для сопоставления; сохраните исходный ZIP поставщика без изменений и передавайте оба файла вместе.</string>
     <string name="appwide_breathe_phone_haptics">Вибрация телефона</string>
     <string name="appwide_calendar_a11y_day_no_data_format">День %1$d, нет данных</string>
-    <string name="appwide_calendar_a11y_day_value_format">День %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_day_value_format">День %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_a11y_today_no_data_format">Сегодня, день %1$d, нет данных</string>
-    <string name="appwide_calendar_a11y_today_value_format">Сегодня, день %1$d, %2$s %3$d</string>
+    <string name="appwide_calendar_a11y_today_value_format">Сегодня, день %1$d, %2$s %3$s</string>
     <string name="appwide_calendar_energy_provenance">Активная энергия поступает из хранилища здоровья телефона. Совокупная оценка калорий Noop Band на основе пульса является другой величиной и не смешивается с ней в этом календаре.</string>
     <string name="appwide_calendar_legend_calm">Спокойно</string>
     <string name="appwide_calendar_legend_easy">Легко</string>
@@ -38,7 +38,7 @@
     <string name="appwide_calendar_nutrition_provenance">Питание показывает записанные вами калории. Пустой день означает, что данные не внесены, а не нулевое потребление.</string>
     <string name="appwide_calendar_previous_month">Предыдущий месяц</string>
     <string name="appwide_calendar_stress_provenance">Импортированный дневной стресс используется при наличии. Для остальных дней нужна надёжная экспериментальная оценка по двум вегетативным сигналам, пульсу покоя и ВСР; ограниченные оценки остаются пустыми.</string>
-    <string name="appwide_calendar_subtitle">Одно кольцо в день</string>
+    <string name="appwide_calendar_subtitle">Ежедневные показатели и итоги</string>
     <string name="appwide_calendar_summary_empty_format">В этом месяце показатель %1$s ещё не рассчитан.</string>
     <string name="appwide_calendar_summary_gaps">Дни без данных остаются пустыми и не учитываются как нулевые.</string>
     <string name="appwide_calendar_summary_overline">ЭТОТ МЕСЯЦ</string>

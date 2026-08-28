@@ -957,15 +957,15 @@
     "zh-Hant": "第 %1$d 天，無數據"
   },
   "appwide.calendar.a11y.day_value_format": {
-    "de": "Tag %1$d, %2$s %3$d",
-    "en": "Day %1$d, %2$s %3$d",
-    "es": "Día %1$d, %2$s %3$d",
-    "fr": "Jour %1$d, %2$s %3$d",
-    "it": "Giorno %1$d, %2$s %3$d",
-    "pt-PT": "Dia %1$d, %2$s %3$d",
-    "ru": "День %1$d, %2$s %3$d",
-    "zh-Hans": "第 %1$d 天，%2$s %3$d",
-    "zh-Hant": "第 %1$d 天，%2$s %3$d"
+    "de": "Tag %1$d, %2$s %3$s",
+    "en": "Day %1$d, %2$s %3$s",
+    "es": "Día %1$d, %2$s %3$s",
+    "fr": "Jour %1$d, %2$s %3$s",
+    "it": "Giorno %1$d, %2$s %3$s",
+    "pt-PT": "Dia %1$d, %2$s %3$s",
+    "ru": "День %1$d, %2$s %3$s",
+    "zh-Hans": "第 %1$d 天，%2$s %3$s",
+    "zh-Hant": "第 %1$d 天，%2$s %3$s"
   },
   "appwide.calendar.a11y.today_no_data_format": {
     "de": "Heute, Tag %1$d, keine Daten",
@@ -979,15 +979,15 @@
     "zh-Hant": "今天，第 %1$d 天，無數據"
   },
   "appwide.calendar.a11y.today_value_format": {
-    "de": "Heute, Tag %1$d, %2$s %3$d",
-    "en": "Today, day %1$d, %2$s %3$d",
-    "es": "Hoy, día %1$d, %2$s %3$d",
-    "fr": "Aujourd’hui, jour %1$d, %2$s %3$d",
-    "it": "Oggi, giorno %1$d, %2$s %3$d",
-    "pt-PT": "Hoje, dia %1$d, %2$s %3$d",
-    "ru": "Сегодня, день %1$d, %2$s %3$d",
-    "zh-Hans": "今天，第 %1$d 天，%2$s %3$d",
-    "zh-Hant": "今天，第 %1$d 天，%2$s %3$d"
+    "de": "Heute, Tag %1$d, %2$s %3$s",
+    "en": "Today, day %1$d, %2$s %3$s",
+    "es": "Hoy, día %1$d, %2$s %3$s",
+    "fr": "Aujourd’hui, jour %1$d, %2$s %3$s",
+    "it": "Oggi, giorno %1$d, %2$s %3$s",
+    "pt-PT": "Hoje, dia %1$d, %2$s %3$s",
+    "ru": "Сегодня, день %1$d, %2$s %3$s",
+    "zh-Hans": "今天，第 %1$d 天，%2$s %3$s",
+    "zh-Hant": "今天，第 %1$d 天，%2$s %3$s"
   },
   "appwide.calendar.energy_provenance": {
     "de": "Aktive Energie stammt aus dem Gesundheitsspeicher des Smartphones. Die kombinierte, herzfrequenzbasierte Kalorienschätzung des Noop Band ist eine andere Größe und wird in diesem Kalender nicht damit vermischt.",
@@ -1166,15 +1166,15 @@
     "zh-Hant": "上個月"
   },
   "appwide.calendar.subtitle": {
-    "de": "Ein Ring pro Tag",
-    "en": "One ring per day",
-    "es": "Un anillo por día",
-    "fr": "Un anneau par jour",
-    "it": "Un anello al giorno",
-    "pt-PT": "Um anel por dia",
-    "ru": "Одно кольцо в день",
-    "zh-Hans": "每天一个圆环",
-    "zh-Hant": "每天一個圓環"
+    "de": "Tägliche Werte und Summen",
+    "en": "Daily scores and totals",
+    "es": "Puntuaciones y totales diarios",
+    "fr": "Scores et totaux quotidiens",
+    "it": "Punteggi e totali giornalieri",
+    "pt-PT": "Pontuações e totais diários",
+    "ru": "Ежедневные показатели и итоги",
+    "zh-Hans": "每日评分和总量",
+    "zh-Hant": "每日評分和總量"
   },
   "appwide.calendar.summary.empty_format": {
     "de": "Für %1$s wurde diesen Monat noch kein Wert berechnet.",
