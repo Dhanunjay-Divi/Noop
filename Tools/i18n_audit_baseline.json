@@ -482,14 +482,6 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Syncing Noop Band history…"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Syncing Noop Band history… ${live.syncChunksThisSession} chunks pulled"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Syncing…"
     ],
     [
@@ -1043,10 +1035,6 @@
       "Noop Band battery"
     ],
     [
-      "Strand/Liquid/LiquidTodayView.swift",
-      "Start a live session. Beta. Silent Noop Band coaching against today's Recovery."
-    ],
-    [
       "Strand/MenuBar/MenuBarContent.swift",
       "Noop Band not connected"
     ],
@@ -1097,10 +1085,6 @@
     [
       "Strand/Screens/BreathingView.swift",
       "Not enough clean beat data to lock a pace today. Try again rested, sitting still with Noop Band snug. For now we'll pace you at 5.5 br/min (coherence)."
-    ],
-    [
-      "Strand/Screens/CalendarMonthView.swift",
-      "\\(vals.count) recorded days · average \\(metric.format(mean))"
     ],
     [
       "Strand/Screens/CoupledView.swift",
@@ -1176,10 +1160,6 @@
     ],
     [
       "Strand/Screens/HealthView.swift",
-      "Biomarker trends"
-    ],
-    [
-      "Strand/Screens/HealthView.swift",
       "Refresh Fitness Age now"
     ],
     [
@@ -1189,10 +1169,6 @@
     [
       "Strand/Screens/HealthView.swift",
       "Timeline"
-    ],
-    [
-      "Strand/Screens/HealthView.swift",
-      "Values retain their original source and recorded date. Sparklines appear only for recent, closely spaced observations; missing periods are not connected. These are not diagnoses or targets."
     ],
     [
       "Strand/Screens/HealthView.swift",
@@ -1560,18 +1536,6 @@
     ],
     [
       "Strand/Screens/WorkoutsView.swift",
-      "1 recorded activity"
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
-      "3 or more activities"
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
-      "Activity calendar"
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
       "All sources"
     ],
     [
@@ -1613,18 +1577,6 @@
     [
       "Strand/Screens/WorkoutsView.swift",
       "Typical effort, no data"
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
-      "\\(count) recorded activities"
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
-      "\\(date.formatted(date: .long, time: .omitted)), "
-    ],
-    [
-      "Strand/Screens/WorkoutsView.swift",
-      "\\(label) activities"
     ],
     [
       "Strand/Screens/WorkoutsView.swift",

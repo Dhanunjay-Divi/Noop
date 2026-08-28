@@ -175,6 +175,8 @@ fun SleepScreen(
                     batches = s.syncChunksThisSession,
                     rows = s.syncRowsThisSession,
                     newestDataUnix = s.syncDataNewestAt,
+                    startedAt = s.syncStartedAt,
+                    lastDurableProgressAt = s.syncLastDurableProgressAt,
                 )
             } else {
                 null
@@ -556,6 +558,8 @@ fun SleepScreen(
                         chunks = progress.batches,
                         rows = progress.rows,
                         newestDataUnix = progress.newestDataUnix,
+                        startedAt = progress.startedAt,
+                        lastDurableProgressAt = progress.lastDurableProgressAt,
                     )
                 }
                 SleepEmptyState()

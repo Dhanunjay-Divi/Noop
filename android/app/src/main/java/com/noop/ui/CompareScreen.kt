@@ -97,6 +97,7 @@ data class CompareMetric(
     val id: String get() = "$source:$key"
 
     fun format(v: Double): String {
+        if (key == "fitness_age") return FitnessAgePresentation.value(v)
         val n = if (decimals == 0) {
             Math.round(v).toString()
         } else {
@@ -142,7 +143,7 @@ private object CompareCatalog {
         CompareMetric("max_hr", "Max Heart Rate", "Heart", "bpm", "my-whoop", 0),
         CompareMetric("energy_kcal", "Calories", "Heart", "kcal", "my-whoop", 0),
         CompareMetric("vo2max", "VO₂ Max", "Heart", "", "apple-health", 1),
-        CompareMetric("fitness_age", "Fitness Age", "Heart", "yrs", "my-whoop", 0),
+        CompareMetric("fitness_age", "Fitness Age", "Heart", "", "my-whoop", 0),
         CompareMetric("vo2max_est", "VO₂ Max (estimated)", "Heart", "", "my-whoop", 1),
         CompareMetric("vitality", "Vitality", "Heart", "", "my-whoop", 0),
         CompareMetric("body_age", "Wellness Age", "Heart", "yrs", "my-whoop", 0),
@@ -412,6 +413,7 @@ private object CorrelationEngine {
 @Composable
 fun CompareScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
 
     // Liquid finish (pilot pattern): the time-of-day sky settles behind the top of the screen, gated on the
     // same day-cycle-background preference the liquid Today honours. Off = the flat dark canvas path.
@@ -436,13 +438,15 @@ fun CompareScreen(vm: AppViewModel) {
     // Load the full history for any selected metric not yet fetched, whenever the
     // selection set or the daily cache changes. Mirrors macOS `.task(id: selectionKey)`.
     val selectionKey = selected.joinToString("|") { it.id }
-    LaunchedEffect(selectionKey, days) {
+    LaunchedEffect(selectionKey, days, ageMetricDataVersion) {
         for (metric in selected) {
             // Always (re)load derived-from-daily my-whoop series when the cache grew;
-            // metricSeries-only metrics are loaded once.
+            // metricSeries-only metrics are loaded once, except focused age metrics whose repository
+            // revision can advance without changing the daily cache.
             val pick = if (metric.source == "my-whoop") CompareCatalog.dailyPick(metric.key) else null
             val needsLoad = !fullSeries.containsKey(metric.id) ||
-                (pick != null && fullSeries[metric.id].isNullOrEmpty())
+                (pick != null && fullSeries[metric.id].isNullOrEmpty()) ||
+                metric.key in AGE_SERIES_KEYS
             if (needsLoad) {
                 fullSeries[metric.id] = loadFullSeries(vm, metric, days)
             }
@@ -601,6 +605,8 @@ fun CompareScreen(vm: AppViewModel) {
         }
     }
 }
+
+private val AGE_SERIES_KEYS = setOf("fitness_age", "vo2max_est", "vitality", "body_age")
 
 // MARK: - Series loading
 

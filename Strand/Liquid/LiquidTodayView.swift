@@ -29,6 +29,7 @@ struct LiquidTodayView: View {
     // would re-render all of Today every second (the exact churn the LiveState leaves isolate). BLEManager
     // only publishes connect/discovery state, never HR. Injected at the app roots beside .environmentObject(model).
     @EnvironmentObject var ble: BLEManager
+    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #if os(iOS)
@@ -98,6 +99,7 @@ struct LiquidTodayView: View {
     @State private var showSettings = false
     @State private var synthesisExpanded = false
     @State private var showLiveSession = false
+    @State private var showNotificationPermissionAlert = false
 
     /// Live Sessions (silent guardian) beta gate — the SAME key the Settings toggle writes. Default ON
     /// (the entry is BETA-labelled in-UI); off removes the Start-session control entirely.
@@ -339,6 +341,12 @@ struct LiquidTodayView: View {
             // A neutral one-shot cue means "today's number has arrived." Historical-day changes already
             // have a selection tick, and a carried prior-night value is not a newly resolved Charge.
             .strandHaptic(.light, trigger: chargeLandingHapticTrigger)
+            .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
+                Button("appwide.action.open_settings") { openNotificationSettings() }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text("appwide.notifications.effort_permission_message")
+            }
     }
 
     private var liquidBody: some View {
@@ -457,7 +465,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -873,7 +881,7 @@ struct LiquidTodayView: View {
                 // The session-start row shares the hero card's pinned-dark `heroFill`, so its text/chevron
                 // use the on-dark tokens — textPrimary/Secondary/Tertiary flip to dark ink in Light mode and
                 // went dark-on-near-black here too (#1013).
-                Text("Start session")
+                Text("appwide.live_session.start")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.onDarkPrimary)
                 Text("BETA")
@@ -917,7 +925,7 @@ struct LiquidTodayView: View {
             )
         }
         .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("Start a live session. Beta. Silent Noop Band coaching against today's Recovery.")
+        .accessibilityLabel("appwide.live_session.start_accessibility")
     }
 
     private var heroCard: some View {
@@ -1169,7 +1177,7 @@ struct LiquidTodayView: View {
                      value: stressText, symbol: card.icon, tint: StrandPalette.accent, frac: fracOver(stress, 3))
         case .fitnessAge:
             cardLink(.metric("fitness_age"), title: card.title, sub: card.subtitle,
-                     value: unitText(visibleFitnessAge, card.unit), symbol: card.icon,
+                     value: visibleFitnessAge.map(FitnessAgePresentation.value) ?? "–", symbol: card.icon,
                      tint: StrandPalette.chargeColor, frac: 0.5)
         case .vitality:
             cardLink(.metric("vitality"), title: card.title, sub: card.subtitle,
@@ -1682,7 +1690,7 @@ struct LiquidTodayView: View {
 
                 if selectedDayOffset == 0 {
                     Divider().overlay(StrandPalette.hairline)
-                    Toggle(isOn: $behavior.strainTargetNudge) {
+                    Toggle(isOn: strainTargetToggle(plan: plan)) {
                         VStack(alignment: .leading, spacing: 3) {
                             Label("daily_plan.notification.toggle", systemImage: "bell")
                                 .font(StrandFont.subhead)
@@ -1695,21 +1703,53 @@ struct LiquidTodayView: View {
                     }
                     .toggleStyle(.switch)
                     .tint(StrandPalette.accent)
-                    .onChangeCompat(of: behavior.strainTargetNudge) { enabled in
-                        if enabled {
-                            StrainTargetNotifier.requestAuthorization()
-                            StrainTargetNotifier.onDayUpdate(
-                                day: selectedDayKey,
-                                dayEffort: cachedDisplayDay?.strain,
-                                targetRange: plan.target,
-                                enabled: true
-                            )
-                        }
-                    }
                 }
             }
             }
         }
+    }
+
+    private func strainTargetToggle(plan: DailyActionPlanner.Plan) -> Binding<Bool> {
+        Binding(
+            get: { behavior.strainTargetNudge },
+            set: { enabled in
+                guard enabled else {
+                    behavior.strainTargetNudge = false
+                    StrainTargetNotifier.setEnabled(false)
+                    return
+                }
+
+                behavior.strainTargetNudge = false
+                StrainTargetNotifier.setEnabled(true) { outcome in
+                    switch outcome {
+                    case .enabled:
+                        behavior.strainTargetNudge = true
+                        StrainTargetNotifier.onDayUpdate(
+                            day: selectedDayKey,
+                            dayEffort: cachedDisplayDay?.strain,
+                            targetRange: plan.target,
+                            enabled: true
+                        )
+                    case .denied:
+                        behavior.strainTargetNudge = false
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        behavior.strainTargetNudge = false
+                    }
+                }
+            }
+        )
+    }
+
+    private func openNotificationSettings() {
+        #if os(iOS)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        #else
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+        ) else { return }
+        #endif
+        openURL(url)
     }
 
     private func dailyPlanEffortProgress(
@@ -4865,13 +4905,18 @@ private struct LiquidSyncStatusRow: View {
     @EnvironmentObject var live: LiveState
     var body: some View {
         if live.backfilling {
-            VStack(alignment: .trailing, spacing: 4) {
-                row(
-                    String(localized: "Noop Band history"),
-                    value: batches,
-                    tone: StrandPalette.accent
-                )
-                if live.historySyncProgress.rowsPersisted > 0 {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                VStack(alignment: .trailing, spacing: 4) {
+                    row(
+                        String(localized: "Noop Band history"),
+                        value: batches,
+                        tone: StrandPalette.accent
+                    )
+                    Text(activityDetail(now: context.date.timeIntervalSince1970))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(activityTone(now: context.date.timeIntervalSince1970))
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(persistedDetail)
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -4886,12 +4931,45 @@ private struct LiquidSyncStatusRow: View {
     }
 
     private var batches: String {
-        live.syncChunksThisSession > 0
-            ? String.localizedStringWithFormat(
-                String(localized: "appwide.today.band_sync.batches_format"),
-                Int64(live.syncChunksThisSession)
-            )
-            : String(localized: "Syncing…")
+        String.localizedStringWithFormat(
+            String(localized: "appwide.today.band_sync.batches_format"),
+            Int64(live.syncChunksThisSession)
+        )
+    }
+
+    private func activityDetail(now: TimeInterval) -> String {
+        let activity: String
+        switch HistorySyncDurableProgressPolicy.activity(
+            startedAt: live.historySyncStartedAt,
+            lastDurableProgressAt: live.historySyncLastDurableProgressAt,
+            now: now
+        ) {
+        case .starting:
+            activity = String(localized: "appwide.today.band_sync.activity_starting")
+        case .advancing:
+            activity = String(localized: "appwide.today.band_sync.activity_advancing")
+        case .waiting:
+            activity = String(localized: "appwide.today.band_sync.activity_waiting")
+        case .stalled:
+            activity = String(localized: "appwide.today.band_sync.activity_stalled")
+        }
+        let elapsed = String.localizedStringWithFormat(
+            String(localized: "appwide.today.band_sync.elapsed_format"),
+            historySyncElapsedClock(startedAt: live.historySyncStartedAt, now: now)
+        )
+        return activity + " · " + elapsed
+    }
+
+    private func activityTone(now: TimeInterval) -> Color {
+        switch HistorySyncDurableProgressPolicy.activity(
+            startedAt: live.historySyncStartedAt,
+            lastDurableProgressAt: live.historySyncLastDurableProgressAt,
+            now: now
+        ) {
+        case .starting, .advancing: return StrandPalette.statusPositive
+        case .waiting: return StrandPalette.statusWarning
+        case .stalled: return StrandPalette.statusCritical
+        }
     }
 
     private var persistedDetail: String {

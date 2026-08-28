@@ -5,6 +5,9 @@ import com.noop.analytics.AutoWorkoutDetector
 import com.noop.analytics.CoarseWorkoutClass
 import com.noop.analytics.WorkoutSport
 import com.noop.data.WorkoutRow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Locale
 
 /**
  * AutoWorkoutPrefs — durable dismissed-span store for the opt-in auto-detect Today card.
@@ -30,6 +33,39 @@ object AutoWorkoutPrefs {
     private const val KEY_REVIEW_AVG = "autoWorkout.review.avg"
     private const val KEY_REVIEW_PEAK = "autoWorkout.review.peak"
     private const val KEY_PREFERRED_SPORT_PREFIX = "workouts.autoDetectPreferredSport."
+    private const val KEY_DECISION_HISTORY = "workouts.autoDetectDecisionHistory.v1"
+
+    enum class DecisionAction(val wireValue: String) {
+        ACCEPTED("accepted"),
+        DISMISSED("dismissed"),
+        AUTO_SAVED("auto_saved_pending_review"),
+        KEPT_AUTO_SAVE("kept_auto_save"),
+        REJECTED_AUTO_SAVE("rejected_auto_save"),
+        REMOVED_DETECTED_WORKOUT("removed_detected_workout"),
+    }
+
+    enum class DecisionActor(val wireValue: String) {
+        USER("user"),
+        AUTOMATION("automation"),
+    }
+
+    data class DecisionRecord(
+        val candidateStartSec: Long,
+        val candidateEndSec: Long?,
+        val recordedAtSec: Long?,
+        val action: DecisionAction,
+        val actor: DecisionActor,
+        val activityName: String?,
+        val detectorVersion: String?,
+        val averageBpm: Int?,
+        val peakBpm: Int?,
+        val eventConfidence: Double?,
+        val confidenceStatus: String?,
+        val evidenceProvenance: String?,
+        val suggestedClass: String?,
+        val suggestionConfidence: Double?,
+        val origin: String,
+    )
 
     data class Review(
         val startSec: Long,
@@ -60,6 +96,9 @@ object AutoWorkoutPrefs {
      * the last ~2 days), so we drop them. 30 days, matching the iOS twin byte-for-byte.
      */
     private const val DISMISSED_MAX_AGE_SEC = 30L * 86_400L
+    internal const val DECISION_HISTORY_MAX = 1_000
+    private const val RECORDED_ORIGIN = "recorded_event"
+    private const val LEGACY_ORIGIN = "legacy_dismissal_tombstone"
 
     private fun prefs(ctx: Context) =
         ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -112,29 +151,270 @@ object AutoWorkoutPrefs {
      * stored set on every add (drop spans older than ~30 days + hard-cap to 200 most-recent) so it can
      * never grow unbounded. Byte-mirrored in the iOS `Repository.dismissDetectedSuggestion`.
      */
-    fun dismiss(ctx: Context, w: AutoWorkoutDetector.DetectedWorkout) {
+    @Synchronized
+    fun dismiss(
+        ctx: Context,
+        w: AutoWorkoutDetector.DetectedWorkout,
+        action: DecisionAction = DecisionAction.DISMISSED,
+        activityName: String? = null,
+    ) {
         val cur = dismissed(ctx).toMutableSet()
         if (cur.none { matches(it, w) } && cur.add(token(w))) {
             // Store a fresh copy — SharedPreferences.getStringSet returns a live instance that must not
             // be mutated in place, so a new set is written back.
             val pruned = prune(cur, System.currentTimeMillis() / 1000L)
             prefs(ctx).edit().putStringSet(KEY_DISMISSED, pruned).apply()
+            recordDecisionLocked(
+                ctx,
+                candidateDecision(
+                    candidate = w,
+                    action = action,
+                    actor = DecisionActor.USER,
+                    activityName = activityName,
+                ),
+            )
         }
     }
 
     /** Bridge a persisted Detected/NOOP row into the canonical suggestion identity. */
-    fun dismiss(ctx: Context, row: WorkoutRow) {
-        dismiss(
+    @Synchronized
+    fun dismiss(
+        ctx: Context,
+        row: WorkoutRow,
+        action: DecisionAction = DecisionAction.REMOVED_DETECTED_WORKOUT,
+    ) {
+        val cur = dismissed(ctx).toMutableSet()
+        val identity = token(row.startTs, row.endTs)
+        val candidate = AutoWorkoutDetector.DetectedWorkout(
+            startSec = row.startTs,
+            endSec = row.endTs,
+            avgBpm = row.avgHr ?: 60,
+            peakBpm = row.maxHr ?: row.avgHr ?: 60,
+            durationMin = maxOf(1, ((row.endTs - row.startTs) / 60L).toInt()),
+        )
+        if (cur.none { matches(it, candidate) } && cur.add(identity)) {
+            prefs(ctx).edit()
+                .putStringSet(KEY_DISMISSED, prune(cur, System.currentTimeMillis() / 1_000L))
+                .apply()
+            recordDecisionLocked(
+                ctx,
+                spanDecision(
+                    startSec = row.startTs,
+                    endSec = row.endTs,
+                    action = action,
+                    activityName = row.sport,
+                ),
+            )
+        }
+    }
+
+    @Synchronized
+    fun recordCandidateDecision(
+        ctx: Context,
+        candidate: AutoWorkoutDetector.DetectedWorkout,
+        action: DecisionAction,
+        actor: DecisionActor,
+        activityName: String?,
+    ) {
+        recordDecisionLocked(
             ctx,
-            AutoWorkoutDetector.DetectedWorkout(
-                startSec = row.startTs,
-                endSec = row.endTs,
-                avgBpm = row.avgHr ?: 60,
-                peakBpm = row.maxHr ?: row.avgHr ?: 60,
-                durationMin = maxOf(1, ((row.endTs - row.startTs) / 60L).toInt()),
+            candidateDecision(candidate, action, actor, activityName),
+        )
+    }
+
+    @Synchronized
+    fun recordReviewDecision(
+        ctx: Context,
+        review: Review,
+        action: DecisionAction,
+    ) {
+        recordDecisionLocked(
+            ctx,
+            spanDecision(
+                startSec = review.startSec,
+                endSec = review.endSec,
+                action = action,
+                activityName = review.sport,
             ),
         )
     }
+
+    private fun candidateDecision(
+        candidate: AutoWorkoutDetector.DetectedWorkout,
+        action: DecisionAction,
+        actor: DecisionActor,
+        activityName: String?,
+        nowSec: Long = System.currentTimeMillis() / 1_000L,
+    ): DecisionRecord = DecisionRecord(
+        candidateStartSec = candidate.startSec,
+        candidateEndSec = candidate.endSec,
+        recordedAtSec = nowSec,
+        action = action,
+        actor = actor,
+        activityName = activityName,
+        detectorVersion = candidate.detectorVersion,
+        averageBpm = candidate.avgBpm,
+        peakBpm = candidate.peakBpm,
+        eventConfidence = candidate.eventConfidence,
+        confidenceStatus = candidate.confidenceStatus.name.lowercase(Locale.US),
+        evidenceProvenance = candidate.evidenceProvenance.wireValue,
+        suggestedClass = candidate.suggestedClass?.raw,
+        suggestionConfidence = candidate.suggestionConfidence,
+        origin = RECORDED_ORIGIN,
+    )
+
+    private fun spanDecision(
+        startSec: Long,
+        endSec: Long?,
+        action: DecisionAction,
+        activityName: String?,
+        nowSec: Long = System.currentTimeMillis() / 1_000L,
+    ): DecisionRecord = DecisionRecord(
+        candidateStartSec = startSec,
+        candidateEndSec = endSec,
+        recordedAtSec = nowSec,
+        action = action,
+        actor = DecisionActor.USER,
+        activityName = activityName,
+        detectorVersion = null,
+        averageBpm = null,
+        peakBpm = null,
+        eventConfidence = null,
+        confidenceStatus = null,
+        evidenceProvenance = null,
+        suggestedClass = null,
+        suggestionConfidence = null,
+        origin = RECORDED_ORIGIN,
+    )
+
+    private fun recordDecisionLocked(ctx: Context, record: DecisionRecord) {
+        val history = decisionRecordsLocked(ctx).toMutableList()
+        val index = history.indexOfFirst {
+            it.candidateStartSec == record.candidateStartSec && it.action == record.action
+        }
+        if (index >= 0) history[index] = record else history += record
+        val bounded = history.takeLast(DECISION_HISTORY_MAX)
+        val encoded = JSONArray()
+        bounded.forEach { encoded.put(decisionJson(it)) }
+        prefs(ctx).edit().putString(KEY_DECISION_HISTORY, encoded.toString()).apply()
+    }
+
+    private fun decisionRecordsLocked(ctx: Context): List<DecisionRecord> {
+        val raw = prefs(ctx).getString(KEY_DECISION_HISTORY, null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val result = ArrayList<DecisionRecord>(minOf(array.length(), DECISION_HISTORY_MAX))
+        val first = maxOf(0, array.length() - DECISION_HISTORY_MAX)
+        for (index in first until array.length()) {
+            val record = runCatching {
+                decisionRecord(array.getJSONObject(index))
+            }.getOrNull() ?: continue
+            result += record
+        }
+        return result
+    }
+
+    @Synchronized
+    fun exportDecisionRecords(ctx: Context): List<DecisionRecord> {
+        val result = decisionRecordsLocked(ctx).toMutableList()
+        val alreadyRejected = result.asSequence()
+            .filter {
+                it.action == DecisionAction.DISMISSED ||
+                    it.action == DecisionAction.REJECTED_AUTO_SAVE ||
+                    it.action == DecisionAction.REMOVED_DETECTED_WORKOUT
+            }
+            .map { it.candidateStartSec }
+            .toMutableSet()
+        for (legacyToken in dismissed(ctx)) {
+            val start = tokenStart(legacyToken) ?: continue
+            if (!alreadyRejected.add(start)) continue
+            val end = if (legacyToken.startsWith("start:")) {
+                null
+            } else {
+                legacyToken.substringAfterLast(':', "").toLongOrNull()
+            }
+            result += DecisionRecord(
+                candidateStartSec = start,
+                candidateEndSec = end,
+                recordedAtSec = null,
+                action = DecisionAction.DISMISSED,
+                actor = DecisionActor.USER,
+                activityName = null,
+                detectorVersion = null,
+                averageBpm = null,
+                peakBpm = null,
+                eventConfidence = null,
+                confidenceStatus = null,
+                evidenceProvenance = null,
+                suggestedClass = null,
+                suggestionConfidence = null,
+                origin = LEGACY_ORIGIN,
+            )
+        }
+        return result.sortedWith(
+            compareBy<DecisionRecord>(
+                { it.candidateStartSec },
+                { it.recordedAtSec ?: Long.MIN_VALUE },
+                { it.action.wireValue },
+            ),
+        )
+    }
+
+    private fun decisionJson(record: DecisionRecord): JSONObject = JSONObject()
+        .put("candidate_start_sec", record.candidateStartSec)
+        .put("candidate_end_sec", record.candidateEndSec ?: JSONObject.NULL)
+        .put("recorded_at_sec", record.recordedAtSec ?: JSONObject.NULL)
+        .put("action", record.action.wireValue)
+        .put("actor", record.actor.wireValue)
+        .put("activity_name", record.activityName ?: JSONObject.NULL)
+        .put("detector_version", record.detectorVersion ?: JSONObject.NULL)
+        .put("average_bpm", record.averageBpm ?: JSONObject.NULL)
+        .put("peak_bpm", record.peakBpm ?: JSONObject.NULL)
+        .put("event_confidence", record.eventConfidence ?: JSONObject.NULL)
+        .put("confidence_status", record.confidenceStatus ?: JSONObject.NULL)
+        .put("evidence_provenance", record.evidenceProvenance ?: JSONObject.NULL)
+        .put("suggested_class", record.suggestedClass ?: JSONObject.NULL)
+        .put("suggestion_confidence", record.suggestionConfidence ?: JSONObject.NULL)
+        .put("origin", record.origin)
+
+    private fun decisionRecord(json: JSONObject): DecisionRecord? {
+        val start = json.optLong("candidate_start_sec", 0L)
+        val action = DecisionAction.entries.firstOrNull {
+            it.wireValue == json.optString("action")
+        } ?: return null
+        val actor = DecisionActor.entries.firstOrNull {
+            it.wireValue == json.optString("actor")
+        } ?: return null
+        if (start <= 0L) return null
+        return DecisionRecord(
+            candidateStartSec = start,
+            candidateEndSec = json.optionalLong("candidate_end_sec"),
+            recordedAtSec = json.optionalLong("recorded_at_sec"),
+            action = action,
+            actor = actor,
+            activityName = json.optionalString("activity_name"),
+            detectorVersion = json.optionalString("detector_version"),
+            averageBpm = json.optionalInt("average_bpm"),
+            peakBpm = json.optionalInt("peak_bpm"),
+            eventConfidence = json.optionalDouble("event_confidence"),
+            confidenceStatus = json.optionalString("confidence_status"),
+            evidenceProvenance = json.optionalString("evidence_provenance"),
+            suggestedClass = json.optionalString("suggested_class"),
+            suggestionConfidence = json.optionalDouble("suggestion_confidence"),
+            origin = json.optString("origin", RECORDED_ORIGIN),
+        )
+    }
+
+    private fun JSONObject.optionalString(key: String): String? =
+        if (!has(key) || isNull(key)) null else getString(key)
+
+    private fun JSONObject.optionalLong(key: String): Long? =
+        if (!has(key) || isNull(key)) null else getLong(key)
+
+    private fun JSONObject.optionalInt(key: String): Int? =
+        if (!has(key) || isNull(key)) null else getInt(key)
+
+    private fun JSONObject.optionalDouble(key: String): Double? =
+        if (!has(key) || isNull(key)) null else getDouble(key).takeIf(Double::isFinite)
 
     /** Last exact catalog choice for this broad detector hint. No free text or private notes are stored. */
     fun preferredSport(

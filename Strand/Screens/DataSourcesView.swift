@@ -485,6 +485,7 @@ struct DataSourcesView: View {
                     )
                 }
                 try await store.upsertWorkouts(rows, deviceId: LiftingImporter.sourceId)
+                repo.noteWorkoutsChanged()
                 await repo.refresh()
                 let totalVolume = result.sessions.reduce(0.0) { $0 + $1.volumeLoadKg }
                 // Whole-phrase variants per count so translators never see a stitched plural.
@@ -574,6 +575,7 @@ struct DataSourcesView: View {
                     steps: activity.steps
                 )
                 try await store.upsertWorkouts([row], deviceId: ActivityFileImporter.sourceId)
+                repo.noteWorkoutsChanged()
 
                 // #137 (A): persist the ride's real per-sample HR under the activity-file source. The
                 // insert is keyed on (deviceId, ts), so re-importing the same file is idempotent (an
@@ -723,7 +725,9 @@ struct DataSourcesView: View {
                 // `DeviceRegistryStore(...).deleteAllData` directly here ran the whole transaction on the
                 // main actor and froze the UI on a large Apple Health dataset.
                 try await store.deleteAllData(deviceId: model.appleDeviceId)
+                repo.noteWorkoutsChanged()
                 await repo.refresh()
+                repo.noteAgeMetricsChanged()
                 // #833/v7.7.2: this purge clears the body-composition series (weight/body_fat/lean_mass/bmi/
                 // vo2max) that live in metricSeries OUTSIDE refresh()'s diff, so refresh() may not bump
                 // `refreshSeq` and AppleHealthView's re-mount cache would keep serving the now-DELETED data.

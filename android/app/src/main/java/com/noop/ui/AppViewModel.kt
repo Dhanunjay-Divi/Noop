@@ -213,7 +213,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         noopApp.deviceRegistry.rename(id, nickname)
 
     /** Permanently delete all of a device's recorded data (its registry row is kept). */
-    suspend fun deletePairedDeviceData(id: String) = noopApp.deviceRegistry.deleteDeviceData(id)
+    suspend fun deletePairedDeviceData(id: String) {
+        noopApp.deviceRegistry.deleteDeviceData(id)
+        repository.noteWorkoutsChanged()
+        noteAgeMetricsChanged()
+    }
 
     /**
      * A DISCOVERY-ONLY [StandardHrSource] for the Add-a-strap wizard. It runs its OWN scan and never
@@ -378,9 +382,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // Body profile (age/sex/weight/height + HR-max override) — the same SharedPreferences
     // store the Settings screen edits. Feeds the on-device scorer's HRmax/zones/calories.
     private val profileStore = ProfileStore.from(app.applicationContext)
-    private val _ageMetricDataVersion = MutableStateFlow(0L)
-    /** Advances only after profile-dependent Fitness Age/Vitality rows have been reconciled. */
-    val ageMetricDataVersion: StateFlow<Long> = _ageMetricDataVersion.asStateFlow()
+    /** Repository-backed revisions also advance for background imports/scoring without an Activity owner. */
+    val metricDataVersion: StateFlow<Long> = repository.metricDataVersion
+    val ageMetricDataVersion: StateFlow<Long> = metricDataVersion
+    val workoutDataVersion: StateFlow<Long> = repository.workoutDataVersion
     private var lastAgeMetricReconciliationTarget: AgeMetricReconciliationTarget? =
         NoopPrefs.of(appContext).let { prefs ->
             val profileState = prefs.getString(AGE_METRIC_RECONCILED_PROFILE_STATE_KEY, null)
@@ -662,6 +667,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     var todayCardsLoadedSig: Int? = null
     var todayCardsLoadedProfileSig: String? = null
+    var todayCardsLoadedAgeMetricVersion: Long? = null
     var todayStressCache: Double? = null
     var todayFitnessAgeCache: Double? = null
     var todayVitalityCache: Double? = null
@@ -1291,11 +1297,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sex = profileStore.sex,
         stepTicksPerStep = profileStore.stepTicksPerStep,
         waistCm = profileStore.waistCm,
-        // The demo flavor's on-device history is synthetic and DemoSeeder stamps its actual profile-age
-        // v2 marker. Treat that seeded age as confirmed for analytics so the normal launch/backstop pass
-        // refreshes (rather than purges) demo Vitality. Production remains strictly user-confirmed.
+        // The demo flavor's on-device history is synthetic and DemoSeeder stamps its actual profile
+        // v2 markers. Treat both seeded Fitness Age inputs as confirmed so the first launch analysis
+        // cannot purge the fixture while onboarding is still open. Production remains user-confirmed.
         ageInputConfirmed = profileStore.ageInputConfirmed || com.noop.BuildConfig.ENABLE_DEMO,
-        sexInputConfirmed = profileStore.sexInputConfirmed,
+        sexInputConfirmed = profileStore.sexInputConfirmed || com.noop.BuildConfig.ENABLE_DEMO,
         fitnessAgeProvenanceRequired = profileStore.fitnessAgeProvenanceRequired,
         vo2maxProvenanceRequired = profileStore.vo2maxProvenanceRequired,
         vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
@@ -1980,13 +1986,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Seed the post-workout notification frontier to the newest existing workout WITHOUT notifying, so
-     *  enabling the toggle doesn't immediately fire a summary for a session already in history (#517).
-     *  Called from the Settings toggle. Reads the already-loaded list; only advances the marker forward. */
-    fun seedWorkoutReportFrontier() {
-        ScheduledReportNotifier.seedWorkoutFrontier(appContext, _workouts.value.maxOfOrNull { it.startTs })
-    }
-
     /** Build the opt-in post-workout summary copy from [row] (Effort on the user's scale, duration, avg HR)
      *  and hand it to the notifier, which applies the strictly-newer gate. avgHr is omitted when absent —
      *  never invented. No-op when the toggle is off (gated inside the notifier). */
@@ -2013,6 +2012,36 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 (pieces.joinToString(" · ") + ". Summarised after your strap synced.")
         }
         ScheduledReportNotifier.onWorkout(appContext, row.startTs, title, body)
+    }
+
+    private var postWorkoutReportPreferenceJob: Job? = null
+
+    /**
+     * Change the post-workout report preference as one transaction. Enabling first snapshots the
+     * source-complete database frontier, then persists ON; this prevents an old workout from racing a
+     * screen-local/empty list. A later off-tap cancels an in-flight enable and removes a standing alert.
+     */
+    fun setPostWorkoutReportEnabled(enabled: Boolean, onComplete: (Boolean) -> Unit = {}) {
+        postWorkoutReportPreferenceJob?.cancel()
+        postWorkoutReportPreferenceJob = null
+        if (!enabled) {
+            NoopPrefs.setPostWorkoutReportEnabled(appContext, false)
+            ScheduledReportNotifier.cancelWorkout(appContext)
+            onComplete(false)
+            return
+        }
+        NoopPrefs.setPostWorkoutReportEnabled(appContext, false)
+        postWorkoutReportPreferenceJob = viewModelScope.launch {
+            val newest = runCatching { repository.latestWorkoutStartAllSources() }
+                .getOrElse {
+                    onComplete(false)
+                    return@launch
+                }
+            ScheduledReportNotifier.seedWorkoutFrontier(appContext, newest)
+            if (!isActive) return@launch
+            NoopPrefs.setPostWorkoutReportEnabled(appContext, true)
+            onComplete(true)
+        }
     }
 
     // MARK: - Workout detail reads (#410) — suspend helpers, additive
@@ -2544,9 +2573,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun noteAgeMetricsChanged() {
         todayCardsLoadedSig = null
         todayCardsLoadedProfileSig = null
+        todayCardsLoadedAgeMetricVersion = null
         todayFitnessAgeCache = null
         todayVitalityCache = null
-        _ageMetricDataVersion.value += 1
+        repository.noteAgeMetricsChanged()
     }
 
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +

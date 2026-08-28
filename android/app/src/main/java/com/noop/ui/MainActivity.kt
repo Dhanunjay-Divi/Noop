@@ -64,9 +64,11 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.ENABLE_DEMO) {
             lifecycleScope.launch(Dispatchers.IO) {
                 runCatching {
+                    val profile = ProfileStore.from(applicationContext)
                     DemoSeeder.seedIfEmpty(
                         WhoopRepository.from(applicationContext),
-                        ProfileStore.from(applicationContext).age.toDouble(),
+                        profile.age.toDouble(),
+                        profile.sex,
                     )
                 }
                 // Also seed a 2nd PAIRED device (Polar H10) so the Devices screen shows WHOOP (Active)
@@ -912,6 +914,7 @@ object NoopPrefs {
     const val KEY_REPORT_STRAIN_TARGET = "noop.report.strainTarget"
     const val KEY_REPORT_STRAIN_TARGET_DAY = "noop.report.lastStrainTargetDay"
     const val KEY_REPORT_LAST_WORKOUT_TS = "noop.report.lastWorkoutTs"
+    const val KEY_REPORT_WORKOUT_FRONTIER_INITIALIZED = "noop.report.workoutFrontierInitialized"
     // Same-day Daily Action self-check. Keys and values mirror BehaviorStore on Apple.
     const val KEY_DAILY_ACTION_CHECK_IN_DAY = "behavior.dailyActionCheckIn.day"
     const val KEY_DAILY_ACTION_CHECK_IN_VALUE = "behavior.dailyActionCheckIn.value"
@@ -991,6 +994,15 @@ object NoopPrefs {
 
     fun setReportLastWorkoutTs(context: Context, ts: Long) {
         of(context).edit().putLong(KEY_REPORT_LAST_WORKOUT_TS, ts).apply()
+    }
+
+    fun reportWorkoutFrontierInitialized(context: Context): Boolean =
+        of(context).getBoolean(KEY_REPORT_WORKOUT_FRONTIER_INITIALIZED, false)
+
+    fun setReportWorkoutFrontierInitialized(context: Context, initialized: Boolean) {
+        of(context).edit()
+            .putBoolean(KEY_REPORT_WORKOUT_FRONTIER_INITIALIZED, initialized)
+            .apply()
     }
 
     /** Caffeine late-intake nudge (PR#566, mvanhorn), opt-in, default OFF. When on, the Caffeine card

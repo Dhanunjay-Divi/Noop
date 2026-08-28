@@ -50,6 +50,7 @@ final class OuraConnectModel: ObservableObject {
                         else { self?.statusText = "Importing \(p.endpoint)\(p.detail.map { " (\($0))" } ?? "")…" }
                     }
                 }
+                if s.workouts > 0 { repo.noteWorkoutsChanged() }
                 await repo.refresh()
                 var line = "Imported \(s.days) days · \(s.sleeps) sleeps · \(s.workouts) workouts · \(s.hrSamples) HR samples"
                 if !s.skippedEndpoints.isEmpty {
@@ -76,6 +77,7 @@ final class OuraConnectModel: ObservableObject {
                     // the row on connect (`registryWriter` is `nonisolated`; `DeviceRegistryStore` is a
                     // thin synchronous, Sendable wrapper — no separate actor hop needed).
                     try DeviceRegistryStore(dbQueue: store.registryWriter).archive("oura-api")
+                    repo.noteWorkoutsChanged()
                     statusText = "Disconnected."
                 } catch {
                     statusText = "Disconnected, but couldn't fully clear local Oura data: \(error.localizedDescription)"

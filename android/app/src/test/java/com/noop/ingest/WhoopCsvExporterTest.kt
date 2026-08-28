@@ -7,7 +7,10 @@ import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import com.noop.ui.AutoWorkoutPrefs
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -364,6 +367,235 @@ class WhoopCsvExporterTest {
         assertTrue(json.contains("\"recovery\""))
         assertTrue(json.contains("\"sleep_deep_min\""))
         assertTrue(json.contains("\"rest_evidence_flags\""))
+    }
+
+    @Test
+    fun comparisonSidecarsAreSourceSeparatedAndIdentifierFree() {
+        val importedDay = DailyMetric(
+            deviceId = "provider-device-secret",
+            day = "2026-06-01",
+            totalSleepMin = 420.0,
+            efficiency = 0.92,
+            deepMin = 95.0,
+            remMin = 115.0,
+            lightMin = 210.0,
+            disturbances = 5,
+            restingHr = 52,
+            avgHrv = 68.4,
+            recovery = 72.0,
+            strain = 45.0,
+            exerciseCount = 1,
+            spo2Pct = 96.0,
+            skinTempDevC = 33.1,
+            respRateBpm = 14.2,
+            steps = 6_000,
+            activeKcalEst = 350.0,
+            hrvMethod = DailyHrvMethod.SDNN,
+        )
+        val computedDay = DailyMetric(
+            deviceId = "noop-device-secret",
+            day = "2026-06-01",
+            totalSleepMin = 400.0,
+            efficiency = 0.9,
+            deepMin = 80.0,
+            remMin = 100.0,
+            lightMin = 220.0,
+            disturbances = 3,
+            restingHr = 55,
+            avgHrv = 42.0,
+            recovery = 61.0,
+            strain = 42.0,
+            exerciseCount = 1,
+            skinTempDevC = 0.2,
+            respRateBpm = 15.2,
+            steps = 5_000,
+            activeKcalEst = 300.0,
+            spo2Red = 10,
+            spo2Ir = 20,
+            hrvMethod = DailyHrvMethod.RMSSD,
+        )
+        val sleep = SleepSession(
+            deviceId = "noop-device-secret",
+            startTs = 0,
+            endTs = 3_600,
+            efficiency = 0.8,
+            restingHr = 54,
+            avgHrv = 50.0,
+            stagesJSON = """{"light":30,"deep":10,"rem":8,"awake":12}""",
+            userEdited = true,
+            rrEligibleWindowCount = 10,
+            rrValidWindowCount = 8,
+        )
+        val workout = WorkoutRow(
+            deviceId = "noop-device-secret",
+            startTs = 0,
+            endTs = 1_800,
+            sport = "=private formula",
+            source = "noop-device-secret",
+            durationS = 1_800.0,
+            energyKcal = 220.0,
+            avgHr = 145,
+            maxHr = 172,
+            strain = 37.5,
+            distanceM = 5_000.0,
+            zonesJSON = """{"z1":5,"z2":15,"z3":40,"z4":30,"z5":10}""",
+            notes = "private note",
+            routePolyline = "private route",
+            steps = 4_200,
+        )
+        val entries = WhoopCsvExporter.comparisonEntries(
+            context = WhoopCsvExporter.ComparisonContext(
+                generatedAtUtc = "2026-08-28T12:00:00Z",
+                platform = "Android",
+                appVersion = "9.2.0",
+            ),
+            daily = listOf(
+                WhoopCsvExporter.ComparisonDailyRow(
+                    WhoopCsvExporter.ComparisonSource.WEARABLE_IMPORT,
+                    importedDay,
+                    true,
+                ),
+                WhoopCsvExporter.ComparisonDailyRow(
+                    WhoopCsvExporter.ComparisonSource.NOOP_COMPUTED,
+                    computedDay,
+                    false,
+                ),
+            ),
+            sleeps = listOf(
+                WhoopCsvExporter.ComparisonSleepRow(
+                    WhoopCsvExporter.ComparisonSource.NOOP_COMPUTED,
+                    sleep,
+                    true,
+                ),
+            ),
+            workouts = listOf(
+                WhoopCsvExporter.ComparisonWorkoutRow(
+                    WhoopCsvExporter.ComparisonSource.NOOP_COMPUTED,
+                    workout,
+                ),
+            ),
+            metricSeries = listOf(
+                WhoopCsvExporter.ComparisonMetricRow(
+                    WhoopCsvExporter.ComparisonSource.WEARABLE_IMPORT,
+                    "2026-06-01",
+                    "recovery",
+                    72.0,
+                ),
+                WhoopCsvExporter.ComparisonMetricRow(
+                    WhoopCsvExporter.ComparisonSource.NOOP_COMPUTED,
+                    "2026-06-01",
+                    "skin_temp",
+                    0.2,
+                ),
+            ),
+            detectorDecisions = listOf(
+                AutoWorkoutPrefs.DecisionRecord(
+                    candidateStartSec = 60,
+                    candidateEndSec = 1_860,
+                    recordedAtSec = 2_000,
+                    action = AutoWorkoutPrefs.DecisionAction.ACCEPTED,
+                    actor = AutoWorkoutPrefs.DecisionActor.USER,
+                    activityName = "Running",
+                    detectorVersion = com.noop.analytics.AutoWorkoutDetector.detectorVersion,
+                    averageBpm = 145,
+                    peakBpm = 172,
+                    eventConfidence = null,
+                    confidenceStatus = "uncalibrated",
+                    evidenceProvenance = "heart_rate_and_motion",
+                    suggestedClass = "run",
+                    suggestionConfidence = 0.8,
+                    origin = "recorded_event",
+                ),
+                AutoWorkoutPrefs.DecisionRecord(
+                    candidateStartSec = 3_000,
+                    candidateEndSec = null,
+                    recordedAtSec = null,
+                    action = AutoWorkoutPrefs.DecisionAction.DISMISSED,
+                    actor = AutoWorkoutPrefs.DecisionActor.USER,
+                    activityName = null,
+                    detectorVersion = null,
+                    averageBpm = null,
+                    peakBpm = null,
+                    eventConfidence = null,
+                    confidenceStatus = null,
+                    evidenceProvenance = null,
+                    suggestedClass = null,
+                    suggestionConfidence = null,
+                    origin = "legacy_dismissal_tombstone",
+                ),
+            ),
+        )
+
+        val dailyHeader =
+            "source,day,recovery_score_0_100,effort_score_0_100,total_sleep_min," +
+                "sleep_efficiency_fraction,light_sleep_min,deep_sleep_min,rem_sleep_min," +
+                "disturbances_count,resting_hr_bpm,hrv_ms,hrv_method,spo2_pct," +
+                "skin_temperature_value_c,skin_temperature_semantics,respiratory_rate_per_min," +
+                "steps_count,energy_kcal,raw_spo2_red_adc,raw_spo2_ir_adc," +
+                "detailed_sleep_stages_status\r\n"
+        assertEquals(
+            dailyHeader +
+                "noop_computed,2026-06-01,61,42,400,0.9,,,,3,55,42,RMSSD,,0.2," +
+                "deviation_from_personal_baseline,15.2,5000,300,10,20," +
+                "withheld_insufficient_evidence\r\n" +
+                "wearable_import,2026-06-01,72,45,420,0.92,210,95,115,5,52,68.4,SDNN," +
+                "96,33.1,absolute_temperature,14.2,6000,350,,,available\r\n",
+            entries.getValue("comparison/daily_metrics.csv").decodeToString(),
+        )
+        assertEquals(
+            "source,day,metric_key,value,unit\r\n" +
+                "noop_computed,2026-06-01,skin_temp,0.2,celsius_delta_from_baseline\r\n" +
+                "wearable_import,2026-06-01,recovery,72,score_0_100\r\n",
+            entries.getValue("comparison/metric_series.csv").decodeToString(),
+        )
+
+        val workoutCsv = entries.getValue("comparison/workouts.csv").decodeToString()
+        assertTrue(workoutCsv.contains("noop_computed,1970-01-01T00:00:00Z"))
+        assertTrue(workoutCsv.contains("'=private formula"))
+        assertFalse(workoutCsv.contains("private note"))
+        assertFalse(workoutCsv.contains("private route"))
+
+        val decisionsCsv = entries.getValue("comparison/detector_decisions.csv").decodeToString()
+        assertTrue(
+            decisionsCsv.contains(
+                "accepted,user,Running," +
+                    "${com.noop.analytics.AutoWorkoutDetector.detectorVersion},145,172,,run,0.8," +
+                    "uncalibrated,heart_rate_and_motion,recorded_event",
+            ),
+        )
+        assertTrue(
+            decisionsCsv.contains(
+                "1970-01-01T00:50:00Z,,,dismissed,user,,,,,,,,,,legacy_dismissal_tombstone",
+            ),
+        )
+
+        val manifest = JSONObject(entries.getValue("comparison/manifest.json").decodeToString())
+        assertEquals("noop.parallel_wear.v1", manifest.getString("schema"))
+        assertFalse(manifest.getBoolean("contains_device_identifiers"))
+        assertEquals(
+            "noop.detector_decisions.v1",
+            manifest.getString("detector_decisions_schema"),
+        )
+        assertEquals(
+            com.noop.analytics.AutoWorkoutDetector.detectorVersion,
+            manifest.getJSONObject("algorithm_revisions").getString("auto_workout_detector"),
+        )
+        val detector = JSONObject(
+            entries.getValue("comparison/workout_detector.json").decodeToString(),
+        )
+        assertEquals("uncalibrated", detector.getString("event_confidence_status"))
+        assertFalse(detector.getBoolean("unattended_save_permitted"))
+        assertFalse(
+            detector.getJSONObject("decision_history")
+                .getBoolean("computed_workout_rows_imply_acceptance"),
+        )
+
+        for (data in entries.values) {
+            val text = data.decodeToString()
+            assertFalse(text.contains("device-secret"))
+            assertFalse(text.contains("private note"))
+            assertFalse(text.contains("private route"))
+        }
     }
 
     @Test

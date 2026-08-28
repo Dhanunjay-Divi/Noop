@@ -527,9 +527,11 @@ struct MetricDetailView: View {
     }
     private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
+    private var detailUnit: String { metric.key == "fitness_age" ? "" : metric.unit }
     private func fmt(_ v: Double) -> String {
-        metric.format(v, system: unitSystem, temperature: temperatureUnit,
-                      effortScale: effortScale, mass: massUnit)
+        if metric.key == "fitness_age" { return FitnessAgePresentation.value(v) }
+        return metric.format(v, system: unitSystem, temperature: temperatureUnit,
+                             effortScale: effortScale, mass: massUnit)
     }
 
     @State private var range: ExploreRange = MetricDetailPresentation.defaultHistoryRange
@@ -1131,11 +1133,18 @@ struct MetricDetailView: View {
                                     .frame(width: 160, height: 160)
                                     .accessibilityHidden(true)
                                 VStack(spacing: 2) {
-                                    CountUpNumber(value: v, font: StrandFont.rounded(48))
-                                        .foregroundStyle(.white)
-                                        .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
-                                    if !metric.unit.isEmpty {
-                                        Text(metric.unit)
+                                    if metric.key == "fitness_age" {
+                                        Text(FitnessAgePresentation.value(v))
+                                            .font(StrandFont.rounded(48))
+                                            .foregroundStyle(.white)
+                                            .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                                    } else {
+                                        CountUpNumber(value: v, font: StrandFont.rounded(48))
+                                            .foregroundStyle(.white)
+                                            .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                                    }
+                                    if !detailUnit.isEmpty {
+                                        Text(detailUnit)
                                             .font(StrandFont.footnote)
                                             .foregroundStyle(.white.opacity(0.85))
                                             .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
@@ -1746,7 +1755,7 @@ struct MetricDetailView: View {
         let readings = windowed.map {
             VitalReading(day: $0.day, value: $0.value, source: sourceByDay[$0.day] ?? metric.source)
         }
-        let rows = vitalReadingRows(readings: readings, unit: metric.unit,
+        let rows = vitalReadingRows(readings: readings, unit: detailUnit,
                                     strapDeviceId: repo.deviceId, format: fmt)
         if !rows.isEmpty {
             NoopCard {

@@ -222,6 +222,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.eveningMinutesKey,
         NotificationRouteBridge.pendingRouteKey,
         AutoWorkoutNotifications.enabledKey,
+        MorningRecapNotifications.enabledKey,
+        MorningRecapNotifications.lastReportDayKey,
         PostWorkoutSummaryNotifications.enabledKey,
         PostWorkoutSummaryNotifications.lastWorkoutStartKey,
         PostWorkoutSummaryNotifications.frontierInitializedKey,
@@ -427,6 +429,119 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertFalse(AutoWorkoutNotifications.shouldDeliver(
             deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
         ))
+    }
+}
+
+@MainActor
+final class MorningRecapNotificationsTests: XCTestCase {
+    private let keys = [
+        MorningRecapNotifications.enabledKey,
+        MorningRecapNotifications.lastReportDayKey,
+    ]
+
+    override func setUp() {
+        super.setUp()
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+
+    override func tearDown() {
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        super.tearDown()
+    }
+
+    func testPolicyRequiresFreshMaterializedScoresAndNewReportDay() {
+        XCTAssertTrue(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            chargeOrRestPresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: "2026-08-27"
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: false,
+            chargeOrRestPresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: nil
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            chargeOrRestPresent: false,
+            reportDay: "2026-08-28",
+            lastReportDay: nil
+        ))
+        XCTAssertFalse(MorningRecapNotifications.shouldNotify(
+            enabled: true,
+            materializedAfterSync: true,
+            chargeOrRestPresent: true,
+            reportDay: "2026-08-28",
+            lastReportDay: "2026-08-28"
+        ))
+    }
+
+    func testEnablePostsOnePrivateRecapPerReportDay() async {
+        let notifications = MorningRecapNotificationClientSpy(status: .authorized)
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                MorningRecapNotifications.EnableOutcome, Never
+            >) in
+            MorningRecapNotifications.setEnabled(
+                true,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertEqual(outcome, .enabled)
+
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-08-28",
+            chargeOrRestPresent: true,
+            materializedAfterSync: true,
+            client: notifications.client
+        )
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: "2026-08-28",
+            chargeOrRestPresent: true,
+            materializedAfterSync: true,
+            client: notifications.client
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+        let request = try? XCTUnwrap(notifications.requests.values.first)
+        XCTAssertEqual(
+            request.flatMap { NotificationRouteBridge.route(from: $0.content.userInfo) },
+            .sleep
+        )
+        XCTAssertEqual(
+            request?.content.categoryIdentifier,
+            DailyReviewNotifications.privacyCategoryID
+        )
+        XCTAssertEqual(
+            UserDefaults.standard.string(forKey: MorningRecapNotifications.lastReportDayKey),
+            "2026-08-28"
+        )
+    }
+
+    func testDeniedPermissionLeavesRecapOff() async {
+        let notifications = MorningRecapNotificationClientSpy(status: .notDetermined)
+        notifications.authorizationResult = false
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                MorningRecapNotifications.EnableOutcome, Never
+            >) in
+            MorningRecapNotifications.setEnabled(
+                true,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+        XCTAssertFalse(MorningRecapNotifications.isEnabled)
     }
 }
 
@@ -647,6 +762,36 @@ final class PostWorkoutSummaryNotificationsTests: XCTestCase {
             UserDefaults.standard.bool(
                 forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
             )
+        )
+    }
+}
+
+@MainActor
+private final class MorningRecapNotificationClientSpy {
+    var status: UNAuthorizationStatus
+    var authorizationResult = false
+    private(set) var authorizationRequestCount = 0
+    private(set) var requests: [String: UNNotificationRequest] = [:]
+
+    init(status: UNAuthorizationStatus) {
+        self.status = status
+    }
+
+    var client: MorningRecapNotifications.NotificationClient {
+        MorningRecapNotifications.NotificationClient(
+            authorizationStatus: { [weak self] in self?.status ?? .denied },
+            requestAuthorization: { [weak self] in
+                guard let self else { return false }
+                self.authorizationRequestCount += 1
+                return self.authorizationResult
+            },
+            preparePrivateCategory: {},
+            add: { [weak self] request in
+                self?.requests[request.identifier] = request
+            },
+            remove: { [weak self] identifiers in
+                identifiers.forEach { self?.requests.removeValue(forKey: $0) }
+            }
         )
     }
 }

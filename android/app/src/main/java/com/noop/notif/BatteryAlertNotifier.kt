@@ -176,6 +176,19 @@ object BatteryAlertNotifier {
                 return
             }
             ensureChannel(context)
+            // A drop below 100 can coincide with another threshold crossing. Remove the stale
+            // full-charge alert before either posting branch returns.
+            if (decision.clearFull) {
+                NotificationLifecycleLedger.cancelled(
+                    context,
+                    NotificationLifecycleId.BATTERY_FULL,
+                    NotificationLifecycleCategory.STATUS,
+                ) {
+                    NotificationManagerCompat.from(context).cancel(
+                        NotificationPlatformIdentity.NotificationId.BATTERY_FULL,
+                    )
+                }
+            }
             if (decision.fireLow) {
                 val n = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
@@ -226,21 +239,6 @@ object BatteryAlertNotifier {
                         NotificationManagerCompat.from(context).notify(
                             NotificationPlatformIdentity.NotificationId.BATTERY_FULL,
                             n,
-                        )
-                    }
-                ) return
-            }
-            // #514: the strap has dropped below 100% - pull the stale "fully charged" note so it
-            // can't linger after the cell discharges. cancel() covers a posted notification; a
-            // not-yet-shown one simply no-ops.
-            if (decision.clearFull) {
-                if (!NotificationLifecycleLedger.cancelled(
-                        context,
-                        NotificationLifecycleId.BATTERY_FULL,
-                        NotificationLifecycleCategory.STATUS,
-                    ) {
-                        NotificationManagerCompat.from(context).cancel(
-                            NotificationPlatformIdentity.NotificationId.BATTERY_FULL,
                         )
                     }
                 ) return

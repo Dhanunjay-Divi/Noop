@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.animateFloatAsState
@@ -800,6 +801,9 @@ fun SettingsScreen(
     ) { uri ->
         if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
         scope.launch {
+            val exportName = withContext(Dispatchers.IO) {
+                documentDisplayName(context, uri) ?: "noop-export.zip"
+            }
             val result = withContext(Dispatchers.IO) {
                 // #458: thread the registry's ACTIVE strap id - the exporter's old "my-whoop" default
                 // exported an empty zip on live-BLE installs (the engine banks under "<strapId>-noop").
@@ -810,7 +814,7 @@ fun SettingsScreen(
                 onSuccess = { msg ->
                     Toast.makeText(
                         context,
-                        "$msg Re-import it through Data Sources on Android or Mac.",
+                        "$msg ${uiString(R.string.appwide_backup_portable_export_success, exportName)}",
                         Toast.LENGTH_LONG,
                     ).show()
                 },
@@ -2954,7 +2958,8 @@ fun SettingsScreen(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
                     text = uiString(R.string.l10n_settings_screen_importing_overwrites_everything_currently_on_this_297b76ae) +
-                        uiString(R.string.noop_backup_platform_portability_help),
+                        uiString(R.string.appwide_backup_encryption_body) + " " +
+                        uiString(R.string.appwide_backup_portable_export_body),
                 )
             }
         }
@@ -3474,6 +3479,18 @@ fun SettingsScreen(
         }
     }
 }
+
+private fun documentDisplayName(context: Context, uri: Uri): String? =
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
+        val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (column >= 0 && cursor.moveToFirst()) cursor.getString(column) else null
+    }
 
 @Composable
 private fun MenstrualCycleSettingsRow(

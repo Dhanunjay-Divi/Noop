@@ -136,6 +136,189 @@ enum AutoWorkoutReviewStore {
     }
 }
 
+enum AutoWorkoutDecisionAction: String, Codable, Sendable {
+    case accepted
+    case dismissed
+    case autoSaved = "auto_saved_pending_review"
+    case keptAutoSave = "kept_auto_save"
+    case rejectedAutoSave = "rejected_auto_save"
+    case removedDetectedWorkout = "removed_detected_workout"
+}
+
+enum AutoWorkoutDecisionActor: String, Codable, Sendable {
+    case user
+    case automation
+}
+
+/// One durable detector outcome for parallel-wear validation. Rows created from a live suggestion
+/// retain the evidence that was actually present at that decision. Review/delete events intentionally
+/// leave unavailable detector fields nil instead of reconstructing them from a saved workout.
+struct AutoWorkoutDecisionRecord: Codable, Equatable, Sendable {
+    let candidateStartSec: Int
+    let candidateEndSec: Int?
+    let recordedAtSec: Int?
+    let action: AutoWorkoutDecisionAction
+    let actor: AutoWorkoutDecisionActor
+    let activityName: String?
+    let detectorVersion: String?
+    let averageBpm: Int?
+    let peakBpm: Int?
+    let eventConfidence: Double?
+    let confidenceStatus: String?
+    let evidenceProvenance: String?
+    let suggestedClass: String?
+    let suggestionConfidence: Double?
+    let origin: String
+}
+
+enum AutoWorkoutDecisionHistory {
+    static let key = "workouts.autoDetectDecisionHistory.v1"
+    static let maxRecords = 1_000
+    static let recordedOrigin = "recorded_event"
+    static let legacyOrigin = "legacy_dismissal_tombstone"
+
+    static func records(defaults: UserDefaults = .standard) -> [AutoWorkoutDecisionRecord] {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([AutoWorkoutDecisionRecord].self, from: data)
+        else { return [] }
+        return Array(decoded.suffix(maxRecords))
+    }
+
+    static func record(
+        candidate: DetectedWorkout,
+        action: AutoWorkoutDecisionAction,
+        actor: AutoWorkoutDecisionActor,
+        activityName: String?,
+        nowSec: Int = Int(Date().timeIntervalSince1970),
+        defaults: UserDefaults = .standard
+    ) {
+        record(
+            AutoWorkoutDecisionRecord(
+                candidateStartSec: candidate.startSec,
+                candidateEndSec: candidate.endSec,
+                recordedAtSec: nowSec,
+                action: action,
+                actor: actor,
+                activityName: activityName,
+                detectorVersion: candidate.detectorVersion,
+                averageBpm: candidate.avgBpm,
+                peakBpm: candidate.peakBpm,
+                eventConfidence: candidate.eventConfidence,
+                confidenceStatus: candidate.confidenceStatus.rawValue,
+                evidenceProvenance: candidate.evidenceProvenance.rawValue,
+                suggestedClass: candidate.suggestedClass?.rawValue,
+                suggestionConfidence: candidate.suggestionConfidence,
+                origin: recordedOrigin
+            ),
+            defaults: defaults
+        )
+    }
+
+    static func recordSpan(
+        startSec: Int,
+        endSec: Int?,
+        action: AutoWorkoutDecisionAction,
+        actor: AutoWorkoutDecisionActor = .user,
+        activityName: String?,
+        nowSec: Int = Int(Date().timeIntervalSince1970),
+        defaults: UserDefaults = .standard
+    ) {
+        record(
+            AutoWorkoutDecisionRecord(
+                candidateStartSec: startSec,
+                candidateEndSec: endSec,
+                recordedAtSec: nowSec,
+                action: action,
+                actor: actor,
+                activityName: activityName,
+                detectorVersion: nil,
+                averageBpm: nil,
+                peakBpm: nil,
+                eventConfidence: nil,
+                confidenceStatus: nil,
+                evidenceProvenance: nil,
+                suggestedClass: nil,
+                suggestionConfidence: nil,
+                origin: recordedOrigin
+            ),
+            defaults: defaults
+        )
+    }
+
+    /// Add or replace one `(candidate, action)` event, then retain only the newest bounded tail.
+    /// Replacing makes duplicate background/foreground handling idempotent while preserving separate
+    /// events such as auto-save followed by Keep or Reject.
+    private static func record(
+        _ newRecord: AutoWorkoutDecisionRecord,
+        defaults: UserDefaults
+    ) {
+        var history = records(defaults: defaults)
+        if let index = history.firstIndex(where: {
+            $0.candidateStartSec == newRecord.candidateStartSec
+                && $0.action == newRecord.action
+        }) {
+            history[index] = newRecord
+        } else {
+            history.append(newRecord)
+        }
+        history = Array(history.suffix(maxRecords))
+        guard let data = try? JSONEncoder().encode(history) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    /// Merge old dismissal tokens into export only. Modern `start:<ts>` tombstones know no endpoint
+    /// or decision time; legacy `start:end` tokens know the endpoint. Unknown fields stay nil.
+    static func exportRecords(
+        legacyDismissedTokens: [String],
+        defaults: UserDefaults = .standard
+    ) -> [AutoWorkoutDecisionRecord] {
+        var result = records(defaults: defaults)
+        let alreadyRejected = Set(result.compactMap { record -> Int? in
+            switch record.action {
+            case .dismissed, .rejectedAutoSave, .removedDetectedWorkout:
+                return record.candidateStartSec
+            case .accepted, .autoSaved, .keptAutoSave:
+                return nil
+            }
+        })
+        var seenLegacy = alreadyRejected
+        for token in legacyDismissedTokens {
+            guard let start = AutoWorkoutSuggestionIdentity.startSec(from: token),
+                  seenLegacy.insert(start).inserted else { continue }
+            let end: Int?
+            if token.hasPrefix("start:") {
+                end = nil
+            } else {
+                let parts = token.split(separator: ":")
+                end = parts.count == 2 ? Int(parts[1]) : nil
+            }
+            result.append(
+                AutoWorkoutDecisionRecord(
+                    candidateStartSec: start,
+                    candidateEndSec: end,
+                    recordedAtSec: nil,
+                    action: .dismissed,
+                    actor: .user,
+                    activityName: nil,
+                    detectorVersion: nil,
+                    averageBpm: nil,
+                    peakBpm: nil,
+                    eventConfidence: nil,
+                    confidenceStatus: nil,
+                    evidenceProvenance: nil,
+                    suggestedClass: nil,
+                    suggestionConfidence: nil,
+                    origin: legacyOrigin
+                )
+            )
+        }
+        return result.sorted {
+            ($0.candidateStartSec, $0.recordedAtSec ?? .min, $0.action.rawValue)
+                < ($1.candidateStartSec, $1.recordedAtSec ?? .min, $1.action.rawValue)
+        }
+    }
+}
+
 /// Per-day sleep figures the WHOOP export carried verbatim (metricSeries rows written by
 /// WhoopImporter under the imported deviceId). SleepView prefers these over its on-device
 /// APPROXIMATE recomputations.
@@ -396,6 +579,15 @@ final class Repository: ObservableObject {
     @Published private(set) var ageMetricsSeq = 0
     func noteAgeMetricsChanged() {
         ageMetricsSeq += 1
+        todayHistoryWideLoadedSeq = -1
+        todayHistoryWideCache = nil
+    }
+
+    /// Bumped whenever workout persistence changes independently of the daily-metric cache. Activity
+    /// calendars and Today workout summaries key their targeted reloads to this revision.
+    @Published private(set) var workoutsSeq = 0
+    func noteWorkoutsChanged() {
+        workoutsSeq += 1
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
     }
@@ -2907,6 +3099,154 @@ final class Repository: ObservableObject {
         return keys.sorted()
     }
 
+    /// User-facing catalog values recorded on one exact local day. This is intentionally one bounded
+    /// metric-series query, then the same source-precedence resolver used by Explore. DailyMetric-backed
+    /// values are rendered by the day overview's core sections and do not need a second database read.
+    func trackedMetrics(day: String) async -> [DayTrackedMetric] {
+        guard let store = await ensureStore(),
+              let rows = try? await store.metricSeries(day: day)
+        else { return [] }
+
+        let values = Dictionary(
+            rows.filter { $0.value.isFinite }.map {
+                ($0.deviceId + "\u{1F}" + $0.key, $0.value)
+            },
+            uniquingKeysWith: { _, newer in newer }
+        )
+
+        func value(source: String, key: String) -> Double? {
+            values[source + "\u{1F}" + key]
+        }
+
+        let catalogMetrics = MetricCatalog.all.compactMap { descriptor in
+            if descriptor.source == Self.appleHealthSource, descriptor.key == "total_kcal" {
+                for source in [Self.appleHealthSource, Self.healthConnectSource] {
+                    if let active = value(source: source, key: "active_kcal"),
+                       let resting = value(source: source, key: "basal_kcal") {
+                        return DayTrackedMetric(descriptor: descriptor, value: active + resting)
+                    }
+                }
+                return nil
+            }
+
+            let candidates = Self.sourceCandidates(
+                forKey: descriptor.key,
+                preferredSource: descriptor.source,
+                actualWhoopSource: deviceId
+            )
+            guard let resolved = candidates.lazy.compactMap({
+                value(source: $0.source, key: $0.key)
+            }).first else { return nil }
+            return DayTrackedMetric(descriptor: descriptor, value: resolved)
+        }
+
+        let representedKeys = Set(catalogMetrics.map { $0.descriptor.key })
+        let fallbackGroups = Dictionary(grouping: rows.filter {
+            $0.value.isFinite && Self.isUserFacingDayMetric(source: $0.deviceId, key: $0.key)
+        }, by: {
+            Self.canonicalDayMetricKey($0.key)
+        })
+        let fallbackMetrics = fallbackGroups
+        .keys
+        .sorted()
+        .compactMap { key -> DayTrackedMetric? in
+            guard !representedKeys.contains(key),
+                  let candidates = fallbackGroups[key],
+                  let selected = candidates.min(by: {
+                      Self.dayMetricSourceRank($0.deviceId, key: key, activeDeviceId: deviceId)
+                          < Self.dayMetricSourceRank($1.deviceId, key: key, activeDeviceId: deviceId)
+                  })
+            else { return nil }
+            return DayTrackedMetric(
+                descriptor: Self.fallbackDayMetricDescriptor(
+                    key: key,
+                    source: selected.deviceId
+                ),
+                value: selected.value
+            )
+        }
+
+        return catalogMetrics + fallbackMetrics
+    }
+
+    private static func canonicalDayMetricKey(_ key: String) -> String {
+        switch key {
+        case "weightKg": return "weight"
+        case "heightCm": return "height"
+        case "bodyFatPct": return "body_fat"
+        default: return key
+        }
+    }
+
+    private static func isUserFacingDayMetric(source: String, key: String) -> Bool {
+        guard source != "cycle-tracking" else { return false }
+        return !key.contains("_profile_") && !key.hasSuffix("_marker")
+    }
+
+    private static func dayMetricSourceRank(
+        _ source: String,
+        key: String,
+        activeDeviceId: String
+    ) -> Int {
+        let preferred: [String]
+        switch key {
+        case "calories_in", "protein_g", "carbs_g", "fat_g":
+            preferred = [NutritionLogContract.deviceId, "nutrition-csv"]
+        case "mood":
+            preferred = ["noop-mood"]
+        case "weight", "height", "body_fat", "lean_mass", "bmi", "body_temp",
+             "wrist_temp", "vo2max":
+            preferred = [
+                appleHealthSource,
+                healthConnectSource,
+                activeDeviceId,
+                whoopSource,
+                activeDeviceId + "-noop",
+                whoopSource + "-noop",
+            ]
+        default:
+            preferred = [
+                activeDeviceId,
+                whoopSource,
+                activeDeviceId + "-noop",
+                whoopSource + "-noop",
+                appleHealthSource,
+                healthConnectSource,
+                "xiaomi-band",
+            ]
+        }
+        return preferred.firstIndex(of: source) ?? preferred.count
+    }
+
+    private static func fallbackDayMetricDescriptor(key: String, source: String) -> MetricDescriptor {
+        let title: String
+        let unit: String
+        switch key {
+        case "weight":
+            title = String(localized: "Weight")
+            unit = "kg"
+        case "height":
+            title = String(localized: "Height")
+            unit = "cm"
+        case "body_fat":
+            title = String(localized: "Body Fat")
+            unit = "%"
+        default:
+            title = key.replacingOccurrences(of: "_", with: " ").capitalized
+            unit = ""
+        }
+        return MetricDescriptor(
+            key: key,
+            title: title,
+            category: "Health",
+            unit: unit,
+            source: source,
+            icon: "chart.xyaxis.line",
+            decimals: 1,
+            higherIsBetter: nil
+        )
+    }
+
     /// Native journal answers live under this dedicated source id. The journal table has no
     /// `source` column (PK is (deviceId, day, question)), so writing native answers under the
     /// imported `deviceId` would let a CSV re-import silently overwrite them , and clears could
@@ -2923,6 +3263,26 @@ final class Repository: ObservableObject {
         for id in importedReadIds { imported += (try? await store.journalEntries(deviceId: id, from: from, to: to)) ?? [] }
         let native = (try? await store.journalEntries(deviceId: Self.journalDeviceId,
                                                       from: from, to: to)) ?? []
+        return Self.mergeJournal(imported: imported, native: native)
+    }
+
+    /// Exact-day journal read for calendar summaries. Native answers win over imported answers for the
+    /// same question, matching the editable Journal screen without loading years of history.
+    func journalEntries(day: String) async -> [JournalEntry] {
+        guard let store = await ensureStore() else { return [] }
+        var imported: [JournalEntry] = []
+        for id in importedReadIds {
+            imported += (try? await store.journalEntries(
+                deviceId: id,
+                from: day,
+                to: day
+            )) ?? []
+        }
+        let native = (try? await store.journalEntries(
+            deviceId: Self.journalDeviceId,
+            from: day,
+            to: day
+        )) ?? []
         return Self.mergeJournal(imported: imported, native: native)
     }
 
@@ -3291,6 +3651,7 @@ final class Repository: ObservableObject {
                 RouteStore.remove(startTs: old.startTs, sport: old.sport)
             }
         }
+        noteWorkoutsChanged()
         return true
     }
 
@@ -3311,21 +3672,33 @@ final class Repository: ObservableObject {
         _ = try? await store.deleteWorkouts(deviceId: row.source, sport: row.sport,
                                             from: row.startTs, to: row.startTs)
         AutoWorkoutReviewStore.clear(startSec: row.startTs)
+        noteWorkoutsChanged()
     }
 
     /// Dismiss a DETECTED bout the user says isn't a workout. Records its span in the durable dismissed
     /// list (so a re-detect that recreates the same span stays hidden) AND deletes the current row so it
     /// disappears immediately. Idempotent: a span already present isn't duplicated. (#107)
-    func dismissDetected(_ row: WorkoutRow) async {
+    func dismissDetected(
+        _ row: WorkoutRow,
+        decisionAction: AutoWorkoutDecisionAction = .removedDetectedWorkout
+    ) async {
         guard WorkoutSource.classify(row.source) == .detected else { return }
         // The app has two detector pipelines with separate durable dismissal stores. Mark the canonical
         // automatic-activity identity too, or removing an auto-saved row would let the suggestion scan
         // recreate the same workout immediately after its database row disappeared.
-        dismissDetectedSuggestion(DetectedWorkout(
+        let candidate = DetectedWorkout(
             startSec: row.startTs, endSec: row.endTs,
             avgBpm: row.avgHr ?? 60, peakBpm: row.maxHr ?? row.avgHr ?? 60,
             durationMin: max(1, (row.endTs - row.startTs) / 60)
-        ))
+        )
+        if rememberDismissedDetectedSuggestion(candidate) {
+            AutoWorkoutDecisionHistory.recordSpan(
+                startSec: row.startTs,
+                endSec: row.endTs,
+                action: decisionAction,
+                activityName: row.sport
+            )
+        }
         let token = WorkoutSource.dismissedToken(for: row)
         var spans = dismissedDetectedSpans
         if !spans.contains(token) { spans.append(token); dismissedDetectedSpans = spans }
@@ -3333,6 +3706,7 @@ final class Repository: ObservableObject {
         _ = try? await store.deleteWorkouts(deviceId: row.source, sport: row.sport,
                                             from: row.startTs, to: row.startTs)
         AutoWorkoutReviewStore.clear(startSec: row.startTs)
+        noteWorkoutsChanged()
     }
 
     /// Delete ONE workout by natural key. The read model has no deviceId, so reconstruct it from the
@@ -3343,6 +3717,7 @@ final class Repository: ObservableObject {
         guard let store = await ensureStore() else { return }
         _ = try? await store.deleteWorkouts(deviceId: deviceId, sport: row.sport,
                                             from: row.startTs, to: row.startTs)
+        noteWorkoutsChanged()
     }
 
     /// #64: merge two-or-more overlapping / adjacent MANUAL or DETECTED sessions into ONE manual session
@@ -3646,12 +4021,19 @@ final class Repository: ObservableObject {
         } catch {
             return false
         }
+        AutoWorkoutDecisionHistory.record(
+            candidate: w,
+            action: markForReview ? .autoSaved : .accepted,
+            actor: markForReview ? .automation : .user,
+            activityName: sport
+        )
         if markForReview {
             AutoWorkoutReviewStore.record(AutoWorkoutReview(
                 startSec: w.startSec, endSec: w.endSec, sport: sport,
                 source: computedDeviceId, avgBpm: w.avgBpm, peakBpm: w.peakBpm
             ))
         }
+        noteWorkoutsChanged()
         return true
     }
 
@@ -3686,15 +4068,45 @@ final class Repository: ObservableObject {
     /// Prunes the stored list on every add (drop spans older than ~30 days + hard-cap to 200 most-recent)
     /// so it can never grow unbounded. Byte-mirrored in the Android `AutoWorkoutPrefs.dismiss`.
     func dismissDetectedSuggestion(_ w: DetectedWorkout) {
+        guard rememberDismissedDetectedSuggestion(w) else { return }
+        AutoWorkoutDecisionHistory.record(
+            candidate: w,
+            action: .dismissed,
+            actor: .user,
+            activityName: nil
+        )
+    }
+
+    @discardableResult
+    private func rememberDismissedDetectedSuggestion(_ w: DetectedWorkout) -> Bool {
         let token = autoDetectToken(w)
         var spans = autoDetectDismissedSpans
         guard !spans.contains(where: {
             AutoWorkoutSuggestionIdentity.matches($0, startSec: w.startSec)
-        }) else { return }
+        }) else { return false }
         spans.append(token)
         autoDetectDismissedSpans = prunedAutoDetectSpans(spans, now: Int(Date().timeIntervalSince1970))
         autoDetectDecisionSeq &+= 1
         autoDetectCandidateCache = nil
+        return true
+    }
+
+    func recordAutoWorkoutReviewDecision(
+        _ review: AutoWorkoutReview,
+        action: AutoWorkoutDecisionAction
+    ) {
+        AutoWorkoutDecisionHistory.recordSpan(
+            startSec: review.startSec,
+            endSec: review.endSec,
+            action: action,
+            activityName: review.sport
+        )
+    }
+
+    func autoWorkoutDecisionExportRecords() -> [AutoWorkoutDecisionRecord] {
+        AutoWorkoutDecisionHistory.exportRecords(
+            legacyDismissedTokens: autoDetectDismissedSpans
+        )
     }
 
     // MARK: - Workout detail (read-only helpers, additive) , #410

@@ -104,11 +104,11 @@ struct CalendarMonthView: View {
         var provenance: String? {
             switch self {
             case .stress:
-                return String(localized: "Imported daily stress is used when available. Other days require a reliable two-signal experimental autonomic estimate from resting heart rate and HRV; limited estimates stay blank.")
+                return String(localized: "appwide.calendar.stress_provenance")
             case .energy:
-                return String(localized: "Active energy comes from Apple Health. Noop Band's combined HR-based calorie estimate is a different quantity and is not mixed into this calendar.")
+                return String(localized: "appwide.calendar.energy_provenance")
             case .nutrition:
-                return String(localized: "Nutrition shows calories you logged. A blank day means not logged, never zero intake.")
+                return String(localized: "appwide.calendar.nutrition_provenance")
             default:
                 return nil
             }
@@ -154,6 +154,7 @@ struct CalendarMonthView: View {
     @State private var energyByDay: [String: Double] = [:]
     @State private var nutritionByDay: [String: Double] = [:]
     @State private var loading = true
+    @State private var dayOverview: DayOverviewTarget?
 
     private let cal = Calendar.current
 
@@ -174,7 +175,18 @@ struct CalendarMonthView: View {
                 summary
             }
         }
-        .task(id: monthKey) { await load() }
+        .task(id: "\(monthKey)|\(model.repo.refreshSeq)") { await load() }
+        .sheet(item: $dayOverview) { target in
+            NavigationStack {
+                DailyOverviewSheet(date: target.date)
+                    .environmentObject(model.repo)
+            }
+            #if os(iOS)
+            .noopSheetPresentation(largeFirst: true)
+            #else
+            .frame(width: 620, height: 760)
+            #endif
+        }
     }
 
     /// A restrained, full-width green signal at the top that fades cleanly into the user's canvas.
@@ -312,35 +324,42 @@ struct CalendarMonthView: View {
         let raw = value(forDay: day)
         let progress = raw.map { normalizedProgress($0, metric: metric) }
         let isToday = isToday(day)
-        return VStack(spacing: 3) {
-            ZStack {
-                Circle()
-                    .stroke(StrandPalette.hairlineStrong.opacity(0.48), lineWidth: 4)
-                if let progress {
+        return Button {
+            guard let date = dayDate(day) else { return }
+            dayOverview = DayOverviewTarget(date: date)
+        } label: {
+            VStack(spacing: 3) {
+                ZStack {
                     Circle()
-                        .trim(from: 0, to: max(0.025, min(progress / 100, 1)))
-                        .stroke(
-                            Self.stepColor(progress, metric: metric),
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
+                        .stroke(StrandPalette.hairlineStrong.opacity(0.48), lineWidth: 4)
+                    if let progress {
+                        Circle()
+                            .trim(from: 0, to: max(0.025, min(progress / 100, 1)))
+                            .stroke(
+                                Self.stepColor(progress, metric: metric),
+                                style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                    }
+                    if isToday {
+                        Circle()
+                            .strokeBorder(StrandPalette.textPrimary.opacity(0.88), lineWidth: 1.4)
+                            .padding(-3)
+                    }
                 }
-                if isToday {
-                    Circle()
-                        .strokeBorder(StrandPalette.textPrimary.opacity(0.88), lineWidth: 1.4)
-                        .padding(-3)
-                }
+                .frame(width: 28, height: 28)
+                Text("\(day)")
+                    .font(StrandFont.overline)
+                    .foregroundStyle(isToday ? StrandPalette.textPrimary : StrandPalette.textTertiary)
             }
-            .frame(width: 28, height: 28)
-            Text("\(day)")
-                .font(StrandFont.overline)
-                .foregroundStyle(isToday ? StrandPalette.textPrimary : StrandPalette.textTertiary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 44)                                  // ≥44 pt target
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(spoken(day: day, value: raw, isToday: isToday)))
+        .accessibilityHint(Text("appwide.day_overview.open_hint"))
     }
 
     /// Strong hue steps so a low day is unmistakable at 28 pt, where arc length alone is hard to read.
@@ -391,11 +410,13 @@ struct CalendarMonthView: View {
         let words = metric.legendWords
         let colors = legendColors
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 14) {
-                ForEach(Array(words.enumerated()), id: \.offset) { idx, word in
-                    legendChip(word, colors[idx])
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(Array(words.enumerated()), id: \.offset) { idx, word in
+                        legendChip(word, colors[idx])
+                    }
+                    legendChip(String(localized: "appwide.calendar.legend.no_data"), .clear, outlined: true)
                 }
-                legendChip(String(localized: "appwide.calendar.legend.no_data"), .clear, outlined: true)
             }
             if let provenance = metric.provenance {
                 Text(provenance)
@@ -439,7 +460,13 @@ struct CalendarMonthView: View {
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                 } else {
                     let mean = vals.reduce(0, +) / Double(vals.count)
-                    Text("\(vals.count) recorded days · average \(metric.format(mean))")
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.calendar.summary.scored_format"),
+                            vals.count,
+                            metric.format(mean)
+                        )
+                    )
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                     Text("appwide.calendar.summary.gaps")
                         .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
@@ -474,10 +501,13 @@ struct CalendarMonthView: View {
     }
 
     private func dayKey(_ day: Int) -> String? {
+        dayDate(day).map(Repository.localDayKey)
+    }
+
+    private func dayDate(_ day: Int) -> Date? {
         var c = cal.dateComponents([.year, .month], from: monthAnchor)
         c.day = day
-        guard let d = cal.date(from: c) else { return nil }
-        return Repository.localDayKey(d)
+        return cal.date(from: c)
     }
 
     private func isToday(_ day: Int) -> Bool {
@@ -531,8 +561,14 @@ struct CalendarMonthView: View {
                 day
             )
         }
-        let prefix = isToday ? String(localized: "Today") : String(localized: "Day \(day)")
-        return "\(prefix), \(metric.title) \(metric.format(value))"
+        return String.localizedStringWithFormat(
+            String(localized: isToday
+                   ? "appwide.calendar.a11y.today_value_format"
+                   : "appwide.calendar.a11y.day_value_format"),
+            day,
+            metric.title,
+            Int(value.rounded())
+        )
     }
 
     private func load() async {

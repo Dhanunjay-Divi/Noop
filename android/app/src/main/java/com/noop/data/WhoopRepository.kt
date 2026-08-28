@@ -8,7 +8,11 @@ import com.noop.analytics.SleepStageTotals
 import com.noop.protocol.DroppedRtcEvent
 import com.noop.protocol.RrSourceChannel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlin.math.roundToInt
 
 /**
@@ -311,6 +315,22 @@ class WhoopRepository private constructor(
     /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
     private val transactor: Transactor,
 ) {
+    private val _metricDataVersion = MutableStateFlow(0L)
+    val metricDataVersion: StateFlow<Long> = _metricDataVersion.asStateFlow()
+    val ageMetricDataVersion: StateFlow<Long> = metricDataVersion
+
+    private val _workoutDataVersion = MutableStateFlow(0L)
+    val workoutDataVersion: StateFlow<Long> = _workoutDataVersion.asStateFlow()
+
+    fun noteMetricsChanged() {
+        _metricDataVersion.update { it + 1L }
+    }
+
+    fun noteAgeMetricsChanged() = noteMetricsChanged()
+
+    fun noteWorkoutsChanged() {
+        _workoutDataVersion.update { it + 1L }
+    }
 
     /** Generic because integrity snapshots return a value from inside the transaction. */
     interface Transactor {
@@ -477,20 +497,26 @@ class WhoopRepository private constructor(
         metricRows: List<MetricSeriesRow>,
         sleepRows: List<SleepSession>,
         workoutRows: List<WorkoutRow>,
-    ) = dao.replaceHealthConnectProjection(
-        source = HEALTH_CONNECT_SOURCE,
-        workoutSource = HEALTH_CONNECT_SOURCE,
-        fromDay = fromDay,
-        toDay = toDay,
-        fromTs = fromTs,
-        toTs = toTs,
-        scope = scope,
-        appleRows = appleRows,
-        dailyRows = dailyRows,
-        metricRows = metricRows,
-        sleepRows = sleepRows,
-        workoutRows = workoutRows,
-    )
+    ) {
+        dao.replaceHealthConnectProjection(
+            source = HEALTH_CONNECT_SOURCE,
+            workoutSource = HEALTH_CONNECT_SOURCE,
+            fromDay = fromDay,
+            toDay = toDay,
+            fromTs = fromTs,
+            toTs = toTs,
+            scope = scope,
+            appleRows = appleRows,
+            dailyRows = dailyRows,
+            metricRows = metricRows,
+            sleepRows = sleepRows,
+            workoutRows = workoutRows,
+        )
+        if (scope.exercise) noteWorkoutsChanged()
+        if (scope.vo2Max || scope.seriesKeys.isNotEmpty() || metricRows.isNotEmpty()) {
+            noteMetricsChanged()
+        }
+    }
 
     suspend fun mergeHealthConnectProjectionAdditive(
         appleRows: List<AppleDaily>,
@@ -498,15 +524,21 @@ class WhoopRepository private constructor(
         metricRows: List<MetricSeriesRow>,
         sleepRows: List<SleepSession>,
         workoutRows: List<WorkoutRow>,
-    ) = dao.mergeHealthConnectProjectionAdditive(
-        source = HEALTH_CONNECT_SOURCE,
-        workoutSource = HEALTH_CONNECT_SOURCE,
-        appleRows = appleRows,
-        dailyRows = dailyRows,
-        metricRows = metricRows,
-        sleepRows = sleepRows,
-        workoutRows = workoutRows,
-    )
+    ) {
+        dao.mergeHealthConnectProjectionAdditive(
+            source = HEALTH_CONNECT_SOURCE,
+            workoutSource = HEALTH_CONNECT_SOURCE,
+            appleRows = appleRows,
+            dailyRows = dailyRows,
+            metricRows = metricRows,
+            sleepRows = sleepRows,
+            workoutRows = workoutRows,
+        )
+        if (workoutRows.isNotEmpty()) noteWorkoutsChanged()
+        if (metricRows.isNotEmpty() || appleRows.any { it.vo2max != null }) {
+            noteMetricsChanged()
+        }
+    }
 
     /** Delete the computed source's cached daily rows whose day-key is in [from, to] (inclusive,
      *  yyyy-MM-dd). The #277 local-day re-bucketing migration clears the computed UTC-keyed rows over
@@ -783,12 +815,24 @@ class WhoopRepository private constructor(
 
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) {
         val normalized = rows.mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
-        if (normalized.isNotEmpty()) dao.upsertMetricSeries(normalized)
+        if (normalized.isNotEmpty()) {
+            dao.upsertMetricSeries(normalized)
+            noteMetricsChanged()
+        }
     }
 
     /** Normalize generic-series units, then atomically persist one complete wearable CSV projection. */
     suspend fun importWhoopCsv(batch: WhoopCsvImportBatch) {
-        dao.applyWhoopCsvImport(normalizedWhoopCsvBatch(batch))
+        val normalized = normalizedWhoopCsvBatch(batch)
+        dao.applyWhoopCsvImport(normalized)
+        if (normalized.officialWorkouts.isNotEmpty() || normalized.fillOnlyWorkouts.isNotEmpty() ||
+            normalized.officialWorkoutRange != null
+        ) {
+            noteWorkoutsChanged()
+        }
+        val seriesKeys = normalized.fillOnlyMetricSeries.map(MetricSeriesRow::key) +
+            normalized.officialMetricSeriesReplacements.flatMap { it.managedKeys }
+        if (seriesKeys.isNotEmpty()) noteMetricsChanged()
     }
 
     private fun normalizedWhoopCsvBatch(batch: WhoopCsvImportBatch): WhoopCsvImportBatch {
@@ -849,6 +893,14 @@ class WhoopRepository private constructor(
             }
             dao.applyWhoopCsvImport(normalizedCsv)
         }
+        if (normalizedCsv.officialWorkouts.isNotEmpty() || normalizedCsv.fillOnlyWorkouts.isNotEmpty() ||
+            normalizedCsv.officialWorkoutRange != null
+        ) {
+            noteWorkoutsChanged()
+        }
+        val seriesKeys = normalizedCsv.fillOnlyMetricSeries.map(MetricSeriesRow::key) +
+            normalizedCsv.officialMetricSeriesReplacements.flatMap { it.managedKeys }
+        if (seriesKeys.isNotEmpty()) noteMetricsChanged()
         return portableSummary
     }
 
@@ -873,6 +925,7 @@ class WhoopRepository private constructor(
             .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
             .toList()
         dao.replaceMetricSeriesRange(deviceId, fromDay, toDay, keys, normalized)
+        if (keys.isNotEmpty()) noteMetricsChanged()
     }
 
     suspend fun upsertNutritionEntries(rows: List<NutritionEntryRow>) = dao.upsertNutritionEntries(rows)
@@ -948,7 +1001,11 @@ class WhoopRepository private constructor(
         dao.upsertNutritionEntries(rows)
     }
     suspend fun upsertJournal(rows: List<JournalEntry>) = dao.upsertJournal(rows)
-    suspend fun upsertWorkouts(rows: List<WorkoutRow>) = dao.upsertWorkouts(rows)
+    suspend fun upsertWorkouts(rows: List<WorkoutRow>) {
+        if (rows.isEmpty()) return
+        dao.upsertWorkouts(rows)
+        noteWorkoutsChanged()
+    }
     suspend fun upsertAppleDaily(rows: List<AppleDaily>) = dao.upsertAppleDaily(rows)
 
     // MARK: - Live Sessions (silent guardian, v22). The runner banks the row at start (endTs null) and
@@ -1209,8 +1266,10 @@ class WhoopRepository private constructor(
     }
 
     /** Delete a computed source's [sport] workouts in [from, to] (makes re-detection idempotent). (#78) */
-    suspend fun deleteComputedWorkouts(deviceId: String, sport: String, from: Long, to: Long) =
+    suspend fun deleteComputedWorkouts(deviceId: String, sport: String, from: Long, to: Long) {
         dao.deleteWorkoutsBySport(deviceId, sport, from, to)
+        noteWorkoutsChanged()
+    }
 
     // MARK: - Workout editing (manual add/edit · relabel · dismiss · delete) (#107)
     //
@@ -1267,6 +1326,7 @@ class WhoopRepository private constructor(
         } else if (replacing != null && (replacing.startTs != row.startTs || replacing.sport != row.sport)) {
             dao.deleteWorkoutByKey(replacing.deviceId, replacing.startTs, replacing.sport)
         }
+        noteWorkoutsChanged()
     }
 
     /**
@@ -1284,6 +1344,7 @@ class WhoopRepository private constructor(
         val manual = row.copy(deviceId = recordingDeviceId, sport = trimmed, source = "manual")
         dao.upsertWorkouts(listOf(manual))
         dao.deleteWorkoutsBySport(row.deviceId, row.sport, row.startTs, row.startTs)
+        noteWorkoutsChanged()
     }
 
     /**
@@ -1297,6 +1358,7 @@ class WhoopRepository private constructor(
         // still overlaps it and stays hidden (matches macOS dismissed-span semantics).
         dao.insertDismissed(listOf(DismissedWorkout(row.deviceId, row.startTs, row.endTs)))
         dao.deleteWorkoutsBySport(row.deviceId, row.sport, row.startTs, row.startTs)
+        noteWorkoutsChanged()
     }
 
     /**
@@ -1306,6 +1368,7 @@ class WhoopRepository private constructor(
     suspend fun deleteWorkout(row: WorkoutRow) {
         if (row.source.lowercase().endsWith("-noop")) { dismissDetected(row); return }
         dao.deleteWorkoutByKey(row.deviceId, row.startTs, row.sport)
+        noteWorkoutsChanged()
     }
 
     // MARK: - Strength training
@@ -1459,6 +1522,7 @@ class WhoopRepository private constructor(
                 else -> continue
             }
         }
+        noteWorkoutsChanged()
     }
 
     /**
@@ -1467,13 +1531,21 @@ class WhoopRepository private constructor(
      * here. The caller reloads afterwards.
      */
     suspend fun bulkDeleteWorkouts(rows: List<WorkoutRow>) {
+        var changed = false
         for (r in rows) {
             when {
-                r.source.lowercase().endsWith("-noop") -> dismissDetected(r)
-                r.source.lowercase() == "manual" -> dao.deleteWorkoutByKey(r.deviceId, r.startTs, r.sport)
+                r.source.lowercase().endsWith("-noop") -> {
+                    dismissDetected(r)
+                    changed = true
+                }
+                r.source.lowercase() == "manual" -> {
+                    dao.deleteWorkoutByKey(r.deviceId, r.startTs, r.sport)
+                    changed = true
+                }
                 else -> continue
             }
         }
+        if (changed) noteWorkoutsChanged()
     }
 
     suspend fun respSamples(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
@@ -1536,6 +1608,10 @@ class WhoopRepository private constructor(
             .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
         return rows
     }
+
+    /** One bounded daily slice of the generic metric store for calendar day summaries. */
+    suspend fun metricSeriesForDay(day: String): List<MetricSeriesRow> =
+        dao.metricSeriesForDay(day).mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
 
     /**
      * Full-fidelity metric-series read for the portable raw sidecar only. Customer-facing queries
@@ -1710,8 +1786,11 @@ class WhoopRepository private constructor(
     }.getOrDefault(false)
 
     /** Remove one computed/source metric series when its required profile inputs become invalid. */
-    suspend fun deleteMetricSeries(deviceId: String, key: String): Int =
-        dao.deleteMetricSeries(deviceId, key)
+    suspend fun deleteMetricSeries(deviceId: String, key: String): Int {
+        val deleted = dao.deleteMetricSeries(deviceId, key)
+        if (deleted > 0) noteMetricsChanged()
+        return deleted
+    }
 
     /**
      * Computed ("-noop") [key] series across the active-strap UNION (the active strap's own computed
@@ -1755,6 +1834,9 @@ class WhoopRepository private constructor(
     /** Workouts whose startTs falls in [from, to] (unix seconds), oldest first, row-limited. */
     suspend fun workouts(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT): List<WorkoutRow> =
         dao.workouts(deviceId, from, to, limit)
+
+    /** Scalar, source-complete newest-workout read for notification frontier initialization. */
+    suspend fun latestWorkoutStartAllSources(): Long? = dao.latestWorkoutStartAllSources()
 
     /** Source-complete overlap read for suggestion dedupe. Intentionally unscoped by device id. */
     suspend fun workoutsOverlappingAllSources(
@@ -1943,6 +2025,38 @@ class WhoopRepository private constructor(
             userEditedDays = userEditedDays(computedSessions),
         )
         return mergeActivityFileSteps(mergeDaily(imported = strap, computed = healthConnect), activityFile)
+    }
+
+    /**
+     * Bounded counterpart to [daysMerged] for calendar and exact-day surfaces. It preserves the same
+     * source union, per-field precedence, Health Connect fallback, activity-file steps, and user-edited
+     * sleep handling without materializing years of history for one visible month.
+     */
+    suspend fun daysMerged(
+        deviceId: String,
+        fromDay: String,
+        toDay: String,
+    ): List<DailyMetric> {
+        val imported = unionByDay(
+            importedSourceIds(deviceId).map { dao.dailyMetricsRange(it, fromDay, toDay) },
+        )
+        val computedIds = computedSourceIds(deviceId)
+        val computed = unionByDay(
+            computedIds.map { dao.dailyMetricsRange(it, fromDay, toDay) },
+        )
+        val healthConnect = dao.dailyMetricsRange(HEALTH_CONNECT_SOURCE, fromDay, toDay)
+        val activityFile = dao.dailyMetricsRange(ACTIVITY_FILE_SOURCE, fromDay, toDay)
+        val (sleepFrom, sleepTo) = sleepSessionTimestampRange(fromDay, toDay)
+        val computedSessions = dao.sleepSessionsForSources(computedIds, sleepFrom, sleepTo)
+        val strap = mergeDaily(
+            imported = imported,
+            computed = computed,
+            userEditedDays = userEditedDays(computedSessions),
+        )
+        return mergeActivityFileSteps(
+            mergeDaily(imported = strap, computed = healthConnect),
+            activityFile,
+        )
     }
 
     /**

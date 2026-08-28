@@ -268,6 +268,7 @@ struct AutoWorkoutCard: View {
 
     private func keep(_ review: AutoWorkoutReview) {
         guard !saving else { return }
+        repo.recordAutoWorkoutReviewDecision(review, action: .keptAutoSave)
         AutoWorkoutReviewStore.clear(startSec: review.startSec)
         AutoWorkoutNotifications.removeHandled()
         autoSavedReview = nil
@@ -278,7 +279,7 @@ struct AutoWorkoutCard: View {
         guard !saving else { return }
         saving = true
         Task {
-            await repo.dismissDetected(review.row)
+            await repo.dismissDetected(review.row, decisionAction: .rejectedAutoSave)
             AutoWorkoutReviewStore.clear(startSec: review.startSec)
             AutoWorkoutNotifications.removeHandled()
             autoSavedReview = nil

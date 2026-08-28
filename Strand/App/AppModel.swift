@@ -878,6 +878,7 @@ final class AppModel: ObservableObject {
         // already running and refreshes the dashboard itself once the new scores persist. (PR #218)
         await intelligence.analyzeRecent(force: true)
         await refreshV5Signals()
+        await reconcileMorningRecapNotifications()
         // A completed sync is the earliest reliable moment to inspect an offloaded session. Existing
         // users keep their chosen mode; fresh installs default to Ask until the classifier has real-world
         // validation. A legacy Auto-save preference resolves to approval-first Ask until confidence is calibrated.
@@ -968,6 +969,17 @@ final class AppModel: ObservableObject {
     private func reconcilePostWorkoutSummaryNotifications() async {
         let newest = await repo.workoutRows().map(\.startTs).max()
         await PostWorkoutSummaryNotifications.postIfAuthorized(newestWorkoutStart: newest)
+    }
+
+    /// Data-triggered twin of Android's morning recap. It runs only from a completed persisted-history
+    /// refresh, so opening the app on an old row cannot manufacture a fresh-notification event.
+    private func reconcileMorningRecapNotifications() async {
+        guard let row = repo.today, row.totalSleepMin != nil else { return }
+        let sleepScore = Repository.dailyColumn(key: "sleep_performance", day: row)
+        await MorningRecapNotifications.postIfAuthorized(
+            reportDay: row.day,
+            chargeOrRestPresent: row.recovery != nil || sleepScore != nil
+        )
     }
 
     /// Canonical ingest for one Bluetooth SIG Weight Measurement. This is deliberately separate from
@@ -1310,6 +1322,7 @@ final class AppModel: ObservableObject {
                     hrSamples: samples.count, durationSec: Int(end.timeIntervalSince(w.start)),
                     gpsPoints: gpsPointCount))
                 self.buzz(loops: 2)
+                self.repo.noteWorkoutsChanged()
                 await self.repo.refresh()
             case .failed(let detail):
                 self.workoutSaveError = String(localized:
@@ -2861,6 +2874,7 @@ final class AppModel: ObservableObject {
                 let summary = try await WhoopImporter.importExport(url: local.url, into: store,
                                                                    deviceId: deviceId, trace: importTraceSink())
                 try? await store.checkpointWAL()   // reclaim the WAL a bulk import grew (#590)
+                repo.noteWorkoutsChanged()
                 await repo.refresh()
                 let span: String
                 if let a = summary.earliest, let b = summary.latest {
@@ -2926,7 +2940,9 @@ final class AppModel: ObservableObject {
                 let summary = try await AppleHealthImport.importExport(url: local.url, into: store,
                                                                        deviceId: appleDeviceId, trace: importTraceSink())
                 try? await store.checkpointWAL()   // reclaim the WAL a bulk import grew (#590)
+                repo.noteWorkoutsChanged()
                 await repo.refresh()
+                repo.noteAgeMetricsChanged()
                 // #833/v7.7.2: an Apple Health import may write ONLY body-composition series (weight/body_fat/
                 // lean_mass/bmi/vo2max), which live in metricSeries OUTSIDE refresh()'s diff over daily/sleep/
                 // vitals, so refresh() may not bump `refreshSeq`. AppleHealthView's re-mount cache keys on
@@ -3070,7 +3086,9 @@ final class AppModel: ObservableObject {
     private func finishShortcutHealthImport(_ outcome: ShortcutHealthImport.Outcome) async {
         switch outcome {
         case .imported(let days, let workouts):
+            if workouts > 0 { repo.noteWorkoutsChanged() }
             await repo.refresh()
+            repo.noteAgeMetricsChanged()
             // #833/v7.7.2: the Shortcuts import writes body-composition series (e.g. weight) into
             // metricSeries, which sits OUTSIDE refresh()'s diff, so refresh() may leave `refreshSeq`
             // unchanged and AppleHealthView's re-mount cache would serve stale data. Drop the cache so the

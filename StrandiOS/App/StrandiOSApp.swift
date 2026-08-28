@@ -125,6 +125,7 @@ struct StrandiOSApp: App {
             guard let model else { return }
             await model.refreshAfterAppleHealthSync(
                 authorized: bridge?.auth == .authorized)
+            model.repo.noteAgeMetricsChanged()
         }
         // HealthKit may relaunch a terminated app in the background to deliver an observer update,
         // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for

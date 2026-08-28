@@ -258,6 +258,217 @@ enum DailyReviewNotifications {
     }
 }
 
+/// An opt-in recap posted only after a completed wearable sync has materialized a scored night.
+///
+/// This is distinct from the clock-based morning review reminder above. Delivery follows the data:
+/// a banked night may reach the phone later, and the same report-day key can never post twice.
+@MainActor
+enum MorningRecapNotifications {
+    static let enabledKey = "morningRecap.enabled"
+    static let lastReportDayKey = "morningRecap.lastReportDay"
+
+    private static let requestID = "morning-recap"
+    private static var preferenceGeneration: UInt64 = 0
+    private static var deliveryGeneration: UInt64 = 0
+    private static var activeReportDay: String?
+
+    enum EnableOutcome: Equatable, Sendable {
+        case enabled
+        case denied
+        case off
+    }
+
+    struct NotificationClient {
+        let authorizationStatus: () async -> UNAuthorizationStatus
+        let requestAuthorization: () async -> Bool
+        let preparePrivateCategory: () async -> Void
+        let add: (UNNotificationRequest) async throws -> Void
+        let remove: ([String]) -> Void
+
+        static var system: NotificationClient {
+            NotificationClient(
+                authorizationStatus: {
+                    await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                },
+                requestAuthorization: {
+                    (try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound])) ?? false
+                },
+                preparePrivateCategory: {
+                    await DailyReviewNotifications.ensurePrivacyCategory(
+                        on: UNUserNotificationCenter.current()
+                    )
+                },
+                add: { request in
+                    try await LocalNotificationLifecycle.schedule(request)
+                },
+                remove: { identifiers in
+                    LocalNotificationLifecycle.cancel(
+                        identifiers: identifiers,
+                        presented: true
+                    )
+                }
+            )
+        }
+    }
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static func shouldNotify(
+        enabled: Bool,
+        materializedAfterSync: Bool,
+        chargeOrRestPresent: Bool,
+        reportDay: String,
+        lastReportDay: String?
+    ) -> Bool {
+        enabled
+            && materializedAfterSync
+            && chargeOrRestPresent
+            && !reportDay.isEmpty
+            && reportDay != lastReportDay
+    }
+
+    static func setEnabled(
+        _ enabled: Bool,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        setEnabled(enabled, client: .system, completion: completion)
+    }
+
+    static func setEnabled(
+        _ enabled: Bool,
+        client: NotificationClient,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        preferenceGeneration &+= 1
+        let attempt = preferenceGeneration
+
+        guard enabled else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            clear(client: client)
+            completion?(.off)
+            return
+        }
+
+        UserDefaults.standard.set(false, forKey: enabledKey)
+        clear(client: client)
+        Task { @MainActor in
+            let status = await client.authorizationStatus()
+            guard attempt == preferenceGeneration else { return }
+
+            let allowed: Bool
+            switch status {
+            case .authorized, .provisional:
+                allowed = true
+#if os(iOS)
+            case .ephemeral:
+                allowed = true
+#endif
+            case .notDetermined:
+                allowed = await client.requestAuthorization()
+            default:
+                allowed = false
+            }
+
+            guard attempt == preferenceGeneration else { return }
+            UserDefaults.standard.set(allowed, forKey: enabledKey)
+            completion?(allowed ? .enabled : .denied)
+        }
+    }
+
+    static func postIfAuthorized(
+        reportDay: String,
+        chargeOrRestPresent: Bool,
+        materializedAfterSync: Bool = true
+    ) async {
+        await postIfAuthorized(
+            reportDay: reportDay,
+            chargeOrRestPresent: chargeOrRestPresent,
+            materializedAfterSync: materializedAfterSync,
+            client: .system
+        )
+    }
+
+    static func postIfAuthorized(
+        reportDay: String,
+        chargeOrRestPresent: Bool,
+        materializedAfterSync: Bool,
+        client: NotificationClient
+    ) async {
+        guard shouldNotify(
+            enabled: isEnabled,
+            materializedAfterSync: materializedAfterSync,
+            chargeOrRestPresent: chargeOrRestPresent,
+            reportDay: reportDay,
+            lastReportDay: UserDefaults.standard.string(forKey: lastReportDayKey)
+        ), activeReportDay != reportDay else { return }
+
+        let generation = deliveryGeneration
+        activeReportDay = reportDay
+        defer {
+            if activeReportDay == reportDay { activeReportDay = nil }
+        }
+
+        let status = await client.authorizationStatus()
+        guard generation == deliveryGeneration,
+              canPost(using: status),
+              isEnabled else { return }
+        await client.preparePrivateCategory()
+        guard generation == deliveryGeneration, isEnabled else { return }
+
+        let content = UNMutableNotificationContent()
+        content.applyProminence(.ambient)
+        content.title = String(localized: "Your morning recap is ready")
+        content.body = String(localized: "Open NOOP to review your Recovery and Sleep Score.")
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.morning-recap"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.sleep.rawValue
+        ]
+
+        do {
+            try await client.add(
+                UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
+            )
+            guard generation == deliveryGeneration, isEnabled else {
+                client.remove([requestID])
+                return
+            }
+            UserDefaults.standard.set(reportDay, forKey: lastReportDayKey)
+        } catch {
+            if generation != deliveryGeneration || !isEnabled {
+                client.remove([requestID])
+            }
+        }
+    }
+
+    static func clear() {
+        clear(client: .system)
+    }
+
+    static func clear(client: NotificationClient) {
+        deliveryGeneration &+= 1
+        activeReportDay = nil
+        client.remove([requestID])
+    }
+
+    private static func canPost(using status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional:
+            return true
+#if os(iOS)
+        case .ephemeral:
+            return true
+#endif
+        default:
+            return false
+        }
+    }
+}
+
 /// An opt-in, privacy-safe heads-up after a newly synced workout reaches NOOP.
 ///
 /// Delivery is intentionally tied to the post-sync caller rather than workout end time: a wearable

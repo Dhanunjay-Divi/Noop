@@ -264,6 +264,13 @@ fun AutoWorkoutNudgeCard(
                 viewModel.repo.saveManualWorkout(row)
             }.isSuccess
             if (saved && row != null) {
+                AutoWorkoutPrefs.recordCandidateDecision(
+                    context,
+                    next,
+                    AutoWorkoutPrefs.DecisionAction.AUTO_SAVED,
+                    AutoWorkoutPrefs.DecisionActor.AUTOMATION,
+                    row.sport,
+                )
                 val review = AutoWorkoutPrefs.Review(
                     startSec = next.startSec, endSec = next.endSec,
                     sport = row.sport, deviceId = row.deviceId, source = row.source,
@@ -295,6 +302,11 @@ fun AutoWorkoutNudgeCard(
             review = review,
             saving = saving,
             onKeep = {
+                AutoWorkoutPrefs.recordReviewDecision(
+                    context,
+                    review,
+                    AutoWorkoutPrefs.DecisionAction.KEPT_AUTO_SAVE,
+                )
                 AutoWorkoutPrefs.clearReview(context, review.startSec)
                 AutoWorkoutCandidateNotifier.cancelHandled(context)
                 autoSavedReview = null
@@ -302,7 +314,11 @@ fun AutoWorkoutNudgeCard(
             },
             onUndo = {
                 saving = true
-                AutoWorkoutPrefs.dismiss(context, review.row())
+                AutoWorkoutPrefs.dismiss(
+                    context,
+                    review.row(),
+                    AutoWorkoutPrefs.DecisionAction.REJECTED_AUTO_SAVE,
+                )
                 viewModel.dismissDetected(review.row())
                 AutoWorkoutPrefs.clearReview(context, review.startSec)
                 AutoWorkoutCandidateNotifier.cancelHandled(context)
@@ -434,6 +450,13 @@ fun AutoWorkoutNudgeCard(
                                 saving = false
                                 when (AutoWorkoutSuggestionPolicy.afterSave(saved)) {
                                     AutoWorkoutSuggestionPolicy.SaveDisposition.CLEAR_CANDIDATE -> {
+                                        AutoWorkoutPrefs.recordCandidateDecision(
+                                            context,
+                                            w,
+                                            AutoWorkoutPrefs.DecisionAction.ACCEPTED,
+                                            AutoWorkoutPrefs.DecisionActor.USER,
+                                            selectedSport,
+                                        )
                                         AutoWorkoutPrefs.rememberSport(
                                             context, selectedSport, w.suggestedClass,
                                         )

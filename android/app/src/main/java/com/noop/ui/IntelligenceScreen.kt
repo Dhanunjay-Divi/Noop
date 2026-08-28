@@ -67,6 +67,8 @@ fun IntelligenceScreen(vm: AppViewModel) {
                     batches = s.syncChunksThisSession,
                     rows = s.syncRowsThisSession,
                     newestDataUnix = s.syncDataNewestAt,
+                    startedAt = s.syncStartedAt,
+                    lastDurableProgressAt = s.syncLastDurableProgressAt,
                 )
             } else {
                 null
@@ -124,6 +126,8 @@ fun IntelligenceScreen(vm: AppViewModel) {
                         chunks = progress.batches,
                         rows = progress.rows,
                         newestDataUnix = progress.newestDataUnix,
+                        startedAt = progress.startedAt,
+                        lastDurableProgressAt = progress.lastDurableProgressAt,
                     )
                 }
                 EmptyNote()

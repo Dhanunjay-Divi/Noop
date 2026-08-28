@@ -178,6 +178,7 @@ enum CsvExport {
             let strengthExercises = try await store.strengthExercises(includeArchived: true)
             let strengthRoutines = try await store.strengthRoutines(includeArchived: true)
             let strengthSessions = try await store.strengthSessions(includeInProgress: true)
+            let autoWorkoutDecisions = repo.autoWorkoutDecisionExportRecords()
 
             // Bridge each source timeline before assigning cycle days. These plain Sendable maps keep the
             // detached serializer off Repository's actor and ensure every fragment of a cross-midnight
@@ -197,6 +198,22 @@ enum CsvExport {
             let habitualMidsleepSec = Repository.historicalHabitualMidsleepSec(
                 impSleep + compSleep)
             let name = defaultName()
+            let generatedAt = comparisonUTC(
+                Int(Date().timeIntervalSince1970),
+                formatter: comparisonUTCFormatter()
+            )
+            #if os(macOS)
+            let comparisonPlatform = "macOS"
+            #else
+            let comparisonPlatform = "iOS"
+            #endif
+            let comparisonContext = ComparisonContext(
+                generatedAtUTC: generatedAt,
+                platform: comparisonPlatform,
+                appVersion: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? "unknown"
+            )
 
             // Assembly + serialization + zip deflate run OFF the main actor (mirrors the timelineSeries
             // Task.detached): only Sendable value types (the fetched rows, the precomputed day-key map)
@@ -319,7 +336,67 @@ enum CsvExport {
                     strengthRoutineSnapshots: strengthRoutines,
                     strengthSessionSnapshots: strengthSessions
                 ).encodedData()
-                let entries: [(name: String, data: Data)] = [
+                let comparisonDaily = imported.map {
+                    ComparisonDailyRow(
+                        source: .wearableImport,
+                        metric: $0,
+                        publishDetailedStages: true
+                    )
+                } + computed.map { row in
+                    let source = computedSourceByDay[row.day]
+                    let minutes = source.flatMap {
+                        publishableComputedMinutesByDay[$0]?[row.day]
+                    }
+                    return ComparisonDailyRow(
+                        source: .noopComputed,
+                        metric: Repository.replacingDetailedStageColumns(row, with: minutes),
+                        publishDetailedStages: minutes != nil
+                    )
+                }
+                let comparisonSleeps = impSleep.map {
+                    ComparisonSleepRow(
+                        source: .wearableImport,
+                        session: $0,
+                        publishDetailedStages: true
+                    )
+                } + compSleep.map {
+                    ComparisonSleepRow(
+                        source: .noopComputed,
+                        session: $0,
+                        publishDetailedStages:
+                            publishableComputedSleep.contains(SleepExportIdentity($0))
+                    )
+                }
+                let comparisonWorkouts = impWorkouts.map {
+                    ComparisonWorkoutRow(
+                        source: $0.source == "manual" ? .noopManual : .wearableImport,
+                        workout: $0
+                    )
+                } + compWorkouts.map {
+                    ComparisonWorkoutRow(source: .noopComputed, workout: $0)
+                }
+                var comparisonSeries: [ComparisonMetricRow] = []
+                var seenComparisonSeries = Set<String>()
+                for (source, ids) in [
+                    (ComparisonSource.wearableImport, importedIds),
+                    (ComparisonSource.noopComputed, computedIds),
+                ] {
+                    for id in ids {
+                        for point in sidecar[id] ?? [] {
+                            let key = "\(source.rawValue)|\(point.day)|\(point.key)"
+                            guard seenComparisonSeries.insert(key).inserted else { continue }
+                            comparisonSeries.append(
+                                ComparisonMetricRow(
+                                    source: source,
+                                    day: point.day,
+                                    key: point.key,
+                                    value: point.value
+                                )
+                            )
+                        }
+                    }
+                }
+                var entries: [(name: String, data: Data)] = [
                     ("physiological_cycles.csv",
                      Data(WhoopCsvExporter.cyclesCSV(
                         days: days,
@@ -363,6 +440,14 @@ enum CsvExport {
                     ("noop_metric_series.json", WhoopCsvExporter.metricSeriesJSON(sidecar)),
                     (PortableUserData.fileName, portable),
                 ]
+                entries += try comparisonEntries(
+                    context: comparisonContext,
+                    daily: comparisonDaily,
+                    sleeps: comparisonSleeps,
+                    workouts: comparisonWorkouts,
+                    metricSeries: comparisonSeries,
+                    detectorDecisions: autoWorkoutDecisions
+                )
                 // Deflate to a temp path off main; the cheap atomic swap into the user's chosen destination
                 // stays on main (it needs the panel/picker result).
                 let out = FileManager.default.temporaryDirectory
@@ -418,6 +503,439 @@ enum CsvExport {
         if w.source == "manual" { return "manual" }
         if computedIds.contains(w.source) || w.sport == "detected" { return "noop (APPROXIMATE)" }
         return "import"
+    }
+
+    // MARK: - Parallel-wear comparison sidecars
+
+    enum ComparisonSource: String, Sendable {
+        case wearableImport = "wearable_import"
+        case noopComputed = "noop_computed"
+        case noopManual = "noop_manual"
+    }
+
+    struct ComparisonContext: Sendable {
+        let generatedAtUTC: String
+        let platform: String
+        let appVersion: String
+    }
+
+    struct ComparisonDailyRow: Sendable {
+        let source: ComparisonSource
+        let metric: DailyMetric
+        let publishDetailedStages: Bool
+    }
+
+    struct ComparisonSleepRow: Sendable {
+        let source: ComparisonSource
+        let session: CachedSleepSession
+        let publishDetailedStages: Bool
+    }
+
+    struct ComparisonWorkoutRow: Sendable {
+        let source: ComparisonSource
+        let workout: WorkoutRow
+    }
+
+    struct ComparisonMetricRow: Sendable {
+        let source: ComparisonSource
+        let day: String
+        let key: String
+        let value: Double
+    }
+
+    /// Readable, source-separated study files carried inside every portable export. These entries are
+    /// additive: NOOP's importer ignores the `comparison/` directory, while a tester can inspect or
+    /// analyze it beside the original unmodified export from another wearable.
+    static func comparisonEntries(
+        context: ComparisonContext,
+        daily: [ComparisonDailyRow],
+        sleeps: [ComparisonSleepRow],
+        workouts: [ComparisonWorkoutRow],
+        metricSeries: [ComparisonMetricRow],
+        detectorDecisions: [AutoWorkoutDecisionRecord] = []
+    ) throws -> [(name: String, data: Data)] {
+        let files = [
+            "comparison/daily_metrics.csv": daily.count,
+            "comparison/sleep_sessions.csv": sleeps.count,
+            "comparison/workouts.csv": workouts.count,
+            "comparison/metric_series.csv": metricSeries.count,
+            "comparison/detector_decisions.csv": detectorDecisions.count,
+        ]
+        let manifest: [String: Any] = [
+            "schema": "noop.parallel_wear.v1",
+            "generated_at_utc": context.generatedAtUTC,
+            "platform": context.platform,
+            "app_version": context.appVersion,
+            "contains_device_identifiers": false,
+            "missing_value_encoding": "blank CSV field",
+            "timestamp_encoding": "UTC ISO-8601",
+            "day_encoding": "stored local calendar day (YYYY-MM-DD)",
+            "sources": [
+                ComparisonSource.wearableImport.rawValue:
+                    "Values parsed from a user-supplied wearable export.",
+                ComparisonSource.noopComputed.rawValue:
+                    "Values estimated locally by NOOP from recorded sensor data.",
+                ComparisonSource.noopManual.rawValue:
+                    "Values explicitly entered or confirmed by the user in NOOP.",
+            ],
+            "score_scales": [
+                "recovery_score": "0-100",
+                "effort_score": "0-100",
+                "sleep_score": "0-100",
+                "sleep_efficiency": "fraction 0-1",
+            ],
+            "algorithm_revisions": [
+                "charge": NoopScoreAlgorithmRevision.charge,
+                "effort": NoopScoreAlgorithmRevision.effort,
+                "rest": NoopScoreAlgorithmRevision.rest,
+                "auto_workout_detector": AutoWorkoutDetector.detectorVersion,
+            ],
+            "detector_decisions_schema": "noop.detector_decisions.v1",
+            "files": files,
+        ]
+        let manifestData = try JSONSerialization.data(
+            withJSONObject: manifest,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let detector: [String: Any] = [
+            "detector_version": AutoWorkoutDetector.detectorVersion,
+            "event_confidence_status": AutoWorkoutConfidenceStatus.uncalibrated.rawValue,
+            "unattended_save_permitted": false,
+            "decision_history": [
+                "schema": "noop.detector_decisions.v1",
+                "maximum_persisted_records": AutoWorkoutDecisionHistory.maxRecords,
+                "computed_workout_rows_imply_acceptance": false,
+                "legacy_tombstones_have_unknown_fields": true,
+            ],
+            "evidence": [
+                "heart_rate": "required",
+                "motion": "Dense motion confirms or rejects; sparse or absent motion falls back to heart-rate-only.",
+                "workout_type": "Advisory broad class only; the user confirms the saved activity.",
+            ],
+            "rules": [
+                "elevated_margin_bpm": AutoWorkoutDetector.elevatedMarginBPM,
+                "minimum_sustained_minutes": AutoWorkoutDetector.minSustainedMin,
+                "maximum_dip_seconds": AutoWorkoutDetector.maxDipS,
+                "merge_gap_seconds": AutoWorkoutDetector.mergeGapS,
+                "minimum_hr_samples": AutoWorkoutDetector.minHRSamples,
+                "maximum_hr_sample_gap_seconds": AutoWorkoutDetector.maxHRSampleGapS,
+                "maximum_seconds_per_hr_sample": AutoWorkoutDetector.maxSecondsPerHRSample,
+                "motion_confirmation_mean": AutoWorkoutDetector.motionConfirmMean,
+                "motion_confirmation_minimum_samples":
+                    AutoWorkoutDetector.motionConfirmationMinSamples,
+                "motion_confirmation_maximum_gap_seconds":
+                    AutoWorkoutDetector.motionConfirmationMaxGapS,
+            ],
+        ]
+        let detectorData = try JSONSerialization.data(
+            withJSONObject: detector,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        let readme = """
+        NOOP PARALLEL-WEAR COMPARISON DATA
+
+        Keep the other wearable's original export ZIP unchanged. Share that original ZIP and this
+        NOOP ZIP together; do not replace either one with a re-zipped or spreadsheet-edited copy.
+
+        The comparison directory separates imported wearable outcomes from NOOP estimates. Blank CSV
+        fields mean the value was not recorded or was not eligible for publication; zero is never used
+        as a substitute for missing data. Timestamps are UTC. Day keys preserve the local calendar day
+        stored by the source. Score scales and algorithm revisions are listed in manifest.json.
+
+        daily_metrics.csv contains one wide daily row per source and day.
+        sleep_sessions.csv contains source-separated sleep windows and eligible stage totals.
+        workouts.csv contains imported, manually confirmed, and NOOP-computed workout records.
+        metric_series.csv contains the complete source-separated scalar series with explicit units.
+        workout_detector.json records the detector version, thresholds, and confidence limitations.
+        detector_decisions.csv records only durable accept, dismiss, automation, and review events.
+        A saved computed workout is never inferred to mean the user accepted a detector suggestion.
+        Older dismissals may appear as legacy tombstones with blank endpoint, decision-time, and
+        evidence fields because those values were not historically stored.
+
+        These files contain sensitive health data. NOOP creates them locally and does not upload them.
+        Device identifiers, account identifiers, credentials, notes, and workout routes are excluded.
+        """
+
+        return [
+            ("comparison/README.txt", Data((readme + "\n").utf8)),
+            ("comparison/manifest.json", manifestData),
+            ("comparison/daily_metrics.csv", Data(comparisonDailyCSV(daily).utf8)),
+            ("comparison/sleep_sessions.csv", Data(comparisonSleepCSV(sleeps).utf8)),
+            ("comparison/workouts.csv", Data(comparisonWorkoutCSV(workouts).utf8)),
+            ("comparison/metric_series.csv", Data(comparisonMetricSeriesCSV(metricSeries).utf8)),
+            ("comparison/detector_decisions.csv",
+             Data(comparisonDetectorDecisionsCSV(detectorDecisions).utf8)),
+            ("comparison/workout_detector.json", detectorData),
+        ]
+    }
+
+    private static func comparisonDailyCSV(_ rows: [ComparisonDailyRow]) -> String {
+        var out = "source,day,recovery_score_0_100,effort_score_0_100,total_sleep_min,"
+            + "sleep_efficiency_fraction,light_sleep_min,deep_sleep_min,rem_sleep_min,"
+            + "disturbances_count,resting_hr_bpm,hrv_ms,hrv_method,spo2_pct,"
+            + "skin_temperature_value_c,skin_temperature_semantics,respiratory_rate_per_min,"
+            + "steps_count,energy_kcal,raw_spo2_red_adc,raw_spo2_ir_adc,"
+            + "detailed_sleep_stages_status\r\n"
+        for row in rows.sorted(by: {
+            ($0.source.rawValue, $0.metric.day) < ($1.source.rawValue, $1.metric.day)
+        }) {
+            let d = row.metric
+            let hasStages = d.lightMin != nil || d.deepMin != nil || d.remMin != nil
+            let stageStatus = row.publishDetailedStages
+                ? (hasStages ? "available" : "not_recorded")
+                : "withheld_insufficient_evidence"
+            let skinSemantics: String
+            if d.skinTempDevC == nil {
+                skinSemantics = ""
+            } else {
+                skinSemantics = row.source == .wearableImport
+                    ? "absolute_temperature" : "deviation_from_personal_baseline"
+            }
+            out += [
+                row.source.rawValue,
+                d.day,
+                comparisonNumber(d.recovery),
+                comparisonNumber(d.strain),
+                comparisonNumber(d.totalSleepMin),
+                comparisonNumber(d.efficiency),
+                comparisonNumber(row.publishDetailedStages ? d.lightMin : nil),
+                comparisonNumber(row.publishDetailedStages ? d.deepMin : nil),
+                comparisonNumber(row.publishDetailedStages ? d.remMin : nil),
+                comparisonNumber(d.disturbances),
+                comparisonNumber(d.restingHr),
+                comparisonNumber(d.avgHrv),
+                comparisonField(d.avgHrv == nil ? nil : d.hrvMethod?.rawValue),
+                comparisonNumber(d.spo2Pct),
+                comparisonNumber(d.skinTempDevC),
+                skinSemantics,
+                comparisonNumber(d.respRateBpm),
+                comparisonNumber(d.steps),
+                comparisonNumber(d.activeKcalEst),
+                comparisonNumber(d.spo2Red),
+                comparisonNumber(d.spo2Ir),
+                stageStatus,
+            ].joined(separator: ",") + "\r\n"
+        }
+        return out
+    }
+
+    private static func comparisonSleepCSV(_ rows: [ComparisonSleepRow]) -> String {
+        let formatter = comparisonUTCFormatter()
+        var out = "source,session_start_utc,session_end_utc,duration_s,sleep_efficiency_fraction,"
+            + "resting_hr_bpm,hrv_ms,light_sleep_min,deep_sleep_min,rem_sleep_min,awake_min,"
+            + "user_edited,rr_eligible_window_count,rr_valid_window_count,"
+            + "detailed_sleep_stages_status\r\n"
+        for row in rows.sorted(by: {
+            ($0.source.rawValue, $0.session.effectiveStartTs)
+                < ($1.source.rawValue, $1.session.effectiveStartTs)
+        }) {
+            let s = row.session
+            let stages = row.publishDetailedStages
+                ? SleepStageTotals.minutes(fromStagesJSON: s.stagesJSON) : nil
+            let stageStatus = row.publishDetailedStages
+                ? (stages == nil ? "not_recorded" : "available")
+                : "withheld_insufficient_evidence"
+            let duration = s.endTs > s.effectiveStartTs ? s.endTs - s.effectiveStartTs : nil
+            out += [
+                row.source.rawValue,
+                comparisonUTC(s.effectiveStartTs, formatter: formatter),
+                comparisonUTC(s.endTs, formatter: formatter),
+                comparisonNumber(duration),
+                comparisonNumber(s.efficiency),
+                comparisonNumber(s.restingHr),
+                comparisonNumber(s.avgHrv),
+                comparisonNumber(stages?.light),
+                comparisonNumber(stages?.deep),
+                comparisonNumber(stages?.rem),
+                comparisonNumber(stages?.awake),
+                s.userEdited ? "true" : "false",
+                comparisonNumber(s.rrEligibleWindowCount),
+                comparisonNumber(s.rrValidWindowCount),
+                stageStatus,
+            ].joined(separator: ",") + "\r\n"
+        }
+        return out
+    }
+
+    private static func comparisonWorkoutCSV(_ rows: [ComparisonWorkoutRow]) -> String {
+        let formatter = comparisonUTCFormatter()
+        var out = "source,workout_start_utc,workout_end_utc,duration_s,activity_name,"
+            + "effort_score_0_100,energy_kcal,average_hr_bpm,max_hr_bpm,distance_m,"
+            + "steps_count,hr_zone_1_pct,hr_zone_2_pct,hr_zone_3_pct,hr_zone_4_pct,"
+            + "hr_zone_5_pct\r\n"
+        for row in rows.sorted(by: {
+            ($0.source.rawValue, $0.workout.startTs)
+                < ($1.source.rawValue, $1.workout.startTs)
+        }) {
+            let w = row.workout
+            let duration = w.durationS
+                ?? (w.endTs > w.startTs ? Double(w.endTs - w.startTs) : nil)
+            let zones = comparisonZonePercents(w.zonesJSON)
+            out += [
+                row.source.rawValue,
+                comparisonUTC(w.startTs, formatter: formatter),
+                comparisonUTC(w.endTs, formatter: formatter),
+                comparisonNumber(duration),
+                comparisonField(w.sport),
+                comparisonNumber(w.strain),
+                comparisonNumber(w.energyKcal),
+                comparisonNumber(w.avgHr),
+                comparisonNumber(w.maxHr),
+                comparisonNumber(w.distanceM),
+                comparisonNumber(w.steps),
+                comparisonNumber(zones?[0]),
+                comparisonNumber(zones?[1]),
+                comparisonNumber(zones?[2]),
+                comparisonNumber(zones?[3]),
+                comparisonNumber(zones?[4]),
+            ].joined(separator: ",") + "\r\n"
+        }
+        return out
+    }
+
+    private static func comparisonMetricSeriesCSV(_ rows: [ComparisonMetricRow]) -> String {
+        var out = "source,day,metric_key,value,unit\r\n"
+        for row in rows.filter({ $0.value.isFinite }).sorted(by: {
+            ($0.source.rawValue, $0.day, $0.key)
+                < ($1.source.rawValue, $1.day, $1.key)
+        }) {
+            out += [
+                row.source.rawValue,
+                row.day,
+                comparisonField(row.key),
+                comparisonNumber(row.value),
+                comparisonField(comparisonUnit(for: row.key, source: row.source)),
+            ].joined(separator: ",") + "\r\n"
+        }
+        return out
+    }
+
+    private static func comparisonDetectorDecisionsCSV(
+        _ rows: [AutoWorkoutDecisionRecord]
+    ) -> String {
+        let formatter = comparisonUTCFormatter()
+        var out = "candidate_start_utc,candidate_end_utc,decision_recorded_utc,action,actor,"
+            + "activity_name,detector_version,average_hr_bpm,peak_hr_bpm,"
+            + "event_confidence_0_1,type_hint_class,type_hint_confidence_0_1,"
+            + "confidence_status,evidence_provenance,record_origin\r\n"
+        for row in rows.sorted(by: {
+            ($0.candidateStartSec, $0.recordedAtSec ?? .min, $0.action.rawValue)
+                < ($1.candidateStartSec, $1.recordedAtSec ?? .min, $1.action.rawValue)
+        }) {
+            out += [
+                comparisonUTC(row.candidateStartSec, formatter: formatter),
+                row.candidateEndSec.map {
+                    comparisonUTC($0, formatter: formatter)
+                } ?? "",
+                row.recordedAtSec.map {
+                    comparisonUTC($0, formatter: formatter)
+                } ?? "",
+                row.action.rawValue,
+                row.actor.rawValue,
+                comparisonField(row.activityName),
+                comparisonField(row.detectorVersion),
+                comparisonNumber(row.averageBpm),
+                comparisonNumber(row.peakBpm),
+                comparisonNumber(row.eventConfidence),
+                comparisonField(row.suggestedClass),
+                comparisonNumber(row.suggestionConfidence),
+                comparisonField(row.confidenceStatus),
+                comparisonField(row.evidenceProvenance),
+                row.origin,
+            ].joined(separator: ",") + "\r\n"
+        }
+        return out
+    }
+
+    private static func comparisonUnit(for key: String, source: ComparisonSource) -> String {
+        switch key {
+        case "recovery", "strain", "sleep_performance":
+            return "score_0_100"
+        case "sleep_efficiency":
+            return "fraction_0_1"
+        case "sleep_consistency", "hours_vs_needed_pct", "restorative_pct", "spo2",
+             "body_fat":
+            return "percent_0_100"
+        case "avg_hr", "max_hr", "rhr":
+            return "bpm"
+        case "hrv":
+            return "ms"
+        case "resp_rate":
+            return "breaths_per_min"
+        case "skin_temp":
+            return source == .wearableImport
+                ? "celsius_absolute" : "celsius_delta_from_baseline"
+        case let value where value.hasSuffix("_min"):
+            return "min"
+        case "energy_kcal", "active_kcal", "basal_kcal", "total_kcal", "calories_in":
+            return "kcal"
+        case "steps", "steps_est", "disturbances", "exercise_count":
+            return "count"
+        case "distance_m":
+            return "m"
+        case "weight", "lean_mass":
+            return "kg"
+        case "height":
+            return "cm"
+        case "vo2max", "vo2max_est":
+            return "mL_per_kg_per_min"
+        case "fitness_age", "body_age":
+            return "decimal_years"
+        case "mood":
+            return "score_1_5"
+        case "stress":
+            return "score_0_3"
+        case "rest_evidence_flags":
+            return "bitmask"
+        case "spo2_red", "spo2_ir":
+            return "adc"
+        default:
+            return "unspecified"
+        }
+    }
+
+    private static func comparisonZonePercents(_ json: String?) -> [Double]? {
+        guard let json, let data = json.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return nil }
+        let values = (1...5).map { index in
+            ((object["z\(index)"] ?? object["zone\(index)"]) as? NSNumber)?.doubleValue ?? 0
+        }
+        return values.contains(where: { $0 > 0 }) ? values : nil
+    }
+
+    private static func comparisonField(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty else { return "" }
+        var safe = raw
+        if let first = safe.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) {
+            safe = "'" + safe
+        }
+        guard safe.contains(",") || safe.contains("\"")
+                || safe.contains("\n") || safe.contains("\r")
+        else { return safe }
+        return "\"" + safe.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    private static func comparisonNumber(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "" }
+        return value == value.rounded() && abs(value) < 1e12
+            ? String(Int64(value)) : String(value)
+    }
+
+    private static func comparisonNumber(_ value: Int?) -> String {
+        value.map(String.init) ?? ""
+    }
+
+    private static func comparisonUTCFormatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return formatter
+    }
+
+    private static func comparisonUTC(_ ts: Int, formatter: DateFormatter) -> String {
+        formatter.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 
     // @MainActor: Repository.localDayKey is MainActor-isolated (Repository is @MainActor); only

@@ -34,6 +34,7 @@ struct AutomationsView: View {
     /// Daily phone reminders are separate from wrist alerts and default OFF. State is mirrored only
     /// after the authorization outcome so a denied system permission never leaves an inert ON switch.
     @State private var dailyReviewEnabled = DailyReviewNotifications.isEnabled
+    @State private var morningRecapEnabled = MorningRecapNotifications.isEnabled
     @AppStorage(DailyReviewNotifications.morningMinutesKey) private var morningReviewMinutes = 8 * 60
     @AppStorage(DailyReviewNotifications.eveningMinutesKey) private var eveningReviewMinutes = 19 * 60
     /// A separate post-sync report opt-in. It shares notification permission with the scheduled review
@@ -101,6 +102,7 @@ struct AutomationsView: View {
         }
         .onAppear {
             dailyReviewEnabled = DailyReviewNotifications.isEnabled
+            morningRecapEnabled = MorningRecapNotifications.isEnabled
             postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
             hydrationReminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()
@@ -160,7 +162,7 @@ struct AutomationsView: View {
             icon: "sun.horizon.fill",
             title: String(localized: "Daily review"),
             blurb: String(localized: "Optional phone reminders for daily review and newly synced workouts. Post-sync timing depends on when your wearable reaches NOOP."),
-            active: dailyReviewEnabled || postWorkoutSummaryEnabled
+            active: dailyReviewEnabled || morningRecapEnabled || postWorkoutSummaryEnabled
         ) {
             VStack(spacing: 0) {
                 ToggleRow(
@@ -182,6 +184,22 @@ struct AutomationsView: View {
                     )
                     rowDivider
                     Text("Reminder banners never include scores or health values. Morning invites a Sleep and Recovery review; evening invites an Effort comparison and journal check-in.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "Morning recap after sync"),
+                    help: String(localized: "Off by default. Notifies once when a newly synced night has a Recovery or Sleep Score; delayed wearable sync means delayed delivery."),
+                    isOn: morningRecapToggle
+                )
+                if morningRecapEnabled {
+                    rowDivider
+                    Text("appwide.notifications.recap_privacy")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -293,6 +311,29 @@ struct AutomationsView: View {
                         showNotificationPermissionAlert = true
                     case .off:
                         postWorkoutSummaryEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var morningRecapToggle: Binding<Bool> {
+        Binding(
+            get: { morningRecapEnabled },
+            set: { on in
+                morningRecapEnabled = on
+                MorningRecapNotifications.setEnabled(on) { outcome in
+                    switch outcome {
+                    case .enabled:
+                        morningRecapEnabled = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    case .denied:
+                        morningRecapEnabled = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        morningRecapEnabled = false
                     }
                 }
             }
@@ -624,6 +665,24 @@ struct AutomationsView: View {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             Task { @MainActor in
                 notificationPermissionDenied = settings.authorizationStatus == .denied
+                if settings.authorizationStatus == .denied {
+                    if dailyReviewEnabled {
+                        dailyReviewEnabled = false
+                        DailyReviewNotifications.setEnabled(false)
+                    }
+                    if morningRecapEnabled {
+                        morningRecapEnabled = false
+                        MorningRecapNotifications.setEnabled(false)
+                    }
+                    if postWorkoutSummaryEnabled {
+                        postWorkoutSummaryEnabled = false
+                        model.setPostWorkoutSummaryNotificationsEnabled(false)
+                    }
+                    if behavior.strainTargetNudge {
+                        behavior.strainTargetNudge = false
+                        StrainTargetNotifier.setEnabled(false)
+                    }
+                }
                 switch settings.authorizationStatus {
                 case .authorized, .provisional:
                     notificationsAuthorized = true
@@ -1153,17 +1212,38 @@ struct AutomationsView: View {
                  active: behavior.strainTargetNudge) {
             ToggleRow(label: String(localized: "Notify when the Effort marker is reached"),
                       help: String(localized: "Posts after Noop Band syncs and NOOP scores the day, not the exact second you cross it. At most once per day."),
-                      isOn: $behavior.strainTargetNudge)
-                .onChangeCompat(of: behavior.strainTargetNudge) { on in
-                    if on {
-                        StrainTargetNotifier.requestAuthorization()
-                        // The repo.$days sink only fires on data changes, so if today's target is
-                        // already reached, evaluate now rather than waiting for the next refresh
-                        // (the reevaluateIllness idiom).
+                      isOn: strainTargetToggle)
+        }
+    }
+
+    private var strainTargetToggle: Binding<Bool> {
+        Binding(
+            get: { behavior.strainTargetNudge },
+            set: { enabled in
+                guard enabled else {
+                    behavior.strainTargetNudge = false
+                    StrainTargetNotifier.setEnabled(false)
+                    return
+                }
+
+                behavior.strainTargetNudge = false
+                StrainTargetNotifier.setEnabled(true) { outcome in
+                    switch outcome {
+                    case .enabled:
+                        behavior.strainTargetNudge = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
                         model.evaluateStrainTarget()
+                    case .denied:
+                        behavior.strainTargetNudge = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        behavior.strainTargetNudge = false
                     }
                 }
-        }
+            }
+        )
     }
 
     // MARK: - Helpers

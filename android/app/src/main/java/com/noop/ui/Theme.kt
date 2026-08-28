@@ -405,6 +405,7 @@ object Metrics {
     val space14 = 14.dp
     val space16 = 16.dp
     val space18 = 18.dp
+    val space20 = 20.dp
     val space24 = 24.dp
     val sourceBadgeHeight = 18.dp
     val cardRadius = 16.dp

@@ -159,6 +159,14 @@ object ScheduledReportNotifier {
         title: String,
         body: String,
     ) {
+        if (NoopPrefs.postWorkoutReportEnabled(context) &&
+            !NoopPrefs.reportWorkoutFrontierInitialized(context)
+        ) {
+            // Upgrade/process-order safety: an enabled preference without the companion frontier came
+            // from an older build. Snapshot existing history silently instead of announcing an old row.
+            seedWorkoutFrontier(context, newestWorkoutTs)
+            return
+        }
         if (!ScheduledReportPolicy.shouldNotifyWorkout(
                 enabled = NoopPrefs.postWorkoutReportEnabled(context),
                 newestWorkoutTs = newestWorkoutTs,
@@ -201,11 +209,36 @@ object ScheduledReportNotifier {
     /**
      * Seed the post-workout frontier to the current newest workout WITHOUT notifying — called once when the
      * user first enables the toggle, so turning it on doesn't immediately fire a summary for an old session
-     * already in history. Only advances the marker forward.
+     * already in history. Explicit re-enabling replaces a stale/future marker with the current snapshot.
      */
     fun seedWorkoutFrontier(context: Context, newestWorkoutTs: Long?) {
-        if (newestWorkoutTs != null && newestWorkoutTs > NoopPrefs.reportLastWorkoutTs(context)) {
-            NoopPrefs.setReportLastWorkoutTs(context, newestWorkoutTs)
+        NoopPrefs.setReportLastWorkoutTs(context, newestWorkoutTs ?: 0L)
+        NoopPrefs.setReportWorkoutFrontierInitialized(context, true)
+    }
+
+    fun cancelMorning(context: Context) {
+        cancel(
+            context,
+            NotificationPlatformIdentity.NotificationId.MORNING_REPORT,
+            NotificationLifecycleId.MORNING_REPORT,
+        )
+    }
+
+    fun cancelWorkout(context: Context) {
+        cancel(
+            context,
+            NotificationPlatformIdentity.NotificationId.WORKOUT_REPORT,
+            NotificationLifecycleId.WORKOUT_REPORT,
+        )
+    }
+
+    private fun cancel(context: Context, id: Int, lifecycleId: String) {
+        NotificationLifecycleLedger.cancelled(
+            context,
+            lifecycleId,
+            NotificationLifecycleCategory.STATUS,
+        ) {
+            NotificationManagerCompat.from(context).cancel(id)
         }
     }
 

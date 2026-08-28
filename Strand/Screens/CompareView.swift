@@ -184,7 +184,9 @@ struct CompareView: View {
 
     private let maxSelection = 4
     private let minSelection = 2
-    private var loadTaskID: String { "\(selectionKey)|\(repo.refreshSeq)" }
+    private var loadTaskID: String {
+        "\(selectionKey)|\(repo.refreshSeq)|\(repo.ageMetricsSeq)"
+    }
 
     var body: some View {
         ScreenScaffold(title: "Compare", subtitle: "Overlay signals, draw conclusions.",

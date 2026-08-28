@@ -155,7 +155,7 @@ private struct SyncStatusSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Sync", overline: "Strap history",
+            SectionHeader("Sync", overline: "appwide.health.band_history",
                           trailing: live.connected ? (live.bonded ? String(localized: "Connected") : String(localized: "Pairing…")) : String(localized: "Offline"))
 
             NoopCard(tint: StrandPalette.chargeColor) {
@@ -195,7 +195,9 @@ private struct SyncStatusSection: View {
             SyncingHistoryNote(
                 chunks: live.syncChunksThisSession,
                 rows: live.historySyncProgress.rowsPersisted,
-                newestDataUnix: live.historySyncProgress.newestDataUnix
+                newestDataUnix: live.historySyncProgress.newestDataUnix,
+                startedAt: live.historySyncStartedAt,
+                lastDurableProgressAt: live.historySyncLastDurableProgressAt
             )
         } else if !live.connected {
             StatePill("Noop Band not connected", tone: .neutral, showsDot: false)
@@ -780,8 +782,12 @@ private struct FitnessAgeSection: View {
 
     /// Latest weekly Fitness Age (years) read from the "fitness_age" metricSeries, nil until loaded/computed.
     @State private var fitnessAge: Double?
+    /// Persisted weekly estimates, oldest first, for the compact progress graph.
+    @State private var fitnessAgeHistory: [(day: String, value: Double)] = []
     /// Latest estimated VO₂max (ml/kg/min) from "vo2max_est" - only present once a waist is set.
     @State private var vo2max: Double?
+    /// Latest provider-measured VO₂max. This is context only and never changes the Fitness Age equation.
+    @State private var measuredVO2max: Double?
     @State private var loaded = false
     @State private var loadedProfileState: String?
     /// True while a manual "refresh Fitness Age" recompute is running (spinner in the readiness card).
@@ -873,6 +879,8 @@ private struct FitnessAgeSection: View {
     @ViewBuilder private var content: some View {
         if let age = visibleFitnessAge {
             heroCard(age: age)
+            weeklyProgressCard
+            measuredContextCard
             if showReadiness {
                 ReadinessChecklistCard(readiness: readiness,
                                        lead: nil,
@@ -910,26 +918,13 @@ private struct FitnessAgeSection: View {
         return max(0.05, min(1, (hi - age) / (hi - lo)))
     }
 
-    /// The younger/older-than-your-age subtitle as whole-phrase variants per count and direction, so
-    /// translators see complete sentences (never a stitched plural or direction fragment).
-    private func ageDeltaLine(years: Int, younger: Bool) -> String {
-        if years == 0 { return String(localized: "About the same as your age") }
-        switch (younger, years == 1) {
-        case (true, true):   return String(localized: "1 year younger than your age")
-        case (true, false):  return String(localized: "\(years) years younger than your age")
-        case (false, true):  return String(localized: "1 year older than your age")
-        case (false, false): return String(localized: "\(years) years older than your age")
-        }
-    }
-
     /// The shown-value hero: a scenic Charge-world backdrop, the big Fitness Age number, a
     /// younger/older-than-your-age subtitle, the optional VO₂max, the ±band disclaimer, and the two
     /// affordances (tap-through to the trend + the "How accurate is this?" disclosure).
     private func heroCard(age: Double) -> some View {
-        let shown = Int(age.rounded())
-        let delta = Double(profile.age) - age        // +ve = fitness age younger than chronological
-        let years = Int(abs(delta).rounded())
-        let younger = delta >= 0
+        let parts = FitnessAgePresentation.components(age)
+        let comparison = FitnessAgePresentation.comparison(estimate: age, profileAge: profile.age)
+        let younger = parts.totalMonths <= profile.age * 12
         let band = Int((FitnessAgeEngine.uncertaintyBandYears(sex: profile.sex) ?? 20).rounded())
         return VStack(alignment: .leading, spacing: NoopMetrics.space4) {
             // Tap the hero body to open the full "fitness_age" trend.
@@ -941,14 +936,20 @@ private struct FitnessAgeSection: View {
                     ZStack {
                         LiquidVessel(value: fitnessAgeFraction(age), tint: StrandPalette.chargeColor, animated: true)
                             .frame(width: 96, height: 96)
-                        CountUpNumber(value: Double(shown), font: StrandFont.rounded(30))
+                        Text(FitnessAgePresentation.value(age))
+                            .font(StrandFont.rounded(23))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
                             .allowsHitTesting(false)
                     }
                     VStack(alignment: .leading, spacing: NoopMetrics.space1) {
                         Text("Fitness Age").strandOverline()
-                        Text(ageDeltaLine(years: years, younger: younger))
+                        Text(FitnessAgePresentation.value(age))
+                            .font(StrandFont.number(28))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        Text(comparison)
                             .font(StrandFont.subhead)
                             .foregroundStyle(younger ? StrandPalette.statusPositiveText : StrandPalette.statusWarningText)
                     }
@@ -973,7 +974,9 @@ private struct FitnessAgeSection: View {
             }
             .buttonStyle(LiquidPressStyle())
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Fitness Age \(shown), \(ageDeltaLine(years: years, younger: younger)). Tap to see the trend.")
+            .accessibilityLabel(
+                "Fitness Age \(FitnessAgePresentation.spokenValue(age)), \(comparison). Tap to see the trend."
+            )
 
             Text("Approx. model uncertainty ± \(band) yr · a fitness comparison, not a biological age")
                 .font(StrandFont.footnote)
@@ -1016,6 +1019,153 @@ private struct FitnessAgeSection: View {
         .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
     }
 
+    @ViewBuilder private var weeklyProgressCard: some View {
+        let points = fitnessAgeHistory.suffix(8)
+        if let latest = points.last {
+            NoopCard(tint: StrandPalette.chargeColor) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("appwide.fitness_age.weekly_progress").strandOverline()
+                        Spacer(minLength: NoopMetrics.space2)
+                        Text(FitnessAgePresentation.value(latest.value))
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    #if !os(watchOS)
+                    Sparkline(
+                        values: points.map(\.value),
+                        gradient: Gradient(colors: [
+                            StrandPalette.chargeColor.opacity(0.45),
+                            StrandPalette.chargeColor
+                        ]),
+                        showsHover: true,
+                        valueFormat: FitnessAgePresentation.value,
+                        indexLabel: { index in points[points.index(points.startIndex, offsetBy: index)].day }
+                    )
+                    .frame(height: 48)
+                    #endif
+                    HStack {
+                        if points.count > 1 {
+                            let previous = points.dropLast().last!
+                            Text(FitnessAgePresentation.weeklyProgress(
+                                current: latest.value,
+                                previous: previous.value
+                            ))
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        } else {
+                            Text("appwide.fitness_age.first_weekly_estimate")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                        Spacer(minLength: NoopMetrics.space2)
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(localized: "appwide.fitness_age.weeks_count"),
+                                points.count
+                            )
+                        )
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct ContextReading: Identifiable {
+        let id: String
+        let value: String
+        let caption: String
+    }
+
+    private var contextReadings: [ContextReading] {
+        let recent = Array(repo.days.suffix(7))
+        var rows: [ContextReading] = []
+        if let sleep = recent.reversed().compactMap(\.totalSleepMin).first {
+            let total = Int(sleep.rounded())
+            rows.append(ContextReading(
+                id: String(localized: "Sleep"),
+                value: "\(total / 60)h \(total % 60)m",
+                caption: String(localized: "appwide.fitness_age.recent_context")
+            ))
+        }
+        if let recovery = recent.reversed().compactMap(\.recovery).first {
+            rows.append(ContextReading(
+                id: String(localized: "Recovery"),
+                value: "\(Int(recovery.rounded()))%",
+                caption: String(localized: "appwide.fitness_age.recent_context")
+            ))
+        }
+        if let hrv = recent.reversed().compactMap(\.avgHrv).first {
+            rows.append(ContextReading(
+                id: String(localized: "HRV"),
+                value: "\(Int(hrv.rounded())) ms",
+                caption: String(localized: "appwide.fitness_age.recent_context")
+            ))
+        }
+        if let oxygen = recent.reversed().compactMap(\.spo2Pct).first {
+            rows.append(ContextReading(
+                id: String(localized: "SpO₂"),
+                value: "\(Int(oxygen.rounded()))%",
+                caption: String(localized: "appwide.fitness_age.recent_context")
+            ))
+        }
+        if let vo2 = measuredVO2max {
+            rows.append(ContextReading(
+                id: String(localized: "VO₂max"),
+                value: "\(Int(vo2.rounded())) ml/kg/min",
+                caption: String(localized: "appwide.fitness_age.recent_context")
+            ))
+        } else if let vo2 = visibleVO2max {
+            rows.append(ContextReading(
+                id: String(localized: "VO₂max"),
+                value: "\(Int(vo2.rounded())) ml/kg/min",
+                caption: String(localized: "appwide.fitness_age.companion_estimate")
+            ))
+        }
+        return rows
+    }
+
+    @ViewBuilder private var measuredContextCard: some View {
+        let rows = contextReadings
+        if !rows.isEmpty {
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("appwide.fitness_age.measured_context").strandOverline()
+                        Spacer(minLength: NoopMetrics.space2)
+                        Text("appwide.fitness_age.not_inputs")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), alignment: .leading),
+                            GridItem(.flexible(), alignment: .leading)
+                        ],
+                        alignment: .leading,
+                        spacing: NoopMetrics.space3
+                    ) {
+                        ForEach(rows) { row in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.id).strandOverline()
+                                Text(row.value)
+                                    .font(StrandFont.bodyNumber)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                                Text(row.caption)
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Load the latest weekly Fitness Age (+ optional VO₂max) from the strap's metricSeries. Uses the
     /// same `exploreSeries(key:source:)` path every other metric on this screen reads, with source
     /// "my-whoop" (the Repository merges the computed "-noop" rows under any real import). Takes the
@@ -1024,25 +1174,37 @@ private struct FitnessAgeSection: View {
         let requestedProfileState = profile.ageMetricStateToken
         guard hasEligibleProfile else {
             fitnessAge = nil
+            fitnessAgeHistory = []
             vo2max = nil
+            measuredVO2max = nil
             loadedProfileState = requestedProfileState
             loaded = true
             return
         }
         async let faPtsA = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
         async let vo2PtsA = repo.exploreSeries(key: "vo2max_est", source: "my-whoop")
+        async let measuredVO2PtsA = repo.exploreSeries(
+            key: "vo2max",
+            source: Repository.appleHealthSource,
+            fullHistory: true
+        )
         async let faProfileA = repo.exploreSeries(
             key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")
         async let vo2ProfileA = repo.exploreSeries(
             key: AgeMetricProfile.vo2maxEstimateKey, source: "my-whoop")
+        let faPoints = await faPtsA
         let faProfile = (await faProfileA).last?.value
         let vo2Profile = (await vo2ProfileA).last?.value
-        let readFitnessAge = (await faPtsA).last?.value
+        let readFitnessAge = faPoints.last?.value
         let readVO2max = (await vo2PtsA).last?.value
+        let readMeasuredVO2max = (await measuredVO2PtsA).last?.value
         guard !Task.isCancelled,
               requestedProfileState == profile.ageMetricStateToken else { return }
-        fitnessAge = profile.acceptsFitnessAge(provenance: faProfile) ? readFitnessAge : nil
+        let acceptsFitnessAge = profile.acceptsFitnessAge(provenance: faProfile)
+        fitnessAge = acceptsFitnessAge ? readFitnessAge : nil
+        fitnessAgeHistory = acceptsFitnessAge ? Array(faPoints.suffix(8)) : []
         vo2max = profile.acceptsVO2maxEstimate(provenance: vo2Profile) ? readVO2max : nil
+        measuredVO2max = readMeasuredVO2max
         loadedProfileState = requestedProfileState
         loaded = true
     }
@@ -1949,8 +2111,8 @@ private struct BodyCompositionSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader(
-                "Body composition",
-                overline: "Whole-body measurements",
+                "appwide.health.body_composition.title",
+                overline: "appwide.health.body_composition.overline",
                 trailing: latestMeasuredDay.map(BodyVitalReading.dayLabel)
             )
 
@@ -1959,7 +2121,7 @@ private struct BodyCompositionSection: View {
                     HStack(spacing: NoopMetrics.space4) {
                         bodyVisual
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("WEIGHT").strandOverline()
+                            Text("appwide.health.body_composition.weight").strandOverline()
                             Text(UnitFormatter.massFromKilograms(weight.value, unit: massUnit))
                                 .font(StrandFont.number(30))
                                 .foregroundStyle(StrandPalette.textPrimary)
@@ -1980,23 +2142,24 @@ private struct BodyCompositionSection: View {
                         spacing: 8
                     ) {
                         compositionMetric(
-                            label: "BMI",
+                            label: String(localized: "appwide.health.body_composition.bmi"),
                             value: bmi.map { String(format: "%.1f", $0.value) } ?? "-",
-                            detail: bmi.map(readingCaption) ?? String(localized: "No value")
+                            detail: bmi.map(readingCaption)
+                                ?? String(localized: "appwide.health.body_composition.no_value")
                         )
                         compositionMetric(
-                            label: "BODY FAT",
+                            label: String(localized: "appwide.health.body_composition.body_fat"),
                             value: snapshot.bodyFat.map { String(format: "%.1f%%", $0.value) } ?? "-",
                             detail: snapshot.bodyFat.map(readingCaption)
-                                ?? String(localized: "No measurement")
+                                ?? String(localized: "appwide.health.body_composition.no_measurement")
                         )
                         compositionMetric(
-                            label: "LEAN MASS",
+                            label: String(localized: "appwide.health.body_composition.lean_mass"),
                             value: snapshot.leanMass.map {
                                 UnitFormatter.massFromKilograms($0.value, unit: massUnit)
                             } ?? "-",
                             detail: snapshot.leanMass.map(readingCaption)
-                                ?? String(localized: "No measurement")
+                                ?? String(localized: "appwide.health.body_composition.no_measurement")
                         )
                     }
 
@@ -2006,7 +2169,7 @@ private struct BodyCompositionSection: View {
             }
             .redacted(reason: loaded ? RedactionReasons() : .placeholder)
 
-            Text("Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk fat and muscle distribution; that requires compatible segmental measurement hardware.")
+            Text("appwide.health.body_composition.disclaimer")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -2037,7 +2200,7 @@ private struct BodyCompositionSection: View {
                 Text(bodyFat.map { String(format: "%.1f%%", $0) } ?? "-")
                     .font(StrandFont.captionNumber)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text("WHOLE BODY")
+                Text("appwide.health.body_composition.whole_body")
                     .font(StrandFont.overline)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .lineLimit(1)
@@ -2047,8 +2210,12 @@ private struct BodyCompositionSection: View {
         .frame(width: 108, height: 108)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            bodyFat.map { "Whole-body fat \($0.formatted(.number.precision(.fractionLength(1)))) percent" }
-                ?? "No whole-body fat measurement"
+            bodyFat.map {
+                String.localizedStringWithFormat(
+                    String(localized: "appwide.health.body_composition.body_fat_accessibility"),
+                    $0.formatted(.number.precision(.fractionLength(1)))
+                )
+            } ?? String(localized: "appwide.health.body_composition.no_body_fat_measurement")
         )
     }
 
@@ -2084,20 +2251,25 @@ private struct BodyCompositionSection: View {
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text("TARGET WEIGHT").strandOverline()
+                Text("appwide.health.body_composition.target_weight").strandOverline()
                 if let target = profile.targetWeightKg {
                     Text(targetDistanceText(currentKg: weight.value, targetKg: target))
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Target \(UnitFormatter.massFromKilograms(target, unit: massUnit)) · selected by you")
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.health.body_composition.target_detail"),
+                            UnitFormatter.massFromKilograms(target, unit: massUnit)
+                        )
+                    )
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 } else {
-                    Text("No target selected")
+                    Text("appwide.health.body_composition.no_target")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
-                    Text("Add an optional target in Profile.")
+                    Text("appwide.health.body_composition.add_target")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -2109,11 +2281,19 @@ private struct BodyCompositionSection: View {
 
     private func targetDistanceText(currentKg: Double, targetKg: Double) -> String {
         let delta = currentKg - targetKg
-        if abs(delta) < 0.05 { return String(localized: "At your selected target") }
+        if abs(delta) < 0.05 {
+            return String(localized: "appwide.health.body_composition.target_reached")
+        }
         let distance = UnitFormatter.massFromKilograms(abs(delta), unit: massUnit)
         return delta > 0
-            ? String(localized: "\(distance) above your selected target")
-            : String(localized: "\(distance) below your selected target")
+            ? String.localizedStringWithFormat(
+                String(localized: "appwide.health.body_composition.target_above"),
+                distance
+            )
+            : String.localizedStringWithFormat(
+                String(localized: "appwide.health.body_composition.target_below"),
+                distance
+            )
     }
 
     private func readingCaption(_ reading: Reading) -> String {
@@ -2198,7 +2378,10 @@ private struct BiomarkerTrendsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Biomarker trends", overline: "Measured history")
+            SectionHeader(
+                "appwide.health.biomarker_trends.title",
+                overline: "appwide.health.biomarker_trends.overline"
+            )
             NoopCard(padding: 0) {
                 VStack(spacing: 0) {
                     ForEach(Array(trends.enumerated()), id: \.element.id) { index, trend in
@@ -2216,7 +2399,7 @@ private struct BiomarkerTrendsSection: View {
                     }
                 }
             }
-            Text("Values retain their original source and recorded date. Sparklines appear only for recent, closely spaced observations; missing periods are not connected. These are not diagnoses or targets.")
+            Text("appwide.health.biomarker_trends.disclaimer")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

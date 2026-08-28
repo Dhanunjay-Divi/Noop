@@ -49,7 +49,7 @@ enum class DashboardCard(
     RESPIRATORY("respiratory", "Respiratory", "Breaths per minute", "rpm", Icons.Filled.Air),
     STEPS("steps", "Steps", "Today", "", Icons.AutoMirrored.Filled.DirectionsWalk),
     STRESS("stress", "Stress", "Autonomic load", "", Icons.Filled.Bolt),
-    FITNESS_AGE("fitnessAge", "Fitness Age", "Updated weekly", "yrs", Icons.AutoMirrored.Filled.DirectionsRun),
+    FITNESS_AGE("fitnessAge", "Fitness Age", "Updated weekly", "", Icons.AutoMirrored.Filled.DirectionsRun),
     VITALITY("vitality", "Vitality", "Wellness score", "", Icons.Filled.AutoAwesome),
     BLOOD_OXYGEN("bloodOxygen", "Blood Oxygen", "Blood oxygen", "", Icons.Filled.WaterDrop),
     SKIN_TEMP("skinTemp", "Skin Temp", "Skin temperature", "", Icons.Filled.Thermostat),

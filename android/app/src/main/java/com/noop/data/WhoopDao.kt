@@ -1035,6 +1035,10 @@ interface WhoopDao : DeviceRegistryDao {
         to: String,
     ): List<MetricSeriesRow>
 
+    /** Every scalar recorded on one exact local day, retaining source partition. */
+    @Query("SELECT * FROM metricSeries WHERE day = :day ORDER BY deviceId ASC, key ASC")
+    suspend fun metricSeriesForDay(day: String): List<MetricSeriesRow>
+
     /** Distinct metric keys present for a device, sorted ascending (Swift metricKeys, v9). */
     @Query("SELECT DISTINCT key FROM metricSeries WHERE deviceId = :deviceId ORDER BY key ASC")
     suspend fun metricKeys(deviceId: String): List<String>
@@ -1558,6 +1562,11 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY startTs ASC LIMIT :limit"
     )
     suspend fun workouts(deviceId: String, from: Long, to: Long, limit: Int): List<WorkoutRow>
+
+    /** Newest workout across every source namespace. Notification frontiers must include imported,
+     *  detected, old-strap and current-strap rows even when the Workouts screen has never loaded. */
+    @Query("SELECT MAX(startTs) FROM workout")
+    suspend fun latestWorkoutStartAllSources(): Long?
 
     /** Every workout from every device/source that overlaps [from, to]. Auto-suggestion exclusion must
      *  be source-complete: imported files, current/old straps, computed siblings and future sources all

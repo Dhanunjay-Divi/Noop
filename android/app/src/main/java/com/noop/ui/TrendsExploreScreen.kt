@@ -132,6 +132,7 @@ private data class MetricSpec(
 
     fun format(v: Double): String {
         if (!v.isFinite()) return ","
+        if (key == "fitness_age") return FitnessAgePresentation.value(v)
         // Effort (#268): the stored value is 0–100; convert to 0–21 for display when that scale is picked.
         val shown = if (whoopEffort) UnitFormatter.effortValue(v, EffortScale.WHOOP) else v
         val n = if (decimals == 0) "${shown.roundToInt()}" else String.format(Locale.US, "%.${decimals}f", shown)
@@ -192,6 +193,15 @@ private val builtInMetrics: List<MetricSpec> = listOf(
  *  check-in , matching the macOS MetricCatalog entries exactly (v2.2.0 parity). seriesKey/
  *  seriesSource are filled in at discovery time. */
 private val knownSeriesMetrics: Map<String, MetricSpec> = mapOf(
+    "fitness_age" to MetricSpec(
+        "fitness_age",
+        uiString(R.string.l10n_health_screen_fitness_age_12383b4a),
+        "",
+        uiString(R.string.explore_category_heart),
+        Palette.chargeColor,
+        false,
+        0,
+    ),
     // #605/#608: imported avg/max HR is written to metricSeries (Apple Health / WHOOP CSV / Xiaomi) and
     // the Compare screen exposes it, but Explore's picker didn't , iOS MetricCatalog has had both. Series-
     // backed (no DailyMetric column), "Heart" category, parity. (Strap-only per-second HR lives in the
@@ -271,6 +281,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     // surface. A single-WHOOP install resolves this to "my-whoop", so the reads are byte-identical there.
     val deviceId = vm.activeStrapId
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
+    val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
 
     // #797 follow-up (Explore 'All' truncation): `recentDays` is the BOUNDED dashboard flow (capped at
     // WhoopRepository.RECENT_DAYS_CAP), so a 3000+ day import would silently show only the most-recent ~800
@@ -288,7 +299,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     // strap source AND the dedicated import/check-in sources, which write under their OWN deviceIds
     // (nutrition-log, noop-mood) and were invisible to a strap-only key scan (v2.2.0 parity).
     var extraKeys by remember { mutableStateOf<List<Pair<String, String?>>>(emptyList()) }
-    LaunchedEffect(deviceId) {
+    LaunchedEffect(deviceId, ageMetricDataVersion) {
         // Scan the strap's series keys across the active-id ∪ canonical "my-whoop" union (SPINE / #814), so a
         // re-added strap still discovers the keys the canonical import/engine wrote. `seriesSource = null`
         // keeps these resolving against the strap path below; a single-WHOOP install scans just "my-whoop".
@@ -350,7 +361,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
     val builtInDays = if (range.reachesDeep) (fullHistory ?: recentDays) else recentDays
     var seriesKeyLoaded by remember { mutableStateOf<String?>(null) }
     var loadedSeries by remember { mutableStateOf<List<SeriesPoint>>(emptyList()) }
-    LaunchedEffect(selected.key, builtInDays) {
+    LaunchedEffect(selected.key, builtInDays, ageMetricDataVersion) {
         val pick = selected.dailyPick
         if (pick != null) {
             loadedSeries = builtInDays.mapNotNull { d ->

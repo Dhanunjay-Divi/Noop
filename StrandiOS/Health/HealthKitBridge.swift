@@ -998,6 +998,9 @@ final class HealthKitBridge: ObservableObject {
                 metricPoints: points,
                 workouts: workoutRows
             )
+            if kind == .workout {
+                repo.noteWorkoutsChanged()
+            }
             if kind == .bodyMass, let newestWeight = reconciledWeight {
                 profile.reconcileExternalWeight(
                     weightKg: newestWeight.kg,
@@ -1259,7 +1262,10 @@ final class HealthKitBridge: ObservableObject {
             try await store.upsertAppleDaily(appleRows, deviceId: appleDeviceId)
             try await store.upsertDailyMetrics(dmRows, deviceId: appleDeviceId)
             try await store.upsertMetricSeries(points, deviceId: appleDeviceId)
-            if !workoutRows.isEmpty { try await store.upsertWorkouts(workoutRows, deviceId: appleDeviceId) }
+            if !workoutRows.isEmpty {
+                try await store.upsertWorkouts(workoutRows, deviceId: appleDeviceId)
+                repo.noteWorkoutsChanged()
+            }
             if let newestWeight {
                 profile.acceptExternalWeight(weightKg: newestWeight.kg,
                                              measuredAt: newestWeight.measuredAt,

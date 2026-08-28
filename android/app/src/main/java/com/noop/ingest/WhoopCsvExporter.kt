@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import android.content.Context
 import android.net.Uri
+import com.noop.analytics.AutoWorkoutDetector
 import com.noop.data.DailyHrvMethod
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
@@ -12,10 +13,13 @@ import com.noop.data.PortableUserDataCodec
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
+import com.noop.sync.RemoteNoopAlgorithmRevision
+import com.noop.ui.AutoWorkoutPrefs
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.time.Instant
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -94,20 +98,22 @@ object WhoopCsvExporter {
         importedBySource: List<List<DailyMetric>>,
         computedBySource: List<List<DailyMetric>>,
     ): List<DailyExportRow> {
-        fun firstWholeRowByDay(sources: List<List<DailyMetric>>): Map<String, DailyMetric> {
-            val rows = LinkedHashMap<String, DailyMetric>()
-            for (source in sources) {
-                for (row in source) rows.putIfAbsent(row.day, row)
-            }
-            return rows
-        }
-
-        val imported = firstWholeRowByDay(importedBySource)
-        val computed = firstWholeRowByDay(computedBySource)
+        val imported = firstWholeDailyRowByDay(importedBySource)
+        val computed = firstWholeDailyRowByDay(computedBySource)
         return (imported.keys + computed.keys).toSortedSet().map { day ->
             imported[day]?.let { DailyExportRow(it, "import") }
                 ?: DailyExportRow(computed.getValue(day), "noop (APPROXIMATE)")
         }
+    }
+
+    private fun firstWholeDailyRowByDay(
+        sources: List<List<DailyMetric>>,
+    ): Map<String, DailyMetric> {
+        val rows = LinkedHashMap<String, DailyMetric>()
+        for (source in sources) {
+            for (row in source) rows.putIfAbsent(row.day, row)
+        }
+        return rows
     }
 
     // --- Tolerant decoders for the cache's polymorphic JSON columns ---
@@ -350,6 +356,411 @@ object WhoopCsvExporter {
         return arr.toString(2)
     }
 
+    // --- Parallel-wear comparison sidecars ---
+
+    internal enum class ComparisonSource(val wireValue: String) {
+        WEARABLE_IMPORT("wearable_import"),
+        NOOP_COMPUTED("noop_computed"),
+        NOOP_MANUAL("noop_manual"),
+    }
+
+    internal data class ComparisonContext(
+        val generatedAtUtc: String,
+        val platform: String,
+        val appVersion: String,
+    )
+
+    internal data class ComparisonDailyRow(
+        val source: ComparisonSource,
+        val metric: DailyMetric,
+        val publishDetailedStages: Boolean,
+    )
+
+    internal data class ComparisonSleepRow(
+        val source: ComparisonSource,
+        val session: SleepSession,
+        val publishDetailedStages: Boolean,
+    )
+
+    internal data class ComparisonWorkoutRow(
+        val source: ComparisonSource,
+        val workout: WorkoutRow,
+    )
+
+    internal data class ComparisonMetricRow(
+        val source: ComparisonSource,
+        val day: String,
+        val key: String,
+        val value: Double,
+    )
+
+    /**
+     * Source-separated, identifier-free study files carried inside every portable export. NOOP's
+     * importer ignores this directory, so the existing cross-platform restore contract is unchanged.
+     */
+    internal fun comparisonEntries(
+        context: ComparisonContext,
+        daily: List<ComparisonDailyRow>,
+        sleeps: List<ComparisonSleepRow>,
+        workouts: List<ComparisonWorkoutRow>,
+        metricSeries: List<ComparisonMetricRow>,
+        detectorDecisions: List<AutoWorkoutPrefs.DecisionRecord> = emptyList(),
+    ): LinkedHashMap<String, ByteArray> {
+        val files = JSONObject()
+            .put("comparison/daily_metrics.csv", daily.size)
+            .put("comparison/sleep_sessions.csv", sleeps.size)
+            .put("comparison/workouts.csv", workouts.size)
+            .put("comparison/metric_series.csv", metricSeries.size)
+            .put("comparison/detector_decisions.csv", detectorDecisions.size)
+        val manifest = JSONObject()
+            .put("schema", "noop.parallel_wear.v1")
+            .put("generated_at_utc", context.generatedAtUtc)
+            .put("platform", context.platform)
+            .put("app_version", context.appVersion)
+            .put("contains_device_identifiers", false)
+            .put("missing_value_encoding", "blank CSV field")
+            .put("timestamp_encoding", "UTC ISO-8601")
+            .put("day_encoding", "stored local calendar day (YYYY-MM-DD)")
+            .put(
+                "sources",
+                JSONObject()
+                    .put(
+                        ComparisonSource.WEARABLE_IMPORT.wireValue,
+                        "Values parsed from a user-supplied wearable export.",
+                    )
+                    .put(
+                        ComparisonSource.NOOP_COMPUTED.wireValue,
+                        "Values estimated locally by NOOP from recorded sensor data.",
+                    )
+                    .put(
+                        ComparisonSource.NOOP_MANUAL.wireValue,
+                        "Values explicitly entered or confirmed by the user in NOOP.",
+                    ),
+            )
+            .put(
+                "score_scales",
+                JSONObject()
+                    .put("recovery_score", "0-100")
+                    .put("effort_score", "0-100")
+                    .put("sleep_score", "0-100")
+                    .put("sleep_efficiency", "fraction 0-1"),
+            )
+            .put(
+                "algorithm_revisions",
+                JSONObject()
+                    .put("charge", RemoteNoopAlgorithmRevision.CHARGE)
+                    .put("effort", RemoteNoopAlgorithmRevision.EFFORT)
+                    .put("rest", RemoteNoopAlgorithmRevision.REST)
+                    .put("auto_workout_detector", AutoWorkoutDetector.detectorVersion),
+            )
+            .put("detector_decisions_schema", "noop.detector_decisions.v1")
+            .put("files", files)
+        val detector = JSONObject()
+            .put("detector_version", AutoWorkoutDetector.detectorVersion)
+            .put("event_confidence_status", "uncalibrated")
+            .put("unattended_save_permitted", false)
+            .put(
+                "decision_history",
+                JSONObject()
+                    .put("schema", "noop.detector_decisions.v1")
+                    .put(
+                        "maximum_persisted_records",
+                        AutoWorkoutPrefs.DECISION_HISTORY_MAX,
+                    )
+                    .put("computed_workout_rows_imply_acceptance", false)
+                    .put("legacy_tombstones_have_unknown_fields", true),
+            )
+            .put(
+                "evidence",
+                JSONObject()
+                    .put("heart_rate", "required")
+                    .put(
+                        "motion",
+                        "Dense motion confirms or rejects; sparse or absent motion falls back to heart-rate-only.",
+                    )
+                    .put(
+                        "workout_type",
+                        "Advisory broad class only; the user confirms the saved activity.",
+                    ),
+            )
+            .put(
+                "rules",
+                JSONObject()
+                    .put("elevated_margin_bpm", AutoWorkoutDetector.elevatedMarginBPM)
+                    .put("minimum_sustained_minutes", AutoWorkoutDetector.minSustainedMin)
+                    .put("maximum_dip_seconds", AutoWorkoutDetector.maxDipS)
+                    .put("merge_gap_seconds", AutoWorkoutDetector.mergeGapS)
+                    .put("minimum_hr_samples", AutoWorkoutDetector.minHRSamples)
+                    .put("maximum_hr_sample_gap_seconds", AutoWorkoutDetector.maxHRSampleGapS)
+                    .put(
+                        "maximum_seconds_per_hr_sample",
+                        AutoWorkoutDetector.maxSecondsPerHRSample,
+                    )
+                    .put("motion_confirmation_mean", AutoWorkoutDetector.motionConfirmMean)
+                    .put(
+                        "motion_confirmation_minimum_samples",
+                        AutoWorkoutDetector.motionConfirmationMinSamples,
+                    )
+                    .put(
+                        "motion_confirmation_maximum_gap_seconds",
+                        AutoWorkoutDetector.motionConfirmationMaxGapS,
+                    ),
+            )
+        val readme = """
+            NOOP PARALLEL-WEAR COMPARISON DATA
+
+            Keep the other wearable's original export ZIP unchanged. Share that original ZIP and this
+            NOOP ZIP together; do not replace either one with a re-zipped or spreadsheet-edited copy.
+
+            The comparison directory separates imported wearable outcomes from NOOP estimates. Blank CSV
+            fields mean the value was not recorded or was not eligible for publication; zero is never used
+            as a substitute for missing data. Timestamps are UTC. Day keys preserve the local calendar day
+            stored by the source. Score scales and algorithm revisions are listed in manifest.json.
+
+            daily_metrics.csv contains one wide daily row per source and day.
+            sleep_sessions.csv contains source-separated sleep windows and eligible stage totals.
+            workouts.csv contains imported, manually confirmed, and NOOP-computed workout records.
+            metric_series.csv contains the complete source-separated scalar series with explicit units.
+            workout_detector.json records the detector version, thresholds, and confidence limitations.
+            detector_decisions.csv records only durable accept, dismiss, automation, and review events.
+            A saved computed workout is never inferred to mean the user accepted a detector suggestion.
+            Older dismissals may appear as legacy tombstones with blank endpoint, decision-time, and
+            evidence fields because those values were not historically stored.
+
+            These files contain sensitive health data. NOOP creates them locally and does not upload them.
+            Device identifiers, account identifiers, credentials, notes, and workout routes are excluded.
+        """.trimIndent() + "\n"
+
+        return linkedMapOf(
+            "comparison/README.txt" to readme.toByteArray(),
+            "comparison/manifest.json" to manifest.toString(2).toByteArray(),
+            "comparison/daily_metrics.csv" to comparisonDailyCsv(daily).toByteArray(),
+            "comparison/sleep_sessions.csv" to comparisonSleepCsv(sleeps).toByteArray(),
+            "comparison/workouts.csv" to comparisonWorkoutCsv(workouts).toByteArray(),
+            "comparison/metric_series.csv" to comparisonMetricSeriesCsv(metricSeries).toByteArray(),
+            "comparison/detector_decisions.csv" to
+                comparisonDetectorDecisionsCsv(detectorDecisions).toByteArray(),
+            "comparison/workout_detector.json" to detector.toString(2).toByteArray(),
+        )
+    }
+
+    private fun comparisonDailyCsv(rows: List<ComparisonDailyRow>): String {
+        val sb = StringBuilder()
+        sb.append("source,day,recovery_score_0_100,effort_score_0_100,total_sleep_min,")
+            .append("sleep_efficiency_fraction,light_sleep_min,deep_sleep_min,rem_sleep_min,")
+            .append("disturbances_count,resting_hr_bpm,hrv_ms,hrv_method,spo2_pct,")
+            .append("skin_temperature_value_c,skin_temperature_semantics,respiratory_rate_per_min,")
+            .append("steps_count,energy_kcal,raw_spo2_red_adc,raw_spo2_ir_adc,")
+            .append("detailed_sleep_stages_status\r\n")
+        for (row in rows.sortedWith(compareBy({ it.source.wireValue }, { it.metric.day }))) {
+            val d = row.metric
+            val hasStages = d.lightMin != null || d.deepMin != null || d.remMin != null
+            val stageStatus = if (!row.publishDetailedStages) {
+                "withheld_insufficient_evidence"
+            } else if (hasStages) {
+                "available"
+            } else {
+                "not_recorded"
+            }
+            val skinSemantics = when {
+                d.skinTempDevC == null -> ""
+                row.source == ComparisonSource.WEARABLE_IMPORT -> "absolute_temperature"
+                else -> "deviation_from_personal_baseline"
+            }
+            sb.append(
+                listOf(
+                    row.source.wireValue,
+                    d.day,
+                    num(d.recovery),
+                    num(d.strain),
+                    num(d.totalSleepMin),
+                    num(d.efficiency),
+                    num(d.lightMin.takeIf { row.publishDetailedStages }),
+                    num(d.deepMin.takeIf { row.publishDetailedStages }),
+                    num(d.remMin.takeIf { row.publishDetailedStages }),
+                    num(d.disturbances),
+                    num(d.restingHr),
+                    num(d.avgHrv),
+                    csvField(d.avgHrv?.let { DailyHrvMethod.normalized(d.hrvMethod) }),
+                    num(d.spo2Pct),
+                    num(d.skinTempDevC),
+                    skinSemantics,
+                    num(d.respRateBpm),
+                    num(d.steps),
+                    num(d.activeKcalEst),
+                    num(d.spo2Red),
+                    num(d.spo2Ir),
+                    stageStatus,
+                ).joinToString(","),
+            ).append("\r\n")
+        }
+        return sb.toString()
+    }
+
+    private fun comparisonSleepCsv(rows: List<ComparisonSleepRow>): String {
+        val sb = StringBuilder()
+        sb.append("source,session_start_utc,session_end_utc,duration_s,sleep_efficiency_fraction,")
+            .append("resting_hr_bpm,hrv_ms,light_sleep_min,deep_sleep_min,rem_sleep_min,awake_min,")
+            .append("user_edited,rr_eligible_window_count,rr_valid_window_count,")
+            .append("detailed_sleep_stages_status\r\n")
+        for (row in rows.sortedWith(compareBy({ it.source.wireValue }, { it.session.effectiveStartTs }))) {
+            val s = row.session
+            val stages = stageMinutes(s.stagesJSON.takeIf { row.publishDetailedStages })
+            val hasStages = listOf(stages.light, stages.deep, stages.rem, stages.awake).any { it != null }
+            val stageStatus = if (!row.publishDetailedStages) {
+                "withheld_insufficient_evidence"
+            } else if (hasStages) {
+                "available"
+            } else {
+                "not_recorded"
+            }
+            val duration = (s.endTs - s.effectiveStartTs).takeIf { it > 0 }?.toDouble()
+            sb.append(
+                listOf(
+                    row.source.wireValue,
+                    comparisonUtc(s.effectiveStartTs),
+                    comparisonUtc(s.endTs),
+                    num(duration),
+                    num(s.efficiency),
+                    num(s.restingHr),
+                    num(s.avgHrv),
+                    num(stages.light),
+                    num(stages.deep),
+                    num(stages.rem),
+                    num(stages.awake),
+                    s.userEdited.toString(),
+                    num(s.rrEligibleWindowCount),
+                    num(s.rrValidWindowCount),
+                    stageStatus,
+                ).joinToString(","),
+            ).append("\r\n")
+        }
+        return sb.toString()
+    }
+
+    private fun comparisonWorkoutCsv(rows: List<ComparisonWorkoutRow>): String {
+        val sb = StringBuilder()
+        sb.append("source,workout_start_utc,workout_end_utc,duration_s,activity_name,")
+            .append("effort_score_0_100,energy_kcal,average_hr_bpm,max_hr_bpm,distance_m,")
+            .append("steps_count,hr_zone_1_pct,hr_zone_2_pct,hr_zone_3_pct,hr_zone_4_pct,")
+            .append("hr_zone_5_pct\r\n")
+        for (row in rows.sortedWith(compareBy({ it.source.wireValue }, { it.workout.startTs }))) {
+            val w = row.workout
+            val duration = w.durationS ?: (w.endTs - w.startTs).takeIf { it > 0 }?.toDouble()
+            val zones = zonePercents(w.zonesJSON)
+            sb.append(
+                listOf(
+                    row.source.wireValue,
+                    comparisonUtc(w.startTs),
+                    comparisonUtc(w.endTs),
+                    num(duration),
+                    csvField(w.sport),
+                    num(w.strain),
+                    num(w.energyKcal),
+                    num(w.avgHr),
+                    num(w.maxHr),
+                    num(w.distanceM),
+                    num(w.steps),
+                    num(zones?.get(0)),
+                    num(zones?.get(1)),
+                    num(zones?.get(2)),
+                    num(zones?.get(3)),
+                    num(zones?.get(4)),
+                ).joinToString(","),
+            ).append("\r\n")
+        }
+        return sb.toString()
+    }
+
+    private fun comparisonMetricSeriesCsv(rows: List<ComparisonMetricRow>): String {
+        val sb = StringBuilder("source,day,metric_key,value,unit\r\n")
+        for (row in rows.filter { it.value.isFinite() }.sortedWith(
+            compareBy({ it.source.wireValue }, { it.day }, { it.key }),
+        )) {
+            sb.append(
+                listOf(
+                    row.source.wireValue,
+                    row.day,
+                    csvField(row.key),
+                    num(row.value),
+                    csvField(comparisonUnit(row.key, row.source)),
+                ).joinToString(","),
+            ).append("\r\n")
+        }
+        return sb.toString()
+    }
+
+    private fun comparisonDetectorDecisionsCsv(
+        rows: List<AutoWorkoutPrefs.DecisionRecord>,
+    ): String {
+        val sb = StringBuilder()
+        sb.append("candidate_start_utc,candidate_end_utc,decision_recorded_utc,action,actor,")
+            .append("activity_name,detector_version,average_hr_bpm,peak_hr_bpm,")
+            .append("event_confidence_0_1,type_hint_class,type_hint_confidence_0_1,")
+            .append("confidence_status,evidence_provenance,record_origin\r\n")
+        for (row in rows.sortedWith(
+            compareBy(
+                { it.candidateStartSec },
+                { it.recordedAtSec ?: Long.MIN_VALUE },
+                { it.action.wireValue },
+            ),
+        )) {
+            sb.append(
+                listOf(
+                    comparisonUtc(row.candidateStartSec),
+                    row.candidateEndSec?.let(::comparisonUtc).orEmpty(),
+                    row.recordedAtSec?.let(::comparisonUtc).orEmpty(),
+                    row.action.wireValue,
+                    row.actor.wireValue,
+                    csvField(row.activityName),
+                    csvField(row.detectorVersion),
+                    num(row.averageBpm),
+                    num(row.peakBpm),
+                    num(row.eventConfidence),
+                    csvField(row.suggestedClass),
+                    num(row.suggestionConfidence),
+                    csvField(row.confidenceStatus),
+                    csvField(row.evidenceProvenance),
+                    row.origin,
+                ).joinToString(","),
+            ).append("\r\n")
+        }
+        return sb.toString()
+    }
+
+    private fun comparisonUnit(key: String, source: ComparisonSource): String = when {
+        key in setOf("recovery", "strain", "sleep_performance") -> "score_0_100"
+        key == "sleep_efficiency" -> "fraction_0_1"
+        key in setOf(
+            "sleep_consistency",
+            "hours_vs_needed_pct",
+            "restorative_pct",
+            "spo2",
+            "body_fat",
+        ) -> "percent_0_100"
+        key in setOf("avg_hr", "max_hr", "rhr") -> "bpm"
+        key == "hrv" -> "ms"
+        key == "resp_rate" -> "breaths_per_min"
+        key == "skin_temp" && source == ComparisonSource.WEARABLE_IMPORT -> "celsius_absolute"
+        key == "skin_temp" -> "celsius_delta_from_baseline"
+        key.endsWith("_min") -> "min"
+        key in setOf("energy_kcal", "active_kcal", "basal_kcal", "total_kcal", "calories_in") -> "kcal"
+        key in setOf("steps", "steps_est", "disturbances", "exercise_count") -> "count"
+        key == "distance_m" -> "m"
+        key in setOf("weight", "lean_mass") -> "kg"
+        key == "height" -> "cm"
+        key in setOf("vo2max", "vo2max_est") -> "mL_per_kg_per_min"
+        key in setOf("fitness_age", "body_age") -> "decimal_years"
+        key == "mood" -> "score_1_5"
+        key == "stress" -> "score_0_3"
+        key == "rest_evidence_flags" -> "bitmask"
+        key in setOf("spo2_red", "spo2_ir") -> "adc"
+        else -> "unspecified"
+    }
+
+    private fun comparisonUtc(epochSeconds: Long): String =
+        java.time.format.DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochSecond(epochSeconds))
+
     /** Zip the named entries into a single byte array (everything is already in memory). */
     internal fun zipBytes(entries: Map<String, ByteArray>): ByteArray {
         val bos = ByteArrayOutputStream()
@@ -401,9 +812,11 @@ object WhoopCsvExporter {
         // Daily export uses whole source rows, matching Apple. Dashboard reads intentionally
         // coalesce fields for presentation; exporting that hybrid and labelling it "import" would
         // turn computed fields into official values on re-import.
+        val importedDailySources = importedIds.map { repo.days(it) }
+        val computedDailySources = computedIds.map { repo.days(it) }
         val selectedDaily = selectDailyRowsForExport(
-            importedBySource = importedIds.map { repo.days(it) },
-            computedBySource = computedIds.map { repo.days(it) },
+            importedBySource = importedDailySources,
+            computedBySource = computedDailySources,
         ).map { row ->
             val minutes = publishedStageMinutesBySource[row.metric.deviceId]?.get(row.metric.day)
             if (!row.metric.deviceId.endsWith("-noop") || minutes == null) {
@@ -426,6 +839,24 @@ object WhoopCsvExporter {
                     publishedStageMinutesBySource[row.metric.deviceId]?.containsKey(row.metric.day) == true
                 )
         }
+        val comparisonDaily = firstWholeDailyRowByDay(importedDailySources).values.map {
+            ComparisonDailyRow(
+                source = ComparisonSource.WEARABLE_IMPORT,
+                metric = it,
+                publishDetailedStages = true,
+            )
+        } + firstWholeDailyRowByDay(computedDailySources).values.map { metric ->
+            val minutes = publishedStageMinutesBySource[metric.deviceId]?.get(metric.day)
+            ComparisonDailyRow(
+                source = ComparisonSource.NOOP_COMPUTED,
+                metric = metric.copy(
+                    deepMin = minutes?.deep,
+                    remMin = minutes?.rem,
+                    lightMin = minutes?.light,
+                ),
+                publishDetailedStages = minutes != null,
+            )
+        }
 
         val sleeps = repo.sleepSessionsMerged(deviceId, 0L, hi)
         val wakeDayBySession = WhoopRepository.wakeDayBySession(sleeps)
@@ -434,6 +865,32 @@ object WhoopCsvExporter {
             sessions = sleeps,
             habitualMidsleepSec = habitualMidsleepSec,
         ).authorizedSessionKeys
+        val importedComparisonSleeps = importedIds
+            .flatMap { repo.sleepSessions(it, 0L, hi, 100_000) }
+            .distinctBy { it.startTs to it.endTs }
+        val computedComparisonSleeps = computedIds
+            .flatMap { repo.sleepSessions(it, 0L, hi, 100_000) }
+            .distinctBy { it.startTs to it.endTs }
+        val comparisonPublishableSleepSessions =
+            WhoopRepository.projectPublishableDetailedStages(
+                sessions = computedComparisonSleeps,
+                habitualMidsleepSec = habitualMidsleepSec,
+            ).authorizedSessionKeys
+        val comparisonSleeps = importedComparisonSleeps.map {
+            ComparisonSleepRow(
+                source = ComparisonSource.WEARABLE_IMPORT,
+                session = it,
+                publishDetailedStages = true,
+            )
+        } + computedComparisonSleeps.map {
+            ComparisonSleepRow(
+                source = ComparisonSource.NOOP_COMPUTED,
+                session = it,
+                publishDetailedStages =
+                    com.noop.analytics.DetailedSleepStagePublication.key(it) in
+                        comparisonPublishableSleepSessions,
+            )
+        }
         // Workouts: imported WHOOP ∪ on-device detected (which carries the "-noop" device id), each
         // side read across its union ids (#458). Apple Health / Health Connect workouts are
         // intentionally omitted, matching the cycles/sleep cut. Dedup by (startTs, sport), imported
@@ -441,8 +898,22 @@ object WhoopCsvExporter {
         // BLE re-detection), which double-counted it in the CSV and inflated totals on reimport.
         // (PR #97 review, tigercraft4. Swift parity.)
         val seenWorkouts = HashSet<String>()
-        val workouts = (repo.workoutsUnion(deviceId, 0L, hi) + repo.detectedWorkoutsUnion(deviceId, 0L, hi))
+        val importedWorkouts = repo.workoutsUnion(deviceId, 0L, hi)
+        val computedWorkouts = repo.detectedWorkoutsUnion(deviceId, 0L, hi)
+        val workouts = (importedWorkouts + computedWorkouts)
             .filter { seenWorkouts.add("${it.startTs}|${it.sport}") }
+        val comparisonWorkouts = importedWorkouts.map {
+            ComparisonWorkoutRow(
+                source = if (it.source == "manual") {
+                    ComparisonSource.NOOP_MANUAL
+                } else {
+                    ComparisonSource.WEARABLE_IMPORT
+                },
+                workout = it,
+            )
+        } + computedWorkouts.map {
+            ComparisonWorkoutRow(ComparisonSource.NOOP_COMPUTED, it)
+        }
         // Journal lives under the imported ids. Native in-app journal logging (a separate feature on
         // its own device id) isn't read here, keeping the exporter self-contained; the imported
         // journal is the WHOOP-sourced history the round-trip targets. Dedup by the row's natural key
@@ -464,11 +935,33 @@ object WhoopCsvExporter {
         }
         // Sidecar: every metricSeries row under every NOOP source id, full fidelity (rows carry their
         // own deviceId, so union duplicates stay distinguishable on re-import).
-        val sidecarRows = buildList {
-            for (id in importedIds + computedIds) {
+        val sidecarRows = ArrayList<MetricSeriesRow>()
+        val comparisonMetricRows = ArrayList<ComparisonMetricRow>()
+        val seenComparisonMetrics = HashSet<String>()
+        for ((source, ids) in listOf(
+            ComparisonSource.WEARABLE_IMPORT to importedIds,
+            ComparisonSource.NOOP_COMPUTED to computedIds,
+        )) {
+            for (id in ids) {
                 for (key in repo.metricKeys(id)) {
-                    addAll(repo.metricSeriesForPortablePayload(
-                        id, key, "0000-01-01", "9999-12-31"))
+                    val rows = repo.metricSeriesForPortablePayload(
+                        id,
+                        key,
+                        "0000-01-01",
+                        "9999-12-31",
+                    )
+                    sidecarRows.addAll(rows)
+                    for (row in rows) {
+                        val identity = "${source.wireValue}|${row.day}|${row.key}"
+                        if (seenComparisonMetrics.add(identity)) {
+                            comparisonMetricRows += ComparisonMetricRow(
+                                source = source,
+                                day = row.day,
+                                key = row.key,
+                                value = row.value,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -502,8 +995,7 @@ object WhoopCsvExporter {
             else -> "import"
         }
 
-        val zip = zipBytes(
-            linkedMapOf(
+        val archiveEntries = linkedMapOf(
                 "physiological_cycles.csv" to cyclesCsv(
                     daily,
                     seriesByDay,
@@ -542,12 +1034,29 @@ object WhoopCsvExporter {
                 "journal_entries.csv" to journalCsv(journal).toByteArray(),
                 "noop_metric_series.json" to metricSeriesJson(sidecarRows).toByteArray(),
                 PortableUserDataCodec.FILE_NAME to portable,
+        )
+        val appVersion = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "unknown"
+        archiveEntries.putAll(
+            comparisonEntries(
+                context = ComparisonContext(
+                    generatedAtUtc = Instant.now().toString(),
+                    platform = "Android",
+                    appVersion = appVersion,
+                ),
+                daily = comparisonDaily,
+                sleeps = comparisonSleeps,
+                workouts = comparisonWorkouts,
+                metricSeries = comparisonMetricRows,
+                detectorDecisions = AutoWorkoutPrefs.exportDecisionRecords(context),
             ),
         )
+        val zip = zipBytes(archiveEntries)
         context.contentResolver.openOutputStream(uri)?.use { it.write(zip); it.flush() }
             ?: throw IOException("Could not open the chosen file for writing.")
         return "Exported ${daily.size} days, ${sleeps.size} sleeps, ${workouts.size} workouts, " +
             "${journal.size} journal entries, ${nutritionEntries.size} nutrition entries, and " +
-            "${strengthSessions.size} strength sessions."
+            "${strengthSessions.size} strength sessions. Comparison-ready source files are included."
     }
 }

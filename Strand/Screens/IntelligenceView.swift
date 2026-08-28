@@ -329,7 +329,9 @@ private struct IntelSyncingNote: View {
             SyncingHistoryNote(
                 chunks: live.syncChunksThisSession,
                 rows: live.historySyncProgress.rowsPersisted,
-                newestDataUnix: live.historySyncProgress.newestDataUnix
+                newestDataUnix: live.historySyncProgress.newestDataUnix,
+                startedAt: live.historySyncStartedAt,
+                lastDurableProgressAt: live.historySyncLastDurableProgressAt
             )
         }
     }

@@ -386,35 +386,83 @@ struct SyncingHistoryNote: View {
     let chunks: Int
     let rows: Int
     let newestDataUnix: Int?
+    let startedAt: TimeInterval?
+    let lastDurableProgressAt: TimeInterval?
 
-    init(chunks: Int, rows: Int = 0, newestDataUnix: Int? = nil) {
+    init(
+        chunks: Int,
+        rows: Int = 0,
+        newestDataUnix: Int? = nil,
+        startedAt: TimeInterval? = nil,
+        lastDurableProgressAt: TimeInterval? = nil
+    ) {
         self.chunks = chunks
         self.rows = rows
         self.newestDataUnix = newestDataUnix
+        self.startedAt = startedAt
+        self.lastDurableProgressAt = lastDurableProgressAt
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 6) {
                 StatePill("Syncing Noop Band history…", tone: .accent, pulsing: true)
-                if chunks > 0 {
-                    Text(
-                        String.localizedStringWithFormat(
-                            String(localized: "appwide.today.band_sync.batches_format"),
-                            Int64(chunks)
-                        )
-                    )
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(activityLabel(now: context.date.timeIntervalSince1970))
+                        .foregroundStyle(activityTone(now: context.date.timeIntervalSince1970))
+                    Spacer(minLength: 8)
+                    Text(elapsedLabel(now: context.date.timeIntervalSince1970))
+                        .foregroundStyle(StrandPalette.textSecondary)
                 }
-            }
-            if rows > 0 {
+                .font(StrandFont.footnote)
+                Text(
+                    String.localizedStringWithFormat(
+                        String(localized: "appwide.today.band_sync.batches_format"),
+                        Int64(chunks)
+                    )
+                )
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
                 Text(persistedDetail)
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func activityLabel(now: TimeInterval) -> String {
+        let key: String
+        switch HistorySyncDurableProgressPolicy.activity(
+            startedAt: startedAt,
+            lastDurableProgressAt: lastDurableProgressAt,
+            now: now
+        ) {
+        case .starting: key = "appwide.today.band_sync.activity_starting"
+        case .advancing: key = "appwide.today.band_sync.activity_advancing"
+        case .waiting: key = "appwide.today.band_sync.activity_waiting"
+        case .stalled: key = "appwide.today.band_sync.activity_stalled"
+        }
+        return String(localized: String.LocalizationValue(key))
+    }
+
+    private func activityTone(now: TimeInterval) -> Color {
+        switch HistorySyncDurableProgressPolicy.activity(
+            startedAt: startedAt,
+            lastDurableProgressAt: lastDurableProgressAt,
+            now: now
+        ) {
+        case .starting, .advancing: return StrandPalette.statusPositive
+        case .waiting: return StrandPalette.statusWarning
+        case .stalled: return StrandPalette.statusCritical
+        }
+    }
+
+    private func elapsedLabel(now: TimeInterval) -> String {
+        String.localizedStringWithFormat(
+            String(localized: "appwide.today.band_sync.elapsed_format"),
+            historySyncElapsedClock(startedAt: startedAt, now: now)
+        )
     }
 
     private var persistedDetail: String {
@@ -432,6 +480,16 @@ struct SyncingHistoryNote: View {
             date
         )
     }
+}
+
+func historySyncElapsedClock(startedAt: TimeInterval?, now: TimeInterval) -> String {
+    let total = max(0, Int(now - (startedAt ?? now)))
+    let hours = total / 3_600
+    let minutes = (total % 3_600) / 60
+    let seconds = total % 60
+    return hours > 0
+        ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        : String(format: "%d:%02d", minutes, seconds)
 }
 
 /// Coarse relative-time label for the "History synced N ago" sync-status line. Pure - `now` is

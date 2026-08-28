@@ -683,7 +683,11 @@ final class IntelligenceEngine: ObservableObject {
                     "fitness_age", "vo2max_est",
                 ])
             }
-            return .reconciled(wroteValue: rows.contains { $0.key == "fitness_age" })
+            let outcome = AgeMetricReconciliationOutcome.reconciled(
+                wroteValue: rows.contains { $0.key == "fitness_age" }
+            )
+            repo.noteAgeMetricsChanged()
+            return outcome
         } catch {
             return .failed
         }
@@ -2059,13 +2063,17 @@ final class IntelligenceEngine: ObservableObject {
         // Migration/repair: older builds silently persisted inferred rows despite the UI's suggestion-only
         // contract. Remove those computed rows and do not re-insert them. Confirmed manual/imported workouts
         // live under different sources and are untouched.
-        _ = try? await store.deleteWorkouts(deviceId: computedId, sport: "detected",
-                                            from: windowStart, to: now)
+        let inferredWorkoutsDeleted = (try? await store.deleteWorkouts(
+            deviceId: computedId, sport: "detected", from: windowStart, to: now
+        )) ?? 0
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the
         // under-sampled ones from that denser data.
-        await rescoreManualWorkouts(store: store, profile: up)
+        let manualWorkoutsChanged = await rescoreManualWorkouts(store: store, profile: up)
+        if inferredWorkoutsDeleted > 0 || manualWorkoutsChanged {
+            repo.noteWorkoutsChanged()
+        }
 
         results = out
         note = out.isEmpty
@@ -2089,6 +2097,10 @@ final class IntelligenceEngine: ObservableObject {
         } else if !wmKey.isEmpty {
             UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey)
         }
+        // Fitness Age, VO₂ estimate, Vitality, and Wellness Age live outside Repository.days. Publish one
+        // focused revision after every completed scoring pass so their screens re-read persisted rows even
+        // when the daily-cache diff is otherwise byte-identical.
+        repo.noteAgeMetricsChanged()
         return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
     }
 
@@ -2239,11 +2251,11 @@ final class IntelligenceEngine: ObservableObject {
     /// window, recompute from it. Conservative + idempotent: only `manual` rows that look under-scored
     /// (negligible calories), and only when the recompute is a genuine improvement , so a well-scored
     /// 4.0 workout is never touched and a still-sparse window is a no-op.
-    private func rescoreManualWorkouts(store: WhoopStore, profile up: UserProfile) async {
+    private func rescoreManualWorkouts(store: WhoopStore, profile up: UserProfile) async -> Bool {
         let now = Int(Date().timeIntervalSince1970)
         let since = now - 14 * 86_400
         guard let rows = try? await store.workouts(deviceId: deviceId, from: since, to: now, limit: 200)
-        else { return }
+        else { return false }
         let hrMax = Double(profile.hrMax)
         var updated: [WorkoutRow] = []
         // A manual row is eligible when it looks under-scored (negligible kcal, #137) OR it's missing
@@ -2266,7 +2278,13 @@ final class IntelligenceEngine: ObservableObject {
                 durationS: row.durationS, energyKcal: energyKcal, avgHr: s.avgHr, maxHr: s.maxHr,
                 strain: s.strain, distanceM: row.distanceM, zonesJSON: row.zonesJSON, notes: row.notes))
         }
-        if !updated.isEmpty { _ = try? await store.upsertWorkouts(updated, deviceId: deviceId) }
+        guard !updated.isEmpty else { return false }
+        do {
+            _ = try await store.upsertWorkouts(updated, deviceId: deviceId)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Re-score ONLY the recovery composite for a day against a (re-seeded) baseline. Every other field

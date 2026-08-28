@@ -126,6 +126,9 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// the DISPLAYED number + unit onto WHOOP's 0–21 axis. Mirrors the Android `MetricSpec.whoopEffort`
     /// gate (`key == "strain"`) - the only value-converting metric in the catalog.
     private var isEffort: Bool { key == "strain" }
+    /// Fitness Age is stored as continuous years but presented as `year.month`, where the suffix is a
+    /// calendar-month count (`23.11` = 23 years, 11 months), on every catalog-driven surface.
+    private var isFitnessAge: Bool { key == "fitness_age" }
     /// The database convention for sleep efficiency is a 0–1 fraction, while the catalog presents it
     /// as a percentage. Keep conversion at the descriptor boundary so charts, tables and stat tiles all
     /// say 90% for a stored 0.90 (rather than the misleading 1% produced by plain rounding).
@@ -141,6 +144,7 @@ struct MetricDescriptor: Identifiable, Hashable {
     private var isSkinTemp: Bool { key == "skin_temp" }
 
     func format(_ v: Double) -> String {
+        if isFitnessAge { return FitnessAgePresentation.value(v) }
         let displayValue = isFractionPercent ? v * 100 : v
         let n = decimals == 0
             ? String(Int(displayValue.rounded()))
@@ -168,6 +172,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         case "kg":  return UnitFormatter.massFromKilograms(
             v, unit: mass ?? (system == .imperial ? .pounds : .kilograms)
         )
+        case "cm":  return UnitFormatter.heightFromCentimeters(v, system: system)
         case "°C":
             // #111: a skin-temp DEVIATION (v < 20 °C) scales without the +32 offset; an absolute reading
             // (WHOOP export, v >= 20 °C) keeps the full C→F. Every other °C metric is absolute.
@@ -185,6 +190,11 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// caller supplies the magnitude (sign is rendered separately).
     func formatDelta(_ v: Double, system: UnitSystem, temperature: TemperatureUnit,
                      effortScale: EffortScale = .hundred, mass: MassUnit? = nil) -> String {
+        if isFitnessAge {
+            return FitnessAgePresentation.duration(
+                totalMonths: Int((v * 12).rounded())
+            )
+        }
         switch unit {
         case "kg":  return UnitFormatter.massFromKilograms(
             v, unit: mass ?? (system == .imperial ? .pounds : .kilograms)
@@ -211,6 +221,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         case "kg":  return UnitFormatter.massUnit(
             mass ?? (system == .imperial ? .pounds : .kilograms)
         )
+        case "cm":  return system == .imperial ? "ft / in" : "cm"
         case "°C":  return UnitFormatter.temperatureUnit(temperature)
         default:    return isEffort ? displayUnit(effortScale: effortScale) : unit
         }
@@ -224,6 +235,12 @@ struct MetricDescriptor: Identifiable, Hashable {
     }
 }
 
+struct DayTrackedMetric: Identifiable, Equatable {
+    let descriptor: MetricDescriptor
+    let value: Double
+    var id: String { descriptor.id }
+}
+
 /// Canonical catalog - mirrors the WHOOP "Trend View" plus Apple Health body metrics.
 /// Keys match exactly what the importers write into metricSeries.
 enum MetricCatalog {
@@ -235,7 +252,7 @@ enum MetricCatalog {
         d("max_hr", String(localized: "Max Heart Rate"), "Heart", "bpm", "my-whoop", "bolt.heart", 0, nil),
         d("energy_kcal", String(localized: "Calories"), "Heart", "kcal", "my-whoop", "flame", 0, nil),
         d("vo2max", String(localized: "VO₂ Max"), "Heart", "", "apple-health", "lungs.fill", 1, true),
-        d("fitness_age", String(localized: "Fitness Age"), "Heart", "yrs", "my-whoop", "figure.run", 0, false),
+        d("fitness_age", String(localized: "Fitness Age"), "Heart", "", "my-whoop", "figure.run", 0, false),
         d("vo2max_est", String(localized: "VO₂ Max (estimated)"), "Heart", "", "my-whoop", "lungs", 1, true),
         d("vitality", String(localized: "Vitality"), "Heart", "", "my-whoop", "sparkles", 0, true),
         d("body_age", String(localized: "Wellness Age"), "Heart", "yrs", "my-whoop", "figure.stand", 0, false),

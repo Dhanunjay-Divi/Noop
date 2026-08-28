@@ -88,6 +88,20 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 if live.connected {
                     consoleHeader
+                    if live.backfilling {
+                        SyncingHistoryNote(
+                            chunks: live.syncChunksThisSession,
+                            rows: live.historySyncProgress.rowsPersisted,
+                            newestDataUnix: live.historySyncProgress.newestDataUnix,
+                            startedAt: live.historySyncStartedAt,
+                            lastDurableProgressAt: live.historySyncLastDurableProgressAt
+                        )
+                    } else if let syncError = live.lastSyncError {
+                        Text(syncError)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     liveTrackingCard
                     // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
                     // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps

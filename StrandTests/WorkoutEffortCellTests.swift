@@ -139,3 +139,48 @@ final class WorkoutDateWindowTests: XCTestCase {
         )
     }
 }
+
+final class DailyOverviewPresentationTests: XCTestCase {
+    private func daily(efficiency: Double?) -> DailyMetric {
+        DailyMetric(
+            day: "2026-08-28",
+            totalSleepMin: 450,
+            efficiency: efficiency,
+            deepMin: 90,
+            remMin: 105,
+            lightMin: 255,
+            disturbances: 5,
+            restingHr: 52,
+            avgHrv: 74,
+            recovery: 82,
+            strain: 41,
+            exerciseCount: 1
+        )
+    }
+
+    func testEfficiencyAcceptsCanonicalFractionAndLegacyPercent() {
+        XCTAssertEqual(
+            DailyOverviewPresentation.efficiencyPercent(0.899) ?? -1,
+            89.9,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            DailyOverviewPresentation.efficiencyPercent(89.9) ?? -1,
+            89.9,
+            accuracy: 0.0001
+        )
+    }
+
+    func testSleepScoreAcceptsCanonicalFractionAndLegacyPercent() {
+        let canonical = DailyOverviewPresentation.sleepScore(daily(efficiency: 0.899))
+        let legacy = DailyOverviewPresentation.sleepScore(daily(efficiency: 89.9))
+        XCTAssertNotNil(canonical)
+        XCTAssertEqual(canonical ?? -1, legacy ?? -2, accuracy: 0.0001)
+    }
+
+    func testInvalidEfficiencyStaysMissing() {
+        XCTAssertNil(DailyOverviewPresentation.efficiencyPercent(-1))
+        XCTAssertNil(DailyOverviewPresentation.efficiencyPercent(100.1))
+        XCTAssertNil(DailyOverviewPresentation.sleepScore(daily(efficiency: .infinity)))
+    }
+}

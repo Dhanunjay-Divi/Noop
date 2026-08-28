@@ -3,6 +3,8 @@ package com.noop.data
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.ActiveZoneMinutes
 import com.noop.analytics.ActiveZoneMinutesCalculator
+import com.noop.analytics.IntelligenceEngine
+import com.noop.analytics.UserProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -49,13 +51,39 @@ object DemoSeeder {
     )
 
     /** Seed only if the demo (and the user) has no daily history yet. Safe to call on every launch. */
-    suspend fun seedIfEmpty(repo: WhoopRepository, vitalityAge: Double) {
+    suspend fun seedIfEmpty(
+        repo: WhoopRepository,
+        profileAge: Double,
+        profileSex: String,
+    ) {
         val existingDays = repo.days(WHOOP)
         if (existingDays.isNotEmpty()) {
+            repairFitnessAgeProfileMarkers(repo, profileAge, profileSex)
             repairActiveZoneFixtures(repo, existingDays)
             return
         }
-        seed(repo, vitalityAge)
+        seed(repo, profileAge, profileSex)
+    }
+
+    /** Upgrade an older persisted demo fixture to the current fail-closed Fitness Age provenance. */
+    private suspend fun repairFitnessAgeProfileMarkers(
+        repo: WhoopRepository,
+        profileAge: Double,
+        profileSex: String,
+    ) {
+        val token = AgeMetricProfile.fitnessAgeToken(profileAge, profileSex) ?: return
+        val fitnessRows = repo.metricSeries(
+            WHOOP_NOOP,
+            "fitness_age",
+            "0000-00-00",
+            "9999-99-99",
+        )
+        if (fitnessRows.isEmpty()) return
+        repo.upsertMetricSeries(
+            fitnessRows.map {
+                MetricSeriesRow(WHOOP_NOOP, it.day, AgeMetricProfile.FITNESS_AGE_KEY, token)
+            },
+        )
     }
 
     /**
@@ -139,7 +167,11 @@ object DemoSeeder {
     private fun SourceCoordinatorIsWhoop(d: PairedDeviceRow): Boolean =
         d.id == "my-whoop" || d.brand.equals("WHOOP", ignoreCase = true)
 
-    private suspend fun seed(repo: WhoopRepository, vitalityAge: Double) {
+    private suspend fun seed(
+        repo: WhoopRepository,
+        profileAge: Double,
+        profileSex: String,
+    ) {
         val rng = Random(0xC0FFEE)
         val zone = ZoneId.systemDefault()
         val startDay = LocalDate.now().minusDays((DAYS - 1).toLong())
@@ -326,29 +358,42 @@ object DemoSeeder {
             }
         }
 
-        // --- weekly Fitness Age + VO2max estimate (the engine stamps these on each week's
-        // Saturday; mirror that here so the Fitness Age screen renders in the demo build).
-        // Trends from ~42 → ~36 (younger) as the demo "fitness" drift climbs; vo2max ~44 → ~50.
-        var fitnessAge = 42.0
-        var vo2 = 44.0
+        // --- weekly Fitness Age (the engine stamps this on each week's Saturday). Build every demo
+        // point with the production calculation so the launch reconciliation pass cannot replace the
+        // newest fixture with a radically different value and fabricate an impossible weekly jump.
         var vitality = 55.0      // weekly Vitality (0–100) trending up as the demo habits improve
         var bodyAgeDemo = 40.0   // Body Age (years) trending down (younger)
+        val fitnessAgeToken = AgeMetricProfile.fitnessAgeToken(profileAge, profileSex)
+        val fitnessProfile = UserProfile(
+            age = profileAge,
+            sex = profileSex,
+            ageInputConfirmed = true,
+            sexInputConfirmed = true,
+        )
         for (i in 0 until DAYS) {
             val date = startDay.plusDays(i.toLong())
             if (date.dayOfWeek.value != 6) continue // 6 = Saturday
             val day = date.toString()
-            // Seed under the NOOP-COMPUTED source (WHOOP_NOOP), exactly where the IntelligenceEngine writes
-            // these derived weekly scores in the real app - so the Health screen, the Today "Your cards"
-            // Fitness age / Vitality cards and Trends (all via the computed union) resolve them in the demo instead
-            // of showing "No Data". Trends ~42 → ~34 (younger) for Fitness age; vitality climbs ~55 → ~80.
-            series.add(MetricSeriesRow(WHOOP_NOOP, day, "fitness_age",
-                round1((fitnessAge + gauss(rng, 0.0, 0.3)).coerceIn(34.0, 44.0))))
-            series.add(MetricSeriesRow(WHOOP_NOOP, day, "vo2max_est",
-                round1((vo2 + gauss(rng, 0.0, 0.4)).coerceIn(42.0, 52.0))))
+            val gateStart = maxOf(0, i - 6)
+            val fitnessRows = IntelligenceEngine.fitnessAgeRows(
+                daily.subList(gateStart, i + 1),
+                fitnessProfile,
+                WHOOP_NOOP,
+                day,
+            )
+            series.addAll(fitnessRows)
             series.add(MetricSeriesRow(WHOOP_NOOP, day, "vitality",
                 round1((vitality + gauss(rng, 0.0, 1.0)).coerceIn(40.0, 80.0))))
             series.add(MetricSeriesRow(WHOOP_NOOP, day, "body_age",
                 round1((bodyAgeDemo + gauss(rng, 0.0, 0.3)).coerceIn(30.0, 45.0))))
+            if (fitnessRows.any { it.key == "fitness_age" }) fitnessAgeToken?.let {
+                series.add(MetricSeriesRow(
+                    WHOOP_NOOP,
+                    day,
+                    AgeMetricProfile.FITNESS_AGE_KEY,
+                    it,
+                ))
+            }
             // Vitality readers require the provenance-safe v2 marker. Stamp the actual demo profile age,
             // mirroring IntelligenceEngine's weekly write, so synthetic rows are visible only for the
             // profile they describe and never inherit the released steps-era v1 grace period.
@@ -356,10 +401,8 @@ object DemoSeeder {
                 WHOOP_NOOP,
                 day,
                 AgeMetricProfile.VITALITY_KEY,
-                AgeMetricProfile.vitalityToken(vitalityAge),
+                AgeMetricProfile.vitalityToken(profileAge),
             ))
-            fitnessAge -= 0.75 // ~6 yr younger across the 8 seeded Saturdays
-            vo2 += 0.75
             vitality += 2.0
             bodyAgeDemo -= 0.6
         }

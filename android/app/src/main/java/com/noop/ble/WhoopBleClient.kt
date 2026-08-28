@@ -198,6 +198,10 @@ data class LiveState(
     /** Oldest/newest usable timestamps durably inserted during the same burst. */
     val syncDataOldestAt: Long? = null,
     val syncDataNewestAt: Long? = null,
+    /** Wall-clock bounds for the current contiguous history drain. Incoming frames do not advance the
+     * durable timestamp; only committed rows or a safely acknowledged trim do. */
+    val syncStartedAt: Long? = null,
+    val syncLastDurableProgressAt: Long? = null,
     /** Wall-clock (unix seconds) of the last offload that ran to HISTORY_COMPLETE, or null if none
      *  this process. For a cloud-free app this is the honest "is sync actually working?" answer - the
      *  UI renders it as a relative "Last synced N ago". (PR #85) */
@@ -803,6 +807,10 @@ class WhoopBleClient(
          * Generous (60s, not 20s) because the type-43 raw flood eats BLE airtime between chunks.
          */
         private const val BACKFILL_IDLE_TIMEOUT_MS = 60_000L
+        /** Frames may remain chatty while persistence/trim acknowledgement is wedged. Stop that attempt
+         * independently, leaving the held history unacknowledged on the band for the next retry. */
+        private const val BACKFILL_DURABLE_PROGRESS_TIMEOUT_MS =
+            HistorySyncDurableProgressPolicy.STALLED_AFTER_SECONDS * 1_000L
         /** Deferral before the first connect-time offload, so SET_CLOCK/GET_DATA_RANGE round-trip first. */
         private const val INITIAL_BACKFILL_DELAY_MS = 1_500L
         /** 5/MG fail-open gate: how long to wait for a GET_DATA_RANGE SUCCESS before requesting
@@ -1117,6 +1125,8 @@ class WhoopBleClient(
                 syncRowsThisSession = 0,
                 syncDataOldestAt = null,
                 syncDataNewestAt = null,
+                syncStartedAt = null,
+                syncLastDurableProgressAt = null,
                 charging = null,
                 // Stale firmware/layout readouts must not outlive the dropped link.
                 strapFirmware = null, historyLayoutVersion = null,
@@ -1170,6 +1180,8 @@ class WhoopBleClient(
                 syncRowsThisSession = 0,
                 syncDataOldestAt = null,
                 syncDataNewestAt = null,
+                syncStartedAt = null,
+                syncLastDurableProgressAt = null,
                 charging = null, strapFirmware = null, historyLayoutVersion = null,
                 pairingHint = null, scanning = false,
                 statusNote = null,
@@ -2142,6 +2154,14 @@ class WhoopBleClient(
         decodedChunksThisSession += 1   // invoked once per non-empty decoded chunk (#77 family tally)
         val hadRows = syncBurstProgress.rows > 0
         syncBurstProgress = syncBurstProgress.adding(committed)
+        if (HistorySyncDurableProgressPolicy.advances(
+                rows = committed.rows,
+                trim = null,
+                previousTrim = null,
+            )
+        ) {
+            noteBackfillDurableProgress()
+        }
         if ((!hadRows && syncBurstProgress.rows > 0) || syncBurstProgress.batches % 10 == 0) {
             publishHistorySyncProgress()
         }
@@ -2299,6 +2319,12 @@ class WhoopBleClient(
                             materializedAfterSync = true,
                         )
                     }
+                    ScheduledReportNotifier.onWorkout(
+                        context = context,
+                        newestWorkoutTs = repository.latestWorkoutStartAllSources(),
+                        title = "",
+                        body = "",
+                    )
                 } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
                     throw cancelled
                 } catch (failure: Throwable) {
@@ -2488,6 +2514,7 @@ class WhoopBleClient(
     @Volatile private var lastBackfillAtMs: Long? = null
 
     private val backfillTimeoutRunnable = Runnable { onBackfillTimeout() }
+    private val backfillDurableProgressTimeoutRunnable = Runnable { onBackfillDurableProgressTimeout() }
 
     /** Live-stream keep-alive (port of BLEManager.keepAliveTimer): re-arms realtime, polls battery,
      *  and bounces a stalled link. Handler-posted on every connect handshake; cancelled in reset(). */
@@ -6133,6 +6160,7 @@ class WhoopBleClient(
         // in the same burst banked rows - tell the backfiller so its no-cursor END reads as "caught up",
         // not "no banked history / charge to 100%". A fresh offload (count 0) keeps the honest guidance.
         val continuingBurst = consecutiveAutoContinues > 0
+        val nowSec = System.currentTimeMillis() / 1_000L
         backfiller.begin(connectedFamily, continuedAfterRows = continuingBurst)   // family drives the +4 puffin offset for 5/MG (#78)
         backfilling = true
         lastBackfillAtMs = System.currentTimeMillis()   // the BackfillPolicy floor is measured from the last KICK
@@ -6151,6 +6179,8 @@ class WhoopBleClient(
                 syncRowsThisSession = syncBurstProgress.rows,
                 syncDataOldestAt = syncBurstProgress.oldestUnix,
                 syncDataNewestAt = syncBurstProgress.newestUnix,
+                syncStartedAt = if (continuingBurst) it.syncStartedAt ?: nowSec else nowSec,
+                syncLastDurableProgressAt = if (continuingBurst) it.syncLastDurableProgressAt else null,
             )
         }
         refreshConnectionPriority()   // #477: escalate to HIGH for the offload burst (faster sync). No-op unless enabled.
@@ -6178,6 +6208,7 @@ class WhoopBleClient(
             sendHistoricalKick()
         }
         armBackfillTimeout()
+        armBackfillDurableProgressTimeout()
         log("Backfill: session started - historical offload requested")
     }
 
@@ -6313,6 +6344,44 @@ class WhoopBleClient(
         handler.postDelayed(backfillTimeoutRunnable, BACKFILL_IDLE_TIMEOUT_MS)
     }
 
+    /**
+     * Bound a chatty-but-wedged offload independently from the frame-idle watchdog. Ending this attempt
+     * calls [Backfiller.timeoutFired] and never acknowledges the held chunk, so the band preserves it.
+     */
+    private fun armBackfillDurableProgressTimeout() {
+        if (!backfilling) return
+        handler.removeCallbacks(backfillDurableProgressTimeoutRunnable)
+        handler.postDelayed(
+            backfillDurableProgressTimeoutRunnable,
+            BACKFILL_DURABLE_PROGRESS_TIMEOUT_MS,
+        )
+    }
+
+    private fun noteBackfillDurableProgress() {
+        if (!backfilling) return
+        val nowSec = System.currentTimeMillis() / 1_000L
+        _state.update { it.copy(syncLastDurableProgressAt = nowSec) }
+        armBackfillDurableProgressTimeout()
+    }
+
+    private fun onBackfillDurableProgressTimeout() {
+        if (!backfilling) return
+        val state = _state.value
+        val nowSec = System.currentTimeMillis() / 1_000L
+        if (!HistorySyncDurableProgressPolicy.shouldStop(
+                startedAt = state.syncStartedAt,
+                lastDurableProgressAt = state.syncLastDurableProgressAt,
+                now = nowSec,
+            )
+        ) {
+            armBackfillDurableProgressTimeout()
+            return
+        }
+        log("Backfill: durable progress stalled for 90s while frames may still be arriving - ending this attempt without acknowledging the held history.")
+        backfiller.timeoutFired()
+        exitBackfilling("durableProgressTimeout")
+    }
+
     private fun onBackfillTimeout() {
         // 5/MG: a session that timed out with ZERO offload frames means the strap never answered the
         // history request (seen on real hardware — the first request after connect can be swallowed).
@@ -6333,6 +6402,7 @@ class WhoopBleClient(
                 )
             }
             handler.removeCallbacks(backfillTimeoutRunnable)
+            handler.removeCallbacks(backfillDurableProgressTimeoutRunnable)
             backfillDrain.clear()
             log("Backfill: no history frames arrived - retrying request (attempt ${whoop5HistoryAttempts + 1})")
             // Bounded mid-attempt retry (whoop5HistoryAttempts < 2): AUTO_CONTINUE so the 90s event floor
@@ -6505,7 +6575,17 @@ class WhoopBleClient(
                             rows = rowsThisSession,
                             deepPackets = it.deepPacketsThisSession,
                         ),
-                    ),
+                ),
+                historySyncExperimental = whoop5HistoryExperimental,
+            )
+            "durableProgressTimeout" -> it.copy(
+                backfilling = false,
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
+                lastSyncError = futureClockBanner
+                    ?: "Sync paused because saved data stopped advancing. Your band history is safe; Noop will retry on the next sync.",
                 historySyncExperimental = whoop5HistoryExperimental,
             )
             else -> it.copy(
@@ -6518,6 +6598,7 @@ class WhoopBleClient(
             )
         } }
         handler.removeCallbacks(backfillTimeoutRunnable)
+        handler.removeCallbacks(backfillDurableProgressTimeoutRunnable)
         backfillDrain.clear()
         closeWhoop5BackfillCapture(flushSummary = true)
         log("Backfill: session ended - reason=$reason")
@@ -6684,6 +6765,11 @@ class WhoopBleClient(
      * metadata.data[10:18]. Port of `BLEManager.ackHistoricalChunk`.
      */
     private fun ackHistoricalChunk(trim: Long, endData: ByteArray) {
+        val trimAdvanced = HistorySyncDurableProgressPolicy.advances(
+            rows = 0,
+            trim = trim,
+            previousTrim = backfiller.lastAckedTrim,
+        )
         val payload = ByteArray(1 + endData.size)
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
@@ -6691,9 +6777,12 @@ class WhoopBleClient(
         // Progress signal for the "Syncing strap history…" UI (#77). The per-session count remains
         // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
-        syncBurstProgress = syncBurstProgress.acknowledgingBatch()
-        if (syncBurstProgress.batches == 1 || syncBurstProgress.batches % 10 == 0) {
-            publishHistorySyncProgress()
+        if (trimAdvanced) {
+            syncBurstProgress = syncBurstProgress.acknowledgingBatch()
+            noteBackfillDurableProgress()
+            if (syncBurstProgress.batches == 1 || syncBurstProgress.batches % 10 == 0) {
+                publishHistorySyncProgress()
+            }
         }
         log("Backfill: acked chunk trim=$trim")
     }
@@ -6879,6 +6968,8 @@ class WhoopBleClient(
             syncRowsThisSession = 0,
             syncDataOldestAt = null,
             syncDataNewestAt = null,
+            syncStartedAt = null,
+            syncLastDurableProgressAt = null,
             charging = null,        // a stale charging flag must not outlive the link
             strapFirmware = null,   // nor stale firmware/layout versions
             historyLayoutVersion = null,
@@ -7055,6 +7146,7 @@ class WhoopBleClient(
         // don't double-log it here).
         closeWhoop5BackfillCapture(flushSummary = false)
         handler.removeCallbacks(backfillTimeoutRunnable)
+        handler.removeCallbacks(backfillDurableProgressTimeoutRunnable)
         stopBackfillTimer()
         stopKeepAlive()
         // The bonded-handshake watchdog (#50) is per-connection — cancel it so a pending bounce can't

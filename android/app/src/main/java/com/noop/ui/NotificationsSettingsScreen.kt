@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +47,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,9 +65,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.notif.CallAlertController
 import com.noop.notif.CallAlertSource
+import com.noop.notif.ScheduledReportNotifier
+import com.noop.notif.StrainTargetNotifier
 import java.util.Calendar
 
 // MARK: - NotificationsSettingsScreen
@@ -219,9 +227,27 @@ internal object NotifPrefs {
 
 // MARK: - Screen
 
+private enum class ReportNotificationKind {
+    MORNING,
+    WORKOUT,
+    STRAIN_TARGET,
+}
+
+internal fun reportNotificationsAvailable(context: Context): Boolean {
+    val runtimePermissionGranted =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+    return runtimePermissionGranted &&
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
 @Composable
 fun NotificationsSettingsScreen(vm: AppViewModel) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val live by vm.live.collectAsStateWithLifecycle()
 
     // Header settings, seeded from prefs once and written through on change.
@@ -237,9 +263,29 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
     var callsPattern by remember { mutableStateOf(NotifPrefs.callPattern(context)) }
     // Scheduled report notifications (#517) — opt-in, default OFF. SharedPreferences isn't reactive, so
     // each Switch mirrors into local state and writes straight through to NoopPrefs.
-    var morningReport by remember { mutableStateOf(NoopPrefs.morningReportEnabled(context)) }
-    var postWorkoutReport by remember { mutableStateOf(NoopPrefs.postWorkoutReportEnabled(context)) }
-    var strainTargetReport by remember { mutableStateOf(NoopPrefs.strainTargetEnabled(context)) }
+    val reportsInitiallyAvailable = reportNotificationsAvailable(context)
+    val morningInitiallyEnabled = NoopPrefs.morningReportEnabled(context)
+    val workoutInitiallyEnabled = NoopPrefs.postWorkoutReportEnabled(context)
+    val strainInitiallyEnabled = NoopPrefs.strainTargetEnabled(context)
+    var morningReport by remember {
+        mutableStateOf(morningInitiallyEnabled && reportsInitiallyAvailable)
+    }
+    var postWorkoutReport by remember {
+        mutableStateOf(workoutInitiallyEnabled && reportsInitiallyAvailable)
+    }
+    var strainTargetReport by remember {
+        mutableStateOf(strainInitiallyEnabled && reportsInitiallyAvailable)
+    }
+    var reportPermissionDenied by remember {
+        mutableStateOf(
+            !reportsInitiallyAvailable &&
+                (morningInitiallyEnabled || workoutInitiallyEnabled || strainInitiallyEnabled),
+        )
+    }
+    var pendingReportPermission by remember {
+        mutableStateOf<ReportNotificationKind?>(null)
+    }
+    var postWorkoutEnablePending by remember { mutableStateOf(false) }
     var phonePermissionDenied by remember { mutableStateOf(false) }
     val phonePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -247,6 +293,101 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         phoneCallsEnabled = granted
         phonePermissionDenied = !granted
         NotifPrefs.setBool(context, NotifPrefs.CALLS_PHONE, granted)
+    }
+
+    fun applyReportPermission(
+        kind: ReportNotificationKind,
+        allowed: Boolean,
+        permissionDenied: Boolean = false,
+    ) {
+        if (allowed) reportPermissionDenied = false
+        when (kind) {
+            ReportNotificationKind.MORNING -> {
+                morningReport = allowed
+                NoopPrefs.setMorningReportEnabled(context, allowed)
+                if (!allowed) ScheduledReportNotifier.cancelMorning(context)
+            }
+            ReportNotificationKind.WORKOUT -> {
+                if (!allowed) {
+                    postWorkoutEnablePending = false
+                    postWorkoutReport = false
+                    vm.setPostWorkoutReportEnabled(false)
+                } else {
+                    postWorkoutEnablePending = true
+                    vm.setPostWorkoutReportEnabled(true) { enabled ->
+                        postWorkoutEnablePending = false
+                        postWorkoutReport = enabled
+                    }
+                }
+            }
+            ReportNotificationKind.STRAIN_TARGET -> {
+                strainTargetReport = allowed
+                NoopPrefs.setStrainTargetEnabled(context, allowed)
+                if (!allowed) StrainTargetNotifier.cancel(context)
+            }
+        }
+        if (permissionDenied) reportPermissionDenied = true
+    }
+
+    val reportPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val kind = pendingReportPermission
+        pendingReportPermission = null
+        if (kind != null) {
+            applyReportPermission(
+                kind,
+                granted && NotificationManagerCompat.from(context).areNotificationsEnabled(),
+                permissionDenied = !granted ||
+                    !NotificationManagerCompat.from(context).areNotificationsEnabled(),
+            )
+        }
+    }
+
+    fun requestReportPermission(kind: ReportNotificationKind) {
+        if (reportNotificationsAvailable(context)) {
+            applyReportPermission(kind, true)
+            return
+        }
+        val canRequestRuntimePermission =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+        if (canRequestRuntimePermission) {
+            pendingReportPermission = kind
+            reportPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            applyReportPermission(kind, false, permissionDenied = true)
+        }
+    }
+
+    // A permission revoked in system settings must not leave inert switches showing ON. Reconcile on
+    // every resume, including the return from the app-notification settings screen.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            if (reportNotificationsAvailable(context)) {
+                reportPermissionDenied = false
+            } else {
+                val hadEnabledReport =
+                    NoopPrefs.morningReportEnabled(context) ||
+                        NoopPrefs.postWorkoutReportEnabled(context) ||
+                        NoopPrefs.strainTargetEnabled(context)
+                if (hadEnabledReport) {
+                    applyReportPermission(
+                        ReportNotificationKind.MORNING,
+                        false,
+                        permissionDenied = true,
+                    )
+                    applyReportPermission(ReportNotificationKind.WORKOUT, false)
+                    applyReportPermission(ReportNotificationKind.STRAIN_TARGET, false)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Per-app enabled state, seeded from prefs so the UI is reactive within the session.
@@ -455,9 +596,12 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                 help = "After last night is processed, a notification with your Recovery and Sleep Score. Posts " +
                     "once a day, after Noop Band has synced the night.",
                 checked = morningReport,
-                onChange = {
-                    morningReport = it
-                    NoopPrefs.setMorningReportEnabled(context, it)
+                onChange = { enabled ->
+                    if (enabled) {
+                        requestReportPermission(ReportNotificationKind.MORNING)
+                    } else {
+                        applyReportPermission(ReportNotificationKind.MORNING, false)
+                    }
                 },
             )
             RowDivider()
@@ -466,12 +610,13 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                 help = "When a new workout syncs in, a notification with its Effort, duration and average " +
                     "heart rate. Shows up after the session reaches NOOP on the next sync.",
                 checked = postWorkoutReport,
-                onChange = {
-                    postWorkoutReport = it
-                    NoopPrefs.setPostWorkoutReportEnabled(context, it)
-                    // Seed the frontier to the newest existing workout when turning ON, so enabling it
-                    // doesn't immediately fire a summary for a session already in history.
-                    if (it) vm.seedWorkoutReportFrontier()
+                enabled = !postWorkoutEnablePending,
+                onChange = { enabled ->
+                    if (enabled) {
+                        requestReportPermission(ReportNotificationKind.WORKOUT)
+                    } else {
+                        applyReportPermission(ReportNotificationKind.WORKOUT, false)
+                    }
                 },
             )
             RowDivider()
@@ -481,11 +626,40 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                 help = "Once a day, a notification at a recovery-based Effort marker. It is a planning cue, " +
                     "not a limit or permission to keep pushing. Posts after Noop Band syncs and NOOP scores the day.",
                 checked = strainTargetReport,
-                onChange = {
-                    strainTargetReport = it
-                    NoopPrefs.setStrainTargetEnabled(context, it)
+                onChange = { enabled ->
+                    if (enabled) {
+                        requestReportPermission(ReportNotificationKind.STRAIN_TARGET)
+                    } else {
+                        applyReportPermission(ReportNotificationKind.STRAIN_TARGET, false)
+                    }
                 },
             )
+            if (reportPermissionDenied) {
+                RowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.appwide_notifications_system_disabled),
+                        style = NoopType.footnote,
+                        color = Palette.statusCritical,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PillButton(
+                        label = stringResource(R.string.appwide_action_open_settings),
+                        icon = Icons.AutoMirrored.Filled.OpenInNew,
+                        enabled = true,
+                    ) {
+                        context.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
+            }
         }
     }
 }

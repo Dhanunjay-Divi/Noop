@@ -1,5 +1,51 @@
 package com.noop.ble
 
+internal enum class HistorySyncProgressActivity {
+    STARTING,
+    ADVANCING,
+    WAITING,
+    STALLED,
+}
+
+/** Pure, wall-clock policy shared by the sync watchdog and progress UI. */
+internal object HistorySyncDurableProgressPolicy {
+    const val WAITING_AFTER_SECONDS = 10L
+    const val STALLED_AFTER_SECONDS = 90L
+
+    fun advances(rows: Int, trim: Long?, previousTrim: Long?): Boolean =
+        rows > 0 || (trim != null && trim != previousTrim)
+
+    fun activity(
+        startedAt: Long?,
+        lastDurableProgressAt: Long?,
+        now: Long,
+        waitingAfterSeconds: Long = WAITING_AFTER_SECONDS,
+        stalledAfterSeconds: Long = STALLED_AFTER_SECONDS,
+    ): HistorySyncProgressActivity {
+        if (startedAt == null) return HistorySyncProgressActivity.STARTING
+        val reference = lastDurableProgressAt ?: startedAt
+        val idle = (now - reference).coerceAtLeast(0)
+        return when {
+            idle >= stalledAfterSeconds -> HistorySyncProgressActivity.STALLED
+            idle >= waitingAfterSeconds -> HistorySyncProgressActivity.WAITING
+            lastDurableProgressAt == null -> HistorySyncProgressActivity.STARTING
+            else -> HistorySyncProgressActivity.ADVANCING
+        }
+    }
+
+    fun shouldStop(
+        startedAt: Long?,
+        lastDurableProgressAt: Long?,
+        now: Long,
+        stalledAfterSeconds: Long = STALLED_AFTER_SECONDS,
+    ): Boolean = activity(
+        startedAt = startedAt,
+        lastDurableProgressAt = lastDurableProgressAt,
+        now = now,
+        stalledAfterSeconds = stalledAfterSeconds,
+    ) == HistorySyncProgressActivity.STALLED
+}
+
 /** Honest, total-free progress for one contiguous history drain across auto-continue slices. */
 internal data class BackfillBurstProgress(
     val batches: Int = 0,

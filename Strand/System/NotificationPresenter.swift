@@ -153,6 +153,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
     static func stableIdentifier(_ raw: String) -> String {
         let canonical = Set([
             "coach_check_in", "connection", "auto_workout", "strain_target",
+            "morning_recap",
             "safety_check_in", "safety_contact_setup", "safety_sos_result",
             "illness_check_in", "daily_review", "inactivity", "smart_alarm",
             "battery", "wind_down", "hydration", "metric_review",
@@ -166,6 +167,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "bluetooth-powered-off": "connection",
             "auto-workout-candidate": "auto_workout",
             "strain-target": "strain_target",
+            "morning-recap": "morning_recap",
             "noop.safety.personal-check-in": "safety_check_in",
             "noop.safety.contacts.setup": "safety_contact_setup",
             "safety-gesture-result": "safety_sos_result",

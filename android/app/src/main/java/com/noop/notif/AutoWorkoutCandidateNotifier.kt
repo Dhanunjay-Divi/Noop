@@ -118,6 +118,13 @@ object AutoWorkoutCandidateNotifier {
             val row = buildDetectedAutoWorkoutRow(computedId, candidate)
             val saved = row != null && runCatching { repository.saveManualWorkout(row) }.isSuccess
             if (saved && row != null) {
+                AutoWorkoutPrefs.recordCandidateDecision(
+                    appContext,
+                    candidate,
+                    AutoWorkoutPrefs.DecisionAction.AUTO_SAVED,
+                    AutoWorkoutPrefs.DecisionActor.AUTOMATION,
+                    row.sport,
+                )
                 AutoWorkoutPrefs.recordReview(
                     appContext,
                     AutoWorkoutPrefs.Review(

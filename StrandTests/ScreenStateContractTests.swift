@@ -418,7 +418,12 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
         XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
         XCTAssertTrue(fitness.contains("WorkoutActivityCalendarSummary.resolve("))
-        XCTAssertTrue(fitness.contains("count == 1 ? \"1 recorded activity\""))
+        XCTAssertTrue(fitness.contains(
+            #"String(localized: "appwide.workouts.activity_calendar.one_recorded_activity")"#
+        ))
+        XCTAssertTrue(fitness.contains(
+            #"String(localized: "appwide.workouts.activity_calendar.recorded_activities")"#
+        ))
         XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Workouts""#))
         XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))
@@ -483,7 +488,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 302)
+        XCTAssertEqual(source.count, 398)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

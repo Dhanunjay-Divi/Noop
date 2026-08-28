@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Edit
@@ -129,6 +130,7 @@ private enum class Destination(
     // Group: Today
     Today("today", R.string.nav_today, Icons.Filled.Home),
     Intelligence("intelligence", R.string.nav_intelligence, Icons.Filled.Psychology),
+    Calendar("calendar", R.string.appwide_calendar_your_month, Icons.Filled.CalendarMonth),
     // Optional, default-OFF (task #43): the Coupled view (WHOOP-style day read). Reached ONLY via the
     // Today dashboard "Coupled view" card tap-through, so it is deliberately NOT in any [DrawerGroup].
     CoupledView("coupled_view", R.string.nav_coupled_view, Icons.Filled.Hexagon),
@@ -363,6 +365,13 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        onOpenCalendar = { nav.navigate(Destination.Calendar.route) },
+                    )
+                }
+                composable(Destination.Calendar.route) {
+                    CalendarMonthScreen(
+                        vm = viewModel,
+                        onBack = { nav.popBackStack() },
                     )
                 }
                 composable(Destination.Live.route) {
@@ -797,7 +806,8 @@ private fun GlassBottomBar(
                         BarSlot(
                             icon = tab.icon,
                             label = stringResource(tab.labelRes),
-                            active = current == tab.dest,
+                            active = current == tab.dest ||
+                                (tab.dest == Destination.Today && current == Destination.Calendar),
                             testTag = "noop.tab.${tab.dest.route}",
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
@@ -817,7 +827,8 @@ private fun GlassBottomBar(
                         icon = Icons.Filled.MoreHoriz,
                         label = stringResource(R.string.nav_more),
                         active = current != Destination.Today && current != Destination.Trends &&
-                            current != Destination.Workouts && current != Destination.Sleep,
+                            current != Destination.Workouts && current != Destination.Sleep &&
+                            current != Destination.Calendar,
                         testTag = "noop.tab.more",
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },

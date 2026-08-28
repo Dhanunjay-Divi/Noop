@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -95,6 +96,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import com.noop.ble.HistorySyncDurableProgressPolicy
+import com.noop.ble.HistorySyncProgressActivity
+import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -298,6 +302,8 @@ internal data class HistorySyncUiProgress(
     val batches: Int,
     val rows: Int,
     val newestDataUnix: Long?,
+    val startedAt: Long?,
+    val lastDurableProgressAt: Long?,
 )
 
 @Composable
@@ -305,45 +311,81 @@ fun SyncingHistoryNote(
     chunks: Int,
     rows: Int = 0,
     newestDataUnix: Long? = null,
+    startedAt: Long? = null,
+    lastDurableProgressAt: Long? = null,
     modifier: Modifier = Modifier,
 ) {
+    var now by remember(startedAt, lastDurableProgressAt) {
+        mutableLongStateOf(System.currentTimeMillis() / 1_000L)
+    }
+    LaunchedEffect(startedAt, lastDurableProgressAt) {
+        while (true) {
+            delay(1_000)
+            now = System.currentTimeMillis() / 1_000L
+        }
+    }
+    val activity = HistorySyncDurableProgressPolicy.activity(
+        startedAt = startedAt,
+        lastDurableProgressAt = lastDurableProgressAt,
+        now = now,
+    )
+    val activityLabel = when (activity) {
+        HistorySyncProgressActivity.STARTING ->
+            uiString(R.string.appwide_today_band_sync_activity_starting)
+        HistorySyncProgressActivity.ADVANCING ->
+            uiString(R.string.appwide_today_band_sync_activity_advancing)
+        HistorySyncProgressActivity.WAITING ->
+            uiString(R.string.appwide_today_band_sync_activity_waiting)
+        HistorySyncProgressActivity.STALLED ->
+            uiString(R.string.appwide_today_band_sync_activity_stalled)
+    }
+    val activityColor = when (activity) {
+        HistorySyncProgressActivity.STARTING,
+        HistorySyncProgressActivity.ADVANCING -> Palette.statusPositive
+        HistorySyncProgressActivity.WAITING -> Palette.statusWarning
+        HistorySyncProgressActivity.STALLED -> Palette.statusCritical
+    }
+    val elapsed = elapsedClock((now - (startedAt ?: now)).coerceAtLeast(0))
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Metrics.space6),
     ) {
+        StatePill("Syncing Noop Band history…", tone = StrandTone.Accent, pulsing = true)
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            StatePill("Syncing Noop Band history…", tone = StrandTone.Accent, pulsing = true)
-            if (chunks > 0) {
-                Text(
-                    uiString(R.string.appwide_today_band_sync_batches_format, chunks),
-                    style = NoopType.footnote,
-                    color = Palette.textSecondary,
-                )
-            }
-        }
-        if (rows > 0) {
-            val newestDate = newestDataUnix?.let {
-                Instant.ofEpochSecond(it)
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDate()
-                    .format(
-                        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-                            .withLocale(Locale.getDefault()),
-                    )
-            }
+            Text(activityLabel, style = NoopType.footnote, color = activityColor, modifier = Modifier.weight(1f))
             Text(
-                if (newestDate != null) {
-                    uiString(R.string.appwide_today_band_sync_rows_ready_format, rows, newestDate)
-                } else {
-                    uiString(R.string.appwide_today_band_sync_rows_format, rows)
-                },
+                uiString(R.string.appwide_today_band_sync_elapsed_format, elapsed),
                 style = NoopType.footnote,
-                color = Palette.textTertiary,
+                color = Palette.textSecondary,
             )
         }
+        Text(
+            uiString(R.string.appwide_today_band_sync_batches_format, chunks),
+            style = NoopType.footnote,
+            color = Palette.textSecondary,
+        )
+        val newestDate = newestDataUnix?.let {
+            Instant.ofEpochSecond(it)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+                .format(
+                    DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+                        .withLocale(Locale.getDefault()),
+                )
+        }
+        Text(
+            if (newestDate != null) {
+                uiString(R.string.appwide_today_band_sync_rows_ready_format, rows, newestDate)
+            } else {
+                uiString(R.string.appwide_today_band_sync_rows_format, rows)
+            },
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
     }
 }
 

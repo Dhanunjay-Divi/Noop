@@ -91,6 +91,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -101,7 +103,12 @@ import com.noop.analytics.WorkoutSport
 import com.noop.analytics.HeartRateRecovery
 import com.noop.analytics.ActiveZoneMinutes
 import com.noop.analytics.ActiveZoneMinutesCalculator
+import com.noop.analytics.RestScorer
+import com.noop.data.DailyMetric
+import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
+import com.noop.data.SleepEfficiencyUnits
+import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import java.time.Instant
 import java.time.LocalDate
@@ -142,11 +149,15 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // history after every repository mutation.
     val allRows by vm.workouts.collectAsStateWithLifecycle()
     val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
+    val workoutDataVersion by vm.workoutDataVersion.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
     // Cached daily metrics — the Charge side of the post-log activity-cost note (#439).
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     var loaded by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(WorkoutRange.All) }
     var showStrengthTrainer by remember { mutableStateOf(false) }
+    var selectedOverviewDay by remember { mutableStateOf<LocalDate?>(null) }
+    var overviewContent by remember { mutableStateOf<WorkoutDayOverviewContent?>(null) }
     // Pick the default range ONCE on first non-empty load; later mutations must not fight a range the
     // user chose. Mirrors macOS, which sets the default only in `.task` / first onAppear.
     var didPickDefaultRange by remember { mutableStateOf(false) }
@@ -244,7 +255,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
         activeZoneLoaded = true
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(vm.activeStrapId, workoutDataVersion) {
         vm.loadWorkouts()
         loaded = true
     }
@@ -297,7 +308,12 @@ fun WorkoutsScreen(vm: AppViewModel) {
             item {
             EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
             }
-            item { ActivityCalendarSection(allRows) }
+            item {
+                ActivityCalendarSection(
+                    rows = allRows,
+                    onSelectDay = { selectedOverviewDay = it },
+                )
+            }
             item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
         } else {
             // #64: the pure WorkoutFilter narrows the window AFTER the range cut, so every section reads
@@ -325,7 +341,12 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 onClear = { sportFilter = null; sourceFilter = null; searchText = "" },
             )
             }
-            item { ActivityCalendarSection(allRows) }
+            item {
+                ActivityCalendarSection(
+                    rows = allRows,
+                    onSelectDay = { selectedOverviewDay = it },
+                )
+            }
             item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
             postLogNote?.let { item { PostLogNoteBanner(it) } }
             item { EffortHero(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
@@ -401,10 +422,48 @@ fun WorkoutsScreen(vm: AppViewModel) {
     if (showStrengthTrainer) {
         StrengthTrainerSheet(vm = vm, onDismiss = { showStrengthTrainer = false })
     }
+
+    selectedOverviewDay?.let { day ->
+        LaunchedEffect(day, vm.activeStrapId, metricDataVersion) {
+            overviewContent = null
+            val dayKey = day.toString()
+            val imported = vm.repo.importedSourceIds(vm.activeStrapId).flatMap {
+                vm.repo.journal(it, dayKey, dayKey)
+            }
+            val native = vm.repo.journal(JOURNAL_DEVICE_ID, dayKey, dayKey)
+            overviewContent = WorkoutDayOverviewContent(
+                day = day,
+                metricRows = vm.repo.metricSeriesForDay(dayKey),
+                journal = mergeJournalEntries(imported, native),
+            )
+        }
+        val exactContent = overviewContent?.takeIf { it.day == day }
+        val daily = recentDays.lastOrNull { it.day == day.toString() }
+        val zoneId = ZoneId.systemDefault()
+        val dayWorkouts = allRows.filter {
+            Instant.ofEpochSecond(it.startTs).atZone(zoneId).toLocalDate() == day
+        }
+        WorkoutDayOverviewSheet(
+            day = day,
+            daily = daily,
+            workouts = dayWorkouts,
+            metricRows = exactContent?.metricRows.orEmpty(),
+            journal = exactContent?.journal.orEmpty(),
+            activeStrapId = vm.activeStrapId,
+            loading = exactContent == null,
+            onDismiss = { selectedOverviewDay = null },
+        )
+    }
 }
 
 /** Drives the manual add/edit dialog. [editing] null = add a new workout, non-null = edit it. */
 private data class DialogTarget(val editing: WorkoutRow?)
+
+private data class WorkoutDayOverviewContent(
+    val day: LocalDate,
+    val metricRows: List<MetricSeriesRow>,
+    val journal: List<JournalEntry>,
+)
 
 private data class WorkoutRecoveryTrendPoint(
     val startTs: Long,
@@ -447,7 +506,10 @@ internal fun workoutActivityCalendarSummary(
 }
 
 @Composable
-private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
+private fun ActivityCalendarSection(
+    rows: List<WorkoutRow>,
+    onSelectDay: (LocalDate) -> Unit,
+) {
     val today = remember { LocalDate.now() }
     val firstDay = remember(today) { today.minusDays(29) }
     val dates = remember(firstDay) { (0L..29L).map(firstDay::plusDays) }
@@ -470,25 +532,25 @@ private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
-            title = "Activity calendar",
-            overline = "Last 30 days",
+            title = uiString(R.string.appwide_workouts_activity_calendar_title),
+            overline = uiString(R.string.appwide_trends_last_30_days),
             trailing = if (summary.activeDays == 1) {
-                "1 active day"
+                uiString(R.string.appwide_workouts_activity_calendar_one_active_day)
             } else {
-                "${summary.activeDays} active days"
+                uiString(R.string.appwide_workouts_activity_calendar_active_days, summary.activeDays)
             },
         )
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        firstDay.format(DateTimeFormatter.ofPattern("MMM", locale)),
+                        firstDay.format(DateTimeFormatter.ofPattern(ACTIVITY_MONTH_PATTERN, locale)),
                         style = NoopType.headline,
                         color = Palette.textPrimary,
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
-                        today.format(DateTimeFormatter.ofPattern("MMM yyyy", locale)),
+                        today.format(DateTimeFormatter.ofPattern(ACTIVITY_MONTH_YEAR_PATTERN, locale)),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -514,18 +576,19 @@ private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
                     ) {
                         week.forEach { day ->
                             if (day == null) {
-                                Spacer(Modifier.weight(1f).height(36.dp))
+                                Spacer(Modifier.weight(1f).height(44.dp))
                             } else {
                                 WorkoutActivityDay(
                                     day = day,
                                     count = summary.countsByDay[day] ?: 0,
                                     isToday = day == today,
+                                    onClick = { onSelectDay(day) },
                                     modifier = Modifier.weight(1f),
                                 )
                             }
                         }
                         repeat(7 - week.size) {
-                            Spacer(Modifier.weight(1f).height(36.dp))
+                            Spacer(Modifier.weight(1f).height(44.dp))
                         }
                     }
                 }
@@ -540,7 +603,10 @@ private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
                     ActivityCalendarLegend("3+", Palette.metricCyan)
                     Spacer(Modifier.weight(1f))
                     Text(
-                        if (summary.totalMinutes == 1) "1 min" else "${summary.totalMinutes} min",
+                        uiString(
+                            R.string.appwide_workouts_active_minutes_value_format,
+                            summary.totalMinutes,
+                        ),
                         style = NoopType.captionNumber,
                         color = Palette.textSecondary,
                     )
@@ -550,11 +616,15 @@ private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
     }
 }
 
+private const val ACTIVITY_MONTH_PATTERN = "MMM"
+private const val ACTIVITY_MONTH_YEAR_PATTERN = "MMM yyyy"
+
 @Composable
 private fun WorkoutActivityDay(
     day: LocalDate,
     count: Int,
     isToday: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val color = when (count) {
@@ -566,16 +636,26 @@ private fun WorkoutActivityDay(
     val shape = RoundedCornerShape(9.dp)
     Box(
         modifier = modifier
-            .height(36.dp)
+            .height(44.dp)
             .clip(shape)
             .background(color)
             .then(
                 if (isToday) Modifier.border(1.dp, Palette.textPrimary.copy(alpha = 0.9f), shape)
                 else Modifier
             )
-            .clearAndSetSemantics {
-                contentDescription = "${day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))}, " +
-                    if (count == 1) "1 recorded activity" else "$count recorded activities"
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                val countDescription = if (count == 1) {
+                    uiString(R.string.appwide_workouts_activity_calendar_one_recorded_activity)
+                } else {
+                    uiString(R.string.appwide_workouts_activity_calendar_recorded_activities, count)
+                }
+                contentDescription = uiString(
+                    R.string.appwide_workouts_activity_calendar_day_description,
+                    day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG)),
+                    countDescription,
+                )
+                role = Role.Button
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -593,13 +673,651 @@ private fun ActivityCalendarLegend(label: String, color: Color) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Metrics.space4),
         modifier = Modifier.clearAndSetSemantics {
-            contentDescription = if (label == "3+") "3 or more activities" else "$label activities"
+            contentDescription = if (label == "3+") {
+                uiString(R.string.appwide_workouts_activity_calendar_three_or_more)
+            } else {
+                uiString(R.string.appwide_workouts_activity_calendar_legend_activities, label)
+            }
         },
     ) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(color))
         Text(label, style = NoopType.caption, color = Palette.textTertiary)
     }
 }
+
+private data class DayOverviewMetric(
+    val label: String,
+    val value: String,
+    val tint: Color? = null,
+)
+
+internal fun dayOverviewSleepEfficiencyPercent(value: Double?): Double? =
+    SleepEfficiencyUnits.displayPercent(value)
+
+internal fun dayOverviewSleepScore(daily: DailyMetric?): Double? {
+    daily ?: return null
+    val efficiency = SleepEfficiencyUnits.canonicalFraction(daily.efficiency) ?: return null
+    return RestScorer.restFromDaily(daily.copy(efficiency = efficiency))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun WorkoutDayOverviewSheet(
+    day: LocalDate,
+    daily: DailyMetric?,
+    workouts: List<WorkoutRow>,
+    metricRows: List<MetricSeriesRow>,
+    journal: List<JournalEntry>,
+    activeStrapId: String,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val unitSystem = remember { UnitPrefs.system(context) }
+    val temperatureUnit = remember { UnitPrefs.temperature(context) }
+    val effortScale = remember { UnitPrefs.effortScale(context) }
+    val noData = uiString(R.string.appwide_day_overview_no_data)
+    val locale = Locale.getDefault()
+    val durationSeconds = workouts.sumOf {
+        it.durationS?.takeIf { value -> value.isFinite() && value >= 0.0 }
+            ?: (it.endTs - it.startTs).coerceAtLeast(0).toDouble()
+    }
+    val workoutCalories = workouts.mapNotNull { it.energyKcal?.takeIf(Double::isFinite) }
+    val workoutDistances = workouts.mapNotNull {
+        it.distanceM?.takeIf { value -> value.isFinite() && value > 0.0 }
+    }
+
+    fun score(value: Double?): String =
+        value?.takeIf(Double::isFinite)?.roundToInt()?.toString() ?: noData
+
+    fun percent(value: Double?): String =
+        value?.takeIf(Double::isFinite)?.roundToInt()?.let { "$it%" } ?: noData
+
+    fun decimal(value: Double?): String? =
+        value?.takeIf(Double::isFinite)?.let { String.format(locale, "%.1f", it) }
+
+    val sleepItems = listOf(
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_total_sleep),
+            dayOverviewDurationMinutes(daily?.totalSleepMin, noData),
+            Palette.restColor,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_sleep_efficiency),
+            percent(dayOverviewSleepEfficiencyPercent(daily?.efficiency)),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_deep_sleep),
+            dayOverviewDurationMinutes(daily?.deepMin, noData),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_rem_sleep),
+            dayOverviewDurationMinutes(daily?.remMin, noData),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_light_sleep),
+            dayOverviewDurationMinutes(daily?.lightMin, noData),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_disturbances),
+            daily?.disturbances?.toString() ?: noData,
+        ),
+    )
+    val vitalItems = listOf(
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_resting_heart_rate),
+            daily?.restingHr?.let { "$it bpm" } ?: noData,
+            Palette.metricRose,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_hrv),
+            decimal(daily?.avgHrv)?.let { "$it ms" } ?: noData,
+            Palette.metricPurple,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_blood_oxygen),
+            decimal(daily?.spo2Pct)?.let { "$it%" } ?: noData,
+            Palette.metricCyan,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_respiratory_rate),
+            decimal(daily?.respRateBpm)?.let { "$it br/min" } ?: noData,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_skin_temperature),
+            daily?.skinTempDevC?.takeIf(Double::isFinite)?.let {
+                UnitFormatter.temperatureDeltaFromCelsius(it, temperatureUnit, decimals = 1)
+            } ?: noData,
+            Palette.metricAmber,
+        ),
+    )
+    val activityItems = listOf(
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_steps),
+            daily?.steps?.let { dayOverviewGrouped(it.toDouble()) } ?: noData,
+            Palette.statusPositive,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_estimated_total_energy),
+            daily?.activeKcalEst?.takeIf(Double::isFinite)
+                ?.let { "${dayOverviewGrouped(it)} kcal" } ?: noData,
+            Palette.metricAmber,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_workout_count),
+            workouts.size.toString(),
+            Palette.effortColor,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_active_time),
+            dayOverviewDurationSeconds(durationSeconds),
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_workout_calories),
+            workoutCalories.takeIf { it.isNotEmpty() }
+                ?.sum()?.let { "${dayOverviewGrouped(it)} kcal" } ?: noData,
+        ),
+        DayOverviewMetric(
+            uiString(R.string.appwide_day_overview_distance),
+            workoutDistances.takeIf { it.isNotEmpty() }
+                ?.sum()?.let { UnitFormatter.distanceFromKilometers(it / 1000.0, unitSystem) }
+                ?: noData,
+        ),
+    )
+    val supplementalItems = dayOverviewSupplementalMetrics(
+        metricRows,
+        activeStrapId,
+        unitSystem,
+        temperatureUnit,
+        locale,
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Palette.surfaceOverlay,
+        contentColor = Palette.textPrimary,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        uiString(R.string.appwide_day_overview_title),
+                        style = NoopType.title2,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        day.format(
+                            DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
+                                .withLocale(locale),
+                        ),
+                        style = NoopType.subhead,
+                        color = Palette.textSecondary,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = uiString(R.string.appwide_action_done),
+                        tint = Palette.textSecondary,
+                    )
+                }
+            }
+
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(vertical = 64.dp),
+                    color = Palette.accent,
+                    strokeWidth = 2.dp,
+                )
+                return@Column
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                SectionHeader(
+                    title = uiString(R.string.appwide_day_overview_daily_scores),
+                    overline = uiString(R.string.appwide_day_overview_overall),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    ) {
+                        StatTile(
+                            label = uiString(R.string.appwide_day_overview_recovery),
+                            value = score(daily?.recovery),
+                            accent = Palette.chargeColor,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            label = uiString(R.string.appwide_day_overview_sleep_score),
+                            value = score(dayOverviewSleepScore(daily)),
+                            accent = Palette.restColor,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    ) {
+                        StatTile(
+                            label = uiString(R.string.appwide_day_overview_effort),
+                            value = daily?.strain?.takeIf(Double::isFinite)
+                                ?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: noData,
+                            accent = Palette.effortColor,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+
+            DayOverviewMetricSection(
+                title = uiString(R.string.appwide_day_overview_sleep),
+                items = sleepItems,
+                noData = noData,
+            )
+            DayOverviewMetricSection(
+                title = uiString(R.string.appwide_day_overview_vitals),
+                items = vitalItems,
+                noData = noData,
+            )
+            DayOverviewMetricSection(
+                title = uiString(R.string.appwide_day_overview_activity),
+                items = activityItems,
+                noData = noData,
+            )
+            if (supplementalItems.isNotEmpty()) {
+                DayOverviewMetricSection(
+                    title = uiString(R.string.appwide_day_overview_more_metrics),
+                    items = supplementalItems,
+                    noData = noData,
+                )
+            }
+            if (journal.isNotEmpty()) {
+                DayOverviewJournalSection(journal)
+            }
+            DayOverviewSessions(
+                workouts = workouts,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DayOverviewJournalSection(entries: List<JournalEntry>) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            title = uiString(R.string.appwide_day_overview_journal),
+            trailing = entries.size.toString(),
+        )
+        NoopCard {
+            Column {
+                entries.forEachIndexed { index, entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = Metrics.space8),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+                        ) {
+                            Text(
+                                entry.question,
+                                style = NoopType.subhead,
+                                color = Palette.textSecondary,
+                            )
+                            entry.notes?.trim()?.takeIf(String::isNotEmpty)?.let {
+                                Text(it, style = NoopType.footnote, color = Palette.textTertiary)
+                            }
+                        }
+                        Text(
+                            dayOverviewJournalValue(entry),
+                            style = NoopType.bodyNumber,
+                            color = Palette.textPrimary,
+                            textAlign = TextAlign.End,
+                        )
+                    }
+                    if (index < entries.lastIndex) FullDivider()
+                }
+            }
+        }
+    }
+}
+
+private fun dayOverviewJournalValue(entry: JournalEntry): String =
+    entry.numericValue?.takeIf(Double::isFinite)?.let {
+        if (it == it.roundToInt().toDouble()) it.roundToInt().toString()
+        else String.format(Locale.getDefault(), "%.1f", it)
+    } ?: if (entry.answeredYes) {
+        uiString(R.string.appwide_day_overview_yes)
+    } else {
+        uiString(R.string.appwide_day_overview_no)
+    }
+
+private fun dayOverviewSupplementalMetrics(
+    rows: List<MetricSeriesRow>,
+    activeStrapId: String,
+    unitSystem: UnitSystem,
+    temperatureUnit: TemperatureUnit,
+    locale: Locale,
+): List<DayOverviewMetric> {
+    val grouped = rows.asSequence()
+        .filter { it.value.isFinite() }
+        .filterNot { dayOverviewHiddenMetric(it.deviceId, it.key) }
+        .groupBy { dayOverviewCanonicalKey(it.key) }
+
+    return grouped.mapNotNull { (key, candidates) ->
+        val selected = if (key == "hydration") {
+            candidates.maxByOrNull { it.value }
+        } else {
+            candidates.minByOrNull { dayOverviewSourceRank(it, key, activeStrapId) }
+        } ?: return@mapNotNull null
+        DayOverviewMetric(
+            label = dayOverviewMetricLabel(key),
+            value = dayOverviewMetricValue(
+                key,
+                selected.value,
+                unitSystem,
+                temperatureUnit,
+                locale,
+            ),
+            tint = dayOverviewMetricTint(key),
+        )
+    }.sortedWith(
+        compareBy<DayOverviewMetric> {
+            dayOverviewMetricOrder(it.label)
+        }.thenBy { it.label.lowercase(locale) }
+    )
+}
+
+private fun dayOverviewCanonicalKey(key: String): String = when (key) {
+    "weightKg" -> "weight"
+    "heightCm" -> "height"
+    "bodyFatPct" -> "body_fat"
+    else -> key
+}
+
+private fun dayOverviewHiddenMetric(source: String, key: String): Boolean {
+    if (source == "cycle-tracking") return true
+    if (key.contains("_profile_") || key.endsWith("_marker")) return true
+    return key in setOf(
+        "recovery",
+        "sleep_performance",
+        "sleep_score",
+        "strain",
+        "sleep_total_min",
+        "asleep_min",
+        "sleep_efficiency",
+        "sleep_deep_min",
+        "deep_min",
+        "sleep_rem_min",
+        "rem_min",
+        "sleep_light_min",
+        "core_min",
+        "hrv",
+        "rhr",
+        "resting_hr",
+        "spo2",
+        "resp_rate",
+        "skin_temp",
+        "steps",
+        "steps_est",
+        "active_kcal",
+        "energy_kcal",
+    )
+}
+
+private fun dayOverviewSourceRank(
+    row: MetricSeriesRow,
+    key: String,
+    activeStrapId: String,
+): Int {
+    val preferred = when {
+        key in setOf("calories_in", "protein_g", "carbs_g", "fat_g") ->
+            listOf("nutrition-log", "nutrition-csv")
+        key == "mood" -> listOf("noop-mood")
+        key in setOf(
+            "weight", "height", "body_fat", "lean_mass", "bmi", "body_temp", "wrist_temp", "vo2max",
+        ) -> listOf(
+            WhoopRepository.APPLE_HEALTH_SOURCE,
+            WhoopRepository.HEALTH_CONNECT_SOURCE,
+            activeStrapId,
+            WhoopRepository.WHOOP_SOURCE,
+        )
+        else -> listOf(
+            activeStrapId,
+            WhoopRepository.WHOOP_SOURCE,
+            "$activeStrapId-noop",
+            "${WhoopRepository.WHOOP_SOURCE}-noop",
+            WhoopRepository.APPLE_HEALTH_SOURCE,
+            WhoopRepository.HEALTH_CONNECT_SOURCE,
+            "xiaomi-band",
+        )
+    }
+    val rank = preferred.indexOf(row.deviceId)
+    return if (rank >= 0) rank else preferred.size + 1
+}
+
+private fun dayOverviewMetricLabel(key: String): String = when (key) {
+    "avg_hr" -> uiString(R.string.explore_metric_average_heart_rate)
+    "max_hr" -> uiString(R.string.explore_metric_max_heart_rate)
+    "fitness_age" -> uiString(R.string.l10n_health_screen_fitness_age_12383b4a)
+    "vitality" -> uiString(R.string.l10n_health_screen_vitality_be320b06)
+    "weight" -> uiString(R.string.l10n_onboarding_screen_weight_69c0b815)
+    "height" -> uiString(R.string.l10n_onboarding_screen_height_3f608b49)
+    "body_fat" -> uiString(R.string.appwide_health_body_composition_body_fat)
+    "lean_mass" -> uiString(R.string.appwide_health_body_composition_lean_mass)
+    "bmi" -> uiString(R.string.profile_bmi_label)
+    "calories_in" -> uiString(R.string.explore_metric_calories_in)
+    "protein_g" -> uiString(R.string.explore_metric_protein)
+    "carbs_g" -> uiString(R.string.explore_metric_carbs)
+    "fat_g" -> uiString(R.string.explore_metric_fat)
+    "mood" -> uiString(R.string.explore_metric_mood)
+    "hydration" -> uiString(R.string.appwide_day_overview_hydration)
+    else -> key.replace('_', ' ').replaceFirstChar { it.titlecase(Locale.getDefault()) }
+}
+
+private fun dayOverviewMetricValue(
+    key: String,
+    value: Double,
+    unitSystem: UnitSystem,
+    temperatureUnit: TemperatureUnit,
+    locale: Locale,
+): String = when (key) {
+    "fitness_age" -> FitnessAgePresentation.value(value)
+    "weight", "lean_mass" -> UnitFormatter.massFromKilograms(
+        value,
+        if (unitSystem == UnitSystem.IMPERIAL) MassUnit.POUNDS else MassUnit.KILOGRAMS,
+    )
+    "height" -> UnitFormatter.heightFromCentimeters(value, unitSystem)
+    "body_temp", "wrist_temp" ->
+        UnitFormatter.temperatureFromCelsius(value, temperatureUnit, decimals = 1)
+    "body_fat", "sleep_consistency", "restorative_pct", "hours_vs_needed_pct" ->
+        "${String.format(locale, "%.1f", value)}%"
+    "avg_hr", "max_hr" -> "${value.roundToInt()} bpm"
+    "vo2max", "vo2max_est" -> String.format(locale, "%.1f ml/kg/min", value)
+    "sleep_need_min", "sleep_debt_min", "in_bed_min", "restorative_min",
+    "hr_zones13_min", "hr_zones45_min", "hr_zones_all_min", "strength_min",
+    "active_zone_moderate_min", "active_zone_vigorous_min", "active_zone_credited_min",
+    "active_zone_observed_min" -> dayOverviewDurationMinutes(value, "0 min")
+    "calories_in", "basal_kcal", "total_kcal" -> "${dayOverviewGrouped(value)} kcal"
+    "protein_g", "carbs_g", "fat_g" -> "${String.format(locale, "%.1f", value)} g"
+    "hydration" -> "${dayOverviewGrouped(value)} ml"
+    "stress" -> String.format(locale, "%.1f", value)
+    "mood" -> "${value.roundToInt()}/5"
+    "body_age" -> String.format(locale, "%.1f yr", value)
+    "vitality" -> value.roundToInt().toString()
+    else -> if (value == value.roundToInt().toDouble()) {
+        value.roundToInt().toString()
+    } else {
+        String.format(locale, "%.1f", value)
+    }
+}
+
+private fun dayOverviewMetricTint(key: String): Color? = when (key) {
+    "avg_hr", "max_hr" -> Palette.metricRose
+    "fitness_age", "vitality", "vo2max", "vo2max_est" -> Palette.chargeColor
+    "calories_in", "basal_kcal", "total_kcal" -> Palette.metricAmber
+    "hydration" -> Palette.metricCyan
+    "mood" -> Palette.metricPurple
+    else -> null
+}
+
+private fun dayOverviewMetricOrder(label: String): Int = when (label) {
+    uiString(R.string.l10n_health_screen_fitness_age_12383b4a) -> 0
+    uiString(R.string.l10n_health_screen_vitality_be320b06) -> 1
+    uiString(R.string.explore_metric_average_heart_rate) -> 2
+    uiString(R.string.explore_metric_max_heart_rate) -> 3
+    else -> 10
+}
+
+@Composable
+private fun DayOverviewMetricSection(
+    title: String,
+    items: List<DayOverviewMetric>,
+    noData: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(title = title)
+        NoopCard {
+            Column {
+                items.forEachIndexed { index, item ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = Metrics.space8),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            item.label,
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            item.value,
+                            style = NoopType.bodyNumber,
+                            color = item.tint
+                                ?: if (item.value == noData) Palette.textTertiary else Palette.textPrimary,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (index < items.lastIndex) FullDivider()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayOverviewSessions(
+    workouts: List<WorkoutRow>,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            title = uiString(R.string.appwide_day_overview_sessions),
+            trailing = workouts.size.toString(),
+        )
+        NoopCard {
+            if (workouts.isEmpty()) {
+                Text(
+                    uiString(R.string.appwide_day_overview_no_sessions),
+                    style = NoopType.subhead,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Column {
+                    workouts.forEachIndexed { index, row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = Metrics.space8),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                sportIcon(row.sport),
+                                contentDescription = null,
+                                tint = Palette.effortColor,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(Metrics.space12))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    WorkoutEditing.displaySport(row.sport),
+                                    style = NoopType.subhead,
+                                    color = Palette.textPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    timeRangeLabel(row.startTs, row.endTs),
+                                    style = NoopType.footnote,
+                                    color = Palette.textTertiary,
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    dayOverviewDurationSeconds(
+                                        row.durationS
+                                            ?: (row.endTs - row.startTs).coerceAtLeast(0).toDouble(),
+                                    ),
+                                    style = NoopType.captionNumber,
+                                    color = Palette.textPrimary,
+                                )
+                                row.energyKcal?.takeIf(Double::isFinite)?.let {
+                                    Text(
+                                        stringResource(
+                                            R.string.appwide_day_overview_calories_format,
+                                            dayOverviewGrouped(it),
+                                        ),
+                                        style = NoopType.footnote,
+                                        color = Palette.metricAmber,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(Metrics.space8))
+                            val (sourceLabel, sourceTint) = row.sourceBadge
+                            SourceBadge(sourceLabel, tint = sourceTint)
+                        }
+                        if (index < workouts.lastIndex) FullDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun dayOverviewDurationMinutes(minutes: Double?, noData: String): String =
+    minutes?.takeIf { it.isFinite() && it >= 0.0 }
+        ?.let { dayOverviewDurationSeconds(it * 60.0) } ?: noData
+
+private fun dayOverviewDurationSeconds(seconds: Double): String {
+    val totalMinutes = (seconds.coerceAtLeast(0.0) / 60.0).roundToInt()
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return if (hours > 0) {
+        uiString(R.string.appwide_day_overview_duration_hours_minutes_format, hours, minutes)
+    } else {
+        uiString(R.string.appwide_day_overview_duration_minutes_format, minutes)
+    }
+}
+
+private fun dayOverviewGrouped(value: Double): String =
+    java.text.NumberFormat.getIntegerInstance(Locale.getDefault()).format(value.roundToInt())
 
 internal fun activeZoneWeekSnapshot(
     moderate: List<MetricSeriesRow>,

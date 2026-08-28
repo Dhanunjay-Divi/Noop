@@ -20,7 +20,9 @@ import kotlin.math.roundToInt
  */
 internal object RemoteNoopAlgorithmRevision {
     const val CHARGE = "noop-charge-v2"
-    const val METADATA = "$CHARGE+noop-effort-v1+noop-rest-v1"
+    const val EFFORT = "noop-effort-v1"
+    const val REST = "noop-rest-v1"
+    const val METADATA = "$CHARGE+$EFFORT+$REST"
     const val ID_SUFFIX = "cer-v2"
 }
 

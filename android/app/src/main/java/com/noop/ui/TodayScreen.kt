@@ -1,5 +1,10 @@
 package com.noop.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -151,9 +156,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import android.app.DatePickerDialog
 import android.view.HapticFeedbackConstants
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.noop.R
 import com.noop.analytics.Baselines
 import com.noop.analytics.AgeMetricProfile
@@ -182,8 +188,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import java.time.temporal.ChronoUnit
-import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -255,6 +259,8 @@ private data class TodayLiveSnapshot(
     val syncChunksThisSession: Int,
     val syncRowsThisSession: Int,
     val syncDataNewestAt: Long?,
+    val syncStartedAt: Long?,
+    val syncLastDurableProgressAt: Long?,
     val historySyncExperimental: Boolean,
     val sustainedEmptyOffload: Boolean,
     val batteryPct: Double?,
@@ -298,6 +304,8 @@ fun TodayScreen(
     // The #627 journal-reminder card links straight to the journal (Insights). Defaulted to a no-op so
     // the call site stays compiling; AppRoot binds it to nav.navigateTopLevel(Insights), same as Sleep.
     onOpenJournal: () -> Unit = {},
+    // The calendar icon opens the same month-at-a-glance history surface as iOS.
+    onOpenCalendar: () -> Unit = {},
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -329,6 +337,8 @@ fun TodayScreen(
                 syncChunksThisSession = s.syncChunksThisSession,
                 syncRowsThisSession = s.syncRowsThisSession,
                 syncDataNewestAt = s.syncDataNewestAt,
+                syncStartedAt = s.syncStartedAt,
+                syncLastDurableProgressAt = s.syncLastDurableProgressAt,
                 historySyncExperimental = s.historySyncExperimental,
                 sustainedEmptyOffload = s.sustainedEmptyOffload,
                 batteryPct = s.batteryPct,
@@ -408,8 +418,13 @@ fun TodayScreen(
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
+    val reportsAvailableInitially = reportNotificationsAvailable(context)
+    val strainTargetInitiallyEnabled = NoopPrefs.strainTargetEnabled(context)
     var strainTargetEnabled by remember {
-        mutableStateOf(NoopPrefs.strainTargetEnabled(context))
+        mutableStateOf(strainTargetInitiallyEnabled && reportsAvailableInitially)
+    }
+    var strainTargetPermissionDenied by remember {
+        mutableStateOf(strainTargetInitiallyEnabled && !reportsAvailableInitially)
     }
     var dailyActionCheckIn by remember(selectedDayKey, selectedDayOffset) {
         mutableStateOf(
@@ -422,6 +437,43 @@ fun TodayScreen(
     }
     val dailyActionReadiness = remember(days, selectedDayKey) {
         ReadinessEngine.evaluate(days, today = selectedDayKey)
+    }
+
+    fun applyStrainTargetPreference(enabled: Boolean, permissionDenied: Boolean = false) {
+        strainTargetEnabled = enabled
+        strainTargetPermissionDenied = permissionDenied
+        NoopPrefs.setStrainTargetEnabled(context, enabled)
+        if (!enabled) {
+            StrainTargetNotifier.cancel(context)
+        } else {
+            StrainTargetNotifier.onStrainTarget(
+                context = context,
+                day = selectedDayKey,
+                dayEffort = displayMetric?.strain,
+                targetRange = DailyActionPlanner.plan(
+                    today = selectedDayKey,
+                    readiness = dailyActionReadiness,
+                    checkIn = NoopPrefs.dailyActionCheckIn(context, selectedDayKey),
+                    recentEffort = days.map {
+                        DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+                    },
+                ).target,
+            )
+        }
+    }
+
+    val strainTargetPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val allowed = granted &&
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        applyStrainTargetPreference(allowed, permissionDenied = !allowed)
+    }
+
+    LaunchedEffect(Unit) {
+        if (strainTargetInitiallyEnabled && !reportsAvailableInitially) {
+            applyStrainTargetPreference(false, permissionDenied = true)
+        }
     }
     val currentIllnessResult = if (selectedDayOffset == 0 && illnessWatchEnabled) {
         healthSignals?.illness
@@ -462,6 +514,7 @@ fun TodayScreen(
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
     val ageMetricDataVersion by viewModel.ageMetricDataVersion.collectAsStateWithLifecycle()
+    val workoutDataVersion by viewModel.workoutDataVersion.collectAsStateWithLifecycle()
 
     // Editable Key-Metrics layout (#251), an ordered list of the pinned tiles, persisted display-only.
     // SharedPreferences isn't reactive, so it's mirrored into local state and re-read when the editor saves.
@@ -531,13 +584,15 @@ fun TodayScreen(
     var fitnessAgeToday by remember(ageMetricState) {
         mutableStateOf(viewModel.todayFitnessAgeCache.takeIf {
             viewModel.todayCardsLoadedSig == cardsSig &&
-                viewModel.todayCardsLoadedProfileSig == ageMetricState
+                viewModel.todayCardsLoadedProfileSig == ageMetricState &&
+                viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         })
     }
     var vitalityToday by remember(ageMetricState) {
         mutableStateOf(viewModel.todayVitalityCache.takeIf {
             viewModel.todayCardsLoadedSig == cardsSig &&
-                viewModel.todayCardsLoadedProfileSig == ageMetricState
+                viewModel.todayCardsLoadedProfileSig == ageMetricState &&
+                viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         })
     }
     LaunchedEffect(days, ageMetricProfileVersion, ageMetricDataVersion) {
@@ -546,7 +601,8 @@ fun TodayScreen(
         // long-lived ViewModel, so a tab-return / post-import re-mount restores the numbers without re-reading.
         val sig = cardsSig
         if (viewModel.todayCardsLoadedSig == sig &&
-            viewModel.todayCardsLoadedProfileSig == ageMetricState
+            viewModel.todayCardsLoadedProfileSig == ageMetricState &&
+            viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         ) return@LaunchedEffect
         // Read each pinned card from the SAME source its own detail screen reads, the proven path that
         // already shows real numbers there (and the resolution iOS's exploreSeries uses). Stress is derived
@@ -593,6 +649,7 @@ fun TodayScreen(
         viewModel.todayVitalityCache = vitalityToday
         viewModel.todayCardsLoadedSig = sig
         viewModel.todayCardsLoadedProfileSig = ageMetricState
+        viewModel.todayCardsLoadedAgeMetricVersion = ageMetricDataVersion
     }
 
     // #713, strap battery runtime estimate ("~X left") for the Data-sources battery row. The battery lane
@@ -1125,7 +1182,7 @@ fun TodayScreen(
         days, selectedDay, keyMetricsWindowDays, importedStepsByDay, stepsEstByDay,
     )
 
-    LaunchedEffect(days) {
+    LaunchedEffect(days, workoutDataVersion) {
         // #849: this footer pass is the heavy one. It derives HR per imported workout from raw strap samples
         // (fillWorkoutHrFromStrap = potentially hundreds of raw-HR reads) and counts every workout / Apple /
         // Health-Connect row across ALL history. A bare Today re-mount (tab-away + return, or an Apple-Health
@@ -1248,7 +1305,7 @@ fun TodayScreen(
         // LIQUID Today header (iOS LiquidTodayView.scene parity), a full structural rebuild to mirror the
         // iOS liquid Today element-for-element (NOT the old numeric-date + recording-light + bell header):
         //   LEFT  - a tappable title block: the big rounded-bold day title ("Today" / "Yesterday" / the
-        //           weekday) over a human date line ("Friday, 3 July"). Tap opens the day picker.
+        //           weekday) over a human date line ("Friday, 3 July"). Tap opens month history.
         //   RIGHT — exactly the iOS four controls, in order: a filled HEART (→ Support), the PROFILE
         //           AVATAR (→ Settings), a "+" ADD button (→ quick actions), and the strap BATTERY RING.
         // The recording-status light and the notifications BELL are GONE from the header (iOS has neither);
@@ -1277,13 +1334,12 @@ fun TodayScreen(
         LiquidTodayHeader(
             headline = headline,
             dateLine = humanDate,
-            selectedDay = selectedDay,
             batteryPct = if (liveSnap.connected) liveSnap.batteryPct else null,
             backfilling = liveSnap.backfilling,
             syncChunksThisSession = liveSnap.syncChunksThisSession,
             lastSyncAt = liveSnap.lastSyncAt,
             historySyncExperimental = liveSnap.historySyncExperimental,
-            onPickDay = { offset -> selectedDayOffset = offset },
+            onOpenCalendar = onOpenCalendar,
             onOpenSettings = onOpenSettings,
             onOpenDevices = onOpenDevices,
             onArrange = { showLayoutEditor = true },
@@ -1318,6 +1374,8 @@ fun TodayScreen(
                     chunks = liveSnap.syncChunksThisSession,
                     rows = liveSnap.syncRowsThisSession,
                     newestDataUnix = liveSnap.syncDataNewestAt,
+                    startedAt = liveSnap.syncStartedAt,
+                    lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
                 )
             }
             // Explained score state (COMPONENT 2): when there's no own number to show, say WHY and WHAT to
@@ -1564,16 +1622,35 @@ fun TodayScreen(
                             onCheckIn = updateDailyActionCheckIn,
                             currentEffort = displayMetric?.strain,
                             notificationEnabled = strainTargetEnabled,
+                            notificationPermissionDenied = strainTargetPermissionDenied,
                             showNotificationControl = selectedDayOffset == 0,
                             onNotificationEnabledChange = { enabled ->
-                                strainTargetEnabled = enabled
-                                NoopPrefs.setStrainTargetEnabled(context, enabled)
-                                if (enabled) {
+                                if (!enabled) {
+                                    applyStrainTargetPreference(false)
+                                } else if (reportNotificationsAvailable(context)) {
+                                    strainTargetEnabled = true
+                                    strainTargetPermissionDenied = false
+                                    NoopPrefs.setStrainTargetEnabled(context, true)
                                     StrainTargetNotifier.onStrainTarget(
-                                        context = context,
-                                        day = selectedDayKey,
-                                        dayEffort = displayMetric?.strain,
-                                        targetRange = dailyActionPlan.target,
+                                        context,
+                                        selectedDayKey,
+                                        displayMetric?.strain,
+                                        dailyActionPlan.target,
+                                    )
+                                } else if (
+                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.POST_NOTIFICATIONS,
+                                    ) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    strainTargetPermissionLauncher.launch(
+                                        Manifest.permission.POST_NOTIFICATIONS,
+                                    )
+                                } else {
+                                    applyStrainTargetPreference(
+                                        false,
+                                        permissionDenied = true,
                                     )
                                 }
                             },
@@ -1718,6 +1795,8 @@ fun TodayScreen(
                 bandSyncBatches = liveSnap.syncChunksThisSession,
                 bandSyncRows = liveSnap.syncRowsThisSession,
                 bandSyncNewestAt = liveSnap.syncDataNewestAt,
+                bandSyncStartedAt = liveSnap.syncStartedAt,
+                bandSyncLastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
                 expanded = sourcesExpanded,
                 onToggle = { sourcesExpanded = !sourcesExpanded },
             )
@@ -1933,6 +2012,7 @@ private fun DailyPlanTargetSection(
     onCheckIn: (DailyActionPlanner.CheckIn) -> Unit,
     currentEffort: Double?,
     notificationEnabled: Boolean,
+    notificationPermissionDenied: Boolean,
     showNotificationControl: Boolean,
     onNotificationEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -2080,6 +2160,13 @@ private fun DailyPlanTargetSection(
                                                 checkedThumbColor = Color.White,
                                                 checkedTrackColor = Palette.accent,
                                             ),
+                                        )
+                                    }
+                                    if (notificationPermissionDenied) {
+                                        Text(
+                                            stringResource(R.string.appwide_notifications_system_disabled),
+                                            style = NoopType.footnote,
+                                            color = Palette.statusCritical,
                                         )
                                     }
                                 }
@@ -2641,7 +2728,7 @@ private fun WorkoutInProgressCard(
 }
 
 /**
- * The compact Live Sessions entry under the hero ("Start session · BETA"). Three honest states off the
+ * The compact Silent Guardian entry under the hero. Three honest states off the
  * process-wide [LiveSessionRunner.active]: no session → start affordance; session running → the way back
  * into the dismissed session dialog (with a live elapsed clock); session ended but its summary not yet
  * Done-dismissed → "See the summary". The runner's 1 Hz snapshot is collected INSIDE this card only, so
@@ -2663,14 +2750,14 @@ private fun LiveSessionEntryCard(onOpen: () -> Unit) {
     }
     val teal = Palette.metricCyan
     val title = when {
-        running -> "Session running"
-        summaryWaiting -> "Session ended"
-        else -> "Start session"
+        running -> "Silent Guardian running"
+        summaryWaiting -> "Silent Guardian ended"
+        else -> "Start Silent Guardian"
     }
     val detail = when {
         running -> "Guarding - silence means you're on track."
         summaryWaiting -> "See the summary of your last session."
-        else -> "Noop Band-guided effort session. It only vibrates when you drift off today's zone."
+        else -> "Manually start band-guided effort coaching. It vibrates only when you drift off today's zone."
     }
 
     // liquidPress on the whole tappable card (same interactionSource on clickable + press), matching the
@@ -2824,13 +2911,12 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
 private fun LiquidTodayHeader(
     headline: String,
     dateLine: String,
-    selectedDay: LocalDate,
     batteryPct: Double?,
     backfilling: Boolean = false,
     syncChunksThisSession: Int = 0,
     lastSyncAt: Long? = null,
     historySyncExperimental: Boolean = false,
-    onPickDay: (Int) -> Unit,
+    onOpenCalendar: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDevices: () -> Unit,
     onArrange: () -> Unit,
@@ -2838,37 +2924,7 @@ private fun LiquidTodayHeader(
     onKeyMetrics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showPicker by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    if (showPicker) {
-        val context = LocalContext.current
-        DisposableEffect(selectedDay) {
-            val cal = Calendar.getInstance().apply {
-                set(selectedDay.year, selectedDay.monthValue - 1, selectedDay.dayOfMonth)
-            }
-            // Anchor the offset to the LOGICAL day (matches selectedDayOffset's anchor) so a picked date
-            // resolves to the same row the header is labelling, never drifting against LocalDate.now().
-            val anchor = logicalDayNow()
-            val dialog = DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    val picked = LocalDate.of(year, month + 1, day)
-                    val offset = ChronoUnit.DAYS.between(picked, anchor).toInt().coerceAtLeast(0)
-                    onPickDay(offset)
-                    showPicker = false
-                },
-                cal.get(Calendar.YEAR),
-                cal.get(Calendar.MONTH),
-                cal.get(Calendar.DAY_OF_MONTH),
-            ).apply {
-                datePicker.maxDate = System.currentTimeMillis()
-                setOnDismissListener { showPicker = false }
-            }
-            dialog.show()
-            onDispose { runCatching { dialog.dismiss() } }
-        }
-    }
-
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Metrics.space16),
@@ -2883,7 +2939,7 @@ private fun LiquidTodayHeader(
             HeaderIconButton(
                 icon = Icons.Filled.CalendarMonth,
                 description = "History calendar",
-                onClick = { showPicker = true },
+                onClick = onOpenCalendar,
             )
             Box(
                 modifier = Modifier
@@ -2916,7 +2972,9 @@ private fun LiquidTodayHeader(
                     onDismissRequest = { showMenu = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Arrange sections") },
+                        text = {
+                            Text(uiString(R.string.l10n_today_screen_arrange_today_sections_9675862b))
+                        },
                         leadingIcon = { Icon(Icons.Filled.SwapVert, contentDescription = null) },
                         onClick = {
                             showMenu = false
@@ -2924,7 +2982,7 @@ private fun LiquidTodayHeader(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Dashboard cards") },
+                        text = { Text(uiString(R.string.appwide_today_dashboard_cards)) },
                         leadingIcon = { Icon(Icons.Filled.Functions, contentDescription = null) },
                         onClick = {
                             showMenu = false
@@ -2932,7 +2990,7 @@ private fun LiquidTodayHeader(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("Key metrics") },
+                        text = { Text(uiString(R.string.l10n_today_screen_edit_key_metrics_f95e61a4)) },
                         leadingIcon = { Icon(Icons.Filled.Tune, contentDescription = null) },
                         onClick = {
                             showMenu = false
@@ -2950,10 +3008,14 @@ private fun LiquidTodayHeader(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClickLabel = "Change day",
-                    onClick = { showPicker = true },
+                    onClick = onOpenCalendar,
                 )
                 .semantics {
-                    contentDescription = "$headline, $dateLine. Tap to pick a day."
+                    contentDescription = uiString(
+                        R.string.l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96,
+                        headline,
+                        dateLine,
+                    )
                 },
             verticalArrangement = Arrangement.spacedBy(Metrics.space4),
         ) {
@@ -3607,7 +3669,7 @@ private fun ScoreHeroRow(
         verticalArrangement = Arrangement.spacedBy(Metrics.space16),
     ) {
         V2HeroArc(
-            label = "Recovery",
+            label = uiString(R.string.l10n_today_screen_recovery_ea924f72),
             value = recovery,
             base = recoveryColors.first,
             tip = recoveryColors.second,
@@ -3626,7 +3688,7 @@ private fun ScoreHeroRow(
             verticalAlignment = Alignment.Top,
         ) {
             V2SatelliteRing(
-                label = "Sleep",
+                label = uiString(R.string.l10n_today_screen_sleep_3cac34e6),
                 value = restScore,
                 maximum = 100.0,
                 base = sleepBase,
@@ -3635,7 +3697,7 @@ private fun ScoreHeroRow(
                 onClick = { onScoreInfo(ScoreSection.REST) },
             )
             V2SatelliteRing(
-                label = "Effort",
+                label = uiString(R.string.l10n_health_screen_effort_8c974bc6),
                 value = effortValue,
                 maximum = effortMax,
                 base = Palette.effortColor,
@@ -3679,9 +3741,22 @@ private fun V2HeroArc(
             .size(size)
             .semantics {
                 contentDescription = if (value == null) {
-                    "$label, ${caption ?: "not calculated"}"
+                    uiString(
+                        R.string.appwide_a11y_state_format,
+                        label,
+                        caption ?: uiString(R.string.appwide_v4_not_calculated),
+                    )
                 } else {
-                    "$label, ${value.roundToInt()} out of ${maximum.roundToInt()}, ${caption.orEmpty()}"
+                    uiString(
+                        R.string.appwide_a11y_state_format,
+                        label,
+                        uiString(
+                            R.string.appwide_v4_value_out_of_with_context_format,
+                            value.roundToInt(),
+                            maximum.roundToInt(),
+                            caption.orEmpty(),
+                        ),
+                    )
                 }
             },
         contentAlignment = Alignment.Center,
@@ -3770,9 +3845,21 @@ private fun V2SatelliteRing(
             )
             .semantics {
                 contentDescription = if (value == null) {
-                    "$label, no data"
+                    uiString(
+                        R.string.appwide_a11y_state_format,
+                        label,
+                        uiString(R.string.appwide_calendar_legend_no_data),
+                    )
                 } else {
-                    "$label, $value out of $maximum"
+                    uiString(
+                        R.string.appwide_a11y_state_format,
+                        label,
+                        uiString(
+                            R.string.appwide_v4_value_text_out_of_text_format,
+                            value.toString(),
+                            maximum.toString(),
+                        ),
+                    )
                 }
             },
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -3805,10 +3892,7 @@ private fun V2SatelliteRing(
                 }
             }
             Text(
-                text = value?.let {
-                    if (decimals > 0) String.format(Locale.getDefault(), "%.${decimals}f", it)
-                    else it.roundToInt().toString()
-                } ?: "-",
+                text = value?.let { formatSatelliteValue(it, decimals) } ?: "-",
                 style = NoopType.number(
                     if (value == null) 18f else 21f,
                     weight = FontWeight.Bold,
@@ -3828,6 +3912,10 @@ private fun V2SatelliteRing(
         )
     }
 }
+
+private fun formatSatelliteValue(value: Double, decimals: Int): String =
+    if (decimals > 0) String.format(Locale.getDefault(), "%.${decimals}f", value)
+    else value.roundToInt().toString()
 
 @Composable
 private fun FitnessAgeHeroLane(
@@ -3858,22 +3946,22 @@ private fun FitnessAgeHeroLane(
         horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("FITNESS AGE", style = NoopType.overline, color = Palette.chargeColor)
             Text(
-                text = age?.let { "${it.roundToInt()} years" } ?: "Learning",
+                uiString(R.string.l10n_health_screen_fitness_age_12383b4a).uppercase(Locale.getDefault()),
+                style = NoopType.overline,
+                color = Palette.chargeColor,
+            )
+            Text(
+                text = age?.let(FitnessAgePresentation::value)
+                    ?: uiString(R.string.appwide_cycle_status_learning),
                 style = NoopType.headline,
                 color = Color.White,
             )
             Text(
                 text = if (age != null && profileAge != null) {
-                    val delta = age.roundToInt() - profileAge
-                    when {
-                        delta < 0 -> "${abs(delta)} years younger than profile age"
-                        delta > 0 -> "$delta years older than profile age"
-                        else -> "Matches profile age"
-                    }
+                    FitnessAgePresentation.localizedComparison(age, profileAge)
                 } else {
-                    calibration ?: "Needs recent resting heart rate and activity"
+                    calibration ?: uiString(R.string.appwide_fitness_age_needs_rhr_activity)
                 },
                 style = NoopType.footnote,
                 color = Palette.onDarkSecondary.copy(alpha = 0.68f),
@@ -3882,9 +3970,10 @@ private fun FitnessAgeHeroLane(
             )
         }
         Text(
-            text = age?.roundToInt()?.toString() ?: "-",
-            style = NoopType.number(32f, weight = FontWeight.Bold),
+            text = age?.let(FitnessAgePresentation::vesselValue) ?: "-",
+            style = NoopType.number(20f, weight = FontWeight.Bold),
             color = if (age == null) Palette.onDarkSecondary.copy(alpha = 0.64f) else Palette.chargeBright,
+            textAlign = TextAlign.End,
         )
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -4864,7 +4953,7 @@ private fun dashboardCardValue(
             // state instead, matching the owner's reply on #706 and the StressScreen empty/calibrating copy.
             stress?.let { it.roundToInt().toString() } ?: STRESS_CALIBRATING
         DashboardCard.FITNESS_AGE ->
-            withUnit(fitnessAge?.let { it.roundToInt().toString() } ?: NO_DATA)
+            fitnessAge?.let(FitnessAgePresentation::value) ?: NO_DATA
         DashboardCard.VITALITY ->
             vitality?.let { it.roundToInt().toString() } ?: NO_DATA
         DashboardCard.HYDRATION ->
@@ -7074,6 +7163,8 @@ private fun TodaySourcesSection(
     bandSyncBatches: Int = 0,
     bandSyncRows: Int = 0,
     bandSyncNewestAt: Long? = null,
+    bandSyncStartedAt: Long? = null,
+    bandSyncLastDurableProgressAt: Long? = null,
     // S5: collapse to a single "Synced from: ..." summary line by default; tapping expands the full
     // per-source rows + strap battery inline. Nothing is removed, only folded behind a tap.
     expanded: Boolean = true,
@@ -7084,6 +7175,15 @@ private fun TodaySourcesSection(
     val whoopPresent = (footer.whoopDays ?: 0) > 0 || strapBatteryPct != null || bandBackfilling
     val applePresent = (footer.appleDays ?: 0) > 0 || (footer.appleWorkouts ?: 0) > 0
     val hcPresent = (footer.hcDays ?: 0) > 0 || (footer.hcWorkouts ?: 0) > 0
+    var syncNow by remember(bandBackfilling, bandSyncStartedAt, bandSyncLastDurableProgressAt) {
+        mutableStateOf(System.currentTimeMillis() / 1_000L)
+    }
+    LaunchedEffect(bandBackfilling, bandSyncStartedAt, bandSyncLastDurableProgressAt) {
+        while (bandBackfilling) {
+            kotlinx.coroutines.delay(1_000)
+            syncNow = System.currentTimeMillis() / 1_000L
+        }
+    }
     val bandSyncDetail = if (bandBackfilling && bandSyncRows > 0) {
         val newestDate = bandSyncNewestAt?.let { unix ->
             Instant.ofEpochSecond(unix)
@@ -7099,6 +7199,30 @@ private fun TodaySourcesSection(
     } else {
         null
     }
+    val bandSyncActivityDetail = if (bandBackfilling) {
+        val activity = com.noop.ble.HistorySyncDurableProgressPolicy.activity(
+            startedAt = bandSyncStartedAt,
+            lastDurableProgressAt = bandSyncLastDurableProgressAt,
+            now = syncNow,
+        )
+        val label = when (activity) {
+            com.noop.ble.HistorySyncProgressActivity.STARTING ->
+                stringResource(R.string.appwide_today_band_sync_activity_starting)
+            com.noop.ble.HistorySyncProgressActivity.ADVANCING ->
+                stringResource(R.string.appwide_today_band_sync_activity_advancing)
+            com.noop.ble.HistorySyncProgressActivity.WAITING ->
+                stringResource(R.string.appwide_today_band_sync_activity_waiting)
+            com.noop.ble.HistorySyncProgressActivity.STALLED ->
+                stringResource(R.string.appwide_today_band_sync_activity_stalled)
+        }
+        val elapsed = elapsedClock((syncNow - (bandSyncStartedAt ?: syncNow)).coerceAtLeast(0))
+        label + " · " + stringResource(R.string.appwide_today_band_sync_elapsed_format, elapsed)
+    } else {
+        null
+    }
+    val combinedBandSyncDetail = listOfNotNull(bandSyncActivityDetail, bandSyncDetail)
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString("\n")
     if (!expanded) {
         // Collapsed: one tappable "Synced from: ..." line. Each source is named for what it is -
         // Health Connect must NOT fold under "Apple Watch" (issue #176: Health-Connect-only users
@@ -7169,7 +7293,7 @@ private fun TodaySourcesSection(
                 },
                 batteryPct = strapBatteryPct,
                 batteryEstimate = strapBatteryEstimate,
-                statusDetail = bandSyncDetail,
+                statusDetail = combinedBandSyncDetail,
             )
             Box(
                 modifier = Modifier

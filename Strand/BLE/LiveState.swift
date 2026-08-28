@@ -4,6 +4,52 @@ import StrandAnalytics
 import WhoopProtocol
 import OuraProtocol
 
+enum HistorySyncProgressActivity: Equatable {
+    case starting
+    case advancing
+    case waiting
+    case stalled
+}
+
+/// Pure, wall-clock policy shared by the sync watchdog and progress UI.
+enum HistorySyncDurableProgressPolicy {
+    static let waitingAfterSeconds: TimeInterval = 10
+    static let stalledAfterSeconds: TimeInterval = 90
+
+    static func advances(rows: Int, trim: UInt32?, previousTrim: UInt32?) -> Bool {
+        rows > 0 || (trim != nil && trim != previousTrim)
+    }
+
+    static func activity(
+        startedAt: TimeInterval?,
+        lastDurableProgressAt: TimeInterval?,
+        now: TimeInterval,
+        waitingAfterSeconds: TimeInterval = HistorySyncDurableProgressPolicy.waitingAfterSeconds,
+        stalledAfterSeconds: TimeInterval = HistorySyncDurableProgressPolicy.stalledAfterSeconds
+    ) -> HistorySyncProgressActivity {
+        guard let startedAt else { return .starting }
+        let reference = lastDurableProgressAt ?? startedAt
+        let idle = max(0, now - reference)
+        if idle >= stalledAfterSeconds { return .stalled }
+        if idle >= waitingAfterSeconds { return .waiting }
+        return lastDurableProgressAt == nil ? .starting : .advancing
+    }
+
+    static func shouldStop(
+        startedAt: TimeInterval?,
+        lastDurableProgressAt: TimeInterval?,
+        now: TimeInterval,
+        stalledAfterSeconds: TimeInterval = HistorySyncDurableProgressPolicy.stalledAfterSeconds
+    ) -> Bool {
+        activity(
+            startedAt: startedAt,
+            lastDurableProgressAt: lastDurableProgressAt,
+            now: now,
+            stalledAfterSeconds: stalledAfterSeconds
+        ) == .stalled
+    }
+}
+
 /// Observable snapshot of the live connection + biometric state, driven by FrameRouter
 /// (from decoded frames) and BLEManager (from CoreBluetooth callbacks).
 /// `@MainActor` so SwiftUI views observe it safely; mutators are called on the main queue.
@@ -401,6 +447,11 @@ public final class LiveState: ObservableObject {
     /// history…" instead of presenting half-loaded data as final (#77).
     @Published public var backfilling = false
 
+    /// Wall-clock bounds for the current contiguous history-drain burst. Receiving frames does not
+    /// advance the durable timestamp; only committed rows or an acknowledged trim do.
+    @Published public private(set) var historySyncStartedAt: TimeInterval?
+    @Published public private(set) var historySyncLastDurableProgressAt: TimeInterval?
+
     /// Honest progress for one contiguous offload burst. Automatic continuation slices retain these
     /// totals, so the UI does not jump back to zero while working through one deep backlog.
     public struct HistorySyncProgress: Equatable, Sendable {
@@ -416,10 +467,18 @@ public final class LiveState: ObservableObject {
     /// batch, every tenth batch, and the exact final count.
     public var syncChunksThisSession: Int { historySyncProgress.batchesReceived }
 
-    func beginHistorySync(continuing: Bool) {
-        guard !continuing else { return }
+    func beginHistorySync(
+        continuing: Bool,
+        at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) {
+        if continuing {
+            if historySyncStartedAt == nil { historySyncStartedAt = timestamp }
+            return
+        }
         pendingHistorySyncProgress = HistorySyncProgress()
         historySyncProgress = HistorySyncProgress()
+        historySyncStartedAt = timestamp
+        historySyncLastDurableProgressAt = nil
     }
 
     func notePersistedHistoryData(
@@ -430,7 +489,11 @@ public final class LiveState: ObservableObject {
     ) {
         historyDataRevision &+= 1
         lastHistoryDataAt = timestamp
-        pendingHistorySyncProgress.rowsPersisted += max(0, rows)
+        let durableRows = max(0, rows)
+        pendingHistorySyncProgress.rowsPersisted += durableRows
+        if durableRows > 0 {
+            historySyncLastDurableProgressAt = timestamp
+        }
         if let oldestUnix {
             pendingHistorySyncProgress.oldestDataUnix = min(
                 pendingHistorySyncProgress.oldestDataUnix ?? oldestUnix,
@@ -451,8 +514,11 @@ public final class LiveState: ObservableObject {
         }
     }
 
-    func noteAcknowledgedHistoryBatch() {
+    func noteAcknowledgedHistoryBatch(
+        at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) {
         pendingHistorySyncProgress.batchesReceived += 1
+        historySyncLastDurableProgressAt = timestamp
         let count = pendingHistorySyncProgress.batchesReceived
         if count == 1 || count.isMultiple(of: 10) {
             publishHistorySyncProgress()
@@ -466,6 +532,8 @@ public final class LiveState: ObservableObject {
     func resetHistorySyncProgress() {
         pendingHistorySyncProgress = HistorySyncProgress()
         historySyncProgress = HistorySyncProgress()
+        historySyncStartedAt = nil
+        historySyncLastDurableProgressAt = nil
     }
 
     private func publishHistorySyncProgress() {

@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 import StrandAnalytics
 @testable import Strand
 
@@ -6,6 +7,7 @@ import StrandAnalytics
 /// #593 evidence-gated Effort-marker nudge. Mirrors the Android `StrainTargetPolicyTest` byte-for-byte (same
 /// fixtures, same expectations). No notification/UserDefaults runtime needed here. Contract: fire at
 /// most once per day, only when strain has genuinely reached a KNOWN target, never on a guessed one.
+@MainActor
 final class StrainTargetPolicyTests: XCTestCase {
     private typealias Policy = StrainTargetNotifier.StrainTargetPolicy
     private let range = DailyActionPlanner.EffortRange(lower: 40, upper: 60)
@@ -112,6 +114,53 @@ final class StrainTargetPolicyTests: XCTestCase {
                 today: "2026-08-22", storedDay: "2026-08-22", storedValue: "unexpected"
             ),
             .unanswered
+        )
+    }
+
+    func testDeniedPermissionDoesNotEnableEffortMarker() async {
+        let notifications = StrainTargetNotificationClientSpy(status: .notDetermined)
+        notifications.authorizationResult = false
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                StrainTargetNotifier.EnableOutcome, Never
+            >) in
+            StrainTargetNotifier.setEnabled(true, client: notifications.client) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+        XCTAssertTrue(notifications.requests.isEmpty)
+    }
+}
+
+@MainActor
+private final class StrainTargetNotificationClientSpy {
+    var status: UNAuthorizationStatus
+    var authorizationResult = false
+    private(set) var authorizationRequestCount = 0
+    private(set) var requests: [String: UNNotificationRequest] = [:]
+
+    init(status: UNAuthorizationStatus) {
+        self.status = status
+    }
+
+    var client: StrainTargetNotifier.NotificationClient {
+        StrainTargetNotifier.NotificationClient(
+            authorizationStatus: { [weak self] in self?.status ?? .denied },
+            requestAuthorization: { [weak self] in
+                guard let self else { return false }
+                self.authorizationRequestCount += 1
+                return self.authorizationResult
+            },
+            preparePrivateCategory: {},
+            add: { [weak self] request in
+                self?.requests[request.identifier] = request
+            },
+            remove: { [weak self] identifiers in
+                identifiers.forEach { self?.requests.removeValue(forKey: $0) }
+            }
         )
     }
 }

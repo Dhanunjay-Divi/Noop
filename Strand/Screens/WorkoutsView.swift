@@ -152,6 +152,51 @@ struct WorkoutActivityCalendarSummary: Equatable {
     }
 }
 
+struct DayOverviewTarget: Identifiable {
+    let date: Date
+    var id: Date { Calendar.current.startOfDay(for: date) }
+}
+
+enum DailyOverviewPresentation {
+    static func efficiencyFraction(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value >= 0, value <= 100 else { return nil }
+        return value <= 1 ? value : value / 100
+    }
+
+    static func efficiencyPercent(_ value: Double?) -> Double? {
+        efficiencyFraction(value).map { $0 * 100 }
+    }
+
+    static func sleepScore(_ daily: DailyMetric?) -> Double? {
+        guard let daily,
+              let efficiency = efficiencyFraction(daily.efficiency)
+        else { return nil }
+        let normalized = DailyMetric(
+            day: daily.day,
+            totalSleepMin: daily.totalSleepMin,
+            efficiency: efficiency,
+            deepMin: daily.deepMin,
+            remMin: daily.remMin,
+            lightMin: daily.lightMin,
+            disturbances: daily.disturbances,
+            restingHr: daily.restingHr,
+            avgHrv: daily.avgHrv,
+            recovery: daily.recovery,
+            strain: daily.strain,
+            exerciseCount: daily.exerciseCount,
+            spo2Pct: daily.spo2Pct,
+            skinTempDevC: daily.skinTempDevC,
+            respRateBpm: daily.respRateBpm,
+            steps: daily.steps,
+            activeKcalEst: daily.activeKcalEst,
+            spo2Red: daily.spo2Red,
+            spo2Ir: daily.spo2Ir,
+            hrvMethod: daily.hrvMethod
+        )
+        return AnalyticsEngine.Rest.composite(daily: normalized)
+    }
+}
+
 // MARK: - Workouts
 //
 // The activity log, instrument-grade and uniform. Built ONLY from the locked Noop
@@ -239,6 +284,10 @@ struct WorkoutsView: View {
     /// The read-only detail screen target — a tapped session. Drives a `.sheet(item:)` separate from
     /// the add/edit sheet so a primary tap (detail) and the ••• menu (edit) never collide. (#410)
     @State private var detail: WorkoutDetailTarget?
+
+    /// A tapped day in the activity calendar. Every cell, including an empty day, opens the same
+    /// exact-day overview used by the month calendar.
+    @State private var dayOverview: DayOverviewTarget?
 
     /// A transient one-line note shown after a manual save / relabel for a sport that already has a
     /// solid/building ActivityCost entry - "Sessions like this usually …" (#439). Auto-clears.
@@ -384,7 +433,7 @@ struct WorkoutsView: View {
                 }
             }
         }
-        .task(id: repo.refreshSeq) {
+        .task(id: "\(repo.refreshSeq)|\(repo.workoutsSeq)") {
             guard !usesPreviewRows else { return }
             // #797: read only the currently-loaded window (bounded on first paint), not the whole history.
             let r = await repo.workoutRows(days: loadedWindowDays ?? 4000)
@@ -453,6 +502,17 @@ struct WorkoutsView: View {
             .noopSheetPresentation(largeFirst: true)
             #else
             .frame(width: 620, height: 720)
+            #endif
+        }
+        .sheet(item: $dayOverview) { target in
+            NavigationStack {
+                DailyOverviewSheet(date: target.date)
+                    .environmentObject(repo)
+            }
+            #if os(iOS)
+            .noopSheetPresentation(largeFirst: true)
+            #else
+            .frame(width: 620, height: 760)
             #endif
         }
         // #459: the in-exercise view, presented when Start Workout is tapped here (same screen LiveView
@@ -847,11 +907,14 @@ struct WorkoutsView: View {
 
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader(
-                "Activity calendar",
-                overline: "Last 30 days",
+                "appwide.workouts.activity_calendar.title",
+                overline: "appwide.trends.last_30_days",
                 trailing: summary.activeDays == 1
-                    ? "1 active day"
-                    : "\(summary.activeDays) active days"
+                    ? String(localized: "appwide.workouts.activity_calendar.one_active_day")
+                    : String.localizedStringWithFormat(
+                        String(localized: "appwide.workouts.activity_calendar.active_days"),
+                        summary.activeDays
+                    )
             )
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.space3) {
@@ -876,7 +939,7 @@ struct WorkoutsView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         ForEach(0..<leading, id: \.self) { _ in
-                            Color.clear.frame(height: 36)
+                            Color.clear.frame(height: 44)
                         }
                         ForEach(dates, id: \.self) { date in
                             activityDay(
@@ -897,11 +960,10 @@ struct WorkoutsView: View {
                         calendarLegend("2", color: StrandPalette.statusPositive)
                         calendarLegend("3+", color: StrandPalette.metricCyan)
                         Spacer(minLength: 4)
-                        Text(
-                            summary.totalMinutes == 1
-                                ? "1 min"
-                                : "\(summary.totalMinutes) min"
-                        )
+                        Text(String.localizedStringWithFormat(
+                            String(localized: "appwide.workouts.active_minutes_value_format"),
+                            summary.totalMinutes
+                        ))
                             .font(StrandFont.captionNumber)
                             .foregroundStyle(StrandPalette.textSecondary)
                     }
@@ -919,24 +981,29 @@ struct WorkoutsView: View {
             default: return StrandPalette.surfaceInset
             }
         }()
-        return ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(color)
-            if isToday {
+        return Button {
+            dayOverview = DayOverviewTarget(date: date)
+        } label: {
+            ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(StrandPalette.textPrimary.opacity(0.9), lineWidth: 1.2)
+                    .fill(color)
+                if isToday {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(StrandPalette.textPrimary.opacity(0.9), lineWidth: 1.2)
+                }
+                Text("\(Calendar.current.component(.day, from: date))")
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(count > 0 ? Color.black.opacity(0.82) : StrandPalette.textTertiary)
             }
-            Text("\(Calendar.current.component(.day, from: date))")
-                .font(StrandFont.captionNumber)
-                .foregroundStyle(count > 0 ? Color.black.opacity(0.82) : StrandPalette.textTertiary)
         }
+        .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .frame(height: 36)
+        .frame(height: 44)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(date.formatted(date: .long, time: .omitted)), "
-            + (count == 1 ? "1 recorded activity" : "\(count) recorded activities")
-        )
+        .accessibilityLabel(activityDayAccessibilityLabel(date: date, count: count))
+        .accessibilityHint(Text("appwide.day_overview.open_hint"))
+        .accessibilityIdentifier("noop.workouts.day.\(Repository.localDayKey(date))")
     }
 
     private func calendarLegend(_ label: String, color: Color) -> some View {
@@ -946,7 +1013,28 @@ struct WorkoutsView: View {
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
-        .accessibilityLabel(label == "3+" ? "3 or more activities" : "\(label) activities")
+        .accessibilityLabel(
+            label == "3+"
+                ? String(localized: "appwide.workouts.activity_calendar.three_or_more")
+                : String.localizedStringWithFormat(
+                    String(localized: "appwide.workouts.activity_calendar.legend_activities"),
+                    label
+                )
+        )
+    }
+
+    private func activityDayAccessibilityLabel(date: Date, count: Int) -> String {
+        let countDescription = count == 1
+            ? String(localized: "appwide.workouts.activity_calendar.one_recorded_activity")
+            : String.localizedStringWithFormat(
+                String(localized: "appwide.workouts.activity_calendar.recorded_activities"),
+                count
+            )
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.workouts.activity_calendar.day_description"),
+            date.formatted(date: .long, time: .omitted),
+            countDescription
+        )
     }
 
     private func weekdayInitials(_ calendar: Calendar) -> [String] {
@@ -2344,6 +2432,588 @@ private struct WorkoutRecoveryTrendChart: View {
         }
         .accessibilityLabel("Heart-rate recovery trend in beats per minute")
     }
+}
+
+struct DailyOverviewSheet: View {
+    @EnvironmentObject private var repo: Repository
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureUnitRaw = ""
+    @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
+
+    let date: Date
+
+    @State private var daily: DailyMetric?
+    @State private var workouts: [WorkoutRow] = []
+    @State private var trackedMetrics: [DayTrackedMetric] = []
+    @State private var hydration: HydrationReading?
+    @State private var journal: [JournalEntry] = []
+    @State private var loading = true
+
+    private var unitSystem: UnitSystem {
+        UnitSystem(rawValue: unitSystemRaw) ?? .metric
+    }
+
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureUnitRaw)
+    }
+
+    private var effortScale: EffortScale {
+        UnitPrefs.resolveEffortScale(effortScaleRaw)
+    }
+
+    private var noData: String {
+        String(localized: "appwide.day_overview.no_data")
+    }
+
+    private struct MetricItem {
+        let label: LocalizedStringKey
+        let value: String
+        let tint: Color?
+    }
+
+    var body: some View {
+        ScrollView {
+            if loading {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 80)
+            } else {
+                VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    Text(date.formatted(date: .complete, time: .omitted))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+
+                    scoreTiles
+                    metricSection(
+                        title: "appwide.day_overview.sleep",
+                        items: sleepItems
+                    )
+                    metricSection(
+                        title: "appwide.day_overview.vitals",
+                        items: vitalItems
+                    )
+                    metricSection(
+                        title: "appwide.day_overview.activity",
+                        items: activityItems
+                    )
+                    if !supplementalItems.isEmpty {
+                        metricSection(
+                            title: "appwide.day_overview.more_metrics",
+                            items: supplementalItems
+                        )
+                    }
+                    if !journal.isEmpty {
+                        journalSection
+                    }
+                    sessionsSection
+                }
+                .padding(.horizontal, NoopMetrics.screenPadding)
+                .padding(.bottom, NoopMetrics.sectionGap)
+            }
+        }
+        .navigationTitle(Text("appwide.day_overview.title"))
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("appwide.action.done") { dismiss() }
+            }
+        }
+        .task(id: [
+            Repository.localDayKey(date),
+            String(repo.refreshSeq),
+            String(repo.ageMetricsSeq),
+            String(repo.workoutsSeq),
+            String(repo.hydrationSeq),
+        ].joined(separator: "|")) {
+            await load()
+        }
+    }
+
+    private var scoreTiles: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "appwide.day_overview.daily_scores",
+                overline: "appwide.day_overview.overall"
+            )
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 148), spacing: NoopMetrics.gap)],
+                spacing: NoopMetrics.gap
+            ) {
+                StatTile(
+                    label: "appwide.day_overview.recovery",
+                    value: score(daily?.recovery),
+                    accent: StrandPalette.chargeColor
+                )
+                StatTile(
+                    label: "appwide.day_overview.sleep_score",
+                    value: score(DailyOverviewPresentation.sleepScore(daily)),
+                    accent: StrandPalette.restColor
+                )
+                StatTile(
+                    label: "appwide.day_overview.effort",
+                    value: daily?.strain.map {
+                        UnitFormatter.effortDisplay($0, scale: effortScale)
+                    } ?? noData,
+                    accent: StrandPalette.effortColor
+                )
+            }
+        }
+    }
+
+    private var sleepItems: [MetricItem] {
+        [
+            MetricItem(
+                label: "appwide.day_overview.total_sleep",
+                value: durationMinutes(daily?.totalSleepMin),
+                tint: StrandPalette.restColor
+            ),
+            MetricItem(
+                label: "appwide.day_overview.sleep_efficiency",
+                value: percent(DailyOverviewPresentation.efficiencyPercent(daily?.efficiency)),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.deep_sleep",
+                value: durationMinutes(daily?.deepMin),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.rem_sleep",
+                value: durationMinutes(daily?.remMin),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.light_sleep",
+                value: durationMinutes(daily?.lightMin),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.disturbances",
+                value: daily?.disturbances.map(String.init) ?? noData,
+                tint: nil
+            ),
+        ]
+    }
+
+    private var vitalItems: [MetricItem] {
+        [
+            MetricItem(
+                label: "appwide.day_overview.resting_heart_rate",
+                value: daily?.restingHr.map { "\($0) bpm" } ?? noData,
+                tint: StrandPalette.metricRose
+            ),
+            MetricItem(
+                label: "appwide.day_overview.hrv",
+                value: daily?.avgHrv.map { "\(decimal($0)) ms" } ?? noData,
+                tint: StrandPalette.metricPurple
+            ),
+            MetricItem(
+                label: "appwide.day_overview.blood_oxygen",
+                value: daily?.spo2Pct.map { "\(decimal($0))%" } ?? noData,
+                tint: StrandPalette.metricCyan
+            ),
+            MetricItem(
+                label: "appwide.day_overview.respiratory_rate",
+                value: daily?.respRateBpm.map { "\(decimal($0)) br/min" } ?? noData,
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.skin_temperature",
+                value: daily?.skinTempDevC.map {
+                    UnitFormatter.temperatureDeltaFromCelsius(
+                        $0,
+                        unit: temperatureUnit,
+                        decimals: 1
+                    )
+                } ?? noData,
+                tint: StrandPalette.metricAmber
+            ),
+        ]
+    }
+
+    private var activityItems: [MetricItem] {
+        let duration = workouts.reduce(0.0) {
+            $0 + ($1.durationS ?? Double(max(0, $1.endTs - $1.startTs)))
+        }
+        let calories = workouts.compactMap(\.energyKcal)
+        let distances = workouts.compactMap(\.distanceM).filter { $0 > 0 }
+        return [
+            MetricItem(
+                label: "appwide.day_overview.steps",
+                value: daily?.steps.map { grouped(Double($0)) } ?? noData,
+                tint: StrandPalette.statusPositive
+            ),
+            MetricItem(
+                label: "appwide.day_overview.estimated_total_energy",
+                value: daily?.activeKcalEst.map { "\(grouped($0)) kcal" } ?? noData,
+                tint: StrandPalette.metricAmber
+            ),
+            MetricItem(
+                label: "appwide.day_overview.workout_count",
+                value: "\(workouts.count)",
+                tint: StrandPalette.effortColor
+            ),
+            MetricItem(
+                label: "appwide.day_overview.active_time",
+                value: durationSeconds(duration),
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.workout_calories",
+                value: calories.isEmpty ? noData : "\(grouped(calories.reduce(0, +))) kcal",
+                tint: nil
+            ),
+            MetricItem(
+                label: "appwide.day_overview.distance",
+                value: distances.isEmpty
+                    ? noData
+                    : UnitFormatter.distanceFromMeters(distances.reduce(0, +), system: unitSystem),
+                tint: nil
+            ),
+        ]
+    }
+
+    private var supplementalItems: [MetricItem] {
+        var seen = Set<String>()
+        var items = trackedMetrics.compactMap { metric -> MetricItem? in
+            guard !Self.coreMetricKeys.contains(metric.descriptor.key) else { return nil }
+            let identity = metric.descriptor.title.lowercased()
+                + "\u{1F}" + metric.descriptor.unit.lowercased()
+            guard seen.insert(identity).inserted else { return nil }
+            return MetricItem(
+                label: LocalizedStringKey(metric.descriptor.title),
+                value: metric.descriptor.format(
+                    metric.value,
+                    system: unitSystem,
+                    temperature: temperatureUnit,
+                    effortScale: effortScale
+                ),
+                tint: metricTint(metric.descriptor.category)
+            )
+        }
+        if let hydration {
+            items.append(MetricItem(
+                label: "appwide.day_overview.hydration",
+                value: "\(grouped(hydration.valueML)) ml",
+                tint: StrandPalette.metricCyan
+            ))
+        }
+        return items
+    }
+
+    private func metricSection(
+        title: LocalizedStringKey,
+        items: [MetricItem]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(title)
+            NoopCard {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        metricRow(item)
+                        if index < items.count - 1 {
+                            Divider().overlay(StrandPalette.hairline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func metricRow(_ item: MetricItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(item.label)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: 8)
+            Text(item.value)
+                .font(StrandFont.number(15))
+                .foregroundStyle(item.tint ?? (
+                    item.value == noData ? StrandPalette.textTertiary : StrandPalette.textPrimary
+                ))
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "appwide.day_overview.sessions",
+                trailing: "\(workouts.count)"
+            )
+            if workouts.isEmpty {
+                NoopCard {
+                    Text("appwide.day_overview.no_sessions")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                NoopCard {
+                    VStack(spacing: 0) {
+                        ForEach(Array(workouts.enumerated()), id: \.offset) { index, row in
+                            workoutRow(row)
+                            if index < workouts.count - 1 {
+                                Divider().overlay(StrandPalette.hairline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var journalSection: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "appwide.day_overview.journal",
+                trailing: "\(journal.count)"
+            )
+            NoopCard {
+                VStack(spacing: 0) {
+                    ForEach(Array(journal.enumerated()), id: \.element.question) { index, entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.question)
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let notes = entry.notes?.trimmingCharacters(
+                                    in: .whitespacesAndNewlines
+                                ), !notes.isEmpty {
+                                    Text(notes)
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            Text(journalValue(entry))
+                                .font(StrandFont.number(15))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .padding(.vertical, 10)
+                        .accessibilityElement(children: .combine)
+                        if index < journal.count - 1 {
+                            Divider().overlay(StrandPalette.hairline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func workoutRow(_ row: WorkoutRow) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: workoutIcon(row.sport))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StrandPalette.effortColor)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(WorkoutSource.displaySport(row.sport))
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(timeRange(row.startTs, row.endTs))
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(durationSeconds(
+                    row.durationS ?? Double(max(0, row.endTs - row.startTs))
+                ))
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                if let kcal = row.energyKcal {
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.day_overview.calories_format"),
+                            grouped(kcal)
+                        )
+                    )
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.metricAmber)
+                }
+            }
+        }
+        .padding(.vertical, 11)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func load() async {
+        loading = true
+        let key = Repository.localDayKey(date)
+        let window = WorkoutDateWindow.localDay(containing: date)
+        async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
+        async let exactWorkouts = repo.workoutRows(
+            overlappingFrom: window.lowerBound,
+            to: window.upperBound
+        )
+        async let exactMetrics = repo.trackedMetrics(day: key)
+        async let exactHydration = repo.hydrationReading(day: key)
+        async let exactJournal = repo.journalEntries(day: key)
+        let (
+            resolvedDaily,
+            resolvedWorkouts,
+            resolvedMetrics,
+            resolvedHydration,
+            resolvedJournal
+        ) = await (
+            dailyRows,
+            exactWorkouts,
+            exactMetrics,
+            exactHydration,
+            exactJournal
+        )
+        daily = resolvedDaily.last(where: { $0.day == key })
+        workouts = resolvedWorkouts.filter {
+            Repository.localDayKey(
+                Date(timeIntervalSince1970: TimeInterval($0.startTs))
+            ) == key
+        }
+        trackedMetrics = resolvedMetrics
+        hydration = resolvedHydration
+        journal = resolvedJournal
+        loading = false
+    }
+
+    private func journalValue(_ entry: JournalEntry) -> String {
+        if let value = entry.numericValue, value.isFinite {
+            return String(
+                format: value.rounded() == value ? "%.0f" : "%.1f",
+                locale: Locale.current,
+                value
+            )
+        }
+        return entry.answeredYes
+            ? String(localized: "appwide.day_overview.yes")
+            : String(localized: "appwide.day_overview.no")
+    }
+
+    private func metricTint(_ category: String) -> Color? {
+        switch category {
+        case "Heart": return StrandPalette.metricRose
+        case "Charge": return StrandPalette.chargeColor
+        case "Rest": return StrandPalette.restColor
+        case "Effort": return StrandPalette.effortColor
+        case "Nutrition": return StrandPalette.metricAmber
+        case "Mind": return StrandPalette.metricPurple
+        default: return nil
+        }
+    }
+
+    private func score(_ value: Double?) -> String {
+        value.map { String(Int($0.rounded())) } ?? noData
+    }
+
+    private func percent(_ value: Double?) -> String {
+        value.map { "\(Int($0.rounded()))%" } ?? noData
+    }
+
+    private func decimal(_ value: Double) -> String {
+        String(format: "%.1f", locale: Locale.current, value)
+    }
+
+    private func grouped(_ value: Double) -> String {
+        Self.integerFormatter.string(from: NSNumber(value: Int(value.rounded())))
+            ?? "\(Int(value.rounded()))"
+    }
+
+    private func durationMinutes(_ minutes: Double?) -> String {
+        guard let minutes, minutes.isFinite, minutes >= 0 else { return noData }
+        return durationSeconds(minutes * 60)
+    }
+
+    private func durationSeconds(_ seconds: Double) -> String {
+        let totalMinutes = max(0, Int((seconds / 60).rounded()))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return String.localizedStringWithFormat(
+                String(localized: "appwide.day_overview.duration_hours_minutes_format"),
+                hours,
+                minutes
+            )
+        }
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.day_overview.duration_minutes_format"),
+            minutes
+        )
+    }
+
+    private func timeRange(_ start: Int, _ end: Int) -> String {
+        let startText = Self.timeFormatter.string(
+            from: Date(timeIntervalSince1970: TimeInterval(start))
+        )
+        guard end > start else { return startText }
+        let endText = Self.timeFormatter.string(
+            from: Date(timeIntervalSince1970: TimeInterval(end))
+        )
+        return "\(startText) - \(endText)"
+    }
+
+    private func workoutIcon(_ sport: String) -> String {
+        let value = sport.lowercased()
+        if value.contains("run") { return "figure.run" }
+        if value.contains("walk") || value.contains("hike") { return "figure.walk" }
+        if value.contains("cycl") || value.contains("bike") { return "bicycle" }
+        if value.contains("swim") { return "figure.pool.swim" }
+        if value.contains("yoga") || value.contains("pilates") { return "figure.yoga" }
+        if value.contains("strength") || value.contains("weight") || value.contains("lift") {
+            return "dumbbell.fill"
+        }
+        return "figure.mixed.cardio"
+    }
+
+    private static let integerFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    private static let coreMetricKeys: Set<String> = [
+        "recovery",
+        "sleep_performance",
+        "sleep_score",
+        "strain",
+        "sleep_total_min",
+        "asleep_min",
+        "sleep_efficiency",
+        "sleep_deep_min",
+        "deep_min",
+        "sleep_rem_min",
+        "rem_min",
+        "sleep_light_min",
+        "core_min",
+        "hrv",
+        "rhr",
+        "resting_hr",
+        "spo2",
+        "resp_rate",
+        "skin_temp",
+        "steps",
+        "steps_est",
+        "active_kcal",
+        "energy_kcal",
+        // Render the source-aware NOOP/Apple Health maximum exactly once below.
+        "hydration",
+    ]
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("jmm")
+        return formatter
+    }()
 }
 
 #if DEBUG

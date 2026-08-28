@@ -93,6 +93,7 @@ import com.noop.analytics.FitnessReadinessStatus
 import com.noop.analytics.VitalBands
 import com.noop.ble.LiveState
 import com.noop.data.DailyMetric
+import com.noop.data.WhoopRepository
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -389,8 +390,8 @@ private fun BodyCompositionSection(
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
-            title = "Body composition",
-            overline = "Whole-body measurements",
+            title = uiString(R.string.appwide_health_body_composition_title),
+            overline = uiString(R.string.appwide_health_body_composition_overline),
             trailing = latestDay?.let { asOfLabel(it)?.removePrefix("as of ") },
         )
         NoopCard(tint = Palette.metricCyan) {
@@ -404,7 +405,7 @@ private fun BodyCompositionSection(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(Metrics.space4),
                     ) {
-                        Overline("WEIGHT")
+                        Overline(uiString(R.string.appwide_health_body_composition_weight))
                         Text(
                             UnitFormatter.massFromKilograms(currentWeight.value, massUnit),
                             style = NoopType.number(30f),
@@ -429,25 +430,26 @@ private fun BodyCompositionSection(
                     horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                 ) {
                     BodyCompositionMetric(
-                        label = "BMI",
+                        label = uiString(R.string.appwide_health_body_composition_bmi),
                         value = currentBmi?.let { String.format(Locale.US, "%.1f", it.value) } ?: "-",
-                        detail = currentBmi?.let(::bodyCompositionCaption) ?: "No value",
+                        detail = currentBmi?.let(::bodyCompositionCaption)
+                            ?: uiString(R.string.appwide_health_body_composition_no_value),
                         modifier = Modifier.weight(1f),
                     )
                     BodyCompositionMetric(
-                        label = "BODY FAT",
-                        value = snapshot.bodyFat?.let {
-                            String.format(Locale.US, "%.1f%%", it.value)
-                        } ?: "-",
-                        detail = snapshot.bodyFat?.let(::bodyCompositionCaption) ?: "No measurement",
+                        label = uiString(R.string.appwide_health_body_composition_body_fat),
+                        value = snapshot.bodyFat?.let { formatBodyFatPct(it.value) } ?: "-",
+                        detail = snapshot.bodyFat?.let(::bodyCompositionCaption)
+                            ?: uiString(R.string.appwide_health_body_composition_no_measurement),
                         modifier = Modifier.weight(1f),
                     )
                     BodyCompositionMetric(
-                        label = "LEAN MASS",
+                        label = uiString(R.string.appwide_health_body_composition_lean_mass),
                         value = snapshot.leanMass?.let {
                             UnitFormatter.massFromKilograms(it.value, massUnit)
                         } ?: "-",
-                        detail = snapshot.leanMass?.let(::bodyCompositionCaption) ?: "No measurement",
+                        detail = snapshot.leanMass?.let(::bodyCompositionCaption)
+                            ?: uiString(R.string.appwide_health_body_composition_no_measurement),
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -462,13 +464,16 @@ private fun BodyCompositionSection(
         }
 
         Text(
-            "Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk " +
-                "fat and muscle distribution; that requires compatible segmental measurement hardware.",
+            uiString(R.string.appwide_health_body_composition_disclaimer),
             style = NoopType.footnote,
             color = Palette.textTertiary,
         )
         if (!loaded) {
-            Text("Loading measurements…", style = NoopType.caption, color = Palette.textTertiary)
+            Text(
+                uiString(R.string.appwide_health_body_composition_loading),
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
         }
     }
 }
@@ -504,12 +509,12 @@ private fun BodyCompositionVisual(bodyFatPct: Double?) {
                 modifier = Modifier.size(31.dp),
             )
             Text(
-                bodyFatPct?.let { String.format(Locale.US, "%.1f%%", it) } ?: "-",
+                bodyFatPct?.let(::formatBodyFatPct) ?: "-",
                 style = NoopType.captionNumber,
                 color = Palette.textPrimary,
             )
             Text(
-                "WHOLE BODY",
+                uiString(R.string.appwide_health_body_composition_whole_body),
                 style = NoopType.overline,
                 color = Palette.textTertiary,
                 maxLines = 1,
@@ -517,6 +522,9 @@ private fun BodyCompositionVisual(bodyFatPct: Double?) {
         }
     }
 }
+
+private fun formatBodyFatPct(value: Double): String =
+    String.format(Locale.US, "%.1f%%", value)
 
 @Composable
 private fun BodyCompositionMetric(
@@ -581,27 +589,41 @@ private fun BodyTargetRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(Metrics.space2),
         ) {
-            Overline("TARGET WEIGHT")
+            Overline(uiString(R.string.appwide_health_body_composition_target_weight))
             if (targetWeightKg != null) {
                 val delta = currentWeightKg - targetWeightKg
                 val distance = UnitFormatter.massFromKilograms(kotlin.math.abs(delta), massUnit)
                 Text(
                     when {
-                        kotlin.math.abs(delta) < 0.05 -> "At your selected target"
-                        delta > 0 -> "$distance above your selected target"
-                        else -> "$distance below your selected target"
+                        kotlin.math.abs(delta) < 0.05 ->
+                            uiString(R.string.appwide_health_body_composition_target_reached)
+                        delta > 0 ->
+                            uiString(R.string.appwide_health_body_composition_target_above, distance)
+                        else ->
+                            uiString(R.string.appwide_health_body_composition_target_below, distance)
                     },
                     style = NoopType.subhead,
                     color = Palette.textPrimary,
                 )
                 Text(
-                    "Target ${UnitFormatter.massFromKilograms(targetWeightKg, massUnit)} · selected by you",
+                    uiString(
+                        R.string.appwide_health_body_composition_target_detail,
+                        UnitFormatter.massFromKilograms(targetWeightKg, massUnit),
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
             } else {
-                Text("No target selected", style = NoopType.subhead, color = Palette.textSecondary)
-                Text("Add an optional target in Profile.", style = NoopType.footnote, color = Palette.textTertiary)
+                Text(
+                    uiString(R.string.appwide_health_body_composition_no_target),
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+                Text(
+                    uiString(R.string.appwide_health_body_composition_add_target),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
             }
         }
     }
@@ -689,7 +711,10 @@ private fun BiomarkerTrendsSection(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Biomarker trends", overline = "Measured history")
+        SectionHeader(
+            uiString(R.string.appwide_health_biomarker_trends_title),
+            overline = uiString(R.string.appwide_health_biomarker_trends_overline),
+        )
         NoopCard(padding = 0.dp) {
             Column {
                 trends.forEachIndexed { index, trend ->
@@ -710,7 +735,7 @@ private fun BiomarkerTrendsSection(
                 }
                 if (!loaded) {
                     Text(
-                        "Loading measured history…",
+                        uiString(R.string.appwide_health_biomarker_trends_loading),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                         modifier = Modifier.padding(Metrics.cardPadding),
@@ -719,8 +744,7 @@ private fun BiomarkerTrendsSection(
             }
         }
         Text(
-            "Values retain their original source and recorded date. Sparklines appear only for recent, " +
-                "closely spaced observations; missing periods are not connected. These are not diagnoses or targets.",
+            uiString(R.string.appwide_health_biomarker_trends_disclaimer),
             style = NoopType.footnote,
             color = Palette.textTertiary,
         )
@@ -873,7 +897,7 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
             "Sync",
-            overline = "Noop Band history",
+            overline = stringResource(R.string.appwide_health_band_history),
             trailing = if (live.connected) (if (live.bonded) "Connected" else "Pairing…") else "Offline",
         )
 
@@ -886,6 +910,8 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
                         chunks = live.syncChunksThisSession,
                         rows = live.syncRowsThisSession,
                         newestDataUnix = live.syncDataNewestAt,
+                        startedAt = live.syncStartedAt,
+                        lastDurableProgressAt = live.syncLastDurableProgressAt,
                     )
                     !live.connected -> StatePill(
                         title = uiString(R.string.l10n_health_screen_no_strap_connected_fb37b99e),
@@ -1271,7 +1297,9 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     // Latest weekly value + its optional VO₂max companion, read once (metricSeries has no Flow, so we
     // re-read whenever the merged history changes — a fresh sync/import is what moves these).
     var fitnessAge by remember { mutableStateOf<Double?>(null) }
+    var fitnessAgeHistory by remember { mutableStateOf<List<Pair<String, Double>>>(emptyList()) }
     var vo2max by remember { mutableStateOf<Double?>(null) }
+    var measuredVo2max by remember { mutableStateOf<Double?>(null) }
     // Manual-refresh plumbing: the not-ready card's refresh button recomputes Fitness Age NOW and bumps
     // this tick, which re-keys the read below so a freshly written value shows without waiting for a sync.
     var refreshTick by remember { mutableStateOf(0) }
@@ -1286,16 +1314,40 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
             !FitnessAgeEngine.supportsSex(profile.sex)
         ) {
             fitnessAge = null
+            fitnessAgeHistory = emptyList()
             vo2max = null
+            measuredVo2max = null
             loadedProfileState = profileState
             return@LaunchedEffect
         }
-        // Latest-value reads (LIMIT-1 per source) — the full-series `.lastOrNull()` scan is gone (perf).
-        val fa = runCatching {
-            vm.repo.latestMetricComputedUnion(vm.activeStrapId, "fitness_age")?.value
-        }.getOrNull()
+        // Fitness Age is weekly and sparse; retain the last eight persisted points for the visible graph.
+        val faSeries = runCatching {
+            vm.repo.metricSeriesComputedUnion(
+                vm.activeStrapId, "fitness_age", "0000-01-01", "9999-12-31",
+            ).takeLast(8)
+        }.getOrDefault(emptyList())
+        val fa = faSeries.lastOrNull()?.value
         val vo2 = runCatching {
             vm.repo.latestMetricComputedUnion(vm.activeStrapId, "vo2max_est")?.value
+        }.getOrNull()
+        val measuredVo2 = runCatching {
+            val appleHealth = vm.repo.appleDaily(
+                WhoopRepository.APPLE_HEALTH_SOURCE,
+                "0000-01-01",
+                "9999-12-31",
+            ).asReversed().firstNotNullOfOrNull { it.vo2max }
+            val healthConnect = vm.repo.appleDaily(
+                WhoopRepository.HEALTH_CONNECT_SOURCE,
+                "0000-01-01",
+                "9999-12-31",
+            ).asReversed().firstNotNullOfOrNull { it.vo2max }
+            appleHealth ?: healthConnect ?: vm.repo.resolvedSeries(
+                key = "vo2max",
+                preferredSource = WhoopRepository.APPLE_HEALTH_SOURCE,
+                from = "0000-01-01",
+                to = "9999-12-31",
+                strapDeviceId = vm.activeStrapId,
+            ).points.lastOrNull()?.value
         }.getOrNull()
         val faProfile = runCatching {
             vm.repo.latestMetricComputedUnion(
@@ -1307,8 +1359,15 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
                 vm.activeStrapId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
             )?.value
         }.getOrNull()
-        fitnessAge = fa.takeIf { profile.acceptsFitnessAge(faProfile) }
+        val acceptsFitnessAge = profile.acceptsFitnessAge(faProfile)
+        fitnessAge = fa.takeIf { acceptsFitnessAge }
+        fitnessAgeHistory = if (acceptsFitnessAge) {
+            faSeries.map { it.day to it.value }
+        } else {
+            emptyList()
+        }
         vo2max = vo2.takeIf { profile.acceptsVO2maxEstimate(vo2Profile) }
+        measuredVo2max = measuredVo2
         loadedProfileState = profileState
     }
 
@@ -1331,6 +1390,12 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
                 modelBandYears = modelBand,
                 onHowAccurate = { showChecklist = !showChecklist },
                 checklistOpen = showChecklist,
+            )
+            FitnessAgeWeeklyProgress(fitnessAgeHistory)
+            FitnessAgeContextCard(
+                days = days,
+                measuredVo2max = measuredVo2max,
+                estimatedVo2max = visibleVo2max,
             )
             if (showChecklist) {
                 FitnessReadinessCard(readiness = readiness, headed = false)
@@ -1557,15 +1622,9 @@ private fun FitnessAgeHero(
     onHowAccurate: () -> Unit,
     checklistOpen: Boolean,
 ) {
-    val shown = fitnessAge.roundToInt()
-    // Delta vs the user's actual age: younger when the fitness age is below it. abs() drives the words.
-    val deltaYears = (chronoAge - fitnessAge).roundToInt()
-    val younger = fitnessAge < chronoAge
-    val deltaWord = when {
-        deltaYears == 0 -> "About your age"
-        younger -> "$deltaYears ${yearWord(deltaYears)} younger than your age"
-        else -> "${kotlin.math.abs(deltaYears)} ${yearWord(deltaYears)} older than your age"
-    }
+    val parts = FitnessAgePresentation.parts(fitnessAge)
+    val younger = parts.totalMonths <= chronoAge * 12
+    val deltaWord = FitnessAgePresentation.localizedComparison(fitnessAge, chronoAge)
     // Vessel fill: a bounded, honest reading of the SAME younger/older signal the card already states,
     // mapped across the model-error band the section advertises - "about your age" is half-full,
     // younger fills it up, older empties it. Presentation only; the shown number is unchanged.
@@ -1580,22 +1639,32 @@ private fun FitnessAgeHero(
     // The frosted liquid hero-card wrapper floats the vessel + white count-up over the sky (the pilot).
     LiquidHeroCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space20),
+            ) {
+                HealthHeroVessel(
+                    fraction = youthFraction,
+                    value = fitnessAge,
+                    tint = Palette.chargeColor,
+                    diameter = 96.dp,
+                    format = FitnessAgePresentation::vesselValue,
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+                ) {
                     Overline("Fitness Age")
-                    // The hero age rides a filling LiquidVessel on the gold Charge world, the age number
-                    // rolled up over it (white, tabular) — the Today HeroScoreVessel idiom. The shown NUMBER
-                    // is the same value (fitnessAge, rounded) as the bare headline this replaced.
-                    HealthHeroVessel(
-                        fraction = youthFraction,
-                        value = shown.toDouble(),
-                        tint = Palette.chargeColor,
-                        diameter = 96.dp,
+                    Text(
+                        text = FitnessAgePresentation.value(fitnessAge),
+                        style = NoopType.chartValueLarge,
+                        color = Palette.textPrimary,
                     )
                     Text(
                         text = deltaWord,
                         style = NoopType.subhead,
-                        color = if (deltaYears == 0) Palette.textSecondary
+                        color = if (parts.totalMonths == chronoAge * 12) Palette.textSecondary
                         else if (younger) Palette.statusPositiveText else Palette.statusWarningText,
                     )
                 }
@@ -1639,6 +1708,161 @@ private fun FitnessAgeHero(
                     style = NoopType.captionNumber,
                     color = Palette.accent,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FitnessAgeWeeklyProgress(history: List<Pair<String, Double>>) {
+    val points = history.takeLast(8)
+    val latest = points.lastOrNull() ?: return
+    NoopCard(tint = Palette.chargeColor) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Overline(
+                    uiString(R.string.appwide_fitness_age_weekly_progress),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    FitnessAgePresentation.value(latest.second),
+                    style = NoopType.captionNumber,
+                    color = Palette.textPrimary,
+                )
+            }
+            LineChart(
+                values = points.map { it.second },
+                color = Palette.chargeColor,
+                modifier = Modifier.height(48.dp),
+                fill = false,
+                selectionEnabled = true,
+                formatValue = FitnessAgePresentation::value,
+                selectionLabels = points.map { it.first },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (points.size > 1) {
+                        FitnessAgePresentation.localizedWeeklyProgress(
+                            current = latest.second,
+                            previous = points[points.lastIndex - 1].second,
+                        )
+                    } else {
+                        uiString(R.string.appwide_fitness_age_first_weekly_estimate)
+                    },
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    uiString(R.string.appwide_fitness_age_weeks_count, points.size),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+    }
+}
+
+private data class FitnessContextReading(
+    val label: String,
+    val value: String,
+    val caption: String,
+)
+
+@Composable
+private fun FitnessAgeContextCard(
+    days: List<DailyMetric>,
+    measuredVo2max: Double?,
+    estimatedVo2max: Double?,
+) {
+    val readings = remember(days, measuredVo2max, estimatedVo2max) {
+        val recent = days.takeLast(7).asReversed()
+        buildList {
+            recent.mapNotNull { it.totalSleepMin }.firstOrNull()?.let { sleep ->
+                val total = sleep.roundToInt()
+                add(FitnessContextReading(
+                    uiString(R.string.l10n_health_screen_sleep_3cac34e6),
+                    "${total / 60}h ${total % 60}m",
+                    uiString(R.string.appwide_fitness_age_recent_context),
+                ))
+            }
+            recent.mapNotNull { it.recovery }.firstOrNull()?.let {
+                add(FitnessContextReading(
+                    uiString(R.string.l10n_health_screen_recovery_ea924f72),
+                    "${it.roundToInt()}%",
+                    uiString(R.string.appwide_fitness_age_recent_context),
+                ))
+            }
+            recent.mapNotNull { it.avgHrv }.firstOrNull()?.let {
+                add(FitnessContextReading(
+                    "HRV",
+                    "${it.roundToInt()} ms",
+                    uiString(R.string.appwide_fitness_age_recent_context),
+                ))
+            }
+            recent.mapNotNull { it.spo2Pct }.firstOrNull()?.let {
+                add(FitnessContextReading(
+                    "SpO₂",
+                    "${it.roundToInt()}%",
+                    uiString(R.string.appwide_fitness_age_recent_context),
+                ))
+            }
+            measuredVo2max?.let {
+                add(FitnessContextReading(
+                    "VO₂max",
+                    "${it.roundToInt()} ml/kg/min",
+                    uiString(R.string.appwide_fitness_age_recent_context),
+                ))
+            } ?: estimatedVo2max?.let {
+                add(FitnessContextReading(
+                    "VO₂max",
+                    "${it.roundToInt()} ml/kg/min",
+                    uiString(R.string.appwide_fitness_age_companion_estimate),
+                ))
+            }
+        }
+    }
+    if (readings.isEmpty()) return
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Overline(
+                    uiString(R.string.appwide_fitness_age_measured_context),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    uiString(R.string.appwide_fitness_age_not_inputs),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            readings.chunked(2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                ) {
+                    row.forEach { reading ->
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+                        ) {
+                            Overline(reading.label)
+                            Text(
+                                reading.value,
+                                style = NoopType.bodyNumber,
+                                color = Palette.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                reading.caption,
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
             }
         }
     }
@@ -2684,6 +2908,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                     color = detail.color,
                     fill = true,
                     selectionEnabled = true, // the Vital Signs detail chart is meant to be tappable
+                    formatValue = detail.format,
                 )
                 Box(
                     modifier = Modifier
@@ -2911,11 +3136,11 @@ private suspend fun buildSeriesVitalDetail(
     "fitness_age" -> VitalDetailModel(
         key = key,
         title = uiString(R.string.l10n_health_screen_fitness_age_12383b4a),
-        unit = "yrs",
+        unit = "",
         color = Palette.chargeColor,
         readings = vm.repo.metricSeriesComputedUnion(vm.activeStrapId, "fitness_age", "0000-01-01", "9999-12-31")
             .map { VitalReading(it.day, it.value, it.deviceId) },
-        format = { it.roundToInt().toString() },
+        format = FitnessAgePresentation::value,
     )
     "vitality" -> VitalDetailModel(
         key = key,

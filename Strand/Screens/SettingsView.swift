@@ -2122,7 +2122,7 @@ struct SettingsView: View {
                         .accessibilityHidden(true)
                     (Text("appwide.backup.encryption_body")
                      + Text(" ")
-                     + Text("Export data creates a portable ZIP with wearable-compatible CSVs plus readable NOOP JSON for editable nutrition and Strength Trainer records."))
+                     + Text("appwide.backup.portable_export_body"))
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2197,7 +2197,10 @@ struct SettingsView: View {
                 return
             case .exported(let url):
                 backupAlertTitle = String(localized: "Data exported")
-                backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). The portable zip re-imports into NOOP (Data Sources → Wearable Export) on any Mac, iPhone, or Android device, including editable nutrition and Strength Trainer records.")
+                backupAlertMessage = String(
+                    format: String(localized: "appwide.backup.portable_export_success"),
+                    url.lastPathComponent
+                )
                 showBackupAlert = true
             case .failure(let message):
                 backupAlertTitle = String(localized: "Export problem")

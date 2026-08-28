@@ -283,7 +283,10 @@ private struct DevicesContent: View {
                 let deviceId = device.id
                 Task {
                     guard let store = await model.repo.storeHandle() else { return }
-                    await registry.deleteDeviceData(deviceId, store: store)
+                    guard await registry.deleteDeviceData(deviceId, store: store) else { return }
+                    model.repo.noteWorkoutsChanged()
+                    await model.repo.refresh()
+                    model.repo.noteAgeMetricsChanged()
                 }
                 deleteDataTarget = nil
             }

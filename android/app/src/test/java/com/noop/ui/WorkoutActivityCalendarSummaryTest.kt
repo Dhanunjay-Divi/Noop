@@ -1,11 +1,14 @@
 package com.noop.ui
 
+import com.noop.data.DailyMetric
 import com.noop.data.WorkoutRow
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class WorkoutActivityCalendarSummaryTest {
@@ -70,5 +73,33 @@ class WorkoutActivityCalendarSummaryTest {
         assertEquals(1, summary.activeDays)
         assertEquals(2, summary.countsByDay[LocalDate.parse("2026-08-27")])
         assertEquals(2, summary.totalMinutes)
+    }
+
+    @Test
+    fun dayOverviewNormalizesFractionAndLegacyPercentEfficiency() {
+        assertEquals(89.9, dayOverviewSleepEfficiencyPercent(0.899)!!, 1e-9)
+        assertEquals(89.9, dayOverviewSleepEfficiencyPercent(89.9)!!, 1e-9)
+
+        fun daily(efficiency: Double) = DailyMetric(
+            deviceId = "test",
+            day = "2026-08-28",
+            totalSleepMin = 450.0,
+            efficiency = efficiency,
+            deepMin = 90.0,
+            remMin = 105.0,
+            lightMin = 255.0,
+        )
+
+        val canonical = dayOverviewSleepScore(daily(0.899))
+        val legacy = dayOverviewSleepScore(daily(89.9))
+        assertNotNull(canonical)
+        assertNotNull(legacy)
+        assertEquals(canonical!!, legacy!!, 1e-9)
+    }
+
+    @Test
+    fun dayOverviewRejectsInvalidEfficiency() {
+        assertNull(dayOverviewSleepEfficiencyPercent(-1.0))
+        assertNull(dayOverviewSleepEfficiencyPercent(100.1))
     }
 }

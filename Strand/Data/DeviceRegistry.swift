@@ -80,13 +80,15 @@ final class DeviceRegistry: ObservableObject {
     /// the whole transaction on the main actor and freeze the UI on a large device/Apple-Health dataset.
     /// Best-effort: a store failure leaves the recordings and published state untouched. Awaits the delete
     /// BEFORE `reload()` so the refreshed device list reflects the emptied recordings.
-    func deleteDeviceData(_ id: String, store: WhoopStore) async {
+    @discardableResult
+    func deleteDeviceData(_ id: String, store: WhoopStore) async -> Bool {
         do {
             try await store.deleteAllData(deviceId: id)
         } catch {
-            return
+            return false
         }
         reload()
+        return true
     }
 
     /// Adopt (or clear, when nil) the stable BLE identity for a device — the

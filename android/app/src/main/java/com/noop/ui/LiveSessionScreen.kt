@@ -192,13 +192,19 @@ private fun LiveSessionBody(
             .padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Header — title + BETA pill (the contract labels the feature BETA at every surface).
+        // Header - manual origin + title + BETA pill (the contract labels the feature BETA at every surface).
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(uiString(R.string.l10n_live_session_screen_live_session_73c925a5), style = NoopType.title1, color = Palette.textPrimary)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Overline(stringResource(R.string.appwide_live_session_manually_started), color = Palette.metricCyan)
+                Text(stringResource(R.string.appwide_live_session_title), style = NoopType.title1, color = Palette.textPrimary)
+            }
             StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
         }
 
@@ -417,8 +423,8 @@ private fun LiveSessionSummary(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Overline("Live Session", color = teal)
-                Text(uiString(R.string.l10n_live_session_screen_session_summary_f9418e16), style = NoopType.title1, color = Palette.textPrimary)
+                Overline(stringResource(R.string.appwide_live_session_manually_started), color = teal)
+                Text(stringResource(R.string.appwide_live_session_summary_title), style = NoopType.title1, color = Palette.textPrimary)
             }
             StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
         }

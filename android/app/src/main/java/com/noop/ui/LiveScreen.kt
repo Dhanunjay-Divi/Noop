@@ -337,27 +337,13 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         if (live.backfilling || live.lastSyncError != null || live.lastSyncAt != null) {
         item {
         if (live.backfilling) {
-            // INDETERMINATE on purpose: the strap never tells us how many records remain, so a percent
-            // would be a lie. A small spinner + the live acked-chunk count is the honest "it's working"
-            // signal. The chunk count only appears once the first chunk lands (0 reads as "starting"). (#93)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(13.dp),
-                    strokeWidth = 2.dp,
-                    color = Palette.accent,
-                )
-                Text(
-                    if (live.syncChunksThisSession > 0)
-                        "Syncing Noop Band history… ${live.syncChunksThisSession} chunks pulled"
-                    else "Syncing Noop Band history…",
-                    style = NoopType.footnote,
-                    color = Palette.textSecondary,
-                )
-            }
+            SyncingHistoryNote(
+                chunks = live.syncChunksThisSession,
+                rows = live.syncRowsThisSession,
+                newestDataUnix = live.syncDataNewestAt,
+                startedAt = live.syncStartedAt,
+                lastDurableProgressAt = live.syncLastDurableProgressAt,
+            )
         } else {
             val syncError = live.lastSyncError
             if (syncError != null) {

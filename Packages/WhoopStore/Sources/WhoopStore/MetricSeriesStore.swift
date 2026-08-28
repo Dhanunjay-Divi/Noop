@@ -20,6 +20,22 @@ public struct MetricPoint: Equatable, Codable, Sendable {
     }
 }
 
+/// One metric-series point with its source partition retained. Used by day-level summary surfaces that
+/// need every recorded scalar for one date without issuing one query per metric key.
+public struct SourcedMetricPoint: Equatable, Codable, Sendable {
+    public let deviceId: String
+    public let day: String
+    public let key: String
+    public let value: Double
+
+    public init(deviceId: String, day: String, key: String, value: Double) {
+        self.deviceId = deviceId
+        self.day = day
+        self.key = key
+        self.value = value
+    }
+}
+
 extension WhoopStore {
 
     // MARK: - Upsert (idempotent by natural key; latest value wins on conflict)
@@ -118,6 +134,31 @@ extension WhoopStore {
                 ORDER BY day ASC
                 """, arguments: [deviceId, key, from, to])
                 .map { MetricPoint(day: $0["day"], key: $0["key"], value: $0["value"]) }
+        }
+    }
+
+    /// Every scalar recorded on one exact local day, with source retained. The natural-key index keeps
+    /// this bounded to one daily slice even when the database contains years of metric history.
+    public func metricSeries(day: String) async throws -> [SourcedMetricPoint] {
+        try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT deviceId, day, key, value FROM metricSeries
+                WHERE day = ?
+                ORDER BY deviceId ASC, key ASC
+                """, arguments: [day])
+                .compactMap {
+                    let key: String = $0["key"]
+                    let stored: Double = $0["value"]
+                    guard let value = Self.normalizedMetricSeriesValue(stored, forKey: key) else {
+                        return nil
+                    }
+                    return SourcedMetricPoint(
+                        deviceId: $0["deviceId"],
+                        day: $0["day"],
+                        key: key,
+                        value: value
+                    )
+                }
         }
     }
 

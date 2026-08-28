@@ -128,6 +128,7 @@ object StrainTargetNotifier {
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         return NotificationLifecycleLedger.posted(
@@ -136,6 +137,18 @@ object StrainTargetNotifier {
             NotificationLifecycleCategory.STATUS,
         ) {
             NotificationManagerCompat.from(context).notify(id, n)
+        }
+    }
+
+    fun cancel(context: Context) {
+        NotificationLifecycleLedger.cancelled(
+            context,
+            NotificationLifecycleId.STRAIN_TARGET,
+            NotificationLifecycleCategory.STATUS,
+        ) {
+            NotificationManagerCompat.from(context).cancel(
+                NotificationPlatformIdentity.NotificationId.STRAIN_TARGET,
+            )
         }
     }
 

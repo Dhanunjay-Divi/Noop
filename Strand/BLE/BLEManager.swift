@@ -526,6 +526,9 @@ public final class BLEManager: NSObject, ObservableObject {
     private var strapNewestTs: Int?
     /// Fires if the strap goes silent mid-offload; re-armed on every frame during backfill.
     private var backfillTimeout: DispatchWorkItem?
+    /// Fires when frames keep arriving but neither committed rows nor safe trim acknowledgements advance.
+    /// Unlike `backfillTimeout`, raw frame receipt never re-arms this deadline.
+    private var backfillDurableProgressTimeout: DispatchWorkItem?
     /// Periodic opportunistic upload while connected. Without it, upload only fires at connect +
     /// backfill-exit, so during a long live session decoded rows pile up locally and the server
     /// (dashboard) lags. Started on bond, cancelled on disconnect.
@@ -1062,6 +1065,7 @@ public final class BLEManager: NSObject, ObservableObject {
                                         newestUnix: receipt.newestUnix,
                                         at: landedAt
                                     )
+                                    self.armBackfillDurableProgressTimeout()
                                     UserDefaults.standard.set(landedAt, forKey: "sync.lastWriteOkAt")
                                 },
                                 // Connection & Sync test mode (Test Centre): the cheap gate + tagged sink the
@@ -1812,11 +1816,19 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The `trim` argument (= end_data first u32) is already persisted as the strap_trim cursor by
     /// the Backfiller; it is passed here only for logging.
     func ackHistoricalChunk(trim: UInt32, endData: [UInt8]) {
+        let trimAdvanced = HistorySyncDurableProgressPolicy.advances(
+            rows: 0,
+            trim: trim,
+            previousTrim: backfiller?.lastAckedTrim
+        )
         send(.historicalDataResult, payload: [0x01] + endData, writeType: .withResponse)
         acknowledgedBatchesThisSession += 1
-        // Live progress is coalesced to the first ACK and every tenth after it. The exact total is
-        // published at session exit, reducing SwiftUI/notification churn during multi-hour drains.
-        state.noteAcknowledgedHistoryBatch()
+        if trimAdvanced {
+            // Live progress is coalesced to the first advancing ACK and every tenth after it. Repeated
+            // empty ENDs at one frozen cursor are not progress and cannot keep the watchdog alive.
+            state.noteAcknowledgedHistoryBatch()
+            armBackfillDurableProgressTimeout()
+        }
     }
 
     // MARK: Backfill helpers
@@ -1888,6 +1900,7 @@ public final class BLEManager: NSObject, ObservableObject {
         // strap streams HISTORY_START → type-47 records → HISTORY_END (acked) … → HISTORY_COMPLETE.
         send(.sendHistoricalData, payload: [0x00], writeType: .withResponse)
         armBackfillTimeout()
+        armBackfillDurableProgressTimeout()
         log("Backfill: session started - historical offload requested")
         return true
     }
@@ -1966,6 +1979,34 @@ public final class BLEManager: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(BLEManager.backfillIdleTimeoutSeconds), execute: item)
     }
 
+    /// A chatty offload can keep the frame-idle watchdog alive forever while a failed store/cursor write
+    /// prevents every safe acknowledgement. Bound that state independently, without acknowledging the
+    /// held chunk; the band retains it and offers it again on the next sync.
+    private func armBackfillDurableProgressTimeout() {
+        guard backfilling else { return }
+        backfillDurableProgressTimeout?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, self.backfilling else { return }
+            let now = Date().timeIntervalSince1970
+            guard HistorySyncDurableProgressPolicy.shouldStop(
+                startedAt: self.state.historySyncStartedAt,
+                lastDurableProgressAt: self.state.historySyncLastDurableProgressAt,
+                now: now
+            ) else {
+                self.armBackfillDurableProgressTimeout()
+                return
+            }
+            self.log("Backfill: durable progress stalled for 90s while frames may still be arriving - ending this attempt without acknowledging the held history.")
+            self.backfiller?.timeoutFired()
+            self.exitBackfilling(reason: "durableProgressTimeout")
+        }
+        backfillDurableProgressTimeout = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + HistorySyncDurableProgressPolicy.stalledAfterSeconds,
+            execute: item
+        )
+    }
+
     /// Tear down the backfill session. Does NOT auto-start live HR: the periodic type-47 backfill
     /// is the primary metric source now, mirroring how WHOOP syncs. Live HR is opt-in only (the
     /// manual "Start HR" button in LiveView). Between backfills the Collector sees only the live
@@ -1981,6 +2022,8 @@ public final class BLEManager: NSObject, ObservableObject {
         lastOffloadFrameAt = Date()
         backfillTimeout?.cancel()
         backfillTimeout = nil
+        backfillDurableProgressTimeout?.cancel()
+        backfillDurableProgressTimeout = nil
         backfillFrameQueue.removeAll()
         log("Backfill: session ended - reason=\(reason)")
         // Inactivity reminder (#419): read-only hook on the natural offload completion (no cadence
@@ -2169,6 +2212,9 @@ public final class BLEManager: NSObject, ObservableObject {
                     bankedThisOffload: bankedThisOffload
                 )
             }
+        } else if reason == "durableProgressTimeout" {
+            state.lastSyncError = futureClockBanner
+                ?? "Sync paused because saved data stopped advancing. Your band history is safe; Noop will retry on the next sync."
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
         // #364 / #25: a session that ended on the 60s IDLE cap OR on a true HISTORY_COMPLETE while still
@@ -4321,6 +4367,8 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         lastBatteryReadAt = nil
         backfillTimeout?.cancel()
         backfillTimeout = nil
+        backfillDurableProgressTimeout?.cancel()
+        backfillDurableProgressTimeout = nil
         backfillFrameQueue.removeAll()
         backfillDraining = false
         uploadTimer?.cancel()

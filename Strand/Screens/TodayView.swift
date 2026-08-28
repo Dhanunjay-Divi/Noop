@@ -55,32 +55,88 @@ enum ReadinessPresentation {
     }
 }
 
-/// One locale-aware Fitness Age formatter shared by Today and the metric explorer.
+/// One month-precise Fitness Age formatter shared by every Apple-platform surface.
 enum FitnessAgePresentation {
+    struct Components: Equatable {
+        let totalMonths: Int
+        let years: Int
+        let months: Int
+    }
+
+    static func components(_ estimate: Double) -> Components {
+        let totalMonths = max(0, Int((estimate * 12).rounded()))
+        return Components(
+            totalMonths: totalMonths,
+            years: totalMonths / 12,
+            months: totalMonths % 12
+        )
+    }
+
     static func value(_ estimate: Double) -> String {
+        let parts = components(estimate)
+        // Product notation: 23.11 means 23 years and 11 months, not 23.11 decimal years.
+        return "\(parts.years).\(parts.months)"
+    }
+
+    static func spokenValue(_ estimate: Double) -> String {
+        duration(totalMonths: components(estimate).totalMonths)
+    }
+
+    static func duration(totalMonths: Int) -> String {
+        let months = max(0, totalMonths)
+        let yearsPart = months / 12
+        let monthsPart = months % 12
+        if yearsPart == 0 {
+            return String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.duration_months"),
+                monthsPart
+            )
+        }
+        if monthsPart == 0 {
+            return String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.duration_years"),
+                yearsPart
+            )
+        }
         return String.localizedStringWithFormat(
-            String(localized: "appwide.fitness_age.value_format"),
-            Int(estimate.rounded())
+            String(localized: "appwide.fitness_age.duration_years_months"),
+            yearsPart,
+            monthsPart
         )
     }
 
     static func comparison(estimate: Double, profileAge: Int) -> String {
-        let delta = Double(profileAge) - estimate
-        let years = Int(abs(delta).rounded())
-        if years == 0 {
+        let deltaMonths = profileAge * 12 - components(estimate).totalMonths
+        if deltaMonths == 0 {
             return String(localized: "appwide.fitness_age.same_profile_age")
         }
-        let key: String
-        if delta > 0 {
-            key = years == 1
-                ? "appwide.fitness_age.younger_one_profile_age"
-                : "appwide.fitness_age.younger_many_profile_age"
-        } else {
-            key = years == 1
-                ? "appwide.fitness_age.older_one_profile_age"
-                : "appwide.fitness_age.older_many_profile_age"
+        let difference = duration(totalMonths: abs(deltaMonths))
+        return deltaMonths > 0
+            ? String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.younger_duration_profile_age"),
+                difference
+            )
+            : String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.older_duration_profile_age"),
+                difference
+            )
+    }
+
+    static func weeklyProgress(current: Double, previous: Double) -> String {
+        let improvementMonths = components(previous).totalMonths - components(current).totalMonths
+        if improvementMonths == 0 {
+            return String(localized: "appwide.fitness_age.no_change_this_week")
         }
-        return String.localizedStringWithFormat(String(localized: String.LocalizationValue(key)), years)
+        let difference = duration(totalMonths: abs(improvementMonths))
+        return improvementMonths > 0
+            ? String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.younger_this_week"),
+                difference
+            )
+            : String.localizedStringWithFormat(
+                String(localized: "appwide.fitness_age.older_this_week"),
+                difference
+            )
     }
 }
 
@@ -1614,6 +1670,7 @@ struct TodayView: View {
         // Reload when the data refreshes OR the selected day changes, the HR trend and Rest score are
         // day-scoped, so navigating must re-fetch them for the newly selected window.
         .task(id: TodayLoadKey(seq: repo.refreshSeq, ageMetricsSeq: repo.ageMetricsSeq,
+                               workoutsSeq: repo.workoutsSeq,
                                offset: selectedDayOffset,
                                ageMetricState: profile.ageMetricStateToken)) { await loadAll() }
         // #989: hydration writes don't bump refreshSeq, so the card needs its own triggers, a logged /
@@ -2559,7 +2616,7 @@ struct TodayView: View {
             return stressToday.map { "\(Int($0.rounded()))" } ?? Self.calibratingPlaceholder
         case .fitnessAge:
             let value = ageMetricsLoadedProfileState == profile.ageMetricStateToken ? fitnessAgeToday : nil
-            return withUnit(value.map { "\(Int($0.rounded()))" } ?? "-")
+            return value.map(FitnessAgePresentation.value) ?? "-"
         case .vitality:
             let value = ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitalityToday : nil
             return value.map { "\(Int($0.rounded()))" } ?? "-"
@@ -4970,6 +5027,7 @@ struct TodayView: View {
 private struct TodayLoadKey: Equatable {
     let seq: Int
     let ageMetricsSeq: Int
+    let workoutsSeq: Int
     let offset: Int
     let ageMetricState: String
 }
@@ -5166,7 +5224,9 @@ private struct SyncingHistoryNoteIfBackfilling: View {
             SyncingHistoryNote(
                 chunks: live.syncChunksThisSession,
                 rows: live.historySyncProgress.rowsPersisted,
-                newestDataUnix: live.historySyncProgress.newestDataUnix
+                newestDataUnix: live.historySyncProgress.newestDataUnix,
+                startedAt: live.historySyncStartedAt,
+                lastDurableProgressAt: live.historySyncLastDurableProgressAt
             )
         }
     }
