@@ -178,7 +178,7 @@ struct CalendarMonthView: View {
         .task(id: "\(monthKey)|\(model.repo.refreshSeq)") { await load() }
         .sheet(item: $dayOverview) { target in
             NavigationStack {
-                DailyOverviewSheet(date: target.date)
+                DailyOverviewSheet(date: target.date, scope: .all)
                     .environmentObject(model.repo)
             }
             #if os(iOS)

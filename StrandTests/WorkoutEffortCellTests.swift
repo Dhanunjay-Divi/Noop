@@ -183,4 +183,9 @@ final class DailyOverviewPresentationTests: XCTestCase {
         XCTAssertNil(DailyOverviewPresentation.efficiencyPercent(100.1))
         XCTAssertNil(DailyOverviewPresentation.sleepScore(daily(efficiency: .infinity)))
     }
+
+    func testActivityScopeExcludesWholeDayHealthMetrics() {
+        XCTAssertFalse(DailyOverviewScope.activity.includesWholeDayMetrics)
+        XCTAssertTrue(DailyOverviewScope.all.includesWholeDayMetrics)
+    }
 }

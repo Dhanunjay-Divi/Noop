@@ -150,14 +150,12 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val allRows by vm.workouts.collectAsStateWithLifecycle()
     val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
     val workoutDataVersion by vm.workoutDataVersion.collectAsStateWithLifecycle()
-    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
     // Cached daily metrics — the Charge side of the post-log activity-cost note (#439).
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     var loaded by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(WorkoutRange.All) }
     var showStrengthTrainer by remember { mutableStateOf(false) }
     var selectedOverviewDay by remember { mutableStateOf<LocalDate?>(null) }
-    var overviewContent by remember { mutableStateOf<WorkoutDayOverviewContent?>(null) }
     // Pick the default range ONCE on first non-empty load; later mutations must not fight a range the
     // user chose. Mirrors macOS, which sets the default only in `.task` / first onAppear.
     var didPickDefaultRange by remember { mutableStateOf(false) }
@@ -424,20 +422,6 @@ fun WorkoutsScreen(vm: AppViewModel) {
     }
 
     selectedOverviewDay?.let { day ->
-        LaunchedEffect(day, vm.activeStrapId, metricDataVersion) {
-            overviewContent = null
-            val dayKey = day.toString()
-            val imported = vm.repo.importedSourceIds(vm.activeStrapId).flatMap {
-                vm.repo.journal(it, dayKey, dayKey)
-            }
-            val native = vm.repo.journal(JOURNAL_DEVICE_ID, dayKey, dayKey)
-            overviewContent = WorkoutDayOverviewContent(
-                day = day,
-                metricRows = vm.repo.metricSeriesForDay(dayKey),
-                journal = mergeJournalEntries(imported, native),
-            )
-        }
-        val exactContent = overviewContent?.takeIf { it.day == day }
         val daily = recentDays.lastOrNull { it.day == day.toString() }
         val zoneId = ZoneId.systemDefault()
         val dayWorkouts = allRows.filter {
@@ -445,12 +429,13 @@ fun WorkoutsScreen(vm: AppViewModel) {
         }
         WorkoutDayOverviewSheet(
             day = day,
+            scope = DayOverviewScope.ACTIVITY,
             daily = daily,
             workouts = dayWorkouts,
-            metricRows = exactContent?.metricRows.orEmpty(),
-            journal = exactContent?.journal.orEmpty(),
+            metricRows = emptyList(),
+            journal = emptyList(),
             activeStrapId = vm.activeStrapId,
-            loading = exactContent == null,
+            loading = false,
             onDismiss = { selectedOverviewDay = null },
         )
     }
@@ -458,12 +443,6 @@ fun WorkoutsScreen(vm: AppViewModel) {
 
 /** Drives the manual add/edit dialog. [editing] null = add a new workout, non-null = edit it. */
 private data class DialogTarget(val editing: WorkoutRow?)
-
-private data class WorkoutDayOverviewContent(
-    val day: LocalDate,
-    val metricRows: List<MetricSeriesRow>,
-    val journal: List<JournalEntry>,
-)
 
 private data class WorkoutRecoveryTrendPoint(
     val startTs: Long,
@@ -700,10 +679,16 @@ internal fun dayOverviewSleepScore(daily: DailyMetric?): Double? {
     return RestScorer.restFromDaily(daily.copy(efficiency = efficiency))
 }
 
+internal enum class DayOverviewScope(val includesWholeDayMetrics: Boolean) {
+    ALL(true),
+    ACTIVITY(false),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun WorkoutDayOverviewSheet(
     day: LocalDate,
+    scope: DayOverviewScope,
     daily: DailyMetric?,
     workouts: List<WorkoutRow>,
     metricRows: List<MetricSeriesRow>,
@@ -825,13 +810,17 @@ internal fun WorkoutDayOverviewSheet(
                 ?: noData,
         ),
     )
-    val supplementalItems = dayOverviewSupplementalMetrics(
-        metricRows,
-        activeStrapId,
-        unitSystem,
-        temperatureUnit,
-        locale,
-    )
+    val supplementalItems = if (scope.includesWholeDayMetrics) {
+        dayOverviewSupplementalMetrics(
+            metricRows,
+            activeStrapId,
+            unitSystem,
+            temperatureUnit,
+            locale,
+        )
+    } else {
+        emptyList()
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -887,27 +876,36 @@ internal fun WorkoutDayOverviewSheet(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                SectionHeader(
-                    title = uiString(R.string.appwide_day_overview_daily_scores),
-                    overline = uiString(R.string.appwide_day_overview_overall),
-                )
+                if (scope.includesWholeDayMetrics) {
+                    SectionHeader(
+                        title = uiString(R.string.appwide_day_overview_daily_scores),
+                        overline = uiString(R.string.appwide_day_overview_overall),
+                    )
+                } else {
+                    SectionHeader(
+                        title = uiString(R.string.appwide_day_overview_effort),
+                        overline = uiString(R.string.appwide_day_overview_activity),
+                    )
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                    ) {
-                        StatTile(
-                            label = uiString(R.string.appwide_day_overview_recovery),
-                            value = score(daily?.recovery),
-                            accent = Palette.chargeColor,
-                            modifier = Modifier.weight(1f),
-                        )
-                        StatTile(
-                            label = uiString(R.string.appwide_day_overview_sleep_score),
-                            value = score(dayOverviewSleepScore(daily)),
-                            accent = Palette.restColor,
-                            modifier = Modifier.weight(1f),
-                        )
+                    if (scope.includesWholeDayMetrics) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                        ) {
+                            StatTile(
+                                label = uiString(R.string.appwide_day_overview_recovery),
+                                value = score(daily?.recovery),
+                                accent = Palette.chargeColor,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatTile(
+                                label = uiString(R.string.appwide_day_overview_sleep_score),
+                                value = score(dayOverviewSleepScore(daily)),
+                                accent = Palette.restColor,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -925,29 +923,31 @@ internal fun WorkoutDayOverviewSheet(
                 }
             }
 
-            DayOverviewMetricSection(
-                title = uiString(R.string.appwide_day_overview_sleep),
-                items = sleepItems,
-                noData = noData,
-            )
-            DayOverviewMetricSection(
-                title = uiString(R.string.appwide_day_overview_vitals),
-                items = vitalItems,
-                noData = noData,
-            )
+            if (scope.includesWholeDayMetrics) {
+                DayOverviewMetricSection(
+                    title = uiString(R.string.appwide_day_overview_sleep),
+                    items = sleepItems,
+                    noData = noData,
+                )
+                DayOverviewMetricSection(
+                    title = uiString(R.string.appwide_day_overview_vitals),
+                    items = vitalItems,
+                    noData = noData,
+                )
+            }
             DayOverviewMetricSection(
                 title = uiString(R.string.appwide_day_overview_activity),
                 items = activityItems,
                 noData = noData,
             )
-            if (supplementalItems.isNotEmpty()) {
+            if (scope.includesWholeDayMetrics && supplementalItems.isNotEmpty()) {
                 DayOverviewMetricSection(
                     title = uiString(R.string.appwide_day_overview_more_metrics),
                     items = supplementalItems,
                     noData = noData,
                 )
             }
-            if (journal.isNotEmpty()) {
+            if (scope.includesWholeDayMetrics && journal.isNotEmpty()) {
                 DayOverviewJournalSection(journal)
             }
             DayOverviewSessions(

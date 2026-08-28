@@ -117,7 +117,7 @@ final class MoreListParityTests: XCTestCase {
 
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
     /// that bar's rendered height and be applied once as an inherited scroll-content margin. This keeps
-    /// final rows reachable without shrinking the full-bleed page backdrop into opaque top/bottom bands.
+    /// final rows reachable and fully opaque without shrinking the full-bleed page backdrop.
     func testCustomiPhoneTabBarHasOneMeasuredFullScreenReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
@@ -137,10 +137,8 @@ final class MoreListParityTests: XCTestCase {
                        "Outer padding creates an opaque band behind the floating controls.")
         XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
                        "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
-        XCTAssertTrue(shell.contains("colors: [.white, .clear]"),
-                      "Foreground must fade at the reserved-strip boundary instead of clipping text sharply.")
-        XCTAssertTrue(shell.contains("Color.clear.frame(height: max(0, visibleTabBarHeight - 24))"),
-                      "The controls still need a fully clear foreground strip over the full-bleed backdrop.")
+        XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
+                       "A shell mask washes out the final visible row before it reaches the reserved strip.")
         let interactionEnvironment = try XCTUnwrap(
             shell.range(of: #".environment(\.liquidInteractionInProgress"#)
         )

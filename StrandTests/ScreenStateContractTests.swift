@@ -414,6 +414,13 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
     func testFitnessCalendarAndReferenceDestinationsStayDiscoverable() throws {
         let fitness = try text("Strand/Screens/WorkoutsView.swift")
+        let calendar = try text("Strand/Screens/CalendarMonthView.swift")
+        let androidFitness = try text(
+            "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt"
+        )
+        let androidCalendar = try text(
+            "android/app/src/main/java/com/noop/ui/CalendarMonthScreen.kt"
+        )
         let shell = try text("StrandiOS/App/RootTabView.swift")
 
         XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
@@ -424,6 +431,14 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(fitness.contains(
             #"String(localized: "appwide.workouts.activity_calendar.recorded_activities")"#
         ))
+        XCTAssertTrue(fitness.contains(
+            "DailyOverviewSheet(date: target.date, scope: .activity)"
+        ))
+        XCTAssertTrue(calendar.contains(
+            "DailyOverviewSheet(date: target.date, scope: .all)"
+        ))
+        XCTAssertTrue(androidFitness.contains("scope = DayOverviewScope.ACTIVITY"))
+        XCTAssertTrue(androidCalendar.contains("scope = DayOverviewScope.ALL"))
         XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Workouts""#))
         XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))

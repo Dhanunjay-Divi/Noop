@@ -178,9 +178,8 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar over a full-bleed page and reserve its measured height only inside scroll
-        // content. The short alpha ramp masks only the foreground as it enters that reserved strip; the
-        // shell-owned backdrop remains edge-to-edge behind the glass instead of becoming an opaque band.
+        // Keep the custom bar over a full-bleed page and reserve its measured height inside scroll
+        // content. Content remains fully opaque up to that reserved strip.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -213,18 +212,6 @@ struct RootTabView: View {
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
             .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
-            .mask(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    Color.white
-                    LinearGradient(
-                        colors: [.white, .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 24)
-                    Color.clear.frame(height: max(0, visibleTabBarHeight - 24))
-                }
-            }
 
             if !keyboardVisible {
                 HStack(alignment: .center, spacing: 8) {

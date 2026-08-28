@@ -157,6 +157,13 @@ struct DayOverviewTarget: Identifiable {
     var id: Date { Calendar.current.startOfDay(for: date) }
 }
 
+enum DailyOverviewScope: String {
+    case all
+    case activity
+
+    var includesWholeDayMetrics: Bool { self == .all }
+}
+
 enum DailyOverviewPresentation {
     static func efficiencyFraction(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value >= 0, value <= 100 else { return nil }
@@ -506,7 +513,7 @@ struct WorkoutsView: View {
         }
         .sheet(item: $dayOverview) { target in
             NavigationStack {
-                DailyOverviewSheet(date: target.date)
+                DailyOverviewSheet(date: target.date, scope: .activity)
                     .environmentObject(repo)
             }
             #if os(iOS)
@@ -2442,6 +2449,7 @@ struct DailyOverviewSheet: View {
     @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
 
     let date: Date
+    let scope: DailyOverviewScope
 
     @State private var daily: DailyMetric?
     @State private var workouts: [WorkoutRow] = []
@@ -2485,25 +2493,27 @@ struct DailyOverviewSheet: View {
                         .foregroundStyle(StrandPalette.textSecondary)
 
                     scoreTiles
-                    metricSection(
-                        title: "appwide.day_overview.sleep",
-                        items: sleepItems
-                    )
-                    metricSection(
-                        title: "appwide.day_overview.vitals",
-                        items: vitalItems
-                    )
+                    if scope.includesWholeDayMetrics {
+                        metricSection(
+                            title: "appwide.day_overview.sleep",
+                            items: sleepItems
+                        )
+                        metricSection(
+                            title: "appwide.day_overview.vitals",
+                            items: vitalItems
+                        )
+                    }
                     metricSection(
                         title: "appwide.day_overview.activity",
                         items: activityItems
                     )
-                    if !supplementalItems.isEmpty {
+                    if scope.includesWholeDayMetrics, !supplementalItems.isEmpty {
                         metricSection(
                             title: "appwide.day_overview.more_metrics",
                             items: supplementalItems
                         )
                     }
-                    if !journal.isEmpty {
+                    if scope.includesWholeDayMetrics, !journal.isEmpty {
                         journalSection
                     }
                     sessionsSection
@@ -2522,6 +2532,7 @@ struct DailyOverviewSheet: View {
             }
         }
         .task(id: [
+            scope.rawValue,
             Repository.localDayKey(date),
             String(repo.refreshSeq),
             String(repo.ageMetricsSeq),
@@ -2534,24 +2545,33 @@ struct DailyOverviewSheet: View {
 
     private var scoreTiles: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader(
-                "appwide.day_overview.daily_scores",
-                overline: "appwide.day_overview.overall"
-            )
+            if scope.includesWholeDayMetrics {
+                SectionHeader(
+                    "appwide.day_overview.daily_scores",
+                    overline: "appwide.day_overview.overall"
+                )
+            } else {
+                SectionHeader(
+                    "appwide.day_overview.effort",
+                    overline: "appwide.day_overview.activity"
+                )
+            }
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 148), spacing: NoopMetrics.gap)],
                 spacing: NoopMetrics.gap
             ) {
-                StatTile(
-                    label: "appwide.day_overview.recovery",
-                    value: score(daily?.recovery),
-                    accent: StrandPalette.chargeColor
-                )
-                StatTile(
-                    label: "appwide.day_overview.sleep_score",
-                    value: score(DailyOverviewPresentation.sleepScore(daily)),
-                    accent: StrandPalette.restColor
-                )
+                if scope.includesWholeDayMetrics {
+                    StatTile(
+                        label: "appwide.day_overview.recovery",
+                        value: score(daily?.recovery),
+                        accent: StrandPalette.chargeColor
+                    )
+                    StatTile(
+                        label: "appwide.day_overview.sleep_score",
+                        value: score(DailyOverviewPresentation.sleepScore(daily)),
+                        accent: StrandPalette.restColor
+                    )
+                }
                 StatTile(
                     label: "appwide.day_overview.effort",
                     value: daily?.strain.map {
@@ -2852,6 +2872,26 @@ struct DailyOverviewSheet: View {
         loading = true
         let key = Repository.localDayKey(date)
         let window = WorkoutDateWindow.localDay(containing: date)
+        if !scope.includesWholeDayMetrics {
+            async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
+            async let exactWorkouts = repo.workoutRows(
+                overlappingFrom: window.lowerBound,
+                to: window.upperBound
+            )
+            let (resolvedDaily, resolvedWorkouts) = await (dailyRows, exactWorkouts)
+            daily = resolvedDaily.last(where: { $0.day == key })
+            workouts = resolvedWorkouts.filter {
+                Repository.localDayKey(
+                    Date(timeIntervalSince1970: TimeInterval($0.startTs))
+                ) == key
+            }
+            trackedMetrics = []
+            hydration = nil
+            journal = []
+            loading = false
+            return
+        }
+
         async let dailyRows = repo.dailyMetrics(fromDay: key, toDay: key)
         async let exactWorkouts = repo.workoutRows(
             overlappingFrom: window.lowerBound,

@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WorkoutActivityCalendarSummaryTest {
@@ -101,5 +102,11 @@ class WorkoutActivityCalendarSummaryTest {
     fun dayOverviewRejectsInvalidEfficiency() {
         assertNull(dayOverviewSleepEfficiencyPercent(-1.0))
         assertNull(dayOverviewSleepEfficiencyPercent(100.1))
+    }
+
+    @Test
+    fun activityOverviewExcludesWholeDayHealthMetrics() {
+        assertFalse(DayOverviewScope.ACTIVITY.includesWholeDayMetrics)
+        assertTrue(DayOverviewScope.ALL.includesWholeDayMetrics)
     }
 }

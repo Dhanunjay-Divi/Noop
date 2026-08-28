@@ -384,6 +384,7 @@ internal fun CalendarMonthScreen(
         }
         WorkoutDayOverviewSheet(
             day = day,
+            scope = DayOverviewScope.ALL,
             daily = exact?.daily,
             workouts = dayWorkouts,
             metricRows = exact?.metricRows.orEmpty(),
