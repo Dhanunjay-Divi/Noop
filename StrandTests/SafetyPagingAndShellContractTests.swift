@@ -513,8 +513,9 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ] {
             XCTAssertTrue(launcher.contains("tile(\"\(title)\""), title)
         }
+        XCTAssertTrue(launcher.contains(#".accessibilityIdentifier("noop.quick-actions.updates")"#))
         XCTAssertTrue(shell.contains(
-            "Opens workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions"
+            "Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions"
         ))
     }
 

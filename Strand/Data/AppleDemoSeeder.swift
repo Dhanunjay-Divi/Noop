@@ -47,17 +47,29 @@ enum AppleDemoSeeder {
     ) {
         guard arguments.contains("--demo-seed") else { return }
         live.batteryPct = 68
-        if arguments.contains("--demo-band-connected") {
+        let presentsConnectedBand =
+            arguments.contains("--demo-band-connected")
+            || arguments.contains("--demo-band-charging")
+            || arguments.contains("--demo-band-syncing")
+        if presentsConnectedBand {
             live.connected = true
+            live.bonded = true
+            live.encryptedBond = true
         }
         if arguments.contains("--demo-band-charging") {
-            live.connected = true
             live.charging = true
         }
         if arguments.contains("--demo-band-syncing") {
-            live.connected = true
             live.backfilling = true
-            live.syncChunksThisSession = 7
+            live.beginHistorySync(continuing: false)
+            for _ in 0..<7 { live.noteAcknowledgedHistoryBatch() }
+            let newest = Int(Date().timeIntervalSince1970) - 900
+            live.notePersistedHistoryData(
+                rows: 12_480,
+                oldestUnix: newest - (14 * 86_400),
+                newestUnix: newest
+            )
+            live.finishHistorySyncProgress()
         }
     }
 

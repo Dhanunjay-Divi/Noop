@@ -189,10 +189,15 @@ data class LiveState(
     /** True while a historical offload session is running, so screens can say "Syncing strap
      *  history…" instead of presenting half-loaded data as final (#77). */
     val backfilling: Boolean = false,
-    /** Chunks acked during the current offload session — an honest progress signal (total pending is
-     *  unknowable from the protocol, so no percent). Republished every ~10 chunks: the foreground
-     *  service re-posts its notification on EVERY LiveState emission, so per-chunk would spam it. */
+    /** Batches acknowledged during the current contiguous offload burst. Automatic continuation slices
+     *  preserve this total so a deep backlog does not appear to restart at zero. Total pending remains
+     *  unknowable from the protocol, so the UI never presents a percentage or ETA. */
     val syncChunksThisSession: Int = 0,
+    /** Score-bearing rows durably inserted during the same burst. */
+    val syncRowsThisSession: Int = 0,
+    /** Oldest/newest usable timestamps durably inserted during the same burst. */
+    val syncDataOldestAt: Long? = null,
+    val syncDataNewestAt: Long? = null,
     /** Wall-clock (unix seconds) of the last offload that ran to HISTORY_COMPLETE, or null if none
      *  this process. For a cloud-free app this is the honest "is sync actually working?" answer - the
      *  UI renders it as a relative "Last synced N ago". (PR #85) */
@@ -1107,7 +1112,12 @@ class WhoopBleClient(
         fun disconnectedLiveState(previous: LiveState): LiveState =
             previous.clearedBiometrics().copy(
                 connected = false, bonded = false, encryptedBond = false,
-                backfilling = false, syncChunksThisSession = 0, charging = null,
+                backfilling = false,
+                syncChunksThisSession = 0,
+                syncRowsThisSession = 0,
+                syncDataOldestAt = null,
+                syncDataNewestAt = null,
+                charging = null,
                 // Stale firmware/layout readouts must not outlive the dropped link.
                 strapFirmware = null, historyLayoutVersion = null,
                 // #580: the 5/MG "history experimental" note is per-link - a fresh connect re-derives it
@@ -1155,6 +1165,11 @@ class WhoopBleClient(
         fun releasedLiveState(previous: LiveState): LiveState =
             previous.clearedBiometrics().copy(
                 connected = false, bonded = false, encryptedBond = false,
+                backfilling = false,
+                syncChunksThisSession = 0,
+                syncRowsThisSession = 0,
+                syncDataOldestAt = null,
+                syncDataNewestAt = null,
                 charging = null, strapFirmware = null, historyLayoutVersion = null,
                 pairingHint = null, scanning = false,
                 statusNote = null,
@@ -2088,7 +2103,7 @@ class WhoopBleClient(
         deviceId = deviceId,
         cursorStore = cursorStore,
         ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
-        onChunkCommitted = { onBackfillChunkCommitted(deviceId) },
+        onChunkCommitted = { committed -> onBackfillChunkCommitted(deviceId, committed) },
         onConsoleChunk = { consoleChunksThisSession += 1 },
         // #77/#91: archive undecodable frames before the ack. append() returns ok=true (written, or
         // archive-full → still safe to ack) and THROWS only on a genuine write failure → return false
@@ -2123,9 +2138,25 @@ class WhoopBleClient(
      * UI's 15-min analysis tick (which also doesn't run at all with the app UI closed and only the
      * foreground service alive). Mirrors the AppViewModel loop's profile + writeback behaviour. (#78 fork)
      */
-    private fun onBackfillChunkCommitted(sourceId: String) {
+    private fun onBackfillChunkCommitted(sourceId: String, committed: BackfillCommittedChunk) {
         decodedChunksThisSession += 1   // invoked once per non-empty decoded chunk (#77 family tally)
+        val hadRows = syncBurstProgress.rows > 0
+        syncBurstProgress = syncBurstProgress.adding(committed)
+        if ((!hadRows && syncBurstProgress.rows > 0) || syncBurstProgress.batches % 10 == 0) {
+            publishHistorySyncProgress()
+        }
         postBackfillAnalysisWorker.noteCommit(sourceId)
+    }
+
+    private fun publishHistorySyncProgress() {
+        _state.update {
+            it.copy(
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
+            )
+        }
     }
 
     /**
@@ -2319,6 +2350,8 @@ class WhoopBleClient(
     /** Chunks acked this offload session — feeds LiveState.syncChunksThisSession (throttled). Only
      *  touched on the serial backfill drain coroutine + the begin/exit lifecycle. */
     private var ackedChunksThisSession = 0
+    /** Visible progress spans automatic continuation slices in one deep-drain burst. */
+    private var syncBurstProgress = BackfillBurstProgress()
     /** #77 family: per-session chunk tallies to tell an EMPTY completed sync (strap handed over only
      *  console/diagnostic output — not banking to flash) from a clean one. Reset at session start. */
     private var decodedChunksThisSession = 0
@@ -6099,15 +6132,27 @@ class WhoopBleClient(
         // #42/#364: consecutiveAutoContinues > 0 means this offload is re-kicked after an EARLIER session
         // in the same burst banked rows - tell the backfiller so its no-cursor END reads as "caught up",
         // not "no banked history / charge to 100%". A fresh offload (count 0) keeps the honest guidance.
-        backfiller.begin(connectedFamily, continuedAfterRows = consecutiveAutoContinues > 0)   // family drives the +4 puffin offset for 5/MG (#78)
+        val continuingBurst = consecutiveAutoContinues > 0
+        backfiller.begin(connectedFamily, continuedAfterRows = continuingBurst)   // family drives the +4 puffin offset for 5/MG (#78)
         backfilling = true
         lastBackfillAtMs = System.currentTimeMillis()   // the BackfillPolicy floor is measured from the last KICK
         ackedChunksThisSession = 0
+        if (!continuingBurst) {
+            syncBurstProgress = BackfillBurstProgress()
+        }
         decodedChunksThisSession = 0
         consoleChunksThisSession = 0
         offloadFramesThisSession = 0
         historicalKickSent = false
-        _state.update { it.copy(backfilling = true, syncChunksThisSession = 0) }
+        _state.update {
+            it.copy(
+                backfilling = true,
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
+            )
+        }
         refreshConnectionPriority()   // #477: escalate to HIGH for the offload burst (faster sync). No-op unless enabled.
         applyPreferredPhy()           // #533: prefer LE 2M for the burst (halves air-time). No-op unless enabled.
         // Opt-in raw capture (research aid): pref read fresh per session, like the probes gate.
@@ -6278,7 +6323,15 @@ class WhoopBleClient(
             whoop5HistoryAttempts++
             backfiller.timeoutFired()
             backfilling = false
-            _state.update { it.copy(backfilling = false, syncChunksThisSession = 0) }
+            _state.update {
+                it.copy(
+                    backfilling = false,
+                    syncChunksThisSession = syncBurstProgress.batches,
+                    syncRowsThisSession = syncBurstProgress.rows,
+                    syncDataOldestAt = syncBurstProgress.oldestUnix,
+                    syncDataNewestAt = syncBurstProgress.newestUnix,
+                )
+            }
             handler.removeCallbacks(backfillTimeoutRunnable)
             backfillDrain.clear()
             log("Backfill: no history frames arrived - retrying request (attempt ${whoop5HistoryAttempts + 1})")
@@ -6411,7 +6464,10 @@ class WhoopBleClient(
         _state.update { when (reason) {
             "HISTORY_COMPLETE" -> it.copy(
                 backfilling = false,
-                syncChunksThisSession = ackedChunksThisSession,
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
                 lastSyncAt = nowSec,
                 // bankedNothing keeps its own sustained-empty precedence (#126/#214) — future-dated is
                 // checked ONLY on the banked-something path, matching the Swift else-if order exactly so
@@ -6430,7 +6486,10 @@ class WhoopBleClient(
             )
             "timeout" -> it.copy(
                 backfilling = false,
-                syncChunksThisSession = ackedChunksThisSession,
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
                 // #580: on a history-experimental 5/MG this isn't a sync failure - suppress the "went quiet"
                 // error (it's just the empty offload), and surface the experimental flag instead.
                 // #324/#928: a future-dated WHOOP-4 TIMES OUT on its deep future-dated backlog — prefer the
@@ -6451,7 +6510,10 @@ class WhoopBleClient(
             )
             else -> it.copy(
                 backfilling = false,
-                syncChunksThisSession = ackedChunksThisSession,
+                syncChunksThisSession = syncBurstProgress.batches,
+                syncRowsThisSession = syncBurstProgress.rows,
+                syncDataOldestAt = syncBurstProgress.oldestUnix,
+                syncDataNewestAt = syncBurstProgress.newestUnix,
                 historySyncExperimental = whoop5HistoryExperimental,
             )
         } }
@@ -6626,12 +6688,12 @@ class WhoopBleClient(
         payload[0] = 0x01
         System.arraycopy(endData, 0, payload, 1, endData.size)
         send(CommandNumber.HISTORICAL_DATA_RESULT, payload, withResponse = true)
-        // Progress signal for the "Syncing strap history…" UI (#77). Republish every 10th chunk only -
-        // the FGS notification re-posts on every LiveState emission. Runs on the single serial drain
-        // coroutine, so the counter is race-free.
+        // Progress signal for the "Syncing strap history…" UI (#77). The per-session count remains
+        // separate for outcome classification; the visible count spans auto-continue slices.
         ackedChunksThisSession += 1
-        if (ackedChunksThisSession % 10 == 0) {
-            _state.update { it.copy(syncChunksThisSession = ackedChunksThisSession) }
+        syncBurstProgress = syncBurstProgress.acknowledgingBatch()
+        if (syncBurstProgress.batches == 1 || syncBurstProgress.batches % 10 == 0) {
+            publishHistorySyncProgress()
         }
         log("Backfill: acked chunk trim=$trim")
     }
@@ -6812,7 +6874,11 @@ class WhoopBleClient(
         // atomic update: LiveState is written from multiple threads (binder/main/IO).
         _state.update { it.clearedBiometrics().copy(
             connected = false, bonded = false, encryptedBond = false,
-            backfilling = false, syncChunksThisSession = 0,
+            backfilling = false,
+            syncChunksThisSession = 0,
+            syncRowsThisSession = 0,
+            syncDataOldestAt = null,
+            syncDataNewestAt = null,
             charging = null,        // a stale charging flag must not outlive the link
             strapFirmware = null,   // nor stale firmware/layout versions
             historyLayoutVersion = null,
@@ -6970,6 +7036,8 @@ class WhoopBleClient(
         disSerial = null
         disHwRev = null
         backfilling = false
+        ackedChunksThisSession = 0
+        syncBurstProgress = BackfillBurstProgress()
         backfillDrain.reset()
         strapNewestTs = null
         offloadFramesThisSession = 0

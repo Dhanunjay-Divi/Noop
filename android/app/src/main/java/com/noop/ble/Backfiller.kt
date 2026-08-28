@@ -2,7 +2,6 @@ package com.noop.ble
 
 import android.content.Context
 import com.noop.data.InsertCounts
-import com.noop.data.StreamBatch
 import com.noop.data.WhoopRepository
 import com.noop.protocol.BadClockDiagnostics
 import com.noop.protocol.DeviceFamily
@@ -14,6 +13,12 @@ import com.noop.protocol.extractHistoricalStreams
 import com.noop.protocol.rejectedHistoricalRecords
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+data class BackfillCommittedChunk(
+    val rows: Int,
+    val oldestUnix: Long?,
+    val newestUnix: Long?,
+)
 
 /**
  * Historical-offload state machine (idle / backfilling).
@@ -66,7 +71,7 @@ class Backfiller(
      * invisible until the next 15-min analysis tick. Empty chunks (metadata-only ENDs) don't fire.
      * (#78 fork)
      */
-    private val onChunkCommitted: (StreamBatch) -> Unit = {},
+    private val onChunkCommitted: (BackfillCommittedChunk) -> Unit = {},
     /**
      * Per-console-only chunk hook (#77 family): a chunk arrived with frames but decoded no rows and
      * held no genuine rejects — pure diagnostic/console output. Lets the client tally a completed-but-
@@ -348,7 +353,7 @@ class Backfiller(
             snapshot
         }
 
-        var committed: StreamBatch? = null
+        var committed: BackfillCommittedChunk? = null
         if (frames.isNotEmpty()) {
             val ref = clockRef
             val decoded = extractHistoricalStreams(
@@ -475,7 +480,6 @@ class Backfiller(
             // port slip: no data loss either way, but the insert-failure retry archived twice.)
             try {
                 val counts = repository.insert(decoded, deviceId)
-                committed = decoded
                 // Success-side observability (#150): tally what actually persisted so the session can emit
                 // "persisted N rows (M with motion) across K night(s)" - the win-rate signal we never logged.
                 val scoreBearingTimestamps =
@@ -489,6 +493,13 @@ class Backfiller(
                 sessionMotionRows += motion
                 sessionSkinTempRows += counts.skinTemp
                 sessionNightKeys.addAll(nights)
+                if (!decoded.isEmpty) {
+                    committed = BackfillCommittedChunk(
+                        rows = rows,
+                        oldestUnix = scoreBearingTimestamps.minOrNull(),
+                        newestUnix = scoreBearingTimestamps.maxOrNull(),
+                    )
+                }
                 // Connection test mode: per-chunk offload PROGRESS (running session totals). Gated zero-cost.
                 // Twin of the Swift Backfiller emit.
                 emitConnection {
@@ -566,7 +577,7 @@ class Backfiller(
 
         ackTrim(trim, endData)
         lastAckedTrim = trim   // #364: record the advanced cursor for the auto-continue spin-detector
-        committed?.takeIf { !it.isEmpty }?.let(onChunkCommitted)
+        committed?.let(onChunkCommitted)
     }
 
     /**

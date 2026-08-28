@@ -71,6 +71,17 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Live HR"].exists)
     }
 
+    func testUpdatesInboxOpensFromQuickActions() {
+        let app = launchApp(extraArguments: ["--demo-quick-actions"])
+        let updates = app.buttons["noop.quick-actions.updates"]
+        XCTAssertTrue(updates.waitForExistence(timeout: 20))
+
+        updates.tap()
+        XCTAssertTrue(app.staticTexts["Updates"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Close"].exists)
+        keepScreenshot(app, name: "quick-actions-updates-inbox")
+    }
+
     func testCompactTabControlExpandsWithoutChangingTheSelectedTab() {
         let app = XCUIApplication()
         app.launchArguments = [
@@ -733,7 +744,7 @@ final class NOOPiOSUITests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let labels = ["Today", "Trends", "Fitness", "Sleep", "More"]
+        let labels = ["Today", "Trends", "Workouts", "Sleep", "More"]
         for (index, label) in labels.enumerated() {
             let tab = app.buttons["noop.tab.\(index)"]
             XCTAssertTrue(tab.waitForExistence(timeout: 5), file: file, line: line)

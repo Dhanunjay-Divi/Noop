@@ -90,6 +90,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -285,23 +290,58 @@ fun DataPendingNote(title: String, body: String, modifier: Modifier = Modifier) 
 // MARK: - SyncingHistoryNote - pulsing "history sync in progress" line (#77)
 //
 // Shown above a screen's empty state while the strap's historical offload runs, so a half-loaded
-// screen ("No nights here yet") reads as in-progress rather than final. Shows the honest live
-// signal — chunks pulled so far — never a percent (total pending is unknowable from the protocol,
-// so a determinate bar would lie).
+// screen ("No nights here yet") reads as in-progress rather than final. Shows batches received,
+// durable rows saved, and the newest timestamp reached — never a percent because total pending is
+// unknowable from the protocol.
+
+internal data class HistorySyncUiProgress(
+    val batches: Int,
+    val rows: Int,
+    val newestDataUnix: Long?,
+)
 
 @Composable
-fun SyncingHistoryNote(chunks: Int, modifier: Modifier = Modifier) {
-    Row(
+fun SyncingHistoryNote(
+    chunks: Int,
+    rows: Int = 0,
+    newestDataUnix: Long? = null,
+    modifier: Modifier = Modifier,
+) {
+    Column(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(Metrics.space6),
     ) {
-        StatePill("Syncing Noop Band history…", tone = StrandTone.Accent, pulsing = true)
-        if (chunks > 0) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            StatePill("Syncing Noop Band history…", tone = StrandTone.Accent, pulsing = true)
+            if (chunks > 0) {
+                Text(
+                    uiString(R.string.appwide_today_band_sync_batches_format, chunks),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            }
+        }
+        if (rows > 0) {
+            val newestDate = newestDataUnix?.let {
+                Instant.ofEpochSecond(it)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                    .format(
+                        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+                            .withLocale(Locale.getDefault()),
+                    )
+            }
             Text(
-                uiString(R.string.l10n_components_chunks_chunks_pulled_cec186cf, chunks),
+                if (newestDate != null) {
+                    uiString(R.string.appwide_today_band_sync_rows_ready_format, rows, newestDate)
+                } else {
+                    uiString(R.string.appwide_today_band_sync_rows_format, rows)
+                },
                 style = NoopType.footnote,
-                color = Palette.textSecondary,
+                color = Palette.textTertiary,
             )
         }
     }

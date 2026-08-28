@@ -81,6 +81,9 @@ private struct HealthSectionsStack: View {
             // labelled progress bars (HRV / Resting HR / Sleep / Respiratory), each
             // scored against the on-device baseline. Depends only on `repo`.
             RecoveryContributorsSection()
+            // Whole-body measurements only: weight, BMI, body fat, lean mass and the
+            // user's optional target. NOOP never invents segmental limb distribution.
+            BodyCompositionSection()
             // Measured body-composition and cardio history, separate from age-shaped estimates.
             BiomarkerTrendsSection()
             // v5 skin-temperature suite: the illness "heads-up", body clock, and (opt-in) cycle
@@ -189,7 +192,11 @@ private struct SyncStatusSection: View {
     @ViewBuilder private var statusRow: some View {
         if live.backfilling {
             // Reuse the shared in-progress affordance so this matches every other "syncing history" surface.
-            SyncingHistoryNote(chunks: live.syncChunksThisSession)
+            SyncingHistoryNote(
+                chunks: live.syncChunksThisSession,
+                rows: live.historySyncProgress.rowsPersisted,
+                newestDataUnix: live.historySyncProgress.newestDataUnix
+            )
         } else if !live.connected {
             StatePill("Noop Band not connected", tone: .neutral, showsDot: false)
         } else if let last = live.lastSyncedAt {
@@ -1411,23 +1418,11 @@ private struct VitalsSection: View {
             sourceRows: repo.vitalMetricRows,
             temperatureUnit: temperatureUnit,
             sleepOverrideDays: repo.editedSleepDays
-        ).filter { $0.key != "spo2raw" }
+        ).filter { ["resp", "spo2", "rhr", "hrv", "skin"].contains($0.key) }
         let rangeSummary = BodyVitalSigns.rangeSummary(readings)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Health Monitor", overline: "Latest", trailing: BodyVitalSigns.latestDayLabel(readings))
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Image(systemName: rangeSummary.allAvailableInRange
-                      ? "checkmark.circle.fill" : "info.circle.fill")
-                    .foregroundStyle(rangeSummary.allAvailableInRange
-                                     ? StrandPalette.statusPositive : StrandPalette.textTertiary)
-                    .accessibilityHidden(true)
-                Text(rangeSummary.message)
-                    .font(StrandFont.subhead)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(rangeSummary.message)
+            HealthMonitorSummary(readings: readings, rangeSummary: rangeSummary)
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)],
                 alignment: .leading,
@@ -1444,6 +1439,75 @@ private struct VitalsSection: View {
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// Compact five-signal scan inspired by the reference monitor. It is a summary of the exact
+/// calibrated readings rendered below, not a separate health score. Missing readings stay neutral
+/// and never increase the "within range" count.
+private struct HealthMonitorSummary: View {
+    let readings: [BodyVitalReading]
+    let rangeSummary: VitalRangeSummary
+
+    private static let shortLabels: [String: String] = [
+        "resp": "RESP", "spo2": "SPO₂", "rhr": "RHR", "hrv": "HRV", "skin": "TEMP",
+    ]
+
+    var body: some View {
+        NoopCard(padding: 14, tint: StrandPalette.statusPositive) {
+            VStack(spacing: 14) {
+                HStack(spacing: 0) {
+                    ForEach(Array(readings.enumerated()), id: \.element.id) { index, reading in
+                        if index > 0 {
+                            Divider()
+                                .frame(height: 66)
+                                .overlay(StrandPalette.hairline)
+                        }
+                        signal(reading)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                Divider().overlay(StrandPalette.hairline)
+                HStack(spacing: 8) {
+                    Image(systemName: rangeSummary.allAvailableInRange
+                          ? "checkmark.square.fill" : "info.circle.fill")
+                        .foregroundStyle(rangeSummary.allAvailableInRange
+                                         ? StrandPalette.statusPositive : StrandPalette.textTertiary)
+                        .accessibilityHidden(true)
+                    Text(rangeSummary.message)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rangeSummary.message)
+    }
+
+    private func signal(_ reading: BodyVitalReading) -> some View {
+        let available = reading.value?.isFinite == true && reading.banding.band != .noData
+        let inRange = available && reading.banding.band == .inRange
+        let statusColor = inRange
+            ? StrandPalette.statusPositive
+            : (available ? StrandPalette.statusCritical : StrandPalette.textTertiary)
+        return VStack(spacing: 6) {
+            Image(systemName: reading.systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(reading.metricColor)
+                .frame(height: 20)
+            Text(Self.shortLabels[reading.key] ?? reading.label.uppercased())
+                .font(StrandFont.overline)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Image(systemName: inRange
+                  ? "checkmark.square.fill"
+                  : (available ? "exclamationmark.triangle.fill" : "minus.circle.fill"))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(statusColor)
         }
     }
 }
@@ -1830,6 +1894,279 @@ enum BiomarkerTrendIntegrity {
     }
 }
 
+// MARK: - Body composition
+
+/// A whole-body composition summary backed only by imported measurements or explicit profile values.
+/// Segmental arm/leg/trunk analysis requires dedicated hardware and is intentionally never inferred.
+private struct BodyCompositionSection: View {
+    private struct Reading: Equatable {
+        let value: Double
+        let day: String?
+        let source: String
+    }
+
+    private struct Snapshot: Equatable {
+        var weight: Reading?
+        var bmi: Reading?
+        var bodyFat: Reading?
+        var leanMass: Reading?
+    }
+
+    @EnvironmentObject private var repo: Repository
+    @EnvironmentObject private var profile: ProfileStore
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @State private var snapshot = Snapshot()
+    @State private var loaded = false
+
+    private var unitSystem: UnitSystem {
+        UnitSystem(rawValue: unitSystemRaw) ?? .metric
+    }
+
+    private var massUnit: MassUnit {
+        UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw)
+    }
+
+    private var weight: Reading {
+        snapshot.weight ?? Reading(value: profile.weightKg, day: nil, source: "profile")
+    }
+
+    private var bmi: Reading? {
+        if let measured = snapshot.bmi { return measured }
+        let metres = profile.heightCm / 100
+        guard weight.value.isFinite, metres.isFinite, metres > 0 else { return nil }
+        let value = weight.value / (metres * metres)
+        guard value >= 5, value <= 100 else { return nil }
+        return Reading(value: value, day: weight.day, source: "profile")
+    }
+
+    private var latestMeasuredDay: String? {
+        [snapshot.weight?.day, snapshot.bmi?.day, snapshot.bodyFat?.day, snapshot.leanMass?.day]
+            .compactMap { $0 }
+            .max()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "Body composition",
+                overline: "Whole-body measurements",
+                trailing: latestMeasuredDay.map(BodyVitalReading.dayLabel)
+            )
+
+            NoopCard(tint: StrandPalette.metricCyan) {
+                VStack(spacing: NoopMetrics.space4) {
+                    HStack(spacing: NoopMetrics.space4) {
+                        bodyVisual
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("WEIGHT").strandOverline()
+                            Text(UnitFormatter.massFromKilograms(weight.value, unit: massUnit))
+                                .font(StrandFont.number(30))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+                            Text(readingCaption(weight))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                        spacing: 8
+                    ) {
+                        compositionMetric(
+                            label: "BMI",
+                            value: bmi.map { String(format: "%.1f", $0.value) } ?? "-",
+                            detail: bmi.map(readingCaption) ?? String(localized: "No value")
+                        )
+                        compositionMetric(
+                            label: "BODY FAT",
+                            value: snapshot.bodyFat.map { String(format: "%.1f%%", $0.value) } ?? "-",
+                            detail: snapshot.bodyFat.map(readingCaption)
+                                ?? String(localized: "No measurement")
+                        )
+                        compositionMetric(
+                            label: "LEAN MASS",
+                            value: snapshot.leanMass.map {
+                                UnitFormatter.massFromKilograms($0.value, unit: massUnit)
+                            } ?? "-",
+                            detail: snapshot.leanMass.map(readingCaption)
+                                ?? String(localized: "No measurement")
+                        )
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+                    targetRow
+                }
+            }
+            .redacted(reason: loaded ? RedactionReasons() : .placeholder)
+
+            Text("Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk fat and muscle distribution; that requires compatible segmental measurement hardware.")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task(id: repo.refreshSeq) { await load() }
+    }
+
+    private var bodyVisual: some View {
+        let bodyFat = snapshot.bodyFat?.value
+        let fraction = bodyFat.map { min(max($0 / 100, 0), 1) } ?? 0
+        return ZStack {
+            Circle()
+                .stroke(StrandPalette.hairlineStrong, lineWidth: 8)
+            if bodyFat != nil {
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(
+                        StrandPalette.metricAmber,
+                        style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
+            VStack(spacing: 3) {
+                Image(systemName: "figure.arms.open")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(StrandPalette.metricCyan)
+                    .accessibilityHidden(true)
+                Text(bodyFat.map { String(format: "%.1f%%", $0) } ?? "-")
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("WHOLE BODY")
+                    .font(StrandFont.overline)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+        }
+        .frame(width: 108, height: 108)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            bodyFat.map { "Whole-body fat \($0.formatted(.number.precision(.fractionLength(1)))) percent" }
+                ?? "No whole-body fat measurement"
+        )
+    }
+
+    private func compositionMetric(label: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(StrandFont.overline)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(value)
+                .font(StrandFont.number(18))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+            Text(detail)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .topLeading)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var targetRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "target")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .frame(width: 34, height: 34)
+                .background(StrandPalette.accent.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("TARGET WEIGHT").strandOverline()
+                if let target = profile.targetWeightKg {
+                    Text(targetDistanceText(currentKg: weight.value, targetKg: target))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Target \(UnitFormatter.massFromKilograms(target, unit: massUnit)) · selected by you")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                } else {
+                    Text("No target selected")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Text("Add an optional target in Profile.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func targetDistanceText(currentKg: Double, targetKg: Double) -> String {
+        let delta = currentKg - targetKg
+        if abs(delta) < 0.05 { return String(localized: "At your selected target") }
+        let distance = UnitFormatter.massFromKilograms(abs(delta), unit: massUnit)
+        return delta > 0
+            ? String(localized: "\(distance) above your selected target")
+            : String(localized: "\(distance) below your selected target")
+    }
+
+    private func readingCaption(_ reading: Reading) -> String {
+        var parts: [String] = []
+        if let day = reading.day { parts.append(BodyVitalReading.dayLabel(day)) }
+        parts.append(sourceLabel(reading.source))
+        return parts.joined(separator: " · ")
+    }
+
+    private func sourceLabel(_ source: String) -> String {
+        switch source {
+        case Repository.appleHealthSource: return String(localized: "Apple Health")
+        case Repository.healthConnectSource: return String(localized: "Health Connect")
+        case "profile": return String(localized: "Profile")
+        default: return source
+        }
+    }
+
+    private func load() async {
+        async let weightResult = repo.resolvedSeries(
+            key: "weight", source: Repository.appleHealthSource, fullHistory: true
+        )
+        async let bmiResult = repo.resolvedSeries(
+            key: "bmi", source: Repository.appleHealthSource, fullHistory: true
+        )
+        async let bodyFatResult = repo.resolvedSeries(
+            key: "body_fat", source: Repository.appleHealthSource, fullHistory: true
+        )
+        async let leanMassResult = repo.resolvedSeries(
+            key: "lean_mass", source: Repository.appleHealthSource, fullHistory: true
+        )
+        let (weightRows, bmiRows, bodyFatRows, leanMassRows) = await (
+            weightResult, bmiResult, bodyFatResult, leanMassResult
+        )
+        guard !Task.isCancelled else { return }
+        snapshot = Snapshot(
+            weight: validReading(weightRows.points.last, range: 20...400),
+            bmi: validReading(bmiRows.points.last, range: 5...100),
+            bodyFat: validReading(bodyFatRows.points.last, range: 0...100),
+            leanMass: validReading(leanMassRows.points.last, range: 5...400)
+        )
+        loaded = true
+    }
+
+    private func validReading(
+        _ point: ResolvedMetricPoint?,
+        range: ClosedRange<Double>
+    ) -> Reading? {
+        guard let point, point.value.isFinite, range.contains(point.value) else { return nil }
+        return Reading(value: point.value, day: point.day, source: point.source)
+    }
+}
+
 /// Source-aware measured markers inspired by the Biology reference. NOOP's Fitness Age and Wellness
 /// Age remain separate sections above; this list never relabels either as "biological age".
 private struct BiomarkerTrendsSection: View {
@@ -1980,22 +2317,42 @@ private struct BiomarkerTrendsSection: View {
             return
         }
 
-        async let hrvA = repo.exploreSeries(key: hrv.key, source: hrv.source, fullHistory: true)
-        async let rhrA = repo.exploreSeries(key: rhr.key, source: rhr.source, fullHistory: true)
-        async let weightA = repo.exploreSeries(key: weight.key, source: weight.source, fullHistory: true)
-        async let bodyFatA = repo.exploreSeries(key: bodyFat.key, source: bodyFat.source, fullHistory: true)
-        async let leanMassA = repo.exploreSeries(key: leanMass.key, source: leanMass.source, fullHistory: true)
-        async let vo2A = repo.exploreSeries(key: vo2.key, source: vo2.source, fullHistory: true)
+        async let hrvA = repo.resolvedSeries(
+            key: hrv.key, source: hrv.source, fullHistory: true
+        )
+        async let rhrA = repo.resolvedSeries(
+            key: rhr.key, source: rhr.source, fullHistory: true
+        )
+        async let weightA = repo.resolvedSeries(
+            key: weight.key, source: weight.source, fullHistory: true
+        )
+        async let bodyFatA = repo.resolvedSeries(
+            key: bodyFat.key, source: bodyFat.source, fullHistory: true
+        )
+        async let leanMassA = repo.resolvedSeries(
+            key: leanMass.key, source: leanMass.source, fullHistory: true
+        )
+        async let vo2A = repo.resolvedSeries(
+            key: vo2.key, source: vo2.source, fullHistory: true
+        )
+        let (hrvRows, rhrRows, weightRows, bodyFatRows, leanMassRows, vo2Rows) = await (
+            hrvA, rhrA, weightA, bodyFatA, leanMassA, vo2A
+        )
+        guard !Task.isCancelled else { return }
 
         trends = [
-            Trend(metric: weight, title: String(localized: "Weight"), points: await weightA),
-            Trend(metric: hrv, title: String(localized: "HRV"), points: await hrvA),
-            Trend(metric: rhr, title: String(localized: "Resting HR"), points: await rhrA),
-            Trend(metric: bodyFat, title: String(localized: "Body Fat"), points: await bodyFatA),
-            Trend(metric: leanMass, title: String(localized: "Lean Body Mass"), points: await leanMassA),
-            Trend(metric: vo2, title: String(localized: "VO₂ Max"), points: await vo2A),
+            Trend(metric: weight, title: String(localized: "Weight"), points: values(weightRows)),
+            Trend(metric: hrv, title: String(localized: "HRV"), points: values(hrvRows)),
+            Trend(metric: rhr, title: String(localized: "Resting HR"), points: values(rhrRows)),
+            Trend(metric: bodyFat, title: String(localized: "Body Fat"), points: values(bodyFatRows)),
+            Trend(metric: leanMass, title: String(localized: "Lean Body Mass"), points: values(leanMassRows)),
+            Trend(metric: vo2, title: String(localized: "VO₂ Max"), points: values(vo2Rows)),
         ]
         loaded = true
+    }
+
+    private func values(_ resolution: MetricSeriesResolution) -> [(day: String, value: Double)] {
+        resolution.points.map { (day: $0.day, value: $0.value) }
     }
 }
 

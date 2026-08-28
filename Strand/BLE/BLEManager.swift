@@ -503,6 +503,9 @@ public final class BLEManager: NSObject, ObservableObject {
     private var backfiller: Backfiller?
     /// True while a historical offload session is in progress (frames route to Backfiller).
     private var backfilling = false
+    /// Per-slice ACK count for transport outcome classification. The visible LiveState count spans an
+    /// auto-continue burst, so it cannot answer whether this individual slice moved.
+    private var acknowledgedBatchesThisSession = 0
     /// Wall time of the most recent offload frame OR HISTORY_COMPLETE — drives the #174 deep-packet
     /// cooldown. A type-0x2F frame arriving just after a backfill ends (backfilling already flipped
     /// false) is a TRAILING historical frame, not the live R22 stream; it must not be miscounted as a
@@ -1050,10 +1053,15 @@ public final class BLEManager: NSObject, ObservableObject {
                                     if decoded { self?.state.decodedChunksThisSession += 1 }
                                     if console { self?.state.consoleChunksThisSession += 1 }
                                 },
-                                onRowsPersisted: { [weak self] _ in
+                                onRowsPersisted: { [weak self] receipt in
                                     guard let self else { return }
                                     let landedAt = Date().timeIntervalSince1970
-                                    self.state.notePersistedHistoryData(at: landedAt)
+                                    self.state.notePersistedHistoryData(
+                                        rows: receipt.rows,
+                                        oldestUnix: receipt.oldestUnix,
+                                        newestUnix: receipt.newestUnix,
+                                        at: landedAt
+                                    )
                                     UserDefaults.standard.set(landedAt, forKey: "sync.lastWriteOkAt")
                                 },
                                 // Connection & Sync test mode (Test Centre): the cheap gate + tagged sink the
@@ -1805,10 +1813,10 @@ public final class BLEManager: NSObject, ObservableObject {
     /// the Backfiller; it is passed here only for logging.
     func ackHistoricalChunk(trim: UInt32, endData: [UInt8]) {
         send(.historicalDataResult, payload: [0x01] + endData, writeType: .withResponse)
-        // Progress signal for the "Syncing strap history…" UI (#77). Same main-queue delegate path as
-        // the other state mutations (e.g. lastSyncedAt in exitBackfilling). NOT historicalAckLogCounter
-        // — that's a puffin-write log throttle that never increments on WHOOP 4.
-        state.syncChunksThisSession += 1
+        acknowledgedBatchesThisSession += 1
+        // Live progress is coalesced to the first ACK and every tenth after it. The exact total is
+        // published at session exit, reducing SwiftUI/notification churn during multi-hour drains.
+        state.noteAcknowledgedHistoryBatch()
     }
 
     // MARK: Backfill helpers
@@ -1861,10 +1869,12 @@ public final class BLEManager: NSObject, ObservableObject {
         // #42/#364: consecutiveAutoContinues > 0 means this offload is re-kicked after an EARLIER session in
         // the same burst banked rows - tell the backfiller so its no-cursor END reads as "caught up", not
         // "no banked history / charge to 100%". A fresh offload (count 0) keeps the honest guidance.
-        backfiller.begin(family: selectedModel.deviceFamily, continuedAfterRows: consecutiveAutoContinues > 0)
+        let continuingBurst = consecutiveAutoContinues > 0
+        backfiller.begin(family: selectedModel.deviceFamily, continuedAfterRows: continuingBurst)
         backfilling = true
+        acknowledgedBatchesThisSession = 0
+        state.beginHistorySync(continuing: continuingBurst)
         state.backfilling = true
-        state.syncChunksThisSession = 0
         state.rejectedFramesThisSession = 0
         state.rejectedFramesUnarchived = 0
         state.decodedChunksThisSession = 0
@@ -1963,6 +1973,7 @@ public final class BLEManager: NSObject, ObservableObject {
     private func exitBackfilling(reason: String) {
         guard backfilling else { return }
         backfilling = false
+        state.finishHistorySyncProgress()
         state.backfilling = false
         // #174: a backfill just ended. Start (or extend) the deep-packet cooldown from this instant so
         // any type-0x2F records the strap flushes in the seconds after the session aren't miscounted as
@@ -2125,7 +2136,7 @@ public final class BLEManager: NSObject, ObservableObject {
             // just experimental/empty on that firmware. "Banked" = this offload made ANY offload progress
             // (chunks acked, rows persisted, or deep packets seen); an empty 5/MG offload has none.
             let bankedThisOffload = BLEManager.offloadBankedAnything(
-                chunks: state.syncChunksThisSession,
+                chunks: acknowledgedBatchesThisSession,
                 rows: rowsThisSession,
                 deepPackets: state.deepPacketsThisSession
             )
@@ -4290,7 +4301,8 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         lastSessionEndTrim = nil
         backfilling = false
         state.backfilling = false
-        state.syncChunksThisSession = 0
+        acknowledgedBatchesThisSession = 0
+        state.resetHistorySyncProgress()
         // A mid-sync disconnect bypasses exitBackfilling, so clear the reject counters here too —
         // otherwise a stale non-zero count survives until the next beginBackfill. (#77/#91)
         state.rejectedFramesThisSession = 0

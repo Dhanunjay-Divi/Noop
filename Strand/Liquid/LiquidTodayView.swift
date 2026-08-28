@@ -4858,28 +4858,57 @@ private struct LiquidBatteryButton: View {
 /// menu bar (`SyncingHistoryNote`); Liquid simply dropped it. Same class of regression as #992, which
 /// dropped the "~X days left" runtime estimate from the row directly above this one.
 ///
-/// Deliberately scoped to what LiveState can honestly answer: THAT a drain is running, how many chunks
-/// it has pulled, and when one last completed. It does NOT yet say "~15h behind" - that needs the
-/// persisted data frontier (max HR ts) compared against `strapRange.newestUnix`, and the frontier is a
-/// Repository read that LiveState does not carry. That remains open in B1.
+/// The protocol does not expose a reliable total, so this never invents a percentage or ETA. It shows
+/// acknowledged batches, rows durably stored, and the newest usable timestamp that has landed so the
+/// wearer can distinguish a long moving backlog from a stalled spinner.
 private struct LiquidSyncStatusRow: View {
     @EnvironmentObject var live: LiveState
     var body: some View {
         if live.backfilling {
-            row(String(localized: "Noop Band history"), value: chunks, tone: StrandPalette.accent)
+            VStack(alignment: .trailing, spacing: 4) {
+                row(
+                    String(localized: "Noop Band history"),
+                    value: batches,
+                    tone: StrandPalette.accent
+                )
+                if live.historySyncProgress.rowsPersisted > 0 {
+                    Text(persistedDetail)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         } else if let ts = live.lastSyncedAt {
             row(String(localized: "Noop Band history"),
                 value: String(localized: "Synced \(relativeAgo(ts)) ago"), tone: StrandPalette.textPrimary)
         }
     }
 
-    /// "Syncing…" alone reads as a spinner that might be stuck; the chunk count is the cheapest available
-    /// proof that the drain is actually moving. Suppressed at zero — a session that has pulled nothing yet
-    /// should not claim "0 chunks pulled" as if that were progress.
-    private var chunks: String {
+    private var batches: String {
         live.syncChunksThisSession > 0
-            ? String(localized: "Syncing… \(live.syncChunksThisSession) chunks")
+            ? String.localizedStringWithFormat(
+                String(localized: "appwide.today.band_sync.batches_format"),
+                Int64(live.syncChunksThisSession)
+            )
             : String(localized: "Syncing…")
+    }
+
+    private var persistedDetail: String {
+        let progress = live.historySyncProgress
+        guard let newest = progress.newestDataUnix else {
+            return String.localizedStringWithFormat(
+                String(localized: "appwide.today.band_sync.rows_format"),
+                Int64(progress.rowsPersisted)
+            )
+        }
+        let date = Date(timeIntervalSince1970: TimeInterval(newest))
+            .formatted(.dateTime.year().month(.abbreviated).day())
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.today.band_sync.rows_ready_format"),
+            Int64(progress.rowsPersisted),
+            date
+        )
     }
 
     private func row(_ label: String, value: String, tone: Color) -> some View {

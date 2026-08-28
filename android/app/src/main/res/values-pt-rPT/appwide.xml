@@ -234,8 +234,11 @@
     <string name="appwide_terms_point_ownership_head">A tua pulseira, os teus dados</string>
     <string name="appwide_terms_subtitle">Até a NOOP Band estar pronta, esta versão funciona com uma pulseira compatível que te pertence.</string>
     <string name="appwide_terms_title">A NOOP Band está a chegar</string>
+    <string name="appwide_today_band_sync_batches_format">%1$d lotes recebidos</string>
     <string name="appwide_today_band_sync_failed">A sincronização da Noop Band não terminou</string>
     <string name="appwide_today_band_sync_progress_format">A sincronizar o histórico da Noop Band, %1$d lotes recebidos</string>
+    <string name="appwide_today_band_sync_rows_format">%1$d leituras guardadas</string>
+    <string name="appwide_today_band_sync_rows_ready_format">%1$d leituras guardadas · Dados mais recentes: %2$s</string>
     <string name="appwide_today_band_sync_synced">Histórico da Noop Band sincronizado</string>
     <string name="appwide_today_band_sync_syncing">A sincronizar o histórico da Noop Band</string>
     <string name="appwide_today_band_sync_unavailable">Sincronização da Noop Band indisponível</string>

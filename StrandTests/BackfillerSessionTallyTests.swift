@@ -285,7 +285,7 @@ final class BackfillerSessionTallyTests: XCTestCase {
         let store = DelayedInsertStore()
         let insertStarted = expectation(description: "insert suspended")
         store.insertStarted = { insertStarted.fulfill() }
-        var receipts: [Int] = []
+        var receipts: [BackfillPersistedRowsReceipt] = []
         let backfiller = Backfiller(
             store: store,
             deviceId: "test",
@@ -307,7 +307,19 @@ final class BackfillerSessionTallyTests: XCTestCase {
         store.completeInsert(StreamInsertCounts(gravity: 3))
         await endTask.value
 
-        XCTAssertEqual(receipts, [3], "teardown must not hide rows that commit after its snapshot")
+        XCTAssertEqual(
+            receipts,
+            [BackfillPersistedRowsReceipt(
+                rows: 3,
+                oldestUnix: v25RecordFrames.compactMap {
+                    parseFrame($0, family: .whoop4).parsed["unix"]?.intValue
+                }.min(),
+                newestUnix: v25RecordFrames.compactMap {
+                    parseFrame($0, family: .whoop4).parsed["unix"]?.intValue
+                }.max()
+            )],
+            "teardown must not hide rows that commit after its snapshot"
+        )
         XCTAssertEqual(backfiller.sessionRowsPersisted, 3)
     }
 }

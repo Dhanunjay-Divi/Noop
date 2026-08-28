@@ -18,6 +18,12 @@ protocol BackfillStoreWriting: AnyObject {
 
 extension WhoopStore: BackfillStoreWriting {}
 
+struct BackfillPersistedRowsReceipt: Equatable, Sendable {
+    let rows: Int
+    let oldestUnix: Int?
+    let newestUnix: Int?
+}
+
 // MARK: - Backfiller
 
 /// Historical-offload state machine (idle / backfilling).
@@ -160,7 +166,7 @@ final class Backfiller {
     /// Fires on the main actor immediately after score-bearing rows are durably inserted. This is the
     /// authoritative freshness receipt: timeout/disconnect teardown can run while an async insert is
     /// suspended, so reading a session counter only at teardown can miss rows that commit moments later.
-    private let onRowsPersisted: ((_ rows: Int) -> Void)?
+    private let onRowsPersisted: ((BackfillPersistedRowsReceipt) -> Void)?
 
     /// Connection & Sync test mode (Test Centre): the cheap gate + tagged sink for the .connection
     /// diagnostic lines (offload progress / firmware layout / trim sentinel). `connectionActive` is one
@@ -182,7 +188,7 @@ final class Backfiller {
          log: ((String) -> Void)? = nil,
          rejectedSink: ((_ frames: [[UInt8]], _ trim: UInt32, _ family: DeviceFamily) -> Bool)? = nil,
          onChunk: ((_ decoded: Bool, _ console: Bool) -> Void)? = nil,
-         onRowsPersisted: ((_ rows: Int) -> Void)? = nil,
+         onRowsPersisted: ((BackfillPersistedRowsReceipt) -> Void)? = nil,
          connectionActive: @escaping () -> Bool = { false },
          connectionLog: ((String) -> Void)? = nil,
          firmwareLayout: ((Int) -> Void)? = nil,
@@ -582,7 +588,11 @@ final class Backfiller {
             sessionSkinTempRows += counts.skinTemp
             sessionNightKeys.formUnion(tally.nights)
             if tally.rows > 0 {
-                onRowsPersisted?(tally.rows)
+                onRowsPersisted?(BackfillPersistedRowsReceipt(
+                    rows: tally.rows,
+                    oldestUnix: scoreBearingTimestamps.min(),
+                    newestUnix: scoreBearingTimestamps.max()
+                ))
             }
 
             // Connection test mode: per-chunk offload PROGRESS (running session totals), so a report shows

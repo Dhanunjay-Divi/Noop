@@ -325,7 +325,13 @@ struct IntelligenceView: View {
 private struct IntelSyncingNote: View {
     @EnvironmentObject private var live: LiveState
     var body: some View {
-        if live.backfilling { SyncingHistoryNote(chunks: live.syncChunksThisSession) }
+        if live.backfilling {
+            SyncingHistoryNote(
+                chunks: live.syncChunksThisSession,
+                rows: live.historySyncProgress.rowsPersisted,
+                newestDataUnix: live.historySyncProgress.newestDataUnix
+            )
+        }
     }
 }
 

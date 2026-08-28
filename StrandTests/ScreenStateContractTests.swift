@@ -397,7 +397,9 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         let health = try text("Strand/Screens/HealthView.swift")
         let vitals = try text("Strand/Screens/VitalSignsSummary.swift")
 
-        XCTAssertTrue(health.contains(#").filter { $0.key != "spo2raw" }"#))
+        XCTAssertTrue(health.contains(
+            #").filter { ["resp", "spo2", "rhr", "hrv", "skin"].contains($0.key) }"#
+        ))
         XCTAssertTrue(health.contains("HealthTimelineSection()"))
         XCTAssertTrue(health.contains("BiomarkerTrendsSection()"))
         XCTAssertTrue(health.contains("Missing wear time stays blank."))
@@ -417,7 +419,7 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
         XCTAssertTrue(fitness.contains("WorkoutActivityCalendarSummary.resolve("))
         XCTAssertTrue(fitness.contains("count == 1 ? \"1 recorded activity\""))
-        XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Fitness""#))
+        XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Workouts""#))
         XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
@@ -481,7 +483,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 299)
+        XCTAssertEqual(source.count, 302)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

@@ -234,8 +234,11 @@
     <string name="appwide_terms_point_ownership_head">Ваш браслет, ваши данные</string>
     <string name="appwide_terms_subtitle">Пока NOOP Band не готов, эта версия работает с принадлежащим вам совместимым браслетом.</string>
     <string name="appwide_terms_title">NOOP Band уже в разработке</string>
+    <string name="appwide_today_band_sync_batches_format">Получено пакетов: %1$d</string>
     <string name="appwide_today_band_sync_failed">Синхронизация Noop Band не завершилась</string>
     <string name="appwide_today_band_sync_progress_format">История Noop Band синхронизируется, получено пакетов: %1$d</string>
+    <string name="appwide_today_band_sync_rows_format">Сохранено показаний: %1$d</string>
+    <string name="appwide_today_band_sync_rows_ready_format">Сохранено показаний: %1$d · Последние данные: %2$s</string>
     <string name="appwide_today_band_sync_synced">История Noop Band синхронизирована</string>
     <string name="appwide_today_band_sync_syncing">История Noop Band синхронизируется</string>
     <string name="appwide_today_band_sync_unavailable">Синхронизация Noop Band недоступна</string>

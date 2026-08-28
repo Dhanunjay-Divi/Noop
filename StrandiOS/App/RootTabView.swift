@@ -35,9 +35,16 @@ struct RootTabView: View {
     /// Cross-screen navigation requests (e.g. Live → "Manage devices"). Devices isn't a tab - it lives
     /// behind the More list — so a request switches to More and pushes it in that tab's stack.
     @EnvironmentObject private var router: NavRouter
+    @EnvironmentObject private var updateStore: UpdateStore
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
     @State private var quickAction: QuickAction? = Self.initialQuickAction
+    /// Android exposes the Updates inbox from the global quick-action launcher. Keep the same app-wide
+    /// entry on iOS so the default Liquid Today does not hide an otherwise complete inbox implementation.
+    @State private var showUpdatesInbox = false
+    /// Present Updates only after the launcher sheet has finished dismissing. Driving two sheets during
+    /// the same transition can make the second presentation get dropped by UIKit.
+    @State private var openUpdatesAfterQuickActionDismissal = false
     /// A normal browsing destination requested from inside a quick-action sheet. The sheet must finish
     /// dismissing before the tab stack is changed or the push happens invisibly behind the modal.
     @State private var pendingMoreDestination: MoreDestination?
@@ -184,7 +191,7 @@ struct RootTabView: View {
                     path: $tabPaths[IPhonePrimaryTab.trends.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.trends.rawValue])
                     .tag(IPhonePrimaryTab.trends.rawValue)
-                tab(WorkoutsView(), "Fitness", "figure.run", tag: IPhonePrimaryTab.activity.rawValue,
+                tab(WorkoutsView(), "Workouts", "figure.run", tag: IPhonePrimaryTab.activity.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.activity.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.activity.rawValue])
                     .tag(IPhonePrimaryTab.activity.rawValue)
@@ -351,8 +358,11 @@ struct RootTabView: View {
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
         // the easing is applied where `quickAction` is set (see `presentQuickAction`), keeping the
         // animation scoped to the sheet rather than the whole shell.
-        .sheet(item: $quickAction, onDismiss: finishPendingMoreRoute) { action in
+        .sheet(item: $quickAction, onDismiss: finishQuickActionDismissal) { action in
             quickActionDestination(action)
+        }
+        .sheet(isPresented: $showUpdatesInbox) {
+            UpdatesInboxView(onClose: { showUpdatesInbox = false })
         }
         // Honour a router request. Ordinary destinations enter through More's OWN NavigationStack so
         // the persistent five-tab glass bar behaves identically whether a page was opened from the More
@@ -573,6 +583,14 @@ struct RootTabView: View {
         openMore(destination)
     }
 
+    private func finishQuickActionDismissal() {
+        if openUpdatesAfterQuickActionDismissal {
+            openUpdatesAfterQuickActionDismissal = false
+            withAnimation(Self.sheetEase) { showUpdatesInbox = true }
+        }
+        finishPendingMoreRoute()
+    }
+
     /// Switch to More and push one destination. When the request originated on a More subpage, append
     /// to that live stack so Back returns to the origin. Requests from another primary tab deliberately
     /// start a fresh More stack. This preserves both the persistent bar and normal back-button semantics.
@@ -599,14 +617,21 @@ struct RootTabView: View {
     private func quickActionDestination(_ action: QuickAction) -> some View {
         switch action {
         case .menu:
-            QuickActionSheet { picked in
-                // Swap the menu for the chosen destination on the next runloop so the sheet
-                // re-presents cleanly (avoids dismiss/re-present races). Calm easing on re-present.
-                quickAction = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    withAnimation(Self.sheetEase) { quickAction = picked }
+            QuickActionSheet(
+                unreadUpdates: updateStore.unreadCount,
+                onUpdates: {
+                    openUpdatesAfterQuickActionDismissal = true
+                    quickAction = nil
+                },
+                onPick: { picked in
+                    // Swap the menu for the chosen destination on the next runloop so the sheet
+                    // re-presents cleanly (avoids dismiss/re-present races). Calm easing on re-present.
+                    quickAction = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(Self.sheetEase) { quickAction = picked }
+                    }
                 }
-            }
+            )
             .presentationDetents([.height(398)])
             .presentationDragIndicator(.hidden)
         case .live:
@@ -1279,6 +1304,8 @@ private enum QuickAction: Int, Identifiable {
 
 /// Compact 3x3 action launcher, matching the reference's separate floating-plus interaction.
 private struct QuickActionSheet: View {
+    let unreadUpdates: Int
+    let onUpdates: () -> Void
     /// Called with the picked destination (the host swaps the menu for that screen).
     let onPick: (QuickAction) -> Void
 
@@ -1291,13 +1318,17 @@ private struct QuickActionSheet: View {
                 .padding(.top, 10)
                 .padding(.bottom, 14)
 
-            Text("QUICK ACTIONS")
-                .font(StrandFont.overline)
-                .tracking(0)
-                .foregroundStyle(StrandPalette.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("QUICK ACTIONS")
+                    .font(StrandFont.overline)
+                    .tracking(0)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Spacer()
+                updatesButton
+            }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+                .frame(height: 44)
+                .padding(.bottom, 6)
 
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3),
@@ -1345,6 +1376,32 @@ private struct QuickActionSheet: View {
                         .frame(height: 1)
                 }
                 .ignoresSafeArea()
+        )
+    }
+
+    private var updatesButton: some View {
+        Button(action: onUpdates) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .frame(width: 44, height: 44)
+
+                if unreadUpdates > 0 {
+                    Text(unreadUpdates > 9 ? "9+" : "\(unreadUpdates)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 18, height: 18)
+                        .background(StrandPalette.statusCritical, in: Circle())
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("noop.quick-actions.updates")
+        .accessibilityLabel(
+            unreadUpdates > 0
+                ? Text("Updates, \(unreadUpdates) unread")
+                : Text("Updates")
         )
     }
 
@@ -1421,7 +1478,7 @@ private struct FloatingTabBar: View {
     private let nav = [
         Item(title: "Today", icon: "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue),
         Item(title: "Trends", icon: "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue),
-        Item(title: "Fitness", icon: "figure.run", tag: IPhonePrimaryTab.activity.rawValue),
+        Item(title: "Workouts", icon: "figure.run", tag: IPhonePrimaryTab.activity.rawValue),
         Item(title: "Sleep", icon: "bed.double", tag: IPhonePrimaryTab.sleep.rawValue),
         Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
     ]
@@ -1705,7 +1762,7 @@ private struct FloatingQuickAddButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Quick actions")
         .accessibilityIdentifier("noop.quick-actions")
-        .accessibilityHint("Opens workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions")
+        .accessibilityHint("Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions")
     }
 }
 

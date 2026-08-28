@@ -234,8 +234,11 @@
     <string name="appwide_terms_point_ownership_head">您的手环，您的数据</string>
     <string name="appwide_terms_subtitle">在 NOOP Band 准备就绪之前，此版本可配合您本人拥有的兼容手环使用。</string>
     <string name="appwide_terms_title">NOOP Band 即将推出</string>
+    <string name="appwide_today_band_sync_batches_format">已接收 %1$d 批</string>
     <string name="appwide_today_band_sync_failed">Noop Band 同步未完成</string>
     <string name="appwide_today_band_sync_progress_format">正在同步 Noop Band 历史记录，已接收 %1$d 批</string>
+    <string name="appwide_today_band_sync_rows_format">已保存 %1$d 条读数</string>
+    <string name="appwide_today_band_sync_rows_ready_format">已保存 %1$d 条读数 · 最新数据：%2$s</string>
     <string name="appwide_today_band_sync_synced">Noop Band 历史记录已同步</string>
     <string name="appwide_today_band_sync_syncing">正在同步 Noop Band 历史记录</string>
     <string name="appwide_today_band_sync_unavailable">Noop Band 同步不可用</string>

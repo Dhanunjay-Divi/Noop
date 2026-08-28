@@ -234,8 +234,11 @@
     <string name="appwide_terms_point_ownership_head">Your band, your data</string>
     <string name="appwide_terms_subtitle">Until NOOP Band is ready, this version works with a compatible band you own.</string>
     <string name="appwide_terms_title">NOOP Band is coming</string>
+    <string name="appwide_today_band_sync_batches_format">%1$d batches received</string>
     <string name="appwide_today_band_sync_failed">Noop Band sync did not finish</string>
     <string name="appwide_today_band_sync_progress_format">Noop Band history syncing, %1$d batches received</string>
+    <string name="appwide_today_band_sync_rows_format">%1$d readings saved</string>
+    <string name="appwide_today_band_sync_rows_ready_format">%1$d readings saved · Latest data %2$s</string>
     <string name="appwide_today_band_sync_synced">Noop Band history synced</string>
     <string name="appwide_today_band_sync_syncing">Noop Band history syncing</string>
     <string name="appwide_today_band_sync_unavailable">Noop Band sync unavailable</string>

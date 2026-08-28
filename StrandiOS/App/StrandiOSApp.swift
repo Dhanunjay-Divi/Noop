@@ -66,7 +66,15 @@ struct StrandiOSApp: App {
         // process keeps Bluetooth, analysis and diagnostic export inert until the verified unlock edge.
         let access = LaunchAccessController()
         _launchAccess = StateObject(wrappedValue: access)
-        let operationallyAllowed = access.isUnlocked
+        #if DEBUG
+        let demoFixtureRequested = CommandLine.arguments.contains("--demo-seed")
+        #else
+        let demoFixtureRequested = false
+        #endif
+        // Screenshot/UI-test fixtures own synthetic transport state. Never let a simulator's stale
+        // launch-access receipt start CoreBluetooth or background services that can overwrite it.
+        let operationallyAllowed = !demoFixtureRequested
+            && access.isUnlocked
             && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
                 == Terms.currentVersion
         Self.reconcileLaunchSurfaceAuthorization(allowed: access.isUnlocked)

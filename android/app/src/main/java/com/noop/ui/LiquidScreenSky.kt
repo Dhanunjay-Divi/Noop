@@ -1,7 +1,5 @@
 package com.noop.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -11,12 +9,11 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-// MARK: - LiquidScreenSky — the reusable liquid Today/liquid-screen sky backdrop
+// MARK: - LiquidScreenSky — the reusable primary-screen backdrop
 //
-// THE ESTABLISHED ANDROID LIQUID SKY-BACKDROP PATTERN (the pilot from the liquid Today; the other liquid
-// screens copy this verbatim). It is the Android equivalent of the iOS
-// `ScreenScaffold(topBackground: liquidScaffoldSky())` — the day-of-sky settles into the theme canvas
-// behind the screen's top content and the cards float OVER it on the flat canvas below.
+// Android equivalent of iOS `LiquidScaffoldSky`: one shared satin-obsidian canvas behind Today, Trends,
+// Workouts, Sleep, More, Journal, and the rest of the primary screen scaffolds. Keeping this compatibility
+// entry point means every existing caller receives the visual update together.
 //
 // HOW IT PLUGS IN: pass this as the scaffold's `topBackground` slot:
 //
@@ -31,11 +28,9 @@ import androidx.compose.ui.unit.dp
 // empty `graphicsLayer {}`) so a static backdrop rasterises ONCE and replays as a texture on every scroll
 // frame. So this composable only has to paint the two layers, top-aligned, at a header height.
 //
-// WHY LiquidSkyStatic (not the animated LiquidSky): Today is a long, scroll-heavy LazyColumn; an
-// always-animating Canvas behind it steals frame headroom and stutters the scroll. LiquidSkyStatic renders
-// ONCE (no per-frame clock), matching the iOS choice of `LiquidSkyStatic` for the scaffold sky and the
-// classic Android scene's static-image treatment. It settles into `Palette.surfaceBase` internally, so the
-// sky dissolves into the page with no seam (the sky owns its own fade — no extra scrim needed here).
+// The bundled image is static by design. It provides dimensional material without spending frame budget
+// behind long chart-heavy lists, and it matches the current iOS product background rather than the retired
+// purple/blue time-of-day gradient.
 //
 // WHY the surfaceBase fill under it: the sky band is only [height] tall; the canvas fill guarantees the
 // region ABOVE the fold and any sub-pixel gap reads as the theme canvas, exactly like the iOS backdrop's
@@ -43,25 +38,14 @@ import androidx.compose.ui.unit.dp
 //
 // Non-interactive + accessibility-hidden — it is pure decoration (the scaffold slot never receives taps).
 
-/** The reusable liquid sky backdrop for a liquid screen's top region. Drop it into a scaffold's
- *  `topBackground` slot. [height] is the sky band; the sky fades into the theme canvas within it, so the
- *  cards below sit on the flat surface. Mirrors the iOS `liquidScaffoldSky`. */
+/** Reusable primary-screen backdrop. [height] is the compact header band; [fillHeight] keeps the
+ * material behind the full scroll viewport so translucent cards reveal it. */
 @Composable
 fun LiquidScreenSky(height: Dp = 240.dp, fillHeight: Boolean = false) {
-    // "Sky behind cards" (opt-in): fill the whole viewport and hold the atmosphere with a softer settle so
-    // the sky still reads UNDER the lower cards, instead of the default top-band that dissolves to canvas.
     val sizeMod = if (fillHeight) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)
-    Box(
-        modifier = sizeMod
-            .background(Palette.surfaceBase)
-            .clearAndSetSemantics {}, // decorative — invisible to TalkBack
-    ) {
-        // The static time-of-day sky, top-aligned, settling into Palette.surfaceBase over its lower half.
-        LiquidSkyStatic(
-            hour = null, // live local hour (hour + minute/60)
-            modifier = if (fillHeight) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height),
-            // A partial settle in fill-height mode keeps the horizon tint alive behind the scroll.
-            settleStrength = if (fillHeight) 0.78f else 1f,
-        )
-    }
+    ObsidianFlowBackground(
+        compact = !fillHeight,
+        intensity = if (fillHeight) 0.90f else 0.84f,
+        modifier = sizeMod.clearAndSetSemantics {},
+    )
 }

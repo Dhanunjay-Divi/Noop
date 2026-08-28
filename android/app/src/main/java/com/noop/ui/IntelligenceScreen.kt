@@ -54,16 +54,23 @@ import kotlin.math.roundToInt
 fun IntelligenceScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     // PERF (#scroll-jank): the BLE live state ticks ~1Hz. This screen reads `live` ONLY for the
-    // "syncing history" note (backfilling + the chunk count), so reading the whole `live` object at
-    // body scope recomposed the entire Intelligence screen on every HR tick. Collapse it to the two
-    // fields the note needs via a structural-equality snapshot: a 72→73 bpm tick produces an EQUAL
-    // snapshot and the body is NOT recomposed; it only recomposes when the backfilling state / chunk
-    // count actually changes. Mirrors the shipped Today liveSnap fix. Appearance-preserving.
+    // "syncing history" note, so reading the whole `live` object at body scope recomposed the entire
+    // Intelligence screen on every HR tick. Collapse it to the progress fields the note needs via a
+    // structural-equality snapshot: a 72→73 bpm tick produces an EQUAL
+    // snapshot and the body is NOT recomposed; it only recomposes when visible sync progress changes.
     val live by vm.live.collectAsStateWithLifecycle()
     val backfillNote by remember {
         derivedStateOf {
             val s = live
-            if (s.backfilling) s.syncChunksThisSession else null
+            if (s.backfilling) {
+                HistorySyncUiProgress(
+                    batches = s.syncChunksThisSession,
+                    rows = s.syncRowsThisSession,
+                    newestDataUnix = s.syncDataNewestAt,
+                )
+            } else {
+                null
+            }
         }
     }
 
@@ -112,7 +119,13 @@ fun IntelligenceScreen(vm: AppViewModel) {
         if (ordered.isEmpty()) {
             item {
                 // While the strap is mid-offload, say so — an empty list reads as final otherwise (#77).
-                if (backfillNote != null) SyncingHistoryNote(chunks = backfillNote!!)
+                backfillNote?.let { progress ->
+                    SyncingHistoryNote(
+                        chunks = progress.batches,
+                        rows = progress.rows,
+                        newestDataUnix = progress.newestDataUnix,
+                    )
+                }
                 EmptyNote()
             }
         } else {

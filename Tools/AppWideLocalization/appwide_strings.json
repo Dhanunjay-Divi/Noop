@@ -2540,6 +2540,17 @@
     "zh-Hans": "NOOP Band 即将推出",
     "zh-Hant": "NOOP Band 即將推出"
   },
+  "appwide.today.band_sync.batches_format": {
+    "de": "%1$d Pakete empfangen",
+    "en": "%1$d batches received",
+    "es": "%1$d lotes recibidos",
+    "fr": "%1$d lots reçus",
+    "it": "%1$d gruppi ricevuti",
+    "pt-PT": "%1$d lotes recebidos",
+    "ru": "Получено пакетов: %1$d",
+    "zh-Hans": "已接收 %1$d 批",
+    "zh-Hant": "已接收 %1$d 批"
+  },
   "appwide.today.band_sync.progress_format": {
     "de": "Noop Band-Verlauf wird synchronisiert, %1$d Pakete empfangen",
     "en": "Noop Band history syncing, %1$d batches received",
@@ -2550,6 +2561,28 @@
     "ru": "История Noop Band синхронизируется, получено пакетов: %1$d",
     "zh-Hans": "正在同步 Noop Band 历史记录，已接收 %1$d 批",
     "zh-Hant": "正在同步 Noop Band 歷史記錄，已接收 %1$d 批"
+  },
+  "appwide.today.band_sync.rows_format": {
+    "de": "%1$d Messwerte gespeichert",
+    "en": "%1$d readings saved",
+    "es": "%1$d lecturas guardadas",
+    "fr": "%1$d mesures enregistrées",
+    "it": "%1$d misurazioni salvate",
+    "pt-PT": "%1$d leituras guardadas",
+    "ru": "Сохранено показаний: %1$d",
+    "zh-Hans": "已保存 %1$d 条读数",
+    "zh-Hant": "已儲存 %1$d 筆讀數"
+  },
+  "appwide.today.band_sync.rows_ready_format": {
+    "de": "%1$d Messwerte gespeichert · Neueste Daten: %2$s",
+    "en": "%1$d readings saved · Latest data %2$s",
+    "es": "%1$d lecturas guardadas · Datos más recientes: %2$s",
+    "fr": "%1$d mesures enregistrées · Données les plus récentes : %2$s",
+    "it": "%1$d misurazioni salvate · Dati più recenti: %2$s",
+    "pt-PT": "%1$d leituras guardadas · Dados mais recentes: %2$s",
+    "ru": "Сохранено показаний: %1$d · Последние данные: %2$s",
+    "zh-Hans": "已保存 %1$d 条读数 · 最新数据：%2$s",
+    "zh-Hant": "已儲存 %1$d 筆讀數 · 最新資料：%2$s"
   },
   "appwide.today.band_sync.synced": {
     "de": "Noop Band-Verlauf synchronisiert",

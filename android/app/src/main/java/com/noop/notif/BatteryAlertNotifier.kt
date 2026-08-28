@@ -154,6 +154,10 @@ object BatteryAlertNotifier {
                 lowAlerted = NoopPrefs.batteryLowAlerted(context),
                 fullAlerted = NoopPrefs.batteryFullAlerted(context),
             )
+            // Persist before any permission/posting return. Otherwise a successful low/full post leaves
+            // the crossing latch unchanged and the next live battery update can alert again.
+            NoopPrefs.setBatteryLowAlerted(context, decision.newLowAlerted)
+            NoopPrefs.setBatteryFullAlerted(context, decision.newFullAlerted)
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
                 if (decision.fireLow) {
                     NotificationLifecycleLedger.suppressed(
@@ -241,9 +245,6 @@ object BatteryAlertNotifier {
                     }
                 ) return
             }
-            // ALWAYS persist the updated flags — re-arming must stick even when nothing fired.
-            NoopPrefs.setBatteryLowAlerted(context, decision.newLowAlerted)
-            NoopPrefs.setBatteryFullAlerted(context, decision.newFullAlerted)
         }
     }
 

@@ -234,8 +234,11 @@
     <string name="appwide_terms_point_ownership_head">Tu banda, tus datos</string>
     <string name="appwide_terms_subtitle">Hasta que NOOP Band esté lista, esta versión funciona con una banda compatible que te pertenece.</string>
     <string name="appwide_terms_title">NOOP Band está en camino</string>
+    <string name="appwide_today_band_sync_batches_format">%1$d lotes recibidos</string>
     <string name="appwide_today_band_sync_failed">La sincronización de Noop Band no terminó</string>
     <string name="appwide_today_band_sync_progress_format">Sincronizando el historial de Noop Band, %1$d lotes recibidos</string>
+    <string name="appwide_today_band_sync_rows_format">%1$d lecturas guardadas</string>
+    <string name="appwide_today_band_sync_rows_ready_format">%1$d lecturas guardadas · Datos más recientes: %2$s</string>
     <string name="appwide_today_band_sync_synced">Historial de Noop Band sincronizado</string>
     <string name="appwide_today_band_sync_syncing">Sincronizando el historial de Noop Band</string>
     <string name="appwide_today_band_sync_unavailable">Sincronización de Noop Band no disponible</string>

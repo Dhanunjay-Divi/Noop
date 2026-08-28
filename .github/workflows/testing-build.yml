@@ -133,8 +133,8 @@ jobs:
           EXPECTED=$(keytool -list -v -keystore "$NOOP_RELEASE_STORE_FILE" \
             -storepass:env NOOP_RELEASE_STORE_PASSWORD -alias "$NOOP_RELEASE_KEY_ALIAS" \
             | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
-          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apksigner.txt" \
-            | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          ACTUAL=$(sed -n -E 's/^(Signer #1|V[0-9.]+ Signer):? certificate SHA-256 digest: //p' \
+            "$RUNNER_TEMP/apksigner.txt" | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
           test -n "$EXPECTED" && test -n "$ACTUAL"
           if [ "$EXPECTED" != "$ACTUAL" ]; then
             echo "::error::APK signer certificate does not match the configured release key."
@@ -441,9 +441,10 @@ jobs:
           CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
         run: |
           if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --cleanup-tag --yes
+            gh release delete "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --yes
           fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${CANDIDATE_TAG}" \
+            >/dev/null 2>&1 || true
       - name: Delete the disposable staging branch
         if: ${{ github.ref_type == 'branch' && github.ref_name == 'noop-staging' }}
         env:

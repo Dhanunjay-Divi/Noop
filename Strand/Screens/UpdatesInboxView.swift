@@ -145,7 +145,10 @@ struct UpdatesInboxView: View {
                 StrandHaptic.selection.play()
                 withAnimation(StrandMotion.interactive) { updateStore.markAllRead() }
             } label: {
-                Text("Mark all read").frame(minWidth: 120).padding(.vertical, 4)
+                Label("Mark all read", systemImage: "checkmark")
+                    .foregroundStyle(StrandPalette.accentInk)
+                    .frame(minWidth: 132)
+                    .padding(.vertical, 4)
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)

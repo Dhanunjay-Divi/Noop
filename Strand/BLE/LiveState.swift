@@ -381,15 +381,14 @@ public final class LiveState: ObservableObject {
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
 
-    /// Monotonic receipt for newly inserted historical sensor rows. Unlike `lastSyncedAt`, this advances
-    /// only when data actually landed, and it also advances when a productive session ends by idle timeout
-    /// or disconnect. AppModel observes it to score a just-offloaded night without waiting for the backstop.
-    @Published public private(set) var historyDataRevision: UInt64 = 0
-    @Published public private(set) var lastHistoryDataAt: TimeInterval?
-
-    func notePersistedHistoryData(at timestamp: TimeInterval = Date().timeIntervalSince1970) {
-        historyDataRevision &+= 1
-        lastHistoryDataAt = timestamp
+    /// Monotonic receipt for newly inserted historical sensor rows. This is an event publisher rather than
+    /// `@Published`: durable commits can arrive every second during a deep drain, and they must schedule
+    /// analysis without invalidating every SwiftUI view that happens to observe LiveState.
+    public private(set) var historyDataRevision: UInt64 = 0
+    public private(set) var lastHistoryDataAt: TimeInterval?
+    private let historyDataSubject = PassthroughSubject<UInt64, Never>()
+    var historyDataPublisher: AnyPublisher<UInt64, Never> {
+        historyDataSubject.eraseToAnyPublisher()
     }
 
     /// Set when an offload ended abnormally (the idle watchdog fired — the strap went quiet mid-sync),
@@ -401,9 +400,78 @@ public final class LiveState: ObservableObject {
     /// True while a historical offload session is running, so screens can say "Syncing strap
     /// history…" instead of presenting half-loaded data as final (#77).
     @Published public var backfilling = false
-    /// Chunks acked during the current offload session — an honest progress signal (total pending is
-    /// unknowable from the protocol, so a count, never a percent).
-    @Published public var syncChunksThisSession: Int = 0
+
+    /// Honest progress for one contiguous offload burst. Automatic continuation slices retain these
+    /// totals, so the UI does not jump back to zero while working through one deep backlog.
+    public struct HistorySyncProgress: Equatable, Sendable {
+        public var batchesReceived: Int = 0
+        public var rowsPersisted: Int = 0
+        public var oldestDataUnix: Int?
+        public var newestDataUnix: Int?
+    }
+    @Published public private(set) var historySyncProgress = HistorySyncProgress()
+    private var pendingHistorySyncProgress = HistorySyncProgress()
+
+    /// Compatibility read used by existing compact sync surfaces. Publication is throttled to the first
+    /// batch, every tenth batch, and the exact final count.
+    public var syncChunksThisSession: Int { historySyncProgress.batchesReceived }
+
+    func beginHistorySync(continuing: Bool) {
+        guard !continuing else { return }
+        pendingHistorySyncProgress = HistorySyncProgress()
+        historySyncProgress = HistorySyncProgress()
+    }
+
+    func notePersistedHistoryData(
+        rows: Int,
+        oldestUnix: Int?,
+        newestUnix: Int?,
+        at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) {
+        historyDataRevision &+= 1
+        lastHistoryDataAt = timestamp
+        pendingHistorySyncProgress.rowsPersisted += max(0, rows)
+        if let oldestUnix {
+            pendingHistorySyncProgress.oldestDataUnix = min(
+                pendingHistorySyncProgress.oldestDataUnix ?? oldestUnix,
+                oldestUnix
+            )
+        }
+        if let newestUnix {
+            pendingHistorySyncProgress.newestDataUnix = max(
+                pendingHistorySyncProgress.newestDataUnix ?? newestUnix,
+                newestUnix
+            )
+        }
+        historyDataSubject.send(historyDataRevision)
+
+        // Show proof of the first durable write immediately. Later progress is coalesced with ACK updates.
+        if historySyncProgress.rowsPersisted == 0, pendingHistorySyncProgress.rowsPersisted > 0 {
+            publishHistorySyncProgress()
+        }
+    }
+
+    func noteAcknowledgedHistoryBatch() {
+        pendingHistorySyncProgress.batchesReceived += 1
+        let count = pendingHistorySyncProgress.batchesReceived
+        if count == 1 || count.isMultiple(of: 10) {
+            publishHistorySyncProgress()
+        }
+    }
+
+    func finishHistorySyncProgress() {
+        publishHistorySyncProgress()
+    }
+
+    func resetHistorySyncProgress() {
+        pendingHistorySyncProgress = HistorySyncProgress()
+        historySyncProgress = HistorySyncProgress()
+    }
+
+    private func publishHistorySyncProgress() {
+        guard historySyncProgress != pendingHistorySyncProgress else { return }
+        historySyncProgress = pendingHistorySyncProgress
+    }
 
     /// Undecodable HISTORICAL_DATA record frames seen this offload session whose raw bytes WERE
     /// preserved to the on-device archive (#77 / #91). Drives the honest "saved on this Mac" sync

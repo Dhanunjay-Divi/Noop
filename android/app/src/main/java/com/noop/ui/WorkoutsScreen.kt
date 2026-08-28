@@ -108,6 +108,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.time.format.TextStyle
+import java.time.temporal.WeekFields
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -291,12 +293,12 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 fullWidth = true,
             ) { showStrengthTrainer = true }
         }
-        item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
-
         if (allRows.isEmpty()) {
             item {
             EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
             }
+            item { ActivityCalendarSection(allRows) }
+            item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
         } else {
             // #64: the pure WorkoutFilter narrows the window AFTER the range cut, so every section reads
             // the remembered projection above instead of independently walking the history.
@@ -323,6 +325,8 @@ fun WorkoutsScreen(vm: AppViewModel) {
                 onClear = { sportFilter = null; sourceFilter = null; searchText = "" },
             )
             }
+            item { ActivityCalendarSection(allRows) }
+            item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
             postLogNote?.let { item { PostLogNoteBanner(it) } }
             item { EffortHero(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
             item { SummarySection(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
@@ -411,6 +415,191 @@ internal data class ActiveZoneWeekSnapshot(
     val minutes: ActiveZoneMinutes,
     val daysWithData: Int,
 )
+
+internal data class WorkoutActivityCalendarSummary(
+    val countsByDay: Map<LocalDate, Int>,
+    val activeDays: Int,
+    val totalMinutes: Int,
+)
+
+internal fun workoutActivityCalendarSummary(
+    rows: List<WorkoutRow>,
+    firstDay: LocalDate,
+    lastDay: LocalDate,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): WorkoutActivityCalendarSummary {
+    val included = rows.filter { row ->
+        val day = Instant.ofEpochSecond(row.startTs).atZone(zoneId).toLocalDate()
+        !day.isBefore(firstDay) && !day.isAfter(lastDay)
+    }
+    val counts = included.groupingBy {
+        Instant.ofEpochSecond(it.startTs).atZone(zoneId).toLocalDate()
+    }.eachCount()
+    val totalSeconds = included.sumOf { row ->
+        row.durationS?.takeIf { it.isFinite() && it >= 0.0 }
+            ?: (row.endTs - row.startTs).coerceAtLeast(0).toDouble()
+    }
+    return WorkoutActivityCalendarSummary(
+        countsByDay = counts,
+        activeDays = counts.size,
+        totalMinutes = (totalSeconds / 60.0).toInt(),
+    )
+}
+
+@Composable
+private fun ActivityCalendarSection(rows: List<WorkoutRow>) {
+    val today = remember { LocalDate.now() }
+    val firstDay = remember(today) { today.minusDays(29) }
+    val dates = remember(firstDay) { (0L..29L).map(firstDay::plusDays) }
+    val summary = remember(rows, firstDay, today) {
+        workoutActivityCalendarSummary(rows, firstDay, today)
+    }
+    val locale = Locale.getDefault()
+    val firstWeekday = remember(locale) { WeekFields.of(locale).firstDayOfWeek }
+    val leading = remember(firstDay, firstWeekday) {
+        (firstDay.dayOfWeek.value - firstWeekday.value + 7) % 7
+    }
+    val weekdayInitials = remember(locale, firstWeekday) {
+        (0L..6L).map { offset ->
+            firstWeekday.plus(offset).getDisplayName(TextStyle.NARROW_STANDALONE, locale)
+        }
+    }
+    val cells = remember(dates, leading) {
+        List<LocalDate?>(leading) { null } + dates
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            title = "Activity calendar",
+            overline = "Last 30 days",
+            trailing = if (summary.activeDays == 1) {
+                "1 active day"
+            } else {
+                "${summary.activeDays} active days"
+            },
+        )
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        firstDay.format(DateTimeFormatter.ofPattern("MMM", locale)),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        today.format(DateTimeFormatter.ofPattern("MMM yyyy", locale)),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
+                ) {
+                    weekdayInitials.forEach { initial ->
+                        Text(
+                            initial,
+                            style = NoopType.overline,
+                            color = Palette.textTertiary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                cells.chunked(7).forEach { week ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
+                    ) {
+                        week.forEach { day ->
+                            if (day == null) {
+                                Spacer(Modifier.weight(1f).height(36.dp))
+                            } else {
+                                WorkoutActivityDay(
+                                    day = day,
+                                    count = summary.countsByDay[day] ?: 0,
+                                    isToday = day == today,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                        repeat(7 - week.size) {
+                            Spacer(Modifier.weight(1f).height(36.dp))
+                        }
+                    }
+                }
+                FullDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space16),
+                ) {
+                    ActivityCalendarLegend("1", Palette.chargeColor.copy(alpha = 0.75f))
+                    ActivityCalendarLegend("2", Palette.statusPositive)
+                    ActivityCalendarLegend("3+", Palette.metricCyan)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (summary.totalMinutes == 1) "1 min" else "${summary.totalMinutes} min",
+                        style = NoopType.captionNumber,
+                        color = Palette.textSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkoutActivityDay(
+    day: LocalDate,
+    count: Int,
+    isToday: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val color = when (count) {
+        1 -> Palette.chargeColor.copy(alpha = 0.75f)
+        2 -> Palette.statusPositive
+        in 3..Int.MAX_VALUE -> Palette.metricCyan
+        else -> Palette.surfaceInset
+    }
+    val shape = RoundedCornerShape(9.dp)
+    Box(
+        modifier = modifier
+            .height(36.dp)
+            .clip(shape)
+            .background(color)
+            .then(
+                if (isToday) Modifier.border(1.dp, Palette.textPrimary.copy(alpha = 0.9f), shape)
+                else Modifier
+            )
+            .clearAndSetSemantics {
+                contentDescription = "${day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))}, " +
+                    if (count == 1) "1 recorded activity" else "$count recorded activities"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            day.dayOfMonth.toString(),
+            style = NoopType.captionNumber,
+            color = if (count > 0) Color.Black.copy(alpha = 0.82f) else Palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun ActivityCalendarLegend(label: String, color: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space4),
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = if (label == "3+") "3 or more activities" else "$label activities"
+        },
+    ) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(color))
+        Text(label, style = NoopType.caption, color = Palette.textTertiary)
+    }
+}
 
 internal fun activeZoneWeekSnapshot(
     moderate: List<MetricSeriesRow>,

@@ -1,5 +1,6 @@
 package com.noop.ble
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -35,6 +36,8 @@ class ChargingAndReleaseTest {
             heartRate = 72, rr = listOf(800, 810), rrRecent = listOf(800, 810),
             charging = true, pairingHint = "still bonded to the official app",
             strapFirmware = "41.17.6.0", historyLayoutVersion = 25,
+            backfilling = true, syncChunksThisSession = 12, syncRowsThisSession = 4_200,
+            syncDataOldestAt = 100, syncDataNewestAt = 200,
             scanning = true, statusNote = "Searching…",
         )
         val released = WhoopBleClient.releasedLiveState(live)
@@ -47,6 +50,11 @@ class ChargingAndReleaseTest {
         assertNull(released.charging)
         assertNull(released.strapFirmware)
         assertNull(released.historyLayoutVersion)
+        assertFalse(released.backfilling)
+        assertEquals(0, released.syncChunksThisSession)
+        assertEquals(0, released.syncRowsThisSession)
+        assertNull(released.syncDataOldestAt)
+        assertNull(released.syncDataNewestAt)
         assertNull(released.pairingHint)
         assertFalse(released.scanning)
         assertNull(released.statusNote)

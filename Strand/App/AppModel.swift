@@ -270,6 +270,8 @@ final class AppModel: ObservableObject {
     private var hrWindow: [(t: Date, v: Double)] = []
     private var stressRRBufferReceivedAt: Date?
     private var hrCancellables = Set<AnyCancellable>()
+    /// Serialized, starvation-proof owner for dashboard refreshes caused by durable history commits.
+    private var persistedHistoryRefreshWorker: PersistedHistoryRefreshWorker?
     /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
     /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
     private var contextualEvaluationTask: Task<Void, Never>?
@@ -535,23 +537,18 @@ final class AppModel: ObservableObject {
         // `lastSyncedAt`: a session can save valid overnight chunks and then end on the idle watchdog or a
         // disconnect before HISTORY_COMPLETE. Those rows still need scoring now, not at the next backstop.
         //
-        // #755 COALESCE: a strap whose firmware segments a deep offload into many productive slices bumps
-        // `historyDataRevision` once per slice, seconds apart, for the whole multi-minute download. Without
-        // coalescing each slice fired refreshAfterPersistedHistory()
-        // , a full repo.refresh (~50 store reads) + analyzeRecent , and every one re-fired TodayView's
-        // ~50-read loadAll, all contending with the backfill's bulk writes on the single-connection store.
-        // On a heavy + actively-syncing history that stacked into a ~10s freeze. `.debounce` collapses the
-        // slice storm: it suppresses the intermediate emissions and fires ONCE, 2s after the stream goes
-        // quiet , i.e. after the LAST slice lands (the backfill is done). Crucially it ALWAYS delivers the
-        // trailing edge, so the dashboard still refreshes with the newly-synced data , freshness is kept,
-        // we just stop re-doing it dozens of times mid-download. removeDuplicates() still drops a slice that
-        // stamped an identical second; the trailing refresh after a real change is never dropped.
-        live.$historyDataRevision
-            .dropFirst()
+        // A resettable debounce starved this path when a deep offload committed about every 1.4 seconds:
+        // the two-second quiet edge never arrived, so rows accumulated for an hour while dashboard
+        // calibration appeared frozen. The revision worker gives the first commit a quick pass, coalesces
+        // continuous commits to a bounded cadence, serializes expensive reads/scoring, and still performs
+        // the final quiet-edge pass after the transfer stops.
+        persistedHistoryRefreshWorker = PersistedHistoryRefreshWorker { [weak self] in
+            await self?.refreshAfterPersistedHistory()
+        }
+        live.historyDataPublisher
             .removeDuplicates()
-            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                Task { [weak self] in await self?.refreshAfterPersistedHistory() }
+            .sink { [weak self] revision in
+                self?.persistedHistoryRefreshWorker?.noteCommit(revision: revision)
             }
             .store(in: &hrCancellables)
 
@@ -559,6 +556,12 @@ final class AppModel: ObservableObject {
             .map { Date(timeIntervalSince1970: $0) }
         sleepMarks = (UserDefaults.standard.array(forKey: "sleepMarks") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
+        #if DEBUG
+        // Publish screenshot-only live state before SwiftUI mounts. Repository/registry startup can
+        // subsequently reconcile transport identity, so each demo startup path reasserts this fixture
+        // once its own wiring is complete.
+        AppleDemoSeeder.applyLiveFixtureIfRequested(to: live)
+        #endif
         if startOperationalWork {
             startOperationalWorkAfterLaunchAccess()
         }
@@ -585,9 +588,9 @@ final class AppModel: ObservableObject {
                 profileAge: self.profile.age,
                 profileSex: self.profile.sex
             )
-            AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
             await self.repo.refresh()
             _ = await self.wireDeviceRegistry()
+            AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
         }
     }
     #endif
@@ -619,10 +622,6 @@ final class AppModel: ObservableObject {
 
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
-        #if DEBUG
-        AppleDemoSeeder.applyLiveFixtureIfRequested(to: live)
-        #endif
-
         startAnalysisLoop()
     }
 
@@ -646,7 +645,6 @@ final class AppModel: ObservableObject {
                     profileAge: self.profile.age,
                     profileSex: self.profile.sex
                 )
-                AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
             }
             #endif
             await self.repo.refresh()                          // surface any imported data at once
@@ -663,6 +661,9 @@ final class AppModel: ObservableObject {
             _ = await self.intelligence.recomputeVitalityOnly()
             #endif
             await self.wireSourceCoordinator()                 // dormant unless a generic strap is active
+            #if DEBUG
+            AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
+            #endif
             try? await Task.sleep(nanoseconds: 6_000_000_000)  // give the first offload a moment
             // FIX 2(a): DEFER the heavy one-shot 4000-day heal/rescore while an import is in flight. A
             // large Apple Health import is the worst-case launch overlap , running a 4000-iteration heal

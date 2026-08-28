@@ -380,20 +380,57 @@ struct ComingSoon: View {
 /// every screen explains the live-now path and the import path with timing.
 /// Pulsing "history sync in progress" line (#77). Shown above a screen's empty state while the
 /// strap's historical offload runs, so a half-loaded screen ("No nights here yet") reads as
-/// in-progress rather than final. Shows the honest live signal — chunks pulled so far — never a
-/// percent (total pending is unknowable from the protocol, so a determinate bar would lie).
+/// in-progress rather than final. Shows batches received, durable rows saved, and the newest timestamp
+/// reached — never a percent (total pending is unknowable from the protocol).
 struct SyncingHistoryNote: View {
     let chunks: Int
+    let rows: Int
+    let newestDataUnix: Int?
+
+    init(chunks: Int, rows: Int = 0, newestDataUnix: Int? = nil) {
+        self.chunks = chunks
+        self.rows = rows
+        self.newestDataUnix = newestDataUnix
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            StatePill("Syncing Noop Band history…", tone: .accent, pulsing: true)
-            if chunks > 0 {
-                Text("\(chunks) chunks pulled")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                StatePill("Syncing Noop Band history…", tone: .accent, pulsing: true)
+                if chunks > 0 {
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.today.band_sync.batches_format"),
+                            Int64(chunks)
+                        )
+                    )
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+            if rows > 0 {
+                Text(persistedDetail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var persistedDetail: String {
+        guard let newestDataUnix else {
+            return String.localizedStringWithFormat(
+                String(localized: "appwide.today.band_sync.rows_format"),
+                Int64(rows)
+            )
+        }
+        let date = Date(timeIntervalSince1970: TimeInterval(newestDataUnix))
+            .formatted(.dateTime.year().month(.abbreviated).day())
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.today.band_sync.rows_ready_format"),
+            Int64(rows),
+            date
+        )
     }
 }
 

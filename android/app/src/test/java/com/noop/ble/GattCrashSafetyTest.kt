@@ -82,6 +82,9 @@ class GattCrashSafetyTest {
             historyLayoutVersion = 25,
             backfilling = true,
             syncChunksThisSession = 12,
+            syncRowsThisSession = 4_200,
+            syncDataOldestAt = 100,
+            syncDataNewestAt = 200,
         )
 
         val after = WhoopBleClient.disconnectedLiveState(live)
@@ -97,6 +100,9 @@ class GattCrashSafetyTest {
         // The "Syncing strap history…" pill must clear too (a dropped link mid-offload can't stay stuck).
         assertFalse(after.backfilling)
         assertEquals(0, after.syncChunksThisSession)
+        assertEquals(0, after.syncRowsThisSession)
+        assertNull(after.syncDataOldestAt)
+        assertNull(after.syncDataNewestAt)
         // A stale charging flag must not outlive the link.
         assertNull(after.charging)
         assertNull(after.strapFirmware)
