@@ -26,6 +26,29 @@ final class ProfileExternalWeightTests: XCTestCase {
         XCTAssertEqual(profile.displayName, String(repeating: "A", count: 31) + emoji)
     }
 
+    func testOptionalTargetWeightPersistsClearsAndRejectsInvalidValues() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        XCTAssertNil(profile.targetWeightKg)
+
+        profile.setTargetWeightKg(68.5)
+        XCTAssertEqual(profile.targetWeightKg, 68.5)
+        XCTAssertEqual(
+            ProfileStore(defaults: defaults).targetWeightKg,
+            68.5,
+            "The user-selected target must survive a relaunch"
+        )
+
+        profile.setTargetWeightKg(.nan)
+        profile.setTargetWeightKg(500)
+        XCTAssertEqual(profile.targetWeightKg, 68.5, "Invalid input must not replace a valid target")
+
+        profile.setTargetWeightKg(nil)
+        XCTAssertNil(profile.targetWeightKg)
+        XCTAssertNil(ProfileStore(defaults: defaults).targetWeightKg)
+        XCTAssertNil(defaults.object(forKey: "profile.targetWeightKg"))
+    }
+
     func testAcceptsOnlyNewerValidExternalWeightAndPersistsProvenance() throws {
         let defaults = try freshDefaults()
         let profile = ProfileStore(defaults: defaults)

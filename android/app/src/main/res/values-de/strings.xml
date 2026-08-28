@@ -2114,4 +2114,19 @@
     <string name="hydration_base_interval_label">Grundintervall</string>
     <string name="today_calibration_valid_hrv_progress">Gültige HRV %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">Detaillierte Schlafphasen werden ausgeblendet, weil für diese Nacht nicht genügend verwertbare Schlag-zu-Schlag-Zeitdaten vorliegen. Die Gesamtschlafzeit bleibt verfügbar.</string>
+    <string name="profile_bmi_label">BMI</string>
+    <string name="profile_bmi_accessibility">Body-Mass-Index, %1$s</string>
+    <string name="profile_bmi_explanation">Der BMI ist eine begrenzte Screening-Berechnung aus Größe und Gewicht. Er ist weder eine Diagnose noch ein Maß für die Körperzusammensetzung.</string>
+    <string name="profile_target_weight_optional">Zielgewicht (optional)</string>
+    <string name="profile_target_weight_add">Hinzufügen</string>
+    <string name="profile_target_weight_add_accessibility">Zielgewicht hinzufügen</string>
+    <string name="profile_target_weight_pounds_accessibility">Zielgewicht, %1$d Pfund</string>
+    <string name="profile_target_weight_kg_accessibility">Zielgewicht in Kilogramm</string>
+    <string name="profile_target_weight_clear">Löschen</string>
+    <string name="profile_target_weight_clear_accessibility">Zielgewicht löschen</string>
+    <string name="profile_target_weight_explanation">Optional und ganz deine Entscheidung. NOOP empfiehlt weder ein Ziel noch eine Änderungsrate.</string>
+    <string name="vital_range_summary_none">Keine aktuellen Bereichsvergleiche verfügbar</string>
+    <string name="vital_range_summary_one_within">Der verfügbare Messwert liegt innerhalb seines aktuellen Bereichs</string>
+    <string name="vital_range_summary_one_outside">Der verfügbare Messwert liegt außerhalb seines aktuellen Bereichs</string>
+    <string name="vital_range_summary_many">%1$d von %2$d verfügbaren Messwerten liegen innerhalb ihrer aktuellen Bereiche</string>
 </resources>

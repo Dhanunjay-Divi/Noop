@@ -71,6 +71,28 @@ internal enum class VitalCaptionMode {
     RANGE,
 }
 
+/** Aggregate only available, calibrated readings. Raw optical ADC and missing values never affect
+ *  either count, so absence cannot be presented as an unhealthy observation. */
+internal data class VitalRangeSummary(
+    val inRangeCount: Int,
+    val availableCount: Int,
+) {
+    val allAvailableInRange: Boolean
+        get() = availableCount > 0 && inRangeCount == availableCount
+}
+
+internal fun summarizeVitalRanges(vitals: List<Vital>): VitalRangeSummary {
+    val available = vitals.filter { vital ->
+        vital.key != "spo2raw" &&
+            vital.value?.isFinite() == true &&
+            vital.banding.band != VitalBands.Band.NO_DATA
+    }
+    return VitalRangeSummary(
+        inRangeCount = available.count { it.banding.band == VitalBands.Band.IN_RANGE },
+        availableCount = available.size,
+    )
+}
+
 /** Build the vitals, banded against the user's OWN trailing baseline once 14 trusted
  *  nights exist (population ranges before that — VitalBands does the deciding). */
 internal fun vitalsFor(

@@ -23,7 +23,13 @@ import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
 import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.social.FriendsSyncScheduler
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * Application entry point.
@@ -41,6 +47,18 @@ import kotlinx.coroutines.runBlocking
 class NoopApplication : Application() {
 
     private var lastWidgetNightMode: Boolean? = null
+    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mutableActiveDeviceId = MutableStateFlow(WhoopBleClient.DEFAULT_DEVICE_ID)
+    private val activeDeviceLock = Any()
+    private var activeDeviceRevision = 0L
+
+    /** Process-wide active-device projection. It starts at the legacy single-band id, then the Room
+     *  registry resolves it off the main thread. Consumers that outlive startup observe the correction
+     *  without making the first Compose frame wait for database open/migration. */
+    val activeDeviceIdFlow: StateFlow<String> = mutableActiveDeviceId.asStateFlow()
+
+    /** Synchronous best-known id for workers and lazy process services. */
+    val activeDeviceId: String get() = mutableActiveDeviceId.value
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
@@ -53,6 +71,7 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        resolveActiveDeviceId()
         // The current live path has no timestamp-matched wrist-motion + R-R evidence contract. Disarm
         // any pre-upgrade automatic stress opt-in before BLE/background readers can observe it.
         BiofeedbackPrefs.migrateAutomaticStressNudgePreferences(this)
@@ -64,16 +83,10 @@ class NoopApplication : Application() {
         // Canonicalize the retired auto-save/Boolean preferences before any UI or background notifier
         // reads them. Ask remains approval-first and rollback cannot resurrect unattended writes.
         NoopPrefs.migrateAutoWorkoutMode(this)
-        // Repair the private three-day Safety setup reminder after process death, reboot, or an app
-        // update. It remains a no-op until onboarding presents Safety and cancels itself at two accepted
-        // contacts.
-        runCatching { SafetyContactSetupReminderScheduler.reconcile(this) }
         // Preference initialization only; no network work occurs here. Self-hosted upload remains
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
-        // Friends uses a distinct least-privilege member credential and a summary-only producer.
-        // Reconcile its network-constrained catch-up only after remote preferences are initialized.
-        FriendsSyncScheduler.reconcile(this)
+        deferProcessMaintenance()
         // Record any uncaught crash to a file so it rides along in the shareable strap log — a
         // device-specific crash (e.g. Insights #224/#267) is otherwise lost to an unreachable logcat.
         CrashCapture.install(this)
@@ -103,19 +116,78 @@ class NoopApplication : Application() {
     val deviceRegistry: DeviceRegistry by lazy { DeviceRegistry(WhoopDatabase.get(this)) }
 
     /**
-     * Active device id resolved once at startup from the registry, falling back to the legacy
-     * "my-whoop" if the registry has none yet (so behaviour is unchanged today). Read with a guarded
-     * blocking call — a one-off indexed `LIMIT 1` query at composition time. Any failure (e.g. an early
-     * read before migration) is swallowed and falls back, so startup can never be broken by this.
+     * Publish a registry selection immediately after a user-driven device switch. The Room transaction
+     * remains the source of truth; this projection removes the old process-lifetime stale value and lets
+     * every subscribed read surface switch without waiting for a restart.
      */
-    val activeDeviceId: String by lazy {
-        runCatching { runBlocking { deviceRegistry.activeDeviceId() } }
-            .onFailure { Log.w("NoopApplication", "activeDeviceId resolve failed; using fallback", it) }
-            .getOrNull() ?: WhoopBleClient.DEFAULT_DEVICE_ID
+    fun noteActiveDeviceId(id: String) {
+        synchronized(activeDeviceLock) {
+            activeDeviceRevision += 1L
+            publishActiveDeviceId(id)
+        }
+    }
+
+    private fun publishActiveDeviceId(id: String) {
+        val resolved = id.trim().ifEmpty { WhoopBleClient.DEFAULT_DEVICE_ID }
+        if (mutableActiveDeviceId.value == resolved) return
+        mutableActiveDeviceId.value = resolved
+        if (bleDelegate.isInitialized()) {
+            ble.setActiveDeviceId(resolved)
+        }
+    }
+
+    /**
+     * Resolve the persisted registry selection without blocking Application/MainActivity startup.
+     * A multi-device install can briefly render the canonical history projection, then atomically
+     * switches to its active source when this indexed Room read completes. If a background service
+     * initialized BLE first, re-point it and start the coordinator so generic-source ownership is
+     * reconciled too.
+     */
+    private fun resolveActiveDeviceId() {
+        val expectedRevision = synchronized(activeDeviceLock) { activeDeviceRevision }
+        startupScope.launch {
+            val resolved = runCatching { deviceRegistry.activeDeviceId() }
+                .onFailure {
+                    Log.w("NoopApplication", "activeDeviceId resolve failed; using fallback", it)
+                }
+                .getOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?: WhoopBleClient.DEFAULT_DEVICE_ID
+            // Publish while holding the same lock as user-driven changes. This also catches a user
+            // explicitly switching back to the default id while Room opens, where comparing only the
+            // current string cannot distinguish the new selection from the initial fallback.
+            val published = synchronized(activeDeviceLock) {
+                if (activeDeviceRevision != expectedRevision) {
+                    false
+                } else {
+                    activeDeviceRevision += 1L
+                    publishActiveDeviceId(resolved)
+                    true
+                }
+            }
+            if (!published) return@launch
+            if (resolved != WhoopBleClient.DEFAULT_DEVICE_ID || bleDelegate.isInitialized()) {
+                sourceCoordinator.start()
+            }
+        }
+    }
+
+    /**
+     * WorkManager opens its own database. Keep schedule repair out of Application's main-thread launch
+     * path while preserving process-level self-healing for starts that do not create an Activity.
+     */
+    private fun deferProcessMaintenance() {
+        startupScope.launch {
+            // The private three-day Safety setup reminder remains inert until onboarding requests it.
+            runCatching { SafetyContactSetupReminderScheduler.reconcile(this@NoopApplication) }
+            // Friends remains credential-gated and network constrained. Remote preferences were initialized
+            // synchronously above, before this task can inspect them.
+            runCatching { FriendsSyncScheduler.reconcile(this@NoopApplication) }
+        }
     }
 
     /** Process-wide BLE client. Owns the GATT connection and outlives any single Activity/ViewModel. */
-    val ble: WhoopBleClient by lazy {
+    private val bleDelegate = lazy {
         WhoopBleClient(
             applicationContext,
             repository = repository,
@@ -127,6 +199,9 @@ class NoopApplication : Application() {
             debugLogcat = NoopPrefs.debugLogging(applicationContext)
         }
     }
+    // Serialize first construction with active-id publication. Otherwise a switch could observe the
+    // delegate as "initializing", skip re-pointing it, and race its constructor reading the old fallback.
+    val ble: WhoopBleClient get() = synchronized(activeDeviceLock) { bleDelegate.value }
 
     /**
      * Multi-source coordinator (Phase 1B): runs exactly one device's live BLE at a time, driven by the
@@ -145,7 +220,7 @@ class NoopApplication : Application() {
      * macOS wiring `BLEManager.connectedPeripheralUUID` into the coordinator's adoption sink. Kept beside
      * the other `ble`-flow collectors there (this Application owns no CoroutineScope of its own).
      */
-    val sourceCoordinator: SourceCoordinator by lazy {
+    private val sourceCoordinatorDelegate = lazy {
         SourceCoordinator(
             context = applicationContext,
             registry = deviceRegistry,
@@ -170,6 +245,7 @@ class NoopApplication : Application() {
             batterySink = { pct -> ble.publishExternalBattery(pct) },
         )
     }
+    val sourceCoordinator: SourceCoordinator get() = sourceCoordinatorDelegate.value
 
     /** The WHOOP family last seen advertising, persisted by [WhoopBleClient.persistSelectedModel] under
      *  "noop.selectedWhoopModel" in the shared noop_prefs store. Defaults to [WhoopModel.WHOOP4] when

@@ -276,6 +276,9 @@ final class AppModel: ObservableObject {
     /// Debounced profile reconciliation. A DOB/sex/waist edit invalidates stored provenance immediately;
     /// this task writes the matching replacement values and then wakes metric-series-only views.
     private var ageMetricRecomputeTask: Task<Void, Never>?
+    /// Resolves the workout frontier before an explicit enable. A later toggle cancels this lookup so
+    /// an in-flight read can never turn the preference back on after the user switched it off.
+    private var postWorkoutPreferenceTask: Task<Void, Never>?
     /// Last profile token handed to the focused age-metric reconciler. Unlike the profile publishers,
     /// this also detects age changing naturally across a birthday when the app returns to foreground.
     private var lastAgeMetricProfileState: String?
@@ -878,6 +881,7 @@ final class AppModel: ObservableObject {
         // users keep their chosen mode; fresh installs default to Ask until the classifier has real-world
         // validation. A legacy Auto-save preference resolves to approval-first Ask until confidence is calibrated.
         await processAutomaticWorkoutAfterSync()
+        await reconcilePostWorkoutSummaryNotifications()
         #if os(iOS)
         // #980: a strap backfill routinely completes while the app is BACKGROUNDED (it runs as a
         // bluetooth-central, so it stays alive to receive the offload). The only other widget-publish
@@ -927,6 +931,42 @@ final class AppModel: ObservableObject {
     /// than lingering after its candidate, mode, or explicit notification opt-in is no longer current.
     func reconcileAutomaticWorkoutSurfaces() async {
         await processAutomaticWorkoutAfterSync()
+    }
+
+    /// Toggle the optional post-workout phone summary. Enabling snapshots the current newest workout
+    /// before requesting notification access, so existing history is the frontier rather than a reason
+    /// to interrupt the user immediately.
+    func setPostWorkoutSummaryNotificationsEnabled(
+        _ enabled: Bool,
+        completion: (@MainActor @Sendable (PostWorkoutSummaryNotifications.EnableOutcome) -> Void)? = nil
+    ) {
+        postWorkoutPreferenceTask?.cancel()
+        postWorkoutPreferenceTask = nil
+        guard enabled else {
+            PostWorkoutSummaryNotifications.setEnabled(
+                false,
+                currentNewestWorkoutStart: nil,
+                completion: completion
+            )
+            return
+        }
+        postWorkoutPreferenceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let newest = await self.repo.workoutRows().map(\.startTs).max()
+            guard !Task.isCancelled else { return }
+            PostWorkoutSummaryNotifications.setEnabled(
+                true,
+                currentNewestWorkoutStart: newest,
+                completion: completion
+            )
+        }
+    }
+
+    /// Called only after persisted wearable history has refreshed and scored. This timing is honest:
+    /// a workout summary can arrive after the session, whenever the next sync completes.
+    private func reconcilePostWorkoutSummaryNotifications() async {
+        let newest = await repo.workoutRows().map(\.startTs).max()
+        await PostWorkoutSummaryNotifications.postIfAuthorized(newestWorkoutStart: newest)
     }
 
     /// Canonical ingest for one Bluetooth SIG Weight Measurement. This is deliberately separate from

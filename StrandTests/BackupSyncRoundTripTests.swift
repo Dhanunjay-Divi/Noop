@@ -353,6 +353,7 @@ final class BackupSyncRoundTripTests: XCTestCase {
             "profile.age": 34,
             "profile.sex": "female",
             "profile.weightKg": 62.5,
+            "profile.targetWeightKg": 60.0,
             "profile.heightCm": 168.0,
             "profile.hrMax": 191,
             "units.system": "imperial",
@@ -373,6 +374,7 @@ final class BackupSyncRoundTripTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "profile.age") as? Int, 34)
         XCTAssertEqual(defaults.string(forKey: "profile.sex"), "female")
         XCTAssertEqual(defaults.object(forKey: "profile.weightKg") as? Double, 62.5)
+        XCTAssertEqual(defaults.object(forKey: "profile.targetWeightKg") as? Double, 60.0)
         XCTAssertEqual(defaults.object(forKey: "profile.heightCm") as? Double, 168.0)
         XCTAssertEqual(defaults.object(forKey: "profile.hrMaxOverride") as? Int, 191,
                        "Canonical profile.hrMax lands on ProfileStore's profile.hrMaxOverride key")

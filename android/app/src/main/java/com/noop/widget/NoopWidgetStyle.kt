@@ -106,18 +106,19 @@ internal fun noopWidgetColors(appearance: NoopWidgetAppearance): NoopWidgetColor
 
 /** Resolve the persisted value without collapsing System into a one-time configuration snapshot. */
 internal fun resolveNoopWidgetAppearance(raw: String?): NoopWidgetAppearance = when (raw) {
+    "system" -> NoopWidgetAppearance.SYSTEM
     "light" -> NoopWidgetAppearance.LIGHT
     "dark" -> NoopWidgetAppearance.DARK
     "black" -> NoopWidgetAppearance.BLACK
-    else -> NoopWidgetAppearance.SYSTEM
+    else -> NoopWidgetAppearance.BLACK
 }
 
 internal fun Context.noopWidgetAppearance(): NoopWidgetAppearance = runCatching {
     resolveNoopWidgetAppearance(
         getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
-            .getString("theme.appearance", "system"),
+            .getString("theme.appearance", "black"),
     )
-}.getOrDefault(NoopWidgetAppearance.DARK)
+}.getOrDefault(NoopWidgetAppearance.BLACK)
 
 /** Composition-failure fallback that still honors explicit Light/Dark/Black app appearance. */
 internal fun Context.noopWidgetErrorRemoteViews(): RemoteViews {

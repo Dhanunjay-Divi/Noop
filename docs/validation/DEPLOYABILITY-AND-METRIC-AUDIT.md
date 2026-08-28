@@ -164,8 +164,9 @@ notifiers — which is the correct design: notifiers are dumb presenters, engine
 clear→raised transition, once per calendar day. `StrainTargetNotifier` requires *"a current solid
 multi-signal readiness read plus today's explicit self-check"*.
 
-All 13 notification producers check authorization before scheduling and use stable identifiers, so `add()`
-replaces rather than duplicates. No silent failures, no duplicates found.
+The audited notification producers check authorization before scheduling and use stable identifiers, so
+repeat scheduling replaces rather than duplicates. The post-sync workout summary advances its workout
+frontier only after Notification Center accepts the request, leaving a failed attempt retryable.
 
 ---
 

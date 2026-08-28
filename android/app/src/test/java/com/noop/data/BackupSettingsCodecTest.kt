@@ -33,6 +33,7 @@ class BackupSettingsCodecTest {
             "profile.dateOfBirth" to "1992-11-03",
             "profile.sex" to "female",
             "profile.weightKg" to 62.5,
+            "profile.targetWeightKg" to 60.0,
             "profile.heightCm" to 168.0,
             "profile.waistCm" to 71.0,
             "profile.hrMax" to 191,
@@ -88,9 +89,10 @@ class BackupSettingsCodecTest {
 
         assertEquals(34, back["profile.age"])
         assertEquals("1992-11-03", back["profile.dateOfBirth"])
-        assertEquals(3, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
+        assertEquals(4, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
         assertEquals("female", back["profile.sex"])
         assertEquals(62.5, back["profile.weightKg"])
+        assertEquals(60.0, back["profile.targetWeightKg"])
         assertEquals(168.0, back["profile.heightCm"])
         assertEquals(71.0, back["profile.waistCm"])
         assertEquals(191, back["profile.hrMax"])
@@ -111,13 +113,14 @@ class BackupSettingsCodecTest {
 
     @Test fun crossPlatformShapedJsonDecodes() {
         // What the Apple exporter writes (JSONSerialization, sorted keys, integral doubles possible).
-        val appleJson = """{"settings.schemaVersion":3,"profile.age":34.0,"profile.dateOfBirth":"1992-11-03","profile.hrMax":191,"profile.sex":"male","profile.weightKg":80,"units.system":"metric","hrv.window":"deep","today.keyMetricsDetailed":true}"""
+        val appleJson = """{"settings.schemaVersion":4,"profile.age":34.0,"profile.dateOfBirth":"1992-11-03","profile.hrMax":191,"profile.sex":"male","profile.weightKg":80,"profile.targetWeightKg":75,"units.system":"metric","hrv.window":"deep","today.keyMetricsDetailed":true}"""
         val back = BackupSettingsCodec.decode(appleJson)
         assertEquals("Integral JSON numbers must land as Int for int-kind keys", 34, back["profile.age"])
         assertEquals("1992-11-03", back["profile.dateOfBirth"])
-        assertEquals(3, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
+        assertEquals(4, back[BackupSettingsCodec.SCHEMA_VERSION_KEY])
         assertEquals(191, back["profile.hrMax"])
         assertEquals("A bare JSON int must land as Double for double-kind keys", 80.0, back["profile.weightKg"])
+        assertEquals(75.0, back["profile.targetWeightKg"])
         assertEquals("male", back["profile.sex"])
         assertEquals("metric", back["units.system"])
         assertEquals("deep", back["hrv.window"])
@@ -130,6 +133,7 @@ class BackupSettingsCodecTest {
             BackupSettingsCodec.DATE_OF_BIRTH_KEY,
             "profile.sex",
             "profile.weightKg",
+            "profile.targetWeightKg",
             "profile.heightCm",
             "profile.waistCm",
             "profile.hrMax",

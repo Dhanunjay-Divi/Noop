@@ -416,6 +416,7 @@ struct RootView: View {
         case .hydration: selection = .today
         case .today: selection = .today
         case .trends: selection = .trends
+        case .workouts: selection = .workouts
         case .devices: selection = .devices
         case .safety: selection = .safety
         case .coach: selection = .coach

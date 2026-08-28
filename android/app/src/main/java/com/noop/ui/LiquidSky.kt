@@ -4,12 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -248,12 +242,12 @@ private val liquidSettleColor: Color
 // MARK: - LiquidSky (animated) — per-frame twinkle + breath
 
 /**
- * The animated time-of-day liquid sky. Drives twinkle + the slow breath of light per frame via
- * `withFrameNanos`. Under Reduce Motion it collapses to the static picture (no frame loop) — matching
- * the house motion rule. [hour] defaults to live local time (hour + minute/60) when null.
+ * The animated time-of-day liquid sky. Drives twinkle + the slow breath of light at the same 20fps
+ * budget as SwiftUI's TimelineView. Under Reduce Motion it collapses to the static picture (no frame
+ * loop). [hour] defaults to live local time (hour + minute/60) when null.
  *
- * Mirrors the iOS `LiquidSky` view (TimelineView.animation at 20fps → here an unbounded frame loop;
- * only the sinusoid phase matters, so the picture is identical).
+ * Mirrors the iOS `LiquidSky` view: both clocks are display-synchronised and capped at 20fps. Only
+ * the sinusoid phase matters, so the picture is identical.
  */
 @Composable
 fun LiquidSky(hour: Double? = null, modifier: Modifier = Modifier) {
@@ -267,18 +261,7 @@ fun LiquidSky(hour: Double? = null, modifier: Modifier = Modifier) {
         return
     }
 
-    // Monotonic seconds clock: accumulate raw frame nanos → seconds. Only the sinusoid phase matters
-    // (the iOS `now` is seconds-since-reference), so a from-zero accumulator gives the same motion.
-    var seconds by remember { mutableDoubleStateOf(0.0) }
-    LaunchedEffect(Unit) {
-        var last = 0L
-        while (true) {
-            withFrameNanos { frame ->
-                if (last != 0L) seconds += (frame - last) / 1_000_000_000.0
-                last = frame
-            }
-        }
-    }
+    val seconds = rememberLiquidClock(maxFramesPerSecond = 20)
 
     Canvas(modifier = modifier) {
         renderLiquidSky(hour = h, now = seconds, settle = settle, animate = true)

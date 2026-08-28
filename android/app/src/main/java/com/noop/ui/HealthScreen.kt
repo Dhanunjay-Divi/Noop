@@ -23,7 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Sync
 import android.widget.Toast
 import androidx.compose.material3.CircularProgressIndicator
@@ -1579,6 +1581,49 @@ private fun VitalsSection(
     // Display-only — banding still runs on the stored °C value.
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(title = title, overline = overline, trailing = trailing)
+        val rangeSummary = summarizeVitalRanges(vitals)
+        val rangeSummaryMessage = when {
+            rangeSummary.availableCount == 0 ->
+                stringResource(R.string.vital_range_summary_none)
+            rangeSummary.availableCount == 1 && rangeSummary.inRangeCount == 1 ->
+                stringResource(R.string.vital_range_summary_one_within)
+            rangeSummary.availableCount == 1 ->
+                stringResource(R.string.vital_range_summary_one_outside)
+            else -> stringResource(
+                R.string.vital_range_summary_many,
+                rangeSummary.inRangeCount,
+                rangeSummary.availableCount,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clearAndSetSemantics {
+                    contentDescription = rangeSummaryMessage
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+        ) {
+            Icon(
+                imageVector = if (rangeSummary.allAvailableInRange) {
+                    Icons.Filled.CheckCircle
+                } else {
+                    Icons.Filled.Info
+                },
+                contentDescription = null,
+                tint = if (rangeSummary.allAvailableInRange) {
+                    Palette.statusPositive
+                } else {
+                    Palette.textTertiary
+                },
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = rangeSummaryMessage,
+                style = NoopType.subhead,
+                color = Palette.textSecondary,
+            )
+        }
 
         // A uniform 2-column grid of fixed-height tiles. The macOS LazyVGrid is
         // adaptive(min: 168); on phones two columns is the faithful equivalent.

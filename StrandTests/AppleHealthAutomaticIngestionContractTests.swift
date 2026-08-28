@@ -52,6 +52,11 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
                        "A HealthKit background launch must never present a permission sheet.")
         XCTAssertTrue(app.contains("bridge.registerObserversAtLaunchIfPreviouslyRequested()"),
                       "Observers must be installed during app initialization, before scenePhase becomes active.")
+        XCTAssertTrue(bridge.contains("guard hasHealthKitEntitlement else { return NSPredicate(value: false) }"),
+                      "A profile-less unsigned process must never evaluate HKSource.default().")
+        XCTAssertTrue(bridge.contains("hasAppStoreReceipt: hasAppStoreReceipt"))
+        XCTAssertFalse(bridge.contains("No embedded profile = App Store build = properly signed"),
+                       "Profile absence alone cannot prove an App Store-signed HealthKit capability.")
         XCTAssertTrue(app.contains("await health.foregroundCatchUp()"))
         XCTAssertTrue(view.contains("Apple may deliver Health updates in the background on its schedule"))
         XCTAssertTrue(view.contains("does not include Apple's background-delivery entitlement"))

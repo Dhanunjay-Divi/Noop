@@ -15,10 +15,10 @@ A current native backup contains:
 The database includes every row stored in that platform's database, including biometric
 history, derived scores, sleep, workouts, journals, nutrition, and strength data.
 
-Settings schema v3 carries only validated, explicitly allowlisted, user-authored values:
+Settings schema v4 carries only validated, explicitly allowlisted, user-authored values:
 
-- profile: exact civil date of birth plus legacy age fallback, sex, weight, height, waist,
-  and manual maximum-heart-rate override;
+- profile: exact civil date of birth plus legacy age fallback, sex, weight, optional user-selected
+  target weight, height, waist, and manual maximum-heart-rate override;
 - units and interpretation: distance system, independent mass/height/temperature choices,
   Effort display scale, and whole-night versus deep-sleep HRV window;
 - appearance: app appearance, data colour style, trend chart shape, day-cycle background,
@@ -97,7 +97,7 @@ Example:
       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     }
   },
-  "settingsSchemaVersion": 3,
+  "settingsSchemaVersion": 4,
   "sourcePlatform": "apple",
   "version": 1
 }
@@ -110,8 +110,8 @@ Example:
 | `createdAtEpochMs` | Non-negative Unix epoch milliseconds. |
 | `sourcePlatform` | `apple` or `android`. |
 | `databaseEngine` | `grdb` for Apple or `room` for Android. |
-| `databaseSchemaVersion` | Positive source database schema version. Current code is Apple `41`, Android `31`. |
-| `settingsSchemaVersion` | Present only when a settings payload is declared. Current value is `3`. |
+| `databaseSchemaVersion` | Positive source database schema version. Current code is Apple `41`, Android `36`. |
+| `settingsSchemaVersion` | Present only when a settings payload is declared. Current value is `4`. |
 | `appVersion` | Optional human-readable source app version. It is informational, not a restore gate. |
 | `payloads.database` | Required canonical path, uncompressed byte length, and lowercase SHA-256. |
 | `payloads.settings` | Optional canonical path, uncompressed byte length, and lowercase SHA-256. |

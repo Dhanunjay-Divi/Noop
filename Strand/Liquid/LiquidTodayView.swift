@@ -2247,26 +2247,18 @@ struct LiquidTodayView: View {
                        trend: [Double]? = nil,
                        symbol: String, key: String? = nil,
                        detailMetric: MetricDescriptor? = nil) -> some View {
-        let tile = VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-            HStack(alignment: .center, spacing: NoopMetrics.space2) {
-                MetricGlyph(symbol, size: 28)
-                Text(label.uppercased())
-                    .font(StrandFont.overlineScaled(9.5))
-                    .tracking(0)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Spacer(minLength: 0)
-                if let trend, trend.count > 1 {
-                    trendDirectionBadge(trend)
-                }
-            }
+        let showsTrend = (trend?.count ?? 0) > 1
+        let tile = VStack(
+            alignment: .leading,
+            spacing: showsTrend ? NoopMetrics.space1 : NoopMetrics.space2
+        ) {
+            keyMetricTileHeader(label, symbol: symbol, trend: trend)
             (Text(value).font(StrandFont.number(24))
                 + Text(unit.isEmpty ? "" : " \(unit)").font(StrandFont.subhead))
                 .foregroundStyle(StrandPalette.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            if let trend, trend.count > 1 {
+            if showsTrend, let trend {
                 Sparkline(
                     values: trend,
                     gradient: Gradient(colors: [tint.opacity(0.42), tint]),
@@ -2293,7 +2285,8 @@ struct LiquidTodayView: View {
                 Color.clear.frame(height: 26).accessibilityHidden(true)
             }
         }
-        .padding(NoopMetrics.space3)
+        .padding(.horizontal, NoopMetrics.space3)
+        .padding(.vertical, showsTrend ? NoopMetrics.space2 : NoopMetrics.space3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             FrostedCardSurface(
@@ -2315,6 +2308,37 @@ struct LiquidTodayView: View {
                     .buttonStyle(.plain)
             } else {
                 tile
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func keyMetricTileHeader(_ label: String, symbol: String, trend: [Double]?) -> some View {
+        if let trend, trend.count > 1 {
+            VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                HStack(alignment: .center, spacing: NoopMetrics.space2) {
+                    MetricGlyph(symbol, size: 28)
+                    Spacer(minLength: 0)
+                    trendDirectionBadge(trend)
+                }
+                Text(label.uppercased())
+                    .font(StrandFont.overlineScaled(9.5))
+                    .tracking(0)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            HStack(alignment: .center, spacing: NoopMetrics.space2) {
+                MetricGlyph(symbol, size: 28)
+                Text(label.uppercased())
+                    .font(StrandFont.overlineScaled(9.5))
+                    .tracking(0)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 0)
             }
         }
     }

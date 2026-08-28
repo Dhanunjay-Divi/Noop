@@ -142,6 +142,9 @@ final class ProfileStore: ObservableObject {
             }
         }
     }
+    /// Optional target selected by the user. This is a remembered preference, not a recommendation:
+    /// NOOP never derives a target or a rate of change. Stored canonically in kilograms.
+    @Published private(set) var targetWeightKg: Double?
     @Published var heightCm: Double { didSet { d.set(heightCm, forKey: K.height) } }
     /// Optional waist circumference (cm); 0 = not set. Only used to ALSO show an estimated VO₂max
     /// alongside Fitness Age — the Fitness Age itself does not need it (the body term cancels).
@@ -196,6 +199,7 @@ final class ProfileStore: ObservableObject {
         /// cross-platform `.noopbak` whitelist keeps round-tripping an Int age unchanged.
         static let legacyAge = "profile.age"
         static let sex = "profile.sex", weight = "profile.weightKg"
+        static let targetWeight = "profile.targetWeightKg"
         static let height = "profile.heightCm", hrMax = "profile.hrMaxOverride"
         static let stepScale = "profile.stepTicksPerStep"
         static let waist = "profile.waistCm"
@@ -249,6 +253,10 @@ final class ProfileStore: ObservableObject {
         d.set(Self.years(from: resolvedDOB, to: Date()), forKey: K.legacyAge)
         sex = d.string(forKey: K.sex) ?? "male"
         weightKg = d.object(forKey: K.weight) as? Double ?? 75
+        let storedTargetWeight = d.object(forKey: K.targetWeight) as? Double
+        targetWeightKg = storedTargetWeight.flatMap {
+            $0.isFinite && Self.targetWeightRange.contains($0) ? $0 : nil
+        }
         heightCm = d.object(forKey: K.height) as? Double ?? 178
         waistCm = d.object(forKey: K.waist) as? Double ?? 0
         hrMaxOverride = d.object(forKey: K.hrMax) as? Int ?? 0
@@ -259,6 +267,9 @@ final class ProfileStore: ObservableObject {
         stepsCalibrationManual = d.object(forKey: K.stepsManualFlag) as? Bool ?? false
         stepsManualCoefficient = max(0, d.object(forKey: K.stepsManualCoeff) as? Double ?? 0)
         avatarImageData = d.data(forKey: K.avatar)
+        if storedTargetWeight != nil, targetWeightKg == nil {
+            d.removeObject(forKey: K.targetWeight)
+        }
     }
 
     /// Persist a compact single-line UI name. Empty input resets to the private default.
@@ -279,6 +290,23 @@ final class ProfileStore: ObservableObject {
             .joined(separator: " ")
         let limited = String(words.prefix(maxDisplayNameLength))
         return limited.isEmpty ? defaultDisplayName : limited
+    }
+
+    // MARK: - Optional target weight
+
+    static let targetWeightRange: ClosedRange<Double> = 30...250
+
+    /// Persist a user-selected target, or clear it with nil. Invalid values are ignored rather than
+    /// replacing a valid target. The range matches the profile weight editor and portable backup.
+    func setTargetWeightKg(_ value: Double?) {
+        guard let value else {
+            targetWeightKg = nil
+            d.removeObject(forKey: K.targetWeight)
+            return
+        }
+        guard value.isFinite, Self.targetWeightRange.contains(value) else { return }
+        targetWeightKg = value
+        d.set(value, forKey: K.targetWeight)
     }
 
     // MARK: - External weight provenance

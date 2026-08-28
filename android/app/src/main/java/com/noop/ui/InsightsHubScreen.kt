@@ -23,11 +23,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -86,9 +86,9 @@ import kotlin.math.roundToInt
 
 @Composable
 fun InsightsHubScreen(vm: AppViewModel) {
-    val days by vm.recentDays.collectAsState()
+    val days by vm.recentDays.collectAsStateWithLifecycle()
     val hub = remember { InsightsHubViewModel() }
-    val state by hub.state.collectAsState()
+    val state by hub.state.collectAsStateWithLifecycle()
 
     // Re-derive whenever the cached days change underneath (journal + dose are read via repo).
     androidx.compose.runtime.LaunchedEffect(days) { hub.load(vm, days) }

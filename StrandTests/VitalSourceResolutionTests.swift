@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import WhoopStore
 import StrandAnalytics
 @testable import Strand
@@ -245,7 +246,55 @@ final class VitalSourceResolutionTests: XCTestCase {
         XCTAssertEqual(BodyVitalReading.dayLabel("2026-08-22"), "22 Aug")
     }
 
+    func testRangeSummaryExcludesMissingAndRawReadings() {
+        let readings = [
+            summaryReading(key: "resp", value: 15, band: .inRange),
+            summaryReading(key: "spo2", value: 92, band: .outOfRange),
+            summaryReading(key: "spo2raw", value: 12_000, band: .inRange),
+            summaryReading(key: "hrv", value: nil, band: .noData),
+        ]
+
+        let summary = BodyVitalSigns.rangeSummary(readings)
+
+        XCTAssertEqual(summary.inRangeCount, 1)
+        XCTAssertEqual(summary.availableCount, 2)
+        XCTAssertFalse(summary.allAvailableInRange)
+        XCTAssertEqual(
+            summary.message,
+            "1 of 2 available readings are within their current ranges"
+        )
+    }
+
+    func testRangeSummaryDoesNotTreatAbsenceAsOutsideRange() {
+        let summary = BodyVitalSigns.rangeSummary([
+            summaryReading(key: "spo2raw", value: 12_000, band: .inRange),
+            summaryReading(key: "hrv", value: nil, band: .noData),
+        ])
+
+        XCTAssertEqual(summary, VitalRangeSummary(inRangeCount: 0, availableCount: 0))
+        XCTAssertEqual(summary.message, "No current range comparisons available")
+    }
+
     // MARK: - Fixtures
+
+    private func summaryReading(
+        key: String,
+        value: Double?,
+        band: VitalBands.Band
+    ) -> BodyVitalReading {
+        BodyVitalReading(
+            key: key,
+            label: key,
+            unit: "",
+            value: value,
+            format: { String($0) },
+            banding: VitalBands.Result(band: band, basis: .population, nights: 0),
+            metricColor: .blue,
+            day: value == nil ? nil : "2026-06-12",
+            source: .localCache,
+            missingCaption: "Missing"
+        )
+    }
 
     private func daily(
         day: String,

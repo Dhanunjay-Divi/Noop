@@ -56,6 +56,30 @@ class ProfileStoreAgeMigrationTest {
     }
 
     @Test
+    fun optionalTargetWeight_persistsClearsAndRejectsInvalidValues() {
+        val prefs = FakeSharedPreferences()
+        val profile = ProfileStore(prefs)
+        assertNull(profile.targetWeightKg)
+
+        profile.targetWeightKg = 68.5
+        assertEquals(68.5, profile.targetWeightKg!!, 0.001)
+        assertEquals(68.5, ProfileStore(prefs).targetWeightKg!!, 0.001)
+        assertEquals(68.5, profile.backupSnapshot()["profile.targetWeightKg"] as Double, 0.001)
+
+        profile.targetWeightKg = Double.NaN
+        profile.targetWeightKg = 500.0
+        assertEquals("Invalid input must not replace a valid target", 68.5, profile.targetWeightKg!!, 0.001)
+
+        profile.targetWeightKg = null
+        assertNull(profile.targetWeightKg)
+        assertNull(ProfileStore(prefs).targetWeightKg)
+        assertFalse(prefs.contains("target_weight_kg"))
+
+        profile.applyBackup(mapOf("profile.targetWeightKg" to 71.25))
+        assertEquals(71.25, profile.targetWeightKg!!, 0.001)
+    }
+
+    @Test
     fun seedValuesAreNotConfirmed_untilUserAcceptsEachInput() {
         val prefs = FakeSharedPreferences()
         val profile = ProfileStore(prefs)

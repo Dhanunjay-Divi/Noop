@@ -191,4 +191,19 @@
     <string name="hydration_base_interval_label">基礎間隔</string>
     <string name="today_calibration_valid_hrv_progress">有效 HRV %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">由於這一晚缺少足夠的可用逐次心搏間隔資料，詳細睡眠階段暫不顯示。總睡眠時長仍可查看。</string>
+    <string name="profile_bmi_label">BMI</string>
+    <string name="profile_bmi_accessibility">身體質量指數，%1$s</string>
+    <string name="profile_bmi_explanation">BMI 只是根據身高和體重進行的有限篩查計算，不是診斷，也不能衡量身體組成。</string>
+    <string name="profile_target_weight_optional">目標體重（選填）</string>
+    <string name="profile_target_weight_add">新增</string>
+    <string name="profile_target_weight_add_accessibility">新增目標體重</string>
+    <string name="profile_target_weight_pounds_accessibility">目標體重，%1$d 磅</string>
+    <string name="profile_target_weight_kg_accessibility">目標體重（公斤）</string>
+    <string name="profile_target_weight_clear">清除</string>
+    <string name="profile_target_weight_clear_accessibility">清除目標體重</string>
+    <string name="profile_target_weight_explanation">此項完全選填，由你自行決定。NOOP 不會建議目標體重或變化速度。</string>
+    <string name="vital_range_summary_none">目前沒有可用的範圍比較</string>
+    <string name="vital_range_summary_one_within">可用讀數在其目前範圍內</string>
+    <string name="vital_range_summary_one_outside">可用讀數不在其目前範圍內</string>
+    <string name="vital_range_summary_many">%1$d/%2$d 項可用讀數在各自的目前範圍內</string>
 </resources>

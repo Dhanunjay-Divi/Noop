@@ -82,6 +82,10 @@ do not silently change the answer based only on the absence of a NOOP cloud.
   Sending a question transmits the question and recent transcript; optional
   consent adds a compact health/fitness context. The provider's own privacy
   terms apply.
+- Post-workout summaries are local, off by default, and evaluated only after a
+  wearable sync persists a newer workout. Lock-screen copy is generic and
+  contains no effort, duration, heart-rate, or other workout health detail.
+  Existing history is not announced when the setting is enabled.
 
 ## Privacy manifests and required-reason APIs
 
@@ -114,7 +118,9 @@ is not a substitute for those App Store Connect answers.
 | Watch complications | App Group only | Reads the Watch app's local shared snapshot. |
 
 Local notifications require user authorization but no `aps-environment`
-entitlement. The binary does not declare remote push, background processing,
+entitlement. This includes the opt-in generic post-sync workout summary; its
+content is built and scheduled on device, and tapping it opens the local
+Workouts view. The binary does not declare remote push, background processing,
 always-location authorization, a network extension, Sign in with Apple, or an
 advertising attribution entitlement.
 

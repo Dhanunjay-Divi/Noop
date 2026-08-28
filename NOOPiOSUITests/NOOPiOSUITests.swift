@@ -398,7 +398,12 @@ final class NOOPiOSUITests: XCTestCase {
     func testProfileMeasurementsCanBeClearedAndRetyped() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "7"]
+            extraArguments: [
+                "--demo-onboarding-step", "7",
+                "-units.system", "metric",
+                "-units.mass", "kg",
+                "-units.height", "cm",
+            ]
         )
 
         let weight = app.textFields["noop.profile.weight"]

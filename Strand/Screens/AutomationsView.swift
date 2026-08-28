@@ -36,6 +36,9 @@ struct AutomationsView: View {
     @State private var dailyReviewEnabled = DailyReviewNotifications.isEnabled
     @AppStorage(DailyReviewNotifications.morningMinutesKey) private var morningReviewMinutes = 8 * 60
     @AppStorage(DailyReviewNotifications.eveningMinutesKey) private var eveningReviewMinutes = 19 * 60
+    /// A separate post-sync report opt-in. It shares notification permission with the scheduled review
+    /// reminders but has its own preference and workout frontier.
+    @State private var postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
     /// Hydration reminders are independent from manual water logging. Both remain opt-in, and changing
     /// this schedule never rewrites an existing hydration total or the dashboard-card preference.
     @State private var hydrationReminderEnabled = HydrationReminders.isEnabled
@@ -98,6 +101,7 @@ struct AutomationsView: View {
         }
         .onAppear {
             dailyReviewEnabled = DailyReviewNotifications.isEnabled
+            postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
             hydrationReminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()
         }
@@ -155,8 +159,8 @@ struct AutomationsView: View {
         Section2(
             icon: "sun.horizon.fill",
             title: String(localized: "Daily review"),
-            blurb: String(localized: "Optional phone reminders to review Sleep in the morning and Today in the evening. Scores appear only after your latest device sync."),
-            active: dailyReviewEnabled
+            blurb: String(localized: "Optional phone reminders for daily review and newly synced workouts. Post-sync timing depends on when your wearable reaches NOOP."),
+            active: dailyReviewEnabled || postWorkoutSummaryEnabled
         ) {
             VStack(spacing: 0) {
                 ToggleRow(
@@ -178,6 +182,22 @@ struct AutomationsView: View {
                     )
                     rowDivider
                     Text("Reminder banners never include scores or health values. Morning invites a Sleep and Recovery review; evening invites an Effort comparison and journal check-in.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "Post-workout summary"),
+                    help: String(localized: "Off by default. Notifies once when a newer workout arrives after sync; existing history is never announced when you turn it on."),
+                    isOn: postWorkoutSummaryToggle
+                )
+                if postWorkoutSummaryEnabled {
+                    rowDivider
+                    Text("The Lock Screen shows only that a summary is ready. Effort, duration and heart-rate details stay inside NOOP.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -250,6 +270,29 @@ struct AutomationsView: View {
                         showNotificationPermissionAlert = true
                     case .off:
                         dailyReviewEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var postWorkoutSummaryToggle: Binding<Bool> {
+        Binding(
+            get: { postWorkoutSummaryEnabled },
+            set: { on in
+                postWorkoutSummaryEnabled = on
+                model.setPostWorkoutSummaryNotificationsEnabled(on) { outcome in
+                    switch outcome {
+                    case .enabled:
+                        postWorkoutSummaryEnabled = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    case .denied:
+                        postWorkoutSummaryEnabled = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        postWorkoutSummaryEnabled = false
                     }
                 }
             }

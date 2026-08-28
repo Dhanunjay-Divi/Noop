@@ -15,6 +15,7 @@ final class BackupSettingsTests: XCTestCase {
             "profile.dateOfBirth": "1992-11-03",
             "profile.sex": "female",
             "profile.weightKg": 62.5,
+            "profile.targetWeightKg": 60.0,
             "profile.heightCm": 168.0,
             "profile.waistCm": 71.0,
             "profile.hrMax": 191,
@@ -70,9 +71,10 @@ final class BackupSettingsTests: XCTestCase {
 
         XCTAssertEqual(back["profile.age"] as? Int, 34)
         XCTAssertEqual(back["profile.dateOfBirth"] as? String, "1992-11-03")
-        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 3)
+        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 4)
         XCTAssertEqual(back["profile.sex"] as? String, "female")
         XCTAssertEqual(back["profile.weightKg"] as? Double, 62.5)
+        XCTAssertEqual(back["profile.targetWeightKg"] as? Double, 60.0)
         XCTAssertEqual(back["profile.heightCm"] as? Double, 168.0)
         XCTAssertEqual(back["profile.waistCm"] as? Double, 71.0)
         XCTAssertEqual(back["profile.hrMax"] as? Int, 191)
@@ -88,7 +90,7 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(back["sleepPlanner.wakeMinutes"] as? Int, 390)
         XCTAssertEqual(back["hydrationReminders.intervalMinutes"] as? Int, 120)
         XCTAssertEqual(back["hydrationReminders.adaptiveEnabled"] as? Bool, false)
-        XCTAssertEqual(back.count, values.count + 1, "Only the v3 schema stamp should be added")
+        XCTAssertEqual(back.count, values.count + 1, "Only the v4 schema stamp should be added")
     }
 
     func testEveryPayloadFieldHasAnAppleDefaultsMapping() {
@@ -206,14 +208,16 @@ final class BackupSettingsTests: XCTestCase {
         let dob = try XCTUnwrap(calendar.date(from: DateComponents(year: 1997, month: 4, day: 9)))
         defaults.set(dob, forKey: "profile.dateOfBirth")
         defaults.set(82.5, forKey: "profile.weightKg")
+        defaults.set(79.0, forKey: "profile.targetWeightKg")
         defaults.set(198, forKey: "profile.hrMaxOverride") // storage key, not the canonical name
         defaults.set("imperial", forKey: "units.system")
 
         let snap = BackupSettings.snapshot(from: defaults)
         XCTAssertEqual(snap["profile.age"] as? Int, 29)
         XCTAssertEqual(snap["profile.dateOfBirth"] as? String, "1997-04-09")
-        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 3)
+        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 4)
         XCTAssertEqual(snap["profile.weightKg"] as? Double, 82.5)
+        XCTAssertEqual(snap["profile.targetWeightKg"] as? Double, 79.0)
         XCTAssertEqual(snap["profile.hrMax"] as? Int, 198, "hrMaxOverride surfaces under the canonical key")
         XCTAssertEqual(snap["units.system"] as? String, "imperial")
         XCTAssertNil(snap["profile.heightCm"], "Never-set keys are omitted, not defaulted")
@@ -226,11 +230,13 @@ final class BackupSettingsTests: XCTestCase {
 
         BackupSettings.apply([
             "profile.age": 41,
+            "profile.targetWeightKg": 72.5,
             "profile.hrMax": 187,
             "units.temperature": "fahrenheit",
         ], to: defaults)
 
         XCTAssertEqual(defaults.object(forKey: "profile.age") as? Int, 41)
+        XCTAssertEqual(defaults.object(forKey: "profile.targetWeightKg") as? Double, 72.5)
         XCTAssertEqual(defaults.object(forKey: "profile.hrMaxOverride") as? Int, 187,
                        "Canonical profile.hrMax lands on the profile.hrMaxOverride storage key")
         XCTAssertEqual(defaults.string(forKey: "units.temperature"), "fahrenheit")
@@ -344,6 +350,7 @@ final class BackupSettingsTests: XCTestCase {
         deviceA.set(dob, forKey: "profile.dateOfBirth")
         deviceA.set("nonbinary", forKey: "profile.sex")
         deviceA.set(90.25, forKey: "profile.weightKg")
+        deviceA.set(84.5, forKey: "profile.targetWeightKg")
         deviceA.set(0, forKey: "profile.hrMaxOverride") // explicit "auto" is still a value
         let payload = try XCTUnwrap(BackupSettings.encode(BackupSettings.snapshot(from: deviceA)))
 
@@ -363,6 +370,7 @@ final class BackupSettingsTests: XCTestCase {
         )
         XCTAssertEqual(deviceB.string(forKey: "profile.sex"), "nonbinary")
         XCTAssertEqual(deviceB.object(forKey: "profile.weightKg") as? Double, 90.25)
+        XCTAssertEqual(deviceB.object(forKey: "profile.targetWeightKg") as? Double, 84.5)
         XCTAssertEqual(deviceB.object(forKey: "profile.hrMaxOverride") as? Int, 0)
     }
 

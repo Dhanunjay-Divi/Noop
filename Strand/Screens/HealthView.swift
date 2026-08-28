@@ -1412,8 +1412,22 @@ private struct VitalsSection: View {
             temperatureUnit: temperatureUnit,
             sleepOverrideDays: repo.editedSleepDays
         ).filter { $0.key != "spo2raw" }
+        let rangeSummary = BodyVitalSigns.rangeSummary(readings)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Health Monitor", overline: "Latest", trailing: BodyVitalSigns.latestDayLabel(readings))
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: rangeSummary.allAvailableInRange
+                      ? "checkmark.circle.fill" : "info.circle.fill")
+                    .foregroundStyle(rangeSummary.allAvailableInRange
+                                     ? StrandPalette.statusPositive : StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+                Text(rangeSummary.message)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(rangeSummary.message)
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)],
                 alignment: .leading,

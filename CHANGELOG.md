@@ -31,6 +31,9 @@ Released **2026-08-13**.
 - Devices has a purposeful empty state and concise default cards, with firmware, voltage, clock, and
   protocol diagnostics moved into Technical details. More gains Quick Access, and onboarding now
   fits compact phones, larger text, mixed unit choices, keyboards, and the home indicator.
+- Profile now shows BMI to one decimal with an explicit limitation and offers a neutral, optional
+  target weight chosen by the user. Health Monitor counts only available calibrated readings in its
+  range summary, and iPhone SE Key Metrics retain readable full labels.
 
 **Evidence and data integrity**
 
@@ -54,6 +57,9 @@ Released **2026-08-13**.
 - Stress nudges require verified stillness, clean R-R evidence, four independent warm-up windows, and
   no active workout or breathing session. Missing motion fails closed instead of claiming the user was
   still.
+- **Private post-workout summaries are optional.** After a wearable sync adds a newer workout, NOOP can
+  post one generic local alert that opens Workouts. Existing history is seeded silently, and effort,
+  duration, and heart-rate details stay off the Lock Screen.
 - Widgets and Live Activities use the timestamp of the actual HR packet. Stale and duplicate surfaces
   end deterministically, while Bluetooth connection and heart-rate freshness are shown separately.
 - **Safety messages and check-ins fail visibly.** A one-shot location expires after five minutes
@@ -69,11 +75,22 @@ Released **2026-08-13**.
   fields. Recent manual meals can now be logged again in one tap, and localized decimal/grouping
   separators round-trip safely.
 
+**Performance and reliability**
+
+- Android moves active-device lookup and opt-in schedule repair off the first-frame path, pauses
+  hidden screen collectors, memoizes deep workout projections, and caps liquid rendering at
+  60/30/20 fps. On the same Pixel 2/API 35 emulator over eight cold launches, the median moved from
+  about 1.465s to 1.064s, about 27%; this is emulator evidence, not a physical-phone claim.
+- Fresh Android installs default to OLED Black while existing appearance choices are preserved.
+- Unsigned/profile-less Apple builds fail closed before entitlement-dependent HealthKit calls,
+  avoiding the iPhone SE launch failure seen in that test configuration.
+
 **Upgrade note**
 
-- The database migrates in place and preserves existing history. This private preview still uses
-  Personal Team signing, so the app must be rebuilt and installed over the same bundle before its
-  seven-day development profile expires.
+- The database migrates in place and preserves existing history. Portable settings schema v4 adds
+  only the optional user-selected target weight. This private preview still uses Personal Team
+  signing, so the app must be rebuilt and installed over the same bundle before its seven-day
+  development profile expires.
 
 ## 9.1.2: safer upgrades, trustworthy signals, private Friends, and Obsidian
 

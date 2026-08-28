@@ -75,6 +75,21 @@ was uploaded: signing, review access/media, export decisions, and
 physical-device validation remain
 open.
 
+## 2026-08-27 — performance, health profile, and private post-sync summaries
+
+The recovered Round 24 work moves Android Room and WorkManager initialization
+off the first-frame path, lifecycle-bounds retained collectors, memoizes deep
+workout projections, and caps liquid rendering. On the same Pixel 2/API 35
+emulator across eight cold launches, the median moved from approximately
+1.465s to 1.064s, approximately 27%; this is bounded emulator evidence.
+
+Apple HealthKit capability checks now fail closed for profile-less,
+receipt-less builds before entitlement-dependent APIs are evaluated. Both
+platforms add a limited BMI display, optional user-selected target weight,
+settings schema v4, and an aggregate vital-range summary that excludes missing
+and raw readings. Apple also adds a generic opt-in local workout summary that
+runs after persisted sync rather than claiming real-time workout detection.
+
 ## Ledger transition
 
 Contemporaneous round records begin on 2026-08-21. Future work must update the

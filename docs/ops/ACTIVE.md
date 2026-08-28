@@ -18,13 +18,15 @@ Last updated: **2026-08-27**
 
 ## Active work
 
-Round 23 closes the device-transport restoration and lifecycle pass. WHOOP
-family discovery and session correlation are evidence-based, Oura history
-cursor movement is transactionally fail-closed, delayed callbacks cannot
-resurrect or overwrite replacement sources, and the support matrix explicitly
-separates stable, implemented, experimental, import, and standard-broadcast
-lanes. The implementation and local evidence are recorded in
-[Device transport durability and support boundaries](rounds/2026-08-27-device-transport-durability.md).
+Round 24 completed the local performance, health-profile, notification, and
+testing release. Android startup work moves Room and WorkManager off the first
+frame, lifecycle-bounds retained collectors, and caps liquid rendering; the
+same-emulator eight-launch median improved from approximately 1.465s to 1.064s.
+Apple HealthKit paths now fail closed in unsigned profile-less builds. BMI,
+optional user-selected target weight, aggregate vital-range status, and a
+privacy-safe opt-in post-sync workout summary are implemented with
+cross-platform settings schema v4. The implementation and evidence are recorded
+in [Performance, health profile, and testing release](rounds/2026-08-27-performance-health-profile-release.md).
 
 The
 [NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
@@ -41,10 +43,12 @@ tests pass, and the name-only build-setting isolation gate passes. Signed
 archive, upload, physical validation, and the recorded release gates remain
 open.
 
-Repository-local closeout for Round 23 is complete when the commit containing
-the round record is synchronized with `origin/main`. Remaining release work
-requires external accounts, infrastructure, carriers, physical devices,
-participant evidence, or store review.
+The final local matrix passes across the app, nine Swift packages, Android Full
+and Demo flavors, StudyHarness, server, localization, privacy, legal, and
+policy checks. Direct `main` publication, hosted CI, and the community testing
+build are release-execution evidence for the commit containing the round
+record. External signing, store, infrastructure, carrier, physical-device,
+participant, and native-speaker gates remain separate.
 
 ## Decisions that remain binding
 
@@ -55,6 +59,8 @@ participant evidence, or store review.
   disabled.
 - Physical-device behavior cannot be claimed from simulator or unit evidence.
 - A shared protocol or service UUID does not establish future-model support.
+- BMI and target weight remain neutral, non-diagnostic user tools.
+- Post-workout alerts remain generic, local, opt-in, and post-sync.
 - Existing app identity and local data must be preserved during in-place
   upgrades.
 - NOOP's PolyForm license and independent dependency notices remain intact.

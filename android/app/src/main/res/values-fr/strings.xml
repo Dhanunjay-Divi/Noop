@@ -2098,4 +2098,19 @@
     <string name="hydration_base_interval_label">Intervalle de base</string>
     <string name="today_calibration_valid_hrv_progress">VFC valide %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">Les phases détaillées du sommeil sont masquées, car cette nuit ne contient pas assez de données exploitables sur les intervalles entre les battements. La durée totale du sommeil reste disponible.</string>
+    <string name="profile_bmi_label">IMC</string>
+    <string name="profile_bmi_accessibility">Indice de masse corporelle, %1$s</string>
+    <string name="profile_bmi_explanation">L’IMC est un calcul de dépistage limité fondé sur la taille et le poids. Ce n’est ni un diagnostic ni une mesure de la composition corporelle.</string>
+    <string name="profile_target_weight_optional">Poids cible (facultatif)</string>
+    <string name="profile_target_weight_add">Ajouter</string>
+    <string name="profile_target_weight_add_accessibility">Ajouter un poids cible</string>
+    <string name="profile_target_weight_pounds_accessibility">Poids cible, %1$d livres</string>
+    <string name="profile_target_weight_kg_accessibility">Poids cible en kilogrammes</string>
+    <string name="profile_target_weight_clear">Effacer</string>
+    <string name="profile_target_weight_clear_accessibility">Effacer le poids cible</string>
+    <string name="profile_target_weight_explanation">Ce choix est facultatif et vous appartient entièrement. NOOP ne recommande ni objectif ni rythme de changement.</string>
+    <string name="vital_range_summary_none">Aucune comparaison avec une plage actuelle n’est disponible</string>
+    <string name="vital_range_summary_one_within">La mesure disponible se situe dans sa plage actuelle</string>
+    <string name="vital_range_summary_one_outside">La mesure disponible se situe en dehors de sa plage actuelle</string>
+    <string name="vital_range_summary_many">%1$d mesures disponibles sur %2$d se situent dans leurs plages actuelles</string>
 </resources>

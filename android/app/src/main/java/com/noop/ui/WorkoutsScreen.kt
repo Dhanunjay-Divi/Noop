@@ -76,7 +76,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -137,7 +136,9 @@ import kotlin.math.roundToInt
 fun WorkoutsScreen(vm: AppViewModel) {
     // The ViewModel owns the loaded rows now (ALL sources incl. detected, dismissed-filtered) so a
     // mutation (add / edit / relabel / dismiss / delete) republishes the list and the screen updates.
-    val allRows by vm.workouts.collectAsState()
+    // Lifecycle-aware collection stops a hidden/backgrounded destination from rebuilding a deep imported
+    // history after every repository mutation.
+    val allRows by vm.workouts.collectAsStateWithLifecycle()
     val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
     // Cached daily metrics — the Charge side of the post-log activity-cost note (#439).
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
@@ -156,7 +157,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     var sportFilter by remember { mutableStateOf<String?>(null) }
     var sourceFilter by remember { mutableStateOf<WorkoutSource?>(null) }
     var searchText by remember { mutableStateOf("") }
-    val filter = WorkoutFilter(sportFilter, sourceFilter, searchText)
+    val filter = remember(sportFilter, sourceFilter, searchText) {
+        WorkoutFilter(sportFilter, sourceFilter, searchText)
+    }
 
     // #64: multi-select + merge. `selectionMode` toggles the leading checkmarks + the toolbar strip;
     // `selectedKeys` holds the natural keys ("startTs|sport") of the chosen rows. Only MANUAL / DETECTED
@@ -198,14 +201,32 @@ fun WorkoutsScreen(vm: AppViewModel) {
 
     // #516: use the same active filter/range as the workout page, capped to 90 days. The cap keeps a deep
     // imported history from launching hundreds of raw-HR reads; 7D/30D/90D are the promised trend views.
-    val recoveryRange = run {
-        val resolved = effectiveRange(allRows, range, filter)
-        if (resolved.days == null || resolved.days > 90) WorkoutRange.Quarter else resolved
+    // The same filtered projection feeds every section. Remember it across local UI changes (selection
+    // mode, dialogs, note banners) so a years-deep workout history is not re-filtered/grouped on each
+    // unrelated recomposition.
+    val resolvedRange = remember(allRows, range, filter) {
+        effectiveRange(allRows, range, filter)
     }
-    val recoveryRows = filter.apply(sessions(allRows, recoveryRange)).sortedBy { it.startTs }
-    val recoveryInputKey = buildString {
-        append(recoveryRange.name)
-        recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
+    val windowRows = remember(allRows, resolvedRange, filter) {
+        filter.apply(sessions(allRows, resolvedRange))
+    }
+    val windowGroups = remember(windowRows) { sportGroups(windowRows) }
+
+    val recoveryRange = remember(resolvedRange) {
+        if (resolvedRange.days == null || resolvedRange.days > 90) {
+            WorkoutRange.Quarter
+        } else {
+            resolvedRange
+        }
+    }
+    val recoveryRows = remember(allRows, recoveryRange, filter) {
+        filter.apply(sessions(allRows, recoveryRange)).sortedBy { it.startTs }
+    }
+    val recoveryInputKey = remember(recoveryRange, recoveryRows) {
+        buildString {
+            append(recoveryRange.name)
+            recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
+        }
     }
     LaunchedEffect(recoveryInputKey, vm.activeStrapId, lastHistorySyncAt) {
         val built = ArrayList<WorkoutRecoveryTrendPoint>()
@@ -277,17 +298,14 @@ fun WorkoutsScreen(vm: AppViewModel) {
             EmptyWorkouts(loaded, onAdd = { dialog = DialogTarget(null) })
             }
         } else {
-            // Resolve the effective range + windowed rows + per-sport groups once. #64: the pure
-            // WorkoutFilter narrows the window AFTER the range cut, so every section reads one filtered set.
-            val resolved = effectiveRange(allRows, range, filter)
-            val windowRows = filter.apply(sessions(allRows, resolved))
-            val groups = sportGroups(windowRows)
-            val fellBack = resolved != range
+            // #64: the pure WorkoutFilter narrows the window AFTER the range cut, so every section reads
+            // the remembered projection above instead of independently walking the history.
+            val fellBack = resolvedRange != range
 
             item {
             RangeBar(
                 range = range,
-                effectiveRange = resolved,
+                effectiveRange = resolvedRange,
                 rowCount = windowRows.size,
                 fellBack = fellBack,
                 filterActive = filter.isActive,
@@ -306,9 +324,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
             )
             }
             postLogNote?.let { item { PostLogNoteBanner(it) } }
-            item { EffortHero(rows = windowRows, effectiveRange = resolved, groups = groups) }
-            item { SummarySection(rows = windowRows, effectiveRange = resolved, groups = groups) }
-            item { BreakdownSection(groups = groups, rows = windowRows) }
+            item { EffortHero(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
+            item { SummarySection(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
+            item { BreakdownSection(groups = windowGroups, rows = windowRows) }
             item { ZonesSection(windowRows) }
             if (recoveryTrend.isNotEmpty()) {
                 item { RecoveryTrendSection(recoveryTrend, recoveryRange.localizedCaption()) }

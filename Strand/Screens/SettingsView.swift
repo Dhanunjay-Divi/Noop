@@ -504,6 +504,70 @@ struct SettingsView: View {
                     }
                 }
                 rowDivider
+                FormRow(label: "BMI") {
+                    Text(FitnessAgeEngine.bmi(
+                        weightKg: profile.weightKg,
+                        heightCm: profile.heightCm
+                    ).formatted(.number.precision(.fractionLength(1))))
+                        .font(StrandFont.bodyNumber)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .accessibilityLabel("Body mass index")
+                        .accessibilityValue(FitnessAgeEngine.bmi(
+                            weightKg: profile.weightKg,
+                            heightCm: profile.heightCm
+                        ).formatted(.number.precision(.fractionLength(1))))
+                }
+                Text("BMI is a limited height-and-weight screening calculation. It is not a diagnosis or a measure of body composition.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                rowDivider
+                FormRow(label: "Target weight (optional)") {
+                    if profile.targetWeightKg != nil {
+                        HStack(spacing: 8) {
+                            if massUnit == .pounds {
+                                poundsField(
+                                    weightKg: targetWeightBinding,
+                                    isTargetWeight: true
+                                )
+                            } else {
+                                measureField(
+                                    value: targetWeightBinding,
+                                    unit: "kg",
+                                    range: ProfileStore.targetWeightRange,
+                                    step: 0.5,
+                                    format: "%.1f",
+                                    accessibility: String(localized: "Target weight in kilograms")
+                                )
+                            }
+                            Button {
+                                profile.setTargetWeightKg(nil)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear target weight")
+                            .accessibilityLabel("Clear target weight")
+                        }
+                    } else {
+                        Button {
+                            profile.setTargetWeightKg(profile.weightKg)
+                        } label: {
+                            Label("Add", systemImage: "plus.circle.fill")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Add a target weight")
+                        .accessibilityLabel("Add target weight")
+                    }
+                }
+                Text("Optional and entirely your choice. NOOP does not recommend a target or a rate of change.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                rowDivider
                 // Waist (optional). Unlike the rows above it, an empty waist is valid (0 = unset) —
                 // it's the ONE measurement that ADDS the VO₂max estimate alongside Fitness Age. It does
                 // NOT sharpen the Fitness Age itself (the body term cancels in the Nes model), so it sits
@@ -696,11 +760,20 @@ struct SettingsView: View {
 
     /// Imperial weight entry: shows pounds, steps in 1-lb increments, and writes the kg equivalent back
     /// to the SI-stored profile. Range mirrors the metric 30…250 kg (≈66…551 lb).
-    private func poundsField(weightKg: Binding<Double>) -> some View {
+    private func poundsField(
+        weightKg: Binding<Double>,
+        isTargetWeight: Bool = false
+    ) -> some View {
         let lb = Binding<Double>(
             get: { UnitFormatter.kgToPounds(weightKg.wrappedValue) },
             set: { weightKg.wrappedValue = $0 / UnitFormatter.poundsPerKilogram }
         )
+        let stepperLabel = isTargetWeight
+            ? String(localized: "Target weight in pounds")
+            : String(localized: "Weight in pounds")
+        let accessibilityLabel = isTargetWeight
+            ? String(localized: "Target weight, \(Int(lb.wrappedValue.rounded())) pounds")
+            : String(localized: "Weight, \(Int(lb.wrappedValue.rounded())) pounds")
         return HStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(String(format: "%.0f", lb.wrappedValue))
@@ -712,10 +785,21 @@ struct SettingsView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            Stepper("Weight in pounds", value: lb, in: 66...551, step: 1)
+            Stepper(stepperLabel, value: lb, in: 66...551, step: 1)
                 .labelsHidden()
-                .accessibilityLabel("Weight, \(Int(lb.wrappedValue.rounded())) pounds")
+                .accessibilityLabel(accessibilityLabel)
         }
+    }
+
+    private var targetWeightBinding: Binding<Double> {
+        Binding(
+            get: {
+                profile.targetWeightKg
+                    ?? min(max(profile.weightKg, ProfileStore.targetWeightRange.lowerBound),
+                           ProfileStore.targetWeightRange.upperBound)
+            },
+            set: { profile.setTargetWeightKg($0) }
+        )
     }
 
     /// Imperial height entry: shows feet′ inches″, steps in whole inches, and writes the cm equivalent

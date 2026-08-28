@@ -15,8 +15,8 @@ class AppearanceModeTest {
         AppearanceMode.entries.forEach { mode ->
             assertEquals(mode, AppearanceMode.fromStorage(mode.storageValue))
         }
-        assertEquals(AppearanceMode.SYSTEM, AppearanceMode.fromStorage(null))
-        assertEquals(AppearanceMode.SYSTEM, AppearanceMode.fromStorage("future-mode"))
+        assertEquals(AppearanceMode.BLACK, AppearanceMode.fromStorage(null))
+        assertEquals(AppearanceMode.BLACK, AppearanceMode.fromStorage("future-mode"))
     }
 
     @Test

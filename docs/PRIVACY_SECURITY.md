@@ -450,6 +450,23 @@ emergency dispatch:
   event, not a confirmed cause. Page copy directs recipients to contact local
   emergency services themselves when immediate danger is suspected.
 
+### 1.5 Local post-sync workout summaries
+
+Post-workout summary notifications are optional, local, and off by default.
+When enabled, NOOP checks for a newer workout only after persisted wearable
+history finishes syncing. This is not real-time workout-end detection, and the
+operating system may delay or suppress delivery.
+
+- Enabling first records the newest workout already on the device, so existing
+  history is not announced.
+- Lock-screen copy says only that a summary is ready. Effort, duration, heart
+  rate, and other workout details remain inside NOOP.
+- A notification opens the local Workouts view. No notification content or
+  workout data is sent to a NOOP server or remote push provider.
+- Turning the setting off removes any pending or presented summary. A delivery
+  frontier advances only after Notification Center accepts the request, so a
+  failed attempt does not silently discard the newly synced workout.
+
 ---
 
 ## 2. Data at rest
@@ -554,11 +571,11 @@ The current full-device restore boundary is precise rather than unlimited:
 - The native SQLite snapshot preserves all rows in that platform's database, including
   biometric history, derived scores, sleep, workouts, journals, nutrition, and strength
   data.
-- The optional settings-schema-v3 `settings.json` restores a validated cross-platform
-  whitelist: profile/body inputs; independent units; Effort and HRV interpretation;
-  appearance/chart choices; Today layout and key metrics; workout keep-awake and hydration
-  tracking; wind-down and canonical wake target; notification/quiet-hours gates; inactivity
-  reminders; and hydration reminders.
+- The optional settings-schema-v4 `settings.json` restores a validated cross-platform
+  whitelist: profile/body inputs, including an optional user-selected target weight;
+  independent units; Effort and HRV interpretation; appearance/chart choices; Today layout
+  and key metrics; workout keep-awake and hydration tracking; wind-down and canonical wake
+  target; notification/quiet-hours gates; inactivity reminders; and hydration reminders.
 - Only explicitly stored source values are emitted. Unknown, wrong-typed, fractional
   integer, out-of-range, unsafe-layout, or impossible schedule values are dropped.
 - Credentials, API/member tokens, Bluetooth peripheral/install identifiers, sync cursors,

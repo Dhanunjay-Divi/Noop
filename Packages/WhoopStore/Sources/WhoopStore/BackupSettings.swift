@@ -9,8 +9,9 @@ import Foundation
 /// ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
 ///
 /// The whitelist is the contract. Its v1 keys remain mirrored by Android's `BackupSettingsCodec`;
-/// v2 added the schema stamp and exact civil birthday; v3 adds a bounded set of durable, user-authored
-/// display, dashboard, reminder, and Sleep Planner preferences. Additive fields are ignored safely by
+/// v2 added the schema stamp and exact civil birthday; v3 added a bounded set of durable, user-authored
+/// display, dashboard, reminder, and Sleep Planner preferences; v4 adds the optional user-selected
+/// target weight. Additive fields are ignored safely by
 /// older readers. Only stable, user-set, non-device-specific values are allowed. NEVER add device ids,
 /// peripheral ids, tokens, sync cursors, delivery de-dup state, derived planner outputs,
 /// or anything anonymity-sensitive: backups get copied into cloud folders and attached to GitHub
@@ -26,9 +27,10 @@ public enum BackupSettings {
     /// Canonical entry name inside the `.noopbak` ZIP. Matches the Android exporter.
     public static let entryName = "settings.json"
 
-    /// V1 carried profile/unit values; v2 added exact civil DOB; v3 adds explicitly allowlisted durable
-    /// preferences while retaining every older key for downgrade compatibility.
-    public static let schemaVersion = 3
+    /// V1 carried profile/unit values; v2 added exact civil DOB; v3 added explicitly allowlisted durable
+    /// preferences; v4 adds an optional user-selected target weight. Every older key remains for
+    /// downgrade compatibility.
+    public static let schemaVersion = 4
     public static let schemaVersionKey = "settings.schemaVersion"
     public static let dateOfBirthKey = "profile.dateOfBirth"
 
@@ -56,6 +58,7 @@ public enum BackupSettings {
         dateOfBirthKey: .civilDate,
         "profile.sex": .string,
         "profile.weightKg": .double,
+        "profile.targetWeightKg": .double,
         "profile.heightCm": .double,
         "profile.waistCm": .double,
         "profile.hrMax": .int,
@@ -110,6 +113,7 @@ public enum BackupSettings {
         dateOfBirthKey: "profile.dateOfBirth",
         "profile.sex": "profile.sex",
         "profile.weightKg": "profile.weightKg",
+        "profile.targetWeightKg": "profile.targetWeightKg",
         "profile.heightCm": "profile.heightCm",
         "profile.waistCm": "profile.waistCm",
         "profile.hrMax": "profile.hrMaxOverride",
@@ -290,6 +294,8 @@ public enum BackupSettings {
         case "profile.sex":
             return allowedString(coerced, ["male", "female", "nonbinary"])
         case "profile.weightKg":
+            return boundedDouble(coerced, 30...250)
+        case "profile.targetWeightKg":
             return boundedDouble(coerced, 30...250)
         case "profile.heightCm":
             return boundedDouble(coerced, 120...230)

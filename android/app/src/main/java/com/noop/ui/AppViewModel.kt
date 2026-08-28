@@ -175,6 +175,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun setActiveDevice(id: String) {
         val changed = id != deviceId
         noopApp.deviceRegistry.setActive(id)
+        noopApp.noteActiveDeviceId(id)
         _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
         refreshActiveDeviceName()
@@ -429,9 +430,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The currently selected strap source id (raw streams + imported history live under this). Seeded
-     *  from [NoopApplication.activeDeviceId], then updated by [setActiveDevice]. Public so the Today screen's
-     *  workout union can follow a re-paired strap's fresh "whoop-<id>" instead of stranding its
-     *  recordings under a read pinned to the literal "my-whoop" (#814 twin of the Workouts screen). */
+     *  from [NoopApplication.activeDeviceId], then updated by its asynchronous registry projection and
+     *  [setActiveDevice]. Public so the Today screen's workout union can follow a re-paired strap's fresh
+     *  source instead of stranding its recordings under the legacy fallback (#814 Workouts twin). */
     val deviceId: String get() = _selectedDeviceId.value
 
     /** Live connection + biometric snapshot, surfaced straight from the BLE client. */
@@ -723,6 +724,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // The registry seed resolves on Application's IO scope so Activity startup never blocks on Room.
+        // Follow that process-wide projection here: a multi-device install may mount on the canonical
+        // fallback for one frame, then every repository flow and active-device label switches together.
+        viewModelScope.launch {
+            noopApp.activeDeviceIdFlow.collect { resolved ->
+                if (resolved == _selectedDeviceId.value) return@collect
+                _selectedDeviceId.value = resolved
+                refreshActiveDeviceName()
+                scheduleAgeMetricRecompute()
+            }
+        }
         // Multi-source coordinator (Phase 1B): reconcile the live source against the registry's active
         // device ONCE at launch. DORMANT for a single-WHOOP install (the default) — it no-ops and the
         // existing WHOOP flow below runs unchanged; it only acts when a non-WHOOP strap is the active

@@ -85,44 +85,6 @@ class MainActivity : ComponentActivity() {
             requestBlePermissions()
         }
 
-        // Re-arm the daily debug export (#510) so its schedule self-heals after a reboot or app update
-        // (WorkManager is KEEP, so this is a no-op when already scheduled, and cancels itself when the
-        // feature is off). Wrapped because a WorkManager hiccup must never block launch.
-        runCatching { DebugExportScheduler.reschedule(applicationContext) }
-
-        // Backup & Sync (#791): self-heal the daily auto-backup schedule (no-op when off / no folder),
-        // and run a DEFERRED on-launch catch-up backup. Must-fix #4: the catch-up is gated on the toggle
-        // being ON, runs fully off the main thread on Dispatchers.IO, and is launched AFTER the
-        // launch-critical setup so a 100MB+ whole-DB zip can never block app startup. Cheap (two prefs
-        // reads) when the feature is off, which is the default.
-        runCatching { BackupSync.reschedule(applicationContext) }
-        lifecycleScope.launch(Dispatchers.IO) {
-            runCatching { BackupSync.catchUpIfDue(applicationContext) }
-        }
-
-        // Optional self-hosted delivery: repair the periodic WorkManager schedule and enqueue a
-        // deferred catch-up when due. Both calls are cheap no-ops until the user explicitly saves a
-        // destination and enables automatic upload (default OFF).
-        runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
-        runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
-
-        // Health Connect Auto-sync is a separate, explicit opt-in. Android 15+ (or Android 14 with U
-        // extension 13) can grant the dedicated background-health permission; older releases stay
-        // foreground/on-open only and reconcile() cancels any stale periodic work.
-        runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
-
-        // Hydration reminders are a separate explicit opt-in (default OFF). WorkManager persists its
-        // one-shot chain, and this cheap reconcile repairs it after an update/reboot without touching
-        // hydration logs or enabling anything on the user's behalf.
-        runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
-
-        // Repair status reconciliation for an explicitly opened Safety page after process death/update.
-        // WorkManager is best-effort; the foreground connection service remains the prompt polling lane.
-        runCatching {
-            SafetyLiveLocationSession.initialize(applicationContext)
-            SafetyIncidentStatusMonitor.reconcile(applicationContext)
-        }
-
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).
         AppearancePrefs.load(this)
@@ -136,6 +98,7 @@ class MainActivity : ComponentActivity() {
                 NoopRoot()
             }
         }
+        deferLaunchMaintenance()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -163,6 +126,35 @@ class MainActivity : ComponentActivity() {
         }.toTypedArray()
 
         if (needed.isNotEmpty()) permissionLauncher.launch(needed)
+    }
+
+    /**
+     * Repair opt-in schedules only after the Compose root is installed. WorkManager initialization opens
+     * its own database and previously ran seven times on the main thread before [setContent], adding
+     * avoidable cold-start latency even when every feature was off. These calls are restart-safe and
+     * idempotent; moving them to IO changes no schedule or privacy gate.
+     */
+    private fun deferLaunchMaintenance() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            // Daily debug export and folder backup schedules self-heal after reboot/update.
+            runCatching { DebugExportScheduler.reschedule(applicationContext) }
+            runCatching { BackupSync.reschedule(applicationContext) }
+            runCatching { BackupSync.catchUpIfDue(applicationContext) }
+
+            // Optional self-hosted delivery remains default-off and network constrained.
+            runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
+            runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
+
+            // Health Connect and hydration automation remain independently opt-in.
+            runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
+            runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
+
+            // Restore only an already-open Safety incident; this never creates one.
+            runCatching {
+                SafetyLiveLocationSession.initialize(applicationContext)
+                SafetyIncidentStatusMonitor.reconcile(applicationContext)
+            }
+        }
     }
 }
 

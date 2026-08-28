@@ -267,7 +267,7 @@ enum class AppearanceMode(
 
     companion object {
         fun fromStorage(raw: String?): AppearanceMode =
-            entries.firstOrNull { it.storageValue == raw } ?: SYSTEM
+            entries.firstOrNull { it.storageValue == raw } ?: BLACK
     }
 }
 
@@ -280,12 +280,12 @@ object AppearancePrefs {
     private fun prefs(ctx: Context): SharedPreferences =
         ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    /** Live appearance mode read by NoopTheme; defaults to System until [load] runs. */
-    var mode by mutableStateOf(AppearanceMode.SYSTEM)
+    /** Live appearance mode read by NoopTheme; new installs match Apple's OLED Black default. */
+    var mode by mutableStateOf(AppearanceMode.BLACK)
         private set
 
     internal fun persistedMode(ctx: Context): AppearanceMode =
-        AppearanceMode.fromStorage(prefs(ctx).getString(KEY, AppearanceMode.SYSTEM.storageValue))
+        AppearanceMode.fromStorage(prefs(ctx).getString(KEY, AppearanceMode.BLACK.storageValue))
 
     fun load(ctx: Context) {
         mode = persistedMode(ctx)

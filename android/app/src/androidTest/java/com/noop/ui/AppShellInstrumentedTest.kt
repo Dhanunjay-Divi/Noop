@@ -2,6 +2,8 @@ package com.noop.ui
 
 import android.Manifest
 import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.provider.Settings
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -25,11 +27,20 @@ class AppShellInstrumentedTest {
     val compose = createEmptyComposeRule()
 
     private lateinit var scenario: ActivityScenario<MainActivity>
+    private var originalAnimatorScale: String? = null
 
     @Before
     fun launchAcceptedApp() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        // A populated demo runs deliberate infinite liquid clocks. Compose correctly treats those as
+        // continuously busy, so waitForIdle cannot inspect an otherwise-ready shell. Exercise the
+        // production Reduce Motion path and restore the developer's previous setting in tearDown.
+        originalAnimatorScale = Settings.Global.getString(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+        )
+        runShellCommand(instrumentation, "settings put global animator_duration_scale 0")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             instrumentation.uiAutomation.grantRuntimePermission(
                 context.packageName,
@@ -63,7 +74,15 @@ class AppShellInstrumentedTest {
 
     @After
     fun closeActivity() {
-        scenario.close()
+        try {
+            if (::scenario.isInitialized) scenario.close()
+        } finally {
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val restore = originalAnimatorScale?.let {
+                "settings put global animator_duration_scale $it"
+            } ?: "settings delete global animator_duration_scale"
+            runShellCommand(instrumentation, restore)
+        }
     }
 
     @Test
@@ -111,5 +130,14 @@ class AppShellInstrumentedTest {
             .fetchSemanticsNode()
             .config[SemanticsProperties.Selected]
         assertTrue("$tag is not selected", selected)
+    }
+
+    private fun runShellCommand(
+        instrumentation: android.app.Instrumentation,
+        command: String,
+    ) {
+        ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command),
+        ).use { it.readBytes() }
     }
 }

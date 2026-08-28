@@ -2128,4 +2128,19 @@
     <string name="smart_alarm_tap_snooze_accessibility">alarm snooze length</string>
     <string name="today_calibration_valid_hrv_progress">Valid HRV %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">Detailed sleep stages are withheld because this night did not contain enough usable beat-to-beat timing data. Total sleep remains available.</string>
+    <string name="profile_bmi_label">BMI</string>
+    <string name="profile_bmi_accessibility">Body mass index, %1$s</string>
+    <string name="profile_bmi_explanation">BMI is a limited height-and-weight screening calculation. It is not a diagnosis or a measure of body composition.</string>
+    <string name="profile_target_weight_optional">Target weight (optional)</string>
+    <string name="profile_target_weight_add">Add</string>
+    <string name="profile_target_weight_add_accessibility">Add target weight</string>
+    <string name="profile_target_weight_pounds_accessibility">Target weight, %1$d pounds</string>
+    <string name="profile_target_weight_kg_accessibility">Target weight in kilograms</string>
+    <string name="profile_target_weight_clear">Clear</string>
+    <string name="profile_target_weight_clear_accessibility">Clear target weight</string>
+    <string name="profile_target_weight_explanation">Optional and entirely your choice. NOOP does not recommend a target or a rate of change.</string>
+    <string name="vital_range_summary_none">No current range comparisons available</string>
+    <string name="vital_range_summary_one_within">The available reading is within its current range</string>
+    <string name="vital_range_summary_one_outside">The available reading is outside its current range</string>
+    <string name="vital_range_summary_many">%1$d of %2$d available readings are within their current ranges</string>
 </resources>

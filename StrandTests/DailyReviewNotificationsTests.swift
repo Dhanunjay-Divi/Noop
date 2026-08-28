@@ -222,6 +222,9 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.eveningMinutesKey,
         NotificationRouteBridge.pendingRouteKey,
         AutoWorkoutNotifications.enabledKey,
+        PostWorkoutSummaryNotifications.enabledKey,
+        PostWorkoutSummaryNotifications.lastWorkoutStartKey,
+        PostWorkoutSummaryNotifications.frontierInitializedKey,
         PuffinExperiment.autoWorkoutModeKey,
         PuffinExperiment.autoDetectWorkoutsKey,
         "autoWorkout.lastNotifiedToken",
@@ -424,6 +427,257 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertFalse(AutoWorkoutNotifications.shouldDeliver(
             deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
         ))
+    }
+}
+
+@MainActor
+final class PostWorkoutSummaryNotificationsTests: XCTestCase {
+    private let keys = [
+        PostWorkoutSummaryNotifications.enabledKey,
+        PostWorkoutSummaryNotifications.lastWorkoutStartKey,
+        PostWorkoutSummaryNotifications.frontierInitializedKey,
+    ]
+
+    override func setUp() {
+        super.setUp()
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+    }
+
+    override func tearDown() {
+        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        super.tearDown()
+    }
+
+    func testPolicyRequiresOptInInitializedFrontierAndStrictlyNewerWorkout() {
+        XCTAssertTrue(PostWorkoutSummaryNotifications.shouldNotify(
+            enabled: true,
+            frontierInitialized: true,
+            newestWorkoutStart: 101,
+            lastWorkoutStart: 100
+        ))
+        XCTAssertFalse(PostWorkoutSummaryNotifications.shouldNotify(
+            enabled: false,
+            frontierInitialized: true,
+            newestWorkoutStart: 101,
+            lastWorkoutStart: 100
+        ))
+        XCTAssertFalse(PostWorkoutSummaryNotifications.shouldNotify(
+            enabled: true,
+            frontierInitialized: false,
+            newestWorkoutStart: 101,
+            lastWorkoutStart: 100
+        ))
+        XCTAssertFalse(PostWorkoutSummaryNotifications.shouldNotify(
+            enabled: true,
+            frontierInitialized: true,
+            newestWorkoutStart: 100,
+            lastWorkoutStart: 100
+        ))
+    }
+
+    func testExplicitEnableSeedsExistingHistoryThenPostsNewWorkoutOnce() async {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        let enabled = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                PostWorkoutSummaryNotifications.EnableOutcome, Never
+            >) in
+            PostWorkoutSummaryNotifications.setEnabled(
+                true,
+                currentNewestWorkoutStart: 100,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(enabled, .enabled)
+        XCTAssertTrue(PostWorkoutSummaryNotifications.isEnabled)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            100
+        )
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 100,
+            client: notifications.client
+        )
+        XCTAssertTrue(notifications.requests.isEmpty)
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client
+        )
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client
+        )
+
+        XCTAssertEqual(notifications.requests.count, 1)
+        let request = try? XCTUnwrap(notifications.requests.values.first)
+        XCTAssertEqual(
+            request.flatMap { NotificationRouteBridge.route(from: $0.content.userInfo) },
+            .workouts
+        )
+        XCTAssertEqual(request?.content.categoryIdentifier, DailyReviewNotifications.privacyCategoryID)
+        XCTAssertFalse(request?.content.body.contains("101") == true)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            101
+        )
+    }
+
+    func testExplicitReenableReplacesAStaleFutureFrontier() async {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(500, forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey)
+        UserDefaults.standard.set(true, forKey: PostWorkoutSummaryNotifications.frontierInitializedKey)
+
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                PostWorkoutSummaryNotifications.EnableOutcome, Never
+            >) in
+            PostWorkoutSummaryNotifications.setEnabled(
+                true,
+                currentNewestWorkoutStart: 100,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .enabled)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            100
+        )
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 101,
+            client: notifications.client
+        )
+        XCTAssertEqual(notifications.requests.count, 1)
+    }
+
+    func testExplicitReenableClearsAStaleFrontierForEmptyHistory() async {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(500, forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey)
+        UserDefaults.standard.set(true, forKey: PostWorkoutSummaryNotifications.frontierInitializedKey)
+
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                PostWorkoutSummaryNotifications.EnableOutcome, Never
+            >) in
+            PostWorkoutSummaryNotifications.setEnabled(
+                true,
+                currentNewestWorkoutStart: nil,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .enabled)
+        XCTAssertNil(
+            UserDefaults.standard.object(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            )
+        )
+        XCTAssertTrue(
+            UserDefaults.standard.bool(
+                forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
+            )
+        )
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 1,
+            client: notifications.client
+        )
+        XCTAssertEqual(notifications.requests.count, 1)
+    }
+
+    func testDeniedPermissionLeavesPreferenceOff() async {
+        let notifications = PostWorkoutNotificationClientSpy(status: .notDetermined)
+        notifications.authorizationResult = false
+
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<
+                PostWorkoutSummaryNotifications.EnableOutcome, Never
+            >) in
+            PostWorkoutSummaryNotifications.setEnabled(
+                true,
+                currentNewestWorkoutStart: 100,
+                client: notifications.client
+            ) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+        XCTAssertFalse(PostWorkoutSummaryNotifications.isEnabled)
+        XCTAssertFalse(
+            UserDefaults.standard.bool(
+                forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
+            )
+        )
+    }
+
+    func testMissingUpgradeFrontierSeedsSilently() async {
+        let notifications = PostWorkoutNotificationClientSpy(status: .authorized)
+        UserDefaults.standard.set(true, forKey: PostWorkoutSummaryNotifications.enabledKey)
+
+        await PostWorkoutSummaryNotifications.postIfAuthorized(
+            newestWorkoutStart: 200,
+            client: notifications.client
+        )
+
+        XCTAssertTrue(notifications.requests.isEmpty)
+        XCTAssertEqual(
+            UserDefaults.standard.integer(
+                forKey: PostWorkoutSummaryNotifications.lastWorkoutStartKey
+            ),
+            200
+        )
+        XCTAssertTrue(
+            UserDefaults.standard.bool(
+                forKey: PostWorkoutSummaryNotifications.frontierInitializedKey
+            )
+        )
+    }
+}
+
+@MainActor
+private final class PostWorkoutNotificationClientSpy {
+    var status: UNAuthorizationStatus
+    var authorizationResult = false
+    private(set) var authorizationRequestCount = 0
+    private(set) var requests: [String: UNNotificationRequest] = [:]
+
+    init(status: UNAuthorizationStatus) {
+        self.status = status
+    }
+
+    var client: PostWorkoutSummaryNotifications.NotificationClient {
+        PostWorkoutSummaryNotifications.NotificationClient(
+            authorizationStatus: { [weak self] in self?.status ?? .denied },
+            requestAuthorization: { [weak self] in
+                guard let self else { return false }
+                self.authorizationRequestCount += 1
+                return self.authorizationResult
+            },
+            preparePrivateCategory: {},
+            add: { [weak self] request in
+                self?.requests[request.identifier] = request
+            },
+            remove: { [weak self] identifiers in
+                identifiers.forEach { self?.requests.removeValue(forKey: $0) }
+            }
+        )
     }
 }
 

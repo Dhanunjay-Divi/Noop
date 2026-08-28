@@ -190,18 +190,18 @@ final class HealthKitBridge: ObservableObject {
         // or returns without ever presenting the sheet and leaves every type `.notDetermined`. Either
         // way the honest answer is "this build can't use Apple Health directly", NOT "you denied it" -
         // so never fall through to `.denied` (which tells the user to fix it in Settings, where the app
-        // can never appear). Detect via the embedded provisioning profile up front (#348).
+        // can never appear). Detect via its provisioning profile or App Store receipt up front (#348).
         guard HealthKitBridge.hasHealthKitEntitlement else { auth = .entitlementMissing; return }
         do {
             try await store.requestAuthorization(toShare: writeTypes, read: readTypes)
-            // The entitlement is present (the guard above proved it via the embedded profile, or there's
-            // no profile = App Store build), so a successful request means the bridge is usable. We do
+            // The entitlement is present (the guard above proved it via the embedded profile or an
+            // App Store/TestFlight receipt), so a successful request means the bridge is usable. We do
             // NOT reclassify to `.entitlementMissing` off the post-request `.notDetermined` heuristic
             // here: on a genuinely-entitled build the user could grant only reads (writes stay
             // `.notDetermined`) or dismiss the share sheet, and that must stay `.authorized` with the
             // normal Settings guidance — never the file-import reroute. The provisioning-profile check is
-            // the authoritative signal; the `.notDetermined` fallback only matters when that check can't
-            // run, which on iOS means an App Store build that by definition has the entitlement.
+            // the authoritative signal for local distributions; App Store/TestFlight builds are tied to
+            // the target capability declared in the signed release.
             auth = .authorized
             UserDefaults.standard.set(true, forKey: HealthKitBridge.authorizationRequestedKey)
         } catch {
@@ -283,6 +283,10 @@ final class HealthKitBridge: ObservableObject {
         // this user previously made the dedicated cycle-health request AND cycle awareness remains on.
         resumeCycleDeliveryIfOptedIn()
         guard auth == .unknown, HKHealthStore.isHealthDataAvailable() else { return }
+        guard HealthKitBridge.hasHealthKitEntitlement else {
+            auth = .entitlementMissing
+            return
+        }
         // A read-only grant is valid, but HealthKit intentionally never reveals read status. Resume
         // once a prior explicit request is known: new installs stamp the local flag; legacy installs
         // are detected when every original share type has reached a decided (allowed OR denied) state.
@@ -358,6 +362,10 @@ final class HealthKitBridge: ObservableObject {
     /// `auth == .authorized`; safe to call from several entry points.
     func enableLiveDelivery() {
         guard auth == .authorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard HealthKitBridge.hasHealthKitEntitlement else {
+            auth = .entitlementMissing
+            return
+        }
 
         var types: [HKSampleType] = []
         let liveIds = HealthKitBridge.liveQuantityIds
@@ -499,7 +507,10 @@ final class HealthKitBridge: ObservableObject {
     /// no timestamp — so it triggers a complete re-read of that one type, never a guessed recent window.
     /// Projection replacement and anchor advancement then commit in one store transaction.
     private func syncFromObserver(type: HKSampleType) async {
-        guard auth == .authorized else { return }
+        guard auth == .authorized, HealthKitBridge.hasHealthKitEntitlement else {
+            if auth == .authorized { auth = .entitlementMissing }
+            return
+        }
         if syncing {
             pendingObserverTypes[type.identifier] = type
             return
@@ -1012,7 +1023,10 @@ final class HealthKitBridge: ObservableObject {
     /// upserts keyed by day).
     @discardableResult
     func sync(days: Int = 30) async -> Bool {
-        guard auth == .authorized else { return false }
+        guard auth == .authorized, HealthKitBridge.hasHealthKitEntitlement else {
+            if auth == .authorized { auth = .entitlementMissing }
+            return false
+        }
         let requestedDays = max(1, days)
         if syncing {
             pendingSyncDays = max(pendingSyncDays ?? 0, requestedDays)
@@ -1270,7 +1284,10 @@ final class HealthKitBridge: ObservableObject {
     /// background, and deliberately leaves `lastSync` (the last two-way read) unchanged.
     func writeBackAfterNewData() async {
         refreshAuthIfPreviouslyGranted()
-        guard auth == .authorized else { return }
+        guard auth == .authorized, HealthKitBridge.hasHealthKitEntitlement else {
+            if auth == .authorized { auth = .entitlementMissing }
+            return
+        }
         if syncing {
             pendingWriteBack = true
             return
@@ -1309,7 +1326,7 @@ final class HealthKitBridge: ObservableObject {
     ///
     /// Throws on save failure so the caller can decide whether to advance `lastSync`.
     private func writeBack(whoopStore: WhoopStore, days: Int = 14) async throws {
-        guard auth == .authorized else { return }
+        guard auth == .authorized, HealthKitBridge.hasHealthKitEntitlement else { return }
         let now = Date()
         guard let fromDate = Calendar.current.date(byAdding: .day, value: -days, to: now) else { return }
         let fromTs = Int(fromDate.timeIntervalSince1970)
@@ -1839,9 +1856,13 @@ final class HealthKitBridge: ObservableObject {
     /// Excludes NOOP's own write-back samples from reads, so the two-way sync never reads its own
     /// output back in as "apple-health" data - which would make the strap and "Apple Health" plot the
     /// same line for a strap-only user, and bias the apple-health average for someone who also has a
-    /// watch. `HKSource.default()` is this app's own source. (Reimplemented from @vulnix0x4's PR #375.)
+    /// watch. `HKSource.default()` is this app's own source. It raises an Objective-C exception in a
+    /// profile-less unsigned process, so the capability check must happen before evaluating it.
     private static var notNoopAuthored: NSPredicate {
-        NSCompoundPredicate(notPredicateWithSubpredicate: HKQuery.predicateForObjects(from: [HKSource.default()]))
+        guard hasHealthKitEntitlement else { return NSPredicate(value: false) }
+        return NSCompoundPredicate(
+            notPredicateWithSubpredicate: HKQuery.predicateForObjects(from: [HKSource.default()])
+        )
     }
 
     private func collect(_ id: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date,
@@ -2214,52 +2235,41 @@ final class HealthKitBridge: ObservableObject {
     /// is still true, but `requestAuthorization` is a dead-end and the app can never appear under
     /// Settings › Health › Data Access & Devices.
     ///
-    /// Resolution order (most authoritative first), mirroring `IOSDiagnostics`'s profile parse:
-    ///  1. If an `embedded.mobileprovision` is present (every dev / sideloaded / TestFlight build ships
-    ///     one), slice the wrapped XML plist and look for `com.apple.developer.healthkit` in its
-    ///     `Entitlements` dict. A free re-sign re-writes this profile WITHOUT that key. This is the
-    ///     definitive signal and is unaffected by whether the user later granted/denied permission.
-    ///  2. No embedded profile → an App Store install (App Store strips it). Those are properly signed
-    ///     with whatever capabilities the app declares, so treat the entitlement as PRESENT. This is the
-    ///     conservative default: it never down-routes a legitimately-signed build, so a user who simply
-    ///     denied permission keeps the normal Settings guidance rather than the file-import reroute.
+    /// Resolution order:
+    ///  1. If an `embedded.mobileprovision` is present (development, ad hoc, or sideloaded), require a
+    ///     truthy entitlement in its `Entitlements` dictionary.
+    ///  2. If the App Store removed the profile, require an installed App Store/TestFlight receipt.
+    ///  3. A profile-less, receipt-less process is an unsigned local/simulator build and fails closed.
     ///
     /// Computed once and cached: the bundle's profile can't change within a process lifetime.
     nonisolated static let hasHealthKitEntitlement: Bool = {
-        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: url) else {
-            // No embedded profile = App Store build = properly signed. Assume present.
-            return true
-        }
-        guard let xmlStart = data.range(of: Data("<?xml".utf8)),
-              let xmlEnd = data.range(of: Data("</plist>".utf8)) else {
-            // Profile present but unparseable — don't claim a missing entitlement off a parse failure;
-            // assume present so we never wrongly down-route a real build.
-            return true
-        }
-        let plistData = data.subdata(in: xmlStart.lowerBound..<xmlEnd.upperBound)
-        guard let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any],
-              let entitlements = plist["Entitlements"] as? [String: Any] else {
-            return true
-        }
-        // The key is present (and truthy) on an entitled build; a free re-sign omits it entirely.
-        return entitlements["com.apple.developer.healthkit"] != nil
+        HealthKitCapabilityPolicy.allows(
+            entitlement: "com.apple.developer.healthkit",
+            embeddedProvisioningProfile: embeddedProvisioningProfile,
+            hasAppStoreReceipt: hasAppStoreReceipt
+        )
     }()
 
     /// HealthKit observer background wakes require a second entitlement on iOS 15+. Keep this
     /// separate from the base HealthKit capability so a development/re-signed profile can still use
     /// foreground Health reads without NOOP claiming it will be woken in the background.
     nonisolated static let hasHealthKitBackgroundDeliveryEntitlement: Bool = {
-        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: url) else {
-            return true // App Store strips the embedded profile.
-        }
-        guard let xmlStart = data.range(of: Data("<?xml".utf8)),
-              let xmlEnd = data.range(of: Data("</plist>".utf8)) else { return false }
-        let plistData = data.subdata(in: xmlStart.lowerBound..<xmlEnd.upperBound)
-        guard let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any],
-              let entitlements = plist["Entitlements"] as? [String: Any] else { return false }
-        return (entitlements["com.apple.developer.healthkit.background-delivery"] as? Bool) == true
+        HealthKitCapabilityPolicy.allows(
+            entitlement: "com.apple.developer.healthkit.background-delivery",
+            embeddedProvisioningProfile: embeddedProvisioningProfile,
+            hasAppStoreReceipt: hasAppStoreReceipt
+        )
+    }()
+
+    nonisolated private static let embeddedProvisioningProfile: Data? = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
+        else { return nil }
+        return try? Data(contentsOf: url)
+    }()
+
+    nonisolated private static let hasAppStoreReceipt: Bool = {
+        guard let url = Bundle.main.appStoreReceiptURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
     }()
 
     private static let authorizationRequestedKey = "healthkit.authorizationRequested.v1"

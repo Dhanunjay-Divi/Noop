@@ -556,7 +556,7 @@ private val NoopShapes = Shapes(
 )
 
 /**
- * NoopTheme — instrument-grade, now System / Light / Dark / OLED Black. The chosen mode (default System) drives
+ * NoopTheme — instrument-grade, now System / Light / Dark / OLED Black. The chosen mode (default OLED Black) drives
  * both `Palette.active` (so every `Palette.*` read re-resolves) and the Material scheme. The write to
  * `Palette.active` is guarded + idempotent, and happens before children compose, so there's no flash
  * and no recomposition loop (NoopTheme itself never reads `active`).

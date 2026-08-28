@@ -8,17 +8,17 @@ import org.junit.Test
 
 class NoopWidgetStyleTest {
     @Test
-    fun explicitAppearanceAlwaysWinsOverSystem() {
+    fun everyExplicitAppearanceValueIsPreserved() {
+        assertEquals(NoopWidgetAppearance.SYSTEM, resolveNoopWidgetAppearance("system"))
         assertEquals(NoopWidgetAppearance.LIGHT, resolveNoopWidgetAppearance("light"))
         assertEquals(NoopWidgetAppearance.DARK, resolveNoopWidgetAppearance("dark"))
         assertEquals(NoopWidgetAppearance.BLACK, resolveNoopWidgetAppearance("black"))
     }
 
     @Test
-    fun systemAndUnknownValuesRemainAdaptive() {
-        assertEquals(NoopWidgetAppearance.SYSTEM, resolveNoopWidgetAppearance("system"))
-        assertEquals(NoopWidgetAppearance.SYSTEM, resolveNoopWidgetAppearance("future-mode"))
-        assertEquals(NoopWidgetAppearance.SYSTEM, resolveNoopWidgetAppearance(null))
+    fun missingAndUnknownValuesMatchTheFreshAppBlackDefault() {
+        assertEquals(NoopWidgetAppearance.BLACK, resolveNoopWidgetAppearance("future-mode"))
+        assertEquals(NoopWidgetAppearance.BLACK, resolveNoopWidgetAppearance(null))
     }
 
     @Test

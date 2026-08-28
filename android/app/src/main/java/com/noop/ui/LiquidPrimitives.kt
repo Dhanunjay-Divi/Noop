@@ -34,21 +34,22 @@ import androidx.compose.ui.unit.dp
 // Compose port of the "// MARK: - Views" and "// MARK: - Shared liquid components" sections of
 // Strand/Liquid/LiquidPrimitives.swift. The three signature @Composables — the circular vessel
 // gauge, the horizontal tube, and the live heart-rate thread — each own a LiquidSim, step it from a
-// per-frame clock, read the one shared tilt source (LiquidMotion), and hand off the actual pixels to
+// display-synchronised bounded clock, read the one shared tilt source (LiquidMotion), and hand off the pixels to
 // the LiquidRender.* draw routines (LiquidRender.kt) drawn onto a Compose Canvas DrawScope.
 //
 // This is a 1:1 behavioural port of the SwiftUI wrappers:
-//   • animated && !reduce-motion  → a per-frame `withFrameNanos` clock advances the sim + redraws
-//                                    live; LiquidMotion is acquired on enter / released on leave;
-//                                    a tap splashes + fires a light haptic.
+//   • animated && !reduce-motion  → a display-synchronised clock advances the sim + redraws at the
+//                                    matching Apple budget (60fps vessel/thread, 30fps tube);
+//                                    LiquidMotion is acquired on enter / released on leave; a tap
+//                                    splashes + fires a light haptic.
 //   • otherwise (static / reduce)  → the primitive draws ONCE with a POSED sim, no clock, no motion.
 // The physics (LiquidSim / LiquidMotion / liquidSeconds) live in LiquidSim.kt in this same package;
 // the renderers (LiquidRender.vessel / .tube / .thread) live in LiquidRender.kt. Reduce-motion is the
 // app's existing `rememberReduceMotion()` (NoopMotion.kt — reads Settings.Global.ANIMATOR_DURATION_SCALE).
 //
-// iOS drove the clock from a TimelineView.animation Date via liquidSeconds(date); here — exactly as
-// LiquidSky.kt already does — a from-zero `withFrameNanos` accumulator gives the same motion because
-// only the sinusoid PHASE of `now` matters to the sim.step / render (the absolute epoch is irrelevant).
+// iOS drove the clock from a TimelineView.animation Date via liquidSeconds(date); here a paced,
+// from-zero `withFrameNanos` accumulator gives the same motion because only the sinusoid PHASE of `now`
+// matters to sim.step / render (the absolute epoch is irrelevant).
 
 // MARK: - The heart-rate pink (LiquidThread's default tint)
 //
@@ -56,6 +57,58 @@ import androidx.compose.ui.unit.dp
 // A fixed brand literal (NOT a theme token) on iOS, so it ports as-is: the HR thread reads the same coral
 // pink on every platform and both schemes, matching LiquidThread's iOS default exactly.
 val liquidHeartPink: Color = Color(red = 1f, green = 107f / 255f, blue = 129f / 255f, alpha = 1f)
+
+/**
+ * Reduces a display-vsync stream to a requested render budget while preserving elapsed time. A 120 Hz
+ * phone therefore draws the expensive liquid Canvas at 60/30/20 fps instead of recomposing it 120 times
+ * per second. The carried budget handles 90/144 Hz displays without collapsing to a simple divisor, and
+ * a background-sized timestamp gap resets rather than throwing a huge physics step into the first frame.
+ */
+internal class LiquidFramePacer(maxFramesPerSecond: Int) {
+    private val intervalNanos = 1_000_000_000L / maxFramesPerSecond.coerceIn(1, 120)
+    private var lastFrameNanos = 0L
+    private var lastAcceptedNanos = 0L
+    private var accumulatedNanos = 0L
+
+    fun advanceSeconds(frameNanos: Long): Double? {
+        if (lastFrameNanos == 0L) {
+            lastFrameNanos = frameNanos
+            lastAcceptedNanos = frameNanos
+            return null
+        }
+        val frameDelta = frameNanos - lastFrameNanos
+        lastFrameNanos = frameNanos
+        if (frameDelta <= 0L || frameDelta > 500_000_000L) {
+            accumulatedNanos = 0L
+            lastAcceptedNanos = frameNanos
+            return null
+        }
+
+        accumulatedNanos += frameDelta
+        if (accumulatedNanos < intervalNanos) return null
+        // Account for elapsed time once, then discard missed render slots. Retaining a long backlog
+        // would make a 120 Hz panel redraw every vsync after a stall while the pacer "caught up".
+        accumulatedNanos %= intervalNanos
+        val elapsed = frameNanos - lastAcceptedNanos
+        lastAcceptedNanos = frameNanos
+        return elapsed / 1_000_000_000.0
+    }
+}
+
+/** A lifecycle-bound, display-synchronised animation clock with a hard redraw budget. */
+@Composable
+internal fun rememberLiquidClock(maxFramesPerSecond: Int): Double {
+    var seconds by remember { mutableDoubleStateOf(0.0) }
+    val pacer = remember(maxFramesPerSecond) { LiquidFramePacer(maxFramesPerSecond) }
+    LaunchedEffect(pacer) {
+        while (true) {
+            withFrameNanos { frame ->
+                pacer.advanceSeconds(frame)?.let { seconds += it }
+            }
+        }
+    }
+    return seconds
+}
 
 // MARK: - LiquidVessel — a circular liquid gauge
 
@@ -93,18 +146,8 @@ fun LiquidVessel(
             onDispose { LiquidMotion.shared.release() }
         }
 
-        // Monotonic seconds clock (from-zero accumulator; only the sinusoid phase matters — same as
-        // LiquidSky.kt). Drives sim.step + render.
-        var seconds by remember { mutableDoubleStateOf(0.0) }
-        LaunchedEffect(Unit) {
-            var last = 0L
-            while (true) {
-                withFrameNanos { frame ->
-                    if (last != 0L) seconds += (frame - last) / 1_000_000_000.0
-                    last = frame
-                }
-            }
-        }
+        // Match iOS's 60fps hero budget even on 90/120/144 Hz Android panels.
+        val seconds = rememberLiquidClock(maxFramesPerSecond = 60)
 
         Canvas(
             modifier = modifier
@@ -166,16 +209,8 @@ fun LiquidTube(
             onDispose { LiquidMotion.shared.release() }
         }
 
-        var seconds by remember { mutableDoubleStateOf(0.0) }
-        LaunchedEffect(Unit) {
-            var last = 0L
-            while (true) {
-                withFrameNanos { frame ->
-                    if (last != 0L) seconds += (frame - last) / 1_000_000_000.0
-                    last = frame
-                }
-            }
-        }
+        // Tubes use the same 30fps budget as the SwiftUI primitive.
+        val seconds = rememberLiquidClock(maxFramesPerSecond = 30)
 
         Canvas(modifier = modifier.height(height)) {
             sim.step(now = seconds, tilt = LiquidMotion.shared.tilt, target = frac)
@@ -234,16 +269,7 @@ fun LiquidThread(
     val renderStill = rememberPoseStill()
 
     if (animated && !renderStill) {
-        var seconds by remember { mutableDoubleStateOf(0.0) }
-        LaunchedEffect(Unit) {
-            var last = 0L
-            while (true) {
-                withFrameNanos { frame ->
-                    if (last != 0L) seconds += (frame - last) / 1_000_000_000.0
-                    last = frame
-                }
-            }
-        }
+        val seconds = rememberLiquidClock(maxFramesPerSecond = 60)
         Canvas(modifier = modifier.height(height)) {
             with(LiquidRender) { thread(size = size, values = bpm, now = seconds, tint = tint) }
         }

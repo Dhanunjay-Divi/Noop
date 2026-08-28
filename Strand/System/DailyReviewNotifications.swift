@@ -6,6 +6,7 @@ import UserNotifications
 enum NoopNotificationRoute: String, Equatable, Sendable {
     case today
     case trends
+    case workouts
     case sleep
     case hydration
     case devices
@@ -254,6 +255,267 @@ enum DailyReviewNotifications {
             hiddenPreviewsBodyPlaceholder: String(localized: "Private NOOP check-in"),
             options: []
         )
+    }
+}
+
+/// An opt-in, privacy-safe heads-up after a newly synced workout reaches NOOP.
+///
+/// Delivery is intentionally tied to the post-sync caller rather than workout end time: a wearable
+/// may bank the session for hours before the phone receives it. Enabling seeds the current newest
+/// workout as the frontier, so old history never produces a surprise notification.
+@MainActor
+enum PostWorkoutSummaryNotifications {
+    static let enabledKey = "postWorkoutSummary.enabled"
+    static let lastWorkoutStartKey = "postWorkoutSummary.lastWorkoutStart"
+    static let frontierInitializedKey = "postWorkoutSummary.frontierInitialized"
+
+    private static let requestID = "post-workout-summary"
+    private static var preferenceGeneration: UInt64 = 0
+    private static var deliveryGeneration: UInt64 = 0
+    private static var activeWorkoutStart: Int?
+
+    enum EnableOutcome: Equatable, Sendable {
+        case enabled
+        case denied
+        case off
+    }
+
+    struct NotificationClient {
+        let authorizationStatus: () async -> UNAuthorizationStatus
+        let requestAuthorization: () async -> Bool
+        let preparePrivateCategory: () async -> Void
+        let add: (UNNotificationRequest) async throws -> Void
+        let remove: ([String]) -> Void
+
+        static var system: NotificationClient {
+            NotificationClient(
+                authorizationStatus: {
+                    await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                },
+                requestAuthorization: {
+                    (try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound])) ?? false
+                },
+                preparePrivateCategory: {
+                    await DailyReviewNotifications.ensurePrivacyCategory(
+                        on: UNUserNotificationCenter.current()
+                    )
+                },
+                add: { request in
+                    try await LocalNotificationLifecycle.schedule(request)
+                },
+                remove: { identifiers in
+                    LocalNotificationLifecycle.cancel(
+                        identifiers: identifiers,
+                        presented: true
+                    )
+                }
+            )
+        }
+    }
+
+    struct Copy: Equatable, Sendable {
+        let title: String
+        let body: String
+    }
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static var copy: Copy {
+        Copy(
+            title: String(localized: "Your workout summary is ready"),
+            body: String(localized: "Open NOOP to review the workout after your latest sync.")
+        )
+    }
+
+    static func setEnabled(
+        _ enabled: Bool,
+        currentNewestWorkoutStart: Int?,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        setEnabled(
+            enabled,
+            currentNewestWorkoutStart: currentNewestWorkoutStart,
+            client: .system,
+            completion: completion
+        )
+    }
+
+    static func setEnabled(
+        _ enabled: Bool,
+        currentNewestWorkoutStart: Int?,
+        client: NotificationClient,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        preferenceGeneration &+= 1
+        let attempt = preferenceGeneration
+
+        guard enabled else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            clear(client: client)
+            completion?(.off)
+            return
+        }
+
+        // Keep the preference false until the OS confirms permission. Capture the frontier before the
+        // prompt so a workout that syncs while the sheet is open remains eligible afterward.
+        UserDefaults.standard.set(false, forKey: enabledKey)
+        clear(client: client)
+        Task { @MainActor in
+            let status = await client.authorizationStatus()
+            guard attempt == preferenceGeneration else { return }
+
+            let allowed: Bool
+            switch status {
+            case .authorized, .provisional:
+                allowed = true
+#if os(iOS)
+            case .ephemeral:
+                allowed = true
+#endif
+            case .notDetermined:
+                allowed = await client.requestAuthorization()
+            default:
+                allowed = false
+            }
+
+            guard attempt == preferenceGeneration else { return }
+            if allowed {
+                initializeFrontier(currentNewestWorkoutStart)
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                completion?(.enabled)
+            } else {
+                UserDefaults.standard.set(false, forKey: enabledKey)
+                completion?(.denied)
+            }
+        }
+    }
+
+    /// Pure gate shared by delivery and focused tests.
+    static func shouldNotify(
+        enabled: Bool,
+        frontierInitialized: Bool,
+        newestWorkoutStart: Int?,
+        lastWorkoutStart: Int
+    ) -> Bool {
+        enabled
+            && frontierInitialized
+            && newestWorkoutStart.map { $0 > lastWorkoutStart } == true
+    }
+
+    static func postIfAuthorized(newestWorkoutStart: Int?) async {
+        await postIfAuthorized(newestWorkoutStart: newestWorkoutStart, client: .system)
+    }
+
+    static func postIfAuthorized(
+        newestWorkoutStart: Int?,
+        client: NotificationClient
+    ) async {
+        guard isEnabled else {
+            clear(client: client)
+            return
+        }
+
+        // Upgrade safety: an impossible pre-feature state (enabled but no frontier marker) seeds
+        // silently instead of treating the entire workout archive as new.
+        guard UserDefaults.standard.bool(forKey: frontierInitializedKey) else {
+            initializeFrontier(newestWorkoutStart)
+            return
+        }
+
+        let last = UserDefaults.standard.object(forKey: lastWorkoutStartKey) as? Int ?? 0
+        guard shouldNotify(
+            enabled: true,
+            frontierInitialized: true,
+            newestWorkoutStart: newestWorkoutStart,
+            lastWorkoutStart: last
+        ), let newestWorkoutStart,
+           activeWorkoutStart != newestWorkoutStart else { return }
+
+        let generation = deliveryGeneration
+        activeWorkoutStart = newestWorkoutStart
+        defer {
+            if activeWorkoutStart == newestWorkoutStart {
+                activeWorkoutStart = nil
+            }
+        }
+
+        let status = await client.authorizationStatus()
+        guard generation == deliveryGeneration,
+              canPost(using: status),
+              isEnabled else { return }
+        await client.preparePrivateCategory()
+        guard generation == deliveryGeneration, isEnabled else { return }
+
+        let text = copy
+        let content = UNMutableNotificationContent()
+        content.applyProminence(.ambient)
+        content.title = text.title
+        content.body = text.body
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.post-workout"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.workouts.rawValue
+        ]
+
+        do {
+            try await client.add(
+                UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
+            )
+            guard generation == deliveryGeneration, isEnabled else {
+                client.remove([requestID])
+                return
+            }
+            // Advance only after Notification Center accepted the request. A denied or failed post can
+            // retry on the next completed sync instead of losing the workout silently.
+            advanceFrontier(to: newestWorkoutStart)
+        } catch {
+            if generation != deliveryGeneration || !isEnabled {
+                client.remove([requestID])
+            }
+        }
+    }
+
+    static func initializeFrontier(_ newestWorkoutStart: Int?) {
+        if let newestWorkoutStart {
+            UserDefaults.standard.set(newestWorkoutStart, forKey: lastWorkoutStartKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastWorkoutStartKey)
+        }
+        UserDefaults.standard.set(true, forKey: frontierInitializedKey)
+    }
+
+    static func clear() {
+        clear(client: .system)
+    }
+
+    static func clear(client: NotificationClient) {
+        deliveryGeneration &+= 1
+        activeWorkoutStart = nil
+        client.remove([requestID])
+    }
+
+    private static func advanceFrontier(to workoutStart: Int) {
+        let current = UserDefaults.standard.object(forKey: lastWorkoutStartKey) as? Int ?? 0
+        if workoutStart > current {
+            UserDefaults.standard.set(workoutStart, forKey: lastWorkoutStartKey)
+        }
+    }
+
+    private static func canPost(using status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional:
+            return true
+#if os(iOS)
+        case .ephemeral:
+            return true
+#endif
+        default:
+            return false
+        }
     }
 }
 

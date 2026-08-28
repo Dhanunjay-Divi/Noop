@@ -1293,7 +1293,9 @@ fun TodayScreen(
                 // holding + dragging the cards directly). Opens a Today-local dialog — no nav destination.
                 TextButton(
                     onClick = { showLayoutEditor = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Palette.textTertiary),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = Palette.onDarkSecondary.copy(alpha = 0.86f),
+                    ),
                     modifier = Modifier.align(Alignment.CenterEnd),
                 ) {
                     Icon(
@@ -3124,7 +3126,7 @@ private fun LiquidWordmark() {
                 ch.toString(),
                 style = NoopType.number(16f, weight = FontWeight.Bold)
                     .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.25f), offset = Offset(0f, 1f), blurRadius = 6f)),
-                color = Color.White.copy(alpha = 0.5f),
+                color = Color.White.copy(alpha = 0.72f),
             )
         }
     }
@@ -3681,19 +3683,19 @@ private fun HeroRingColumn(
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = Palette.textSecondary.copy(alpha = 0.6f),
+                tint = Palette.onDarkSecondary.copy(alpha = 0.68f),
                 modifier = Modifier
                     .size(14.dp)
                     .alpha(0f),
             )
             // #74: never wrap the hero label onto a second line — at a larger font/screen-zoom (Samsung
             // One UI defaults) "REST" could wrap, growing the whole hero card. One line, ellipsis if forced.
-            Text(domain.label.uppercase(), style = NoopType.overline, color = Palette.textSecondary,
+            Text(domain.label.uppercase(), style = NoopType.overline, color = Palette.onDarkSecondary,
                  maxLines = 1, overflow = TextOverflow.Ellipsis)
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = uiString(R.string.l10n_today_screen_how_domain_label_is_calculated_8897768c, domain.label),
-                tint = Palette.textSecondary.copy(alpha = 0.6f),
+                tint = Palette.onDarkSecondary.copy(alpha = 0.68f),
                 modifier = Modifier.size(14.dp),
             )
         }

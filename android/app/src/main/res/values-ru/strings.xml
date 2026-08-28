@@ -191,4 +191,19 @@
     <string name="hydration_base_interval_label">Базовый интервал</string>
     <string name="today_calibration_valid_hrv_progress">Достоверная ВСР %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">Подробные стадии сна скрыты, потому что за эту ночь недостаточно пригодных данных об интервалах между ударами сердца. Общая продолжительность сна остаётся доступной.</string>
+    <string name="profile_bmi_label">ИМТ</string>
+    <string name="profile_bmi_accessibility">Индекс массы тела, %1$s</string>
+    <string name="profile_bmi_explanation">ИМТ - это ограниченный скрининговый расчёт на основе роста и веса. Он не является диагнозом или показателем состава тела.</string>
+    <string name="profile_target_weight_optional">Целевой вес (необязательно)</string>
+    <string name="profile_target_weight_add">Добавить</string>
+    <string name="profile_target_weight_add_accessibility">Добавить целевой вес</string>
+    <string name="profile_target_weight_pounds_accessibility">Целевой вес: %1$d фунтов</string>
+    <string name="profile_target_weight_kg_accessibility">Целевой вес в килограммах</string>
+    <string name="profile_target_weight_clear">Очистить</string>
+    <string name="profile_target_weight_clear_accessibility">Удалить целевой вес</string>
+    <string name="profile_target_weight_explanation">Этот параметр необязателен, и выбор полностью за вами. NOOP не рекомендует целевой вес или темп его изменения.</string>
+    <string name="vital_range_summary_none">Сравнения с текущими диапазонами недоступны</string>
+    <string name="vital_range_summary_one_within">Доступное значение находится в своём текущем диапазоне</string>
+    <string name="vital_range_summary_one_outside">Доступное значение находится вне своего текущего диапазона</string>
+    <string name="vital_range_summary_many">%1$d из %2$d доступных значений находятся в своих текущих диапазонах</string>
 </resources>

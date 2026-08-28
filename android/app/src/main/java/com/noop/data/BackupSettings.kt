@@ -26,8 +26,9 @@ import org.json.JSONObject
  *
  * The whitelist is the contract, defined once per platform and mirrored byte-for-byte by the Apple
  * `BackupSettings.whitelist` (same canonical key strings, same JSON kinds). V1 carried profile/unit
- * values, v2 added a schema stamp and exact civil birthday, and v3 adds a bounded set of durable,
- * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences. Only stable,
+ * values, v2 added a schema stamp and exact civil birthday, v3 added a bounded set of durable,
+ * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences, and v4 adds the
+ * optional user-selected target weight. Only stable,
  * non-device-specific values are allowed. NEVER add credentials, device/peripheral/install ids,
  * sync cursors, active alarm epochs, delivery de-dup state, or derived planner outputs: backups get
  * copied into cloud folders and attached to GitHub issues, so this file must stay safe to share.
@@ -41,7 +42,7 @@ object BackupSettingsCodec {
 
     /** Canonical entry name inside the `.noopbak` ZIP. Matches the Apple exporter byte-for-byte. */
     const val ENTRY_NAME = "settings.json"
-    const val SCHEMA_VERSION = 3
+    const val SCHEMA_VERSION = 4
     const val SCHEMA_VERSION_KEY = "settings.schemaVersion"
     const val DATE_OF_BIRTH_KEY = "profile.dateOfBirth"
 
@@ -63,6 +64,7 @@ object BackupSettingsCodec {
         DATE_OF_BIRTH_KEY to Kind.CIVIL_DATE,
         "profile.sex" to Kind.STRING,
         "profile.weightKg" to Kind.DOUBLE,
+        "profile.targetWeightKg" to Kind.DOUBLE,
         "profile.heightCm" to Kind.DOUBLE,
         "profile.waistCm" to Kind.DOUBLE,
         "profile.hrMax" to Kind.INT,
@@ -171,6 +173,7 @@ object BackupSettingsCodec {
             }
             "profile.sex" -> allowedString(coerced, setOf("male", "female", "nonbinary"))
             "profile.weightKg" -> boundedDouble(coerced, 30.0..250.0)
+            "profile.targetWeightKg" -> boundedDouble(coerced, 30.0..250.0)
             "profile.heightCm" -> boundedDouble(coerced, 120.0..230.0)
             "profile.waistCm" -> boundedDouble(coerced, 0.0..200.0)
             "profile.hrMax" -> boundedInt(coerced, 0..230)

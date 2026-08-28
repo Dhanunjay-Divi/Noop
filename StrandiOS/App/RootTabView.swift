@@ -543,6 +543,9 @@ struct RootTabView: View {
             case .trends:
                 tabPaths[IPhonePrimaryTab.trends.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.trends.rawValue
+            case .workouts:
+                tabPaths[IPhonePrimaryTab.activity.rawValue] = NavigationPath()
+                selectedTab = IPhonePrimaryTab.activity.rawValue
             case .devices:
                 routeToMore(.devices)
             case .safety:

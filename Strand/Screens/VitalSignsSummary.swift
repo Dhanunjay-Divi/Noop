@@ -117,6 +117,31 @@ struct BodyVitalReading: Identifiable {
     }
 }
 
+/// Honest aggregate for the Health Monitor's latest-reading grid. It deliberately counts only
+/// finite, available, calibrated readings. Raw optical ADC and missing values never affect the
+/// numerator or denominator.
+struct VitalRangeSummary: Equatable, Sendable {
+    let inRangeCount: Int
+    let availableCount: Int
+
+    var allAvailableInRange: Bool {
+        availableCount > 0 && inRangeCount == availableCount
+    }
+
+    var message: String {
+        guard availableCount > 0 else {
+            return String(localized: "No current range comparisons available")
+        }
+        if availableCount == 1 {
+            return inRangeCount == 1
+                ? String(localized: "The available reading is within its current range")
+                : String(localized: "The available reading is outside its current range")
+        }
+        return String(localized:
+            "\(inRangeCount) of \(availableCount) available readings are within their current ranges")
+    }
+}
+
 /// Builds the body vital-sign readings from source-tagged daily rows. Pure + namespaced so the
 /// resolution (per-metric source precedence) and banding can be unit-tested without a Repository.
 enum BodyVitalSigns {
@@ -377,6 +402,20 @@ enum BodyVitalSigns {
     /// The newest day any resolved reading was sourced from - drives the section's "Latest" trailing label.
     static func latestDayLabel(_ readings: [BodyVitalReading]) -> String? {
         readings.compactMap(\.day).max().map(BodyVitalReading.dayLabel)
+    }
+
+    /// Aggregate only calibrated, finite readings. A raw SpO₂ ADC can be useful in diagnostics but
+    /// has no health range, and a missing tile is absence rather than an out-of-range observation.
+    static func rangeSummary(_ readings: [BodyVitalReading]) -> VitalRangeSummary {
+        let available = readings.filter { reading in
+            reading.key != "spo2raw"
+                && reading.value?.isFinite == true
+                && reading.banding.band != .noData
+        }
+        return VitalRangeSummary(
+            inRangeCount: available.filter { $0.banding.band == .inRange }.count,
+            availableCount: available.count
+        )
     }
 
     /// The LOGICAL local day for `now` (rolls at 04:00 local). Self-contained so this helper stays pure

@@ -76,7 +76,7 @@ enum AppleDemoSeeder {
             // DEBUG fixture's additive/versioned data when an older demo dataset is already present,
             // so new surfaces remain testable without resetting or duplicating the seeded history.
             do {
-                _ = try await repairFitnessAgeProfileMarkers(
+                _ = try await repairAgeMetricProfileMarkers(
                     in: store,
                     profileAge: profileAge,
                     profileSex: profileSex
@@ -100,41 +100,88 @@ enum AppleDemoSeeder {
         catch { NSLog("AppleDemoSeeder: seed failed - \(error)") }
     }
 
-    /// Upgrades a persisted DEBUG demo fixture after the Fitness Age model marker changes. This is
+    /// Upgrades a persisted DEBUG demo fixture after either age-model marker changes. This is
     /// deliberately called only from the explicit `--demo-seed` path; release/user databases never
     /// receive synthetic provenance. Existing correct rows are skipped, making repeated launches a no-op.
     @discardableResult
-    static func repairFitnessAgeProfileMarkers(
+    static func repairAgeMetricProfileMarkers(
         in store: WhoopStore,
         profileAge: Int,
         profileSex: String
     ) async throws -> Int {
-        guard let token = AgeMetricProfile.fitnessAgeToken(
+        let fitnessToken = AgeMetricProfile.fitnessAgeToken(
             age: profileAge,
             sex: profileSex
-        ) else { return 0 }
+        )
+        let vitalityToken = AgeMetricProfile.vitalityToken(age: profileAge)
 
-        async let ageRowsRead = store.metricSeries(
+        async let fitnessRowsRead = store.metricSeries(
             deviceId: whoop,
             key: "fitness_age",
             from: "0000-00-00",
             to: "9999-99-99"
         )
-        async let markerRowsRead = store.metricSeries(
+        async let fitnessMarkerRowsRead = store.metricSeries(
             deviceId: whoop,
             key: AgeMetricProfile.fitnessAgeKey,
             from: "0000-00-00",
             to: "9999-99-99"
         )
-        let ageRows = try await ageRowsRead
-        guard !ageRows.isEmpty else { return 0 }
-        let markerByDay = Dictionary(
-            uniqueKeysWithValues: try await markerRowsRead.map { ($0.day, $0.value) }
+        async let vitalityRowsRead = store.metricSeries(
+            deviceId: whoop,
+            key: "vitality",
+            from: "0000-00-00",
+            to: "9999-99-99"
         )
-        let repairs = ageRows.compactMap { row -> MetricPoint? in
-            guard markerByDay[row.day] != token else { return nil }
-            return MetricPoint(day: row.day, key: AgeMetricProfile.fitnessAgeKey, value: token)
+        async let bodyAgeRowsRead = store.metricSeries(
+            deviceId: whoop,
+            key: "body_age",
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )
+        async let vitalityMarkerRowsRead = store.metricSeries(
+            deviceId: whoop,
+            key: AgeMetricProfile.vitalityKey,
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )
+        let (fitnessRows, fitnessMarkerRows, vitalityRows, bodyAgeRows, vitalityMarkerRows) =
+            try await (
+                fitnessRowsRead,
+                fitnessMarkerRowsRead,
+                vitalityRowsRead,
+                bodyAgeRowsRead,
+                vitalityMarkerRowsRead
+            )
+
+        let fitnessMarkerByDay = Dictionary(
+            uniqueKeysWithValues: fitnessMarkerRows.map { ($0.day, $0.value) }
+        )
+        var repairs: [MetricPoint] = []
+        if let fitnessToken {
+            repairs.append(contentsOf: fitnessRows.compactMap { row -> MetricPoint? in
+                guard fitnessMarkerByDay[row.day] != fitnessToken else { return nil }
+                return MetricPoint(
+                    day: row.day,
+                    key: AgeMetricProfile.fitnessAgeKey,
+                    value: fitnessToken
+                )
+            })
         }
+
+        let vitalityMarkerByDay = Dictionary(
+            uniqueKeysWithValues: vitalityMarkerRows.map { ($0.day, $0.value) }
+        )
+        let vitalityDays = Set(vitalityRows.map(\.day)).union(bodyAgeRows.map(\.day))
+        repairs.append(contentsOf: vitalityDays.sorted().compactMap { day -> MetricPoint? in
+            guard vitalityMarkerByDay[day] != vitalityToken else { return nil }
+            return MetricPoint(
+                day: day,
+                key: AgeMetricProfile.vitalityKey,
+                value: vitalityToken
+            )
+        })
+
         guard !repairs.isEmpty else { return 0 }
         return try await store.upsertMetricSeries(repairs, deviceId: whoop)
     }

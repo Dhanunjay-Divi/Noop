@@ -1,6 +1,6 @@
 # Release blockers and production readiness
 
-**Assessed:** 2026-08-25
+**Assessed:** 2026-08-27
 
 **Product verdict:** not yet production-ready
 
@@ -64,9 +64,12 @@ local-only so gates 4 and 5 leave the critical path entirely.
 
 ## Current engineering evidence
 
-Round 21 records the latest package, app, simulator, emulator, localization,
-privacy, and migration results in
-[`ROUND-21-validation-calibration-import-integrity.md`](archive/ROUND-21-validation-calibration-import-integrity.md).
+Round 24 records the current package, app, simulator, emulator, localization,
+privacy, and migration release work in
+[`2026-08-27-performance-health-profile-release.md`](../ops/rounds/2026-08-27-performance-health-profile-release.md).
+Its complete local matrix passes. Direct source publication, hosted CI, and the
+community testing build provide release-execution evidence for that commit but
+do not close the external gates below.
 Simulator, emulator, and unit evidence does not close any physical-device,
 carrier, signing, store, infrastructure, clinical, or regulatory gate above.
 

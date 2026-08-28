@@ -106,6 +106,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.BuildConfig
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.Baselines
+import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.Zones
 import com.noop.R
 import com.noop.ble.PuffinExperiment
@@ -286,6 +287,24 @@ class ProfileStore(private val prefs: SharedPreferences) {
         get() = prefs.getFloat(KEY_WEIGHT, 75f).toDouble().coerceIn(WEIGHT_MIN, WEIGHT_MAX)
         set(v) = prefs.edit().putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat()).apply()
 
+    /**
+     * Optional target selected by the user. It is stored canonically in kilograms and is never
+     * inferred by NOOP. Invalid values are ignored rather than replacing a valid selection.
+     */
+    var targetWeightKg: Double?
+        get() {
+            if (!prefs.contains(KEY_TARGET_WEIGHT)) return null
+            return prefs.getFloat(KEY_TARGET_WEIGHT, Float.NaN).toDouble()
+                .takeIf { it.isFinite() && it in WEIGHT_MIN..WEIGHT_MAX }
+        }
+        set(v) {
+            when {
+                v == null -> prefs.edit().remove(KEY_TARGET_WEIGHT).apply()
+                v.isFinite() && v in WEIGHT_MIN..WEIGHT_MAX ->
+                    prefs.edit().putFloat(KEY_TARGET_WEIGHT, v.toFloat()).apply()
+            }
+        }
+
     var heightCm: Double
         get() = prefs.getFloat(KEY_HEIGHT, 178f).toDouble().coerceIn(HEIGHT_MIN, HEIGHT_MAX)
         set(v) = prefs.edit().putFloat(KEY_HEIGHT, v.coerceIn(HEIGHT_MIN, HEIGHT_MAX).toFloat()).apply()
@@ -385,6 +404,9 @@ class ProfileStore(private val prefs: SharedPreferences) {
         }
         if (prefs.contains(KEY_SEX)) out["profile.sex"] = sex
         if (prefs.contains(KEY_WEIGHT)) out["profile.weightKg"] = weightKg
+        if (prefs.contains(KEY_TARGET_WEIGHT)) {
+            targetWeightKg?.let { out["profile.targetWeightKg"] = it }
+        }
         if (prefs.contains(KEY_HEIGHT)) out["profile.heightCm"] = heightCm
         if (prefs.contains(KEY_WAIST)) out["profile.waistCm"] = waistCm
         if (prefs.contains(KEY_HRMAX)) out["profile.hrMax"] = hrMaxOverride
@@ -412,6 +434,7 @@ class ProfileStore(private val prefs: SharedPreferences) {
         }
         (values["profile.sex"] as? String)?.let { sex = it }
         (values["profile.weightKg"] as? Number)?.let { weightKg = it.toDouble() }
+        (values["profile.targetWeightKg"] as? Number)?.let { targetWeightKg = it.toDouble() }
         (values["profile.heightCm"] as? Number)?.let { heightCm = it.toDouble() }
         (values["profile.waistCm"] as? Number)?.let { waistCm = it.toDouble() }
         (values["profile.hrMax"] as? Number)?.let { hrMaxOverride = it.toInt() }
@@ -431,6 +454,7 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_VO2MAX_PROVENANCE_REQUIRED = "vo2max_provenance_required"
         private const val KEY_VITALITY_PROVENANCE_REQUIRED = "vitality_provenance_required"
         private const val KEY_WEIGHT = "weight_kg"
+        private const val KEY_TARGET_WEIGHT = "target_weight_kg"
         private const val KEY_HEIGHT = "height_cm"
         private const val KEY_WAIST = "waist_cm"
         private const val KEY_HRMAX = "hr_max_override"
@@ -1122,6 +1146,109 @@ fun SettingsScreen(
                         )
                     }
                 }
+                RowDivider()
+                FormRow(label = stringResource(R.string.profile_bmi_label)) {
+                    val bmi = FitnessAgeEngine.bmi(profile.weightKg, profile.heightCm)
+                    val bmiText = "%.1f".format(bmi)
+                    val bmiAccessibility = stringResource(
+                        R.string.profile_bmi_accessibility,
+                        bmiText,
+                    )
+                    Text(
+                        text = bmiText,
+                        style = NoopType.bodyNumber,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.semantics {
+                            contentDescription = bmiAccessibility
+                        },
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.profile_bmi_explanation),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+                RowDivider()
+                FormRow(label = stringResource(R.string.profile_target_weight_optional)) {
+                    val target = profile.targetWeightKg
+                    if (target == null) {
+                        val addTargetAccessibility = stringResource(
+                            R.string.profile_target_weight_add_accessibility,
+                        )
+                        TextButton(
+                            onClick = { mutate { profile.targetWeightKg = profile.weightKg } },
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .semantics {
+                                    contentDescription = addTargetAccessibility
+                                },
+                        ) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = null,
+                                modifier = Modifier.padding(end = 8.dp),
+                            )
+                            Text(stringResource(R.string.profile_target_weight_add))
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.End) {
+                            if (massUnit == MassUnit.POUNDS) {
+                                val pounds = UnitFormatter.kgToPounds(target)
+                                StepperField(
+                                    value = "%.0f".format(pounds),
+                                    unit = "lb",
+                                    accessibility = stringResource(
+                                        R.string.profile_target_weight_pounds_accessibility,
+                                        pounds.roundToInt(),
+                                    ),
+                                    onMinus = {
+                                        mutate {
+                                            profile.targetWeightKg = UnitFormatter.poundsToKg(pounds - 1)
+                                        }
+                                    },
+                                    onPlus = {
+                                        mutate {
+                                            profile.targetWeightKg = UnitFormatter.poundsToKg(pounds + 1)
+                                        }
+                                    },
+                                )
+                            } else {
+                                StepperField(
+                                    value = "%.1f".format(target),
+                                    unit = "kg",
+                                    accessibility = stringResource(
+                                        R.string.profile_target_weight_kg_accessibility,
+                                    ),
+                                    onMinus = { mutate { profile.targetWeightKg = target - 0.5 } },
+                                    onPlus = { mutate { profile.targetWeightKg = target + 0.5 } },
+                                )
+                            }
+                            val clearTargetAccessibility = stringResource(
+                                R.string.profile_target_weight_clear_accessibility,
+                            )
+                            TextButton(
+                                onClick = { mutate { profile.targetWeightKg = null } },
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .semantics {
+                                        contentDescription = clearTargetAccessibility
+                                    },
+                            ) {
+                                Icon(
+                                    Icons.Filled.Cancel,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                Text(stringResource(R.string.profile_target_weight_clear))
+                            }
+                        }
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.profile_target_weight_explanation),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
                 RowDivider()
                 // Waist (optional): the one extra body measure that unlocks the Fitness Age VO₂max
                 // estimate. Unset (0) by design — the headline Fitness Age never needs it — so it shows

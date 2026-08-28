@@ -2098,4 +2098,19 @@
     <string name="hydration_base_interval_label">Intervalo base</string>
     <string name="today_calibration_valid_hrv_progress">VFC válida %1$d/%2$d</string>
     <string name="sleep_stage_detail_withheld">Las fases detalladas del sueño se ocultan porque esta noche no contiene suficientes datos utilizables de los intervalos entre latidos. El tiempo total de sueño sigue disponible.</string>
+    <string name="profile_bmi_label">IMC</string>
+    <string name="profile_bmi_accessibility">Índice de masa corporal, %1$s</string>
+    <string name="profile_bmi_explanation">El IMC es un cálculo de cribado limitado basado en la altura y el peso. No es un diagnóstico ni una medida de la composición corporal.</string>
+    <string name="profile_target_weight_optional">Peso objetivo (opcional)</string>
+    <string name="profile_target_weight_add">Añadir</string>
+    <string name="profile_target_weight_add_accessibility">Añadir peso objetivo</string>
+    <string name="profile_target_weight_pounds_accessibility">Peso objetivo, %1$d libras</string>
+    <string name="profile_target_weight_kg_accessibility">Peso objetivo en kilogramos</string>
+    <string name="profile_target_weight_clear">Borrar</string>
+    <string name="profile_target_weight_clear_accessibility">Borrar peso objetivo</string>
+    <string name="profile_target_weight_explanation">Es opcional y tú decides. NOOP no recomienda un objetivo ni un ritmo de cambio.</string>
+    <string name="vital_range_summary_none">No hay comparaciones de rangos actuales disponibles</string>
+    <string name="vital_range_summary_one_within">La lectura disponible está dentro de su rango actual</string>
+    <string name="vital_range_summary_one_outside">La lectura disponible está fuera de su rango actual</string>
+    <string name="vital_range_summary_many">%1$d de %2$d lecturas disponibles están dentro de sus rangos actuales</string>
 </resources>
