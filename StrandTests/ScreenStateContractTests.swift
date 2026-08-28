@@ -488,7 +488,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 398)
+        XCTAssertEqual(source.count, 409)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"
