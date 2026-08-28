@@ -73,7 +73,9 @@ enum AutoWorkoutAutomationPolicy {
 enum AutoWorkoutBackgroundPolicy {
     static let maximumCandidateAgeSeconds = 2 * 60 * 60
     static let futureToleranceSeconds = 5 * 60
-    static let minimumCorroboratedMinutes = 15
+    /// Match the detector's ten-minute candidate floor once independent wrist motion corroborates it.
+    /// A second, longer notification floor made valid 10-14 minute sessions visible only in-app.
+    static let minimumCorroboratedMinutes = 10
 
     static func shouldProcess(_ candidate: DetectedWorkout, nowSec: Int) -> Bool {
         guard candidate.startSec > 0,

@@ -120,16 +120,21 @@ final class WorkoutSourceTests: XCTestCase {
         ), "historical backfill must not generate a real-time lock-screen alert")
     }
 
-    func testMotionCorroborationAllowsARecentFifteenMinuteCandidate() {
+    func testMotionCorroborationAllowsARecentTenMinuteCandidate() {
         let now = 1_700_010_000
         let corroborated = DetectedWorkout(
-            startSec: now - 25 * 60, endSec: now - 10 * 60,
-            avgBpm: 100, peakBpm: 115, durationMin: 15,
+            startSec: now - 20 * 60, endSec: now - 10 * 60,
+            avgBpm: 100, peakBpm: 115, durationMin: 10,
             evidenceProvenance: .heartRateAndMotion
         )
         XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(
             corroborated, nowSec: now
         ), "motion evidence preserves timely notification for a real moderate workout")
+        XCTAssertEqual(
+            Double(AutoWorkoutBackgroundPolicy.minimumCorroboratedMinutes),
+            AutoWorkoutDetector.minSustainedMin,
+            "the interruptive motion-backed policy must not silently exceed the detector floor"
+        )
     }
 
     func testBackgroundWorkoutRecencyAndDurationBoundaries() {
@@ -143,12 +148,13 @@ final class WorkoutSourceTests: XCTestCase {
             )
         }
 
-        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 14), nowSec: now))
-        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 15), nowSec: now))
-        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_200, duration: 15), nowSec: now))
-        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_201, duration: 15), nowSec: now))
-        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 300, duration: 15), nowSec: now))
-        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 301, duration: 15), nowSec: now))
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 9), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 10), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 13), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_200, duration: 10), nowSec: now))
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_201, duration: 10), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 300, duration: 10), nowSec: now))
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 301, duration: 10), nowSec: now))
     }
 
     func testAutomaticActivitySetterCannotRestoreRetiredAutoSaveMode() {

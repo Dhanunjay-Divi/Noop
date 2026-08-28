@@ -93,13 +93,14 @@ internal object AutoWorkoutAutomationPolicy {
 
 /**
  * A completed background offload can contain old or borderline HR-only candidates. Keep those available
- * on Today, but interrupt only for a recent, longer candidate backed by motion/activity evidence.
+ * on Today, but interrupt only for a recent detector-qualified candidate backed by motion/activity evidence.
  * HR-only candidates never create a lock-screen claim. Byte-parity twin of Swift policy.
  */
 internal object AutoWorkoutBackgroundPolicy {
     const val maximumCandidateAgeSeconds = 2 * 60 * 60L
     const val futureToleranceSeconds = 5 * 60L
-    const val minimumCorroboratedMinutes = 15
+    /** Match the detector's ten-minute floor once independent wrist motion corroborates the candidate. */
+    const val minimumCorroboratedMinutes = 10
 
     fun shouldProcess(
         candidate: AutoWorkoutDetector.DetectedWorkout,

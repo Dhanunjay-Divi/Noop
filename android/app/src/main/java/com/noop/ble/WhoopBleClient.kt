@@ -1147,6 +1147,12 @@ class WhoopBleClient(
         fun shouldApplyChargingFromBatteryEvent(replayedOffload: Boolean): Boolean = !replayedOffload
 
         /**
+         * A live strap event is a rate-limited catch-up hint, matching Swift FrameRouter.onSyncTrigger.
+         * Replayed historical events must never recursively start another history pull.
+         */
+        fun shouldRequestSyncForEvent(replayedOffload: Boolean): Boolean = !replayedOffload
+
+        /**
          * PR #577: is this EVENT string a PHYSICAL GESTURE (double-tap / wrist on/off)? Gestures take the
          * freshness-gated gesture branch; everything else (BLE_BONDED, BATTERY_LEVEL, and crucially
          * STRAP_DRIVEN_ALARM_EXECUTED=57) takes the non-gesture branch. Pure so the routing can be tested
@@ -5226,6 +5232,12 @@ class WhoopBleClient(
 
             "EVENT" -> {
                 (parsed.parsed["event"] as? String)?.let { ev ->
+                    // Strap-as-clock: a live event can mean fresh banked data is ready. Route it through
+                    // the existing 90-second/backoff/clock-aware policy; historical replay stays inert.
+                    // Queue the pull so this event finishes routing before beginBackfill can change state.
+                    if (shouldRequestSyncForEvent(replayedOffload)) {
+                        handler.post { requestSync(BackfillTrigger.STRAP) }
+                    }
                     // Event strings are "NAME(rawValue)", e.g. "WRIST_ON(9)" (see Schema.enumName).
                     // Pure [isGestureEvent] so the gesture-vs-non-gesture routing is unit-testable (PR #577).
                     val isGesture = isGestureEvent(ev)

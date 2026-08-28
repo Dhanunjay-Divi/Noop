@@ -83,17 +83,22 @@ class AutoWorkoutSuggestionPolicyTest {
     }
 
     @Test
-    fun motionCorroboration_allowsARecentFifteenMinuteCandidate() {
+    fun motionCorroboration_allowsARecentTenMinuteCandidate() {
         val now = 1_700_010_000L
         val corroborated = AutoWorkoutDetector.DetectedWorkout(
-            startSec = now - 25 * 60,
+            startSec = now - 20 * 60,
             endSec = now - 10 * 60,
             avgBpm = 100,
             peakBpm = 115,
-            durationMin = 15,
+            durationMin = 10,
             evidenceProvenance = AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION,
         )
         assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(corroborated, now))
+        assertEquals(
+            AutoWorkoutDetector.minSustainedMin,
+            AutoWorkoutBackgroundPolicy.minimumCorroboratedMinutes.toDouble(),
+            0.0,
+        )
     }
 
     @Test
@@ -111,12 +116,13 @@ class AutoWorkoutSuggestionPolicyTest {
             )
         }
 
-        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 14), now))
-        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 15), now))
-        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_200, 15), now))
-        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_201, 15), now))
-        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(300, 15), now))
-        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(301, 15), now))
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 9), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 10), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 13), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_200, 10), now))
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_201, 10), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(300, 10), now))
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(301, 10), now))
     }
 
     @Test

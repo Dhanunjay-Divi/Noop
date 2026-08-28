@@ -15,6 +15,11 @@ import org.junit.Test
  */
 class StrapEventRoutingTest {
 
+    @Test fun onlyLiveEventsRequestAnExpeditedHistorySync() {
+        assertTrue(WhoopBleClient.shouldRequestSyncForEvent(replayedOffload = false))
+        assertFalse(WhoopBleClient.shouldRequestSyncForEvent(replayedOffload = true))
+    }
+
     // The crux of the bug: event 57 is NOT a gesture, so it MUST take the non-gesture branch (where the
     // alarm dispatch now lives). If this were ever true, the case would land in the gesture `when` and be
     // swallowed again.

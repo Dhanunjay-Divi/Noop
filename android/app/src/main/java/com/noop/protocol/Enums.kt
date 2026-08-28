@@ -57,7 +57,10 @@ enum class EventNumber(val rawValue: Int) {
     BLE_REALTIME_HR_OFF(34),
     STRAP_DRIVEN_ALARM_EXECUTED(57),
     APP_DRIVEN_ALARM_EXECUTED(58),
-    HAPTICS_FIRED(60);
+    HAPTICS_FIRED(60),
+    HIGH_FREQ_SYNC_PROMPT(96),
+    HIGH_FREQ_SYNC_ENABLED(97),
+    HIGH_FREQ_SYNC_DISABLED(98);
 
     companion object {
         private val byRaw = entries.associateBy { it.rawValue }

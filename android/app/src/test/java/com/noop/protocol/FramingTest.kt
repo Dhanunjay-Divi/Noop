@@ -388,6 +388,7 @@ class FramingTest {
     fun enums_fromRawRoundTrip() {
         assertEquals(PacketType.REALTIME_DATA, PacketType.fromRaw(40))
         assertEquals(EventNumber.BATTERY_LEVEL, EventNumber.fromRaw(3))
+        assertEquals(EventNumber.HIGH_FREQ_SYNC_PROMPT, EventNumber.fromRaw(96))
         assertEquals(MetadataType.HISTORY_END, MetadataType.fromRaw(2))
         assertEquals(CommandNumber.RUN_HAPTICS_PATTERN, CommandNumber.fromRaw(79))
         // #769: STOP_HAPTICS is cmd 122, the documented WHOOP 4.0 clear the Breathe teardown fires.
