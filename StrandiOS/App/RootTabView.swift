@@ -752,7 +752,8 @@ struct RootTabView: View {
                 moreSection("App") {
                     // Manual personal-safety tools live above utility/settings rows so they are easy to
                     // find without masquerading as a health metric or an automatic emergency service.
-                    MoreRow("Safety", "shield.lefthalf.filled", .safety)
+                    MoreRow("Safety", "shield.fill", .safety,
+                            iconTint: StrandPalette.statusCritical)
                     // #805/#811: keep the unified Sleep Planner reachable on iPhone as well as in the
                     // macOS/iPad sidebar. It routes to SmartAlarmView, the shared planning/alarm surface.
                     //
@@ -1163,6 +1164,8 @@ private enum MoreDestination: Hashable {
     static func demo(named rawName: String) -> Self? {
         switch rawName.lowercased() {
         case "calendar", "month": return .calendar
+        case "insightshub", "insights_hub": return .insightsHub
+        case "intelligence": return .intelligence
         case "coach": return .coach
         case "profile": return .profile
         case "friends": return .friends
@@ -1171,13 +1174,27 @@ private enum MoreDestination: Hashable {
         case "workouts": return .workouts
         case "nutrition": return .nutrition
         case "health": return .health
+        case "labbook", "lab_book": return .labBook
+        case "stress": return .stress
+        case "breathe": return .breathe
+        case "intervals": return .intervals
+        case "rhythm": return .rhythm
+        case "fusedrecord", "fused_record": return .fusedRecord
+        case "applehealth", "apple_health": return .appleHealth
+        case "miband", "mi_band": return .miBand
+        case "datasources", "data_sources": return .dataSources
+        case "backupsync", "backup_sync": return .backupSync
+        case "shortcutsexport", "shortcuts_export": return .shortcutsExport
         case "insights": return .insights
         case "explore": return .explore
         case "compare": return .compare
-        case "settings": return .settings
-        case "widgets": return .widgets
         case "safety": return .safety
         case "alarms", "sleepplanner": return .alarms
+        case "automations": return .automations
+        case "widgets": return .widgets
+        case "testcentre", "test_centre": return .testCentre
+        case "sirishortcuts", "siri_shortcuts": return .siriShortcuts
+        case "settings": return .settings
         default: return nil
         }
     }
@@ -1191,10 +1208,12 @@ private struct MoreQuickAccessLabel: View {
 
     var body: some View {
         HStack(spacing: 11) {
-            Image(systemName: item.systemImage)
-                .symbolRenderingMode(.monochrome)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(StrandPalette.textPrimary)
+                    Image(systemName: item.systemImage)
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(item.id == "safety"
+                                         ? StrandPalette.statusCritical
+                                         : StrandPalette.textPrimary)
                 .frame(width: 34, height: 34)
                 .background(StrandPalette.surfaceInset.opacity(0.86),
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -1226,9 +1245,14 @@ private struct MoreRow: View {
     let title: LocalizedStringKey
     let icon: String
     let route: MoreDestination
+    let iconTint: Color
 
-    init(_ title: LocalizedStringKey, _ icon: String, _ route: MoreDestination) {
-        self.title = title; self.icon = icon; self.route = route
+    init(_ title: LocalizedStringKey, _ icon: String, _ route: MoreDestination,
+         iconTint: Color = StrandPalette.textPrimary) {
+        self.title = title
+        self.icon = icon
+        self.route = route
+        self.iconTint = iconTint
     }
 
     var body: some View {
@@ -1246,7 +1270,7 @@ private struct MoreRow: View {
                     Image(systemName: icon)
                         .symbolRenderingMode(.monochrome)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(StrandPalette.textPrimary)
+                        .foregroundStyle(iconTint)
                 }
                 .frame(width: 32, height: 32)
                 .overlay(

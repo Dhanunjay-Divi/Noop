@@ -32,14 +32,18 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -47,6 +51,7 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Hexagon
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -61,9 +66,13 @@ import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -131,6 +140,7 @@ private enum class Destination(
     Today("today", R.string.nav_today, Icons.Filled.Home),
     Intelligence("intelligence", R.string.nav_intelligence, Icons.Filled.Psychology),
     Calendar("calendar", R.string.appwide_calendar_your_month, Icons.Filled.CalendarMonth),
+    Profile("profile", R.string.l10n_settings_screen_profile_ff4fc027, Icons.Filled.AccountCircle),
     // Optional, default-OFF (task #43): the Coupled view (WHOOP-style day read). Reached ONLY via the
     // Today dashboard "Coupled view" card tap-through, so it is deliberately NOT in any [DrawerGroup].
     CoupledView("coupled_view", R.string.nav_coupled_view, Icons.Filled.Hexagon),
@@ -173,7 +183,7 @@ private enum class Destination(
     // Route id stays "smart_alarm" (display string only).
     SmartAlarm("smart_alarm", R.string.nav_alarms, Icons.Filled.Alarm),
     Safety("safety", R.string.nav_safety, Icons.Filled.Shield),
-    Devices("devices", R.string.nav_devices, Icons.Filled.Sensors),
+    Devices("devices", R.string.nav_devices, Icons.Filled.Watch),
     DataSources("data_sources", R.string.nav_data_sources, Icons.Filled.Storage),
     BackupSync("backup_sync", R.string.nav_backup_sync, Icons.Filled.CloudSync),
     FusedRecord("fused_record", R.string.nav_fused_record, Icons.AutoMirrored.Filled.CompareArrows),
@@ -214,20 +224,21 @@ private data class DrawerGroup(
 // Notifications, Devices) are slotted into the matching iOS group.
 private val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Insights", R.string.more_group_insights, listOf(
-        Destination.InsightsHub, Destination.Intelligence, Destination.Coach,
+        Destination.Calendar, Destination.InsightsHub, Destination.Intelligence, Destination.Coach,
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Friends, Destination.Nutrition, Destination.Health, Destination.VitalSigns,
+        Destination.Profile, Destination.Friends, Destination.Devices, Destination.Live, Destination.Nutrition,
+        Destination.Health, Destination.VitalSigns,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
         Destination.Rhythm,
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
-        Destination.BackupSync, Destination.Devices,
+        Destination.BackupSync,
     ), defaultExpanded = false),
     DrawerGroup("App", R.string.more_group_app, listOf(
-        Destination.Automations, Destination.SmartAlarm, Destination.Notifications,
+        Destination.Safety, Destination.SmartAlarm, Destination.Automations, Destination.Notifications,
         Destination.TestCentre, Destination.Settings,
     ), defaultExpanded = false),
 )
@@ -275,8 +286,17 @@ internal object MoreSectionPrefs {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppRoot(viewModel: AppViewModel = viewModel()) {
+fun AppRoot(
+    viewModel: AppViewModel = viewModel(),
+    initialRoute: String? = null,
+) {
     val nav = rememberNavController()
+    val startRoute = remember(initialRoute) {
+        val requested = initialRoute?.trim()?.lowercase()
+        Destination.entries.firstOrNull { destination ->
+            destination.route == requested && !destination.route.contains('{')
+        }?.route ?: Destination.Today.route
+    }
 
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
@@ -317,7 +337,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         ) { inner ->
             NavHost(
                 navController = nav,
-                startDestination = Destination.Today.route,
+                startDestination = startRoute,
                 modifier = Modifier.padding(inner),
                 // README motion: top-level destinations crossfade (~240ms) on the calm,
                 // decelerating global easing — nothing slides or bounces between tabs. The
@@ -369,10 +389,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.Calendar.route) {
-                    CalendarMonthScreen(
-                        vm = viewModel,
-                        onBack = { nav.popBackStack() },
-                    )
+                    CalendarMonthScreen(vm = viewModel)
                 }
                 composable(Destination.Live.route) {
                     LiveScreen(
@@ -381,10 +398,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.Sleep.route) {
-                    SleepScreen(
-                        vm = viewModel,
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
-                    )
+                    SleepScreen(vm = viewModel)
                 }
                 composable(Destination.CoupledView.route) {
                     CoupledScreen(
@@ -456,6 +470,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     DevicesScreen(
                         viewModel,
                         onUseFileImport = { nav.navigateTopLevel(Destination.DataSources.route) },
+                    )
+                }
+                composable(Destination.Profile.route) {
+                    SettingsScreen(
+                        viewModel,
+                        profileEntry = true,
                     )
                 }
                 composable(Destination.DataSources.route) { DataSourcesScreen(viewModel) }
@@ -603,47 +623,12 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
     ScreenScaffold(
         title = uiString(R.string.l10n_app_root_more_4bab2d8f),
         subtitle = "Everything else, one tap away",
+        trailing = { MoreAppearanceMenu() },
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down.
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
-        // Safety is an immediate launch card above every collapsible group. Keeping it outside the
-        // default-collapsed App group makes the manual help/check-in surface discoverable under stress.
-        NoopCard(
-            modifier = Modifier.clickable { onNavigate(Destination.Safety.route) },
-            tint = Palette.statusCritical,
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Filled.Shield,
-                    contentDescription = null,
-                    tint = Palette.statusCritical,
-                    modifier = Modifier.size(22.dp),
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        stringResource(Destination.Safety.titleRes),
-                        style = NoopType.headline,
-                        color = Palette.textPrimary,
-                    )
-                    Text(
-                        stringResource(R.string.safety_more_subtitle),
-                        style = NoopType.footnote,
-                        color = Palette.textSecondary,
-                    )
-                }
-                Icon(
-                    Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = Palette.textTertiary,
-                    modifier = Modifier.size(Metrics.iconSmall),
-                )
-            }
-        }
+        MoreQuickAccess(onNavigate = onNavigate)
 
         // Mirror the iOS More page: each group is a tappable UPPERCASE overline header (with a disclosure
         // chevron) over a single grouped white NoopCard whose rows are tight (accent icon + title +
@@ -675,6 +660,142 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoreAppearanceMenu() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val selected = AppearancePrefs.mode
+    val selectedLabel = stringResource(selected.labelRes)
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(Palette.surfaceRaised.copy(alpha = 0.82f))
+                .border(0.8.dp, Palette.hairlineStrong.copy(alpha = 0.78f), CircleShape)
+                .clickable { expanded = true }
+                .semantics {
+                    contentDescription = "App appearance"
+                    stateDescription = selectedLabel
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                when (selected) {
+                    AppearanceMode.SYSTEM -> Icons.Filled.Contrast
+                    AppearanceMode.LIGHT -> Icons.Filled.LightMode
+                    AppearanceMode.DARK -> Icons.Filled.DarkMode
+                    AppearanceMode.BLACK -> Icons.Outlined.Circle
+                },
+                contentDescription = null,
+                tint = Palette.textPrimary,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            AppearanceMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(mode.labelRes),
+                            color = if (mode == selected) Palette.accent else Palette.textPrimary,
+                        )
+                    },
+                    onClick = {
+                        AppearancePrefs.set(context, mode)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private data class MoreQuickAccessItem(
+    @StringRes val titleRes: Int,
+    val icon: ImageVector,
+    val route: String,
+    val critical: Boolean = false,
+)
+
+private val moreQuickAccessItems = listOf(
+    MoreQuickAccessItem(R.string.nav_safety, Icons.Filled.Shield, Destination.Safety.route, critical = true),
+    MoreQuickAccessItem(
+        R.string.l10n_settings_screen_profile_ff4fc027,
+        Icons.Filled.AccountCircle,
+        Destination.Profile.route,
+    ),
+    MoreQuickAccessItem(R.string.nav_devices, Icons.Filled.Watch, Destination.Devices.route),
+    MoreQuickAccessItem(R.string.nav_friends, Icons.Filled.People, Destination.Friends.route),
+)
+
+/** Same two-column shortcut rail as iOS More. Safety is the only status-colored shortcut on either
+ * platform; every other icon remains neutral navigation chrome. */
+@Composable
+private fun MoreQuickAccess(onNavigate: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Overline("Quick Access", modifier = Modifier.weight(1f), color = Palette.textSecondary)
+            Text("Everyday tools", style = NoopType.caption, color = Palette.textTertiary)
+        }
+        moreQuickAccessItems.chunked(2).forEach { pair ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                pair.forEach { item ->
+                    val title = stringResource(item.titleRes)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Palette.surfaceRaised.copy(alpha = 0.92f))
+                            .border(
+                                0.8.dp,
+                                Palette.hairlineStrong.copy(alpha = 0.8f),
+                                RoundedCornerShape(16.dp),
+                            )
+                            .clickable { onNavigate(item.route) }
+                            .padding(horizontal = 13.dp)
+                            .semantics {
+                                contentDescription = title
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(11.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Palette.surfaceInset.copy(alpha = 0.86f))
+                                .border(0.8.dp, Palette.hairline, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                item.icon,
+                                contentDescription = null,
+                                tint = if (item.critical) Palette.statusCritical else Palette.textPrimary,
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
+                        Text(
+                            title,
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
@@ -727,7 +848,21 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(dest.icon, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Palette.surfaceInset.copy(alpha = 0.86f))
+                .border(0.8.dp, Palette.hairline, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                dest.icon,
+                contentDescription = null,
+                tint = if (dest == Destination.Safety) Palette.statusCritical else Palette.textPrimary,
+                modifier = Modifier.size(17.dp),
+            )
+        }
         Spacer(Modifier.width(14.dp))
         Text(stringResource(dest.titleRes), style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
         Icon(
@@ -754,10 +889,10 @@ private val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
     // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
     BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
-    BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts),
+    BarTab(Destination.Workouts, Icons.AutoMirrored.Filled.DirectionsRun, R.string.nav_workouts),
 )
 private val barTrailingTabs = listOf(
-    BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
+    BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
 )
 
 @Composable
@@ -875,7 +1010,7 @@ private fun FloatingQuickAddButton(onClick: () -> Unit) {
 }
 
 /** One nav slot: an icon over a small label. Active = gold accent (semibold), inactive = textSecondary.
- *  No selection pill, no glow — just the colour swap, matching the iOS bar. */
+ *  The selected capsule and green ink mirror iOS's expanded FloatingTabBar. */
 @Composable
 private fun BarSlot(
     icon: ImageVector,
@@ -885,11 +1020,27 @@ private fun BarSlot(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tint = if (active) Palette.accent else Palette.textSecondary
+    val tint = if (active) Palette.chargeColor else Palette.textSecondary
+    val shape = RoundedCornerShape(50)
     Column(
         modifier = modifier
             .testTag(testTag)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(shape)
+            .background(
+                if (active) Palette.textPrimary.copy(alpha = 0.15f) else Color.Transparent,
+                shape,
+            )
+            .then(
+                if (active) {
+                    Modifier.border(
+                        0.6.dp,
+                        Palette.textPrimary.copy(alpha = 0.11f),
+                        shape,
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

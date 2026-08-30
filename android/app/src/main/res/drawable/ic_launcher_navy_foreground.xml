@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Generated from the same AppIcon-Obsidian source used by iOS. -->
+<!-- Generated from the same AppIcon-Navy source used by iOS. -->
 <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
     android:antialias="true"
     android:dither="true"
     android:filter="true"
     android:gravity="fill"
-    android:src="@drawable/ic_launcher_obsidian_art" />
+    android:src="@drawable/ic_launcher_navy_art" />

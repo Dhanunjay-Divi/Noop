@@ -86,3 +86,26 @@ final class ProfileAgeInputConfirmationTests: XCTestCase {
         XCTAssertTrue(rows.isEmpty)
     }
 }
+
+final class FitnessAgePublicationStabilityTests: XCTestCase {
+    @MainActor
+    func testOrchestratorBoundsAChangedEstimateAgainstThePriorWeek() {
+        let days = (1...13).map { i in
+            DailyMetric(
+                day: String(format: "2026-08-%02d", i),
+                totalSleepMin: 420, efficiency: 0.9,
+                deepMin: 80, remMin: 100, lightMin: 240, disturbances: 1,
+                restingHr: 50, avgHrv: 70, recovery: 85, strain: 90,
+                exerciseCount: 1)
+        }
+        let rows = IntelligenceEngine.fitnessAgeRows(
+            gateDays: days, age: 40, sex: "male", waistCm: 0,
+            computedId: "test-noop", satKey: "2026-08-08",
+            previousPublishedAge: 40)
+
+        XCTAssertEqual(
+            rows.first(where: { $0.key == "fitness_age" })!.value,
+            39.75,
+            accuracy: 1e-9)
+    }
+}

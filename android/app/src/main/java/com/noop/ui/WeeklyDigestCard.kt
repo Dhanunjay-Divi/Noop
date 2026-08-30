@@ -2,12 +2,16 @@ package com.noop.ui
 
 import com.noop.R
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,12 +28,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.BalanceRead
@@ -114,7 +123,7 @@ fun WeeklyDigestCard(vm: AppViewModel, modifier: Modifier = Modifier) {
     val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
     val digest = buildWeeklyDigest(days, effortDisplayFactor = factor)
     if (digest.isEmpty) return
-    NoopCard(modifier = modifier) {
+    Box(modifier = modifier) {
         WeeklyDigestContent(digest = digest, compact = true)
     }
 }
@@ -135,7 +144,7 @@ fun WeeklyDigestScreen(vm: AppViewModel) {
                     "day or two of data, your week-in-review appears here.",
             )
         } else {
-            NoopCard { WeeklyDigestContent(digest = digest, compact = false) }
+            WeeklyDigestContent(digest = digest, compact = false)
         }
     }
 }
@@ -149,6 +158,20 @@ private val MONTHS = arrayOf(
 private val DISPLAY_ORDER = listOf(
     WeeklyMetric.CHARGE, WeeklyMetric.EFFORT, WeeklyMetric.REST, WeeklyMetric.HRV, WeeklyMetric.RHR,
 )
+private val SCORE_ORDER = listOf(WeeklyMetric.CHARGE, WeeklyMetric.EFFORT, WeeklyMetric.REST)
+
+private data class DigestDomain(
+    val color: Color,
+    val bright: Color,
+)
+
+private fun digestDomain(metric: WeeklyMetric): DigestDomain = when (metric) {
+    WeeklyMetric.CHARGE -> DigestDomain(Palette.chargeColor, Palette.chargeBright)
+    WeeklyMetric.EFFORT -> DigestDomain(Palette.effortColor, Palette.effortBright)
+    WeeklyMetric.REST -> DigestDomain(Palette.restColor, Palette.restBright)
+    WeeklyMetric.HRV -> DigestDomain(Palette.metricPurple, Palette.restBright)
+    WeeklyMetric.RHR -> DigestDomain(Palette.metricRose, Palette.metricAmber)
+}
 
 /**
  * The inner content shared by the card and the full screen. [compact] trims the metric
@@ -156,63 +179,257 @@ private val DISPLAY_ORDER = listOf(
  */
 @Composable
 fun WeeklyDigestContent(digest: WeeklyDigest, compact: Boolean = false) {
-    // #268/#463: the Effort row follows the Effort display-scale toggle like every other Effort
-    // read-out in the app (Swift's DigestScoreCard already does). Read once here, threaded to the
-    // rows, so a 0-21 user can't see "Effort 22" beside a Trends chart reading 4.6.
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // Header.
+    val scoreSummaries = SCORE_ORDER.mapNotNull(digest::summary)
+    val secondarySignals = if (compact) {
+        emptyList()
+    } else {
+        listOf(WeeklyMetric.HRV, WeeklyMetric.RHR).mapNotNull(digest::summary)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        DigestHeader(digest)
+        if (scoreSummaries.isNotEmpty()) {
+            DigestScoreRow(scoreSummaries, effortScale)
+        }
+        if (digest.focalPoints.isNotEmpty() || secondarySignals.isNotEmpty() || !compact) {
+            NoopCard {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    if (digest.focalPoints.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                            digest.focalPoints.forEach { FocalRow(it) }
+                        }
+                    }
+                    if (secondarySignals.isNotEmpty()) {
+                        if (digest.focalPoints.isNotEmpty()) {
+                            HorizontalDivider(color = Palette.hairline)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
+                            secondarySignals.forEach { MetricRow(it, effortScale) }
+                        }
+                    }
+                    if (!compact) {
+                        HorizontalDivider(color = Palette.hairline)
+                        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space6)) {
+                            digest.sleepConsistencySD?.let { sd ->
+                                Text(
+                                    uiString(
+                                        R.string.l10n_weekly_digest_card_sleep_steadiness_rest_varied_fmt1_sd_44997f21,
+                                        fmt1(sd),
+                                    ),
+                                    style = NoopType.footnote,
+                                    color = Palette.textTertiary,
+                                )
+                            }
+                            Text(
+                                digest.balance.sentence,
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                            Text(
+                                uiString(R.string.l10n_weekly_digest_card_informational_only_not_medical_advice_593feb77),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DigestHeader(digest: WeeklyDigest) {
+    NoopCard(padding = 0.dp, tint = Palette.chargeColor) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(104.dp)
+                .sceneHeroBackground(maxAlpha = 0.26f, fadeEndFraction = 0.96f)
+                .padding(Metrics.cardPadding),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+            ) {
+                Overline("Week in review")
+                Text(
+                    weekRangeLabel(digest),
+                    style = NoopType.title1,
+                    color = Palette.textPrimary,
+                )
+            }
+            Text(
+                uiString(
+                    R.string.l10n_weekly_digest_card_digest_dayswithdata_7_days_182e6a18,
+                    digest.daysWithData,
+                ),
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+                modifier = Modifier.semantics {
+                    contentDescription = uiString(
+                        R.string.l10n_weekly_digest_card_digest_dayswithdata_of_7_days_had_8068f0ee,
+                        digest.daysWithData,
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DigestScoreRow(
+    summaries: List<WeeklyMetricSummary>,
+    effortScale: EffortScale,
+) {
+    NoopCard(padding = Metrics.space8) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
         ) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Overline("Week in review")
-                Text(weekRangeLabel(digest), style = NoopType.title2, color = Palette.textPrimary)
-            }
-            Text(
-                uiString(R.string.l10n_weekly_digest_card_digest_dayswithdata_7_days_182e6a18, digest.daysWithData),
-                style = NoopType.footnote,
-                color = Palette.textSecondary,
-                modifier = Modifier.semantics {
-                    contentDescription = uiString(R.string.l10n_weekly_digest_card_digest_dayswithdata_of_7_days_had_8068f0ee, digest.daysWithData)
-                },
-            )
-        }
-
-        // Focal points — the plain-English read, most salient first.
-        if (digest.focalPoints.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                digest.focalPoints.forEach { FocalRow(it) }
-            }
-        }
-
-        HorizontalDivider(color = Palette.hairline)
-
-        // Per-metric rows.
-        val rows = (if (compact) listOf(WeeklyMetric.CHARGE, WeeklyMetric.EFFORT, WeeklyMetric.REST)
-        else DISPLAY_ORDER).mapNotNull { digest.summary(it) }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            rows.forEach { MetricRow(it, effortScale) }
-        }
-
-        if (!compact) {
-            HorizontalDivider(color = Palette.hairline)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                digest.sleepConsistencySD?.let { sd ->
-                    Text(
-                        uiString(R.string.l10n_weekly_digest_card_sleep_steadiness_rest_varied_fmt1_sd_44997f21, fmt1(sd)),
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
+            summaries.forEachIndexed { index, summary ->
+                DigestScoreColumn(
+                    summary = summary,
+                    effortScale = effortScale,
+                    modifier = Modifier.weight(1f),
+                )
+                if (index < summaries.lastIndex) {
+                    Box(
+                        Modifier
+                            .padding(vertical = Metrics.space12)
+                            .width(1.dp)
+                            .height(128.dp)
+                            .background(Palette.hairline),
                     )
                 }
-                Text(digest.balance.sentence, style = NoopType.footnote, color = Palette.textTertiary)
-                Text(
-                    uiString(R.string.l10n_weekly_digest_card_informational_only_not_medical_advice_593feb77),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
+            }
+        }
+    }
+}
+
+@Composable
+private fun DigestScoreColumn(
+    summary: WeeklyMetricSummary,
+    effortScale: EffortScale,
+    modifier: Modifier = Modifier,
+) {
+    val domain = digestDomain(summary.metric)
+    val hasValue = summary.thisWeek.n > 0
+    val value = summary.thisWeek.mean.coerceIn(0.0, 100.0)
+    val number = when {
+        !hasValue -> null
+        summary.metric == WeeklyMetric.EFFORT ->
+            UnitFormatter.effortDisplay(summary.thisWeek.mean, effortScale)
+        else -> summary.thisWeek.mean.roundToInt().toString()
+    }
+    val denominator = if (summary.metric == WeeklyMetric.EFFORT) {
+        UnitFormatter.effortScaleMax(effortScale)
+    } else {
+        100
+    }
+
+    Column(
+        modifier = modifier
+            .semantics(mergeDescendants = true) {
+                contentDescription = rowAccessibility(summary, effortScale)
+            }
+            .padding(horizontal = Metrics.space4),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Metrics.space6),
+    ) {
+        Text(
+            summary.metric.label.uppercase(),
+            style = NoopType.overline,
+            color = domain.color,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DigestGauge(
+            fraction = if (hasValue) value / 100.0 else 0.0,
+            color = domain.color,
+            tipColor = domain.bright,
+            number = number,
+        )
+        if (hasValue) {
+            Text(
+                "of $denominator",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                maxLines = 1,
+            )
+        }
+        if (hasComparison(summary)) {
+            DeltaChip(summary)
+        }
+    }
+}
+
+@Composable
+private fun DigestGauge(
+    fraction: Double,
+    color: Color,
+    tipColor: Color,
+    number: String?,
+) {
+    val startAngle = 140f
+    val totalSweep = 260f
+    val safeFraction = fraction.coerceIn(0.0, 1.0).toFloat()
+    Box(
+        modifier = Modifier.size(82.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 10.dp.toPx()
+            val radius = (size.minDimension - stroke) / 2f
+            val topLeft = Offset(center.x - radius, center.y - radius)
+            val arcSize = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f)
+            drawArc(
+                color = Palette.surfaceInset,
+                startAngle = startAngle,
+                sweepAngle = totalSweep,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            if (safeFraction > 0f) {
+                val sweep = totalSweep * safeFraction
+                drawArc(
+                    color = color,
+                    startAngle = startAngle,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                val radians = Math.toRadians((startAngle + sweep).toDouble())
+                drawCircle(
+                    color = tipColor,
+                    radius = 3.2.dp.toPx(),
+                    center = Offset(
+                        x = center.x + kotlin.math.cos(radians).toFloat() * radius,
+                        y = center.y + kotlin.math.sin(radians).toFloat() * radius,
+                    ),
                 )
             }
+            drawCircle(
+                color = Palette.hairline,
+                radius = radius - stroke * 0.72f,
+                style = Stroke(width = 1.dp.toPx()),
+            )
+        }
+        if (number != null) {
+            Text(
+                number,
+                style = NoopType.number(22f),
+                color = Palette.textPrimary,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -230,7 +447,12 @@ private fun FocalRow(line: String) {
             tint = Palette.accent,
             modifier = Modifier.size(16.dp),
         )
-        Text(line, style = NoopType.subhead, color = Palette.textPrimary)
+        Text(
+            line,
+            style = NoopType.subhead,
+            color = Palette.textPrimary,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -243,11 +465,16 @@ private fun MetricRow(s: WeeklyMetricSummary, effortScale: EffortScale) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .background(digestDomain(s.metric).color, RoundedCornerShape(50)),
+        )
         Text(
             s.metric.label,
             style = NoopType.subhead,
             color = Palette.textSecondary,
-            modifier = Modifier.width(92.dp),
+            modifier = Modifier.width(84.dp),
         )
         Text(
             meanText(s, effortScale),
@@ -278,9 +505,18 @@ private fun DeltaChip(s: WeeklyMetricSummary) {
             .clearAndSetSemantics { },
     ) {
         Icon(arrow, contentDescription = null, tint = tone, modifier = Modifier.size(10.dp))
-        Text(deltaText(s), style = NoopType.captionNumber, color = tone)
+        val sign = when {
+            !hasComparison(s) -> ""
+            s.wowDelta > 0 -> "+"
+            s.wowDelta < 0 -> "−"
+            else -> ""
+        }
+        Text("$sign${deltaText(s)}", style = NoopType.captionNumber, color = tone)
     }
 }
+
+private fun hasComparison(s: WeeklyMetricSummary): Boolean =
+    s.weekOverWeek.current.n > 0 && s.weekOverWeek.previous.n > 0
 
 // MARK: - Formatting
 

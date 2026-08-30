@@ -154,6 +154,8 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     var loaded by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(WorkoutRange.All) }
+    var customStartDate by remember { mutableStateOf(LocalDate.now().minusDays(29)) }
+    var customEndDate by remember { mutableStateOf(LocalDate.now()) }
     var showStrengthTrainer by remember { mutableStateOf(false) }
     var selectedOverviewDay by remember { mutableStateOf<LocalDate?>(null) }
     // Pick the default range ONCE on first non-empty load; later mutations must not fight a range the
@@ -215,27 +217,26 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // The same filtered projection feeds every section. Remember it across local UI changes (selection
     // mode, dialogs, note banners) so a years-deep workout history is not re-filtered/grouped on each
     // unrelated recomposition.
-    val resolvedRange = remember(allRows, range, filter) {
-        effectiveRange(allRows, range, filter)
-    }
-    val windowRows = remember(allRows, resolvedRange, filter) {
-        filter.apply(sessions(allRows, resolvedRange))
+    val resolvedRange = range
+    val windowRows = remember(allRows, range, customStartDate, customEndDate, filter) {
+        filter.apply(
+            sessions(
+                all = allRows,
+                range = range,
+                customStartDate = customStartDate,
+                customEndDate = customEndDate,
+            ),
+        )
     }
     val windowGroups = remember(windowRows) { sportGroups(windowRows) }
 
-    val recoveryRange = remember(resolvedRange) {
-        if (resolvedRange.days == null || resolvedRange.days > 90) {
-            WorkoutRange.Quarter
-        } else {
-            resolvedRange
-        }
+    val recoveryRows = remember(windowRows) {
+        latestWorkoutRows(windowRows, maximumDays = 90).sortedBy { it.startTs }
     }
-    val recoveryRows = remember(allRows, recoveryRange, filter) {
-        filter.apply(sessions(allRows, recoveryRange)).sortedBy { it.startTs }
-    }
-    val recoveryInputKey = remember(recoveryRange, recoveryRows) {
+    val recoveryInputKey = remember(range, customStartDate, customEndDate, recoveryRows) {
         buildString {
-            append(recoveryRange.name)
+            append(range.name)
+            append('|').append(customStartDate).append('|').append(customEndDate)
             recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
         }
     }
@@ -314,19 +315,21 @@ fun WorkoutsScreen(vm: AppViewModel) {
             }
             item { ActiveZoneSection(activeZoneWeek, activeZoneLoaded) }
         } else {
-            // #64: the pure WorkoutFilter narrows the window AFTER the range cut, so every section reads
-            // the remembered projection above instead of independently walking the history.
-            val fellBack = resolvedRange != range
-
             item {
             RangeBar(
                 range = range,
-                effectiveRange = resolvedRange,
                 rowCount = windowRows.size,
-                fellBack = fellBack,
                 filterActive = filter.isActive,
                 onSelect = { range = it },
                 onAdd = { dialog = DialogTarget(null) },
+                customStartDate = customStartDate,
+                customEndDate = customEndDate,
+                onCustomStartDate = {
+                    customStartDate = minOf(it, customEndDate)
+                },
+                onCustomEndDate = {
+                    customEndDate = maxOf(customStartDate, minOf(it, LocalDate.now()))
+                },
             )
             }
             item {
@@ -352,7 +355,12 @@ fun WorkoutsScreen(vm: AppViewModel) {
             item { BreakdownSection(groups = windowGroups, rows = windowRows) }
             item { ZonesSection(windowRows) }
             if (recoveryTrend.isNotEmpty()) {
-                item { RecoveryTrendSection(recoveryTrend, recoveryRange.localizedCaption()) }
+                item {
+                    RecoveryTrendSection(
+                        recoveryTrend,
+                        recoveryRangeCaption(range, customStartDate, customEndDate),
+                    )
+                }
             }
             item {
             SessionsSection(
@@ -1733,18 +1741,13 @@ private fun PostLogNoteBanner(text: String) {
  *  (in the range bar) and the empty state, so a user with no imports can still log a session. */
 @Composable
 private fun AddWorkoutButton(onAdd: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Palette.accentMuted)
-            .clickable(onClick = onAdd)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Icons.Filled.Add, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(uiString(R.string.l10n_workouts_screen_add_workout_a196a2cc), style = NoopType.subhead, color = Palette.accent)
-    }
+    NoopButton(
+        text = uiString(R.string.l10n_workouts_screen_add_workout_a196a2cc),
+        leadingIcon = Icons.Filled.Add,
+        kind = NoopButtonKind.Secondary,
+        fullWidth = true,
+        onClick = onAdd,
+    )
 }
 
 // MARK: - Range control
@@ -1752,15 +1755,17 @@ private fun AddWorkoutButton(onAdd: () -> Unit) {
 @Composable
 private fun RangeBar(
     range: WorkoutRange,
-    effectiveRange: WorkoutRange,
     rowCount: Int,
-    fellBack: Boolean,
     filterActive: Boolean,
     onSelect: (WorkoutRange) -> Unit,
     onAdd: () -> Unit,
+    customStartDate: LocalDate,
+    customEndDate: LocalDate,
+    onCustomStartDate: (LocalDate) -> Unit,
+    onCustomEndDate: (LocalDate) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Phone width can't fit the labelled Add button beside the 5-segment range pill without
+        // Phone width can't fit the labelled Add button beside the range pill without
         // crushing/clipping one — stack them (button, then pill), matching the iPhone fix (#234/#339).
         AddWorkoutButton(onAdd)
         SegmentedPillControl(
@@ -1768,20 +1773,141 @@ private fun RangeBar(
             selection = range,
             label = { it.label },
             onSelect = onSelect,
+            adaptsToAvailableWidth = true,
         )
+        if (range == WorkoutRange.Custom) {
+            CustomWorkoutRangePicker(
+                startDate = customStartDate,
+                endDate = customEndDate,
+                onStartDate = onCustomStartDate,
+                onEndDate = onCustomEndDate,
+            )
+        }
         val unit = if (rowCount == 1) "session" else "sessions"
         // #64: append "· filtered" when a sport/source/search filter narrows the list.
         val suffix = if (filterActive) " · filtered" else ""
-        val caption = if (fellBack) {
-            "$rowCount $unit · sparse, widened to ${effectiveRange.caption}$suffix"
+        val rangeCaption = if (range == WorkoutRange.Custom) {
+            formatWorkoutDateRange(customStartDate, customEndDate)
         } else {
-            "$rowCount $unit · ${effectiveRange.caption}$suffix"
+            range.caption
         }
+        val caption = "$rowCount $unit · $rangeCaption$suffix"
         Text(
             caption,
             style = NoopType.footnote,
-            color = if (fellBack) Palette.statusWarning else Palette.textTertiary,
+            color = Palette.textTertiary,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun CustomWorkoutRangePicker(
+    startDate: LocalDate,
+    endDate: LocalDate,
+    onStartDate: (LocalDate) -> Unit,
+    onEndDate: (LocalDate) -> Unit,
+) {
+    val context = LocalContext.current
+    val locale = Locale.getDefault()
+
+    fun openPicker(
+        initial: LocalDate,
+        minimum: LocalDate?,
+        maximum: LocalDate,
+        onPicked: (LocalDate) -> Unit,
+    ) {
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                onPicked(LocalDate.of(year, month + 1, day))
+            },
+            initial.year,
+            initial.monthValue - 1,
+            initial.dayOfMonth,
+        ).apply {
+            datePicker.maxDate = maximum
+                .plusDays(1)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli() - 1
+            minimum?.let {
+                datePicker.minDate = it
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+            }
+        }.show()
+    }
+
+    NoopCard(tint = Palette.effortColor, padding = Metrics.space12) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+            Overline("Custom dates")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
+                WorkoutDateButton(
+                    label = "From",
+                    date = startDate,
+                    locale = locale,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    openPicker(
+                        initial = startDate,
+                        minimum = null,
+                        maximum = endDate,
+                        onPicked = onStartDate,
+                    )
+                }
+                WorkoutDateButton(
+                    label = "To",
+                    date = endDate,
+                    locale = locale,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    openPicker(
+                        initial = endDate,
+                        minimum = startDate,
+                        maximum = LocalDate.now(),
+                        onPicked = onEndDate,
+                    )
+                }
+            }
+            Text(
+                formatWorkoutDateRange(startDate, endDate, locale),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkoutDateButton(
+    label: String,
+    date: LocalDate,
+    locale: Locale,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(Palette.surfaceInset)
+            .border(1.dp, Palette.hairline, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Metrics.space12, vertical = Metrics.space8),
+        verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+    ) {
+        Text(label, style = NoopType.caption, color = Palette.textTertiary)
+        Text(
+            date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)),
+            style = NoopType.subhead,
+            color = Palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -3400,48 +3526,123 @@ private enum class WorkoutRange(val label: String, val caption: String, val days
     Quarter("90D", "last 90 days", 90, "quarter"),
     Year("1Y", "last year", 365, "year"),
     All("All", "all time", null, "log"),
+    Custom("Custom", "custom dates", null, "range"),
 }
 
-/** The HRR card must not interpolate the range enum's legacy English-only caption into localized copy. */
-private fun WorkoutRange.localizedCaption(): String = when (this) {
-    WorkoutRange.Week -> uiString(R.string.l10n_workouts_screen_hrr_last_7_days_516)
-    WorkoutRange.Month -> uiString(R.string.l10n_workouts_screen_hrr_last_30_days_516)
-    WorkoutRange.Quarter, WorkoutRange.Year, WorkoutRange.All ->
-        uiString(R.string.l10n_workouts_screen_hrr_last_90_days_516)
-}
-
-/** This range plus every larger range, ascending — the auto-expand search order. */
-private fun WorkoutRange.widening(): List<WorkoutRange> {
-    val order = WorkoutRange.entries
-    val i = order.indexOf(this)
-    return if (i < 0) listOf(WorkoutRange.All) else order.subList(i, order.size)
-}
-
-/** Sessions inside a range, RELATIVE TO THE LATEST session. `All` = everything. */
-private fun sessions(all: List<WorkoutRow>, r: WorkoutRange): List<WorkoutRow> {
-    val days = r.days ?: return all
-    val last = all.maxOfOrNull { it.startTs } ?: return emptyList()
-    val cutoff = last - days * 86_400L
-    return all.filter { it.startTs >= cutoff }
-}
-
-/** The range actually shown: the selected range if it holds ≥1 session (after the active #64 filter),
- *  else the smallest larger range that does — so only an empty window widens. */
-private fun effectiveRange(all: List<WorkoutRow>, selected: WorkoutRange, filter: WorkoutFilter = WorkoutFilter()): WorkoutRange {
-    if (all.isEmpty()) return selected
-    for (r in selected.widening()) {
-        if (filter.apply(sessions(all, r)).isNotEmpty()) return r
+internal data class WorkoutDateWindow(
+    val lowerBound: Long,
+    val upperBound: Long,
+) {
+    fun intersects(row: WorkoutRow): Boolean {
+        val effectiveEnd = if (row.endTs > row.startTs) row.endTs else row.startTs + 1
+        return row.startTs < upperBound && effectiveEnd > lowerBound
     }
-    return WorkoutRange.All
+
+    fun filter(rows: List<WorkoutRow>): List<WorkoutRow> = rows.filter(::intersects)
+
+    companion object {
+        fun trailingCalendarDays(
+            count: Int,
+            endingOn: LocalDate = LocalDate.now(),
+            zoneId: ZoneId = ZoneId.systemDefault(),
+        ): WorkoutDateWindow {
+            val safeCount = count.coerceAtLeast(1)
+            val firstDay = endingOn.minusDays((safeCount - 1).toLong())
+            return WorkoutDateWindow(
+                lowerBound = firstDay.atStartOfDay(zoneId).toEpochSecond(),
+                upperBound = endingOn.plusDays(1).atStartOfDay(zoneId).toEpochSecond(),
+            )
+        }
+
+        fun custom(
+            first: LocalDate,
+            second: LocalDate,
+            zoneId: ZoneId = ZoneId.systemDefault(),
+        ): WorkoutDateWindow {
+            val start = minOf(first, second)
+            val end = maxOf(first, second)
+            return WorkoutDateWindow(
+                lowerBound = start.atStartOfDay(zoneId).toEpochSecond(),
+                upperBound = end.plusDays(1).atStartOfDay(zoneId).toEpochSecond(),
+            )
+        }
+    }
+}
+
+/** Exact, today-anchored calendar windows matching iOS. Custom dates are inclusive. */
+private fun sessions(
+    all: List<WorkoutRow>,
+    range: WorkoutRange,
+    customStartDate: LocalDate,
+    customEndDate: LocalDate,
+    today: LocalDate = LocalDate.now(),
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): List<WorkoutRow> {
+    val window = when (range) {
+        WorkoutRange.Week -> WorkoutDateWindow.trailingCalendarDays(7, today, zoneId)
+        WorkoutRange.Month -> WorkoutDateWindow.trailingCalendarDays(30, today, zoneId)
+        WorkoutRange.Quarter -> WorkoutDateWindow.trailingCalendarDays(90, today, zoneId)
+        WorkoutRange.Year -> WorkoutDateWindow.trailingCalendarDays(365, today, zoneId)
+        WorkoutRange.Custom -> WorkoutDateWindow.custom(customStartDate, customEndDate, zoneId)
+        WorkoutRange.All -> null
+    }
+    return window?.filter(all) ?: all
+}
+
+private fun latestWorkoutRows(
+    rows: List<WorkoutRow>,
+    maximumDays: Int,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): List<WorkoutRow> {
+    val newestDay = rows.maxOfOrNull { row ->
+        Instant.ofEpochSecond(row.startTs).atZone(zoneId).toLocalDate()
+    } ?: return emptyList()
+    return WorkoutDateWindow.trailingCalendarDays(maximumDays, newestDay, zoneId).filter(rows)
+}
+
+private fun recoveryRangeCaption(
+    range: WorkoutRange,
+    customStartDate: LocalDate,
+    customEndDate: LocalDate,
+): String {
+    val display = if (range == WorkoutRange.Custom) {
+        formatWorkoutDateRange(customStartDate, customEndDate)
+    } else {
+        range.caption
+    }
+    val customDayCount = kotlin.math.abs(customEndDate.toEpochDay() - customStartDate.toEpochDay()) + 1
+    return when {
+        range == WorkoutRange.All || range == WorkoutRange.Year ->
+            "latest 90 days within $display"
+        range == WorkoutRange.Custom && customDayCount > 90 ->
+            "latest 90 days within $display"
+        else -> display
+    }
+}
+
+private fun formatWorkoutDateRange(
+    first: LocalDate,
+    second: LocalDate,
+    locale: Locale = Locale.getDefault(),
+): String {
+    val start = minOf(first, second)
+    val end = maxOf(first, second)
+    val formatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)
+    return if (start == end) start.format(formatter) else "${start.format(formatter)} – ${end.format(formatter)}"
 }
 
 /** Pick the tightest range that still holds ≥2 sessions; otherwise show All. */
 private fun defaultRange(source: List<WorkoutRow>): WorkoutRange {
-    val last = source.maxOfOrNull { it.startTs } ?: return WorkoutRange.All
-    for (r in WorkoutRange.entries) {
-        val days = r.days ?: continue
-        val cutoff = last - days * 86_400L
-        if (source.count { it.startTs >= cutoff } >= 2) return r
+    if (source.isEmpty()) return WorkoutRange.All
+    val today = LocalDate.now()
+    val customStart = today.minusDays(29)
+    for (range in listOf(
+        WorkoutRange.Week,
+        WorkoutRange.Month,
+        WorkoutRange.Quarter,
+        WorkoutRange.Year,
+    )) {
+        if (sessions(source, range, customStart, today).size >= 2) return range
     }
     return WorkoutRange.All
 }

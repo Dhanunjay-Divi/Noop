@@ -577,6 +577,7 @@ fun SettingsScreen(
     vm: AppViewModel,
     onOpenTestCentre: () -> Unit = {},
     onOpenBackupSync: () -> Unit = {},
+    profileEntry: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -735,9 +736,9 @@ fun SettingsScreen(
     // Display-only; the stored value never changes. Mirrors into local state like the toggles above.
     var effortScale by remember { mutableStateOf(UnitPrefs.effortScale(context)) }
 
-    // App icon (v3 "Titanium & Gold") - machined-titanium (.IconDefault) or blued-titanium (.IconNavy).
-    // SharedPreferences isn't reactive, so the segmented control drives this local mirror; flipping it
-    // enables exactly one launcher alias via PackageManager (see setAppIcon below).
+    // App icon parity with iOS: Obsidian (.IconDefault) or legacy navy (.IconNavy). SharedPreferences
+    // isn't reactive, so the segmented control drives this local mirror; flipping it enables exactly
+    // one launcher alias via PackageManager (see setAppIcon below).
     var appIconNavy by remember { mutableStateOf(NoopPrefs.appIconNavy(context)) }
 
     // Theme (System / Light / Dark / Black) — drives NoopTheme; AppearancePrefs mirrors it in snapshot state.
@@ -988,8 +989,18 @@ fun SettingsScreen(
     }
 
     ScreenScaffold(
-        title = uiString(R.string.l10n_settings_screen_settings_c7f73bb5),
-        subtitle = "Your numbers, Noop Band, and how NOOP works. All on this phone.",
+        title = uiString(
+            if (profileEntry) {
+                R.string.l10n_settings_screen_profile_ff4fc027
+            } else {
+                R.string.l10n_settings_screen_settings_c7f73bb5
+            },
+        ),
+        subtitle = if (profileEntry) {
+            "Your profile and body metrics, stored on this phone."
+        } else {
+            "Your numbers, Noop Band, and how NOOP works. All on this phone."
+        },
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the static time-of-day sky settles
         // into the theme canvas behind the top of the list, exactly like the liquid Today. This is a long,
         // scroll-heavy list with NO hero gauge, so the liquid finish here is just the sky + liquidPress on
@@ -1653,8 +1664,8 @@ fun SettingsScreen(
             }
         }
 
-        // --- App icon (v3 "Titanium & Gold") ---
-        // Two staged launcher icons — machined titanium (default) and blued/dark-blue titanium. The
+        // --- App icon ---
+        // The same Obsidian primary and legacy navy alternate artwork shipped on iOS. The
         // swap is done by enabling exactly one <activity-alias> (.IconDefault / .IconNavy) at runtime;
         // the launcher may take a beat (or briefly disappear/redraw) while it re-reads the icon.
         SettingsSection(
@@ -1666,7 +1677,7 @@ fun SettingsScreen(
                 SegmentedPillControl(
                     items = listOf(false, true),
                     selection = appIconNavy,
-                    label = { if (it) "Blue Titanium" else "Titanium" },
+                    label = { if (it) "Legacy navy" else "Obsidian" },
                     onSelect = { navy ->
                         appIconNavy = navy
                         setAppIcon(context, navy)
@@ -3594,14 +3605,14 @@ private fun CycleTrackingSetupDialog(
 
 private const val SUPPORT_URL = "https://github.com/Dhanunjay-Divi/Noop/issues"
 
-// MARK: - App icon swap (v3 "Titanium & Gold")
+// MARK: - App icon swap
 
 /**
  * The two launcher-icon aliases declared in AndroidManifest.xml. Exactly one is ever enabled — the
  * enabled one is the app's home-screen entry point and supplies the launcher icon.
  */
-private const val ALIAS_DEFAULT = "com.noop.IconDefault" // machined titanium
-private const val ALIAS_NAVY = "com.noop.IconNavy"       // blued / dark-blue titanium
+private const val ALIAS_DEFAULT = "com.noop.IconDefault" // Obsidian
+private const val ALIAS_NAVY = "com.noop.IconNavy"       // legacy navy
 
 /**
  * Persist the chosen launcher icon and flip the manifest aliases so exactly one is enabled:

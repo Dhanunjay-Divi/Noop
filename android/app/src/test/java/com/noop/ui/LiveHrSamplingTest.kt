@@ -1,6 +1,8 @@
 package com.noop.ui
 
+import com.noop.ble.LiveState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -88,5 +90,22 @@ class LiveHrSamplingTest {
         assertEquals(180, history.size)
         // The oldest 20 ticks fell off the front.
         assertEquals(20_000L, history.first().timeMs)
+    }
+
+    // ── explicit-session freshness ─────────────────────────────────────────────
+
+    @Test fun cachedReadingNeverQualifiesBeforeStart() {
+        val live = LiveState(heartRate = 72, heartRateSampleSequence = 41L)
+        assertNull(sessionLiveDisplayHr(false, null, bpm = 72, live = live))
+    }
+
+    @Test fun startSequenceItselfIsStillCached() {
+        val live = LiveState(heartRate = 72, heartRateSampleSequence = 41L)
+        assertNull(sessionLiveDisplayHr(true, 41L, bpm = 72, live = live))
+    }
+
+    @Test fun newerPacketUnlocksLiveDisplayEvenWhenBpmRepeats() {
+        val live = LiveState(heartRate = 72, heartRateSampleSequence = 42L)
+        assertEquals(72, sessionLiveDisplayHr(true, 41L, bpm = 72, live = live))
     }
 }

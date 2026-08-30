@@ -182,24 +182,10 @@ fun TrendsScreen(vm: AppViewModel) {
             }
         }
 
-        // --- Week in review , the Charge / Effort / Rest trio in NOOP's pip language (PipBar +
-        // CountUpText), mirroring the iOS TrendsView.weekInReview card. White count-up numbers over
-        // segmented count-up bars; self-hides when none of the three carry a window mean. ---
-        item {
-            WeekInReviewCard(
-                charge = recovery,
-                effort = strain,
-                rest = rest,
-                selectedRange = range,
-                effortScale = effortScale,
-                modifier = Modifier.staggeredAppear(index = 1),
-            )
-        }
-
         // --- Range control ---
         item {
             Column(
-                modifier = Modifier.staggeredAppear(index = 2),
+                modifier = Modifier.staggeredAppear(index = 1),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space8),
             ) {
                 SegmentedPillControl(
@@ -218,6 +204,18 @@ fun TrendsScreen(vm: AppViewModel) {
                     color = if (recovery.widened) Palette.statusWarning else Palette.textTertiary,
                 )
             }
+        }
+
+        // --- Selected-range averages: Recovery / Effort / Sleep, after the selector just like iOS. ---
+        item {
+            WeekInReviewCard(
+                charge = recovery,
+                effort = strain,
+                rest = rest,
+                selectedRange = range,
+                effortScale = effortScale,
+                modifier = Modifier.staggeredAppear(index = 2),
+            )
         }
 
         // --- Hero , charge over time. Charge (green) world: domain card wash, a crisp flat line with a
@@ -367,7 +365,7 @@ private fun WeeklyDigestNav(
                 body = stringResource(R.string.trends_no_readings_body),
             )
         } else {
-            NoopCard { WeeklyDigestContent(digest = digest, compact = true) }
+            WeeklyDigestContent(digest = digest, compact = true)
         }
     }
 }

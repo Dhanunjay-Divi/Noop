@@ -31,6 +31,9 @@ internal object FitnessAgePresentation {
 
     fun spokenValue(estimate: Double): String = duration(parts(estimate).totalMonths)
 
+    fun localizedSpokenValue(estimate: Double): String =
+        localizedDuration(parts(estimate).totalMonths)
+
     fun duration(totalMonths: Int): String {
         val months = totalMonths.coerceAtLeast(0)
         val yearsPart = months / 12

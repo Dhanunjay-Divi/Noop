@@ -112,7 +112,7 @@ struct SettingsView: View {
     @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
     @AppStorage(UnitPrefs.trendChartStyleKey) private var trendChartStyleRaw = TrendChartStyle.line.rawValue
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
-    // Alternate app icon (iOS only) — false = Titanium (primary AppIcon), true = Blue Titanium
+    // Alternate app icon (iOS only) — false = Obsidian (primary), true = legacy navy
     // ("AppIcon-Navy"). Display-only preference; the live switch goes through setAlternateIconName.
     @AppStorage("appIcon.alt") private var useNavyIcon = false
     // OLED Black is the first-run finish; all four choices remain available and persist app-wide.

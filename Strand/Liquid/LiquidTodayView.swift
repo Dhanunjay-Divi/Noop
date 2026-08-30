@@ -869,9 +869,8 @@ struct LiquidTodayView: View {
     }
     #endif
 
-    /// One-tap Live Session start (silent guardian, beta) — sits directly under the hero scores, the
-    /// Recovery its band is gated on. The plain-language title and detail explain the feature before
-    /// introducing its Silent Guardian name on the in-session screen.
+    /// Live Session entry (silent guardian, beta). It opens an explicit pre-session explanation; no
+    /// realtime tracking begins until the separate Start confirmation on that screen.
     private var liveSessionStartRow: some View {
         Button { showLiveSession = true } label: {
             HStack(spacing: 12) {

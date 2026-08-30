@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -43,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -223,7 +223,6 @@ private data class CalendarDayOverviewContent(
 @Composable
 internal fun CalendarMonthScreen(
     vm: AppViewModel,
-    onBack: () -> Unit,
 ) {
     val allWorkouts by vm.workouts.collectAsStateWithLifecycle()
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
@@ -334,12 +333,11 @@ internal fun CalendarMonthScreen(
     ScreenScaffold(
         title = stringResource(R.string.appwide_calendar_your_month),
         subtitle = stringResource(R.string.appwide_calendar_subtitle),
-        topBackground = { LiquidScreenSky(fillHeight = false) },
+        topBackground = { CalendarHeaderBackdrop() },
     ) {
         CalendarMonthHeader(
             month = month,
             canAdvance = month < YearMonth.now(),
-            onBack = onBack,
             onPrevious = { month = month.minusMonths(1) },
             onNext = { if (month < YearMonth.now()) month = month.plusMonths(1) },
         )
@@ -417,10 +415,28 @@ internal fun CalendarMonthScreen(
 }
 
 @Composable
+private fun CalendarHeaderBackdrop() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(380.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF042918),
+                        Color.Black.copy(alpha = 0.88f),
+                        Color.Black.copy(alpha = 0.30f),
+                        Color.Transparent,
+                    ),
+                ),
+            ),
+    )
+}
+
+@Composable
 private fun CalendarMonthHeader(
     month: YearMonth,
     canAdvance: Boolean,
-    onBack: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -429,13 +445,6 @@ private fun CalendarMonthHeader(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.appwide_action_done),
-                tint = Palette.textPrimary,
-            )
-        }
         IconButton(onClick = onPrevious, modifier = Modifier.size(44.dp)) {
             Icon(
                 Icons.Filled.ChevronLeft,
@@ -504,12 +513,7 @@ private fun CalendarMetricPicker(
                 horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    option.icon,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(18.dp),
-                )
+                MetricGlyph(option.icon, size = 18.dp)
                 Text(
                     stringResource(option.titleRes),
                     style = NoopType.subhead,
@@ -552,12 +556,7 @@ private fun CalendarMonthGrid(
                 horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    metric.icon,
-                    contentDescription = null,
-                    tint = metric.calendarTint(),
-                    modifier = Modifier.size(16.dp),
-                )
+                MetricGlyph(metric.icon, size = 16.dp)
                 Text(
                     stringResource(metric.titleRes),
                     style = NoopType.subhead,

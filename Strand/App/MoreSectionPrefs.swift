@@ -35,7 +35,7 @@ enum MoreSectionPrefs {
     /// A deliberately small shortcut row. Safety leads because a stressful moment is exactly when a user
     /// should not have to remember which collapsed catalogue group owns the tool.
     static let quickAccess: [MoreQuickAccessItem] = [
-        .init(id: "safety", title: "Safety", systemImage: "shield.lefthalf.filled"),
+        .init(id: "safety", title: "Safety", systemImage: "shield.fill"),
         .init(id: "profile", title: "Profile", systemImage: "person.crop.circle.fill"),
         .init(id: "devices", title: "Devices", systemImage: "applewatch.side.right"),
         .init(id: "friends", title: "Friends", systemImage: "person.2.fill")

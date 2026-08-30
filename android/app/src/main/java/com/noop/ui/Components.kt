@@ -74,6 +74,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -196,6 +197,85 @@ fun NoopCard(
             .padding(padding),
     ) {
         content()
+    }
+}
+
+/**
+ * Android counterpart to iOS `MetricGlyph`: a compact monochrome plate with a crisp lower extrusion,
+ * diagonal face light, bevelled rim, and pressed-metal icon. Metric colour belongs to adjacent data.
+ */
+@Composable
+fun MetricGlyph(
+    icon: ImageVector,
+    size: Dp = 32.dp,
+    modifier: Modifier = Modifier,
+) {
+    val glyphSize = size
+    val shape = RoundedCornerShape(size * 0.30f)
+    val depth = (size.value * 0.065f).coerceAtLeast(1.5f).dp
+    val shadowElevation = (size.value * 0.21f).dp
+    val rimWidth = (size.value * 0.022f).coerceAtLeast(0.7f).dp
+    val iconSize = size * 0.44f
+    val iconDepth = (size.value * 0.032f).coerceAtLeast(0.8f).dp
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .shadow(shadowElevation, shape = shape, clip = false)
+            .drawBehind {
+                val radius = CornerRadius(glyphSize.toPx() * 0.30f)
+                drawRoundRect(
+                    color = Palette.glyphExtrusion,
+                    topLeft = Offset(0f, depth.toPx()),
+                    size = Size(this.size.width, this.size.height),
+                    cornerRadius = radius,
+                )
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Palette.glyphFaceTop, Palette.glyphFaceBottom),
+                        start = Offset.Zero,
+                        end = Offset(this.size.width, this.size.height),
+                    ),
+                    cornerRadius = radius,
+                )
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.White.copy(alpha = if (Palette.isLight) 0.54f else 0.115f),
+                            0.22f to Color.White.copy(alpha = if (Palette.isLight) 0.19f else 0.04f),
+                            0.46f to Color.Transparent,
+                        ),
+                    ),
+                    cornerRadius = radius,
+                )
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (Palette.isLight) 0.88f else 0.24f),
+                            Palette.bevelSide.copy(alpha = if (Palette.isLight) 0.64f else 0.30f),
+                            Palette.bevelBottom.copy(alpha = if (Palette.isLight) 0.30f else 0.94f),
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(this.size.width, this.size.height),
+                    ),
+                    cornerRadius = radius,
+                    style = Stroke(width = rimWidth.toPx()),
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (Palette.isLight) Color.White.copy(alpha = 0.82f) else Color.Black.copy(alpha = 0.90f),
+            modifier = Modifier.size(iconSize).offset(y = iconDepth),
+        )
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = Palette.glyphInkTop,
+            modifier = Modifier.size(iconSize),
+        )
     }
 }
 
@@ -773,9 +853,9 @@ fun <T> SegmentedPillControl(
         items.forEach { item ->
             val selected = item == selection
             val itemEnabled = enabled(item)
-            // Selection is neutral chrome in every appearance. Physiological colour is reserved for
-            // data and status, while accentInk guarantees contrast on black/pearl selected fills.
-            val selectedFill = Palette.accent
+            // Match iOS SegmentedPillControl exactly: blue accent in light mode, lighter neutral
+            // #363B41 chrome in dark mode. Selected range/mode is navigation state, not biometric data.
+            val selectedFill = if (Palette.isLight) Palette.accent else Color(0xFF363B41)
             Box(
                 modifier = Modifier
                     .then(if (usesEqualWidth) Modifier.weight(1f) else Modifier)
@@ -810,7 +890,7 @@ fun <T> SegmentedPillControl(
                     maxLines = if (adaptsToAvailableWidth) 1 else Int.MAX_VALUE,
                     overflow = if (adaptsToAvailableWidth) TextOverflow.Ellipsis else TextOverflow.Clip,
                     color = when {
-                        selected -> Palette.accentInk
+                        selected -> if (Palette.isLight) Color.White else Palette.textPrimary
                         !itemEnabled -> Palette.textTertiary.copy(alpha = 0.45f)
                         else -> Palette.textTertiary
                     },

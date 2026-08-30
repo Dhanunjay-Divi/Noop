@@ -29,8 +29,10 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.TrackChanges
@@ -41,8 +43,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -144,20 +146,9 @@ fun HealthScreen(
     val cycleScope = rememberCoroutineScope()
     val hrMax = profile.hrMax
 
-    // Health Monitor is a lightweight observer. It may display standard-profile HR already arriving
-    // from the connected wearable, but opening this screen never starts the battery-intensive stream.
-    // Users explicitly start that from Live Tracking (or an explicit workout/HRV/session capture).
-
-    // PERF (#scroll-jank): the BLE live state + smoothed bpm tick ~1Hz. Reading them in this body to
-    // compute the empty-state gate recomposed the WHOLE Health screen on every HR tick. The body only
-    // needs "is a live HR present" (null↔non-null), never the bpm number - so collapse the ticking
-    // value to a stable boolean via derivedStateOf: a 72→73 bpm tick produces an EQUAL boolean and the
-    // body is NOT recomposed; it only recomposes when live-HR presence actually flips. The live bpm
-    // number is rendered in HeartRateSection / SyncStatusSection, which now scope their own collection.
-    // Mirrors the shipped Today liveSnap fix. Appearance-preserving.
+    // The parent observes connection state only for the first-run gate. HeartRateSection owns the
+    // ticking BPM stream, so a ~1 Hz packet never re-renders this full screen.
     val live by vm.live.collectAsStateWithLifecycle()
-    val bpm by vm.bpm.collectAsStateWithLifecycle()
-    val hasLiveHr by remember { derivedStateOf { displayHr(bpm, live) != null } }
 
     // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles into
     // the theme canvas behind this screen's top region, full-bleed up behind the status bar via the
@@ -176,7 +167,7 @@ fun HealthScreen(
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
-        if (today == null && !hasLiveHr) {
+        if (days.isEmpty() && !live.connected) {
             // Even with no history yet, a freshly-connected strap can be told to sync now (#364) — the
             // manual "Sync now" + honest status sits above the empty state so it's always reachable.
             item { SyncStatusSection(vm = vm, onSyncNow = { vm.syncNow() }) }
@@ -918,6 +909,20 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
                         tone = StrandTone.Neutral,
                         showsDot = false,
                     )
+                    live.lastSyncError != null -> Column(
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    ) {
+                        StatePill(
+                            title = "Sync needs attention",
+                            tone = StrandTone.Warning,
+                            showsDot = true,
+                        )
+                        Text(
+                            live.lastSyncError!!,
+                            style = NoopType.footnote,
+                            color = Palette.statusWarning,
+                        )
+                    }
                     live.lastSyncAt != null -> Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
@@ -974,11 +979,13 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
 /** The helper line below the Sync-now button: explains the current state (syncing / offline / pairing /
  *  ready), copy-matched to HealthView.swift's SyncStatusSection.helperText. */
 private fun syncHelperText(live: LiveState): String = when {
-    live.backfilling -> "Pulling Noop Band's stored history. This drains oldest-first; a deep backlog " +
-        "now continues automatically across passes instead of waiting between syncs."
+    live.backfilling -> "Pulling Noop Band's stored history. Rows appear as they are saved, and you can " +
+        "keep using Noop while a deep oldest-first backlog continues across passes."
     !live.connected -> "Connect Noop Band to sync its stored history. Until then, only imported data " +
         "shows here."
     !live.bonded -> "Finishing the pairing handshake. Sync now becomes available once Noop Band is paired."
+    live.lastSyncError != null -> "Your stored history remains on Noop Band. Tap Sync now to retry when " +
+        "the connection is ready."
     else -> "Syncs Noop Band's stored history right away instead of waiting for the next automatic sync."
 }
 
@@ -1662,6 +1669,11 @@ private fun FitnessAgeHero(
                         color = Palette.textPrimary,
                     )
                     Text(
+                        text = FitnessAgePresentation.localizedSpokenValue(fitnessAge),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                    Text(
                         text = deltaWord,
                         style = NoopType.subhead,
                         color = if (parts.totalMonths == chronoAge * 12) Palette.textSecondary
@@ -2068,7 +2080,19 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
     // shipped Today fix (HeartRateTrendCard scopes its own collection). Appearance + behaviour identical.
     val live by vm.live.collectAsStateWithLifecycle()
     val bpm by vm.bpm.collectAsStateWithLifecycle()
-    val displayHr = displayHr(bpm, live)
+    var liveTrackingOptedIn by remember { mutableStateOf(false) }
+    var liveTrackingStartSequence by remember { mutableStateOf<Long?>(null) }
+    val hasFreshPacket = hasFreshHeartRatePacket(
+        optedIn = liveTrackingOptedIn,
+        startSequence = liveTrackingStartSequence,
+        currentSequence = live.heartRateSampleSequence,
+    )
+    val displayHr = sessionLiveDisplayHr(
+        optedIn = liveTrackingOptedIn,
+        startSequence = liveTrackingStartSequence,
+        bpm = bpm,
+        live = live,
+    )
     val hasLiveHr = displayHr != null
     val derived = hrIsDerived(live)
     val fraction = hrFraction(displayHr, hrMax)
@@ -2094,6 +2118,25 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
     val hrHistory = remember { mutableStateListOf<LiveHrSample>() }
     val latestDisplayHr by rememberUpdatedState(displayHr)
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // This card owns one foreground realtime lease after an explicit Start. Stopping or leaving
+    // Health disposes the true-keyed effect and releases only this card's lease.
+    DisposableEffect(liveTrackingOptedIn) {
+        if (liveTrackingOptedIn) vm.requestRealtimeHr()
+        onDispose {
+            if (liveTrackingOptedIn) vm.releaseRealtimeHr()
+        }
+    }
+
+    // A transport gap invalidates the old packet. Reconnect keeps the logical lease but waits for a
+    // genuinely newer sensor sequence before the card can return to Streaming.
+    LaunchedEffect(live.connected) {
+        if (liveTrackingOptedIn) {
+            liveTrackingStartSequence = live.heartRateSampleSequence
+            hrHistory.clear()
+        }
+    }
+
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
@@ -2102,15 +2145,74 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
             }
         }
     }
-    val series = hrSeries(hrHistory, live, displayHr)
+    val series = if (hasFreshPacket) hrSeries(hrHistory, live, displayHr) else emptyList()
     val zoneColor = Palette.hrZoneColor(zone)
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
             title = uiString(R.string.l10n_health_screen_heart_rate_dde6e8f7),
-            overline = "Live",
-            trailing = if (derived) "from R-R" else null,
+            overline = if (liveTrackingOptedIn) "Live" else "Paused",
+            trailing = if (hasFreshPacket && derived) "from R-R" else null,
         )
+
+        NoopCard(tint = Palette.metricRose) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.MonitorHeart,
+                        contentDescription = null,
+                        tint = if (liveTrackingOptedIn) Palette.metricRose else Palette.textSecondary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                    ) {
+                        Text(
+                            if (liveTrackingOptedIn) "Live heart rate is on" else "Live heart rate is off",
+                            style = NoopType.headline,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            if (liveTrackingOptedIn) {
+                                "Showing the high-rate foreground stream on this screen."
+                            } else {
+                                "Your wearable stays connected and stored history continues to sync."
+                            },
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                        )
+                        Text(
+                            "Live tracking uses more wearable and phone battery. It stops when you leave this screen; workouts and other sessions manage their own streams.",
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                }
+                NoopButton(
+                    text = if (liveTrackingOptedIn) "Stop Live HR" else "Start Live HR",
+                    leadingIcon = if (liveTrackingOptedIn) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                    kind = if (liveTrackingOptedIn) NoopButtonKind.Secondary else NoopButtonKind.Primary,
+                    fullWidth = true,
+                    enabled = liveTrackingOptedIn || (live.connected && !live.backfilling),
+                    onClick = {
+                        if (liveTrackingOptedIn) {
+                            liveTrackingOptedIn = false
+                            liveTrackingStartSequence = null
+                            hrHistory.clear()
+                        } else if (live.connected && !live.backfilling) {
+                            liveTrackingStartSequence = live.heartRateSampleSequence
+                            hrHistory.clear()
+                            liveTrackingOptedIn = true
+                        }
+                    },
+                )
+            }
+        }
 
         // The live HR hero is Apple-flat — a plain card tinted rose (heart-rate's metric accent) over a
         // SUBTLE time-of-day backdrop, NOT a scenic starfield/bloom. Mirrors HealthView.swift's reset:
@@ -2132,9 +2234,10 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                         Text(uiString(R.string.l10n_health_screen_heart_rate_dde6e8f7), style = NoopType.headline, color = Palette.textPrimary)
                         Text(
                             text = when {
-                                derived -> "Estimated from R-R interval"
+                                hasFreshPacket && derived -> "Estimated from R-R interval"
                                 hasLiveHr -> "Streaming live"
-                                else -> "Awaiting Noop Band"
+                                liveTrackingOptedIn -> "Awaiting wearable"
+                                else -> "Live display paused"
                             },
                             style = NoopType.footnote,
                             color = Palette.textSecondary,
@@ -2194,7 +2297,7 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                     }
 
                     StatePill(
-                        title = zoneLabel(hasLiveHr, zone, fraction),
+                        title = zoneLabel(liveTrackingOptedIn, hasLiveHr, zone, fraction),
                         tone = if (hasLiveHr) StrandTone.Accent else StrandTone.Neutral,
                         showsDot = hasLiveHr,
                         pulsing = hasLiveHr,
@@ -2207,7 +2310,11 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                     zone = if (hasLiveHr) "Z$zone" else "-",
                     percentMax = if (hasLiveHr) "${(fraction * 100).roundToInt()}%" else "-",
                     maxHr = "$hrMax",
-                    state = if (hasLiveHr) "STREAMING" else "IDLE",
+                    state = when {
+                        hasLiveHr -> "STREAMING"
+                        liveTrackingOptedIn -> "WAITING"
+                        else -> "PAUSED"
+                    },
                 )
             }
             }
@@ -2215,7 +2322,13 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
     }
 }
 
-private fun zoneLabel(hasLiveHr: Boolean, zone: Int, fraction: Double): String {
+private fun zoneLabel(
+    liveTrackingOptedIn: Boolean,
+    hasLiveHr: Boolean,
+    zone: Int,
+    fraction: Double,
+): String {
+    if (!liveTrackingOptedIn) return "Paused"
     if (!hasLiveHr) return "Idle"
     return "Zone $zone · ${(fraction * 100).roundToInt()}%"
 }

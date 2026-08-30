@@ -49,8 +49,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -62,7 +62,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.DragHandle
@@ -70,6 +70,7 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -98,9 +99,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -235,8 +239,80 @@ private var todayDidSnapToTodayThisLaunch = false
 // translucent near-black (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessels + white
 // count-up numbers read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge.
 private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
+private val LIQUID_HERO_BASE: Color = Color(red = 7f / 255f, green = 9f / 255f, blue = 8f / 255f, alpha = 1f)
 private val LIQUID_HERO_RADIUS: Dp = 26.dp
 private val DAILY_SIGNAL_ALERT_TINT = Color(0xFFFF453A)
+
+private fun Modifier.liquidTodayHeroSurface(tint: Color): Modifier = composed {
+    val opacity = CardAppearance.opacity
+    val shape = RoundedCornerShape(LIQUID_HERO_RADIUS)
+    this
+        .shadow(
+            elevation = (22f * opacity).dp,
+            shape = shape,
+            clip = false,
+        )
+        .clip(shape)
+        .background(LIQUID_HERO_BASE.copy(alpha = opacity))
+        .background(
+            Brush.linearGradient(
+                colors = listOf(
+                    tint.copy(alpha = 0.16f * opacity),
+                    tint.copy(alpha = 0.045f * opacity),
+                    Color.Transparent,
+                ),
+            ),
+        )
+        .background(
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.07f * opacity),
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.24f * opacity),
+                ),
+            ),
+        )
+        .border(
+            width = 0.9.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    tint.copy(alpha = 0.34f * opacity),
+                    Color.White.copy(alpha = 0.08f * opacity),
+                    Color.Black.copy(alpha = 0.86f * opacity),
+                ),
+            ),
+            shape = shape,
+        )
+}
+
+private fun Modifier.liquidTodayCompactSurface(): Modifier = composed {
+    val opacity = CardAppearance.opacity
+    val shape = RoundedCornerShape(18.dp)
+    this
+        .shadow(elevation = (16f * opacity).dp, shape = shape, clip = false)
+        .clip(shape)
+        .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * opacity))
+        .background(
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.06f * opacity),
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.18f * opacity),
+                ),
+            ),
+        )
+        .border(
+            width = 0.85.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.20f * opacity),
+                    Color.White.copy(alpha = 0.055f * opacity),
+                    Color.Black.copy(alpha = 0.84f * opacity),
+                ),
+            ),
+            shape = shape,
+        )
+}
 
 // The Vitality vessel purple (#9b7bff) — no exact Palette token in this theme, so a fixed brand literal
 // matching the iOS liquid Today's `liquidPurple` (Color(.sRGB, red:0x9b, green:0x7b, blue:0xff)). Used by
@@ -1335,7 +1411,9 @@ fun TodayScreen(
         LiquidTodayHeader(
             headline = headline,
             dateLine = humanDate,
+            connected = liveSnap.connected,
             batteryPct = if (liveSnap.connected) liveSnap.batteryPct else null,
+            charging = liveSnap.charging,
             backfilling = liveSnap.backfilling,
             syncChunksThisSession = liveSnap.syncChunksThisSession,
             lastSyncAt = liveSnap.lastSyncAt,
@@ -1523,18 +1601,13 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            // The liquid hero CARD: a translucent near-black that floats over the day-of-sky
-                            // so the vessels + white count-up numbers stay crisp. A rounded 26 corner + a
-                            // faint white hairline give it the frosted-glass edge of the iOS liquid heroCard
-                            // (heroFill = rgba(13,14,20,.80), stroke white@0.11).
+                            val heroRecovery = displayMetric?.recovery ?: lastScoredCharge?.value
+                            val heroTone = heroRecovery?.let(Palette::recoveryGaugeColors)?.first
+                                ?: Palette.chargeColor
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(
-                                        LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity),
-                                        RoundedCornerShape(LIQUID_HERO_RADIUS),
-                                    )
-                                    .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
+                                    .liquidTodayHeroSurface(heroTone)
                                     .staggeredAppear(stagger),
                             ) {
                                 Column {
@@ -1603,13 +1676,8 @@ fun TodayScreen(
                         // at the loop level (sectionVisible) so a gated-off section emits no item.
                         TodaySection.LIVE_SESSION -> LiveSessionEntryCard(
                             onOpen = {
-                                // Only BEGIN when nothing is in flight: an active runner (running, or ended
-                                // and holding its unseen summary) is simply re-presented, never displaced —
-                                // so a tap can't silently discard a running session or a summary awaiting
-                                // its "Done".
-                                if (LiveSessionRunner.active.value == null) {
-                                    startOrResumeLiveSession(viewModel, context)
-                                }
+                                // Opening a new coach shows its pre-session guide first. An existing
+                                // runner still resumes directly, including an unseen end summary.
                                 showLiveSession = true
                             },
                         )
@@ -1936,6 +2004,34 @@ private fun joinLocalizedFragments(vararg parts: String): String =
     parts.filter { it.isNotBlank() }.joinToString(" ")
 
 @Composable
+private fun DailyPlanSectionHeader(
+    title: String,
+    trailing: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Metrics.space2)
+            .padding(top = Metrics.space4),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        Text(
+            title,
+            modifier = Modifier.weight(1f),
+            style = NoopType.overline,
+            color = Palette.textSecondary,
+        )
+        Text(
+            trailing,
+            style = NoopType.caption,
+            color = Palette.textSecondary,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+@Composable
 private fun DailyPlanWhySection(
     readiness: ReadinessEngine.Readiness,
     modifier: Modifier = Modifier,
@@ -1947,7 +2043,7 @@ private fun DailyPlanWhySection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Metrics.space8),
     ) {
-        SectionHeader(
+        DailyPlanSectionHeader(
             title = stringResource(R.string.daily_plan_why_title),
             trailing = readinessHeadline,
         )
@@ -1967,11 +2063,9 @@ private fun DailyPlanWhySection(
                         horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
                         verticalAlignment = Alignment.Top,
                     ) {
-                        Icon(
-                            dailyPlanReadinessIcon(readiness.level),
-                            contentDescription = null,
-                            tint = dailyPlanReadinessTint(readiness.level),
-                            modifier = Modifier.size(24.dp),
+                        MetricGlyph(
+                            icon = dailyPlanReadinessIcon(readiness.level),
+                            size = 28.dp,
                         )
                         Column(
                             modifier = Modifier.weight(1f),
@@ -2024,7 +2118,7 @@ private fun DailyPlanTargetSection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Metrics.space8),
     ) {
-        SectionHeader(
+        DailyPlanSectionHeader(
             title = stringResource(R.string.daily_plan_target_title),
             trailing = stringResource(dailyPlanTargetStatusResource(plan)),
         )
@@ -2321,7 +2415,7 @@ private fun DailyPlanWatchSection(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Metrics.space8),
     ) {
-        SectionHeader(
+        DailyPlanSectionHeader(
             title = stringResource(R.string.daily_plan_watch_title),
             trailing = trailing,
         )
@@ -2483,11 +2577,9 @@ private fun DailyPlanEmptyRow(icon: ImageVector, text: String) {
         horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = Palette.textTertiary,
-            modifier = Modifier.size(24.dp),
+        MetricGlyph(
+            icon = icon,
+            size = 26.dp,
         )
         Text(
             text,
@@ -2508,11 +2600,9 @@ private fun DailyPlanSignalRow(signal: ReadinessEngine.Signal) {
         horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
         verticalAlignment = Alignment.Top,
     ) {
-        Icon(
-            dailyPlanSignalIcon(signal.key),
-            contentDescription = null,
-            tint = dailyPlanSignalTint(signal.flag),
-            modifier = Modifier.size(24.dp),
+        MetricGlyph(
+            icon = dailyPlanSignalIcon(signal.key),
+            size = 28.dp,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -2734,7 +2824,7 @@ private fun WorkoutInProgressCard(
  * into the dismissed session dialog (with a live elapsed clock); session ended but its summary not yet
  * Done-dismissed → "See the summary". The runner's 1 Hz snapshot is collected INSIDE this card only, so
  * the per-second tick recomposes this card, never the Today body (the WorkoutInProgressCard idiom).
- * The whole card is one tap target; [onOpen] begins/re-presents the session dialog.
+ * The whole card is one tap target; [onOpen] presents the guide or returns to the active session.
  */
 @Composable
 private fun LiveSessionEntryCard(onOpen: () -> Unit) {
@@ -2766,46 +2856,62 @@ private fun LiveSessionEntryCard(onOpen: () -> Unit) {
     // liquidPress on the whole tappable card (same interactionSource on clickable + press), matching the
     // workout-in-progress card above. Merged semantics so TalkBack reads one Button, not four stops.
     val interaction = remember { MutableInteractionSource() }
-    NoopCard(
-        tint = teal,
+    Row(
         modifier = Modifier
+            .fillMaxWidth()
+            .liquidTodayCompactSurface()
             .liquidPress(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onOpen)
             .semantics(mergeDescendants = true) {
                 contentDescription = uiString(R.string.l10n_today_screen_title_beta_detail_6b39ae21, title, detail)
-            },
+            }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(
-                Icons.Filled.Shield,
-                contentDescription = null,
-                tint = teal,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                ) {
-                    Text(title, style = NoopType.headline, color = Palette.textPrimary)
-                    StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
-                }
-                Text(detail, style = NoopType.footnote, color = Palette.textTertiary)
+        Icon(
+            Icons.Filled.Shield,
+            contentDescription = null,
+            tint = teal,
+            modifier = Modifier.size(16.dp),
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
+                Text(
+                    title,
+                    style = NoopType.subhead,
+                    color = Palette.onDarkPrimary,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    "BETA",
+                    style = NoopType.overline.copy(fontSize = 8.5.sp),
+                    color = Palette.onDarkSecondary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 2.5.dp),
+                )
             }
-            if (running) {
-                Text(elapsed, style = NoopType.number(15f), color = Palette.textPrimary)
-            }
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Palette.textTertiary,
-                modifier = Modifier.size(Metrics.iconSmall),
+            Text(
+                detail,
+                style = NoopType.footnote,
+                color = Palette.onDarkSecondary,
             )
         }
+        if (running) {
+            Text(elapsed, style = NoopType.number(15f), color = Palette.onDarkPrimary)
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Palette.onDarkTertiary,
+            modifier = Modifier.size(12.dp),
+        )
     }
 }
 
@@ -2914,7 +3020,9 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
 private fun LiquidTodayHeader(
     headline: String,
     dateLine: String,
+    connected: Boolean,
     batteryPct: Double?,
+    charging: Boolean?,
     backfilling: Boolean = false,
     syncChunksThisSession: Int = 0,
     lastSyncAt: Long? = null,
@@ -2961,12 +3069,26 @@ private fun LiquidTodayHeader(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                ProfileAvatar(size = 34.dp)
+                if (ProfileAvatarStore.hasAvatar) {
+                    ProfileAvatar(size = 34.dp)
+                } else {
+                    Icon(
+                        Icons.Outlined.AccountCircle,
+                        contentDescription = null,
+                        tint = Palette.textPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
-            LiquidBatteryRing(batteryPct = batteryPct, onClick = onOpenDevices)
+            LiquidBandBatteryButton(
+                connected = connected,
+                batteryPct = batteryPct,
+                charging = charging,
+                onClick = onOpenDevices,
+            )
             Box {
                 HeaderIconButton(
-                    icon = Icons.Filled.MoreVert,
+                    icon = Icons.Filled.MoreHoriz,
                     description = "Customize Today",
                     onClick = { showMenu = true },
                 )
@@ -3151,72 +3273,150 @@ private fun shortSyncAgo(unixSec: Long): String {
     }
 }
 
-/** The liquid header strap-battery ring: when connected + a reading exists it draws a trimmed ring in
- *  the charge/warning/critical hue plus the % inside, else a
- *  bolt-slash glyph. Tap → Devices. Mirrors the iOS liquid header battery ring. */
+/** Exact Android twin of iOS LiquidBatteryButton. A single 70x34 NOOP status capsule replaces the
+ * second profile-like circle and distinguishes disconnected, awaiting-reading, charging, and current
+ * percentage states without presenting a stale battery value as live. */
 @Composable
-private fun LiquidBatteryRing(batteryPct: Double?, onClick: () -> Unit) {
+private fun LiquidBandBatteryButton(
+    connected: Boolean,
+    batteryPct: Double?,
+    charging: Boolean?,
+    onClick: () -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
-    val label = batteryPct?.let { "Noop Band battery ${it.roundToInt()} percent" } ?: "Noop Band battery"
-    Box(
+    val value = when {
+        !connected -> "OFF"
+        batteryPct != null -> "${batteryPct.roundToInt()}%"
+        charging == true -> "CHG"
+        else -> "SYNC"
+    }
+    val tone = when {
+        !connected -> Palette.textTertiary
+        charging == true -> Palette.chargeColor
+        batteryPct == null -> Palette.textSecondary
+        batteryPct < 15 -> Palette.statusCritical
+        batteryPct < 35 -> Palette.statusWarning
+        else -> Palette.chargeColor
+    }
+    val label = when {
+        !connected -> "Noop Band battery, band not connected"
+        batteryPct == null && charging == true -> "Noop Band battery charging, no reading yet"
+        batteryPct == null -> "Noop Band battery, no reading yet"
+        charging == true -> "Noop Band battery ${batteryPct.roundToInt()} percent, charging"
+        else -> "Noop Band battery ${batteryPct.roundToInt()} percent"
+    }
+    Row(
         modifier = Modifier
-            .size(34.dp)
+            .width(70.dp)
+            .height(34.dp)
             .liquidPress(interaction)
-            .clip(CircleShape)
-            // A translucent near-black disc + faint white rim, matching iOS (rgba(10,11,16,.5) + white@.15).
-            .background(Color(red = 10f / 255f, green = 11f / 255f, blue = 16f / 255f, alpha = 0.5f))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+            .clip(RoundedCornerShape(50))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Palette.surfaceRaised.copy(alpha = 0.92f),
+                        Palette.surfaceOverlay.copy(alpha = 0.74f),
+                    ),
+                ),
+            )
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    colors = listOf(
+                        Palette.hairlineStrong.copy(alpha = 0.82f),
+                        Palette.hairline.copy(alpha = 0.52f),
+                    ),
+                ),
+                RoundedCornerShape(50),
+            )
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
             )
             .semantics { contentDescription = label },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HorizontalBandBatteryGlyph(
+            level = when {
+                batteryPct != null -> (batteryPct / 100.0).toFloat().coerceIn(0f, 1f)
+                connected && charging == true -> 1f
+                else -> 0f
+            },
+            charging = connected && charging == true,
+            tone = tone,
+        )
+        Spacer(Modifier.width(5.dp))
+        Column(verticalArrangement = Arrangement.spacedBy((-1).dp)) {
+            Text(
+                "NOOP",
+                style = NoopType.caption.copy(fontSize = 6.sp, fontWeight = FontWeight.Bold),
+                color = Palette.textSecondary,
+                maxLines = 1,
+            )
+            Text(
+                value,
+                style = NoopType.number(10f, weight = FontWeight.Bold),
+                color = tone,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** SF Battery-style horizontal silhouette used by iOS in the matching masthead control. */
+@Composable
+private fun HorizontalBandBatteryGlyph(
+    level: Float,
+    charging: Boolean,
+    tone: Color,
+) {
+    Box(
+        modifier = Modifier.size(width = 16.dp, height = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (batteryPct != null) {
-            val pct = batteryPct.coerceIn(0.0, 100.0)
-            val ringColor = when {
-                pct < 15 -> Palette.statusCritical
-                pct < 35 -> Palette.statusWarning
-                else -> Palette.chargeColor
-            }
-            Canvas(modifier = Modifier.size(34.dp).padding(2.5.dp)) {
-                val strokePx = 3.dp.toPx()
-                val d = size.minDimension - strokePx
-                val topLeft = Offset((size.width - d) / 2f, (size.height - d) / 2f)
-                // Track.
-                drawArc(
-                    color = Color.White.copy(alpha = 0.10f),
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = Size(d, d),
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
-                // Fill arc (min 2% so a near-flat battery still shows a cap), clockwise from 12 o'clock.
-                drawArc(
-                    color = ringColor,
-                    startAngle = -90f,
-                    sweepAngle = (360f * (pct / 100.0).coerceIn(0.02, 1.0)).toFloat(),
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = Size(d, d),
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
-            }
-            Text(
-                uiString(R.string.l10n_today_screen_pct_roundtoint_05ba4549, pct.roundToInt()),
-                style = NoopType.number(9f, weight = FontWeight.Bold),
-                color = Color.White.copy(alpha = 0.9f),
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val stroke = 1.25.dp.toPx()
+            val bodyTop = 3.dp.toPx()
+            val bodyHeight = 8.dp.toPx()
+            val bodyLeft = stroke / 2f
+            val terminalWidth = 1.45.dp.toPx()
+            val terminalGap = 0.7.dp.toPx()
+            val bodyWidth = size.width - bodyLeft - terminalWidth - terminalGap - stroke
+            val radius = 2.dp.toPx()
+
+            drawRoundRect(
+                color = tone,
+                topLeft = Offset(bodyLeft, bodyTop),
+                size = Size(bodyWidth, bodyHeight),
+                cornerRadius = CornerRadius(radius, radius),
+                style = Stroke(width = stroke),
             )
-        } else {
+            drawRoundRect(
+                color = tone,
+                topLeft = Offset(bodyLeft + bodyWidth + terminalGap, bodyTop + 2.1.dp.toPx()),
+                size = Size(terminalWidth, 3.8.dp.toPx()),
+                cornerRadius = CornerRadius(terminalWidth / 2f, terminalWidth / 2f),
+            )
+
+            if (level > 0f) {
+                val inset = 2.dp.toPx()
+                val available = (bodyWidth - inset * 2f).coerceAtLeast(0f)
+                drawRoundRect(
+                    color = tone,
+                    topLeft = Offset(bodyLeft + inset, bodyTop + inset),
+                    size = Size((available * level).coerceAtLeast(1.dp.toPx()), bodyHeight - inset * 2f),
+                    cornerRadius = CornerRadius(0.8.dp.toPx(), 0.8.dp.toPx()),
+                )
+            }
+        }
+        if (charging) {
             Icon(
-                Icons.AutoMirrored.Filled.BatteryUnknown,
+                Icons.Filled.Bolt,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.5f),
-                modifier = Modifier.size(15.dp),
+                tint = Color.White,
+                modifier = Modifier.size(7.5.dp),
             )
         }
     }
@@ -3931,59 +4131,111 @@ private fun FitnessAgeHeroLane(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .then(
-                if (onClick != null) {
-                    Modifier
-                        .liquidPress(interaction)
-                        .clickable(
-                            interactionSource = interaction,
-                            indication = null,
-                            onClick = onClick,
-                        )
-                } else {
-                    Modifier
-                },
-            )
             .padding(vertical = Metrics.space4),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                uiString(R.string.l10n_health_screen_fitness_age_12383b4a).uppercase(Locale.getDefault()),
-                style = NoopType.overline,
-                color = Palette.chargeColor,
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (onClick != null) {
+                        Modifier
+                            .liquidPress(interaction)
+                            .clickable(
+                                interactionSource = interaction,
+                                indication = null,
+                                onClick = onClick,
+                            )
+                    } else {
+                        Modifier
+                    },
+                ),
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+            verticalAlignment = Alignment.Top,
+        ) {
+            MetricGlyph(
+                icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                size = 34.dp,
             )
-            Text(
-                text = age?.let(FitnessAgePresentation::value)
-                    ?: uiString(R.string.appwide_cycle_status_learning),
-                style = NoopType.headline,
-                color = Color.White,
-            )
-            Text(
-                text = if (age != null && profileAge != null) {
-                    FitnessAgePresentation.localizedComparison(age, profileAge)
-                } else {
-                    calibration ?: uiString(R.string.appwide_fitness_age_needs_rhr_activity)
-                },
-                style = NoopType.footnote,
-                color = Palette.onDarkSecondary.copy(alpha = 0.68f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        uiString(R.string.l10n_health_screen_fitness_age_12383b4a)
+                            .uppercase(Locale.getDefault()),
+                        style = NoopType.overline.copy(fontSize = 10.sp),
+                        color = Palette.onDarkSecondary,
+                        maxLines = 1,
+                    )
+                    Text(
+                        stringResource(R.string.appwide_fitness_age_weekly),
+                        style = NoopType.overline.copy(fontSize = 8.sp),
+                        color = Palette.onDarkSecondary,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Palette.chargeColor.copy(alpha = 0.14f))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = age?.let(FitnessAgePresentation::value)
+                            ?: uiString(R.string.appwide_cycle_status_learning),
+                        style = NoopType.number(18f),
+                        color = Palette.onDarkPrimary,
+                        maxLines = 1,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = Palette.onDarkSecondary,
+                        modifier = Modifier.size(11.dp),
+                    )
+                }
+                Text(
+                    text = if (age != null && profileAge != null) {
+                        FitnessAgePresentation.localizedComparison(age, profileAge)
+                    } else {
+                        calibration ?: uiString(R.string.appwide_fitness_age_needs_rhr_activity)
+                    },
+                    style = NoopType.footnote,
+                    color = Palette.onDarkSecondary.copy(alpha = 0.82f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        Text(
-            text = age?.let(FitnessAgePresentation::vesselValue) ?: "-",
-            style = NoopType.number(20f, weight = FontWeight.Bold),
-            color = if (age == null) Palette.onDarkSecondary.copy(alpha = 0.64f) else Palette.chargeBright,
-            textAlign = TextAlign.End,
-        )
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = Palette.onDarkSecondary.copy(alpha = 0.68f),
-            modifier = Modifier.size(18.dp),
-        )
+        val infoShape = RoundedCornerShape(8.dp)
+        IconButton(
+            onClick = { onClick?.invoke() },
+            enabled = onClick != null,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(infoShape)
+                    .background(Palette.chargeColor.copy(alpha = 0.12f))
+                    .border(1.dp, Palette.chargeColor.copy(alpha = 0.45f), infoShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = stringResource(
+                        R.string.l10n_health_screen_how_accurate_is_this_fitness_age_935c9a6d,
+                    ),
+                    tint = Palette.chargeColor,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
     }
 }
 

@@ -152,6 +152,7 @@
     <string name="appwide_fitness_age_recent_context">Недавний контекст</string>
     <string name="appwide_fitness_age_same_profile_age">Примерно соответствует возрасту в профиле</string>
     <string name="appwide_fitness_age_value_format">%1$d лет</string>
+    <string name="appwide_fitness_age_weekly">ЕЖЕНЕДЕЛЬНО</string>
     <string name="appwide_fitness_age_weekly_progress">НЕДЕЛЬНЫЙ ПРОГРЕСС</string>
     <string name="appwide_fitness_age_weeks_count">%1$d нед.</string>
     <string name="appwide_fitness_age_younger_duration_profile_age">На %1$s моложе возраста в профиле</string>
@@ -187,8 +188,19 @@
     <string name="appwide_journal_editing_help">Переименуйте, перегруппируйте или удалите пункт, чтобы упорядочить список. Исходный вопрос сохраняется внутри, поэтому импортированные данные продолжают сопоставляться. Пользовательские пункты удаляются, а встроенные скрываются и могут быть восстановлены ниже.</string>
     <string name="appwide_legal_summary">Условия проекта и лицензия исходного кода. Доступно офлайн.</string>
     <string name="appwide_live_session_manually_started">ЗАПУЩЕНО ВРУЧНУЮ</string>
+    <string name="appwide_live_session_preflight_cues_body">В первую минуту сигналов нет. Затем 2 лёгких импульса предлагают повысить нагрузку после 25 секунд ниже цели; 3 сильных импульса предлагают снизить темп, если резкий подъём держится выше цели 25 секунд. Короткие скачки игнорируются, а одинаковые сигналы разделены минимум 50 секундами.</string>
+    <string name="appwide_live_session_preflight_cues_title">Когда браслет вибрирует</string>
+    <string name="appwide_live_session_preflight_intro">Узнайте, как всё работает, до начала сеанса. Отслеживание начнётся только после нажатия «Начать».</string>
+    <string name="appwide_live_session_preflight_stop_body">Завершить сеанс можно в любой момент. При отсутствии данных пульса подсказки приостанавливаются примерно через 8 секунд, а через 10 минут без показаний сеанс завершится автоматически.</string>
+    <string name="appwide_live_session_preflight_stop_title">Когда сеанс завершится</string>
+    <string name="appwide_live_session_preflight_target_body">Диапазон определяется сегодняшним Восстановлением, недавним пульсом в покое и максимальным пульсом из профиля. Без оценки Восстановления NOOP использует осторожный средний диапазон.</string>
+    <string name="appwide_live_session_preflight_target_title">Как задаётся цель</string>
+    <string name="appwide_live_session_preflight_title">Тренер для тренировки</string>
+    <string name="appwide_live_session_preflight_tracks_body">Динамика пульса в реальном времени и время внутри, ниже и выше сегодняшнего целевого диапазона. Этот сеанс не создаёт запись о тренировке.</string>
+    <string name="appwide_live_session_preflight_tracks_title">Что отслеживается</string>
     <string name="appwide_live_session_start">Запустить тренера для тренировки</string>
     <string name="appwide_live_session_start_accessibility">Запустить тренера для тренировки. Бета. Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.</string>
+    <string name="appwide_live_session_start_coaching">Начать</string>
     <string name="appwide_live_session_start_detail">Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.</string>
     <string name="appwide_live_session_summary_title">Сводка Silent Guardian</string>
     <string name="appwide_live_session_title">Silent Guardian</string>

@@ -23,7 +23,7 @@ struct LiveSessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var motion = NoopMotionState.shared
 
-    /// One runner per presentation — created here, started on appear, never restarted.
+    /// One runner per presentation. Construction is inert; explicit confirmation starts it once.
     @StateObject private var runner = LiveSessionRunner()
     let onClose: () -> Void
 
@@ -41,10 +41,47 @@ struct LiveSessionView: View {
     @State private var showSummary = false
     /// "N sessions guarded" for the summary streak line, read from the store when the session ends.
     @State private var guardedCount: Int?
+    /// Opening the surface is informational only. The runner, live-HR lease, persistence, and haptics
+    /// remain untouched until the user explicitly confirms after reading the pre-session guide.
+    @State private var hasStarted = false
 
     private let ringDiameter: CGFloat = 250
 
     var body: some View {
+        ZStack {
+            LiveSessionBackdrop()
+
+            Group {
+                if hasStarted {
+                    sessionBody
+                } else {
+                    LiveSessionPreflightView(onStart: startSession, onClose: onClose)
+                }
+            }
+        }
+        // Left without ending (a torn-down shell on macOS): end cleanly so the realtime-HR arm is
+        // balanced and the row's totals are banked. Closing the guide before Start has no side effects.
+        .onDisappear {
+            if hasStarted, runner.finalRow == nil { runner.end() }
+        }
+        // Both end paths (the End tap and the 10-min stale auto-end) land here: load the streak count,
+        // then raise the summary.
+        .onChangeCompat(of: runner.finalRow) { row in
+            guard row != nil else { return }
+            loadGuardedCount()
+            showSummary = true
+        }
+        .onChangeCompat(of: runner.output) { out in advance(to: out) }
+        .sheet(isPresented: $showSummary, onDismiss: { onClose() }) {
+            if let row = runner.finalRow {
+                LiveSessionSummarySheet(row: row, guardedCount: guardedCount) {
+                    showSummary = false   // onDismiss closes the whole session screen
+                }
+            }
+        }
+    }
+
+    private var sessionBody: some View {
         VStack(spacing: 0) {
             header
                 .padding(.top, NoopMetrics.space6)
@@ -67,35 +104,17 @@ struct LiveSessionView: View {
         .screenPadding()
         .padding(.vertical, NoopMetrics.space6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(StrandPalette.surfaceBase.ignoresSafeArea())
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 640)
         #endif
-        .onAppear {
-            runner.start(model: model, repo: repo, ble: model.ble, profile: profile)
-        }
-        // Left without ending (a dismissed sheet on macOS, a shell teardown): end cleanly so the
-        // realtime-HR arm is balanced and the row's totals are banked. Guarded — a normal End already set
-        // finalRow, so this only catches the escape paths.
-        .onDisappear {
-            if runner.finalRow == nil { runner.end() }
-        }
-        // Both end paths (the End tap and the 10-min stale auto-end) land here: load the streak count,
-        // then raise the summary.
-        .onChangeCompat(of: runner.finalRow) { row in
-            guard row != nil else { return }
-            loadGuardedCount()
-            showSummary = true
-        }
-        .onChangeCompat(of: runner.output) { out in advance(to: out) }
         .task { await fadeChargeSentenceLater() }
-        .sheet(isPresented: $showSummary, onDismiss: { onClose() }) {
-            if let row = runner.finalRow {
-                LiveSessionSummarySheet(row: row, guardedCount: guardedCount) {
-                    showSummary = false   // onDismiss closes the whole session screen
-                }
-            }
-        }
+    }
+
+    private func startSession() {
+        guard !hasStarted else { return }
+        chargeLineVisible = true
+        runner.start(model: model, repo: repo, ble: model.ble, profile: profile)
+        hasStarted = true
     }
 
     // MARK: - Header
@@ -108,20 +127,10 @@ struct LiveSessionView: View {
             HStack(spacing: NoopMetrics.space2) {
                 Text("appwide.live_session.title")
                     .font(StrandFont.title1).foregroundStyle(StrandPalette.textPrimary)
-                betaPill
+                StatePill("BETA", tone: .accent, showsDot: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var betaPill: some View {
-        Text("BETA")
-            .font(StrandFont.overlineScaled(8.5)).tracking(0)
-            .foregroundStyle(StrandPalette.textSecondary)
-            .padding(.horizontal, 8).padding(.vertical, 2.5)
-            .background(Capsule().fill(StrandPalette.surfaceInset)
-                .overlay(Capsule().strokeBorder(StrandPalette.hairline, lineWidth: 1)))
-            .accessibilityLabel("Beta feature")
     }
 
     // MARK: - Ring
@@ -281,6 +290,160 @@ struct LiveSessionView: View {
     }
 }
 
+// MARK: - Shared liquid chrome
+
+/// The same static satin-obsidian field used by the primary liquid screens. The appearance gates remain
+/// live through `LiquidScaffoldSky`; disabling dimensional backgrounds still leaves the base surface.
+private struct LiveSessionBackdrop: View {
+    var body: some View {
+        ZStack(alignment: .top) {
+            StrandPalette.surfaceBase
+            LiquidScaffoldSky()
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Pre-session guide
+
+/// Informational gate shown before any runner side effect. Its copy mirrors Android and is intentionally
+/// specific about the engine's actual warm-up, dwell, cooldown, stale, and auto-end thresholds.
+private struct LiveSessionPreflightView: View {
+    let onStart: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                    Text("appwide.live_session.preflight_intro")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(spacing: 0) {
+                        guideRow(
+                            icon: "heart.fill",
+                            title: "appwide.live_session.preflight_tracks_title",
+                            body: "appwide.live_session.preflight_tracks_body")
+                        guideDivider
+                        guideRow(
+                            icon: "scope",
+                            title: "appwide.live_session.preflight_target_title",
+                            body: "appwide.live_session.preflight_target_body")
+                        guideDivider
+                        guideRow(
+                            icon: "wave.3.right",
+                            title: "appwide.live_session.preflight_cues_title",
+                            body: "appwide.live_session.preflight_cues_body")
+                        guideDivider
+                        guideRow(
+                            icon: "stop.circle.fill",
+                            title: "appwide.live_session.preflight_stop_title",
+                            body: "appwide.live_session.preflight_stop_body")
+                    }
+                    .background(
+                        FrostedCardSurface(
+                            tint: StrandPalette.metricCyan,
+                            cornerRadius: NoopMetrics.cardRadius,
+                            washStrength: 0.7
+                        )
+                    )
+                }
+                .padding(.vertical, NoopMetrics.space6)
+            }
+
+            NoopButton(
+                "appwide.live_session.start_coaching",
+                systemImage: "play.fill",
+                kind: .primary,
+                fullWidth: true,
+                action: onStart)
+                .padding(.top, NoopMetrics.space2)
+        }
+        .screenPadding()
+        .padding(.vertical, NoopMetrics.space6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #if os(macOS)
+        .frame(minWidth: 480, minHeight: 640)
+        #endif
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: NoopMetrics.space3) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("appwide.live_session.preflight_title")
+                    .font(StrandFont.title1)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                StatePill("BETA", tone: .accent, showsDot: false)
+            }
+            Spacer(minLength: NoopMetrics.space3)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(StrandPalette.surfaceRaised.opacity(0.82))
+                            .overlay(
+                                Circle().strokeBorder(StrandPalette.hairline, lineWidth: 1)
+                            )
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Close"))
+            .help("Close")
+        }
+    }
+
+    private func guideRow(
+        icon: String,
+        title: LocalizedStringKey,
+        body: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: NoopMetrics.rowSpacing) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(StrandPalette.metricCyan)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(StrandPalette.metricCyan.opacity(0.12))
+                        .overlay(
+                            Circle().strokeBorder(
+                                StrandPalette.metricCyan.opacity(0.28),
+                                lineWidth: 1
+                            )
+                        )
+                )
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(body)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, NoopMetrics.space4)
+        .padding(.vertical, 14)
+    }
+
+    private var guideDivider: some View {
+        Divider()
+            .overlay(StrandPalette.hairline)
+            .padding(.leading, 62)
+            .padding(.trailing, NoopMetrics.space4)
+    }
+}
+
 // MARK: - Summary sheet
 
 /// The end-of-session read-out: time in / below / above the band, the cues sent, a plain verdict, and
@@ -292,56 +455,62 @@ struct LiveSessionSummarySheet: View {
     let onDone: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("appwide.live_session.manually_started")
-                    .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
-                    .foregroundStyle(StrandPalette.metricCyan)
-                Text("appwide.live_session.summary_title")
-                    .font(StrandFont.title1).foregroundStyle(StrandPalette.textPrimary)
-            }
-            .padding(.top, NoopMetrics.space6)
+        ZStack {
+            LiveSessionBackdrop()
 
-            Text(Self.verdict(row: row))
-                .font(StrandFont.body)
-                .foregroundStyle(StrandPalette.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            summaryCard {
-                bandRow(String(localized: "In band"), seconds: row.inBandSec, tint: StrandPalette.metricCyan)
-                bandRow(String(localized: "Below band"), seconds: row.belowSec, tint: StrandPalette.textTertiary)
-                bandRow(String(localized: "Above band"), seconds: row.aboveSec, tint: StrandPalette.statusCritical)
-            }
-
-            summaryCard {
-                HStack {
-                    Text("Cues sent").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    Text(cueLine).font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textPrimary)
+            VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("appwide.live_session.manually_started")
+                        .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                        .foregroundStyle(StrandPalette.metricCyan)
+                    HStack(spacing: NoopMetrics.space2) {
+                        Text("appwide.live_session.summary_title")
+                            .font(StrandFont.title1).foregroundStyle(StrandPalette.textPrimary)
+                        StatePill("BETA", tone: .accent, showsDot: false)
+                    }
                 }
-                HStack {
-                    Text("Band").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    Text("\(Int(row.floorBpm.rounded()))–\(Int(row.ceilingBpm.rounded())) bpm")
-                        .font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textPrimary)
+                .padding(.top, NoopMetrics.space6)
+
+                Text(Self.verdict(row: row))
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                summaryCard {
+                    bandRow(String(localized: "In band"), seconds: row.inBandSec, tint: StrandPalette.metricCyan)
+                    bandRow(String(localized: "Below band"), seconds: row.belowSec, tint: StrandPalette.textTertiary)
+                    bandRow(String(localized: "Above band"), seconds: row.aboveSec, tint: StrandPalette.statusCritical)
                 }
-            }
 
-            if let n = guardedCount, n > 0 {
-                Text(n == 1 ? String(localized: "1 session guarded")
-                            : String(localized: "\(n) sessions guarded"))
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+                summaryCard {
+                    HStack {
+                        Text("Cues sent").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
+                        Spacer()
+                        Text(cueLine).font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textPrimary)
+                    }
+                    HStack {
+                        Text("Band").font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
+                        Spacer()
+                        Text("\(Int(row.floorBpm.rounded()))–\(Int(row.ceilingBpm.rounded())) bpm")
+                            .font(StrandFont.captionNumber).foregroundStyle(StrandPalette.textPrimary)
+                    }
+                }
 
-            Spacer(minLength: NoopMetrics.space3)
-            NoopButton("Done", kind: .primary, fullWidth: true) { onDone() }
+                if let n = guardedCount, n > 0 {
+                    Text(n == 1 ? String(localized: "1 session guarded")
+                                : String(localized: "\(n) sessions guarded"))
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                Spacer(minLength: NoopMetrics.space3)
+                NoopButton("Done", kind: .primary, fullWidth: true) { onDone() }
+            }
+            .screenPadding()
+            .padding(.vertical, NoopMetrics.space6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .screenPadding()
-        .padding(.vertical, NoopMetrics.space6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(StrandPalette.surfaceBase.ignoresSafeArea())
         #if os(macOS)
         .frame(minWidth: 420, minHeight: 520)
         #endif

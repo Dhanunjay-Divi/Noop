@@ -72,7 +72,10 @@ class SafetyShellContractTest {
             "composable(Destination.Safety.route) { SafetyCenterScreen() }",
         ))
         assertTrue(text.contains(
-            "modifier = Modifier.clickable { onNavigate(Destination.Safety.route) }",
+            "MoreQuickAccessItem(R.string.nav_safety, Icons.Filled.Shield, Destination.Safety.route, critical = true)",
+        ))
+        assertTrue(text.contains(
+            "Destination.Safety, Destination.SmartAlarm, Destination.Automations",
         ))
         assertTrue(text.contains("GlassBottomBar("))
     }

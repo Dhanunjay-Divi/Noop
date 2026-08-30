@@ -24,7 +24,7 @@ class PrimaryNavigationContractTest {
         val text = source!!
 
         assertTrue(text.contains(
-            "BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts)"
+            "BarTab(Destination.Workouts, Icons.AutoMirrored.Filled.DirectionsRun, R.string.nav_workouts)"
         ))
         assertTrue(text.contains("current != Destination.Workouts && current != Destination.Sleep"))
         assertFalse(text.contains(
@@ -45,7 +45,7 @@ class PrimaryNavigationContractTest {
             "Friends(\"friends\", R.string.nav_friends, Icons.Filled.People)"
         ))
         assertTrue(text.contains(
-            "Destination.Live, Destination.Friends, Destination.Nutrition"
+            "Destination.Profile, Destination.Friends, Destination.Devices, Destination.Live"
         ))
         assertTrue(text.contains("composable(Destination.Friends.route)"))
         assertTrue(text.contains("FriendsScreen("))

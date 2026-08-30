@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -178,7 +180,6 @@ private fun StartSportRow(sp: Sport, isSelected: Boolean, onPick: () -> Unit) {
  */
 @Composable
 fun WorkoutStartSection(vm: AppViewModel) {
-    val live by vm.live.collectAsStateWithLifecycle()
     val activeWorkout by vm.activeWorkout.collectAsStateWithLifecycle()
     var showSportPicker by remember { mutableStateOf(false) }
     // Live workout mode (#238): the full-screen in-exercise view. StartWorkoutSheet opens it the
@@ -218,15 +219,19 @@ fun WorkoutStartSection(vm: AppViewModel) {
                 ) { Text(uiString(R.string.l10n_workout_start_end_a2bb9d34), style = NoopType.captionNumber) }
             }
         }
-    } else if (live.bonded) {
-        Button(
+    } else {
+        NoopButton(
+            text = uiString(R.string.l10n_workout_start_start_workout_d0f3f2cd),
+            kind = NoopButtonKind.Primary,
+            fullWidth = true,
+            leadingContent = {
+                MetricGlyph(
+                    icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                    size = 30.dp,
+                )
+            },
             onClick = { showSportPicker = true },
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Palette.accent, contentColor = Palette.surfaceBase,
-            ),
-        ) { Text(uiString(R.string.l10n_workout_start_start_workout_d0f3f2cd), style = NoopType.captionNumber) }
+        )
     }
 
     if (showSportPicker) {

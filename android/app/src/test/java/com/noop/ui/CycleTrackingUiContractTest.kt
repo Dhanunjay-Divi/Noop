@@ -46,7 +46,7 @@ class CycleTrackingUiContractTest {
     fun healthObservesProfileAndKeepsCycleSetupInItsNoDataBranch() {
         val health = source("src/main/java/com/noop/ui/HealthScreen.kt")
         assertTrue(health.contains("ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()"))
-        val emptyStart = health.indexOf("if (today == null && !hasLiveHr)")
+        val emptyStart = health.indexOf("if (days.isEmpty() && !live.connected)")
         val populatedStart = health.indexOf("} else {", startIndex = emptyStart)
         assertTrue(emptyStart >= 0 && populatedStart > emptyStart)
         assertTrue(health.substring(emptyStart, populatedStart).contains("SkinTempSuiteSection("))

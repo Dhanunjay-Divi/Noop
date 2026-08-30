@@ -357,33 +357,65 @@ final class IntelligenceEngine: ObservableObject {
         return fmt.string(from: sat)
     }
 
-    /// Assess Fitness Age readiness from `gateDays` (the merged last-7 the readiness card counts) and, when
-    /// ready, build the fitness_age (+ optional vo2max) points for `satKey`. Empty when not ready. The
-    /// SINGLE source of the gate + compute , shared by the recompute pass and the manual "refresh Fitness
-    /// Age" button so the two can never drift. Profile passed as primitives (no cross-actor object read).
+    /// Assess Fitness Age readiness from the newest seven `gateDays`, then average up to seven eligible
+    /// trailing-week snapshots before bounding the headline against `previousPublishedAge`. Callers pass
+    /// up to `historyDaysNeeded` merged days so an activity bucket crossed by one new day is phased into
+    /// the estimate instead of appearing as a multi-year jump. Empty when the newest window is not ready.
+    /// This remains the single gate + compute source for normal analysis and manual refresh.
     /// Mirrors the Android `IntelligenceEngine.fitnessAgeRows`.
     static func fitnessAgeRows(
         gateDays: [DailyMetric], age: Int, sex: String, waistCm: Double,
         computedId: String, satKey: String, ageConfirmed: Bool = true, sexConfirmed: Bool = true,
+        previousPublishedAge: Double? = nil,
     ) -> [MetricPoint] {
-        let rhrs = gateDays.compactMap { $0.restingHr }.map(Double.init)
-        let strains = gateDays.compactMap { $0.strain }.filter { $0 >= 30 }
-        let meanStrain = strains.isEmpty ? 0 : strains.reduce(0, +) / Double(strains.count)
+        var byDay: [String: DailyMetric] = [:]
+        for day in gateDays { byDay[day.day] = day }
+        let history = Array(
+            byDay.values.sorted { $0.day < $1.day }.suffix(FitnessAgeEngine.historyDaysNeeded))
+        let newestWindow = Array(history.suffix(FitnessAgeEngine.estimateWindowDays))
         let waist: Double? = waistCm > 0 ? waistCm : nil
-        let ready = FitnessAgeEngine.assessReadiness(
+        let newestReadiness = FitnessAgeEngine.assessReadiness(
             hasAge: ageConfirmed && FitnessAgeEngine.supports(age: Double(age)),
             hasSex: sexConfirmed && FitnessAgeEngine.supports(sex: sex),
-            rhrDays: rhrs.count, activityDays: gateDays.compactMap { $0.strain }.count,
+            rhrDays: newestWindow.compactMap { $0.restingHr }.count,
+            activityDays: newestWindow.compactMap { $0.strain }.count,
             hasWaist: waist != nil)
-        guard ready.canCompute,
-              let res = FitnessAgeEngine.compute(
+        guard newestReadiness.canCompute else { return [] }
+
+        func result(for window: [DailyMetric]) -> FitnessAgeResult? {
+            let rhrs = window.compactMap { $0.restingHr }.map(Double.init)
+            let strains = window.compactMap { $0.strain }.filter { $0 >= 30 }
+            let readiness = FitnessAgeEngine.assessReadiness(
+                hasAge: ageConfirmed && FitnessAgeEngine.supports(age: Double(age)),
+                hasSex: sexConfirmed && FitnessAgeEngine.supports(sex: sex),
+                rhrDays: rhrs.count, activityDays: window.compactMap { $0.strain }.count,
+                hasWaist: waist != nil)
+            guard readiness.canCompute else { return nil }
+            let meanStrain = strains.isEmpty ? 0 : strains.reduce(0, +) / Double(strains.count)
+            return FitnessAgeEngine.compute(
                 age: Double(age), sex: sex,
                 restingHR: medianOf(rhrs),
                 paIndex: FitnessAgeEngine.physicalActivityIndexFromStrain(
                     activeDaysPerWeek: strains.count, meanActiveStrain: meanStrain),
-                waistCm: waist) else { return [] }
-        var rows = [MetricPoint(day: satKey, key: "fitness_age", value: res.fitnessAge)]
-        if let v = res.vo2max { rows.append(MetricPoint(day: satKey, key: "vo2max_est", value: v)) }
+                waistCm: waist)
+        }
+
+        let firstEndpoint = max(0, history.count - FitnessAgeEngine.smoothingWindowEstimates)
+        let snapshots = history.indices.compactMap { endpoint -> FitnessAgeResult? in
+            guard endpoint >= firstEndpoint else { return nil }
+            return result(for: Array(
+                history[...endpoint].suffix(FitnessAgeEngine.estimateWindowDays)))
+        }
+        guard let smoothed = FitnessAgeEngine.smoothedFitnessAge(
+                  recentEstimates: snapshots.map(\.fitnessAge)),
+              let published = FitnessAgeEngine.boundedFitnessAge(
+                  candidate: smoothed, previousPublished: previousPublishedAge),
+              let newestResult = snapshots.last else { return [] }
+
+        var rows = [MetricPoint(day: satKey, key: "fitness_age", value: published)]
+        if let v = newestResult.vo2max {
+            rows.append(MetricPoint(day: satKey, key: "vo2max_est", value: v))
+        }
         return rows
     }
 
@@ -413,6 +445,34 @@ final class IntelligenceEngine: ObservableObject {
             if best == nil || row.day > best!.day { best = row }
         }
         return best?.value
+    }
+
+    /// Latest point before the current weekly key across the computed-source union. Excluding the current
+    /// key is what makes the movement bound idempotent during repeated refreshes in one week.
+    private func latestComputedMetricPoint(
+        store: WhoopStore, key: String, before day: String
+    ) async -> MetricPoint? {
+        var best: MetricPoint?
+        for id in repo.computedReadIds {
+            let rows = (try? await store.metricSeries(
+                deviceId: id, key: key, from: "0000-01-01", to: day)) ?? []
+            guard let row = rows.last(where: { $0.day < day }) else { continue }
+            if best == nil || row.day > best!.day { best = row }
+        }
+        return best
+    }
+
+    private func latestComputedMetricPointStrict(
+        store: WhoopStore, key: String, before day: String
+    ) async throws -> MetricPoint? {
+        var best: MetricPoint?
+        for id in repo.computedReadIds {
+            let rows = try await store.metricSeries(
+                deviceId: id, key: key, from: "0000-01-01", to: day)
+            guard let row = rows.last(where: { $0.day < day }) else { continue }
+            if best == nil || row.day > best!.day { best = row }
+        }
+        return best
     }
 
     /// Purge every computed-union copy, not just the current write id. This matters after a strap is
@@ -617,7 +677,8 @@ final class IntelligenceEngine: ObservableObject {
         } catch {
             return .failed
         }
-        let gate7 = Array(persistedDays.sorted { $0.day < $1.day }.suffix(7))
+        let history = Array(
+            persistedDays.sorted { $0.day < $1.day }.suffix(FitnessAgeEngine.historyDaysNeeded))
         do {
             let storedLegacyFitnessToken = try await latestComputedProfileTokenStrict(
                 store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
@@ -627,8 +688,9 @@ final class IntelligenceEngine: ObservableObject {
                 store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
             let storedVO2Token = try await latestComputedProfileTokenStrict(
                 store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-            if storedLegacyFitnessToken != nil
-                || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+            let acceptsStoredFitness = storedLegacyFitnessToken == nil
+                && profile.acceptsFitnessAge(provenance: storedFitnessToken)
+            if !acceptsStoredFitness {
                 try await purgeComputedMetricKeysStrict(
                     store: store, keys: [
                         AgeMetricProfile.fitnessAgeKey,
@@ -646,19 +708,25 @@ final class IntelligenceEngine: ObservableObject {
                     ])
             }
 
+            let satKey = Self.saturdayKey(onOrBefore: newestDay)
+            let previousPublishedAge = acceptsStoredFitness
+                ? try await latestComputedMetricPointStrict(
+                    store: store, key: "fitness_age", before: satKey)?.value
+                : nil
             var rows = Self.fitnessAgeRows(
-                gateDays: gate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
+                gateDays: history, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
                 computedId: computedId,
-                satKey: Self.saturdayKey(onOrBefore: newestDay),
-                ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
+                satKey: satKey,
+                ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed,
+                previousPublishedAge: previousPublishedAge)
             if rows.contains(where: { $0.key == "fitness_age" }),
                let token = profile.fitnessAgeProfileToken {
-                rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                rows.append(MetricPoint(day: satKey,
                                         key: AgeMetricProfile.fitnessAgeKey, value: token))
             }
             if rows.contains(where: { $0.key == "vo2max_est" }),
                let token = profile.vo2maxProfileToken {
-                rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                rows.append(MetricPoint(day: satKey,
                                         key: AgeMetricProfile.vo2maxEstimateKey, value: token))
             } else {
                 // Upsert does not remove an omitted optional row. Clearing/invalidating waist must remove
@@ -1754,7 +1822,9 @@ final class IntelligenceEngine: ObservableObject {
         var faGateByDay: [String: DailyMetric] = [:]
         for d in faPriorDaily { faGateByDay[d.day] = d }
         for d in dailies { faGateByDay[d.day] = d }
-        let faGate7 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(7))
+        let faHistory = Array(
+            faGateByDay.values.sorted { $0.day < $1.day }
+                .suffix(FitnessAgeEngine.historyDaysNeeded))
         let storedLegacyFitnessToken = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
         let storedFitnessToken = await latestComputedProfileToken(
@@ -1763,8 +1833,9 @@ final class IntelligenceEngine: ObservableObject {
             store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
         let storedVO2Token = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-        if storedLegacyFitnessToken != nil
-            || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+        let acceptsStoredFitness = storedLegacyFitnessToken == nil
+            && profile.acceptsFitnessAge(provenance: storedFitnessToken)
+        if !acceptsStoredFitness {
             await purgeComputedMetricKeys(
                 store: store, keys: [
                     AgeMetricProfile.fitnessAgeKey,
@@ -1783,11 +1854,16 @@ final class IntelligenceEngine: ObservableObject {
         }
 
         let faSatKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
+        let previousPublishedAge = acceptsStoredFitness
+            ? await latestComputedMetricPoint(
+                store: store, key: "fitness_age", before: faSatKey)?.value
+            : nil
         var faPts = Self.fitnessAgeRows(
-            gateDays: faGate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
+            gateDays: faHistory, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
             computedId: computedId,
-            satKey: faSatKey,
-            ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
+            satKey: faSatKey, ageConfirmed: profile.ageInputConfirmed,
+            sexConfirmed: profile.sexInputConfirmed,
+            previousPublishedAge: previousPublishedAge)
         if faPts.contains(where: { $0.key == "fitness_age" }), let token = profile.fitnessAgeProfileToken {
             faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.fitnessAgeKey, value: token))
         }

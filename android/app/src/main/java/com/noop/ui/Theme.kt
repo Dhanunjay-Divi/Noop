@@ -63,6 +63,40 @@ object Palette {
     val hairline get() = active.hairline
     val hairlineStrong get() = active.hairlineStrong
 
+    // Dimensional monochrome chrome shared with iOS MetricGlyph/DepthGlyph.
+    val bevelSide: Color
+        get() = when {
+            isLight -> Color(0xFFCCD0D5)
+            isBlack -> Color(0xFF4B4C50)
+            else -> Color(0xFF5B5E65)
+        }
+    val bevelBottom: Color
+        get() = when {
+            isLight -> Color(0xFFA8ADB5)
+            isBlack -> Color.Black
+            else -> Color(0xFF050506)
+        }
+    val glyphFaceTop: Color
+        get() = when {
+            isLight -> Color.White
+            isBlack -> Color(0xFF242426)
+            else -> Color(0xFF303237)
+        }
+    val glyphFaceBottom: Color
+        get() = when {
+            isLight -> Color(0xFFE0E3E7)
+            isBlack -> Color(0xFF080809)
+            else -> Color(0xFF101114)
+        }
+    val glyphExtrusion: Color
+        get() = when {
+            isLight -> Color(0xFFB9BEC5)
+            isBlack -> Color.Black
+            else -> Color(0xFF050607)
+        }
+    val glyphInkTop get() = if (isLight) Color(0xFF34373B) else Color(0xFFF5F5F2)
+    val glyphInkBottom get() = if (isLight) Color(0xFF07090B) else Color(0xFFB8B8B2)
+
     // Text.
     val textPrimary get() = active.textPrimary
     val textSecondary get() = active.textSecondary
@@ -70,7 +104,9 @@ object Palette {
 
     // Text that always sits on a pinned-dark surface, independent of the app's active light/dark scheme.
     // Mirrors StrandPalette.onDarkSecondary for the liquid hero's source badge.
+    val onDarkPrimary = Color(0xFFF7F7F5)
     val onDarkSecondary = Color(0xFFC8CFD8)
+    val onDarkTertiary = Color(0xFF989893)
 
     // Glow.
     val glowAmbient get() = active.glowAmbient

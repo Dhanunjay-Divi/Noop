@@ -152,6 +152,7 @@
     <string name="appwide_fitness_age_recent_context">Contesto recente</string>
     <string name="appwide_fitness_age_same_profile_age">Circa uguale all’età del profilo</string>
     <string name="appwide_fitness_age_value_format">%1$d anni</string>
+    <string name="appwide_fitness_age_weekly">SETTIMANALE</string>
     <string name="appwide_fitness_age_weekly_progress">PROGRESSO SETTIMANALE</string>
     <string name="appwide_fitness_age_weeks_count">%1$d sett.</string>
     <string name="appwide_fitness_age_younger_duration_profile_age">%1$s in meno rispetto all’età del profilo</string>
@@ -187,8 +188,19 @@
     <string name="appwide_journal_editing_help">Rinomina, raggruppa o rimuovi un elemento per riordinare l’elenco. La domanda originale resta associata internamente, così i riferimenti importati continuano a corrispondere. Gli elementi personalizzati vengono eliminati; quelli integrati vengono nascosti e possono essere ripristinati qui sotto.</string>
     <string name="appwide_legal_summary">Termini del progetto e licenza del codice sorgente. Disponibile offline.</string>
     <string name="appwide_live_session_manually_started">AVVIATO MANUALMENTE</string>
+    <string name="appwide_live_session_preflight_cues_body">Il primo minuto resta silenzioso. Poi 2 tocchi leggeri indicano di aumentare lo sforzo dopo 25 secondi sotto l’obiettivo; 3 tocchi decisi indicano di rallentare se un aumento rapido resta sopra l’obiettivo per 25 secondi. I picchi brevi non attivano segnali e lo stesso segnale attende almeno 50 secondi.</string>
+    <string name="appwide_live_session_preflight_cues_title">Quando vibra la fascia</string>
+    <string name="appwide_live_session_preflight_intro">Scopri cosa succederà prima di iniziare. Nulla viene monitorato finché non tocchi Avvia coaching.</string>
+    <string name="appwide_live_session_preflight_stop_body">Termina la sessione in qualsiasi momento. Se mancano dati sulla frequenza cardiaca, i segnali si mettono in pausa dopo circa 8 secondi e la sessione termina automaticamente dopo 10 minuti senza letture.</string>
+    <string name="appwide_live_session_preflight_stop_title">Quando termina il coaching</string>
+    <string name="appwide_live_session_preflight_target_body">Il Recupero di oggi, la frequenza cardiaca a riposo recente e la frequenza massima del profilo definiscono la fascia. Senza un punteggio di Recupero, NOOP usa una fascia intermedia prudente.</string>
+    <string name="appwide_live_session_preflight_target_title">Come viene impostato l’obiettivo</string>
+    <string name="appwide_live_session_preflight_title">Coach di allenamento</string>
+    <string name="appwide_live_session_preflight_tracks_body">L’andamento della frequenza cardiaca in tempo reale e il tempo trascorso dentro, sotto e sopra la fascia obiettivo di oggi. Questa sessione di coaching non crea una voce di allenamento.</string>
+    <string name="appwide_live_session_preflight_tracks_title">Cosa monitora</string>
     <string name="appwide_live_session_start">Avvia coach di allenamento</string>
     <string name="appwide_live_session_start_accessibility">Avvia coach di allenamento. Beta. Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.</string>
+    <string name="appwide_live_session_start_coaching">Avvia coaching</string>
     <string name="appwide_live_session_start_detail">Le vibrazioni del bracciale guidano lo sforzo usando il Recupero e la frequenza cardiaca di oggi.</string>
     <string name="appwide_live_session_summary_title">Riepilogo di Silent Guardian</string>
     <string name="appwide_live_session_title">Silent Guardian</string>

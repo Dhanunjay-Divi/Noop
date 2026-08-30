@@ -152,6 +152,7 @@
     <string name="appwide_fitness_age_recent_context">Aktueller Kontext</string>
     <string name="appwide_fitness_age_same_profile_age">Ungefähr so alt wie dein Profilalter</string>
     <string name="appwide_fitness_age_value_format">%1$d J.</string>
+    <string name="appwide_fitness_age_weekly">WÖCHENTLICH</string>
     <string name="appwide_fitness_age_weekly_progress">WÖCHENTLICHER VERLAUF</string>
     <string name="appwide_fitness_age_weeks_count">%1$d Wo.</string>
     <string name="appwide_fitness_age_younger_duration_profile_age">%1$s jünger als dein Profilalter</string>
@@ -187,8 +188,19 @@
     <string name="appwide_journal_editing_help">Benenne einen Eintrag um, gruppiere ihn neu oder entferne ihn, um deine Liste aufzuräumen. Beim Umbenennen bleibt die ursprüngliche Frage intern erhalten, damit importierte Referenzen weiterhin zugeordnet werden. Eigene Einträge werden gelöscht; integrierte werden ausgeblendet und können unten wiederhergestellt werden.</string>
     <string name="appwide_legal_summary">Projektbedingungen und Quellcodelizenz. Offline verfügbar.</string>
     <string name="appwide_live_session_manually_started">MANUELL GESTARTET</string>
+    <string name="appwide_live_session_preflight_cues_body">In der ersten Minute bleibt das Band still. Danach bedeuten 2 leichte Impulse mehr Belastung nach 25 Sekunden unter dem Ziel; 3 kräftige Impulse bedeuten langsamer werden, wenn ein schneller Anstieg 25 Sekunden über dem Ziel bleibt. Kurze Ausschläge bleiben still, und derselbe Hinweis wartet mindestens 50 Sekunden.</string>
+    <string name="appwide_live_session_preflight_cues_title">Wann das Band vibriert</string>
+    <string name="appwide_live_session_preflight_intro">Informiere dich vor dem Start über den Ablauf. Es wird nichts erfasst, bis du auf „Coaching starten“ tippst.</string>
+    <string name="appwide_live_session_preflight_stop_body">Du kannst die Sitzung jederzeit beenden. Fehlende Herzfrequenzdaten pausieren Hinweise nach etwa 8 Sekunden und beenden die Sitzung nach 10 Minuten ohne Messwert automatisch.</string>
+    <string name="appwide_live_session_preflight_stop_title">Wann das Coaching endet</string>
+    <string name="appwide_live_session_preflight_target_body">Die heutige Erholung, deine aktuelle Ruheherzfrequenz und die maximale Herzfrequenz aus deinem Profil legen den Bereich fest. Ohne Erholungswert verwendet NOOP einen vorsichtigen mittleren Bereich.</string>
+    <string name="appwide_live_session_preflight_target_title">So wird dein Ziel festgelegt</string>
+    <string name="appwide_live_session_preflight_title">Workout-Coach</string>
+    <string name="appwide_live_session_preflight_tracks_body">Live-Herzfrequenztrends und die Zeit innerhalb, unterhalb und oberhalb deines heutigen Zielbereichs. Diese Coaching-Sitzung erstellt keinen Trainingseintrag.</string>
+    <string name="appwide_live_session_preflight_tracks_title">Was erfasst wird</string>
     <string name="appwide_live_session_start">Workout-Coach starten</string>
     <string name="appwide_live_session_start_accessibility">Workout-Coach starten. Beta. Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.</string>
+    <string name="appwide_live_session_start_coaching">Coaching starten</string>
     <string name="appwide_live_session_start_detail">Bandvibrationen steuern deine Belastung anhand der heutigen Erholung und Herzfrequenz.</string>
     <string name="appwide_live_session_summary_title">Silent Guardian-Zusammenfassung</string>
     <string name="appwide_live_session_title">Silent Guardian</string>

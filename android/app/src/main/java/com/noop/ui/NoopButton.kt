@@ -124,6 +124,7 @@ private fun appearanceFor(kind: NoopButtonKind): NoopButtonAppearance = when (ki
  * @param kind the button role (default Primary).
  * @param fullWidth stretch to the available width.
  * @param enabled when false the button dims and ignores taps.
+ * @param leadingContent optional custom leading visual; takes precedence over [leadingIcon].
  * @param onClick the tap action.
  */
 @Composable
@@ -134,6 +135,7 @@ fun NoopButton(
     fullWidth: Boolean = false,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
+    leadingContent: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val reduced = rememberReduceMotion()
@@ -185,7 +187,9 @@ fun NoopButton(
         ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (leadingIcon != null) {
+        if (leadingContent != null) {
+            leadingContent()
+        } else if (leadingIcon != null) {
             Icon(
                 imageVector = leadingIcon,
                 contentDescription = null, // the text labels the button

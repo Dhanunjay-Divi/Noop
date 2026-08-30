@@ -3,7 +3,6 @@ package com.noop.ui
 import com.noop.R
 import androidx.compose.ui.res.stringResource
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -14,11 +13,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,26 +27,41 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TrackChanges
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -59,7 +73,6 @@ import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 // MARK: - LiveSessionScreen - the Live Session ("silent guardian") surface + end-of-session summary
@@ -134,11 +147,18 @@ fun startOrResumeLiveSession(vm: AppViewModel, context: Context): LiveSessionRun
 fun LiveSessionScreen(vm: AppViewModel, onClose: () -> Unit) {
     val active by LiveSessionRunner.active.collectAsStateWithLifecycle()
     val runner = active
-    LaunchedEffect(runner == null) { if (runner == null) onClose() }
-    if (runner == null) return
+    val context = LocalContext.current
+    if (runner == null) {
+        LiveSessionPreflight(
+            onClose = onClose,
+            onStart = { startOrResumeLiveSession(vm, context) },
+        )
+        return
+    }
 
     val snap by runner.snapshot.collectAsStateWithLifecycle()
     Box(modifier = Modifier.fillMaxSize().background(Palette.surfaceBase)) {
+        LiveSessionBackdrop()
         if (snap.ended) {
             LiveSessionSummary(
                 vm = vm,
@@ -155,6 +175,176 @@ fun LiveSessionScreen(vm: AppViewModel, onClose: () -> Unit) {
     }
 }
 
+// MARK: - Shared liquid chrome
+
+/** The same static satin-obsidian field and appearance gates used by iOS `LiquidScaffoldSky`. */
+@Composable
+private fun LiveSessionBackdrop() {
+    val context = LocalContext.current
+    val showBackground = remember(context) { NoopPrefs.showDayCycleBackground(context) }
+    val behindCards = remember(context) { NoopPrefs.skyBehindCards(context) }
+    if (showBackground) LiquidScreenSky(fillHeight = behindCards)
+}
+
+// MARK: - Explicit pre-session guide
+
+/**
+ * Opening the coach is informational only. The runner, realtime-HR lease, persistence, and haptics
+ * remain untouched until [onStart], and the copy mirrors the iOS guide.
+ */
+@Composable
+private fun LiveSessionPreflight(
+    onClose: () -> Unit,
+    onStart: () -> Unit,
+) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Palette.surfaceBase),
+    ) {
+        LiveSessionBackdrop()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.appwide_live_session_preflight_title),
+                        style = NoopType.title1,
+                        color = Palette.textPrimary,
+                    )
+                    StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
+                }
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Palette.surfaceRaised.copy(alpha = 0.82f), CircleShape)
+                        .border(1.dp, Palette.hairline, CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = uiString(R.string.l10n_today_screen_close_bbfa773e),
+                        tint = Palette.textSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    stringResource(R.string.appwide_live_session_preflight_intro),
+                    style = NoopType.body,
+                    color = Palette.textSecondary,
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(Metrics.cardRadius))
+                        .frostedCardSurface(
+                            tint = Palette.metricCyan,
+                            cornerRadius = Metrics.cardRadius,
+                            washStrength = 0.7f,
+                        ),
+                ) {
+                    LiveSessionGuideRow(
+                        icon = Icons.Filled.Favorite,
+                        title = stringResource(R.string.appwide_live_session_preflight_tracks_title),
+                        body = stringResource(R.string.appwide_live_session_preflight_tracks_body),
+                    )
+                    LiveSessionGuideDivider()
+                    LiveSessionGuideRow(
+                        icon = Icons.Filled.TrackChanges,
+                        title = stringResource(R.string.appwide_live_session_preflight_target_title),
+                        body = stringResource(R.string.appwide_live_session_preflight_target_body),
+                    )
+                    LiveSessionGuideDivider()
+                    LiveSessionGuideRow(
+                        icon = Icons.Filled.Notifications,
+                        title = stringResource(R.string.appwide_live_session_preflight_cues_title),
+                        body = stringResource(R.string.appwide_live_session_preflight_cues_body),
+                    )
+                    LiveSessionGuideDivider()
+                    LiveSessionGuideRow(
+                        icon = Icons.Filled.Stop,
+                        title = stringResource(R.string.appwide_live_session_preflight_stop_title),
+                        body = stringResource(R.string.appwide_live_session_preflight_stop_body),
+                    )
+                }
+            }
+
+            NoopButton(
+                text = stringResource(R.string.appwide_live_session_start_coaching),
+                leadingIcon = Icons.Filled.PlayArrow,
+                kind = NoopButtonKind.Primary,
+                fullWidth = true,
+                modifier = Modifier.padding(top = 8.dp),
+                onClick = onStart,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveSessionGuideRow(
+    icon: ImageVector,
+    title: String,
+    body: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(Palette.metricCyan.copy(alpha = 0.12f), CircleShape)
+                .border(1.dp, Palette.metricCyan.copy(alpha = 0.28f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = Palette.metricCyan,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(title, style = NoopType.headline, color = Palette.textPrimary)
+            Text(body, style = NoopType.subhead, color = Palette.textSecondary)
+        }
+    }
+}
+
+@Composable
+private fun LiveSessionGuideDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 64.dp, end = 16.dp),
+        color = Palette.hairline,
+    )
+}
+
 // MARK: - The live session body (ring + guarding line + Charge sentence + End)
 
 @Composable
@@ -165,6 +355,14 @@ private fun LiveSessionBody(
 ) {
     val out = snap.output
     val stale = out?.status == LiveSessionEngine.Status.STALE
+    var gaugeFraction by remember(runner) { mutableDoubleStateOf(0.0) }
+    LaunchedEffect(out?.smoothedBpm, out?.band?.floorBpm, out?.band?.ceilingBpm) {
+        val smoothed = out?.smoothedBpm ?: return@LaunchedEffect
+        val band = out.band
+        val low = band.floorBpm - 20.0
+        val high = band.ceilingBpm + 20.0
+        if (high > low) gaugeFraction = ((smoothed - low) / (high - low)).coerceIn(0.0, 1.0)
+    }
 
     // Long-press bpm reveal: a one-shot timestamp so repeated long-presses re-arm the 4s window. The
     // reveal shows ONLY a real smoothed read — a stale stream reveals nothing (never fabricate).
@@ -188,29 +386,30 @@ private fun LiveSessionBody(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(28.dp),
+            .padding(horizontal = 16.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Header - manual origin + title + BETA pill (the contract labels the feature BETA at every surface).
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Overline(stringResource(R.string.appwide_live_session_manually_started), color = Palette.metricCyan)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Overline(stringResource(R.string.appwide_live_session_manually_started), color = Palette.metricCyan)
                 Text(stringResource(R.string.appwide_live_session_title), style = NoopType.title1, color = Palette.textPrimary)
+                StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
             }
-            StatePill("BETA", tone = StrandTone.Accent, showsDot = false)
         }
 
         Spacer(Modifier.weight(1f))
 
         GuardianRing(
+            gaugeFraction = gaugeFraction,
             position = out?.position,
             stale = stale,
             settled = out != null,
@@ -223,11 +422,18 @@ private fun LiveSessionBody(
 
         // The one line of copy. STALE says so honestly (coaching paused, nothing accrues); otherwise the
         // guarding promise — the whole design is that this screen has nothing to watch.
+        val guardianCopy = when (out?.status) {
+            LiveSessionEngine.Status.WARMUP ->
+                "Warming up. Cues stay quiet for the first minute."
+            LiveSessionEngine.Status.ACTIVE ->
+                "Guarding your session. Silence means you're on track."
+            LiveSessionEngine.Status.STALE, null ->
+                "No live reading. Coaching is paused until Noop Band comes back."
+        }
         Text(
-            if (stale) "Signal lost - coaching paused."
-            else "Guarding your session. Silence means you're on track.",
+            guardianCopy,
             style = NoopType.subhead,
-            color = if (stale) Palette.textTertiary else Palette.textSecondary,
+            color = if (stale || out == null) Palette.textTertiary else Palette.textSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -250,14 +456,13 @@ private fun LiveSessionBody(
 
         Spacer(Modifier.weight(1f))
 
-        Button(
+        NoopButton(
+            text = uiString(R.string.l10n_live_session_screen_end_session_8c0f4c33),
+            leadingIcon = Icons.Filled.Stop,
+            kind = NoopButtonKind.Destructive,
+            fullWidth = true,
             onClick = onEnd,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Palette.statusCritical, contentColor = Palette.surfaceBase,
-            ),
-        ) { Text(uiString(R.string.l10n_live_session_screen_end_session_8c0f4c33), style = NoopType.headline) }
+        )
     }
 }
 
@@ -273,6 +478,7 @@ private fun LiveSessionBody(
  */
 @Composable
 private fun GuardianRing(
+    gaugeFraction: Double,
     position: LiveSessionEngine.Position?,
     stale: Boolean,
     settled: Boolean,
@@ -301,82 +507,66 @@ private fun GuardianRing(
         position == LiveSessionEngine.Position.BELOW -> "Below today's band"
         else -> "In today's band"
     }
+    val breath = if (breathing) {
+        // Slow breath: ~5.2s per full cycle, composed only while in-band so an off-band or stale
+        // ring keeps zero per-frame animation work.
+        val animated by rememberInfiniteTransition(
+            label = uiString(R.string.l10n_live_session_screen_guardianbreath_f76a0607),
+        ).animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2_600, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = uiString(R.string.l10n_live_session_screen_guardianbreathscale_38b62ee7),
+        )
+        animated
+    } else {
+        0f
+    }
+
     Box(
         modifier = Modifier
-            .size(260.dp)
+            .size(276.dp)
+            .graphicsLayer {
+                val breathingScale = 1f + 0.03f * breath
+                scaleX = breathingScale
+                scaleY = breathingScale
+            }
             .pointerInput(Unit) { detectTapGestures(onLongPress = { onLongPress() }) }
             .semantics { contentDescription = uiString(R.string.l10n_live_session_screen_session_ring_statelabel_long_press_to_42ac1b3b, stateLabel) },
         contentAlignment = Alignment.Center,
     ) {
-        if (breathing) {
-            // Slow breath: ~5.2s per full cycle, composed only while in-band so an off-band or stale
-            // ring keeps zero per-frame animation work.
-            val breath by rememberInfiniteTransition(label = uiString(R.string.l10n_live_session_screen_guardianbreath_f76a0607)).animateFloat(
-                initialValue = 0f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2_600, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = uiString(R.string.l10n_live_session_screen_guardianbreathscale_38b62ee7),
-            )
-            RingCanvas(ringColor, breath, inBandFraction, arcColor = if (stale) ringColor else teal)
-        } else {
-            RingCanvas(ringColor, 0f, inBandFraction, arcColor = if (stale) ringColor else teal)
-        }
-        // Long-press reveal — the ONLY number this screen can show, and only from a live smoothed read.
-        if (revealedBpm != null) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(uiString(R.string.l10n_live_session_screen_revealedbpm_dbe24cbe, revealedBpm), style = NoopType.number(44f), color = Palette.textPrimary)
-                Text("bpm", style = NoopType.caption, color = Palette.textTertiary)
+        // Match iOS's 240-degree outer held-time arc, including its lower gap and 276pt footprint.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            if (inBandFraction > 0f) {
+                val stroke = 3.dp.toPx()
+                val radius = size.minDimension / 2f - stroke
+                val centre = Offset(size.width / 2f, size.height / 2f)
+                drawArc(
+                    color = (if (stale) ringColor else teal).copy(alpha = 0.55f),
+                    startAngle = 150f,
+                    sweepAngle = 240f * inBandFraction,
+                    useCenter = false,
+                    topLeft = Offset(centre.x - radius, centre.y - radius),
+                    size = Size(radius * 2f, radius * 2f),
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
             }
         }
-    }
-}
 
-@Composable
-private fun RingCanvas(
-    ringColor: Color,
-    breath: Float,
-    inBandFraction: Float,
-    arcColor: Color,
-) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val centre = Offset(size.width / 2f, size.height / 2f)
-        val outerR = min(size.width, size.height) / 2f - 3.dp.toPx()
-
-        // Thin outer arc — the in-band hour filling up. Track first, then the honest progress.
-        val arcStroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(
-            color = Palette.hairline,
-            radius = outerR,
-            center = centre,
-            style = Stroke(width = 3.dp.toPx()),
-        )
-        if (inBandFraction > 0f) {
-            drawArc(
-                color = arcColor,
-                startAngle = -90f,
-                sweepAngle = 360f * inBandFraction,
-                useCenter = false,
-                topLeft = Offset(centre.x - outerR, centre.y - outerR),
-                size = Size(outerR * 2f, outerR * 2f),
-                style = arcStroke,
-            )
-        }
-
-        // The main state ring, breathing scale ±4%, with a faint inner wash that swells with the breath.
-        val ringR = (outerR - 26.dp.toPx()) * (1f + 0.04f * breath)
-        drawCircle(
-            color = ringColor.copy(alpha = ringColor.alpha * (0.05f + 0.06f * breath)),
-            radius = ringR - 10.dp.toPx(),
-            center = centre,
-        )
-        drawCircle(
-            color = ringColor,
-            radius = ringR,
-            center = centre,
-            style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round),
+        BevelGauge(
+            fraction = gaugeFraction,
+            stops = listOf(
+                0f to ringColor.copy(alpha = ringColor.alpha * 0.7f),
+                1f to ringColor,
+            ),
+            tipColor = ringColor,
+            numberText = revealedBpm?.toString() ?: "-",
+            captionText = if (revealedBpm != null) "bpm" else null,
+            diameter = 250.dp,
+            showsLabel = revealedBpm != null,
         )
     }
 }
@@ -413,8 +603,9 @@ private fun LiveSessionSummary(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(28.dp),
+            .padding(horizontal = 16.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Row(
@@ -482,14 +673,12 @@ private fun LiveSessionSummary(
 
         Spacer(Modifier.height(12.dp))
 
-        Button(
+        NoopButton(
+            text = uiString(R.string.l10n_live_session_screen_done_e9b450d1),
+            kind = NoopButtonKind.Primary,
+            fullWidth = true,
             onClick = onDone,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Palette.accent, contentColor = Palette.surfaceBase,
-            ),
-        ) { Text(uiString(R.string.l10n_live_session_screen_done_e9b450d1), style = NoopType.headline) }
+        )
     }
 }
 

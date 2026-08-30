@@ -28,6 +28,12 @@ object FitnessAgeEngine {
     const val paiReference = 5.0
 
     const val minAge = 20.0; const val maxAge = 80.0
+    /** Raw estimates use weekly inputs; publication averages the latest daily snapshots of that week. */
+    const val estimateWindowDays = 7
+    const val smoothingWindowEstimates = 7
+    const val historyDaysNeeded = estimateWindowDays + smoothingWindowEstimates - 1
+    /** Maximum weekly headline movement: three months. The underlying model remains unchanged. */
+    const val maxPublishedChangeYears = 0.25
 
     private fun isFemale(sex: String): Boolean = sex.trim().lowercase() == "female"
 
@@ -69,6 +75,25 @@ object FitnessAgeEngine {
         val ageC = c[1]; val rhrC = c[3]; val paiC = c[4]
         val fa = age + (rhrC * (restingHR - restingHRReference) - paiC * (paIndex - paiReference)) / ageC
         return fa.coerceIn(minAge, maxAge)
+    }
+
+    /** Average up to seven recent daily snapshots. Invalid values remain missing, never zero. */
+    fun smoothedFitnessAge(recentEstimates: List<Double>): Double? {
+        val valid = recentEstimates.takeLast(smoothingWindowEstimates)
+            .filter { it.isFinite() && it in minAge..maxAge }
+        return valid.takeIf { it.isNotEmpty() }?.average()
+    }
+
+    /** Bound a weekly publication against the preceding distinct week. A first estimate is unchanged. */
+    fun boundedFitnessAge(candidate: Double, previousPublished: Double?): Double? {
+        if (!candidate.isFinite() || candidate !in minAge..maxAge) return null
+        if (previousPublished == null || !previousPublished.isFinite() ||
+            previousPublished !in minAge..maxAge
+        ) return candidate
+        return candidate.coerceIn(
+            previousPublished - maxPublishedChangeYears,
+            previousPublished + maxPublishedChangeYears,
+        )
     }
 
     /** Reconstruct the HUNT PA-index (0–15 = frequency×intensity×duration) from measured weekly

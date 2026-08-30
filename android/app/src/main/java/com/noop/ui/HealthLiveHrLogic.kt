@@ -18,6 +18,33 @@ internal fun displayHr(bpm: Int?, live: LiveState): Int? {
     return null
 }
 
+/**
+ * Cached BPM never becomes "live" just because Health opened. A session is fresh only after the
+ * transport accepts a packet newer than the sequence captured when the user tapped Start.
+ */
+internal fun hasFreshHeartRatePacket(
+    optedIn: Boolean,
+    startSequence: Long?,
+    currentSequence: Long,
+): Boolean = optedIn && startSequence != null && currentSequence > startSequence
+
+internal fun sessionLiveDisplayHr(
+    optedIn: Boolean,
+    startSequence: Long?,
+    bpm: Int?,
+    live: LiveState,
+): Int? = if (
+    hasFreshHeartRatePacket(
+        optedIn = optedIn,
+        startSequence = startSequence,
+        currentSequence = live.heartRateSampleSequence,
+    )
+) {
+    displayHr(bpm, live)
+} else {
+    null
+}
+
 internal fun hrIsDerived(live: LiveState): Boolean =
     (live.heartRate ?: 0) <= 0 && live.rr.isNotEmpty()
 

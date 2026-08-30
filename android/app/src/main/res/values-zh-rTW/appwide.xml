@@ -152,6 +152,7 @@
     <string name="appwide_fitness_age_recent_context">近期背景</string>
     <string name="appwide_fitness_age_same_profile_age">與個人資料年齡大致相同</string>
     <string name="appwide_fitness_age_value_format">%1$d 歲</string>
+    <string name="appwide_fitness_age_weekly">每週</string>
     <string name="appwide_fitness_age_weekly_progress">每週進展</string>
     <string name="appwide_fitness_age_weeks_count">%1$d 週</string>
     <string name="appwide_fitness_age_younger_duration_profile_age">比個人資料年齡小 %1$s</string>
@@ -187,8 +188,19 @@
     <string name="appwide_journal_editing_help">可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。</string>
     <string name="appwide_legal_summary">專案條款和原始碼授權。可離線查看。</string>
     <string name="appwide_live_session_manually_started">手動啟動</string>
+    <string name="appwide_live_session_preflight_cues_body">第一分鐘不會提示。之後，低於目標持續 25 秒時，2 次輕振表示應提高強度；心率快速上升並高於目標持續 25 秒時，3 次強振表示應降低強度。短暫波動不會提示，相同提示至少間隔 50 秒。</string>
+    <string name="appwide_live_session_preflight_cues_title">手環何時振動</string>
+    <string name="appwide_live_session_preflight_intro">開始前先了解訓練過程。只有點一下「開始指導」後才會開始追蹤。</string>
+    <string name="appwide_live_session_preflight_stop_body">你可以隨時結束訓練。若沒有心率資料，提示會在約 8 秒後暫停，並在連續 10 分鐘沒有讀數後自動結束。</string>
+    <string name="appwide_live_session_preflight_stop_title">指導何時停止</string>
+    <string name="appwide_live_session_preflight_target_body">今日恢復、近期靜息心率和個人資料中的最大心率共同設定區間。若沒有恢復評分，NOOP 會採用較為謹慎的中間區間。</string>
+    <string name="appwide_live_session_preflight_target_title">目標如何設定</string>
+    <string name="appwide_live_session_preflight_title">訓練教練</string>
+    <string name="appwide_live_session_preflight_tracks_body">即時心率趨勢，以及處於今日目標區間內、低於和高於區間的時間。本次指導不會建立體能訓練記錄。</string>
+    <string name="appwide_live_session_preflight_tracks_title">追蹤內容</string>
     <string name="appwide_live_session_start">啟動訓練教練</string>
     <string name="appwide_live_session_start_accessibility">啟動訓練教練。測試版。手環根據今天的恢復狀況和心率，透過振動引導訓練強度。</string>
+    <string name="appwide_live_session_start_coaching">開始指導</string>
     <string name="appwide_live_session_start_detail">手環根據今天的恢復狀況和心率，透過振動引導訓練強度。</string>
     <string name="appwide_live_session_summary_title">Silent Guardian 摘要</string>
     <string name="appwide_live_session_title">Silent Guardian</string>

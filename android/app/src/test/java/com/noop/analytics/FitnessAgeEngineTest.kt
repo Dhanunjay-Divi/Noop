@@ -11,6 +11,25 @@ import org.junit.Test
 /** Mirror of the Swift FitnessAgeEngineTests — identical inputs and expected numbers (parity guard). */
 class FitnessAgeEngineTest {
 
+    @Test fun orchestratorBoundsAChangedEstimateAgainstThePriorWeek() {
+        val days = (1..13).map { i ->
+            DailyMetric(
+                deviceId = "test", day = "2026-08-${i.toString().padStart(2, '0')}",
+                totalSleepMin = 420.0, efficiency = 0.9,
+                deepMin = 80.0, remMin = 100.0, lightMin = 240.0,
+                disturbances = 1, restingHr = 50, avgHrv = 70.0,
+                recovery = 85.0, strain = 90.0, exerciseCount = 1,
+            )
+        }
+        val profile = UserProfile(
+            age = 40.0, sex = "male", ageInputConfirmed = true, sexInputConfirmed = true,
+        )
+        val rows = IntelligenceEngine.fitnessAgeRows(
+            days, profile, "test-noop", "2026-08-08", previousPublishedAge = 40.0,
+        )
+        assertEquals(39.75, rows.first { it.key == "fitness_age" }.value, 1e-9)
+    }
+
     @Test fun orchestratorRejectsUnconfirmedSeedProfile() {
         val days = (1..4).map { i ->
             DailyMetric(
@@ -57,6 +76,26 @@ class FitnessAgeEngineTest {
 
     @Test fun clampHigh() = assertEquals(80.0, FitnessAgeEngine.fitnessAge(75.0, "male", 120.0, 0.0), 1e-9)
     @Test fun clampLow() = assertEquals(20.0, FitnessAgeEngine.fitnessAge(25.0, "male", 35.0, 15.0), 1e-9)
+
+    @Test fun recentWeeklySnapshotsAreAveragedInsteadOfPublishingLatestJump() {
+        assertEquals(39.0, FitnessAgeEngine.smoothedFitnessAge(listOf(40.0, 40.0, 40.0, 36.0))!!, 1e-9)
+        assertEquals(
+            39.0,
+            FitnessAgeEngine.smoothedFitnessAge(List(7) { 40.0 } + 33.0)!!,
+            1e-9,
+        )
+    }
+
+    @Test fun weeklyPublicationMovesAtMostThreeMonths() {
+        assertEquals(39.75, FitnessAgeEngine.boundedFitnessAge(35.0, 40.0)!!, 1e-9)
+        assertEquals(40.25, FitnessAgeEngine.boundedFitnessAge(45.0, 40.0)!!, 1e-9)
+        assertEquals(40.1, FitnessAgeEngine.boundedFitnessAge(40.1, 40.0)!!, 1e-9)
+    }
+
+    @Test fun firstPublishedEstimateUsesSmoothedCandidateWithoutInventingAnchor() {
+        assertEquals(37.4, FitnessAgeEngine.boundedFitnessAge(37.4, null)!!, 1e-9)
+        assertNull(FitnessAgeEngine.smoothedFitnessAge(listOf(Double.NaN, Double.POSITIVE_INFINITY)))
+    }
 
     @Test fun paiSedentary() = assertEquals(0.0, FitnessAgeEngine.physicalActivityIndex(0, 0.0, 0.0), 1e-9)
     @Test fun paiHigh() = assertEquals(15.0, FitnessAgeEngine.physicalActivityIndex(7, 75.0, 0.8), 1e-9)

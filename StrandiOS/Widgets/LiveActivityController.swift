@@ -43,6 +43,7 @@ final class LiveActivityController {
         let bpm: Int?
         let recovery: Int?
         let effort: Int?
+        let batteryPct: Int?
         let connected: Bool
         let observedAt: Date?
         let now: Date
@@ -58,10 +59,11 @@ final class LiveActivityController {
     /// live link, not the sticky "paired" flag) and a heart rate is present; ends the moment the link
     /// drops. Throttled to ~once every 2 s so we stay well under the Live Activity update budget.
     func update(bpm: Int?, recovery: Int?, connected: Bool, effort: Int? = nil,
-                observedAt: Date?, now: Date = Date()) {
+                batteryPct: Int? = nil, observedAt: Date?, now: Date = Date()) {
         stateGeneration &+= 1
         let desired = DesiredState(generation: stateGeneration,
                                    bpm: bpm, recovery: recovery, effort: effort,
+                                   batteryPct: batteryPct,
                                    connected: connected, observedAt: observedAt, now: now)
         latestState = desired
         pendingState = desired
@@ -75,9 +77,9 @@ final class LiveActivityController {
     /// emits. A disconnected, disabled, or freshly reinstalled app must not leave an orphaned heart
     /// pill that launches a surface iOS can no longer resolve.
     func reconcile(bpm: Int?, recovery: Int?, connected: Bool, effort: Int? = nil,
-                   observedAt: Date?) {
+                   batteryPct: Int? = nil, observedAt: Date?) {
         update(bpm: bpm, recovery: recovery, connected: connected, effort: effort,
-               observedAt: observedAt)
+               batteryPct: batteryPct, observedAt: observedAt)
         // ActivityKit can hydrate surviving activities shortly after the app scene mounts. A second
         // reconciliation reaches those handles and either adopts or ends them; it cannot start from a
         // stale packet because the original observation timestamp is carried through unchanged.
@@ -146,7 +148,8 @@ final class LiveActivityController {
             bpm: bpm,
             recovery: desired.recovery,
             bonded: desired.connected,
-            effort: desired.effort
+            effort: desired.effort,
+            batteryPct: desired.batteryPct
         )
         let staleDate = observedAt.addingTimeInterval(
             LiveHeartRateSurfacePolicy.maximumSampleAge
@@ -230,6 +233,7 @@ final class LiveActivityController {
             if let latest = self.latestState {
                 self.update(bpm: latest.bpm, recovery: latest.recovery,
                             connected: latest.connected, effort: latest.effort,
+                            batteryPct: latest.batteryPct,
                             observedAt: latest.observedAt, now: Date())
             } else {
                 await self.end(scheduleHydrationRepair: false)

@@ -475,6 +475,42 @@ final class ReferenceSurfaceContractTests: XCTestCase {
     }
 }
 
+final class LiveSessionPreflightContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func text(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    func testOpeningCoachIsInertUntilExplicitConfirmationOnBothPlatforms() throws {
+        let apple = try text("Strand/Liquid/LiveSessionView.swift")
+        let androidScreen = try text(
+            "android/app/src/main/java/com/noop/ui/LiveSessionScreen.kt")
+        let androidToday = try text(
+            "android/app/src/main/java/com/noop/ui/TodayScreen.kt")
+
+        XCTAssertTrue(apple.contains("@State private var hasStarted = false"))
+        XCTAssertTrue(apple.contains(
+            "LiveSessionPreflightView(onStart: startSession, onClose: onClose)"))
+        XCTAssertFalse(apple.contains(".onAppear {\n            runner.start("))
+
+        XCTAssertTrue(androidScreen.contains(
+            "if (runner == null) {\n        LiveSessionPreflight("))
+        XCTAssertTrue(androidScreen.contains(
+            "onStart = { startOrResumeLiveSession(vm, context) }"))
+        XCTAssertFalse(androidToday.contains(
+            "if (LiveSessionRunner.active.value == null) {\n" +
+            "                                    startOrResumeLiveSession"))
+    }
+}
+
 final class AppWideLocalizationContractTests: XCTestCase {
     private var repoRoot: URL {
         URL(fileURLWithPath: #filePath)
@@ -508,7 +544,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 410)
+        XCTAssertEqual(source.count, 422)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

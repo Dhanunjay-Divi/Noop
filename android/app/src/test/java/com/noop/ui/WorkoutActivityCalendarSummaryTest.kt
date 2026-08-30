@@ -77,6 +77,38 @@ class WorkoutActivityCalendarSummaryTest {
     }
 
     @Test
+    fun workoutWindowsUseCalendarDaysAcrossDaylightSavingTime() {
+        val window = WorkoutDateWindow.trailingCalendarDays(
+            count = 7,
+            endingOn = LocalDate.parse("2026-03-10"),
+            zoneId = zone,
+        )
+
+        assertTrue(window.intersects(row("2026-03-04")))
+        assertTrue(window.intersects(row("2026-03-10")))
+        assertFalse(window.intersects(row("2026-03-03")))
+        assertEquals((7 * 86_400L) - 3_600L, window.upperBound - window.lowerBound)
+    }
+
+    @Test
+    fun customWorkoutDatesAreInclusiveAndKeepBoundaryOverlaps() {
+        val window = WorkoutDateWindow.custom(
+            first = LocalDate.parse("2026-08-10"),
+            second = LocalDate.parse("2026-08-12"),
+            zoneId = zone,
+        )
+        val crossesIntoRange = row(
+            day = "2026-08-09",
+            hour = 23,
+            fallbackSeconds = 7_200,
+        )
+
+        assertTrue(window.intersects(crossesIntoRange))
+        assertTrue(window.intersects(row("2026-08-12", hour = 23)))
+        assertFalse(window.intersects(row("2026-08-13")))
+    }
+
+    @Test
     fun dayOverviewNormalizesFractionAndLegacyPercentEfficiency() {
         assertEquals(89.9, dayOverviewSleepEfficiencyPercent(0.899)!!, 1e-9)
         assertEquals(89.9, dayOverviewSleepEfficiencyPercent(89.9)!!, 1e-9)

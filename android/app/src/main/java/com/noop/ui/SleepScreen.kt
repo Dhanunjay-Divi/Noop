@@ -158,7 +158,6 @@ private suspend fun loadSleepBrowseSessions(vm: AppViewModel): List<SleepSession
 @Composable
 fun SleepScreen(
     vm: AppViewModel,
-    onOpenJournal: () -> Unit = {},
 ) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
 
@@ -312,70 +311,6 @@ fun SleepScreen(
     // Sky-behind-cards (#434 family): when on, the sky fills the whole viewport so the transparent
     // cards reveal it the whole way down, exactly like Today and the metric-detail screens.
     val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
-
-    // Morning-journal nudge: once per calendar day, when the freshest night ended within the last
-    // 12 hours, invite the user to log how they felt. The shown-day is persisted so the sheet never
-    // re-pops on a recomposition or a same-day re-open. (PR #260)
-    var showJournalPrompt by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    LaunchedEffect(sleeps) {
-        // #627: the journal-reminder toggle (default ON) gates this morning sheet too, so disabling the
-        // reminder silences both the Today card and this sheet with one switch.
-        if (!NoopPrefs.journalReminderEnabled(context)) return@LaunchedEffect
-        val latestEnd = sleeps.lastOrNull()?.endTs ?: return@LaunchedEffect
-        val nowS = System.currentTimeMillis() / 1000L
-        val hoursAgo = (nowS - latestEnd) / 3600.0
-        if (hoursAgo in 0.0..12.0) {
-            val today = LocalDate.now().toString()
-            // #684: don't nudge when today's journal is already logged — e.g. via the Today card (#656),
-            // which never sets KEY_LAST_JOURNAL_PROMPT, so the once-per-day dedup alone would still pop
-            // this sheet. Reuse the SAME completion signal the Today card uses (repo.journal for today).
-            val loggedToday = runCatching {
-                vm.repo.journal(JOURNAL_DEVICE_ID, today, today).any { it.day == today }
-            }.getOrDefault(false)
-            if (loggedToday) return@LaunchedEffect
-            val prefs = NoopPrefs.of(context)
-            val lastPrompted = prefs.getString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, "")
-            if (lastPrompted != today) {
-                prefs.edit().putString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, today).apply()
-                showJournalPrompt = true
-            }
-        }
-    }
-
-    if (showJournalPrompt) {
-        ModalBottomSheet(
-            onDismissRequest = { showJournalPrompt = false },
-            sheetState = sheetState,
-            containerColor = Palette.surfaceRaised,
-            contentColor = Palette.textPrimary,
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(Metrics.space24),
-                verticalArrangement = Arrangement.spacedBy(Metrics.space16),
-            ) {
-                Text(uiString(R.string.l10n_sleep_screen_good_morning_33e88869), style = NoopType.title2, color = Palette.textPrimary)
-                Text(
-                    uiString(R.string.l10n_sleep_screen_your_night_data_is_in_logging_ec461720),
-                    style = NoopType.subhead,
-                    color = Palette.textSecondary,
-                )
-                Button(
-                    onClick = { showJournalPrompt = false; onOpenJournal() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent),
-                ) {
-                    Text(uiString(R.string.l10n_sleep_screen_open_journal_4bf0daee), style = NoopType.headline, color = Palette.surfaceBase)
-                }
-                TextButton(
-                    onClick = { showJournalPrompt = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(uiString(R.string.l10n_sleep_screen_maybe_later_27ad1d83), style = NoopType.subhead, color = Palette.textTertiary)
-                }
-            }
-        }
-    }
 
     val detailedStageDays = remember(
         days,

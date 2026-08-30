@@ -1359,7 +1359,8 @@ object IntelligenceEngine {
         val faGateByDay = LinkedHashMap<String, DailyMetric>()
         for (d in faPriorDaily) faGateByDay[d.day] = d
         for (d in dailies) faGateByDay[d.day] = d
-        val faGate7 = faGateByDay.values.sortedBy { it.day }.takeLast(7)
+        val faHistory = faGateByDay.values.sortedBy { it.day }
+            .takeLast(FitnessAgeEngine.historyDaysNeeded)
         val storedLegacyFitnessToken = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
         )?.value
@@ -1372,11 +1373,11 @@ object IntelligenceEngine {
         val storedVo2Token = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
         )?.value
-        if (storedLegacyFitnessToken != null ||
-            !AgeMetricProfile.acceptsFitnessAge(
+        val acceptsStoredFitness = storedLegacyFitnessToken == null &&
+            AgeMetricProfile.acceptsFitnessAge(
                 storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
             )
-        ) purgeComputedMetricKeys(
+        if (!acceptsStoredFitness) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
             listOf(
                 AgeMetricProfile.FITNESS_AGE_KEY,
@@ -1399,9 +1400,17 @@ object IntelligenceEngine {
         )
 
         val faSatKey = saturdayKeyOnOrBefore(newestDay)
-        val faPts = fitnessAgeRows(faGate7, profile, computedId, faSatKey).toMutableList()
+        val previousPublishedAge = if (acceptsStoredFitness) {
+            repo.metricSeriesComputedUnion(
+                importedDeviceId, "fitness_age", "0000-01-01", faSatKey,
+            ).lastOrNull { it.day < faSatKey }?.value
+        } else null
+        val faPts = fitnessAgeRows(
+            faHistory, profile, computedId, faSatKey, previousPublishedAge,
+        ).toMutableList()
         // Strap-log proof: the RHR-night count the engine sees for the gate , should equal the "N of last 7
         // nights" the readiness card shows; `computed` says whether the value was (re)written this pass.
+        val faGate7 = faHistory.takeLast(FitnessAgeEngine.estimateWindowDays)
         diag("fitnessAge gate day=$newestDay rhrNights=${faGate7.mapNotNull { it.restingHr }.size} activityDays=${faGate7.mapNotNull { it.strain }.size} computed=${faPts.isNotEmpty()}")
         if (faPts.any { it.key == "fitness_age" }) {
             AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex)?.let { token ->
@@ -2024,30 +2033,72 @@ object IntelligenceEngine {
      * the skin-temp baseline isn't usable yet (< minNightsSeed) , honest cold-start. Rounded to 2 dp
      * to match the imported/demo precision. APPROXIMATE. (PR #85)
      */
-    /** Assess Fitness Age readiness from [gateDays] (the merged last-7 the readiness card counts) and,
-     *  when ready, build the fitness_age (+ optional vo2max) rows keyed to [satKey]. Empty when not ready.
-     *  The SINGLE source of the gate + compute , shared by the recompute pass and the manual "refresh
-     *  Fitness Age" button so the two can never drift. */
+    /** Assess readiness from the newest seven [gateDays], average up to seven eligible trailing-week
+     *  snapshots, then bound the headline against [previousPublishedAge]. Callers pass up to
+     *  [FitnessAgeEngine.historyDaysNeeded] merged days so one PA bucket crossing phases in gradually.
+     *  This remains the single source for normal analysis and manual refresh. */
     fun fitnessAgeRows(
         gateDays: List<DailyMetric>, profile: UserProfile, computedId: String, satKey: String,
+        previousPublishedAge: Double? = null,
     ): List<MetricSeriesRow> {
-        val rhrs = gateDays.mapNotNull { it.restingHr }.map { it.toDouble() }
-        val strains = gateDays.mapNotNull { it.strain }.filter { it >= 30.0 }
-        val meanStrain = if (strains.isEmpty()) 0.0 else strains.average()
+        val history = gateDays.associateBy { it.day }.values.sortedBy { it.day }
+            .takeLast(FitnessAgeEngine.historyDaysNeeded)
+        val newestWindow = history.takeLast(FitnessAgeEngine.estimateWindowDays)
         val waist = if (profile.waistCm > 0) profile.waistCm else null
-        val ready = FitnessAgeEngine.assessReadiness(
+        val newestReadiness = FitnessAgeEngine.assessReadiness(
             hasAge = profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age),
             hasSex = profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
-            rhrDays = rhrs.size, activityDays = gateDays.mapNotNull { it.strain }.size,
+            rhrDays = newestWindow.mapNotNull { it.restingHr }.size,
+            activityDays = newestWindow.mapNotNull { it.strain }.size,
             hasWaist = waist != null)
-        if (!ready.canCompute) return emptyList()
-        val res = FitnessAgeEngine.compute(
-            age = profile.age, sex = profile.sex,
-            restingHR = medianOfDoubles(rhrs),
-            paIndex = FitnessAgeEngine.physicalActivityIndexFromStrain(strains.size, meanStrain),
-            waistCm = waist) ?: return emptyList()
-        val rows = mutableListOf(MetricSeriesRow(deviceId = computedId, day = satKey, key = "fitness_age", value = res.fitnessAge))
-        res.vo2max?.let { rows.add(MetricSeriesRow(deviceId = computedId, day = satKey, key = "vo2max_est", value = it)) }
+        if (!newestReadiness.canCompute) return emptyList()
+
+        fun result(window: List<DailyMetric>): FitnessAgeResult? {
+            val rhrs = window.mapNotNull { it.restingHr }.map { it.toDouble() }
+            val strains = window.mapNotNull { it.strain }.filter { it >= 30.0 }
+            val readiness = FitnessAgeEngine.assessReadiness(
+                hasAge = profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age),
+                hasSex = profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
+                rhrDays = rhrs.size,
+                activityDays = window.mapNotNull { it.strain }.size,
+                hasWaist = waist != null,
+            )
+            if (!readiness.canCompute) return null
+            val meanStrain = if (strains.isEmpty()) 0.0 else strains.average()
+            return FitnessAgeEngine.compute(
+                age = profile.age,
+                sex = profile.sex,
+                restingHR = medianOfDoubles(rhrs),
+                paIndex = FitnessAgeEngine.physicalActivityIndexFromStrain(strains.size, meanStrain),
+                waistCm = waist,
+            )
+        }
+
+        val firstEndpoint = maxOf(0, history.size - FitnessAgeEngine.smoothingWindowEstimates)
+        val snapshots = history.indices.mapNotNull { endpoint ->
+            if (endpoint < firstEndpoint) null
+            else result(
+                history.subList(
+                    maxOf(0, endpoint + 1 - FitnessAgeEngine.estimateWindowDays),
+                    endpoint + 1,
+                ),
+            )
+        }
+        val smoothed = FitnessAgeEngine.smoothedFitnessAge(
+            snapshots.map { it.fitnessAge },
+        ) ?: return emptyList()
+        val published = FitnessAgeEngine.boundedFitnessAge(
+            smoothed, previousPublishedAge,
+        ) ?: return emptyList()
+        val newestResult = snapshots.lastOrNull() ?: return emptyList()
+        val rows = mutableListOf(
+            MetricSeriesRow(
+                deviceId = computedId, day = satKey, key = "fitness_age", value = published,
+            ),
+        )
+        newestResult.vo2max?.let {
+            rows.add(MetricSeriesRow(deviceId = computedId, day = satKey, key = "vo2max_est", value = it))
+        }
         return rows
     }
 
@@ -2097,8 +2148,10 @@ object IntelligenceEngine {
         val nowLocalMidnight = midnightLocal(nowSeconds, tzOffsetSeconds)
         val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)
         val oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds)
-        val gate7 = repo.daysMerged(importedDeviceId)
-            .filter { it.day in oldestDay..newestDay }.sortedBy { it.day }.takeLast(7)
+        val history = repo.daysMerged(importedDeviceId)
+            .filter { it.day in oldestDay..newestDay }
+            .sortedBy { it.day }
+            .takeLast(FitnessAgeEngine.historyDaysNeeded)
         val storedLegacyFitnessToken = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
         )?.value
@@ -2111,11 +2164,11 @@ object IntelligenceEngine {
         val storedVo2Token = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
         )?.value
-        if (storedLegacyFitnessToken != null ||
-            !AgeMetricProfile.acceptsFitnessAge(
+        val acceptsStoredFitness = storedLegacyFitnessToken == null &&
+            AgeMetricProfile.acceptsFitnessAge(
                 storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
             )
-        ) purgeComputedMetricKeys(
+        if (!acceptsStoredFitness) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
             listOf(
                 AgeMetricProfile.FITNESS_AGE_KEY,
@@ -2138,7 +2191,14 @@ object IntelligenceEngine {
         )
 
         val satKey = saturdayKeyOnOrBefore(newestDay)
-        val rows = fitnessAgeRows(gate7, profile, computedId, satKey).toMutableList()
+        val previousPublishedAge = if (acceptsStoredFitness) {
+            repo.metricSeriesComputedUnion(
+                importedDeviceId, "fitness_age", "0000-01-01", satKey,
+            ).lastOrNull { it.day < satKey }?.value
+        } else null
+        val rows = fitnessAgeRows(
+            history, profile, computedId, satKey, previousPublishedAge,
+        ).toMutableList()
         if (rows.any { it.key == "fitness_age" }) {
             AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex)?.let { token ->
                 rows += MetricSeriesRow(computedId, satKey, AgeMetricProfile.FITNESS_AGE_KEY, token)

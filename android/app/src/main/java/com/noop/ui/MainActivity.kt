@@ -44,6 +44,8 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
 
+    private var demoRoute by mutableStateOf<String?>(null)
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             // Permission results flow back into the BLE client's own runtime checks;
@@ -52,6 +54,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
         // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
         // trusted route now; AppRoot consumes it once its navigation host mounts.
         NotificationRouteBridge.recordFromIntent(applicationContext, intent)
@@ -97,7 +100,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NoopTheme {
-                NoopRoot()
+                NoopRoot(demoRoute = demoRoute)
             }
         }
         deferLaunchMaintenance()
@@ -106,6 +109,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
         // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
         // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
         NotificationRouteBridge.recordFromIntent(applicationContext, intent)
@@ -159,6 +163,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
 
 internal fun appLaunchIntent(context: Context): Intent =
     context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -415,8 +421,8 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_BUZZ_WHOOP4_WITH_ALARM, enabled).apply()
     }
 
-    /** Launcher-icon preference (v3 "Titanium & Gold"). false = machined-titanium (.IconDefault,
-     *  the default); true = blued/dark-blue titanium (.IconNavy). The actual swap is done by
+    /** Launcher-icon preference. false = Obsidian (.IconDefault, the default); true = the iOS-matching
+     *  legacy navy alternate (.IconNavy). The actual swap is done by
      *  enabling exactly one of the two <activity-alias> entries via PackageManager, this bool just
      *  records the user's choice so the App Icon control reflects it across restarts. */
     const val KEY_APP_ICON_NAVY = "noop.appIconNavy"
@@ -1118,9 +1124,10 @@ object NoopPrefs {
  * state on each transition.
  */
 @Composable
-fun NoopRoot() {
+fun NoopRoot(demoRoute: String? = null) {
     val context = LocalContext.current
     val prefs = remember { NoopPrefs.of(context) }
+    val demoBypass = BuildConfig.DEBUG && demoRoute != null
 
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
@@ -1141,7 +1148,7 @@ fun NoopRoot() {
     var acceptedTerms by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
     }
-    if (acceptedTerms != Terms.CURRENT_VERSION) {
+    if (acceptedTerms != Terms.CURRENT_VERSION && !demoBypass) {
         TermsGateScreen(onAccept = {
             prefs.edit()
                 .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
@@ -1176,7 +1183,7 @@ fun NoopRoot() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (!onboarded) {
+    if (!onboarded && !demoBypass) {
         OnboardingScreen(
             viewModel = appViewModel,
             onFinished = {
@@ -1195,9 +1202,9 @@ fun NoopRoot() {
 
     // Existing, onboarded user: render the app, and if they've updated since last launch
     // (stored version behind current), show "What's New" once over the top.
-    AppRoot(viewModel = appViewModel)
+    AppRoot(viewModel = appViewModel, initialRoute = demoRoute)
 
-    if (lastSeenChangelog != AppChangelog.CURRENT_VERSION) {
+    if (lastSeenChangelog != AppChangelog.CURRENT_VERSION && !demoBypass) {
         Dialog(
             onDismissRequest = {
                 prefs.edit()

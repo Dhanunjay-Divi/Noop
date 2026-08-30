@@ -95,6 +95,18 @@ private data class NotifyTick(
     val illness: String?,
 )
 
+internal fun connectionNotificationDetail(
+    connected: Boolean,
+    recoveryPct: Double?,
+    effort: Double?,
+    batteryPct: Double?,
+): String = buildList {
+    add(if (connected) "Streaming in the background" else "Keeping the link open")
+    recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
+    effort?.let { add("Effort ${it.roundToInt()}") }
+    batteryPct?.let { add("Strap ${it.roundToInt()}%") }
+}.joinToString("  ·  ")
+
 class WhoopConnectionService : Service() {
 
     /** Main-thread scope used only to mirror [LiveState] into the notification. */
@@ -310,7 +322,7 @@ class WhoopConnectionService : Service() {
                 .collect { (state, todayRow, anchorRow, vitalsRow, illness) ->
                 // Honest-null: the notification's Recovery line reads the NAIVE today row, never the
                 // carried anchor, so it stays blank until tonight's recovery actually lands (#911).
-                postNotification(state, todayRow?.recovery)
+                postNotification(state, todayRow?.recovery, todayRow?.strain)
                 // Banner transition (clear → raised) → real system notification; the notifier's
                 // persisted day gate dedupes against the app-open (AppViewModel) call site.
                 if (lastIllnessAlert == null && illness != null) {
@@ -644,11 +656,16 @@ class WhoopConnectionService : Service() {
      *  a per-beat wakeup into a handful of updates a day. */
     private var lastNotificationKey: String? = null
 
-    private fun postNotification(state: LiveState, recoveryPct: Double? = null) {
+    private fun postNotification(
+        state: LiveState,
+        recoveryPct: Double? = null,
+        effort: Double? = null,
+    ) {
         val key = listOf(
             state.connected,
             state.backfilling,
             recoveryPct?.roundToInt(),
+            effort?.roundToInt(),
             state.batteryPct?.roundToInt(),
         ).joinToString("|")
         if (key == lastNotificationKey) return
@@ -661,11 +678,15 @@ class WhoopConnectionService : Service() {
             NotificationLifecycleCategory.SERVICE,
         ) {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            mgr.notify(NOTIF_ID, buildNotification(state, recoveryPct))
+            mgr.notify(NOTIF_ID, buildNotification(state, recoveryPct, effort))
         }
     }
 
-    private fun buildNotification(state: LiveState, recoveryPct: Double?): Notification {
+    private fun buildNotification(
+        state: LiveState,
+        recoveryPct: Double?,
+        effort: Double? = null,
+    ): Notification {
         // #216: deliberately NO live BPM in the title. A per-beat-changing notification forces the
         // foreground service to re-post (and wake the device) ~once a second all day, which is a real
         // battery cost for a number nobody reads off the lock screen. The title now reflects only the
@@ -675,11 +696,12 @@ class WhoopConnectionService : Service() {
             state.backfilling  -> "Syncing strap history…"
             else               -> "Connected to Noop Band"
         }
-        val detail = buildList {
-            add(if (state.connected) "Streaming in the background" else "Keeping the link open")
-            recoveryPct?.let { add("Recovery ${it.roundToInt()}%") }
-            state.batteryPct?.let { add("Strap ${it.roundToInt()}%") }
-        }.joinToString("  ·  ")
+        val detail = connectionNotificationDetail(
+            connected = state.connected,
+            recoveryPct = recoveryPct,
+            effort = effort,
+            batteryPct = state.batteryPct,
+        )
 
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
             this,

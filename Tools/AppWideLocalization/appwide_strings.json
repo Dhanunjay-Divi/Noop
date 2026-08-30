@@ -175,6 +175,17 @@
     "zh-Hans": "每周进展",
     "zh-Hant": "每週進展"
   },
+  "appwide.fitness_age.weekly": {
+    "de": "WÖCHENTLICH",
+    "en": "WEEKLY",
+    "es": "SEMANAL",
+    "fr": "HEBDOMADAIRE",
+    "it": "SETTIMANALE",
+    "pt-PT": "SEMANALMENTE",
+    "ru": "ЕЖЕНЕДЕЛЬНО",
+    "zh-Hans": "每周",
+    "zh-Hant": "每週"
+  },
   "appwide.fitness_age.first_weekly_estimate": {
     "de": "Erste wöchentliche Schätzung",
     "en": "First weekly estimate",
@@ -812,6 +823,127 @@
     "ru": "Запустить тренера для тренировки. Бета. Вибрации браслета направляют нагрузку с учётом сегодняшнего Восстановления и пульса.",
     "zh-Hans": "启动训练教练。测试版。手环根据今天的恢复状况和心率，通过振动引导训练强度。",
     "zh-Hant": "啟動訓練教練。測試版。手環根據今天的恢復狀況和心率，透過振動引導訓練強度。"
+  },
+  "appwide.live_session.preflight_title": {
+    "de": "Workout-Coach",
+    "en": "Workout coach",
+    "es": "Coach de entrenamiento",
+    "fr": "Coach d’entraînement",
+    "it": "Coach di allenamento",
+    "pt-PT": "Orientação de treino",
+    "ru": "Тренер для тренировки",
+    "zh-Hans": "训练教练",
+    "zh-Hant": "訓練教練"
+  },
+  "appwide.live_session.preflight_intro": {
+    "de": "Informiere dich vor dem Start über den Ablauf. Es wird nichts erfasst, bis du auf „Coaching starten“ tippst.",
+    "en": "Know what will happen before the session starts. Nothing is tracked until you tap Start coaching.",
+    "es": "Conoce lo que ocurrirá antes de iniciar la sesión. No se registra nada hasta que pulses Iniciar coaching.",
+    "fr": "Découvrez le déroulement avant de commencer. Rien n’est suivi tant que vous n’avez pas touché Démarrer le coaching.",
+    "it": "Scopri cosa succederà prima di iniziare. Nulla viene monitorato finché non tocchi Avvia coaching.",
+    "pt-PT": "Saiba o que vai acontecer antes de iniciar. Nada é monitorizado até tocares em Iniciar orientação.",
+    "ru": "Узнайте, как всё работает, до начала сеанса. Отслеживание начнётся только после нажатия «Начать».",
+    "zh-Hans": "开始前先了解训练过程。只有轻点“开始指导”后才会开始跟踪。",
+    "zh-Hant": "開始前先了解訓練過程。只有點一下「開始指導」後才會開始追蹤。"
+  },
+  "appwide.live_session.preflight_tracks_title": {
+    "de": "Was erfasst wird",
+    "en": "What it tracks",
+    "es": "Qué registra",
+    "fr": "Ce qui est suivi",
+    "it": "Cosa monitora",
+    "pt-PT": "O que monitoriza",
+    "ru": "Что отслеживается",
+    "zh-Hans": "跟踪内容",
+    "zh-Hant": "追蹤內容"
+  },
+  "appwide.live_session.preflight_tracks_body": {
+    "de": "Live-Herzfrequenztrends und die Zeit innerhalb, unterhalb und oberhalb deines heutigen Zielbereichs. Diese Coaching-Sitzung erstellt keinen Trainingseintrag.",
+    "en": "Live heart-rate trends and time inside, below, and above today's target band. This coaching session does not create a workout entry.",
+    "es": "La tendencia de frecuencia cardiaca en directo y el tiempo dentro, por debajo y por encima del rango objetivo de hoy. Esta sesión de coaching no crea un registro de entrenamiento.",
+    "fr": "La tendance de fréquence cardiaque en direct et le temps passé dans, sous et au-dessus de la zone cible du jour. Cette séance de coaching ne crée pas d’entraînement.",
+    "it": "L’andamento della frequenza cardiaca in tempo reale e il tempo trascorso dentro, sotto e sopra la fascia obiettivo di oggi. Questa sessione di coaching non crea una voce di allenamento.",
+    "pt-PT": "A tendência da frequência cardíaca em direto e o tempo dentro, abaixo e acima do intervalo-alvo de hoje. Esta sessão de orientação não cria um registo de treino.",
+    "ru": "Динамика пульса в реальном времени и время внутри, ниже и выше сегодняшнего целевого диапазона. Этот сеанс не создаёт запись о тренировке.",
+    "zh-Hans": "实时心率趋势，以及处于今日目标区间内、低于和高于区间的时间。本次指导不会创建锻炼记录。",
+    "zh-Hant": "即時心率趨勢，以及處於今日目標區間內、低於和高於區間的時間。本次指導不會建立體能訓練記錄。"
+  },
+  "appwide.live_session.preflight_target_title": {
+    "de": "So wird dein Ziel festgelegt",
+    "en": "How your target is set",
+    "es": "Cómo se define el objetivo",
+    "fr": "Comment la cible est définie",
+    "it": "Come viene impostato l’obiettivo",
+    "pt-PT": "Como o objetivo é definido",
+    "ru": "Как задаётся цель",
+    "zh-Hans": "目标如何设定",
+    "zh-Hant": "目標如何設定"
+  },
+  "appwide.live_session.preflight_target_body": {
+    "de": "Die heutige Erholung, deine aktuelle Ruheherzfrequenz und die maximale Herzfrequenz aus deinem Profil legen den Bereich fest. Ohne Erholungswert verwendet NOOP einen vorsichtigen mittleren Bereich.",
+    "en": "Today's Recovery, your recent resting heart rate, and profile max heart rate set the range. Without a Recovery score, NOOP uses a cautious middle range.",
+    "es": "La Recuperación de hoy, tu frecuencia cardiaca en reposo reciente y la frecuencia máxima del perfil definen el rango. Sin puntuación de Recuperación, NOOP usa un rango medio prudente.",
+    "fr": "La Récupération du jour, votre fréquence cardiaque au repos récente et la fréquence maximale du profil définissent la zone. Sans score de Récupération, NOOP utilise une zone intermédiaire prudente.",
+    "it": "Il Recupero di oggi, la frequenza cardiaca a riposo recente e la frequenza massima del profilo definiscono la fascia. Senza un punteggio di Recupero, NOOP usa una fascia intermedia prudente.",
+    "pt-PT": "A Recuperação de hoje, a frequência cardíaca de repouso recente e a frequência máxima do perfil definem o intervalo. Sem pontuação de Recuperação, o NOOP usa um intervalo intermédio prudente.",
+    "ru": "Диапазон определяется сегодняшним Восстановлением, недавним пульсом в покое и максимальным пульсом из профиля. Без оценки Восстановления NOOP использует осторожный средний диапазон.",
+    "zh-Hans": "今日恢复、近期静息心率和个人资料中的最大心率共同设定区间。若没有恢复评分，NOOP 会采用较为谨慎的中间区间。",
+    "zh-Hant": "今日恢復、近期靜息心率和個人資料中的最大心率共同設定區間。若沒有恢復評分，NOOP 會採用較為謹慎的中間區間。"
+  },
+  "appwide.live_session.preflight_cues_title": {
+    "de": "Wann das Band vibriert",
+    "en": "When the band vibrates",
+    "es": "Cuándo vibra la pulsera",
+    "fr": "Quand le bracelet vibre",
+    "it": "Quando vibra la fascia",
+    "pt-PT": "Quando a bracelete vibra",
+    "ru": "Когда браслет вибрирует",
+    "zh-Hans": "手环何时振动",
+    "zh-Hant": "手環何時振動"
+  },
+  "appwide.live_session.preflight_cues_body": {
+    "de": "In der ersten Minute bleibt das Band still. Danach bedeuten 2 leichte Impulse mehr Belastung nach 25 Sekunden unter dem Ziel; 3 kräftige Impulse bedeuten langsamer werden, wenn ein schneller Anstieg 25 Sekunden über dem Ziel bleibt. Kurze Ausschläge bleiben still, und derselbe Hinweis wartet mindestens 50 Sekunden.",
+    "en": "The first minute stays quiet. Then 2 light taps mean increase effort after 25 seconds below target; 3 firm taps mean ease off after a sharp rise stays above target for 25 seconds. Brief spikes stay silent, and the same cue waits at least 50 seconds.",
+    "es": "El primer minuto permanece en silencio. Después, 2 toques suaves indican que aumentes el esfuerzo tras 25 segundos por debajo del objetivo; 3 toques firmes indican que aflojes si una subida brusca se mantiene 25 segundos por encima. Los picos breves no generan avisos y la misma señal espera al menos 50 segundos.",
+    "fr": "La première minute reste silencieuse. Ensuite, 2 légères impulsions invitent à intensifier après 25 secondes sous la cible ; 3 impulsions fermes invitent à ralentir si une hausse rapide reste 25 secondes au-dessus. Les pics brefs restent silencieux et un même signal attend au moins 50 secondes.",
+    "it": "Il primo minuto resta silenzioso. Poi 2 tocchi leggeri indicano di aumentare lo sforzo dopo 25 secondi sotto l’obiettivo; 3 tocchi decisi indicano di rallentare se un aumento rapido resta sopra l’obiettivo per 25 secondi. I picchi brevi non attivano segnali e lo stesso segnale attende almeno 50 secondi.",
+    "pt-PT": "O primeiro minuto fica em silêncio. Depois, 2 toques leves indicam mais esforço após 25 segundos abaixo do objetivo; 3 toques firmes indicam abrandar se uma subida rápida ficar 25 segundos acima. Picos breves não geram avisos e o mesmo sinal espera pelo menos 50 segundos.",
+    "ru": "В первую минуту сигналов нет. Затем 2 лёгких импульса предлагают повысить нагрузку после 25 секунд ниже цели; 3 сильных импульса предлагают снизить темп, если резкий подъём держится выше цели 25 секунд. Короткие скачки игнорируются, а одинаковые сигналы разделены минимум 50 секундами.",
+    "zh-Hans": "第一分钟不会提示。之后，低于目标持续 25 秒时，2 次轻振表示应提高强度；心率快速上升并高于目标持续 25 秒时，3 次强振表示应降低强度。短暂波动不会提示，相同提示至少间隔 50 秒。",
+    "zh-Hant": "第一分鐘不會提示。之後，低於目標持續 25 秒時，2 次輕振表示應提高強度；心率快速上升並高於目標持續 25 秒時，3 次強振表示應降低強度。短暫波動不會提示，相同提示至少間隔 50 秒。"
+  },
+  "appwide.live_session.preflight_stop_title": {
+    "de": "Wann das Coaching endet",
+    "en": "When coaching stops",
+    "es": "Cuándo termina el coaching",
+    "fr": "Quand le coaching s’arrête",
+    "it": "Quando termina il coaching",
+    "pt-PT": "Quando termina a orientação",
+    "ru": "Когда сеанс завершится",
+    "zh-Hans": "指导何时停止",
+    "zh-Hant": "指導何時停止"
+  },
+  "appwide.live_session.preflight_stop_body": {
+    "de": "Du kannst die Sitzung jederzeit beenden. Fehlende Herzfrequenzdaten pausieren Hinweise nach etwa 8 Sekunden und beenden die Sitzung nach 10 Minuten ohne Messwert automatisch.",
+    "en": "End the session at any time. Missing heart-rate data pauses cues after about 8 seconds and automatically ends the session after 10 minutes without a reading.",
+    "es": "Finaliza la sesión cuando quieras. Si faltan datos de frecuencia cardiaca, los avisos se pausan tras unos 8 segundos y la sesión termina automáticamente después de 10 minutos sin lectura.",
+    "fr": "Terminez la séance à tout moment. Sans données de fréquence cardiaque, les signaux se mettent en pause après environ 8 secondes et la séance s’arrête automatiquement après 10 minutes sans mesure.",
+    "it": "Termina la sessione in qualsiasi momento. Se mancano dati sulla frequenza cardiaca, i segnali si mettono in pausa dopo circa 8 secondi e la sessione termina automaticamente dopo 10 minuti senza letture.",
+    "pt-PT": "Termina a sessão em qualquer altura. Sem dados de frequência cardíaca, os sinais ficam em pausa após cerca de 8 segundos e a sessão termina automaticamente após 10 minutos sem leitura.",
+    "ru": "Завершить сеанс можно в любой момент. При отсутствии данных пульса подсказки приостанавливаются примерно через 8 секунд, а через 10 минут без показаний сеанс завершится автоматически.",
+    "zh-Hans": "你可以随时结束训练。若没有心率数据，提示会在约 8 秒后暂停，并在连续 10 分钟没有读数后自动结束。",
+    "zh-Hant": "你可以隨時結束訓練。若沒有心率資料，提示會在約 8 秒後暫停，並在連續 10 分鐘沒有讀數後自動結束。"
+  },
+  "appwide.live_session.start_coaching": {
+    "de": "Coaching starten",
+    "en": "Start coaching",
+    "es": "Iniciar coaching",
+    "fr": "Démarrer le coaching",
+    "it": "Avvia coaching",
+    "pt-PT": "Iniciar orientação",
+    "ru": "Начать",
+    "zh-Hans": "开始指导",
+    "zh-Hant": "開始指導"
   },
   "appwide.automations.tap_guide.alarm_body": {
     "de": "Stoppt den aktiven Bandalarm, wenn die Reaktion auf Tippen unter „Alarme“ aktiviert ist.",

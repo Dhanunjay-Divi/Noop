@@ -252,6 +252,7 @@ struct StrandiOSApp: App {
                         connected: model.live.connected,
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
+                        batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
                         observedAt: sample.receivedAt
                     )
                 }
@@ -269,6 +270,7 @@ struct StrandiOSApp: App {
                         connected: isConnected,
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
+                        batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
                         observedAt: model.live.heartRateSample?.receivedAt
                     )
                 }
@@ -314,8 +316,10 @@ struct StrandiOSApp: App {
                 // and foreground-initiated reloads are budget-exempt. dropFirst() skips the attach replay.
                 .onReceive(model.live.$batteryPct.dropFirst()) { _ in
                     guard launchAccess.isUnlocked,
-                          acceptedTermsVersion == Terms.currentVersion,
-                          scenePhase == .active else { return }
+                          acceptedTermsVersion == Terms.currentVersion else { return }
+                    // Battery changes are infrequent, so keep the Lock Screen Live Activity current too.
+                    reconcileLiveActivity()
+                    guard scenePhase == .active else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                 }
                 .onReceive(model.live.$connected.dropFirst()) { _ in
@@ -471,16 +475,17 @@ struct StrandiOSApp: App {
             ? day?.recovery.map { Int($0.rounded()) } : nil
         let effort = liveActivityShowsEffort
             ? day?.strain.map { Int($0.rounded()) } : nil
+        let batteryPct = model.live.batteryPct.map { Int($0.rounded()) }
         let observedAt = model.live.heartRateSample?.receivedAt
         if repairHydration {
             liveActivity.reconcile(
                 bpm: bpm, recovery: recovery, connected: model.live.connected,
-                effort: effort, observedAt: observedAt
+                effort: effort, batteryPct: batteryPct, observedAt: observedAt
             )
         } else {
             liveActivity.update(
                 bpm: bpm, recovery: recovery, connected: model.live.connected,
-                effort: effort, observedAt: observedAt
+                effort: effort, batteryPct: batteryPct, observedAt: observedAt
             )
         }
     }
@@ -706,6 +711,7 @@ enum DemoScreens {
         case "stress":   return AnyView(StressView())
         case "workouts": return AnyView(WorkoutsView())
         case "startworkout": return AnyView(StartWorkoutSheet { _ in })
+        case "workoutcoach": return AnyView(LiveSessionView(onClose: {}))
         case "health":   return AnyView(HealthView())
         case "cycletracker": return AnyView(CycleTrackerDemoHost())
         case "insights": return AnyView(InsightsView())

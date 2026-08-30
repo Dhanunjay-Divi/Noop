@@ -60,6 +60,41 @@ final class FitnessAgeEngineTests: XCTestCase {
                        20, accuracy: 1e-9)
     }
 
+    func testRecentWeeklySnapshotsAreAveragedInsteadOfPublishingLatestJump() {
+        XCTAssertEqual(
+            FitnessAgeEngine.smoothedFitnessAge(recentEstimates: [40, 40, 40, 36])!,
+            39,
+            accuracy: 1e-9)
+        XCTAssertEqual(
+            FitnessAgeEngine.smoothedFitnessAge(
+                recentEstimates: Array(repeating: 40, count: 7) + [33])!,
+            39,
+            accuracy: 1e-9)
+    }
+
+    func testWeeklyPublicationMovesAtMostThreeMonths() {
+        XCTAssertEqual(
+            FitnessAgeEngine.boundedFitnessAge(candidate: 35, previousPublished: 40)!,
+            39.75,
+            accuracy: 1e-9)
+        XCTAssertEqual(
+            FitnessAgeEngine.boundedFitnessAge(candidate: 45, previousPublished: 40)!,
+            40.25,
+            accuracy: 1e-9)
+        XCTAssertEqual(
+            FitnessAgeEngine.boundedFitnessAge(candidate: 40.1, previousPublished: 40)!,
+            40.1,
+            accuracy: 1e-9)
+    }
+
+    func testFirstPublishedEstimateUsesSmoothedCandidateWithoutInventingAnchor() {
+        XCTAssertEqual(
+            FitnessAgeEngine.boundedFitnessAge(candidate: 37.4, previousPublished: nil)!,
+            37.4,
+            accuracy: 1e-9)
+        XCTAssertNil(FitnessAgeEngine.smoothedFitnessAge(recentEstimates: [.nan, .infinity]))
+    }
+
     // MARK: - PA-index reconstruction (HUNT1 PA-Q buckets)
 
     func testPAIndexSedentary() {

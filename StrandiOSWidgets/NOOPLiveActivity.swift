@@ -22,13 +22,16 @@ struct NOOPLiveActivity: Widget {
                                 .foregroundStyle(context.isStale ? StrandPalette.textSecondary : StrandPalette.textPrimary)
                         }
                         Spacer()
-                        // Charge + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
-                        HStack(spacing: 12) {
+                        // Keep the same at-a-glance daily and strap state as Android's ongoing notification.
+                        HStack(spacing: 10) {
                             if let r = context.state.recovery {
                                 bannerStat(label: "Charge", value: "\(r)%")
                             }
                             if let e = context.state.effort {
                                 bannerStat(label: "Effort", value: "\(e)")
+                            }
+                            if let battery = context.state.batteryPct {
+                                bannerStat(label: "Battery", value: "\(battery)%")
                             }
                         }
                     }
@@ -70,9 +73,21 @@ struct NOOPLiveActivity: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(authorized ? context.attributes.title : String(localized: "launch.locked.instruction"))
+                    if authorized {
+                        HStack {
+                            Text(context.attributes.title)
+                            Spacer(minLength: 8)
+                            if let battery = context.state.batteryPct {
+                                Label("\(battery)%", systemImage: "battery.100percent")
+                            }
+                        }
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text("launch.locked.instruction")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } compactLeading: {
                 Image(systemName: authorized ? (context.isStale ? "pause.fill" : "heart.fill") : "lock.fill")

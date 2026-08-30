@@ -152,6 +152,7 @@
     <string name="appwide_fitness_age_recent_context">Contexto recente</string>
     <string name="appwide_fitness_age_same_profile_age">Aproximadamente igual à idade do perfil</string>
     <string name="appwide_fitness_age_value_format">%1$d anos</string>
+    <string name="appwide_fitness_age_weekly">SEMANALMENTE</string>
     <string name="appwide_fitness_age_weekly_progress">PROGRESSO SEMANAL</string>
     <string name="appwide_fitness_age_weeks_count">%1$d sem.</string>
     <string name="appwide_fitness_age_younger_duration_profile_age">%1$s abaixo da idade do perfil</string>
@@ -187,8 +188,19 @@
     <string name="appwide_journal_editing_help">Muda o nome, reagrupa ou remove um item para organizar a lista. A pergunta original fica associada internamente, para que as referências importadas continuem alinhadas. Os itens personalizados são eliminados; os integrados ficam ocultos e podem ser restaurados abaixo.</string>
     <string name="appwide_legal_summary">Termos do projeto e licença do código-fonte. Disponível offline.</string>
     <string name="appwide_live_session_manually_started">INICIADO MANUALMENTE</string>
+    <string name="appwide_live_session_preflight_cues_body">O primeiro minuto fica em silêncio. Depois, 2 toques leves indicam mais esforço após 25 segundos abaixo do objetivo; 3 toques firmes indicam abrandar se uma subida rápida ficar 25 segundos acima. Picos breves não geram avisos e o mesmo sinal espera pelo menos 50 segundos.</string>
+    <string name="appwide_live_session_preflight_cues_title">Quando a bracelete vibra</string>
+    <string name="appwide_live_session_preflight_intro">Saiba o que vai acontecer antes de iniciar. Nada é monitorizado até tocares em Iniciar orientação.</string>
+    <string name="appwide_live_session_preflight_stop_body">Termina a sessão em qualquer altura. Sem dados de frequência cardíaca, os sinais ficam em pausa após cerca de 8 segundos e a sessão termina automaticamente após 10 minutos sem leitura.</string>
+    <string name="appwide_live_session_preflight_stop_title">Quando termina a orientação</string>
+    <string name="appwide_live_session_preflight_target_body">A Recuperação de hoje, a frequência cardíaca de repouso recente e a frequência máxima do perfil definem o intervalo. Sem pontuação de Recuperação, o NOOP usa um intervalo intermédio prudente.</string>
+    <string name="appwide_live_session_preflight_target_title">Como o objetivo é definido</string>
+    <string name="appwide_live_session_preflight_title">Orientação de treino</string>
+    <string name="appwide_live_session_preflight_tracks_body">A tendência da frequência cardíaca em direto e o tempo dentro, abaixo e acima do intervalo-alvo de hoje. Esta sessão de orientação não cria um registo de treino.</string>
+    <string name="appwide_live_session_preflight_tracks_title">O que monitoriza</string>
     <string name="appwide_live_session_start">Iniciar orientação de treino</string>
     <string name="appwide_live_session_start_accessibility">Iniciar orientação de treino. Beta. As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.</string>
+    <string name="appwide_live_session_start_coaching">Iniciar orientação</string>
     <string name="appwide_live_session_start_detail">As vibrações da pulseira orientam o esforço com base na Recuperação e frequência cardíaca de hoje.</string>
     <string name="appwide_live_session_summary_title">Resumo do Silent Guardian</string>
     <string name="appwide_live_session_title">Silent Guardian</string>

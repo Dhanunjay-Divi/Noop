@@ -38,6 +38,15 @@ public enum FitnessAgeEngine {
     public static let paiReference = 5.0
 
     public static let minAge = 20.0, maxAge = 80.0
+    /// Each raw estimate still uses the published model's weekly input window. Publishing averages the
+    /// latest daily snapshots of that window so one day crossing a PA bucket cannot move the headline
+    /// all at once.
+    public static let estimateWindowDays = 7
+    public static let smoothingWindowEstimates = 7
+    public static let historyDaysNeeded = estimateWindowDays + smoothingWindowEstimates - 1
+    /// A weekly headline may move by at most three months from the preceding published week. The raw
+    /// model is retained underneath; this is a display-stability policy, not a change to its equation.
+    public static let maxPublishedChangeYears = 0.25
 
     private static func isFemale(_ sex: String) -> Bool {
         sex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "female"
@@ -89,6 +98,30 @@ public enum FitnessAgeEngine {
         let (_, ageC, _, rhrC, paiC) = coeffs(sex)
         let fa = age + (rhrC*(restingHR - restingHRReference) - paiC*(paIndex - paiReference)) / ageC
         return min(maxAge, max(minAge, fa))
+    }
+
+    /// Average up to seven recent daily snapshots of the trailing-week estimate. Invalid or out-of-range
+    /// values are ignored rather than converted to zero.
+    public static func smoothedFitnessAge(recentEstimates: [Double]) -> Double? {
+        let valid = recentEstimates.suffix(smoothingWindowEstimates).filter {
+            $0.isFinite && (minAge...maxAge).contains($0)
+        }
+        guard !valid.isEmpty else { return nil }
+        return valid.reduce(0, +) / Double(valid.count)
+    }
+
+    /// Bound a new weekly publication against the preceding distinct week. Callers deliberately do not
+    /// use the current week's row as the anchor, so repeated refreshes cannot ratchet toward a volatile
+    /// raw value. A first-ever estimate has no prior anchor and is returned unchanged after smoothing.
+    public static func boundedFitnessAge(candidate: Double, previousPublished: Double?) -> Double? {
+        guard candidate.isFinite, (minAge...maxAge).contains(candidate) else { return nil }
+        guard let previousPublished,
+              previousPublished.isFinite,
+              (minAge...maxAge).contains(previousPublished) else { return candidate }
+        return min(
+            previousPublished + maxPublishedChangeYears,
+            max(previousPublished - maxPublishedChangeYears, candidate)
+        )
     }
 
     /// Reconstruct the HUNT PA-index (0–15 = frequency×intensity×duration) from measured weekly

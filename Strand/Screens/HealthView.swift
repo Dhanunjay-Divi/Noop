@@ -201,6 +201,14 @@ private struct SyncStatusSection: View {
             )
         } else if !live.connected {
             StatePill("Noop Band not connected", tone: .neutral, showsDot: false)
+        } else if let error = live.lastSyncError {
+            VStack(alignment: .leading, spacing: 8) {
+                StatePill("Sync needs attention", tone: .warning)
+                Text(error)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         } else if let last = live.lastSyncedAt {
             HStack(spacing: 8) {
                 StatePill("History synced", tone: .positive)
@@ -216,13 +224,16 @@ private struct SyncStatusSection: View {
 
     private var helperText: String {
         if live.backfilling {
-            return String(localized: "Pulling Noop Band's stored history. This drains oldest-first; a deep backlog now continues automatically across passes instead of waiting between syncs.")
+            return String(localized: "Pulling Noop Band's stored history. Rows appear as they are saved, and you can keep using Noop while a deep oldest-first backlog continues across passes.")
         }
         if !live.connected {
             return String(localized: "Connect Noop Band to sync its stored history. Until then, only imported data shows here.")
         }
         if !live.bonded {
             return String(localized: "Finishing the pairing handshake. Sync now becomes available once Noop Band is paired.")
+        }
+        if live.lastSyncError != nil {
+            return String(localized: "Your stored history remains on Noop Band. Tap Sync now to retry when the connection is ready.")
         }
         return String(localized: "Syncs Noop Band's stored history right away instead of waiting for the next automatic sync.")
     }
@@ -330,7 +341,8 @@ private struct HeartRateSection: View {
         let hasLiveHR = displayHR != nil
         let fraction = hrFraction(displayHR)
         let zone = hrZone(fraction)
-        let series = hrSeries(displayHR)
+        // Never draw cached R-R/BPM while paused or before the first post-Start packet.
+        let series = hasFreshPacket ? hrSeries(displayHR) : []
 
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Heart Rate", overline: liveTrackingOptedIn ? "Live" : "Paused",
@@ -949,6 +961,9 @@ private struct FitnessAgeSection: View {
                             .foregroundStyle(StrandPalette.textPrimary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
+                        Text(FitnessAgePresentation.spokenValue(age))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
                         Text(comparison)
                             .font(StrandFont.subhead)
                             .foregroundStyle(younger ? StrandPalette.statusPositiveText : StrandPalette.statusWarningText)
