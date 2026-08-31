@@ -107,24 +107,6 @@ final class LiveActivityController {
     private func apply(_ desired: DesiredState) async {
         guard isCurrent(desired) else { return }
 
-        let all = allKnownActivities()
-        let usable = all.filter { candidate in
-            switch candidate.activityState {
-            case .ended, .dismissed: false
-            default: true
-            }
-        }
-        // ActivityKit does not promise an ordering for `activities`. Pick the newest stale-date and use
-        // a stable ID tie-break so relaunch adoption cannot oscillate between surviving activities.
-        let selection = LiveActivitySelection.select(usable.map {
-            .init(id: $0.id, freshnessDate: $0.content.staleDate)
-        })
-        let canonical = selection.canonicalID.flatMap { id in
-            usable.first { $0.id == id }
-        }
-        adopt(canonical)
-
-        guard isCurrent(desired) else { return }
         guard authInfo.areActivitiesEnabled,
               UnitPrefs.liveActivityEnabled(),
               desired.hasFreshHeartRate else {
@@ -135,14 +117,33 @@ final class LiveActivityController {
             return
         }
 
-        // A previous race/build may have left more than one NOOP activity. Keep the deterministic
-        // canonical activity and remove every duplicate before publishing the fresh state.
-        let duplicateIDs = Set(selection.duplicateIDs)
-        for duplicate in usable where duplicateIDs.contains(duplicate.id) {
-            await duplicate.end(nil, dismissalPolicy: .immediate)
-            guard isCurrent(desired) else { return }
+        if !hasUsableCachedActivity {
+            let usable = allKnownActivities().filter { candidate in
+                switch candidate.activityState {
+                case .ended, .dismissed: false
+                default: true
+                }
+            }
+            // ActivityKit does not promise an ordering for `activities`. Pick the newest stale-date and
+            // use a stable ID tie-break so cold-launch adoption cannot oscillate between survivors.
+            let selection = LiveActivitySelection.select(usable.map {
+                .init(id: $0.id, freshnessDate: $0.content.staleDate)
+            })
+            let canonical = selection.canonicalID.flatMap { id in
+                usable.first { $0.id == id }
+            }
+            adopt(canonical)
+
+            // A previous race/build may have left duplicates. Reconcile them when adopting; once a valid
+            // handle is cached, normal HR pushes no longer enumerate the process-wide activity list.
+            let duplicateIDs = Set(selection.duplicateIDs)
+            for duplicate in usable where duplicateIDs.contains(duplicate.id) {
+                await duplicate.end(nil, dismissalPolicy: .immediate)
+                guard isCurrent(desired) else { return }
+            }
         }
 
+        guard isCurrent(desired) else { return }
         guard let bpm = desired.bpm, let observedAt = desired.observedAt else { return }
         let state = NOOPActivityAttributes.ContentState(
             bpm: bpm,
@@ -189,6 +190,14 @@ final class LiveActivityController {
     private func adopt(_ canonical: NOOPActivity?) {
         if activity?.id != canonical?.id { lastPush = .distantPast }
         activity = canonical
+    }
+
+    private var hasUsableCachedActivity: Bool {
+        guard let activity else { return false }
+        switch activity.activityState {
+        case .ended, .dismissed: return false
+        default: return true
+        }
     }
 
     private func allKnownActivities() -> [NOOPActivity] {

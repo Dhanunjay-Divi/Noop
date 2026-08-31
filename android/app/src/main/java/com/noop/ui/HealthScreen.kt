@@ -913,7 +913,7 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(Metrics.space8),
                     ) {
                         StatePill(
-                            title = "Sync needs attention",
+                            title = stringResource(R.string.health_sync_needs_attention),
                             tone = StrandTone.Warning,
                             showsDot = true,
                         )
@@ -2173,28 +2173,42 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                         verticalArrangement = Arrangement.spacedBy(Metrics.space4),
                     ) {
                         Text(
-                            if (liveTrackingOptedIn) "Live heart rate is on" else "Live heart rate is off",
+                            stringResource(
+                                if (liveTrackingOptedIn) {
+                                    R.string.health_live_hr_on
+                                } else {
+                                    R.string.health_live_hr_off
+                                },
+                            ),
                             style = NoopType.headline,
                             color = Palette.textPrimary,
                         )
                         Text(
-                            if (liveTrackingOptedIn) {
-                                "Showing the high-rate foreground stream on this screen."
-                            } else {
-                                "Your wearable stays connected and stored history continues to sync."
-                            },
+                            stringResource(
+                                if (liveTrackingOptedIn) {
+                                    R.string.health_live_hr_on_detail
+                                } else {
+                                    R.string.health_live_hr_off_detail
+                                },
+                            ),
                             style = NoopType.subhead,
                             color = Palette.textSecondary,
                         )
                         Text(
-                            "Live tracking uses more wearable and phone battery. It stops when you leave this screen; workouts and other sessions manage their own streams.",
+                            stringResource(R.string.health_live_hr_battery_notice),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )
                     }
                 }
                 NoopButton(
-                    text = if (liveTrackingOptedIn) "Stop Live HR" else "Start Live HR",
+                    text = stringResource(
+                        if (liveTrackingOptedIn) {
+                            R.string.health_stop_live_hr
+                        } else {
+                            R.string.health_start_live_hr
+                        },
+                    ),
                     leadingIcon = if (liveTrackingOptedIn) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                     kind = if (liveTrackingOptedIn) NoopButtonKind.Secondary else NoopButtonKind.Primary,
                     fullWidth = true,
@@ -2236,8 +2250,8 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                             text = when {
                                 hasFreshPacket && derived -> "Estimated from R-R interval"
                                 hasLiveHr -> "Streaming live"
-                                liveTrackingOptedIn -> "Awaiting wearable"
-                                else -> "Live display paused"
+                                liveTrackingOptedIn -> stringResource(R.string.health_awaiting_wearable)
+                                else -> stringResource(R.string.health_live_display_paused)
                             },
                             style = NoopType.footnote,
                             color = Palette.textSecondary,

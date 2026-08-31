@@ -76,6 +76,30 @@ final class LiquidKeyMetricTrendTests: XCTestCase {
         XCTAssertEqual(trends[.bloodOxygen], [97, 98])
     }
 
+    func testResolvedBloodOxygenFillsBandDaysWithoutCalibratedPercentages() {
+        let days = [
+            metric("2026-08-20", spo2: nil),
+            metric("2026-08-21", spo2: nil),
+        ]
+        let resolved = [
+            (day: "2026-08-20", value: 96.2),
+            (day: "2026-08-21", value: 97.1),
+            (day: "2026-08-21", value: .infinity),
+            (day: "2026-08-21", value: 12_000),
+        ]
+
+        let trends = LiquidTodayView.keyMetricTrendSeries(
+            days: days,
+            restSeries: [],
+            stepEstimates: [],
+            appleRows: [],
+            endingAt: "2026-08-21",
+            resolvedSpo2: resolved
+        )
+
+        XCTAssertEqual(trends[.bloodOxygen], [96.2, 97.1])
+    }
+
     func testDirectionDescribesMovementWithoutAssigningGoodOrBadMeaning() {
         XCTAssertEqual(LiquidTodayView.keyMetricTrendDirection([52, 54]), .up)
         XCTAssertEqual(LiquidTodayView.keyMetricTrendDirection([54, 52]), .down)

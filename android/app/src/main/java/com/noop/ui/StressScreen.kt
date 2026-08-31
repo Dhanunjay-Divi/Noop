@@ -133,8 +133,8 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     val model = remember(days, stored) { StressModel.build(days, stored) }
 
     LazyScreenScaffold(
-        title = uiString(R.string.l10n_stress_screen_stress_bad33342),
-        subtitle = "Autonomic load from HRV and resting heart rate",
+        title = stringResource(R.string.stress_autonomic_load_title),
+        subtitle = "Your physiology relative to your own recent baseline",
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
         // into the theme canvas behind the header + hero vessel, full-bleed (full-width, up behind the
         // status bar via the scaffold's topBackground plumbing), and the cards float OVER it on the flat
@@ -223,7 +223,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.StressContent(
             modifier = Modifier.staggeredAppear(1),
             verticalArrangement = Arrangement.spacedBy(Metrics.gap),
         ) {
-            SectionHeader("Today", overline = "Markers", trailing = "vs 30-day baseline")
+            SectionHeader("Latest Read", overline = "Markers", trailing = "vs prior baseline")
             StressTiles(model)
         }
     }
@@ -870,10 +870,10 @@ private fun hourLabel(hour: Int): String {
 private fun StressTiles(model: StressModel) {
     val tiles = listOf<@Composable (Modifier) -> Unit>(
         { m ->
-            // Today's stress value, with its band as the caption.
+            // Today's autonomic-load value, with its band as the caption.
             StatTile(
                 modifier = m,
-                label = uiString(R.string.l10n_stress_screen_stress_bad33342),
+                label = stringResource(R.string.stress_autonomic_load_label),
                 value = String.format(Locale.US, "%.1f", model.score),
                 caption = "of 3 · ${model.band.title}",
                 accent = StressRamp.color(model.score),
@@ -902,10 +902,10 @@ private fun StressTiles(model: StressModel) {
             )
         },
         { m ->
-            // Estimated calm time — share of recent days spent in the LOW band.
+            // Estimated low-load share among recent scorable days.
             StatTile(
                 modifier = m,
-                label = uiString(R.string.l10n_stress_screen_calm_time_fa546d52),
+                label = stringResource(R.string.stress_low_load_days),
                 value = model.calmTimeValue,
                 caption = model.calmTimeCaption,
                 accent = StressRamp.CALM,
@@ -968,7 +968,7 @@ private fun StressTrendSection(model: StressModel, modifier: Modifier = Modifier
     val points = remember(model, range) { model.windowedTrend(range) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Stress Trend", overline = "History", trailing = range.label)
+        SectionHeader("Autonomic Load Trend", overline = "History", trailing = range.label)
         if (points.size >= 2) {
             val avg = points.average()
             NoopCard(tint = Palette.stressColor) {
@@ -978,7 +978,7 @@ private fun StressTrendSection(model: StressModel, modifier: Modifier = Modifier
                         verticalAlignment = Alignment.Top,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Overline("Stress · ${range.label}")
+                            Overline("NOOP Load · ${range.label}")
                             Text(
                                 uiString(R.string.l10n_stress_screen_daily_0_3_proxy_63247929),
                                 style = NoopType.footnote,

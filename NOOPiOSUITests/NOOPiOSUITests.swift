@@ -738,6 +738,59 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "trends-range-compact-copy")
     }
 
+    func testTodayScrollPerformance() {
+        let app = launchApp()
+        let calendar = app.buttons["noop.today.calendar"]
+        XCTAssertTrue(calendar.waitForExistence(timeout: 20))
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        #if targetEnvironment(simulator)
+        // The iOS 26 simulator currently throws NSInternalInconsistencyException while decoding the
+        // scrolling signpost payload. Keep CI useful with process metrics; real devices retain Apple's
+        // hitch/deceleration metric below.
+        measure(
+            metrics: [XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric()],
+            options: options
+        ) {
+            scroll.swipeUp()
+            scroll.swipeDown()
+        }
+        #else
+        measure(
+            metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric],
+            options: options
+        ) {
+            scroll.swipeUp()
+        }
+        #endif
+    }
+
+    func testRepeatedTabNavigationRemainsResponsive() {
+        // Accessibility sizes deliberately keep the five destinations expanded while scrolling. That
+        // removes SwiftUI's transient replacement of compact/expanded accessibility nodes from this
+        // performance regression; dedicated tests above cover that morph at standard text sizes.
+        let app = launchApp(preferredContentSize: PreferredContentSize.accessibilityLarge)
+        let tabs = (0...4).map { app.buttons["noop.tab.\($0)"] }
+        XCTAssertTrue(tabs[0].waitForExistence(timeout: 20))
+
+        for _ in 0..<3 {
+            for tab in tabs.dropFirst() {
+                guard tab.waitForExistence(timeout: 5) else {
+                    XCTFail("A primary tab did not remain responsive.")
+                    return
+                }
+                tab.tap()
+                XCTAssertTrue(tab.isSelected)
+                app.swipeUp()
+            }
+            tabs[0].tap()
+            XCTAssertTrue(tabs[0].isSelected)
+        }
+    }
+
     private func assertExpandedNavigationLabels(
         selectedTab: Int,
         in app: XCUIApplication,

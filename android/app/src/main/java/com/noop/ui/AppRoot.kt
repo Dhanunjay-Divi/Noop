@@ -87,18 +87,28 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.noop.R
 import com.noop.analytics.FusionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -206,6 +216,22 @@ private enum class Destination(
     }
 }
 
+private val primaryTabDestinations = setOf(
+    Destination.Today,
+    Destination.Trends,
+    Destination.Workouts,
+    Destination.Sleep,
+    Destination.More,
+)
+
+/** Resolve the tab that owns a route entered without an existing tab stack. Nested pushes retain the
+ * selected tab at the call site; only a direct launch/deep link needs this fallback ownership. */
+private fun primaryTabForRoute(route: String?): Destination = when (val destination = Destination.forRoute(route)) {
+    Destination.Today, Destination.Calendar -> Destination.Today
+    Destination.Trends, Destination.Workouts, Destination.Sleep, Destination.More -> destination
+    else -> Destination.More
+}
+
 /** More-page groups, mirroring the iOS More tab exactly: Insights · Body · Data · App. `defaultExpanded`
  *  mirrors the iOS S2 default: Insights + Body open at rest, Data + App collapsed to just their header. */
 // [header] is the STABLE persistence key (stored in SharedPreferences and kept byte-identical to iOS's
@@ -300,7 +326,10 @@ fun AppRoot(
 
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
-    val current = Destination.forRoute(currentRoute)
+    var selectedTabRoute by rememberSaveable(startRoute) {
+        mutableStateOf(primaryTabForRoute(startRoute).route)
+    }
+    val selectedTab = Destination.forRoute(selectedTabRoute)
     var showQuickActions by remember { mutableStateOf(false) }
     var quickOverlay by remember { mutableStateOf<QuickActionKind?>(null) }
     // The Updates inbox sheet (opened by the Today header bell). The store is a process singleton so
@@ -309,13 +338,26 @@ fun AppRoot(
     val updateStore = remember { UpdateStore.from(context) }
     var showUpdatesInbox by remember { mutableStateOf(false) }
 
+    fun openTopLevel(route: String) {
+        selectedTabRoute = primaryTabForRoute(route).route
+        if (route != currentRoute) nav.navigateTopLevel(route)
+    }
+
+    // System Back can leave a top-level destination and reveal a different tab root. Keep the persistent
+    // selection synchronized only for exact roots; a nested route deliberately retains its owning tab.
+    LaunchedEffect(currentRoute) {
+        Destination.entries
+            .firstOrNull { it.route == currentRoute && it in primaryTabDestinations }
+            ?.let { selectedTabRoute = it.route }
+    }
+
     // Notification route bridge: StateFlow emits immediately, so this consumes a cold-launch route that
     // arrived before AppRoot mounted; later emissions handle warm SINGLE_TOP taps. Only trusted top-level
     // routes can enter the bridge, and consumePending removes each request before navigation.
     LaunchedEffect(nav, context) {
         NotificationRouteBridge.routeRequests.collect {
             NotificationRouteBridge.consumePending(context)?.let { route ->
-                nav.navigateTopLevel(route.navRoute)
+                openTopLevel(route.navRoute)
             }
         }
     }
@@ -327,9 +369,15 @@ fun AppRoot(
                 // One translucent navigation island plus a separate persistent quick-add circle. The
                 // action stays reachable from every tab without crowding a page-specific header.
                 GlassBottomBar(
-                    current = current,
+                    selected = selectedTab,
                     onTabSelected = { dest ->
-                        if (dest.route != currentRoute) nav.navigateTopLevel(dest.route)
+                        val reselected = selectedTabRoute == dest.route
+                        selectedTabRoute = dest.route
+                        if (reselected) {
+                            nav.returnToTabRoot(dest.route)
+                        } else if (dest.route != currentRoute) {
+                            nav.navigateTopLevel(dest.route)
+                        }
                     },
                     onQuickActions = { showQuickActions = true },
                 )
@@ -359,7 +407,7 @@ fun AppRoot(
                         onOpenUpdates = { showUpdatesInbox = true },
                         // The leading profile avatar opens Settings (where the photo is set/changed),
                         // mirroring iOS's avatar-leading Today header. The drawer hamburger is unchanged.
-                        onOpenSettings = { nav.navigateTopLevel(Destination.Settings.route) },
+                        onOpenSettings = { openTopLevel(Destination.Settings.route) },
                         // The opt-in Hydration card (only shown when Hydration tracking is on) pushes its
                         // detail. A normal push so the back-stack returns to Today.
                         onOpenHydration = { nav.navigate(Destination.Hydration.route) },
@@ -370,7 +418,7 @@ fun AppRoot(
                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
                         onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
-                        onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) },
+                        onOpenSleep = { openTopLevel(Destination.Sleep.route) },
                         // Optional Coupled view card (task #43): a normal push so back returns to Today.
                         onOpenCoupled = { nav.navigate(Destination.CoupledView.route) },
                         // The "workout in progress" indicator: raise the one-shot the Live screen consumes to
@@ -381,10 +429,10 @@ fun AppRoot(
                         },
                         // The liquid header's strap battery ring taps through to Devices (iOS parity: the
                         // battery ring → router.openDevices()).
-                        onOpenDevices = { nav.navigateTopLevel(Destination.Devices.route) },
+                        onOpenDevices = { openTopLevel(Destination.Devices.route) },
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
+                        onOpenJournal = { openTopLevel(Destination.Insights.route) },
                         onOpenCalendar = { nav.navigate(Destination.Calendar.route) },
                     )
                 }
@@ -394,7 +442,7 @@ fun AppRoot(
                 composable(Destination.Live.route) {
                     LiveScreen(
                         viewModel = viewModel,
-                        onManageDevices = { nav.navigateTopLevel(Destination.Devices.route) },
+                        onManageDevices = { openTopLevel(Destination.Devices.route) },
                     )
                 }
                 composable(Destination.Sleep.route) {
@@ -404,7 +452,7 @@ fun AppRoot(
                     CoupledScreen(
                         vm = viewModel,
                         // Tapping Sleep in the coupled read opens the full Sleep screen (iOS parity).
-                        onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) },
+                        onOpenSleep = { openTopLevel(Destination.Sleep.route) },
                     )
                 }
                 composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
@@ -422,24 +470,24 @@ fun AppRoot(
                 composable(Destination.Stress.route) {
                     StressScreen(
                         vm = viewModel,
-                        onBreathe = { nav.navigateTopLevel(Destination.Breathe.route) },
+                        onBreathe = { openTopLevel(Destination.Breathe.route) },
                     )
                 }
                 composable(Destination.Trends.route) { TrendsScreen(viewModel) }
-                composable(Destination.Insights.route) { InsightsScreen(viewModel, onOpenInsightsHub = { nav.navigateTopLevel(Destination.InsightsHub.route) }) }
+                composable(Destination.Insights.route) { InsightsScreen(viewModel, onOpenInsightsHub = { openTopLevel(Destination.InsightsHub.route) }) }
                 composable(Destination.Compare.route) { CompareScreen(viewModel) }
                 composable(Destination.Health.route) {
                     HealthScreen(
                         vm = viewModel,
                         onVitalClick = { nav.navigate("vital_detail/$it") },
-                        onOpenLabBook = { nav.navigateTopLevel(Destination.LabBook.route) },
-                        onOpenFusedRecord = { nav.navigateTopLevel(Destination.FusedRecord.route) },
+                        onOpenLabBook = { openTopLevel(Destination.LabBook.route) },
+                        onOpenFusedRecord = { openTopLevel(Destination.FusedRecord.route) },
                     )
                 }
                 composable(Destination.Friends.route) {
                     FriendsScreen(
                         onOpenBackupSync = {
-                            nav.navigateTopLevel(Destination.BackupSync.route)
+                            openTopLevel(Destination.BackupSync.route)
                         },
                     )
                 }
@@ -469,7 +517,7 @@ fun AppRoot(
                 composable(Destination.Devices.route) {
                     DevicesScreen(
                         viewModel,
-                        onUseFileImport = { nav.navigateTopLevel(Destination.DataSources.route) },
+                        onUseFileImport = { openTopLevel(Destination.DataSources.route) },
                     )
                 }
                 composable(Destination.Profile.route) {
@@ -490,9 +538,12 @@ fun AppRoot(
                 }
                 composable(Destination.TestCentre.route) { TestCentreScreen(viewModel) }
                 // The "More" page - the iOS More tab's twin: a navigated ScreenScaffold page hosting the
-                // full grouped destination list (was a pull-up sheet). A row navigates top-level.
+                // full grouped destination list. Rows push inside More's owned stack so re-tapping More
+                // can always return to this root, exactly like iOS clearing that tab's NavigationPath.
                 composable(Destination.More.route) {
-                    MoreScreen(onNavigate = { nav.navigateTopLevel(it) })
+                    MoreScreen(onNavigate = {
+                        nav.navigate(it) { launchSingleTop = true }
+                    })
                 }
             }
         }
@@ -518,7 +569,7 @@ fun AppRoot(
                             QuickActionKind.STRENGTH,
                             QuickActionKind.HRV -> quickOverlay = action.kind
                             else -> action.route?.let { route ->
-                                if (route != currentRoute) nav.navigateTopLevel(route)
+                                if (route != currentRoute) openTopLevel(route)
                             }
                         }
                     },
@@ -574,7 +625,7 @@ fun AppRoot(
                             "trends" -> Destination.Trends.route
                             else -> null
                         }
-                        if (route != null && route != currentRoute) nav.navigateTopLevel(route)
+                        if (route != null && route != currentRoute) openTopLevel(route)
                     },
                     onRestore = { cardId ->
                         // Flip the shared dismissed flag back off so the card reappears, and signal a
@@ -672,6 +723,7 @@ private fun MoreAppearanceMenu() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val selected = AppearancePrefs.mode
     val selectedLabel = stringResource(selected.labelRes)
+    val appearanceLabel = stringResource(R.string.app_appearance_accessibility)
     var expanded by remember { mutableStateOf(false) }
     Box {
         Box(
@@ -682,7 +734,7 @@ private fun MoreAppearanceMenu() {
                 .border(0.8.dp, Palette.hairlineStrong.copy(alpha = 0.78f), CircleShape)
                 .clickable { expanded = true }
                 .semantics {
-                    contentDescription = "App appearance"
+                    contentDescription = appearanceLabel
                     stateDescription = selectedLabel
                 },
             contentAlignment = Alignment.Center,
@@ -746,7 +798,11 @@ private fun MoreQuickAccess(onNavigate: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Overline("Quick Access", modifier = Modifier.weight(1f), color = Palette.textSecondary)
-            Text("Everyday tools", style = NoopType.caption, color = Palette.textTertiary)
+            Text(
+                stringResource(R.string.more_everyday_tools),
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
         }
         moreQuickAccessItems.chunked(2).forEach { pair ->
             Row(
@@ -897,7 +953,7 @@ private val barTrailingTabs = listOf(
 
 @Composable
 private fun GlassBottomBar(
-    current: Destination,
+    selected: Destination,
     onTabSelected: (Destination) -> Unit,
     onQuickActions: () -> Unit,
 ) {
@@ -906,8 +962,8 @@ private fun GlassBottomBar(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 6.dp)
-            .padding(top = 4.dp, bottom = Metrics.space12),
+            .padding(horizontal = 12.dp)
+            .padding(top = 4.dp, bottom = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -915,25 +971,18 @@ private fun GlassBottomBar(
                 .fillMaxWidth()
                 .widthIn(max = 548.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                shape = barShape,
-                color = Palette.surfaceRaised.copy(alpha = 0.64f),
-                tonalElevation = 1.dp,
-                shadowElevation = 4.dp,
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .border(
-                        0.7.dp,
-                        Palette.hairlineStrong.copy(alpha = 0.58f),
-                        barShape,
-                    ),
+                    .height(48.dp)
+                    .navigationGlassSurface(barShape),
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 5.dp, vertical = 7.dp),
+                        .fillMaxSize()
+                        .padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(1.dp),
                 ) {
@@ -941,8 +990,7 @@ private fun GlassBottomBar(
                         BarSlot(
                             icon = tab.icon,
                             label = stringResource(tab.labelRes),
-                            active = current == tab.dest ||
-                                (tab.dest == Destination.Today && current == Destination.Calendar),
+                            active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
@@ -952,7 +1000,7 @@ private fun GlassBottomBar(
                         BarSlot(
                             icon = tab.icon,
                             label = stringResource(tab.labelRes),
-                            active = current == tab.dest,
+                            active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
@@ -961,9 +1009,7 @@ private fun GlassBottomBar(
                     BarSlot(
                         icon = Icons.Filled.MoreHoriz,
                         label = stringResource(R.string.nav_more),
-                        active = current != Destination.Today && current != Destination.Trends &&
-                            current != Destination.Workouts && current != Destination.Sleep &&
-                            current != Destination.Calendar,
+                        active = selected == Destination.More,
                         testTag = "noop.tab.more",
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
@@ -983,14 +1029,15 @@ private fun FloatingQuickAddButton(onClick: () -> Unit) {
     )
     Box(
         modifier = Modifier
-            .size(54.dp)
+            .size(48.dp)
             .testTag("noop.quick-actions")
-            .clip(CircleShape)
-            .background(Palette.surfaceRaised.copy(alpha = 0.66f))
-            .border(
-                0.7.dp,
-                Palette.hairlineStrong.copy(alpha = 0.62f),
-                CircleShape,
+            .navigationGlassSurface(
+                shape = CircleShape,
+                accentRim = if (Palette.isLight) {
+                    Color.Black.copy(alpha = 0.10f)
+                } else {
+                    Palette.chargeColor.copy(alpha = 0.46f)
+                },
             )
             .clickable(
                 interactionSource = interaction,
@@ -1003,10 +1050,102 @@ private fun FloatingQuickAddButton(onClick: () -> Unit) {
         Icon(
             Icons.Filled.Add,
             contentDescription = null,
-            tint = Palette.textPrimary,
-            modifier = Modifier.size(22.dp),
+            tint = if (Palette.isLight) {
+                Color.Black.copy(alpha = 0.90f)
+            } else {
+                Palette.chargeColor
+            },
+            modifier = Modifier.size(20.dp),
         )
     }
+}
+
+/**
+ * Static Android counterpart to iOS navigation glass. The fixed smoke, specular and lower-rim
+ * layers keep the rail lens-like without adding a render effect to every content scroll frame.
+ */
+private fun Modifier.navigationGlassSurface(
+    shape: androidx.compose.ui.graphics.Shape,
+    accentRim: Color? = null,
+): Modifier = composed {
+    val light = Palette.isLight
+    val base = if (light) {
+        Color.White.copy(alpha = 0.72f)
+    } else {
+        Palette.surfaceRaised.copy(alpha = 0.72f)
+    }
+    val smoke = if (light) {
+        Color.Black.copy(alpha = 0.025f)
+    } else {
+        Color.Black.copy(alpha = 0.13f)
+    }
+    val topSpecular = if (light) {
+        Color.White.copy(alpha = 0.62f)
+    } else {
+        Color.White.copy(alpha = 0.12f)
+    }
+    val midSpecular = if (light) {
+        Color.White.copy(alpha = 0.15f)
+    } else {
+        Color.White.copy(alpha = 0.025f)
+    }
+    val lowerShade = if (light) {
+        Color.Black.copy(alpha = 0.055f)
+    } else {
+        Color.Black.copy(alpha = 0.18f)
+    }
+    val rimTop = accentRim ?: if (light) {
+        Color.White.copy(alpha = 0.52f)
+    } else {
+        Color.White.copy(alpha = 0.12f)
+    }
+    val rimBottom = if (light) {
+        Color.Black.copy(alpha = 0.07f)
+    } else {
+        Color.Black.copy(alpha = 0.20f)
+    }
+
+    this
+        .shadow(
+            elevation = if (light) 8.dp else 11.dp,
+            shape = shape,
+            clip = false,
+        )
+        .clip(shape)
+        .drawWithCache {
+            val radius = CornerRadius(size.minDimension / 2f)
+            val body = Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0f to topSpecular,
+                    0.20f to midSpecular,
+                    0.52f to base,
+                    1f to lowerShade,
+                ),
+            )
+            val diagonalGlint = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = if (light) 0.20f else 0.055f),
+                    Color.Transparent,
+                    Color.Black.copy(alpha = if (light) 0.02f else 0.08f),
+                ),
+                start = Offset.Zero,
+                end = Offset(size.width, size.height),
+            )
+            val rim = Brush.verticalGradient(
+                colors = listOf(rimTop, midSpecular, rimBottom),
+            )
+            onDrawBehind {
+                drawRoundRect(color = base, cornerRadius = radius)
+                drawRoundRect(color = smoke, cornerRadius = radius)
+                drawRoundRect(brush = body, cornerRadius = radius)
+                drawRoundRect(brush = diagonalGlint, cornerRadius = radius)
+                drawRoundRect(
+                    brush = rim,
+                    cornerRadius = radius,
+                    style = Stroke(width = 0.7.dp.toPx()),
+                )
+            }
+        }
 }
 
 /** One nav slot: an icon over a small label. Active = gold accent (semibold), inactive = textSecondary.
@@ -1022,8 +1161,15 @@ private fun BarSlot(
 ) {
     val tint = if (active) Palette.chargeColor else Palette.textSecondary
     val shape = RoundedCornerShape(50)
+    val selectedTabLiftLabel = stringResource(R.string.nav_selected_tab_animation_label)
+    val selectedScale by animateFloatAsState(
+        targetValue = if (active) 1.08f else 1f,
+        animationSpec = tween(durationMillis = 260, easing = NavEasing),
+        label = selectedTabLiftLabel,
+    )
     Column(
         modifier = modifier
+            .height(44.dp)
             .testTag(testTag)
             .clip(shape)
             .background(
@@ -1054,7 +1200,18 @@ private fun BarSlot(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(Metrics.iconSmall))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier
+                .size(Metrics.iconSmall)
+                .graphicsLayer {
+                    scaleX = selectedScale
+                    scaleY = selectedScale
+                    translationY = if (active) -1.dp.toPx() else 0f
+                },
+        )
         Text(
             label,
             style = NoopType.footnote.copy(
@@ -1247,42 +1404,89 @@ private val NavEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 /** ~240ms crossfade on the calm easing - the README "Tab crossfade" between roots. */
 private val navFadeSpec = tween<Float>(durationMillis = 240, easing = NavEasing)
 
-/**
- * BrandMark — the NOOP logo glyph at a small in-app size: an OPEN recovery ring (≈80%
- * arc, round caps, starting at −90° / 12 o'clock, clockwise) in the gold gradient with a
- * solid gold core dot at the centre. This is the same brand glyph the RecoveryRing hero
- * carries (the "O" of NOOP), shrunk for the top bar / drawer header so the logo reads in
- * app. CLEAN/flat per the v3 restraint brief — no bloom, no halo, just the gradient ring.
- * Token-only (gold gradient + hairline track); decorative, so it carries no content label.
- */
+/** Canonical NOOP monogram: the same geometric NO / OP obsidian tile used by iOS. */
 @Composable
 internal fun BrandMark(size: Dp = 22.dp) {
-    Canvas(modifier = Modifier.size(size)) {
-        val stroke = this.size.minDimension * 0.13f          // ~2px-equivalent at 22dp
-        val radius = (this.size.minDimension - stroke) / 2f
-        val topLeft = Offset(center.x - radius, center.y - radius)
-        val arcSize = Size(radius * 2f, radius * 2f)
-        val capStroke = Stroke(width = stroke, cap = StrokeCap.Round)
+    Canvas(
+        modifier = Modifier
+            .size(size)
+            .semantics { contentDescription = "NOOP" },
+    ) {
+        val edge = this.size.minDimension
+        val ox = (this.size.width - edge) / 2f
+        val oy = (this.size.height - edge) / 2f
+        fun x(fraction: Float) = ox + edge * fraction
+        fun y(fraction: Float) = oy + edge * fraction
+        val tile = Color(0xFF050505)
+        val letter = Color(0xFFF4F1EA)
+        val radius = edge * 0.235f
+        val rim = maxOf(0.5.dp.toPx(), edge * 0.006f)
 
-        // Faint full-ring track (navy hairline) behind the open arc.
-        drawCircle(
-            color = Palette.hairline.copy(alpha = 0.5f),
-            radius = radius,
-            center = center,
-            style = capStroke,
+        drawRoundRect(
+            color = tile,
+            topLeft = Offset(ox, oy),
+            size = Size(edge, edge),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius),
         )
-        // Open recovery-ring arc: ~80% (288°), −90° start (12 o'clock), clockwise.
-        drawArc(
-            color = Palette.chargeColor,
-            startAngle = -90f,
-            sweepAngle = 288f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = capStroke,
+        drawRoundRect(
+            color = Color.White.copy(alpha = 0.10f),
+            topLeft = Offset(ox, oy),
+            size = Size(edge, edge),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius),
+            style = Stroke(width = rim),
         )
-        // Solid WHITE "on-device core" dot at the centre (green ring + white core - iOS parity, no gold).
-        drawCircle(color = Color.White, radius = stroke * 0.62f, center = center)
+
+        val monogram = Path().apply {
+            fillType = PathFillType.EvenOdd
+
+            moveTo(x(0.210f), y(0.205f))
+            lineTo(x(0.305f), y(0.205f))
+            lineTo(x(0.405f), y(0.340f))
+            lineTo(x(0.405f), y(0.205f))
+            lineTo(x(0.490f), y(0.205f))
+            lineTo(x(0.490f), y(0.490f))
+            lineTo(x(0.397f), y(0.490f))
+            lineTo(x(0.303f), y(0.358f))
+            lineTo(x(0.303f), y(0.490f))
+            lineTo(x(0.210f), y(0.490f))
+            close()
+
+            addOval(Rect(x(0.515f), y(0.200f), x(0.810f), y(0.492f)))
+            addOval(Rect(x(0.604f), y(0.287f), x(0.721f), y(0.408f)))
+            addOval(Rect(x(0.207f), y(0.500f), x(0.503f), y(0.787f)))
+            addOval(Rect(x(0.296f), y(0.579f), x(0.415f), y(0.707f)))
+
+            moveTo(x(0.516f), y(0.505f))
+            lineTo(x(0.680f), y(0.505f))
+            cubicTo(x(0.756f), y(0.505f), x(0.802f), y(0.546f), x(0.802f), y(0.608f))
+            cubicTo(x(0.802f), y(0.670f), x(0.756f), y(0.711f), x(0.680f), y(0.711f))
+            lineTo(x(0.614f), y(0.711f))
+            lineTo(x(0.614f), y(0.780f))
+            lineTo(x(0.516f), y(0.780f))
+            close()
+
+            moveTo(x(0.614f), y(0.576f))
+            lineTo(x(0.678f), y(0.576f))
+            cubicTo(x(0.707f), y(0.576f), x(0.724f), y(0.589f), x(0.724f), y(0.608f))
+            cubicTo(x(0.724f), y(0.627f), x(0.707f), y(0.641f), x(0.678f), y(0.641f))
+            lineTo(x(0.614f), y(0.641f))
+            close()
+        }
+        drawPath(monogram, color = letter)
+
+        val incisionWidth = maxOf(1.dp.toPx(), edge * 0.014f)
+        val incisionHeight = edge * 0.095f
+        val incisionCenter = Offset(x(0.707f), y(0.253f))
+        rotate(degrees = 35f, pivot = incisionCenter) {
+            drawRect(
+                color = tile,
+                topLeft = Offset(
+                    incisionCenter.x - incisionWidth / 2f,
+                    incisionCenter.y - incisionHeight / 2f,
+                ),
+                size = Size(incisionWidth, incisionHeight),
+            )
+        }
     }
 }
 
@@ -1292,6 +1496,19 @@ private fun NavHostController.navigateTopLevel(route: String) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+/** Re-selecting the active tab is a root command, not another state-restoring tab switch. Prefer popping
+ * the live stack so the root instance survives; if the root is not live (for example a direct deep link),
+ * rebuild that one root without restoring a previously saved detail destination. */
+private fun NavHostController.returnToTabRoot(route: String) {
+    if (currentDestination?.route == route) return
+    if (popBackStack(route, inclusive = false)) return
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) { saveState = false }
+        launchSingleTop = true
+        restoreState = false
     }
 }
 

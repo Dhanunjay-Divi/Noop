@@ -3,6 +3,7 @@ package com.noop.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -46,6 +47,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingFlat
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
@@ -152,6 +156,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1070,6 +1075,32 @@ fun TodayScreen(
             .map { it.value }
     }
 
+    // Calibrated SpO2 can come from a wearable import, Apple Health, or Health Connect. The live band
+    // stream intentionally stores raw red/IR ADC only, so use the cross-source resolver and never turn
+    // those raw channels into a percentage.
+    var resolvedSpo2Window by remember { mutableStateOf(ResolvedSpo2Window()) }
+    val resolvedSpo2ByDay = if (resolvedSpo2Window.anchorDay == selectedDayKey) {
+        resolvedSpo2Window.values
+    } else {
+        emptyMap()
+    }
+    LaunchedEffect(days, selectedDayKey, keyMetricsWindowDays, viewModel.activeStrapId) {
+        val anchor = runCatching { LocalDate.parse(selectedDayKey) }.getOrDefault(selectedDay)
+        val lookbackDays = maxOf(30, keyMetricsWindowDays)
+        val values = runCatching {
+            viewModel.repo.resolvedSeries(
+                key = "spo2",
+                preferredSource = "my-whoop",
+                from = anchor.minusDays((lookbackDays - 1).toLong()).toString(),
+                to = anchor.toString(),
+                strapDeviceId = viewModel.activeStrapId,
+            ).points
+                .filter { it.value.isFinite() && it.value > 0.0 && it.value <= 100.0 }
+                .associate { it.day to it.value }
+        }.getOrDefault(emptyMap())
+        resolvedSpo2Window = ResolvedSpo2Window(selectedDayKey, values)
+    }
+
     // Provenance (COMPONENT 4): the REAL per-metric merge winner for the selected day's three hero scores,
     // keyed by metric key ("recovery" / "strain" / "sleep_performance"); each value is the RAW source id the resolver
     // returned (e.g. "my-whoop", "my-whoop-noop", "apple-health"). resolvedSeries applies the SAME
@@ -1201,6 +1232,23 @@ fun TodayScreen(
     val lastSpo2Day: DailyMetric? = remember(days, carryOverTodayKey, selectedDayOffset, displayMetric) {
         if (selectedDayOffset == 0) lastSpo2Row(days, maxOf(displayMetric?.day ?: "", carryOverTodayKey)) else null
     }
+    val resolvedSpo2Day: DailyMetric? = remember(
+        resolvedSpo2ByDay, selectedDayKey, selectedDayOffset,
+    ) {
+        val entry = resolvedSpo2ByDay[selectedDayKey]?.let { selectedDayKey to it }
+            ?: if (selectedDayOffset == 0) {
+                resolvedSpo2ByDay.entries
+                    .filter { it.key <= selectedDayKey }
+                    .maxByOrNull { it.key }
+                    ?.let { it.key to it.value }
+            } else {
+                null
+            }
+        entry?.let { (day, value) ->
+            DailyMetric(deviceId = "resolved-spo2", day = day, spo2Pct = value)
+        }
+    }
+    val displaySpo2Day = resolvedSpo2Day ?: lastSpo2Day
     val lastSkinTempDay: DailyMetric? = remember(days, carryOverTodayKey, selectedDayOffset, displayMetric) {
         if (selectedDayOffset == 0) lastSkinTempRow(days, maxOf(displayMetric?.day ?: "", carryOverTodayKey)) else null
     }
@@ -1257,6 +1305,7 @@ fun TodayScreen(
     // Old imports stay in history, but they do not fill the Today trend tiles.
     val window = rememberTrendWindow(
         days, selectedDay, keyMetricsWindowDays, importedStepsByDay, stepsEstByDay,
+        resolvedSpo2ByDay,
     )
 
     LaunchedEffect(days, workoutDataVersion) {
@@ -1767,7 +1816,7 @@ fun TodayScreen(
                                     recoveryCalibration = recoveryCalibration,
                                     lastScoredCharge = lastScoredCharge,
                                     carriedDay = lastScoredRecoveryDay,
-                                    spo2CarryDay = lastSpo2Day,
+                                    spo2CarryDay = displaySpo2Day,
                                     massUnit = massUnit,
                                     effortScale = effortScale,
                                     effortForDay = effortForDay,
@@ -1817,7 +1866,7 @@ fun TodayScreen(
                             day = displayMetric,
                             carriedDay = lastScoredRecoveryDay,
                             vitalsDay = lastVitalsDay,
-                            spo2Day = lastSpo2Day,
+                            spo2Day = displaySpo2Day,
                             skinTempDay = lastSkinTempDay,
                             stress = stressToday,
                             fitnessAge = fitnessAgeToday,
@@ -2887,7 +2936,7 @@ private fun LiveSessionEntryCard(onOpen: () -> Unit) {
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Text(
-                    "BETA",
+                    stringResource(R.string.today_beta_badge),
                     style = NoopType.overline.copy(fontSize = 8.5.sp),
                     color = Palette.onDarkSecondary,
                     modifier = Modifier
@@ -3299,11 +3348,13 @@ private fun LiquidBandBatteryButton(
         else -> Palette.chargeColor
     }
     val label = when {
-        !connected -> "Noop Band battery, band not connected"
-        batteryPct == null && charging == true -> "Noop Band battery charging, no reading yet"
-        batteryPct == null -> "Noop Band battery, no reading yet"
-        charging == true -> "Noop Band battery ${batteryPct.roundToInt()} percent, charging"
-        else -> "Noop Band battery ${batteryPct.roundToInt()} percent"
+        !connected -> stringResource(R.string.today_band_battery_disconnected)
+        batteryPct == null && charging == true ->
+            stringResource(R.string.today_band_battery_charging_no_reading)
+        batteryPct == null -> stringResource(R.string.today_band_battery_no_reading)
+        charging == true ->
+            stringResource(R.string.today_band_battery_percent_charging, batteryPct.roundToInt())
+        else -> stringResource(R.string.today_band_battery_percent, batteryPct.roundToInt())
     }
     Row(
         modifier = Modifier
@@ -4802,8 +4853,7 @@ private fun HeroMetricRows(day: DailyMetric?, carriedDay: DailyMetric? = null, v
     val carriedFromVitals = day?.avgHrv == null && day?.restingHr == null && day?.respRateBpm == null &&
         (hrv != null || rhr != null || resp != null) && vitalsDay != null
     // iOS `recoveryVitalsSection`: a frosted card with a "RECOVERY VITALS" header + a "last night · <date>"
-    // on the right, then three `vitalRow`s (26dp mini LIQUID VESSEL + label + value). NoopCard supplies the
-    // same neutral surfaceRaised + hairline as iOS's frosted card. Inner spacing 12, matching iOS.
+    // on the right, then three `vitalRow`s (dimensional MetricGlyph + label + value).
     NoopCard(padding = Metrics.space16) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -4821,20 +4871,17 @@ private fun HeroMetricRows(day: DailyMetric?, carriedDay: DailyMetric? = null, v
             HeroVitalRow(
                 label = uiString(R.string.l10n_today_screen_heart_rate_variability_a137586d),
                 value = hrv?.let { "${it.roundToInt()} ms" } ?: NO_DATA,
-                tint = Palette.metricCyan,
-                fraction = hrv?.let { (it / 120.0).coerceIn(0.0, 1.0) },
+                icon = Icons.Filled.MonitorHeart,
             )
             HeroVitalRow(
                 label = uiString(R.string.l10n_today_screen_resting_heart_rate_348928d6),
                 value = rhr?.let { "$it bpm" } ?: NO_DATA,
-                tint = Palette.metricRose,
-                fraction = rhr?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+                icon = Icons.Filled.Favorite,
             )
             HeroVitalRow(
                 label = uiString(R.string.l10n_today_screen_breaths_per_minute_2b197c54),
                 value = resp?.let { String.format(Locale.US, "%.1f rpm", it) } ?: NO_DATA,
-                tint = Palette.accent,
-                fraction = resp?.let { (it / 24.0).coerceIn(0.0, 1.0) },
+                icon = Icons.Filled.Air,
             )
         }
     }
@@ -4846,10 +4893,9 @@ private fun heroVitalsLastNightLine(): String {
     return "Last night · ${d.format(DateTimeFormatter.ofPattern("d MMM", Locale.US))}"
 }
 
-/** One iOS `vitalRow`: a 26dp mini liquid VESSEL filled to [fraction] in [tint], the label (subhead,
- *  secondary), a spacer, and the value (number 15, primary). Replaces the old flat-Material-icon row. */
+/** One iOS `vitalRow`: a 28dp dimensional metric glyph, label, and tabular value. */
 @Composable
-private fun HeroVitalRow(label: String, value: String, tint: Color, fraction: Double?) {
+private fun HeroVitalRow(label: String, value: String, icon: ImageVector) {
     val hasValue = value != NO_DATA
     Row(
         modifier = Modifier
@@ -4858,12 +4904,7 @@ private fun HeroVitalRow(label: String, value: String, tint: Color, fraction: Do
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
     ) {
-        LiquidVessel(
-            value = fraction,
-            tint = tint,
-            animated = false,
-            modifier = Modifier.size(26.dp),
-        )
+        MetricGlyph(icon = icon, size = 28.dp)
         Text(label, style = NoopType.subhead, color = Palette.textSecondary, modifier = Modifier.weight(1f))
         Text(
             value,
@@ -4968,18 +5009,6 @@ private fun YourCardsSection(
                         hydrationTotalMl = hydrationTotalMl,
                         hydrationGoalMl = hydrationGoalMl,
                     ),
-                    // The mini liquid vessel's fill — the SAME per-card fraction iOS `liquidCard` uses.
-                    fraction = dashboardCardFraction(
-                        card = card,
-                        day = day,
-                        carriedDay = carriedDay,
-                        vitalsDay = vitalsDay,
-                        stress = stress,
-                        fitnessAge = fitnessAge,
-                        vitality = vitality,
-                        importedStepsForDay = importedStepsForDay,
-                        estimatedStepsForDay = estimatedStepsForDay,
-                    ),
                     tint = dashboardCardTint(card),
                     // #110: label the sleep row with its source + night (this section renders at offset 0
                     // only, so it IS last night), so a WHOOP-imported figure is never silently shown as
@@ -5071,8 +5100,8 @@ private fun dashboardCardDestination(
 
 /** A dashboard card's WHOOP-token tint (icon + accent). Score cards take their domain colour; vitals take
  *  their biometric hue; everything else the blue accent. No gold (WHOOP), tokens only. Mirrors iOS
- *  dashboardTint. This drives the mini liquid vessel's tint on each row, so it follows the iOS `liquidCard`
- *  per-card tints exactly: Stress=accent, Fitness age=charge-green, Vitality=liquid-purple, HRV=cyan,
+ *  dashboardTint. This drives the card's restrained wash, so it follows the iOS `liquidCard`
+ *  per-card tints: Stress=accent, Fitness age=charge-green, Vitality=liquid-purple, HRV=cyan,
  *  Resting HR=rose, Respiratory=accent, Steps=cyan, Sleep=rest, Coupled=charge. */
 private fun dashboardCardTint(card: DashboardCard): Color = when (card) {
     // iOS `liquidCard`: stress → StrandPalette.accent (blue), not the Effort orange.
@@ -5091,49 +5120,6 @@ private fun dashboardCardTint(card: DashboardCard): Color = when (card) {
     DashboardCard.CALORIES -> Palette.metricAmber
     DashboardCard.HYDRATION -> Palette.metricCyan
     DashboardCard.COUPLED -> Palette.chargeColor
-}
-
-/**
- * A dashboard card's mini-vessel fill fraction (0..1), or null for an empty (no-reading) vessel. Mirrors the
- * iOS `liquidCard` `frac:` argument exactly, per card:
- *   Stress = stress/3 · Fitness age = 0.5 (fixed) · Vitality = vitality/100 · HRV = avgHrv/120 ·
- *   Resting HR = restingHr/100 · Respiratory = respRate/24 · Steps = steps/10000 · Sleep = totalSleepMin/480 ·
- *   Coupled = 0.6 (fixed) · Blood oxygen / Skin temp / Calories / Hydration = null (empty, not half-full).
- * The three overnight vitals (HRV / Resting HR / Respiratory) read PER-FIELD today-first with the
- * recovery-INDEPENDENT [vitalsDay] carry, matching the row VALUE, so the vessel fill and the number agree
- * (and a recovery-nulled night keeps its OWN preserved vitals). Sleep keeps the recovery-gated
- * `carriedDay ?: day` carry.
- */
-private fun dashboardCardFraction(
-    card: DashboardCard,
-    day: DailyMetric?,
-    carriedDay: DailyMetric?,
-    vitalsDay: DailyMetric?,
-    stress: Double?,
-    fitnessAge: Double?,
-    vitality: Double?,
-    importedStepsForDay: Int?,
-    estimatedStepsForDay: Int?,
-): Double? {
-    fun over(v: Double?, ceiling: Double): Double? = v?.let { (it / ceiling).coerceIn(0.0, 1.0) }
-    val vd = carriedDay ?: day
-    return when (card) {
-        DashboardCard.STRESS -> over(stress, 3.0)
-        DashboardCard.FITNESS_AGE -> if (fitnessAge != null) 0.5 else null
-        DashboardCard.VITALITY -> over(vitality, 100.0)
-        DashboardCard.HRV -> over(day?.avgHrv ?: vitalsDay?.avgHrv, 120.0)
-        DashboardCard.RESTING_HR -> over((day?.restingHr ?: vitalsDay?.restingHr)?.toDouble(), 100.0)
-        DashboardCard.RESPIRATORY -> over(day?.respRateBpm ?: vitalsDay?.respRateBpm, 24.0)
-        DashboardCard.STEPS -> {
-            val steps = resolvedSteps(importedStepsForDay, day?.steps, estimatedStepsForDay)?.toDouble()
-            over(steps, 10000.0)
-        }
-        DashboardCard.SLEEP -> over(vd?.totalSleepMin, 480.0)
-        DashboardCard.COUPLED -> 0.6
-        // Not wired to a real read yet — an EMPTY vessel (not half-full) so it doesn't imply a reading.
-        DashboardCard.BLOOD_OXYGEN, DashboardCard.SKIN_TEMP, DashboardCard.CALORIES,
-        DashboardCard.HYDRATION -> null
-    }
 }
 
 /**
@@ -5235,7 +5221,6 @@ private fun dashboardCardValue(
 private fun DashboardCardRow(
     card: DashboardCard,
     value: String,
-    fraction: Double?,
     tint: Color,
     // #110: a per-card dynamic subtitle (currently the sleep row's source + night); null keeps the
     // card's static description.
@@ -5254,7 +5239,11 @@ private fun DashboardCardRow(
             .fillMaxWidth()
             .let { if (onClick != null) it.liquidPress(interaction) else it }
             .clip(rowShape)
-            .frostedCardSurface(cornerRadius = Metrics.cardRadius)
+            .frostedCardSurface(
+                tint = tint,
+                cornerRadius = Metrics.cardRadius,
+                washStrength = 0.60f,
+            )
             .let {
                 if (onClick != null) {
                     it.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -5266,15 +5255,7 @@ private fun DashboardCardRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // THE fix: a 30dp mini LIQUID VESSEL filled to this card's fraction, tinted its domain colour — the
-        // "small liquid circle per icon" iOS shows and Android was missing (a flat Material-icon square).
-        // Static (animated=false) so the many small gauges cost nothing per frame, matching iOS `cardLink`.
-        LiquidVessel(
-            value = fraction,
-            tint = tint,
-            animated = false,
-            modifier = Modifier.size(30.dp),
-        )
+        MetricGlyph(icon = card.icon, size = 32.dp)
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(1.dp),
@@ -6287,11 +6268,8 @@ private fun MetricGrid(
     // night-detail pattern) via [onOpenMetric].
     onOpenMetric: (String) -> Unit = {},
 ) {
-    // FIX 3 (iOS `keyMetricsSection` parity): a 3-COLUMN grid of COMPACT liquid tiles, each an iOS `ktile`
-    // — a 9sp/+1.2 overline label and a value + small unit. Genuinely bounded daily scores also get a thin
-    // 8dp LiquidTube; raw measurements keep the same aligned space without an arbitrary "more is better"
-    // fill. One descriptor per KeyMetric carries the same value/tint reads the old builders used. The #251
-    // editor's pin order is preserved while every catalog tile remains visible.
+    // Current iOS parity: two readable columns, a dimensional semantic glyph, large value, and either a
+    // real trend or a bounded-score liquid rail. The editor's pin order still leads the complete catalog.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
@@ -6435,10 +6413,10 @@ private fun MetricGrid(
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }
-    // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
+    // iOS `keyMetricsSection` LazyVGrid: 2 columns, spacing 8. Build from rows so tile heights stay uniform
     // and a partial last row pads with empty weight so the columns stay aligned.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(3).forEach { rowTiles ->
+        tiles.chunked(2).forEach { rowTiles ->
             // Detailed rows equalise heights (IntrinsicSize.Max + fillMaxHeight, the #399 idiom): a
             // graph-less tile (Steps/Weight/Calories) sharing a row with graphed neighbours must not
             // shrink its card. Compact rows keep the plain layout, byte-identical to before.
@@ -6449,13 +6427,16 @@ private fun MetricGrid(
                 rowTiles.forEach { (metric, tile) ->
                     LiquidKeyTile(
                         tile,
+                        icon = metric.icon,
                         showsBoundedProgress = metric.isBoundedProgress,
-                        detailed = detailed,
                         onClick = tapFor(metric),
-                        modifier = Modifier.weight(1f).then(if (detailed) Modifier.fillMaxHeight() else Modifier),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("noop.today.metric.${metric.raw}")
+                            .then(if (detailed) Modifier.fillMaxHeight() else Modifier),
                     )
                 }
-                repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
+                repeat(2 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -6473,26 +6454,43 @@ private data class KeyTileData(
     val spark: List<Double> = emptyList(),
 )
 
-/**
- * One iOS `ktile`: a compact 3-column tile — a 9sp / +1.2 overline label and the value (number 17) + small
- * unit (caption). A bounded score gets a thin 8dp [LiquidTube] tinted [KeyTileData.tint] to
- * [KeyTileData.frac]; a raw vital reserves the same height but draws no fake progress. Flat surfaceRaised
- * fill + a 16dp-corner hairline (iOS ktile background), padding 12h / 11v. Replaces the old tall 2-column
- * SparkStatTile. A No-Data bounded score dims and its tube reads empty.
- *
- * [detailed] (the #251 editor's "Detailed tiles" switch): the tile grows a 14-day trend [Sparkline] in the
- * metric's tint under the fill bar — taller/squarer, per the tester mock. A metric with no windowed series
- * (Steps/Weight/Calories) or fewer than two points stays tube-only, so no tile ever draws a fake flat line.
- */
+private enum class KeyMetricTrendDirection(
+    @StringRes val labelRes: Int,
+    val icon: ImageVector,
+) {
+    UP(R.string.today_trend_direction_up, Icons.AutoMirrored.Filled.TrendingUp),
+    DOWN(R.string.today_trend_direction_down, Icons.AutoMirrored.Filled.TrendingDown),
+    STEADY(R.string.today_trend_direction_steady, Icons.AutoMirrored.Filled.TrendingFlat),
+}
+
+/** Endpoint direction only, matching iOS's neutral tolerance and making no clinical claim. */
+private fun keyMetricTrendDirection(values: List<Double>): KeyMetricTrendDirection? {
+    val finite = values.filter(Double::isFinite)
+    if (finite.size < 2) return null
+    val first = finite.first()
+    val last = finite.last()
+    val delta = last - first
+    val scale = maxOf(kotlin.math.abs(first), kotlin.math.abs(last), 1.0)
+    val tolerance = maxOf(0.01, scale * 0.001)
+    return when {
+        kotlin.math.abs(delta) <= tolerance -> KeyMetricTrendDirection.STEADY
+        delta > 0.0 -> KeyMetricTrendDirection.UP
+        else -> KeyMetricTrendDirection.DOWN
+    }
+}
+
+/** Current iOS `ktile`: a two-column dimensional glyph tile with a 24sp value and 26dp trend/progress lane. */
 @Composable
 private fun LiquidKeyTile(
     data: KeyTileData,
+    icon: ImageVector,
     showsBoundedProgress: Boolean,
-    detailed: Boolean = false,
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val hasValue = data.value != NO_DATA
+    val trend = data.spark.takeLast(14)
+    val showsTrend = trend.size >= 2
     // Tap -> the tile's focused trend detail (the Sleep night-detail tile idiom): liquidPress on the
     // tappable tile, indication = null so only the liquid settle shows. A null onClick keeps the tile
     // inert with zero modifier overhead (byte-identical to before).
@@ -6506,66 +6504,125 @@ private fun LiquidKeyTile(
     }
     Column(
         modifier = base
-            .clip(RoundedCornerShape(16.dp))
-            .frostedCardSurface(cornerRadius = 16.dp)
-            .padding(horizontal = 12.dp, vertical = 11.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .frostedCardSurface(
+                tint = data.tint,
+                cornerRadius = 20.dp,
+                washStrength = 0.76f,
+            )
+            .padding(horizontal = 12.dp, vertical = 12.dp)
             .semantics { contentDescription = uiString(R.string.l10n_today_screen_data_label_data_value_data_unit_27f6fd6b, data.label, data.value, data.unit).trim() },
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            data.label.uppercase(),
-            style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 0.sp),
-            color = Palette.textTertiary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (showsTrend) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MetricGlyph(icon = icon, size = 28.dp)
+                Spacer(Modifier.weight(1f))
+                keyMetricTrendDirection(trend)?.let { direction ->
+                    val directionLabel = stringResource(direction.labelRes)
+                    val directionDescription = stringResource(
+                        R.string.today_14_day_direction,
+                        directionLabel,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .height(20.dp)
+                            .clip(CircleShape)
+                            .background(Palette.surfaceInset.copy(alpha = 0.78f))
+                            .border(
+                                width = 0.6.dp,
+                                color = Palette.hairline.copy(alpha = 0.9f),
+                                shape = CircleShape,
+                            )
+                            .padding(horizontal = 5.dp)
+                            .semantics {
+                                contentDescription = directionDescription
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.today_14_day_short),
+                            style = NoopType.overline.copy(fontSize = 7.5.sp, letterSpacing = 0.sp),
+                            color = Palette.textTertiary,
+                        )
+                        Icon(
+                            imageVector = direction.icon,
+                            contentDescription = null,
+                            tint = Palette.textTertiary,
+                            modifier = Modifier.size(10.dp),
+                        )
+                    }
+                }
+            }
+            Text(
+                data.label.uppercase(),
+                style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
+                color = Palette.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                MetricGlyph(icon = icon, size = 28.dp)
+                Text(
+                    data.label.uppercase(),
+                    style = NoopType.overline.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
+                    color = Palette.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 data.value,
-                style = NoopType.number(17f),
+                style = NoopType.number(24f),
                 color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
                 maxLines = 1,
             )
             if (data.unit.isNotEmpty() && hasValue) {
                 Text(
                     uiString(R.string.l10n_today_screen_data_unit_c768ef8c, data.unit),
-                    style = NoopType.caption,
+                    style = NoopType.subhead,
                     color = Palette.textPrimary,
                     maxLines = 1,
                 )
             }
         }
-        // Detailed rows are height-equalised (fillMaxHeight): pin the bar + graph to the bottom edge so a
-        // graph-less tile's bar lines up with its neighbours' bars rather than floating mid-card.
-        if (detailed) Spacer(Modifier.weight(1f))
-        if (showsBoundedProgress) {
-            LiquidTube(
-                frac = data.frac ?: 0.0,
-                tint = data.tint,
-                height = 8.dp,
-                animated = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else {
-            // Keep every grid row aligned without drawing an arbitrary "health progress" bar for a raw
-            // measurement. The value + optional sparkline carry the raw metric honestly.
-            Spacer(Modifier.height(8.dp))
-        }
-        // Detailed tiles: the 14-day trend graph under the bar (same Sparkline leaf the Sleep tiles use,
-        // at the shared tile spark height), tinted to the metric so the graph reads as the same signal.
-        if (detailed) {
-            val tail = data.spark.takeLast(14)
-            if (tail.size >= 2) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(26.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                showsTrend -> {
                 Sparkline(
-                    values = tail,
+                    values = trend,
                     color = data.tint,
                     modifier = Modifier
                         .fillMaxWidth()
-                        // A touch more air between the fill bar and the graph (tester feedback: the two
-                        // read as one element when they nearly touch).
-                        .padding(top = 6.dp)
-                        .height(Metrics.sparkHeight),
+                            .height(26.dp),
                 )
+            }
+                showsBoundedProgress -> {
+                    LiquidTube(
+                        frac = data.frac ?: 0.0,
+                        tint = data.tint,
+                        height = 7.dp,
+                        animated = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                else -> Unit
             }
         }
     }
@@ -7937,6 +7994,11 @@ private data class Window(
     val steps: List<Double>,
 )
 
+private data class ResolvedSpo2Window(
+    val anchorDay: String = "",
+    val values: Map<String, Double> = emptyMap(),
+)
+
 /**
  * Build the trailing trend windows from `recentDays` over the chosen span (2 / 7 / 14 calendar days —
  * the editor's detailed-graph window). Each series drops null days from the trailing calendar window
@@ -7949,8 +8011,11 @@ private fun rememberTrendWindow(
     windowDays: Int,
     importedStepsByDay: Map<String, Int> = emptyMap(),
     calibratedStepsByDay: Map<String, Int> = emptyMap(),
+    resolvedSpo2ByDay: Map<String, Double> = emptyMap(),
 ): Window =
-    androidx.compose.runtime.remember(days, anchorDay, windowDays, importedStepsByDay, calibratedStepsByDay) {
+    androidx.compose.runtime.remember(
+        days, anchorDay, windowDays, importedStepsByDay, calibratedStepsByDay, resolvedSpo2ByDay,
+    ) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
         val cutoff = anchorDay.minusDays((windowDays - 1).toLong()).toString()
@@ -7966,7 +8031,11 @@ private fun rememberTrendWindow(
             sleepMin = series { it.totalSleepMin },
             hrv = series { it.avgHrv },
             rhr = series { it.restingHr?.toDouble() },
-            spo2 = series { it.spo2Pct },
+            spo2 = resolvedSpo2ByDay.entries
+                .filter { it.key in cutoff..end }
+                .sortedBy { it.key }
+                .map { it.value }
+                .ifEmpty { series { it.spo2Pct } },
             resp = series { it.respRateBpm },
             steps = resolvedStepsSeries(measuredWindow, motionStepsByDay, calibratedWindow).map { it.second },
         )

@@ -140,7 +140,7 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
     }
 
     func testStoreOverwritesPreviousSnapshot() {
-        // Each captured sample re-stores; the latest write wins (mirrors the per-sample persist).
+        // Each bounded checkpoint replaces the snapshot; the latest durable window wins.
         let defaults = freshDefaults()
         ActiveWorkoutPersistence.store(snapshot(samples: [sample(1_700_000_001, 120)], avgHr: 120, peakHr: 120),
                                        into: defaults)
@@ -249,6 +249,43 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
         cadence.didPersist(sampleCount: 31, atSec: 1_059) // forced GPS/lifecycle checkpoint
         XCTAssertFalse(cadence.isDue(sampleCount: 31, nowSec: 2_000),
                        "No new sample means there is no HR tail to persist.")
+    }
+
+    func testLiveStrainCadenceWaitsForTrustworthyCoverage() {
+        let cadence = WorkoutLiveStrainCadence(computedSampleCount: 0, computedAtSec: 1_000)
+
+        XCTAssertFalse(cadence.isDue(
+            sampleCount: 19, firstSampleSec: 1_000, nowSec: 1_600,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ))
+        XCTAssertFalse(cadence.isDue(
+            sampleCount: 600, firstSampleSec: 1_000, nowSec: 1_598,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ))
+        XCTAssertTrue(cadence.isDue(
+            sampleCount: 600, firstSampleSec: 1_000, nowSec: 1_599,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ))
+    }
+
+    func testLiveStrainCadenceSupportsDenseAndSparseStreams() {
+        var cadence = WorkoutLiveStrainCadence(computedSampleCount: 600, computedAtSec: 1_600)
+        cadence.didCompute(sampleCount: 600, atSec: 1_600)
+
+        XCTAssertFalse(cadence.isDue(
+            sampleCount: 604, firstSampleSec: 1_000, nowSec: 1_604,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ))
+        XCTAssertTrue(cadence.isDue(
+            sampleCount: 605, firstSampleSec: 1_000, nowSec: 1_604,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ), "Dense streams refresh after five accepted samples.")
+
+        cadence.didCompute(sampleCount: 605, atSec: 1_604)
+        XCTAssertTrue(cadence.isDue(
+            sampleCount: 606, firstSampleSec: 1_000, nowSec: 1_634,
+            minimumSampleCount: 20, minimumSpanSec: 599
+        ), "Sparse streams refresh after elapsed time without waiting for five packets.")
     }
 
 

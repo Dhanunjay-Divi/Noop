@@ -356,7 +356,7 @@ private fun DigestScoreColumn(
         )
         if (hasValue) {
             Text(
-                "of $denominator",
+                stringResource(R.string.weekly_digest_of_value, denominator),
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
                 maxLines = 1,
@@ -511,7 +511,11 @@ private fun DeltaChip(s: WeeklyMetricSummary) {
             s.wowDelta < 0 -> "−"
             else -> ""
         }
-        Text("$sign${deltaText(s)}", style = NoopType.captionNumber, color = tone)
+        Text(
+            stringResource(R.string.weekly_digest_signed_delta, sign, deltaText(s)),
+            style = NoopType.captionNumber,
+            color = tone,
+        )
     }
 }
 

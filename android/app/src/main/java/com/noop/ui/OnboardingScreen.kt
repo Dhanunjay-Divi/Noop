@@ -3,6 +3,7 @@ package com.noop.ui
 import com.noop.R
 import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
+import android.app.DatePickerDialog
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,6 +14,12 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Brush
@@ -40,6 +48,7 @@ import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
@@ -86,6 +95,12 @@ import com.noop.safety.SafetyPagingController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Calendar
 import kotlin.math.roundToInt
 
 // MARK: - OnboardingScreen
@@ -164,82 +179,99 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         color = Palette.surfaceBase,
     ) {
-        // Design Reset: the flow sits on a flat opaque surfaceBase substrate — no scenic starfield
-        // hero behind the steps (mirrors the iOS onboarding's clean surfaceBase background). Each
-        // step's read-outs live on flat opaque NoopCards over this canvas, not floating on a scene.
         Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                // Edge-to-edge (setDecorFitsSystemWindows=false) draws under the system bars,
-                // so inset for them here — the onboarding has no Scaffold to do it for us.
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = Metrics.screenPadding)
-                .padding(top = 16.dp, bottom = 16.dp),
-        ) {
-            OnboardingTopBar(
-                page = pageIndex + 1,
-                total = pages.size,
-                progress = (pageIndex + 1).toFloat() / pages.size.toFloat(),
-            )
-
+            OnboardingBackdrop()
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 44.dp, bottom = 18.dp),
+                    .fillMaxSize()
+                    // Edge-to-edge draws under the system bars; the wizard owns both insets.
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = Metrics.screenPadding)
+                    .padding(top = 10.dp, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                when (page) {
-                    OnboardingPage.Welcome -> WelcomeStep()
-                    OnboardingPage.WhatItDoes -> WhatItDoesStep()
-                    OnboardingPage.Expectations -> ExpectationsStep()
-                    OnboardingPage.Bluetooth -> BluetoothStep()
-                    OnboardingPage.Wear -> WearStep()
-                    OnboardingPage.Connect -> ConnectStep(viewModel)
-                    OnboardingPage.Bonded -> BondedStep(viewModel)
-                    OnboardingPage.Profile -> ProfileStep()
-                    OnboardingPage.Import -> ImportStep(viewModel)
-                    OnboardingPage.Notifications -> NotificationsStep()
-                    OnboardingPage.SafetyContacts -> SafetyContactsStep()
-                    OnboardingPage.Appearance -> AppearanceStep()
-                    OnboardingPage.Done -> DoneStep()
-                }
-            }
-
-            OnboardingFooter(
-                canGoBack = pageIndex > 0,
-                cta = page.cta,
-                onBack = {
+                val goBack = {
                     var target = pageIndex - 1
                     // Skip the bonded celebration going back when nothing is bonded.
                     if (target >= 0 && pages[target] == OnboardingPage.Bonded && !live.bonded) target--
                     if (target >= 0) pageIndex = target
-                },
-                onNext = {
-                    if (pageIndex == pages.lastIndex) {
-                        complete()
-                    } else {
-                        advance()
+                }
+                OnboardingTopBar(
+                    page = pageIndex + 1,
+                    total = pages.size,
+                    canGoBack = pageIndex > 0,
+                    onBack = goBack,
+                )
+
+                val onboardingPageLabel = stringResource(R.string.onboarding_page_animation_label)
+                AnimatedContent(
+                    targetState = page,
+                    transitionSpec = {
+                        (
+                            fadeIn(tween(Motion.durationStandard)) +
+                                slideInHorizontally(tween(Motion.durationStandard)) { it / 8 }
+                            ).togetherWith(
+                            fadeOut(tween(Motion.durationStandard)) +
+                                slideOutHorizontally(tween(Motion.durationStandard)) { -it / 8 },
+                        )
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .widthIn(max = 620.dp),
+                    label = onboardingPageLabel,
+                ) { targetPage ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(top = 6.dp, bottom = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        when (targetPage) {
+                            OnboardingPage.Welcome -> WelcomeStep()
+                            OnboardingPage.WhatItDoes -> WhatItDoesStep()
+                            OnboardingPage.Expectations -> ExpectationsStep()
+                            OnboardingPage.Bluetooth -> BluetoothStep()
+                            OnboardingPage.Wear -> WearStep()
+                            OnboardingPage.Connect -> ConnectStep(viewModel)
+                            OnboardingPage.Bonded -> BondedStep(viewModel)
+                            OnboardingPage.Profile -> ProfileStep()
+                            OnboardingPage.Import -> ImportStep(viewModel)
+                            OnboardingPage.Notifications -> NotificationsStep()
+                            OnboardingPage.SafetyContacts -> SafetyContactsStep()
+                            OnboardingPage.Appearance -> AppearanceStep()
+                            OnboardingPage.Done -> DoneStep()
+                        }
                     }
-                },
-            )
-        }
+                }
+
+                OnboardingFooter(
+                    progress = if (pages.size <= 1) 1f else pageIndex.toFloat() / pages.lastIndex.toFloat(),
+                    cta = page.cta,
+                    onNext = {
+                        if (pageIndex == pages.lastIndex) {
+                            complete()
+                        } else {
+                            advance()
+                        }
+                    },
+                )
+            }
         }
     }
 }
 
 private enum class OnboardingPage(val cta: String) {
-    Welcome("Begin"),
+    Welcome("Get Started"),
     WhatItDoes("Continue"),
-    Expectations("Continue"),
+    Expectations("I understand"),
     Bluetooth("Continue"),
-    Wear("Continue"),
+    Wear("I'm wearing it"),
     Connect("Continue"),
     Bonded("Continue"),
-    Profile("Save & continue"),
+    Profile("Save & Continue"),
     Import("Continue"),
     Notifications("Continue"),
     SafetyContacts("Finish later"),
@@ -250,22 +282,103 @@ private enum class OnboardingPage(val cta: String) {
 // MARK: - Shell
 
 @Composable
-private fun OnboardingTopBar(page: Int, total: Int, progress: Float) {
+private fun OnboardingBackdrop() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Palette.glowAmbient.copy(alpha = 0.07f),
+                        Color.Transparent,
+                    ),
+                    radius = 1_400f,
+                ),
+            ),
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Palette.accentMuted.copy(alpha = 0.20f),
+                        Color.Transparent,
+                    ),
+                    endY = 900f,
+                ),
+            ),
+    )
+}
+
+@Composable
+private fun OnboardingTopBar(
+    page: Int,
+    total: Int,
+    canGoBack: Boolean,
+    onBack: () -> Unit,
+) {
+    val backLabel = stringResource(R.string.l10n_onboarding_screen_back_b52b36b7)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 620.dp)
+            .heightIn(min = 28.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (canGoBack) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onBack)
+                    .padding(horizontal = 2.dp, vertical = 4.dp)
+                    .semantics { contentDescription = backLabel },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Icon(
+                    Icons.Filled.ChevronLeft,
+                    contentDescription = null,
+                    tint = Palette.textSecondary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    backLabel,
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+            }
+        } else {
+            Spacer(Modifier.width(64.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        Text(
+            uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total),
+            style = NoopType.captionNumber,
+            color = Palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingFooter(
+    progress: Float,
+    cta: String,
+    onNext: () -> Unit,
+) {
     val animated by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
         animationSpec = tween(Motion.durationStandard),
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Overline("NOOP", color = Palette.accent)
-            Spacer(Modifier.weight(1f))
-            Text(uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total), style = NoopType.captionNumber, color = Palette.textTertiary)
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 620.dp)
+            .padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -278,36 +391,8 @@ private fun OnboardingTopBar(page: Int, total: Int, progress: Float) {
                     .fillMaxWidth(animated)
                     .height(3.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(Palette.accent),
+                .background(Palette.accent),
             )
-        }
-    }
-}
-
-@Composable
-private fun OnboardingFooter(
-    canGoBack: Boolean,
-    cta: String,
-    onBack: () -> Unit,
-    onNext: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = Metrics.gap),
-        horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedButton(
-            onClick = onBack,
-            enabled = canGoBack,
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = Palette.textPrimary,
-                disabledContentColor = Palette.textTertiary,
-            ),
-            modifier = Modifier.weight(0.9f),
-        ) {
-            Text(uiString(R.string.l10n_onboarding_screen_back_b52b36b7), style = NoopType.subhead)
         }
         Button(
             onClick = onNext,
@@ -315,7 +400,10 @@ private fun OnboardingFooter(
                 containerColor = Palette.accent,
                 contentColor = Palette.surfaceBase,
             ),
-            modifier = Modifier.weight(1.4f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 50.dp),
+            shape = RoundedCornerShape(14.dp),
         ) {
             Text(cta, style = NoopType.headline)
         }
@@ -374,19 +462,8 @@ private fun WelcomeStep() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // The NOOP mark centred on a flat brushed-titanium hero tile (the metallic titanium ramp, a
-            // reset token — no gold). Clean and flat: a hairline rim, no bloom.
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(150.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(150.dp)
-                        .clip(CircleShape)
-                        .background(Brush.linearGradient(*Palette.titaniumGradient.toTypedArray()))
-                        .border(1.dp, Palette.hairline, CircleShape),
-                )
-                BrandMark(size = 104.dp)
-            }
-            Spacer(Modifier.height(18.dp))
+            BrandMark(size = 120.dp)
+            Spacer(Modifier.height(24.dp))
             Text(
                 uiString(R.string.l10n_onboarding_screen_all_your_data_none_of_the_6fc6f26d),
                 style = NoopType.title2,
@@ -415,19 +492,19 @@ private fun WhatItDoesStep() {
                 icon = Icons.Filled.AutoGraph,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_see_recovery_clearly_d8db34a9),
-                body = "A calm ring rolls HRV, resting heart rate and sleep into one read on whether to push or rest.",
+                body = "A signature ring distils HRV, resting heart rate and sleep into one calm read on whether to push or rest.",
             )
             FeatureRow(
                 icon = Icons.Filled.MonitorHeart,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_watch_your_heart_live_8c9c1267),
-                body = "Connect a Noop Band, heart-rate strap, watch, ring, or gym machine and watch each beat in real time, with zones that match your profile. Already have history elsewhere? Import a wearable export, Apple Health, Oura, Fitbit or Garmin data.",
+                body = "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import a wearable export, or use Health Connect, Apple Health, Oura, Fitbit, or Garmin.",
             )
             FeatureRow(
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_own_your_data_offline_997fe15e),
-                body = "Everything lives on this phone. No account, no sync, no cloud.",
+                body = "Everything starts on this phone. No account or cloud is required. Data leaves only when you explicitly share it, use Coach, or enable your own self-hosted sync.",
             )
         }
     }
@@ -437,7 +514,7 @@ private fun WhatItDoesStep() {
 private fun ExpectationsStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_what_to_expect_ed98f851),
-        subtitle = "A few honest words, so nothing is a surprise.",
+        subtitle = "A few honest words, so nothing's a surprise.",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
             AppChangelog.expectations.forEach { e ->
@@ -451,7 +528,7 @@ private fun ExpectationsStep() {
 private fun BluetoothStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a),
-        subtitle = "NOOP uses Bluetooth to find Noop Band. When you continue, allow the permission so it can scan.",
+        subtitle = "Android will ask for Bluetooth in a moment.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -462,11 +539,15 @@ private fun BluetoothStep() {
             InfoCard(
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
-                title = uiString(R.string.l10n_onboarding_screen_nothing_leaves_your_phone_502d5d0c),
-                message = "NOOP talks to Noop Band directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.",
+                title = stringResource(R.string.onboarding_direct_local_bluetooth),
+                message = "NOOP talks straight to Noop Band over Bluetooth Low Energy, with no project server in the middle. Readings stay on this phone unless you later enable an optional destination such as your own self-hosted server.",
             )
-            Checkline("When Android asks, allow Bluetooth so NOOP can scan and connect.")
-            Checkline("If pairing stalls, put Noop Band in pairing mode and close any other band app.")
+            Text(
+                stringResource(R.string.onboarding_bluetooth_permission_prompt),
+                style = NoopType.subhead,
+                color = Palette.textTertiary,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -475,19 +556,19 @@ private fun BluetoothStep() {
 private fun WearStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_put_your_strap_on_031d4807),
-        subtitle = "The sensor needs skin contact before data starts to mean anything.",
+        subtitle = "And make sure it's charged.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            IconBadge(icon = Icons.Filled.Sensors, tint = Palette.accent, size = 86)
+            IconBadge(icon = Icons.Filled.Watch, tint = Palette.accent, size = 86)
             NoopCard(padding = 18.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Checkline("Wear it snug on your wrist or bicep, sensor against skin.")
                     Checkline("Give it a few minutes of charge if the battery is low.")
-                    Checkline("Keep it near this phone while pairing and during the first sync.")
+                    Checkline("Keep it within about a metre of this phone.")
                 }
             }
         }
@@ -690,10 +771,42 @@ private fun ProfileStep() {
     }
     @Suppress("UNUSED_VARIABLE") val tick = rev
 
-    // Wheel-picker option lists — replace the +/- stepper tap-spamming with a tap-to-scroll selector. The
-    // stored profile stays SI; Weight/Height option labels re-format per the live unit system, and the
-    // picker maps the chosen index back to SI on select. Age is 13..100 (matches setAge's clamp).
-    val ageSteps = remember { (13..100).toList() }
+    val zone = remember { ZoneId.systemDefault() }
+    val today = LocalDate.now(zone)
+    val minimumBirthDate = remember(today) { today.minusYears(100) }
+    val maximumBirthDate = remember(today) { today.minusYears(13) }
+    val birthDate = remember(rev, profile.dateOfBirthMillis) {
+        Instant.ofEpochMilli(profile.dateOfBirthMillis)
+            .atZone(zone)
+            .toLocalDate()
+            .coerceIn(minimumBirthDate, maximumBirthDate)
+    }
+    val birthDateLabel = remember(birthDate) {
+        birthDate.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    }
+    fun pickBirthDate() {
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val selected = LocalDate.of(year, month + 1, day)
+                    .coerceIn(minimumBirthDate, maximumBirthDate)
+                mutate {
+                    profile.dateOfBirthMillis = selected
+                        .atStartOfDay(zone)
+                        .toInstant()
+                        .toEpochMilli()
+                }
+            },
+            birthDate.year,
+            birthDate.monthValue - 1,
+            birthDate.dayOfMonth,
+        ).apply {
+            datePicker.minDate = minimumBirthDate.atStartOfDay(zone).toInstant().toEpochMilli()
+            datePicker.maxDate = maximumBirthDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        }.show()
+    }
+
+    // Wheel-picker option lists keep storage in SI while the independent display choices can be mixed.
     val weightStepsKg = remember(massUnit) {
         when (massUnit) {
             MassUnit.KILOGRAMS -> generateSequence(30.0) { it + 0.5 }
@@ -708,7 +821,6 @@ private fun ProfileStep() {
             HeightUnit.FEET_INCHES -> (47..91).map { UnitFormatter.inchesToCm(it.toDouble()) }
         }
     }
-    val ageOptions = remember { ageSteps.map { "$it" } }
     val weightOptions = remember(massUnit, weightStepsKg) {
         when (massUnit) {
             MassUnit.KILOGRAMS -> weightStepsKg.map { UnitFormatter.massFromKilograms(it, massUnit) }
@@ -721,21 +833,34 @@ private fun ProfileStep() {
 
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_about_you_5c4698b6),
-        subtitle = "So your zones, calories and on-device scoring start from the right numbers.",
+        subtitle = "So your zones, calories and baselines are accurate.",
     ) {
         NoopCard(padding = 18.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_age_ff9f1ff3)) {
-                    WheelPickerField(
-                        value = "${profile.age}",
-                        unit = "yrs",
-                        accessibility = "Age, ${profile.age} years",
-                        options = ageOptions,
-                        selectedIndex = ageSteps.indexOf(profile.age).coerceAtLeast(0),
-                        dialogTitle = "Age",
-                        // #146: age derives from a stored date of birth; setAge re-anchors it (clamped 13..100).
-                        onSelected = { mutate { profile.setAge(ageSteps[it]) } },
+            Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClickLabel = "Choose date of birth", onClick = ::pickBirthDate)
+                        .padding(horizontal = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.onboarding_date_of_birth),
+                        style = NoopType.body,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.weight(1f),
                     )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(birthDateLabel, style = NoopType.bodyNumber, color = Palette.textPrimary)
+                        Text(
+                            stringResource(R.string.onboarding_age_years, profile.age),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                    }
                 }
                 ThinDivider()
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -750,61 +875,74 @@ private fun ProfileStep() {
                     )
                 }
                 ThinDivider()
-                // Independent controls support mixed choices such as height in ft/in and weight in kg.
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Overline("Units", color = Palette.textTertiary)
-                    Text(uiString(R.string.l10n_today_screen_weight_69c0b815), style = NoopType.footnote, color = Palette.textSecondary)
-                    SegmentedPillControl(
-                        items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
-                        selection = massUnit,
-                        label = { if (it == MassUnit.KILOGRAMS) "kg" else "lb" },
-                        onSelect = {
-                            massUnit = it
-                            NoopPrefs.setMassUnit(context, it)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(uiString(R.string.l10n_settings_screen_height_3f608b49), style = NoopType.footnote, color = Palette.textSecondary)
-                    SegmentedPillControl(
-                        items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
-                        selection = heightUnit,
-                        label = { if (it == HeightUnit.CENTIMETERS) "cm" else "ft / in" },
-                        onSelect = {
-                            heightUnit = it
-                            NoopPrefs.setHeightUnit(context, it)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Overline("Weight", modifier = Modifier.weight(1f), color = Palette.textTertiary)
+                        Box(modifier = Modifier.width(132.dp)) {
+                            SegmentedPillControl(
+                                items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
+                                selection = massUnit,
+                                label = { if (it == MassUnit.KILOGRAMS) "kg" else "lb" },
+                                onSelect = {
+                                    massUnit = it
+                                    NoopPrefs.setMassUnit(context, it)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        WheelPickerField(
+                            value = UnitFormatter.massFromKilograms(profile.weightKg, massUnit),
+                            accessibility = "Weight",
+                            options = weightOptions,
+                            selectedIndex = weightStepsKg.indices.minByOrNull {
+                                kotlin.math.abs(weightStepsKg[it] - profile.weightKg)
+                            } ?: 0,
+                            dialogTitle = "Weight",
+                            onSelected = { mutate { profile.weightKg = weightStepsKg[it] } },
+                        )
+                    }
                 }
                 ThinDivider()
-                ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_weight_69c0b815)) {
-                    WheelPickerField(
-                        // Full re-labelled string (e.g. "74.5 kg" / "164.2 lb"); unit folded into value.
-                        value = UnitFormatter.massFromKilograms(profile.weightKg, massUnit),
-                        accessibility = "Weight",
-                        options = weightOptions,
-                        selectedIndex = weightStepsKg.indices.minByOrNull {
-                            kotlin.math.abs(weightStepsKg[it] - profile.weightKg)
-                        } ?: 0,
-                        dialogTitle = "Weight",
-                        onSelected = { mutate { profile.weightKg = weightStepsKg[it] } },
-                    )
-                }
-                ThinDivider()
-                ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_height_3f608b49)) {
-                    WheelPickerField(
-                        value = UnitFormatter.heightFromCentimeters(profile.heightCm, heightUnit),
-                        accessibility = "Height",
-                        options = heightOptions,
-                        selectedIndex = heightStepsCm.indices.minByOrNull {
-                            kotlin.math.abs(heightStepsCm[it] - profile.heightCm)
-                        } ?: 0,
-                        dialogTitle = "Height",
-                        onSelected = { mutate { profile.heightCm = heightStepsCm[it] } },
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Overline("Height", modifier = Modifier.weight(1f), color = Palette.textTertiary)
+                        Box(modifier = Modifier.width(144.dp)) {
+                            SegmentedPillControl(
+                                items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
+                                selection = heightUnit,
+                                label = { if (it == HeightUnit.CENTIMETERS) "cm" else "ft / in" },
+                                onSelect = {
+                                    heightUnit = it
+                                    NoopPrefs.setHeightUnit(context, it)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        WheelPickerField(
+                            value = UnitFormatter.heightFromCentimeters(profile.heightCm, heightUnit),
+                            accessibility = "Height",
+                            options = heightOptions,
+                            selectedIndex = heightStepsCm.indices.minByOrNull {
+                                kotlin.math.abs(heightStepsCm[it] - profile.heightCm)
+                            } ?: 0,
+                            dialogTitle = "Height",
+                            onSelected = { mutate { profile.heightCm = heightStepsCm[it] } },
+                        )
+                    }
                 }
             }
         }
+
+        Text(
+            stringResource(R.string.onboarding_units_independent),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+            textAlign = TextAlign.Center,
+        )
 
         Row(
             modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_onboarding_screen_estimated_max_heart_rate_profile_hrmax_622da889, profile.hrMax) },
@@ -857,13 +995,26 @@ private fun ImportStep(viewModel: AppViewModel) {
 
     val hcPermissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
-    ) { granted ->
-        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
-            runImport { HealthConnectImporter.import(context, viewModel.repo, ProfileStore.from(context).heightCm) }
-        } else {
-            val message = "Health Connect access not granted."
-            status = message
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+    ) {
+        scope.launch {
+            // The contract may return only the scopes requested in this launch. Re-read the complete
+            // grant set so an existing partial grant still imports after a newly added scope is declined.
+            val granted = runCatching {
+                HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
+            }.getOrDefault(emptySet())
+            if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
+                runImport {
+                    HealthConnectImporter.import(
+                        context,
+                        viewModel.repo,
+                        ProfileStore.from(context).heightCm,
+                    )
+                }
+            } else {
+                val message = "Health Connect access not granted."
+                status = message
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -876,10 +1027,11 @@ private fun ImportStep(viewModel: AppViewModel) {
             val granted = runCatching {
                 HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
             }.getOrDefault(emptySet())
-            if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
+            val missing = HealthConnectImporter.missingReadPermissions(granted)
+            if (missing.isEmpty()) {
                 runImport { HealthConnectImporter.import(context, viewModel.repo, ProfileStore.from(context).heightCm) }
             } else {
-                hcPermissionLauncher.launch(HealthConnectImporter.PERMISSIONS)
+                hcPermissionLauncher.launch(missing)
             }
         }
     }

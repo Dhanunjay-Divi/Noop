@@ -85,14 +85,7 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
                 Color.clear.frame(height: 0).id(screenScaffoldBottomAnchorID)
             }
             #if os(iOS)
-            .background {
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: ScreenScrollOffsetPreferenceKey.self,
-                        value: geometry.frame(in: .global).minY
-                    )
-                }
-            }
+            .modifier(LegacyScreenScrollOffsetProbe())
             #endif
         }
         #if os(iOS)
@@ -534,6 +527,27 @@ private let screenScaffoldScrollSpace = "screenScaffold.scroll"
 private struct ScreenScrollOffsetPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Global-frame preferences are needed only on iOS 17. Leaving this geometry probe mounted on newer
+/// systems makes every retained tab participate in global layout and can trap SwiftUI in a layout pass
+/// after repeated tab switches. iOS 18+ uses the native scroll-geometry callback below instead.
+private struct LegacyScreenScrollOffsetProbe: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+        } else {
+            content.background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ScreenScrollOffsetPreferenceKey.self,
+                        value: geometry.frame(in: .global).minY
+                    )
+                }
+            }
+        }
+    }
 }
 
 /// iOS 18 exposes the actual scroll geometry, including programmatic jumps and inertial movement. Keep

@@ -4,6 +4,7 @@ import com.noop.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -210,6 +211,22 @@ fun MetricGlyph(
     size: Dp = 32.dp,
     modifier: Modifier = Modifier,
 ) {
+    val reduceMotion = rememberReduceMotion()
+    val presented = remember(icon) { Animatable(if (reduceMotion) 1f else 0f) }
+    LaunchedEffect(icon, reduceMotion) {
+        if (reduceMotion) {
+            presented.snapTo(1f)
+        } else if (presented.value < 1f) {
+            presented.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.72f,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+    }
+
     val glyphSize = size
     val shape = RoundedCornerShape(size * 0.30f)
     val depth = (size.value * 0.065f).coerceAtLeast(1.5f).dp
@@ -217,6 +234,47 @@ fun MetricGlyph(
     val rimWidth = (size.value * 0.022f).coerceAtLeast(0.7f).dp
     val iconSize = size * 0.44f
     val iconDepth = (size.value * 0.032f).coerceAtLeast(0.8f).dp
+    val iconName = icon.name.lowercase(Locale.US)
+    val startScale: Float
+    val startOffsetFraction: Float
+    val startRotation: Float
+    when {
+        iconName.contains("heart") || iconName.contains("waveform") ||
+            iconName.contains("favorite") || iconName.contains("monitor") -> {
+            startScale = 0.72f
+            startOffsetFraction = 0f
+            startRotation = 0f
+        }
+        iconName.contains("air") || iconName.contains("drop") ||
+            iconName.contains("moon") || iconName.contains("bed") -> {
+            startScale = 0.90f
+            startOffsetFraction = 0.08f
+            startRotation = 0f
+        }
+        iconName.contains("fire") || iconName.contains("run") ||
+            iconName.contains("walk") || iconName.contains("bolt") -> {
+            startScale = 0.84f
+            startOffsetFraction = 0.12f
+            startRotation = 0f
+        }
+        else -> {
+            startScale = 0.88f
+            startOffsetFraction = 0f
+            startRotation = -5f
+        }
+    }
+    val progress = presented.value
+    val symbolScale = startScale + ((1f - startScale) * progress)
+    val symbolOffset = size.value * startOffsetFraction * (1f - progress)
+    val symbolRotation = startRotation * (1f - progress)
+    val symbolOpacity = 0.55f + (0.45f * progress)
+    val symbolMotion = Modifier.graphicsLayer {
+        scaleX = symbolScale
+        scaleY = symbolScale
+        translationY = symbolOffset.dp.toPx()
+        rotationZ = symbolRotation
+        alpha = symbolOpacity
+    }
 
     Box(
         modifier = modifier
@@ -268,13 +326,18 @@ fun MetricGlyph(
             imageVector = icon,
             contentDescription = null,
             tint = if (Palette.isLight) Color.White.copy(alpha = 0.82f) else Color.Black.copy(alpha = 0.90f),
-            modifier = Modifier.size(iconSize).offset(y = iconDepth),
+            modifier = Modifier
+                .size(iconSize)
+                .offset(y = iconDepth)
+                .then(symbolMotion),
         )
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = Palette.glyphInkTop,
-            modifier = Modifier.size(iconSize),
+            modifier = Modifier
+                .size(iconSize)
+                .then(symbolMotion),
         )
     }
 }

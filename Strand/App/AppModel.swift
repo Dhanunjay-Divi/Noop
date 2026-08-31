@@ -170,20 +170,27 @@ final class AppModel: ObservableObject {
     /// Bounds full recovery-snapshot rewrites for the growing ~1 Hz HR array. Lifecycle/GPS checkpoints
     /// also reset this cursor; End always forces one final snapshot before save.
     private var workoutRecoveryCadence = WorkoutRecoveryCadence()
+    /// The sensor window is capture state, not presentation state. Keeping it outside the published
+    /// `ActiveWorkout` avoids copy-on-write cloning a growing array on every accepted packet.
+    private var activeWorkoutSamples: [HRSample] = []
+    /// Exact running sum for O(1) live average updates.
+    private var activeWorkoutHeartRateTotal = 0
+    /// Live Effort is presentation data and does not need a full-window score on every ~1 Hz packet.
+    /// The final saved workout is still rescored from the complete window.
+    private var workoutLiveStrainCadence = WorkoutLiveStrainCadence()
     /// A manual workout owns one logical realtime lease from explicit Start through End. The central
     /// foreground policy temporarily disarms its physical stream when the app is inactive without
     /// ending or corrupting the durable workout.
     private var activeWorkoutOwnsRealtimeLease = false
 
-    /// A manual workout in progress. `samples` accumulate from genuine sequence-identified sensor events;
-    /// `liveStrain` is recomputed as the window grows so the active card can show strain building in real time.
+    /// A manual workout's lightweight presentation state. The growing sensor window stays private so
+    /// publishing a live-stat change never copies thousands of samples through SwiftUI.
     struct ActiveWorkout: Equatable {
         let start: Date
         /// The named sport chosen at start (e.g. "Tennis", "Padel") , persisted as the saved row's
         /// `sport` so a live-tracked session keeps its label instead of the old generic "Workout".
         /// Defaults to the catalogue default ("Other") when started without a pick. (#519)
         var sport: String = WorkoutCatalog.defaultSportName
-        var samples: [HRSample] = []
         var liveStrain: Double = 0
         var avgHr: Int = 0
         var peakHr: Int = 0
@@ -1088,6 +1095,12 @@ final class AppModel: ObservableObject {
         let name = sport.trimmingCharacters(in: .whitespaces)
         let resolved = name.isEmpty ? WorkoutCatalog.defaultSportName : name
         let started = Date()
+        activeWorkoutSamples.removeAll(keepingCapacity: false)
+        activeWorkoutHeartRateTotal = 0
+        workoutLiveStrainCadence = WorkoutLiveStrainCadence(
+            computedSampleCount: 0,
+            computedAtSec: Int(started.timeIntervalSince1970)
+        )
         activeWorkout = ActiveWorkout(start: started, sport: resolved)
         workoutSaveError = nil
         workoutSaveInProgress = false
@@ -1157,7 +1170,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Persist the in-flight manual workout to `UserDefaults` so it survives the app being killed mid-
-    /// session (#529). Called on start + each captured HR sample, bounded GPS checkpoints and End. A
+    /// session (#529). Called on start, bounded HR/GPS checkpoints, and End. A
     /// no-op when nothing is running; GPS intent and accepted route live in this same snapshot.
     private func persistActiveWorkout() {
         guard let w = activeWorkout else { return }
@@ -1168,12 +1181,12 @@ final class AppModel: ObservableObject {
                 gpsEnabled: activeWorkoutGpsEnabled,
                 routeCheckpoint: activeWorkoutRouteCheckpoint,
                 sport: w.sport,
-                samples: w.samples,
+                samples: activeWorkoutSamples,
                 avgHr: w.avgHr,
                 peakHr: w.peakHr,
                 liveStrain: w.liveStrain))
         workoutRecoveryCadence.didPersist(
-            sampleCount: w.samples.count,
+            sampleCount: activeWorkoutSamples.count,
             atSec: Int(Date().timeIntervalSince1970)
         )
     }
@@ -1186,11 +1199,16 @@ final class AppModel: ObservableObject {
         guard activeWorkout == nil, let snap = ActiveWorkoutPersistence.load() else { return }
         var w = ActiveWorkout(start: Date(timeIntervalSince1970: TimeInterval(snap.startSec)),
                               sport: snap.sport)
-        w.samples = snap.samples
         w.avgHr = snap.avgHr
         w.peakHr = snap.peakHr
         w.liveStrain = snap.liveStrain
         w.endedAt = snap.endSec.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+        activeWorkoutSamples = snap.samples
+        activeWorkoutHeartRateTotal = snap.samples.reduce(0) { $0 + $1.bpm }
+        workoutLiveStrainCadence = WorkoutLiveStrainCadence(
+            computedSampleCount: snap.samples.count,
+            computedAtSec: snap.samples.last?.ts ?? snap.startSec
+        )
         activeWorkout = w
         activeWorkoutGpsEnabled = snap.gpsEnabled
         activeWorkoutRouteCheckpoint = snap.routeCheckpoint
@@ -1260,7 +1278,7 @@ final class AppModel: ObservableObject {
             // snapshot before route checkpoints existed. It was produced from accepted recorder points.
             route = RouteStore.load(startTs: startTs, sport: w.sport)
         }
-        let samples = w.samples
+        let samples = activeWorkoutSamples
         // Save when there's an HR window OR a real GPS route , a GPS-only walk (HR not streaming) is
         // still a workout (parity with Android's `samples.size < 2 && track.size < 2` discard gate).
         guard samples.count >= 2 || route != nil else {
@@ -1313,6 +1331,9 @@ final class AppModel: ObservableObject {
             switch result {
             case .saved:
                 self.activeWorkout = nil
+                self.activeWorkoutSamples.removeAll(keepingCapacity: false)
+                self.activeWorkoutHeartRateTotal = 0
+                self.workoutLiveStrainCadence = WorkoutLiveStrainCadence()
                 self.activeWorkoutGpsEnabled = false
                 self.activeWorkoutRouteCheckpoint = nil
                 self.workoutSaveError = nil
@@ -1342,12 +1363,15 @@ final class AppModel: ObservableObject {
         RouteStore.remove(startTs: Int(w.start.timeIntervalSince1970), sport: w.sport)
         ActiveWorkoutPersistence.clear()
         activeWorkout = nil
+        activeWorkoutSamples.removeAll(keepingCapacity: false)
+        activeWorkoutHeartRateTotal = 0
+        workoutLiveStrainCadence = WorkoutLiveStrainCadence()
         lastWorkout = nil
         workoutSaveError = nil
     }
 
-    /// Append one timestamped, sequence-identified sensor event to the active workout and recompute its
-    /// running strain. A display-state update, R-R callback, timer tick, or cached read cannot enter here.
+    /// Append one timestamped, sequence-identified sensor event and update lightweight live stats. The
+    /// full-window Effort pass is cadence-limited; End always performs an exact final score.
     private func captureWorkoutSample(_ packet: LiveState.HeartRateSample) {
         guard var w = activeWorkout, w.endedAt == nil else { return }
         guard (30...220).contains(packet.bpm) else { return }
@@ -1357,15 +1381,30 @@ final class AppModel: ObservableObject {
             receivedAt: packet.receivedAt
         ) else { return }
         let hr = sample.bpm
-        w.samples.append(sample)
+        activeWorkoutSamples.append(sample)
+        activeWorkoutHeartRateTotal += hr
+        let sampleCount = activeWorkoutSamples.count
         w.peakHr = max(w.peakHr, hr)
-        w.avgHr = Int((Double(w.samples.map(\.bpm).reduce(0, +)) / Double(w.samples.count)).rounded())
-        w.liveStrain = StrainScorer.strain(w.samples, maxHR: Double(profile.hrMax), sex: profile.sex) ?? 0
+        w.avgHr = Int((Double(activeWorkoutHeartRateTotal) / Double(sampleCount)).rounded())
+        let nowSec = sample.ts
+        if workoutLiveStrainCadence.isDue(
+            sampleCount: sampleCount,
+            firstSampleSec: activeWorkoutSamples.first?.ts,
+            nowSec: nowSec,
+            minimumSampleCount: StrainScorer.minSparseReadings,
+            minimumSpanSec: StrainScorer.minSpanSeconds - 1
+        ) {
+            w.liveStrain = StrainScorer.strain(
+                activeWorkoutSamples,
+                maxHR: Double(profile.hrMax),
+                sex: profile.sex
+            ) ?? 0
+            workoutLiveStrainCadence.didCompute(sampleCount: sampleCount, atSec: nowSec)
+        }
         activeWorkout = w
         // Avoid JSON-encoding the entire growing sample prefix at ~1 Hz. The pure cadence gate caps full
         // recovery writes at 30 accepted samples / 30 seconds; End and GPS lifecycle checkpoints force.
-        let nowSec = Int(packet.receivedAt.timeIntervalSince1970)
-        if workoutRecoveryCadence.isDue(sampleCount: w.samples.count, nowSec: nowSec) {
+        if workoutRecoveryCadence.isDue(sampleCount: sampleCount, nowSec: nowSec) {
             persistActiveWorkout()
         }
     }

@@ -136,6 +136,11 @@ object HealthConnectImporter {
     val PERMISSIONS: Set<String> =
         READ_RECORDS.map { HealthPermission.getReadPermission(it) }.toSet()
 
+    /** Missing read scopes for an explicit import/review action. Unlike background auto-sync, this asks
+     * for newly supported record types (for example oxygen saturation) after an app upgrade. */
+    internal fun missingReadPermissions(grantedPermissions: Set<String>): Set<String> =
+        PERMISSIONS - grantedPermissions
+
     /** Stable Room key used for one durable change token per Health Connect record type. */
     internal fun recordTypeKey(type: KClass<out Record>): String =
         requireNotNull(type.qualifiedName) { "Health Connect record type has no qualified name" }

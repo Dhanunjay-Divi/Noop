@@ -26,7 +26,7 @@ class PrimaryNavigationContractTest {
         assertTrue(text.contains(
             "BarTab(Destination.Workouts, Icons.AutoMirrored.Filled.DirectionsRun, R.string.nav_workouts)"
         ))
-        assertTrue(text.contains("current != Destination.Workouts && current != Destination.Sleep"))
+        assertTrue(text.contains("active = selected == Destination.More"))
         assertFalse(text.contains(
             "Destination.Live, Destination.Workouts, Destination.Nutrition"
         ))
@@ -49,5 +49,20 @@ class PrimaryNavigationContractTest {
         ))
         assertTrue(text.contains("composable(Destination.Friends.route)"))
         assertTrue(text.contains("FriendsScreen("))
+    }
+
+    @Test
+    fun nestedDetailsKeepTheirTabOwnerAndReselectPopsToRoot() {
+        val source = appRootSource()
+        assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
+        val text = source!!
+
+        assertTrue(text.contains("var selectedTabRoute by rememberSaveable(startRoute)"))
+        assertTrue(text.contains("val reselected = selectedTabRoute == dest.route"))
+        assertTrue(text.contains("nav.returnToTabRoot(dest.route)"))
+        assertTrue(text.contains("if (popBackStack(route, inclusive = false)) return"))
+        assertTrue(text.contains("restoreState = false"))
+        assertTrue(text.contains("nav.navigate(it) { launchSingleTop = true }"))
+        assertFalse(text.contains("MoreScreen(onNavigate = { nav.navigateTopLevel(it) })"))
     }
 }

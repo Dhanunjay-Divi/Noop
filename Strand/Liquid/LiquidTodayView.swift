@@ -131,6 +131,8 @@ struct LiquidTodayView: View {
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
+    /// Calibrated percentages resolved across imports and Apple Health. Raw band red/IR remains separate.
+    @State private var resolvedSpo2ByDay: [String: Double] = [:]
     // Daily Action uses the same stable, day-scoped keys as BehaviorStore without observing AppModel.
     // AppStorage keeps the control reactive while the expensive planner result is cached with readiness.
     @AppStorage(BehaviorStore.dailyActionCheckInDayKey) private var dailyActionCheckInDay = ""
@@ -175,7 +177,9 @@ struct LiquidTodayView: View {
     // Custom liquid pull-to-refresh: a vessel that FILLS as you drag, releases into a refresh (replaces
     // the system spinner). Driven by the scroll's top overscroll offset.
     @State private var pullY: CGFloat = 0
-    @State private var scrollOffset: CGFloat = 0
+    /// Raw offsets arrive every display-linked scroll update. Reference storage keeps that bookkeeping
+    /// from invalidating this entire dashboard; only visible pull-state transitions remain `@State`.
+    @State private var scrollTracker = LiquidTodayScrollTracker()
     @State private var pullGestureStartedAtTop: Bool?
     @State private var refreshArmed = false
     @State private var refreshing = false
@@ -279,7 +283,7 @@ struct LiquidTodayView: View {
     private var pullRefreshGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
-                let startedAtTop = pullGestureStartedAtTop ?? (scrollOffset >= -2)
+                let startedAtTop = pullGestureStartedAtTop ?? (scrollTracker.offset >= -2)
                 if pullGestureStartedAtTop == nil {
                     pullGestureStartedAtTop = startedAtTop
                 }
@@ -289,7 +293,7 @@ struct LiquidTodayView: View {
                 handlePull(dy)
             }
             .onEnded { value in
-                let startedAtTop = pullGestureStartedAtTop ?? (scrollOffset >= -2)
+                let startedAtTop = pullGestureStartedAtTop ?? (scrollTracker.offset >= -2)
                 pullGestureStartedAtTop = nil
                 let dx = value.translation.width
                 let dy = value.translation.height
@@ -436,7 +440,7 @@ struct LiquidTodayView: View {
         }
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
-            scrollOffset = offset
+            scrollTracker.offset = offset
             handlePull(offset)
             reportScrollPosition(offset)
         }
@@ -2456,6 +2460,7 @@ struct LiquidTodayView: View {
         stepEstimates: [(day: String, value: Double)],
         appleRows: [AppleDaily],
         endingAt endDay: String,
+        resolvedSpo2: [(day: String, value: Double)] = [],
         windowDays: Int = 14
     ) -> [KeyMetric: [Double]] {
         guard let endDate = dayKeyParser.date(from: endDay),
@@ -2471,6 +2476,7 @@ struct LiquidTodayView: View {
 
         func record(_ metric: KeyMetric, day: String, value: Double?) {
             guard day >= startDay, day <= endDay, let value, value.isFinite else { return }
+            guard metric != .bloodOxygen || (value > 0 && value <= 100) else { return }
             byMetric[metric, default: [:]][day] = value
         }
 
@@ -2491,6 +2497,12 @@ struct LiquidTodayView: View {
             record(.bloodOxygen, day: day.day, value: day.spo2Pct)
             record(.respiratory, day: day.day, value: day.respRateBpm)
             record(.steps, day: day.day, value: day.steps.map(Double.init))
+        }
+
+        // The resolver contributes only calibrated daily percentages from compatible sources. It can
+        // replace a sparse cache entry, but raw band red/IR samples never enter this series.
+        for point in resolvedSpo2 {
+            record(.bloodOxygen, day: point.day, value: point.value)
         }
 
         // Apple Health is measured and therefore wins the per-day steps slot. Weight is naturally
@@ -2722,6 +2734,10 @@ struct LiquidTodayView: View {
         async let vitProfileA = repo.exploreSeries(
             key: AgeMetricProfile.vitalityKey, source: "my-whoop")
         async let stepsA = repo.exploreSeries(key: "steps_est", source: "my-whoop")
+        async let spo2A = repo.resolvedSeries(
+            key: "spo2",
+            source: Repository.whoopSource,
+            days: max(30, selectedDayOffset + 15))
         async let appleA = repo.appleDailyRows()
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
         async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
@@ -2739,6 +2755,13 @@ struct LiquidTodayView: View {
 
         let restSeries = await restA
         let stepsSeries = await stepsA
+        let spo2Resolution = await spo2A
+        let validSpo2Points = spo2Resolution.values.filter {
+            $0.value.isFinite && $0.value > 0 && $0.value <= 100
+        }
+        resolvedSpo2ByDay = Dictionary(
+            validSpo2Points,
+            uniquingKeysWith: { _, last in last })
         let restByDay = Dictionary(restSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
         // Selected day's Rest; tail fallback only at offset 0 (a past day with no row shows nothing) AND
         // only when the tail night is still fresh. #977: a live 5.0 whose sleep never scores (no overnight
@@ -2801,7 +2824,8 @@ struct LiquidTodayView: View {
             restSeries: restSeries,
             stepEstimates: stepsSeries,
             appleRows: appleRows,
-            endingAt: selectedDayKey
+            endingAt: selectedDayKey,
+            resolvedSpo2: validSpo2Points
         )
         hrValues = (await hrA).map { $0.bpm }
         // A row that only OVERLAPS the selected day (for example a workout begun before midnight) must
@@ -3028,7 +3052,14 @@ struct LiquidTodayView: View {
     }
 
     private var liquidSpo2: Double? {
-        displayDay?.spo2Pct ?? vitalsDay?.spo2Pct ?? spo2Day?.spo2Pct
+        displayDay?.spo2Pct
+            ?? resolvedSpo2ByDay[selectedDayKey]
+            ?? vitalsDay?.spo2Pct
+            ?? spo2Day?.spo2Pct
+            ?? (selectedDayOffset == 0
+                ? resolvedSpo2ByDay.filter { $0.key <= selectedDayKey }
+                    .max(by: { $0.key < $1.key })?.value
+                : nil)
     }
 
     private var liquidSkinTemperature: Double? {
@@ -3525,6 +3556,12 @@ private struct SignalPatternDetailSheet: View {
         case .building: return "circle.dotted"
         }
     }
+}
+
+/// Non-observable scratch storage for the display-linked scroll offset. SwiftUI retains the reference
+/// through `@State`, but mutating `offset` does not publish and therefore does not rebuild Today.
+private final class LiquidTodayScrollTracker {
+    var offset: CGFloat = 0
 }
 
 /// Carries the Today scroll's top overscroll offset up to the view for the custom liquid pull-to-refresh.

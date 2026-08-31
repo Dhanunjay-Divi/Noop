@@ -239,17 +239,19 @@ struct StrandiOSApp: App {
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onReceive(model.live.heartRateSamplePublisher) { sample in
                     guard launchAccess.isUnlocked,
-                          acceptedTermsVersion == Terms.currentVersion else { return }
+                          acceptedTermsVersion == Terms.currentVersion,
+                          liveActivityEnabled,
+                          model.live.connected else { return }
                     // #911: anchor the Live Activity on the SAME shared `Repository.widgetAnchor` the
                     // Home/Lock widget and the watch snapshot use, so this fourth surface can't drift to a
                     // different day at the rollover (it previously read `days.last(where: recovery != nil)`,
                     // which kept pointing at yesterday's scored row after Today had moved on).
-                    let day = Repository.widgetAnchor(days: model.repo.days)
+                    let day = model.repo.cachedWidgetAnchor()
                     liveActivity.update(
-                        bpm: model.live.connected ? sample.bpm : nil,
+                        bpm: sample.bpm,
                         recovery: liveActivityShowsCharge
                             ? day?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: model.live.connected,
+                        connected: true,
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
                         batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
@@ -260,14 +262,18 @@ struct StrandiOSApp: App {
                 .onReceive(model.live.$connected) { isConnected in
                     guard launchAccess.isUnlocked,
                           acceptedTermsVersion == Terms.currentVersion else { return }
+                    guard liveActivityEnabled, isConnected else {
+                        Task { await liveActivity.end() }
+                        return
+                    }
                     // #911: same shared anchor as the heartRate site above, so the Live Activity, the
                     // widget, the watch and Today never disagree about which day they describe.
-                    let day = Repository.widgetAnchor(days: model.repo.days)
+                    let day = model.repo.cachedWidgetAnchor()
                     liveActivity.update(
-                        bpm: isConnected ? (model.bpm ?? model.live.heartRate) : nil,
+                        bpm: model.bpm ?? model.live.heartRate,
                         recovery: liveActivityShowsCharge
                             ? day?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: isConnected,
+                        connected: true,
                         effort: liveActivityShowsEffort
                             ? day?.strain.map { Int($0.rounded()) } : nil,
                         batteryPct: model.live.batteryPct.map { Int($0.rounded()) },
@@ -465,26 +471,34 @@ struct StrandiOSApp: App {
 
     private func reconcileLiveActivity(repairHydration: Bool = false) {
         guard launchAccess.isUnlocked,
-              acceptedTermsVersion == Terms.currentVersion else {
+              acceptedTermsVersion == Terms.currentVersion,
+              liveActivityEnabled,
+              model.live.connected else {
             Task { await liveActivity.end() }
             return
         }
-        let day = Repository.widgetAnchor(days: model.repo.days)
-        let bpm = model.live.connected ? (model.bpm ?? model.live.heartRate) : nil
+        let observedAt = model.live.heartRateSample?.receivedAt
+        let bpm = model.bpm ?? model.live.heartRate
+        guard LiveHeartRateSurfacePolicy.isLive(
+            connected: true, bpm: bpm, observedAt: observedAt, now: Date()
+        ) else {
+            Task { await liveActivity.end() }
+            return
+        }
+        let day = model.repo.cachedWidgetAnchor()
         let recovery = liveActivityShowsCharge
             ? day?.recovery.map { Int($0.rounded()) } : nil
         let effort = liveActivityShowsEffort
             ? day?.strain.map { Int($0.rounded()) } : nil
         let batteryPct = model.live.batteryPct.map { Int($0.rounded()) }
-        let observedAt = model.live.heartRateSample?.receivedAt
         if repairHydration {
             liveActivity.reconcile(
-                bpm: bpm, recovery: recovery, connected: model.live.connected,
+                bpm: bpm, recovery: recovery, connected: true,
                 effort: effort, batteryPct: batteryPct, observedAt: observedAt
             )
         } else {
             liveActivity.update(
-                bpm: bpm, recovery: recovery, connected: model.live.connected,
+                bpm: bpm, recovery: recovery, connected: true,
                 effort: effort, batteryPct: batteryPct, observedAt: observedAt
             )
         }

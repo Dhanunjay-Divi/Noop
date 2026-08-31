@@ -2,6 +2,17 @@ package com.noop.ui
 
 import android.content.Context
 import androidx.annotation.StringRes
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.MonitorWeight
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.noop.R
 
 // MARK: - Editable Key-Metrics layout (#251)
@@ -22,21 +33,22 @@ import com.noop.R
 enum class KeyMetric(
     val raw: String,
     @StringRes val titleRes: Int,
+    val icon: ImageVector,
     /** True only when the tile's value has a real, bounded progress axis. Raw vitals deliberately stay
      *  false: mapping HRV, resting HR, respiration, etc. to an arbitrary ceiling makes a decorative fill
      *  look like "more is better" health progress. */
     val isBoundedProgress: Boolean = false,
 ) {
-    CHARGE("charge", R.string.l10n_today_screen_recovery_ea924f72, isBoundedProgress = true),
-    EFFORT("effort", R.string.trends_effort, isBoundedProgress = true),
-    REST("rest", R.string.l10n_today_screen_sleep_3cac34e6, isBoundedProgress = true),
-    HRV("hrv", R.string.widget_hrv),
-    RESTING_HR("restingHr", R.string.l10n_today_screen_resting_hr_26677094),
-    BLOOD_OXYGEN("bloodOxygen", R.string.l10n_today_screen_blood_oxygen_a8ad9ff5),
-    RESPIRATORY("respiratory", R.string.l10n_today_screen_respiratory_1cd8c175),
-    STEPS("steps", R.string.l10n_today_screen_steps_cdde4f20),
-    WEIGHT("weight", R.string.l10n_today_screen_weight_69c0b815),
-    CALORIES("calories", R.string.l10n_today_screen_calories_3e62ecfe);
+    CHARGE("charge", R.string.l10n_today_screen_recovery_ea924f72, Icons.Filled.Bolt, isBoundedProgress = true),
+    EFFORT("effort", R.string.trends_effort, Icons.Filled.LocalFireDepartment, isBoundedProgress = true),
+    REST("rest", R.string.l10n_today_screen_sleep_3cac34e6, Icons.Filled.Bedtime, isBoundedProgress = true),
+    HRV("hrv", R.string.widget_hrv, Icons.Filled.MonitorHeart),
+    RESTING_HR("restingHr", R.string.l10n_today_screen_resting_hr_26677094, Icons.Filled.Favorite),
+    BLOOD_OXYGEN("bloodOxygen", R.string.l10n_today_screen_blood_oxygen_a8ad9ff5, Icons.Filled.WaterDrop),
+    RESPIRATORY("respiratory", R.string.l10n_today_screen_respiratory_1cd8c175, Icons.Filled.Air),
+    STEPS("steps", R.string.l10n_today_screen_steps_cdde4f20, Icons.AutoMirrored.Filled.DirectionsWalk),
+    WEIGHT("weight", R.string.l10n_today_screen_weight_69c0b815, Icons.Filled.MonitorWeight),
+    CALORIES("calories", R.string.l10n_today_screen_calories_3e62ecfe, Icons.Filled.LocalFireDepartment);
 
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }

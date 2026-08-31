@@ -62,6 +62,11 @@ class AppShellInstrumentedTest {
             .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
             .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
             .commit()
+        TodayLayoutPrefs.setOrder(
+            context,
+            listOf(TodaySection.KEY_METRICS) +
+                TodaySection.defaultOrder.filterNot { it == TodaySection.KEY_METRICS },
+        )
         scenario = ActivityScenario.launch(MainActivity::class.java)
         compose.waitUntil(timeoutMillis = 20_000) {
             runCatching {
@@ -115,6 +120,21 @@ class AppShellInstrumentedTest {
                     .fetchSemanticsNodes()
                     .isNotEmpty()
             }.getOrDefault(false)
+        }
+    }
+
+    @Test
+    fun todayMetricDetailKeepsTodaySelectedAndReselectReturnsToRoot() {
+        val metricTag = "noop.today.metric.hrv"
+        compose.onNodeWithTag(metricTag).performScrollTo().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag(metricTag).fetchSemanticsNodes().isEmpty()
+        }
+        assertSelected("noop.tab.today")
+
+        compose.onNodeWithTag("noop.tab.today").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag(metricTag).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

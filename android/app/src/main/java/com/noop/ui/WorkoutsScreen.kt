@@ -1848,7 +1848,7 @@ private fun CustomWorkoutRangePicker(
                 horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
             ) {
                 WorkoutDateButton(
-                    label = "From",
+                    label = stringResource(R.string.workouts_custom_date_from),
                     date = startDate,
                     locale = locale,
                     modifier = Modifier.weight(1f),
@@ -1861,7 +1861,7 @@ private fun CustomWorkoutRangePicker(
                     )
                 }
                 WorkoutDateButton(
-                    label = "To",
+                    label = stringResource(R.string.workouts_custom_date_to),
                     date = endDate,
                     locale = locale,
                     modifier = Modifier.weight(1f),

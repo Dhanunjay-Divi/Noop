@@ -294,10 +294,6 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
-      "Awaiting Noop Band"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
       "CALIBRATING"
     ],
     [
@@ -491,14 +487,6 @@
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Waiting for R-R intervals."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveSessionScreen.kt",
-      "Guarding your session. Silence means you're on track."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveSessionScreen.kt",
-      "Signal lost - coaching paused."
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt",
@@ -835,14 +823,6 @@
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "No heart rate in the last ${hrWindow.label}. Try a wider window or Today."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Noop Band battery"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Noop Band battery ${it.roundToInt()} percent"
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",

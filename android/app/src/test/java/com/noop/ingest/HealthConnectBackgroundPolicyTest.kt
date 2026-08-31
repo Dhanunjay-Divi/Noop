@@ -4,6 +4,7 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BodyTemperatureRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.OxygenSaturationRecord
 import com.noop.data.ImportSummary
 import com.noop.data.importCompletedSuccessfully
 import org.junit.Assert.assertEquals
@@ -63,6 +64,17 @@ class HealthConnectBackgroundPolicyTest {
             setOf(bodyPermission, background),
         )
         assertTrue(missing.isEmpty())
+    }
+
+    @Test fun explicitImportRequestsNewOxygenScopeAfterUpgrade() {
+        val oxygen = HealthPermission.getReadPermission(OxygenSaturationRecord::class)
+        val missing = HealthConnectImporter.missingReadPermissions(setOf(bodyPermission))
+
+        assertTrue(oxygen in missing)
+        assertFalse(bodyPermission in missing)
+        assertTrue(
+            HealthConnectImporter.missingReadPermissions(HealthConnectImporter.PERMISSIONS).isEmpty(),
+        )
     }
 
     @Test fun projectionScopeKeepsWorkoutEnrichmentPermissionsIndependent() {

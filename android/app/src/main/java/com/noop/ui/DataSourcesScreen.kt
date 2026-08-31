@@ -338,10 +338,8 @@ fun DataSourcesScreen(vm: AppViewModel) {
             hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - granted
             val missing = if (requestBackground) {
                 HealthConnectBackgroundPolicy.runtimeMissingPermissionsForAutoSync(granted)
-            } else if (granted.none { it in HealthConnectImporter.PERMISSIONS }) {
-                HealthConnectImporter.PERMISSIONS
             } else {
-                emptySet()
+                HealthConnectImporter.missingReadPermissions(granted)
             }
             if (missing.isEmpty()) {
                 runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }

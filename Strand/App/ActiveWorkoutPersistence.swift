@@ -178,6 +178,41 @@ struct WorkoutRecoveryCadence: Equatable {
     }
 }
 
+/// Bounds full-window live Effort recomputation while a workout grows. The scorer remains authoritative:
+/// this gate changes only presentation cadence, and `endWorkout()` always scores the complete final array.
+struct WorkoutLiveStrainCadence: Equatable {
+    static let sampleStride = 5
+    static let intervalSec = 5
+
+    private(set) var computedSampleCount: Int
+    private(set) var computedAtSec: Int
+
+    init(computedSampleCount: Int = 0, computedAtSec: Int = 0) {
+        self.computedSampleCount = max(0, computedSampleCount)
+        self.computedAtSec = max(0, computedAtSec)
+    }
+
+    func isDue(
+        sampleCount: Int,
+        firstSampleSec: Int?,
+        nowSec: Int,
+        minimumSampleCount: Int,
+        minimumSpanSec: Int
+    ) -> Bool {
+        guard sampleCount >= minimumSampleCount,
+              let firstSampleSec,
+              nowSec >= firstSampleSec,
+              nowSec - firstSampleSec >= minimumSpanSec else { return false }
+        return sampleCount - computedSampleCount >= Self.sampleStride
+            || (nowSec >= computedAtSec && nowSec - computedAtSec >= Self.intervalSec)
+    }
+
+    mutating func didCompute(sampleCount: Int, atSec: Int) {
+        computedSampleCount = max(0, sampleCount)
+        computedAtSec = max(0, atSec)
+    }
+}
+
 /// Event cursor for manual-workout HR capture. `LiveState.heartRate` is display state and may be read or
 /// republished repeatedly after transport stalls; a workout sample is admitted only when the sensor-event
 /// sequence advances. The event's receipt time becomes the stored timestamp, and the one-second storage
