@@ -105,6 +105,9 @@ struct RootTabView: View {
 
     private static var initialSelectedTab: Int {
         #if DEBUG
+        if ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"] != nil {
+            return IPhonePrimaryTab.activity.rawValue
+        }
         let args = CommandLine.arguments
         if args.contains("--demo-more-route") { return IPhonePrimaryTab.more.rawValue }
         if let i = args.firstIndex(of: "--demo-tab"), i + 1 < args.count {

@@ -272,8 +272,13 @@ struct WorkoutsView: View {
     @State private var showLiveWorkout = false
     @State private var showStartSport = false
     #if DEBUG
-    @State private var showStrengthTrainer =
+    @State private var showStrengthTrainer = false
+    @State private var didPresentStrengthTrainerDemo = false
+    private static var shouldPresentStrengthTrainerDemo: Bool {
         ProcessInfo.processInfo.arguments.contains("--demo-strength-trainer")
+        || ProcessInfo.processInfo.arguments.contains("--demo-strength-guide")
+        || ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"] != nil
+    }
     #else
     @State private var showStrengthTrainer = false
     #endif
@@ -509,6 +514,14 @@ struct WorkoutsView: View {
                 range = defaultRange(for: allRows)
                 seededInitialRange = true
             }
+            #if DEBUG
+            if Self.shouldPresentStrengthTrainerDemo && !didPresentStrengthTrainerDemo {
+                didPresentStrengthTrainerDemo = true
+                DispatchQueue.main.async {
+                    showStrengthTrainer = true
+                }
+            }
+            #endif
         }
         // #797: when the user picks a range wider than the bounded first-paint window (typically "All"),
         // page the full history in. A pick that fits the loaded window is a no-op. Empty selections stay

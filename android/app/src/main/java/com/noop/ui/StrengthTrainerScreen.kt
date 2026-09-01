@@ -172,7 +172,11 @@ private const val STRENGTH_PROFILE_FOCUS_MUSCLES = "strength.profile.focusMuscle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StrengthTrainerSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+fun StrengthTrainerSheet(
+    vm: AppViewModel,
+    onDismiss: () -> Unit,
+    initialGuideExerciseId: String? = null,
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
@@ -462,6 +466,7 @@ fun StrengthTrainerSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         onEditRoutine = { routineEditor = StrengthRoutineEditorTarget(it) },
                         onCreateExercise = { customExerciseEditor = true },
                         onClose = onDismiss,
+                        initialGuideExerciseId = initialGuideExerciseId,
                     )
                 } else if (routineEditor != null) {
                     StrengthRoutineEditor(
@@ -601,6 +606,7 @@ private fun StrengthDashboard(
     onEditRoutine: (StrengthRoutineSnapshot) -> Unit,
     onCreateExercise: () -> Unit,
     onClose: () -> Unit,
+    initialGuideExerciseId: String?,
 ) {
     val context = LocalContext.current
     val active = sessions.firstOrNull { it.session.endedAt == null }
@@ -612,7 +618,9 @@ private fun StrengthDashboard(
         mutableIntStateOf(prefs.getInt("strength.goal.weeklySets", 12).coerceIn(1, 100))
     }
     var selectedTab by rememberSaveable { mutableStateOf(StrengthGymTab.TODAY) }
-    var exerciseGuide by remember { mutableStateOf<StrengthExerciseRow?>(null) }
+    var exerciseGuide by remember(exercises, initialGuideExerciseId) {
+        mutableStateOf(exercises.firstOrNull { it.id == initialGuideExerciseId })
+    }
     var libraryQuery by rememberSaveable { mutableStateOf("") }
     var libraryMuscle by rememberSaveable { mutableStateOf("all") }
     var libraryEquipment by rememberSaveable { mutableStateOf("all") }

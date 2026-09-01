@@ -1,10 +1,18 @@
 package com.noop.ui
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color as AndroidColor
+import android.util.Log
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,18 +64,24 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.noop.R
+import com.noop.BuildConfig
 import com.noop.data.StrengthExerciseAnimationVariant
 import com.noop.data.StrengthExerciseGuidance
 import com.noop.data.StrengthExerciseMotionProfile
 import com.noop.data.StrengthExerciseRow
 import com.noop.data.StrengthMuscleStatus
+import java.io.ByteArrayInputStream
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
-import java.util.Locale
+
+private const val STRENGTH_MOTION_HOST = "appassets.androidplatform.net"
+private const val STRENGTH_MOTION_PREFIX = "/assets/strength-motion/"
+private const val STRENGTH_MOTION_ORIGIN = "https://$STRENGTH_MOTION_HOST"
 
 /** Native offline counterpart to iOS StrengthExerciseMotionView. */
 @Composable
@@ -148,7 +162,7 @@ private fun StrengthMotionWebView(
 ) {
     val shape = RoundedCornerShape(8.dp)
     val pageUrl = remember(exerciseId, cycleDurationSeconds, reduceMotion) {
-        "file:///android_asset/strength-motion/index.html" +
+        "$STRENGTH_MOTION_ORIGIN${STRENGTH_MOTION_PREFIX}index.html" +
             "?exercise=$exerciseId" +
             "&duration=${String.format(Locale.US, "%.3f", cycleDurationSeconds)}" +
             "&reduceMotion=${if (reduceMotion) 1 else 0}"
@@ -156,6 +170,9 @@ private fun StrengthMotionWebView(
     AndroidView(
         factory = { context ->
             WebView(context).apply {
+                if (BuildConfig.DEBUG) {
+                    WebView.setWebContentsDebuggingEnabled(true)
+                }
                 setBackgroundColor(AndroidColor.rgb(8, 9, 12))
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 overScrollMode = View.OVER_SCROLL_NEVER
@@ -165,12 +182,49 @@ private fun StrengthMotionWebView(
                 settings.domStorageEnabled = false
                 settings.databaseEnabled = false
                 settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                settings.allowFileAccess = true
+                settings.allowFileAccess = false
                 settings.allowContentAccess = false
-                settings.allowFileAccessFromFileURLs = true
+                settings.allowFileAccessFromFileURLs = false
                 settings.allowUniversalAccessFromFileURLs = false
                 settings.blockNetworkLoads = true
                 settings.mediaPlaybackRequiresUserGesture = true
+                if (BuildConfig.DEBUG) {
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                            Log.d(
+                                "StrengthMotion",
+                                "${message.messageLevel()}: ${message.message()} " +
+                                    "(${message.sourceId()}:${message.lineNumber()})",
+                            )
+                            return true
+                        }
+                    }
+                }
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? = strengthMotionAssetResponse(context, request)
+
+                    override fun onPageFinished(view: WebView, url: String) {
+                        if (BuildConfig.DEBUG) {
+                            Log.d("StrengthMotion", "Loaded $url")
+                        }
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        error: WebResourceError,
+                    ) {
+                        if (BuildConfig.DEBUG) {
+                            Log.e(
+                                "StrengthMotion",
+                                "Failed ${request.url}: ${error.errorCode} ${error.description}",
+                            )
+                        }
+                    }
+                }
             }
         },
         update = { webView ->
@@ -189,6 +243,51 @@ private fun StrengthMotionWebView(
             },
     )
 }
+
+private fun strengthMotionAssetResponse(
+    context: Context,
+    request: WebResourceRequest,
+): WebResourceResponse? {
+    val url = request.url
+    if (url.scheme != "http" && url.scheme != "https") return null
+    if (
+        url.scheme != "https" ||
+        url.host != STRENGTH_MOTION_HOST ||
+        url.path?.startsWith(STRENGTH_MOTION_PREFIX) != true
+    ) {
+        return strengthMotionErrorResponse(403, "Forbidden")
+    }
+    val assetPath = url.path!!.removePrefix("/assets/")
+    if (assetPath.contains("..")) {
+        return strengthMotionErrorResponse(403, "Forbidden")
+    }
+    return runCatching {
+        val extension = assetPath.substringAfterLast('.', missingDelimiterValue = "")
+        val mimeType = when (extension) {
+            "html" -> "text/html"
+            "css" -> "text/css"
+            "js" -> "application/javascript"
+            "json" -> "application/json"
+            "glb" -> "model/gltf-binary"
+            else -> "application/octet-stream"
+        }
+        val encoding = if (extension in setOf("html", "css", "js", "json")) "UTF-8" else null
+        WebResourceResponse(mimeType, encoding, context.assets.open(assetPath))
+    }.getOrElse { cause ->
+        Log.e("StrengthMotion", "Missing local asset $assetPath", cause)
+        strengthMotionErrorResponse(404, "Not Found")
+    }
+}
+
+private fun strengthMotionErrorResponse(statusCode: Int, reason: String): WebResourceResponse =
+    WebResourceResponse(
+        "text/plain",
+        "UTF-8",
+        statusCode,
+        reason,
+        emptyMap(),
+        ByteArrayInputStream(reason.toByteArray(Charsets.UTF_8)),
+    )
 
 enum class StrengthBodyMapMode {
     LOAD,

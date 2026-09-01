@@ -96,7 +96,13 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer.contains("onGuide(plan.exercise)"))
         assertTrue(motion!!.contains("withFrameNanos"))
         assertTrue(motion.contains("drawStrengthMotion("))
-        assertTrue(motion.contains("drawStrengthMotionTrack("))
+        assertTrue(motion.contains("StrengthMotionWebView("))
+        assertTrue(
+            motion.contains("STRENGTH_MOTION_HOST = \"appassets.androidplatform.net\""),
+        )
+        assertTrue(motion.contains("STRENGTH_MOTION_PREFIX = \"/assets/strength-motion/\""))
+        assertTrue(motion.contains("shouldInterceptRequest("))
+        assertTrue(motion.contains("settings.blockNetworkLoads = true"))
         assertFalse(motion.contains("pair.second,\n        exercise.primaryMuscle"))
     }
 

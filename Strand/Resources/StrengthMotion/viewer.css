@@ -7,7 +7,7 @@
 
 * { box-sizing: border-box; }
 
-html, body, #stage {
+html, body {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -15,8 +15,16 @@ html, body, #stage {
   background: #08090c;
 }
 
+body {
+  position: fixed;
+  inset: 0;
+}
+
 #stage {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   touch-action: none;
 }
 

@@ -12,6 +12,15 @@ struct ContentView: View {
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
     @State private var showWhatsNew = false
 
+    private var isStrengthGuideDemo: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--demo-strength-guide")
+            || ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"] != nil
+        #else
+        false
+        #endif
+    }
+
     init(onOnboardingFinished: @escaping () -> Void = {}) {
         self.onOnboardingFinished = onOnboardingFinished
     }
@@ -20,12 +29,12 @@ struct ContentView: View {
         ZStack {
             // RootView starts repository refresh, backup catch-up and optional remote sync from its task.
             // Keep those operational side effects outside the pre-acceptance view hierarchy.
-            if acceptedTerms == Terms.currentVersion {
+            if acceptedTerms == Terms.currentVersion || isStrengthGuideDemo {
                 RootView()
             } else {
                 StrandPalette.surfaceBase.ignoresSafeArea()
             }
-            if acceptedTerms == Terms.currentVersion && !onboarded {
+            if acceptedTerms == Terms.currentVersion && !onboarded && !isStrengthGuideDemo {
                 OnboardingWizard(onFinished: {
                     onOnboardingFinished()
                     onboarded = true
@@ -38,7 +47,7 @@ struct ContentView: View {
             }
             // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
-            if acceptedTerms != Terms.currentVersion {
+            if acceptedTerms != Terms.currentVersion && !isStrengthGuideDemo {
                 TermsGateView(onAccept: {
                     acceptedTermsAt = ISO8601DateFormatter().string(from: Date())
                     acceptedTerms = Terms.currentVersion

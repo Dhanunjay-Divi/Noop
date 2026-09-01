@@ -142,6 +142,9 @@ entradas_diario.csv
 __pycache__/
 *.pyc
 
+# JavaScript dependencies
+node_modules/
+
 # Local release artifacts (zips/ipas built for upload; never tracked)
 dist/
 err.txt

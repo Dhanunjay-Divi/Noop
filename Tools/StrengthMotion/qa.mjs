@@ -10,7 +10,15 @@ import { PNG } from "pngjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const output = resolve(process.env.NOOP_STRENGTH_QA_OUTPUT ?? "/tmp/noop-strength-motion-qa");
 const manifest = JSON.parse(await readFile(join(root, "manifest.json"), "utf8"));
-const exercises = manifest.exercises.map(({ id }) => id);
+const requestedExercises = (process.env.NOOP_STRENGTH_QA_EXERCISES ?? "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
+const allExercises = manifest.exercises.map(({ id }) => id);
+const exercises = requestedExercises.length > 0
+  ? requestedExercises.filter((id) => allExercises.includes(id))
+  : allExercises;
+assert(exercises.length > 0, "No matching exercises selected for QA");
 const failures = [];
 
 await mkdir(output, { recursive: true });
@@ -99,6 +107,7 @@ if (failures.length > 0) {
 async function assertViewerState(currentPage, id) {
   const state = await currentPage.evaluate(() => ({
     ready: document.body.dataset.ready,
+    model: document.body.dataset.model,
     error: document.body.dataset.error,
     loadingHidden: document.querySelector("#loading")?.hidden,
     errorHidden: document.querySelector("#error")?.hidden,
@@ -110,6 +119,7 @@ async function assertViewerState(currentPage, id) {
     safety: document.querySelector("#instruction-safety")?.textContent?.trim() ?? "",
   }));
   assert.equal(state.ready, "true", `${id} did not reach ready state`);
+  assert.equal(state.model, "humanoid", `${id} did not load the skinned human model`);
   assert.equal(state.error, undefined, `${id} entered error state`);
   assert.equal(state.loadingHidden, true, `${id} left loading visible`);
   assert.equal(state.errorHidden, true, `${id} left error visible`);

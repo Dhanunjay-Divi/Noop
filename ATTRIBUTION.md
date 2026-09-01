@@ -53,6 +53,13 @@ remains available as a fallback.
   exercise guidance. MIT License.
 - **Lucide** (`lucide-icons/lucide`) — supplies controls within the offline strength
   exercise viewer. ISC License; portions derived from Feather are MIT licensed.
+- **Mixamo X Bot** (Adobe Mixamo; redistributed through the Three.js example
+  repository) — the skinned humanoid base used by NOOP's offline exercise
+  demonstrations. NOOP supplies its own exercise poses, retargeting, materials,
+  equipment, and guidance. Adobe's Mixamo FAQ permits royalty-free use of
+  downloaded characters in commercial and noncommercial projects; the model is
+  not covered by the Three.js MIT license. Provenance and the exact asset hash
+  are recorded in `Tools/StrengthMotion/ASSET-PROVENANCE.md`.
 
 The complete resolved runtime dependency inventory and required license texts
 are generated into [`NOTICE`](NOTICE). Those independent dependencies remain

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild viewer.ts --bundle --minify --sourcemap --target=es2020 --outfile=dist/viewer.js",
+    "build": "esbuild viewer.ts --bundle --minify --sourcemap --target=es2020 --loader:.glb=dataurl --outfile=dist/viewer.js",
     "check": "tsc --noEmit",
     "qa": "npm run check && npm run build && node qa.mjs"
   },

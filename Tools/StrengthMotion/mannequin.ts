@@ -75,6 +75,12 @@ export class ExerciseMannequin {
     this.reset();
   }
 
+  setBodyVisible(visible: boolean): void {
+    this.root.traverse((node) => {
+      if (node instanceof THREE.Mesh) node.visible = visible;
+    });
+  }
+
   pose(exerciseId: string, phase: number): void {
     this.reset();
     const amount = repAmount(phase);
@@ -100,8 +106,10 @@ export class ExerciseMannequin {
         break;
       case "bent_over_row":
       case "one_arm_dumbbell_row":
-      case "chest_supported_row":
         this.poseBentRow(exerciseId, amount);
+        break;
+      case "chest_supported_row":
+        this.poseChestSupportedRow(amount);
         break;
       case "seated_cable_row":
       case "resistance_band_row":
@@ -439,6 +447,15 @@ export class ExerciseMannequin {
     this.arm("right", -48 + (oneArm ? 0 : 30) * amount, oneArm ? 28 : 18, oneArm ? 0 : -105 * amount);
   }
 
+  private poseChestSupportedRow(amount: number): void {
+    this.root.position.set(0, 0.91, -0.04);
+    this.spine.rotation.x = 42 * DEG;
+    this.leg("left", -12, 18);
+    this.leg("right", -12, 18);
+    this.arm("left", -42 + 28 * amount, 16, -102 * amount);
+    this.arm("right", -42 + 28 * amount, 16, -102 * amount);
+  }
+
   private poseSeatedRow(amount: number): void {
     this.root.position.y = 0.52;
     this.leg("left", -88, 92);
@@ -600,10 +617,12 @@ export class ExerciseMannequin {
   }
 
   private poseDip(amount: number): void {
-    this.root.position.y -= 0.2 * amount;
-    this.spine.rotation.x = 12 * amount * DEG;
-    this.arm("left", 15, 8, -92 * amount);
-    this.arm("right", 15, 8, -92 * amount);
+    this.root.position.y = 1.45 - 0.2 * amount;
+    this.spine.rotation.x = 10 * amount * DEG;
+    this.arm("left", 8, 7, -88 * amount);
+    this.arm("right", 8, 7, -88 * amount);
+    this.leg("left", 4, 20);
+    this.leg("right", 4, 20);
   }
 
   private poseHangingLegRaise(amount: number): void {
@@ -615,18 +634,18 @@ export class ExerciseMannequin {
   }
 
   private poseCableCrunch(amount: number): void {
-    this.root.position.y = 0.77;
-    this.leg("left", -8, 20);
-    this.leg("right", -8, 20);
+    this.root.position.y = 0.58;
+    this.leg("left", -6, 108, 18);
+    this.leg("right", -6, 108, 18);
     this.spine.rotation.x = 52 * amount * DEG;
     this.arm("left", -38, 12, -105);
     this.arm("right", -38, 12, -105);
   }
 
   private poseSidePlank(amount: number): void {
-    this.root.rotation.set(90 * DEG, 0, 90 * DEG);
-    this.root.position.set(0, 0.47 + 0.012 * amount, 0);
-    this.arm("left", 0, 90, 0);
+    this.root.rotation.set(90 * DEG, -90 * DEG, 0);
+    this.root.position.set(0, 0.34 + 0.012 * amount, 0);
+    this.arm("left", 0, 90, -88);
     this.arm("right", 0, 90, 0);
   }
 
@@ -683,7 +702,7 @@ export class ExerciseMannequin {
     const wave = Math.sin(phase * Math.PI * 2);
     const left = (wave + 1) / 2;
     const right = 1 - left;
-    this.root.position.y = 0.66;
+    this.root.position.set(0, 1.02, -0.1);
     this.spine.rotation.x = 30 * DEG;
     this.leg("left", -48 - 40 * left, 36 + 76 * left);
     this.leg("right", -48 - 40 * right, 36 + 76 * right);

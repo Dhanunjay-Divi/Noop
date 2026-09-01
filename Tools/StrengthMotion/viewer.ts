@@ -2,7 +2,10 @@ import { createIcons, Info, Pause, Play, RotateCcw, X } from "lucide";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { exerciseInstructions } from "./guidance";
+import { ExerciseHumanoid } from "./humanoid";
+import motionManifest from "./manifest.json";
 import { ExerciseMannequin } from "./mannequin";
+import trainerModelURL from "./trainer.glb";
 
 interface MotionSegment {
   id: string;
@@ -30,8 +33,9 @@ const pauseButton = required<HTMLButtonElement>("pause");
 const resetButton = required<HTMLButtonElement>("reset");
 const instructionsSheet = required<HTMLElement>("instructions");
 const closeButton = required<HTMLButtonElement>("close");
+const viewerIcons = { Info, Pause, Play, RotateCcw, X };
 
-createIcons({ icons: { Info, Pause, Play, RotateCcw, X } });
+createIcons({ icons: viewerIcons });
 populateInstructions();
 
 const renderer = new THREE.WebGLRenderer({
@@ -39,6 +43,7 @@ const renderer = new THREE.WebGLRenderer({
   antialias: true,
   alpha: false,
   powerPreference: "high-performance",
+  preserveDrawingBuffer: true,
 });
 renderer.setClearColor(0x08090c, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -93,6 +98,7 @@ floor.receiveShadow = true;
 scene.add(floor);
 
 let mannequin: ExerciseMannequin | undefined;
+let humanoid: ExerciseHumanoid | undefined;
 let equipment: ExerciseEquipment | undefined;
 let paused = reduceMotion;
 let frozenPhase = reduceMotion ? stillPhase : 0;
@@ -103,7 +109,7 @@ let homeTarget = new THREE.Vector3(0, 0.95, 0);
 
 new ResizeObserver(resize).observe(canvas);
 resize();
-void loadScene();
+void Promise.resolve().then(loadScene);
 
 infoButton.addEventListener("click", openInstructions);
 pauseButton.addEventListener("click", togglePaused);
@@ -118,9 +124,7 @@ window.addEventListener("keydown", (event) => {
 
 async function loadScene(): Promise<void> {
   try {
-    const manifestResponse = await fetch("manifest.json");
-    if (!manifestResponse.ok) throw new Error(`Manifest ${manifestResponse.status}`);
-    const manifest = (await manifestResponse.json()) as MotionManifest;
+    const manifest = motionManifest as MotionManifest;
     if (!manifest.exercises.some((candidate) => candidate.id === exerciseId)) {
       throw new Error(`No motion profile for ${exerciseId}`);
     }
@@ -128,9 +132,21 @@ async function loadScene(): Promise<void> {
     mannequin = new ExerciseMannequin();
     mannequin.pose(exerciseId, stillPhase);
     scene.add(mannequin.root);
-    equipment = new ExerciseEquipment(scene, mannequin.root, exerciseId);
+    let visualModel = mannequin.root;
+    try {
+      humanoid = await ExerciseHumanoid.load(trainerModelURL, mannequin, exerciseId);
+      mannequin.setBodyVisible(false);
+      scene.add(humanoid.root);
+      visualModel = humanoid.root;
+      document.body.dataset.model = "humanoid";
+    } catch (cause) {
+      console.warn("Using procedural exercise model fallback", cause);
+      document.body.dataset.model = "fallback";
+    }
+    equipment = new ExerciseEquipment(scene, visualModel, exerciseId);
     equipment.update();
-    frameCamera(mannequin.root);
+    frameCamera(visualModel);
+    renderer.render(scene, camera);
     loading.hidden = true;
     document.body.dataset.ready = "true";
     requestAnimationFrame(animate);
@@ -145,6 +161,7 @@ async function loadScene(): Promise<void> {
 function animate(now: number): void {
   if (mannequin) {
     mannequin.pose(exerciseId, currentPhase(now));
+    humanoid?.update();
     equipment?.update();
   }
   controls.update();
@@ -169,7 +186,7 @@ function setPaused(nextPaused: boolean): void {
   pauseButton.innerHTML = `<i data-lucide="${paused ? "play" : "pause"}"></i>`;
   pauseButton.ariaLabel = paused ? "Play animation" : "Pause animation";
   pauseButton.title = pauseButton.ariaLabel;
-  createIcons({ icons: { Pause, Play } });
+  createIcons({ icons: viewerIcons });
 }
 
 function togglePaused(): void {
@@ -200,7 +217,7 @@ function frameCamera(model: THREE.Object3D): void {
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
   const maximum = Math.max(size.x, size.y, size.z, 1.2);
-  const distance = maximum * 2;
+  const distance = maximum * 2.2;
   const direction = new THREE.Vector3(0.68, 0.24, 1).normalize();
   homeTarget.copy(center);
   homeTarget.y += size.y * 0.02;
@@ -242,8 +259,9 @@ class ExerciseEquipment {
   private readonly leftHand: THREE.Object3D | undefined;
   private readonly rightHand: THREE.Object3D | undefined;
   private readonly hips: THREE.Object3D | undefined;
-  private readonly upperSpine: THREE.Object3D | undefined;
   private readonly pullUpFrame: THREE.Group | undefined;
+  private readonly dipFrame: THREE.Group | undefined;
+  private readonly abWheel: THREE.Group | undefined;
   private readonly leftPosition = new THREE.Vector3();
   private readonly rightPosition = new THREE.Vector3();
   private readonly hipsPosition = new THREE.Vector3();
@@ -253,7 +271,6 @@ class ExerciseEquipment {
     this.leftHand = findBone(model, "lefthand");
     this.rightHand = findBone(model, "righthand");
     this.hips = findBone(model, "hips");
-    this.upperSpine = findBone(model, "spine2");
     this.dynamicKind = dynamicEquipment(id);
 
     if (this.dynamicKind === "barbell") {
@@ -275,6 +292,8 @@ class ExerciseEquipment {
     }
     addStructuralEquipment(this.root, id);
     this.pullUpFrame = this.root.getObjectByName("PullUpFrame") as THREE.Group | undefined;
+    this.dipFrame = this.root.getObjectByName("DipFrame") as THREE.Group | undefined;
+    this.abWheel = this.root.getObjectByName("AbWheel") as THREE.Group | undefined;
   }
 
   update(): void {
@@ -284,23 +303,21 @@ class ExerciseEquipment {
     if (this.pullUpFrame && this.leftHand && this.rightHand) {
       this.pullUpFrame.position.copy(this.leftPosition).lerp(this.rightPosition, 0.5);
     }
+    if (this.dipFrame && this.leftHand && this.rightHand) {
+      this.dipFrame.position.copy(this.leftPosition).lerp(this.rightPosition, 0.5);
+    }
+    if (this.abWheel && this.leftHand && this.rightHand) {
+      placeAcrossHands(this.abWheel, this.leftPosition, this.rightPosition);
+    }
 
     if (this.dynamicKind === "barbell" && this.dynamic) {
       const hipMounted = this.id === "barbell_hip_thrust";
-      const shoulderMounted =
-        this.id === "barbell_back_squat" || this.id === "barbell_front_squat";
       if (hipMounted) {
         this.dynamic.position.copy(this.hipsPosition);
         this.dynamic.position.y += 0.04;
         this.dynamic.quaternion.identity();
-      } else if (shoulderMounted && this.upperSpine) {
-        this.upperSpine.getWorldPosition(this.dynamic.position);
-        this.dynamic.position.y += 0.08;
-        this.dynamic.position.z += this.id === "barbell_back_squat" ? -0.09 : 0.11;
-        this.dynamic.quaternion.identity();
       } else if (this.leftHand && this.rightHand) {
-        this.dynamic.position.copy(this.leftPosition).lerp(this.rightPosition, 0.5);
-        this.dynamic.quaternion.identity();
+        placeAcrossHands(this.dynamic, this.leftPosition, this.rightPosition);
       }
     } else if (this.dynamicKind === "dumbbells" && this.dynamic) {
       const [left, right] = this.dynamic.children;
@@ -385,7 +402,12 @@ function makeKettlebell(): THREE.Group {
 
 function addStructuralEquipment(root: THREE.Group, id: string): void {
   if (benchExercises.has(id)) addBench(root, id.includes("incline"));
+  if (id === "one_arm_dumbbell_row") addRowBench(root);
+  if (id === "chest_supported_row") addChestSupportedBench(root);
+  if (id === "preacher_curl") addPreacherBench(root);
   if (barExercises.has(id)) addPullUpBar(root);
+  if (id === "parallel_bar_dip") addDipBars(root);
+  if (id === "ab_wheel_rollout") addAbWheel(root);
   if (cableExercises.has(id)) addCableTower(root);
   if (machineExercises.has(id)) addMachineFrame(root, id);
   if (id === "treadmill_run") addTreadmill(root);
@@ -427,6 +449,75 @@ function addPullUpBar(root: THREE.Group): void {
     frame.add(upright);
   }
   root.add(frame);
+}
+
+function addDipBars(root: THREE.Group): void {
+  const frame = new THREE.Group();
+  frame.name = "DipFrame";
+  for (const x of [-0.31, 0.31]) {
+    const bar = cylinder(0.025, 0.92, graphite, "y");
+    bar.rotation.x = Math.PI / 2;
+    bar.position.x = x;
+    frame.add(bar);
+    const upright = cylinder(0.027, 1.05, graphite, "y");
+    upright.position.set(x, -0.53, 0.3);
+    frame.add(upright);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.72), graphite);
+    foot.position.set(x, -1.04, 0.3);
+    frame.add(foot);
+  }
+  root.add(frame);
+}
+
+function addAbWheel(root: THREE.Group): void {
+  const wheel = new THREE.Group();
+  wheel.name = "AbWheel";
+  const tire = cylinder(0.135, 0.09, rubber, "x");
+  wheel.add(tire);
+  wheel.add(cylinder(0.018, 0.52, graphite, "x"));
+  for (const x of [-0.19, 0.19]) {
+    const grip = cylinder(0.032, 0.14, red, "x");
+    grip.position.x = x;
+    wheel.add(grip);
+  }
+  root.add(wheel);
+}
+
+function addRowBench(root: THREE.Group): void {
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.09, 0.96), rubber);
+  pad.position.set(-0.48, 0.5, 0.16);
+  root.add(pad);
+  for (const z of [-0.2, 0.4]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.5, 0.055), graphite);
+    post.position.set(-0.48, 0.25, z);
+    root.add(post);
+  }
+}
+
+function addChestSupportedBench(root: THREE.Group): void {
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.09, 0.9), rubber);
+  pad.rotation.x = -0.68;
+  pad.position.set(0, 0.76, 0.1);
+  root.add(pad);
+  const post = cylinder(0.032, 0.74, graphite, "y");
+  post.position.set(0, 0.37, -0.08);
+  root.add(post);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.055, 0.52), graphite);
+  base.position.set(0, 0.03, -0.08);
+  root.add(base);
+}
+
+function addPreacherBench(root: THREE.Group): void {
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.085, 0.38), rubber);
+  pad.rotation.x = 0.64;
+  pad.position.set(0, 1.16, 0.32);
+  root.add(pad);
+  const post = cylinder(0.032, 0.98, graphite, "y");
+  post.position.set(0, 0.57, 0.14);
+  root.add(post);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.06, 0.5), graphite);
+  base.position.set(0, 0.03, 0.12);
+  root.add(base);
 }
 
 function addCableTower(root: THREE.Group): void {
@@ -479,8 +570,18 @@ function addCycle(root: THREE.Group): void {
   post.rotation.z = -0.2;
   root.add(post);
   const seat = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.18), rubber);
-  seat.position.set(0, 1.02, 0.13);
+  seat.position.set(0, 1.02, -0.1);
   root.add(seat);
+  const handlePost = cylinder(0.028, 0.88, graphite, "y");
+  handlePost.rotation.x = -0.42;
+  handlePost.position.set(0, 0.78, 0.35);
+  root.add(handlePost);
+  const handlebar = cylinder(0.025, 0.72, graphite, "x");
+  handlebar.position.set(0, 1.16, 0.53);
+  root.add(handlebar);
+  const crank = cylinder(0.025, 0.38, red, "x");
+  crank.position.set(0, 0.46, 0.1);
+  root.add(crank);
 }
 
 function addRower(root: THREE.Group): void {
@@ -599,8 +700,6 @@ const benchExercises = new Set([
   "chest_fly",
   "skull_crusher",
   "barbell_hip_thrust",
-  "preacher_curl",
-  "chest_supported_row",
   "lying_leg_curl",
   "back_extension",
 ]);

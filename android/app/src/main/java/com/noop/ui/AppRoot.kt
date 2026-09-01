@@ -332,9 +332,22 @@ fun AppRoot(
     }
     val selectedTab = Destination.forRoute(selectedTabRoute)
     var showQuickActions by remember { mutableStateOf(false) }
+    val demoStrengthGuideExerciseId = remember(initialRoute) {
+        initialRoute
+            ?.takeIf { BuildConfig.DEBUG && it.startsWith("strength-guide:") }
+            ?.substringAfter(':')
+            ?.takeIf { it.isNotBlank() }
+    }
     var quickOverlay by remember(initialRoute) {
         mutableStateOf<QuickActionKind?>(
-            if (BuildConfig.DEBUG && initialRoute == "strength") QuickActionKind.STRENGTH else null,
+            if (
+                BuildConfig.DEBUG &&
+                (initialRoute == "strength" || demoStrengthGuideExerciseId != null)
+            ) {
+                QuickActionKind.STRENGTH
+            } else {
+                null
+            },
         )
     }
     // The Updates inbox sheet (opened by the Today header bell). The store is a process singleton so
@@ -587,6 +600,7 @@ fun AppRoot(
                 StrengthTrainerSheet(
                     vm = viewModel,
                     onDismiss = { quickOverlay = null },
+                    initialGuideExerciseId = demoStrengthGuideExerciseId,
                 )
             }
             QuickActionKind.HRV -> {

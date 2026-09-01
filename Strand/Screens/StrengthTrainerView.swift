@@ -103,10 +103,12 @@ struct StrengthTrainerView: View {
     private static var initialExerciseGuide: StrengthExerciseRow? {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "--demo-strength-guide") else { return nil }
-        let requestedID = index + 1 < arguments.count
-            ? arguments[index + 1]
-            : "barbell_back_squat"
+        let environmentID = ProcessInfo.processInfo.environment["NOOP_STRENGTH_GUIDE_DEMO"]
+        let argumentIndex = arguments.firstIndex(of: "--demo-strength-guide")
+        guard argumentIndex != nil || environmentID != nil else { return nil }
+        let requestedID = argumentIndex.flatMap { index in
+            index + 1 < arguments.count ? arguments[index + 1] : nil
+        } ?? environmentID ?? "barbell_back_squat"
         return StrengthTrainingContract.builtInExercises.first { $0.id == requestedID }
         #else
         return nil

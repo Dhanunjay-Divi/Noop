@@ -58,12 +58,15 @@ final class StrengthTrainerContractTests: XCTestCase {
         XCTAssertTrue(source.contains("AVSpeechSynthesizer()"))
         XCTAssertTrue(source.contains("completePacedSet(id: setID)"))
         XCTAssertTrue(source.contains("exercisePerformanceContext(for: value)"))
-        XCTAssertTrue(source.contains("@State private var exerciseGuide: StrengthExerciseRow?"))
+        XCTAssertTrue(source.contains("@State private var exerciseGuide = Self.initialExerciseGuide"))
         XCTAssertTrue(source.contains("StrengthExerciseGuidePreview(exercise: exercise)"))
         XCTAssertTrue(source.contains("exerciseGuide = plan.exercise"))
         XCTAssertTrue(motion.contains("TimelineView("))
         XCTAssertTrue(motion.contains("StrengthMotionRenderer.draw("))
-        XCTAssertTrue(motion.contains("drawMotionTrack("))
+        XCTAssertTrue(motion.contains("StrengthMotionWebView("))
+        XCTAssertTrue(motion.contains("subdirectory: \"StrengthMotion\""))
+        XCTAssertTrue(motion.contains("webView.loadFileURL(pageURL, allowingReadAccessTo: readAccessURL)"))
+        XCTAssertTrue(motion.contains("configuration.websiteDataStore = .nonPersistent()"))
         XCTAssertFalse(motion.contains("pose: ghost"))
     }
 
