@@ -302,6 +302,12 @@ struct LiquidTodayView: View {
                     pullY = 0
                     return
                 }
+                // ScrollView can coalesce the final onChanged sample under load. Honor the release
+                // distance itself so a clearly completed pull cannot miss the sync threshold.
+                if dy >= pullThreshold, !refreshArmed {
+                    refreshArmed = true
+                    pullHaptic &+= 1
+                }
                 handlePull(0)
             }
     }
