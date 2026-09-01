@@ -11,12 +11,17 @@ class StrengthWorkoutPlanningTest {
     @Test
     fun everyBuiltInExerciseHasSpecificPositiveMotionGuidance() {
         assertEquals(56, StrengthTrainingContract.BUILT_IN_EXERCISES.size)
+        val variants = mutableSetOf<StrengthExerciseAnimationVariant>()
         StrengthTrainingContract.BUILT_IN_EXERCISES.forEach { exercise ->
             val guide = StrengthExerciseGuidance.guide(exercise)
             assertTrue(exercise.id, guide.isExerciseSpecific)
             assertTrue(exercise.id, guide.profile != StrengthExerciseMotionProfile.GENERIC)
             assertTrue(exercise.id, guide.cycleDurationSeconds > 0f)
+            assertEquals(exercise.id, guide.animationVariant?.exerciseId)
+            guide.animationVariant?.let(variants::add)
         }
+        assertEquals(StrengthTrainingContract.BUILT_IN_EXERCISES.size, variants.size)
+        assertEquals(StrengthExerciseAnimationVariant.entries.size, variants.size)
 
         val custom = StrengthExerciseRow(
             id = "custom-squat",
@@ -31,6 +36,7 @@ class StrengthWorkoutPlanningTest {
         )
         val fallback = StrengthExerciseGuidance.guide(custom)
         assertEquals(StrengthExerciseMotionProfile.SQUAT, fallback.profile)
+        assertNull(fallback.animationVariant)
         assertTrue(!fallback.isExerciseSpecific)
     }
 

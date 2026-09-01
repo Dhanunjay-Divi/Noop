@@ -6,12 +6,19 @@ final class StrengthWorkoutPlanningTests: XCTestCase {
 
     func testEveryBuiltInExerciseHasSpecificPositiveMotionGuidance() {
         XCTAssertEqual(StrengthTrainingContract.builtInExercises.count, 56)
+        var variants = Set<StrengthExerciseAnimationVariant>()
         for exercise in StrengthTrainingContract.builtInExercises {
             let guide = StrengthExerciseGuidance.guide(for: exercise)
             XCTAssertTrue(guide.isExerciseSpecific, exercise.id)
             XCTAssertNotEqual(guide.profile, .generic, exercise.id)
             XCTAssertGreaterThan(guide.cycleDuration, 0, exercise.id)
+            XCTAssertEqual(guide.animationVariant?.rawValue, exercise.id, exercise.id)
+            if let variant = guide.animationVariant {
+                variants.insert(variant)
+            }
         }
+        XCTAssertEqual(variants.count, StrengthTrainingContract.builtInExercises.count)
+        XCTAssertEqual(variants.count, StrengthExerciseAnimationVariant.allCases.count)
 
         let custom = StrengthExerciseRow(
             id: "custom-squat",
@@ -25,6 +32,7 @@ final class StrengthWorkoutPlanningTests: XCTestCase {
         )
         let fallback = StrengthExerciseGuidance.guide(for: custom)
         XCTAssertEqual(fallback.profile, .squat)
+        XCTAssertNil(fallback.animationVariant)
         XCTAssertFalse(fallback.isExerciseSpecific)
     }
 

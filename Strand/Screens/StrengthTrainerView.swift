@@ -74,7 +74,7 @@ struct StrengthTrainerView: View {
     @State private var starting = false
     @State private var editor: EditorTarget?
     @State private var exerciseDetail: ExerciseDetailTarget?
-    @State private var exerciseGuide: StrengthExerciseRow?
+    @State private var exerciseGuide = Self.initialExerciseGuide
     @State private var deleteCandidate: StrengthSessionSnapshot?
     @State private var selectedTab = GymTab.today
     @State private var routineEditor: RoutineEditorTarget?
@@ -99,6 +99,19 @@ struct StrengthTrainerView: View {
     #if DEBUG
     @State private var didHandleDemoEditorRoute = false
     #endif
+
+    private static var initialExerciseGuide: StrengthExerciseRow? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--demo-strength-guide") else { return nil }
+        let requestedID = index + 1 < arguments.count
+            ? arguments[index + 1]
+            : "barbell_back_squat"
+        return StrengthTrainingContract.builtInExercises.first { $0.id == requestedID }
+        #else
+        return nil
+        #endif
+    }
 
     private var massUnit: MassUnit {
         UnitPrefs.resolveMass(

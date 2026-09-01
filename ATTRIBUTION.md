@@ -49,6 +49,10 @@ remains available as a fallback.
 - **GRDB.swift** (`groue/GRDB.swift`) — SQLite persistence (via Swift Package Manager).
 - **MarkdownUI** (`gonzalezreal/swift-markdown-ui`) — renders the AI Coach's Markdown
   replies (via Swift Package Manager).
+- **Three.js** (`mrdoob/three.js`) — renders NOOP's offline interactive strength
+  exercise guidance. MIT License.
+- **Lucide** (`lucide-icons/lucide`) — supplies controls within the offline strength
+  exercise viewer. ISC License; portions derived from Feather are MIT licensed.
 
 The complete resolved runtime dependency inventory and required license texts
 are generated into [`NOTICE`](NOTICE). Those independent dependencies remain

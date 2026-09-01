@@ -45,19 +45,94 @@ enum class StrengthExerciseMotionProfile {
     GENERIC,
 }
 
+/** Stable visual identities for every exercise in NOOP's built-in catalog. */
+enum class StrengthExerciseAnimationVariant(val exerciseId: String) {
+    BACK_SQUAT("barbell_back_squat"),
+    BENCH_PRESS("barbell_bench_press"),
+    DEADLIFT("conventional_deadlift"),
+    OVERHEAD_PRESS("overhead_press"),
+    BENT_OVER_ROW("bent_over_row"),
+    PULL_UP("pull_up"),
+    LAT_PULLDOWN("lat_pulldown"),
+    LEG_PRESS("leg_press"),
+    ROMANIAN_DEADLIFT("romanian_deadlift"),
+    DUMBBELL_LUNGE("dumbbell_lunge"),
+    BICEPS_CURL("biceps_curl"),
+    TRICEPS_PUSHDOWN("triceps_pushdown"),
+    PLANK("plank"),
+    FRONT_SQUAT("barbell_front_squat"),
+    GOBLET_SQUAT("goblet_squat"),
+    HACK_SQUAT("hack_squat"),
+    LEG_EXTENSION("leg_extension"),
+    LYING_LEG_CURL("lying_leg_curl"),
+    HIP_THRUST("barbell_hip_thrust"),
+    GLUTE_BRIDGE("glute_bridge"),
+    BULGARIAN_SPLIT_SQUAT("bulgarian_split_squat"),
+    WALKING_LUNGE("walking_lunge"),
+    STANDING_CALF_RAISE("standing_calf_raise"),
+    SEATED_CALF_RAISE("seated_calf_raise"),
+    INCLINE_BENCH_PRESS("incline_barbell_bench_press"),
+    DUMBBELL_BENCH_PRESS("dumbbell_bench_press"),
+    PUSH_UP("push_up"),
+    CHEST_FLY("chest_fly"),
+    CABLE_CROSSOVER("cable_crossover"),
+    MACHINE_CHEST_PRESS("machine_chest_press"),
+    ONE_ARM_DUMBBELL_ROW("one_arm_dumbbell_row"),
+    SEATED_CABLE_ROW("seated_cable_row"),
+    CHEST_SUPPORTED_ROW("chest_supported_row"),
+    CHIN_UP("chin_up"),
+    FACE_PULL("face_pull"),
+    DUMBBELL_SHOULDER_PRESS("dumbbell_shoulder_press"),
+    LATERAL_RAISE("lateral_raise"),
+    REAR_DELT_FLY("rear_delt_fly"),
+    HAMMER_CURL("hammer_curl"),
+    PREACHER_CURL("preacher_curl"),
+    SKULL_CRUSHER("skull_crusher"),
+    OVERHEAD_TRICEPS_EXTENSION("overhead_triceps_extension"),
+    DIP("parallel_bar_dip"),
+    HANGING_LEG_RAISE("hanging_leg_raise"),
+    CABLE_CRUNCH("cable_crunch"),
+    SIDE_PLANK("side_plank"),
+    AB_WHEEL_ROLLOUT("ab_wheel_rollout"),
+    FARMERS_CARRY("farmers_carry"),
+    KETTLEBELL_SWING("kettlebell_swing"),
+    BACK_EXTENSION("back_extension"),
+    BAND_PULL_APART("band_pull_apart"),
+    RESISTANCE_BAND_ROW("resistance_band_row"),
+    TREADMILL_RUN("treadmill_run"),
+    INDOOR_CYCLING("indoor_cycling"),
+    ROWING_ERGOMETER("rowing_ergometer"),
+    STAIR_CLIMBER("stair_climber"),
+    ;
+
+    companion object {
+        private val byExerciseId = entries.associateBy { it.exerciseId }
+
+        fun forExerciseId(exerciseId: String): StrengthExerciseAnimationVariant? =
+            byExerciseId[exerciseId]
+    }
+}
+
 data class StrengthExerciseGuide(
     val profile: StrengthExerciseMotionProfile,
+    val animationVariant: StrengthExerciseAnimationVariant?,
     val cycleDurationSeconds: Float,
     val isExerciseSpecific: Boolean,
 )
 
 object StrengthExerciseGuidance {
     fun guide(exercise: StrengthExerciseRow): StrengthExerciseGuide {
+        val animationVariant = if (exercise.isCustom) {
+            null
+        } else {
+            StrengthExerciseAnimationVariant.forExerciseId(exercise.id)
+        }
         val profile = if (exercise.isCustom) fallbackProfile(exercise) else builtInProfile(exercise)
         return StrengthExerciseGuide(
             profile = profile,
+            animationVariant = animationVariant,
             cycleDurationSeconds = cycleDuration(profile),
-            isExerciseSpecific = !exercise.isCustom &&
+            isExerciseSpecific = animationVariant != null &&
                 profile != StrengthExerciseMotionProfile.GENERIC,
         )
     }

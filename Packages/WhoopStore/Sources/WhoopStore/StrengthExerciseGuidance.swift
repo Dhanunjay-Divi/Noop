@@ -44,17 +44,84 @@ public enum StrengthExerciseMotionProfile: String, CaseIterable, Codable, Sendab
     case generic
 }
 
+/// Stable visual identities for every exercise in NOOP's built-in catalog.
+///
+/// The raw value deliberately matches the persisted exercise id. Renderers use this identity to
+/// specialize stance, equipment, camera angle, and motion while custom exercises continue to use a
+/// semantic motion-profile fallback.
+public enum StrengthExerciseAnimationVariant: String, CaseIterable, Codable, Sendable {
+    case backSquat = "barbell_back_squat"
+    case benchPress = "barbell_bench_press"
+    case deadlift = "conventional_deadlift"
+    case overheadPress = "overhead_press"
+    case bentOverRow = "bent_over_row"
+    case pullUp = "pull_up"
+    case latPulldown = "lat_pulldown"
+    case legPress = "leg_press"
+    case romanianDeadlift = "romanian_deadlift"
+    case dumbbellLunge = "dumbbell_lunge"
+    case bicepsCurl = "biceps_curl"
+    case tricepsPushdown = "triceps_pushdown"
+    case plank
+    case frontSquat = "barbell_front_squat"
+    case gobletSquat = "goblet_squat"
+    case hackSquat = "hack_squat"
+    case legExtension = "leg_extension"
+    case lyingLegCurl = "lying_leg_curl"
+    case hipThrust = "barbell_hip_thrust"
+    case gluteBridge = "glute_bridge"
+    case bulgarianSplitSquat = "bulgarian_split_squat"
+    case walkingLunge = "walking_lunge"
+    case standingCalfRaise = "standing_calf_raise"
+    case seatedCalfRaise = "seated_calf_raise"
+    case inclineBenchPress = "incline_barbell_bench_press"
+    case dumbbellBenchPress = "dumbbell_bench_press"
+    case pushUp = "push_up"
+    case chestFly = "chest_fly"
+    case cableCrossover = "cable_crossover"
+    case machineChestPress = "machine_chest_press"
+    case oneArmDumbbellRow = "one_arm_dumbbell_row"
+    case seatedCableRow = "seated_cable_row"
+    case chestSupportedRow = "chest_supported_row"
+    case chinUp = "chin_up"
+    case facePull = "face_pull"
+    case dumbbellShoulderPress = "dumbbell_shoulder_press"
+    case lateralRaise = "lateral_raise"
+    case rearDeltFly = "rear_delt_fly"
+    case hammerCurl = "hammer_curl"
+    case preacherCurl = "preacher_curl"
+    case skullCrusher = "skull_crusher"
+    case overheadTricepsExtension = "overhead_triceps_extension"
+    case dip = "parallel_bar_dip"
+    case hangingLegRaise = "hanging_leg_raise"
+    case cableCrunch = "cable_crunch"
+    case sidePlank = "side_plank"
+    case abWheelRollout = "ab_wheel_rollout"
+    case farmersCarry = "farmers_carry"
+    case kettlebellSwing = "kettlebell_swing"
+    case backExtension = "back_extension"
+    case bandPullApart = "band_pull_apart"
+    case resistanceBandRow = "resistance_band_row"
+    case treadmillRun = "treadmill_run"
+    case indoorCycling = "indoor_cycling"
+    case rowingErgometer = "rowing_ergometer"
+    case stairClimber = "stair_climber"
+}
+
 public struct StrengthExerciseGuide: Equatable, Sendable {
     public let profile: StrengthExerciseMotionProfile
+    public let animationVariant: StrengthExerciseAnimationVariant?
     public let cycleDuration: TimeInterval
     public let isExerciseSpecific: Bool
 
     public init(
         profile: StrengthExerciseMotionProfile,
+        animationVariant: StrengthExerciseAnimationVariant?,
         cycleDuration: TimeInterval,
         isExerciseSpecific: Bool
     ) {
         self.profile = profile
+        self.animationVariant = animationVariant
         self.cycleDuration = cycleDuration
         self.isExerciseSpecific = isExerciseSpecific
     }
@@ -62,13 +129,17 @@ public struct StrengthExerciseGuide: Equatable, Sendable {
 
 public enum StrengthExerciseGuidance {
     public static func guide(for exercise: StrengthExerciseRow) -> StrengthExerciseGuide {
+        let animationVariant = exercise.isCustom
+            ? nil
+            : StrengthExerciseAnimationVariant(rawValue: exercise.id)
         let profile = exercise.isCustom
             ? fallbackProfile(for: exercise)
             : builtInProfile(for: exercise)
         return StrengthExerciseGuide(
             profile: profile,
+            animationVariant: animationVariant,
             cycleDuration: cycleDuration(for: profile),
-            isExerciseSpecific: !exercise.isCustom && profile != .generic
+            isExerciseSpecific: animationVariant != nil && profile != .generic
         )
     }
 
