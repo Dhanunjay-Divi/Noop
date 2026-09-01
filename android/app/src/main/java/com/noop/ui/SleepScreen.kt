@@ -2560,12 +2560,21 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
             SectionHeader(
                 "Sleep Stress",
                 overline = "Overnight load",
-                trailing = result?.let {
-                    "${(it.fraction(SleepStress.Band.HIGH) * 100).roundToInt()}% high"
-                },
+                trailing = null,
             )
 
             if (result != null) {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                ) {
+                    Text(
+                        "${(result.fraction(SleepStress.Band.HIGH) * 100).roundToInt()}%",
+                        style = NoopType.number(42f),
+                        color = Palette.textPrimary,
+                    )
+                    Text("high stress", style = NoopType.subhead, color = Palette.textTertiary)
+                }
                 SleepStressTrace(result, window)
                 SleepStressBandRow(
                     "High",
@@ -2595,7 +2604,7 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp),
+                        .height(180.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -2630,7 +2639,7 @@ private fun SleepStressTrace(result: SleepStress.Result, window: SleepStressWind
             Column(
                 modifier = Modifier
                     .width(18.dp)
-                    .height(150.dp),
+                    .height(230.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.End,
             ) {
@@ -2641,7 +2650,7 @@ private fun SleepStressTrace(result: SleepStress.Result, window: SleepStressWind
             Canvas(
                 modifier = Modifier
                     .weight(1f)
-                    .height(150.dp),
+                    .height(230.dp),
             ) {
                 val bandHeight = size.height / 3f
                 drawRect(
@@ -2739,7 +2748,7 @@ private fun SleepStressBandRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(Metrics.space8)
+                .height(14.dp)
                 .clip(RoundedCornerShape(Metrics.cornerPill))
                 .background(Palette.surfaceInset),
         ) {

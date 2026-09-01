@@ -824,15 +824,21 @@ struct SleepView: View {
         let result = finished ? loadedSleepStress?.result : nil
 
         NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
-            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+            VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 SectionHeader(
                     "Sleep Stress",
                     overline: "Overnight load",
-                    trailing: result.map {
-                        "\(Int(($0.fraction(in: .high) * 100).rounded()))% high"
-                    })
+                    trailing: nil)
 
                 if let result {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(Int((result.fraction(in: .high) * 100).rounded()))%")
+                            .font(StrandFont.number(42))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("high stress")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                     sleepStressTrace(result, window: window)
                     sleepStressBandRow("High", band: .high, color: StrandPalette.statusCritical, result: result)
                     sleepStressBandRow("Medium", band: .medium, color: StrandPalette.statusPositive, result: result)
@@ -847,7 +853,7 @@ struct SleepView: View {
                          : "Reading overnight signals...")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textTertiary)
-                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                        .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
                         .multilineTextAlignment(.center)
                 }
             }
@@ -897,7 +903,7 @@ struct SleepView: View {
                 }
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
-                .frame(width: 14, height: 150)
+                .frame(width: 14, height: 230)
 
                 Canvas { context, size in
                     let bandHeight = size.height / 3
@@ -943,7 +949,7 @@ struct SleepView: View {
                         with: .color(StrandPalette.textPrimary),
                         style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 }
-                .frame(height: 150)
+                .frame(height: 230)
             }
 
             HStack {
@@ -987,7 +993,7 @@ struct SleepView: View {
                         .frame(width: proxy.size.width * CGFloat(fraction))
                 }
             }
-            .frame(height: 8)
+            .frame(height: 14)
         }
         .accessibilityElement(children: .combine)
     }

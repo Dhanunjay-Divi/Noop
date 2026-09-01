@@ -1798,8 +1798,10 @@ private struct ThreadProgress: View {
             GeometryReader { geo in
                 let cycle = timeline.date.timeIntervalSinceReferenceDate
                     .truncatingRemainder(dividingBy: 2.4) / 2.4
-                let phase = reduceMotion ? min(max(progress, 0), 1) : cycle
-                let pulseWidth: CGFloat = 54
+                let phase = reduceMotion ? 0.5 : (cycle <= 0.5 ? cycle * 2 : (1 - cycle) * 2)
+                let fillWidth = max(6, geo.size.width * min(max(progress, 0), 1))
+                let pulseWidth = min(54, max(6, fillWidth * 0.55))
+                let pulseOffset = phase * max(0, fillWidth - pulseWidth)
 
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -1807,20 +1809,24 @@ private struct ThreadProgress: View {
                     Capsule()
                         .fill(LinearGradient(gradient: StrandPalette.recoveryGradient,
                                              startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(6, geo.size.width * progress))
+                        .frame(width: fillWidth)
                         .shadow(color: StrandPalette.recovery078.opacity(0.45), radius: 5)
                         .animation(StrandMotion.gentle, value: progress)
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.clear, .white.opacity(0.68), .clear],
-                                startPoint: .leading,
-                                endPoint: .trailing
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.clear, .white.opacity(0.68), .clear],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .frame(width: pulseWidth)
-                        .offset(x: phase * (geo.size.width + pulseWidth) - pulseWidth)
-                        .opacity(reduceMotion ? 0.24 : 1)
+                            .frame(width: pulseWidth)
+                            .offset(x: pulseOffset)
+                            .opacity(reduceMotion ? 0.24 : 1)
+                    }
+                    .frame(width: fillWidth, alignment: .leading)
+                    .clipShape(Capsule())
                 }
                 .clipShape(Capsule())
             }

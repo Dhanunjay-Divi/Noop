@@ -411,7 +411,7 @@ private fun OnboardingFooter(
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 2_400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
+            repeatMode = RepeatMode.Reverse,
         ),
         label = "onboarding thread pulse phase",
     )
@@ -447,8 +447,8 @@ private fun OnboardingFooter(
                 size = Size(fillWidth, size.height),
                 cornerRadius = CornerRadius(radius, radius),
             )
-            val pulseWidth = size.width.coerceAtMost(72.dp.toPx())
-            val pulseStart = pulsePhase * (size.width + pulseWidth) - pulseWidth
+            val pulseWidth = minOf(72.dp.toPx(), maxOf(size.height, fillWidth * 0.55f))
+            val pulseStart = pulsePhase * (fillWidth - pulseWidth).coerceAtLeast(0f)
             drawRect(
                 brush = Brush.horizontalGradient(
                     colors = listOf(
