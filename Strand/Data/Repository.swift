@@ -1601,6 +1601,49 @@ final class Repository: ObservableObject {
         return byTs.values.sorted { $0.ts < $1.ts }
     }
 
+    /// Clean R-R intervals over the active-strap/canonical union. Earlier source ids win, while a
+    /// multiset merge preserves legitimate equal intervals emitted within the same whole-second stamp.
+    func rrIntervals(from: Int, to: Int, limit: Int = 200_000) async -> [RRInterval] {
+        guard let store = await ensureStore() else { return [] }
+        guard deviceId != canonicalDeviceId else {
+            return (try? await store.rrIntervals(
+                deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
+        }
+
+        struct Key: Hashable {
+            let ts: Int
+            let rrMs: Int
+            let source: Int?
+        }
+
+        var merged: [(order: Int, sample: RRInterval)] = []
+        var maxOccurrences: [Key: Int] = [:]
+        var order = 0
+        for id in importedReadIds {
+            let rows = (try? await store.rrIntervals(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+            var sourceOccurrences: [Key: Int] = [:]
+            for sample in rows {
+                let key = Key(
+                    ts: sample.ts,
+                    rrMs: sample.rrMs,
+                    source: sample.srcChannel?.rawValue)
+                let occurrence = sourceOccurrences[key, default: 0] + 1
+                sourceOccurrences[key] = occurrence
+                if occurrence > maxOccurrences[key, default: 0] {
+                    merged.append((order, sample))
+                    order += 1
+                }
+            }
+            for (key, count) in sourceOccurrences {
+                maxOccurrences[key] = max(maxOccurrences[key, default: 0], count)
+            }
+        }
+        return merged
+            .sorted { ($0.sample.ts, $0.order) < ($1.sample.ts, $1.order) }
+            .map(\.sample)
+    }
+
     /// Raw motion over the active-strap/canonical union, de-duplicated by timestamp with the active
     /// device winning. Auto-workout confirmation uses this when the device actually banks motion;
     /// HR-only devices simply return an empty list and retain the conservative HR fallback.

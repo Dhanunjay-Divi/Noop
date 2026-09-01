@@ -1560,26 +1560,10 @@ private struct SafetyContactsStep: View {
 // MARK: - Done
 
 private struct DoneStep: View {
-    @State private var appear = false
-
     var body: some View {
         GeometryReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 26) {
-                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                        .font(.system(size: 62, weight: .light))
-                        .foregroundStyle(
-                            LinearGradient(
-                                gradient: StrandPalette.recoveryGradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 116, height: 116)
-                        .scaleEffect(appear ? 1 : 0.82)
-                        .opacity(appear ? 1 : 0)
-                        .accessibilityHidden(true)
-
+                VStack(spacing: 12) {
                     VStack(spacing: 12) {
                         Text("Your thread starts here.")
                             .font(StrandFont.title1)
@@ -1595,7 +1579,6 @@ private struct DoneStep: View {
                             .accessibilityIdentifier("noop.onboarding.done.body")
                     }
                     .frame(maxWidth: 420)
-                    .opacity(appear ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, minHeight: max(360, proxy.size.height - 28))
                 .padding(.horizontal, 4)
@@ -1603,7 +1586,6 @@ private struct DoneStep: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .onAppear { withAnimation(StrandMotion.hero) { appear = true } }
     }
 }
 
@@ -1809,19 +1791,41 @@ private struct RadarSweep: View {
 
 private struct ThreadProgress: View {
     var progress: Double           // 0...1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(StrandPalette.hairline)
-                Capsule()
-                    .fill(LinearGradient(gradient: StrandPalette.recoveryGradient,
-                                         startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(6, geo.size.width * progress))
-                    .shadow(color: StrandPalette.recovery078.opacity(0.6), radius: 6)
-                    .animation(StrandMotion.gentle, value: progress)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
+            GeometryReader { geo in
+                let cycle = timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 2.4) / 2.4
+                let phase = reduceMotion ? min(max(progress, 0), 1) : cycle
+                let pulseWidth: CGFloat = 54
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(StrandPalette.hairline)
+                    Capsule()
+                        .fill(LinearGradient(gradient: StrandPalette.recoveryGradient,
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(6, geo.size.width * progress))
+                        .shadow(color: StrandPalette.recovery078.opacity(0.45), radius: 5)
+                        .animation(StrandMotion.gentle, value: progress)
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [.clear, .white.opacity(0.68), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: pulseWidth)
+                        .offset(x: phase * (geo.size.width + pulseWidth) - pulseWidth)
+                        .opacity(reduceMotion ? 0.24 : 1)
+                }
+                .clipShape(Capsule())
             }
         }
+        .accessibilityHidden(true)
     }
 }
 

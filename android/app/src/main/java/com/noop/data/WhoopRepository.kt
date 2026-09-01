@@ -1217,6 +1217,37 @@ class WhoopRepository private constructor(
     suspend fun rrIntervals(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.rrIntervals(deviceId, from, to, limit)
 
+    /**
+     * Clean R-R intervals over the active-strap/canonical union. Earlier source ids win, while a
+     * multiset merge preserves legitimate equal intervals emitted within one whole-second stamp.
+     */
+    suspend fun rrIntervalsUnion(
+        activeDeviceId: String,
+        from: Long,
+        to: Long,
+        limit: Int = DEFAULT_LIMIT,
+    ): List<RrInterval> {
+        data class Key(val ts: Long, val rrMs: Int, val source: Int?)
+
+        val merged = ArrayList<RrInterval>()
+        val maxOccurrences = HashMap<Key, Int>()
+        for (id in importedSourceIds(activeDeviceId)) {
+            val sourceOccurrences = HashMap<Key, Int>()
+            for (sample in dao.rrIntervals(id, from, to, limit)) {
+                val key = Key(sample.ts, sample.rrMs, sample.srcChannel)
+                val occurrence = (sourceOccurrences[key] ?: 0) + 1
+                sourceOccurrences[key] = occurrence
+                if (occurrence > (maxOccurrences[key] ?: 0)) merged.add(sample)
+            }
+            for ((key, count) in sourceOccurrences) {
+                maxOccurrences[key] = maxOf(maxOccurrences[key] ?: 0, count)
+            }
+        }
+        return merged.sortedWith(
+            compareBy<RrInterval>({ it.ts }, { it.ord ?: Int.MAX_VALUE }, { it.rrMs }, { it.seq })
+        )
+    }
+
     suspend fun events(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.events(deviceId, from, to, limit)
 

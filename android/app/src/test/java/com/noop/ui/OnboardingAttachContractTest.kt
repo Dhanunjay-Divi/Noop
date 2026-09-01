@@ -57,22 +57,24 @@ class OnboardingAttachContractTest {
         assertFalse(step.contains("Switch("))
     }
 
-    @Test fun completionUsesTheCenteredNoopThreadMark() {
+    @Test fun progressUsesTheSharedThreadPulseInsteadOfACompletionMark() {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val onboarding = source(userDir, "OnboardingScreen.kt").readText()
         val doneStep = onboarding
             .substringAfter("private fun DoneStep()")
-            .substringBefore("@Composable\nprivate fun CompletionThreadMark()")
-        val threadMark = onboarding
-            .substringAfter("private fun CompletionThreadMark()")
             .substringBefore("// MARK: - Pieces")
+        val footer = onboarding
+            .substringAfter("private fun OnboardingFooter(")
+            .substringBefore("@Composable\nprivate fun OnboardingContent(")
 
-        assertTrue(doneStep.contains("CompletionThreadMark()"))
+        assertFalse(doneStep.contains("CompletionThreadMark()"))
+        assertFalse(onboarding.contains("private fun CompletionThreadMark()"))
         assertTrue(doneStep.contains("horizontalAlignment = Alignment.CenterHorizontally"))
         assertTrue(doneStep.contains("textAlign = TextAlign.Center"))
-        assertTrue(threadMark.contains("Canvas("))
-        assertTrue(threadMark.contains(".size(116.dp)"))
-        assertTrue(threadMark.contains("Brush.linearGradient("))
+        assertTrue(footer.contains("rememberInfiniteTransition"))
+        assertTrue(footer.contains("pulsePhase"))
+        assertTrue(footer.contains("Canvas("))
+        assertTrue(footer.contains("Brush.horizontalGradient("))
     }
 
     private fun source(userDir: String, name: String): File =

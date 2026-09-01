@@ -13,6 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -82,7 +87,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -398,6 +405,16 @@ private fun OnboardingFooter(
         animationSpec = tween(Motion.durationStandard),
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
+    val pulseTransition = rememberInfiniteTransition(label = "onboarding thread pulse")
+    val pulsePhase by pulseTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2_400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "onboarding thread pulse phase",
+    )
 
     Column(
         modifier = Modifier
@@ -406,19 +423,44 @@ private fun OnboardingFooter(
             .padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Box(
+        Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Palette.hairline),
+                .height(3.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(animated)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(50))
-                .background(Palette.accent),
+            val radius = size.height / 2f
+            drawRoundRect(
+                color = Palette.hairline,
+                size = size,
+                cornerRadius = CornerRadius(radius, radius),
+            )
+            val fillWidth = (size.width * animated).coerceAtLeast(size.height)
+            drawRoundRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Palette.statusCritical,
+                        Palette.statusWarning,
+                        Palette.statusPositive,
+                    ),
+                    endX = size.width,
+                ),
+                size = Size(fillWidth, size.height),
+                cornerRadius = CornerRadius(radius, radius),
+            )
+            val pulseWidth = size.width.coerceAtMost(72.dp.toPx())
+            val pulseStart = pulsePhase * (size.width + pulseWidth) - pulseWidth
+            drawRect(
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        Color.White.copy(alpha = 0.68f),
+                        Color.Transparent,
+                    ),
+                    startX = pulseStart,
+                    endX = pulseStart + pulseWidth,
+                ),
+                topLeft = Offset(pulseStart, 0f),
+                size = Size(pulseWidth, size.height),
             )
         }
         Button(
@@ -1409,8 +1451,6 @@ private fun DoneStep() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            CompletionThreadMark()
-            Spacer(Modifier.height(26.dp))
             Text(
                 uiString(R.string.l10n_onboarding_screen_your_thread_starts_here_acdccf92),
                 style = NoopType.title1,
@@ -1427,53 +1467,6 @@ private fun DoneStep() {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-    }
-}
-
-@Composable
-private fun CompletionThreadMark() {
-    val startColor = Palette.statusCritical
-    val middleColor = Palette.statusWarning
-    val endColor = Palette.statusPositive
-    Canvas(
-        modifier = Modifier.size(116.dp),
-    ) {
-        val strokeWidth = 6.dp.toPx()
-        val radius = 12.dp.toPx()
-        val start = Offset(size.width * 0.34f, size.height * 0.28f)
-        val end = Offset(size.width * 0.66f, size.height * 0.72f)
-        val path = Path().apply {
-            moveTo(start.x, start.y + radius)
-            cubicTo(
-                start.x,
-                size.height * 0.50f,
-                end.x,
-                size.height * 0.46f,
-                end.x,
-                end.y - radius,
-            )
-        }
-        drawPath(
-            path = path,
-            brush = Brush.linearGradient(
-                colors = listOf(startColor, middleColor, endColor),
-                start = start,
-                end = end,
-            ),
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-        )
-        drawCircle(
-            color = startColor,
-            radius = radius,
-            center = start,
-            style = Stroke(width = strokeWidth),
-        )
-        drawCircle(
-            color = endColor,
-            radius = radius,
-            center = end,
-            style = Stroke(width = strokeWidth),
-        )
     }
 }
 

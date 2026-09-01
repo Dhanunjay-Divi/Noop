@@ -87,10 +87,13 @@ import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.SleepDebtLedger
 import com.noop.analytics.SleepEditGuard
 import com.noop.analytics.SleepStageTotals
+import com.noop.analytics.SleepStress
 import com.noop.data.DismissedSleep
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.text.SimpleDateFormat
@@ -381,6 +384,48 @@ fun SleepScreen(
             detailedStageDays = detailedStageDays)
     }
     val display = remember(model, night) { heroDisplay(model, night) }
+    val sleepStressWindow = remember(night, days) {
+        night?.let {
+            SleepStressWindow(
+                startTs = it.heroOnsetTs ?: it.session.effectiveStartTs,
+                endTs = it.heroWakeTs ?: it.session.endTs,
+            )
+        }
+    }
+    var loadedSleepStress by remember { mutableStateOf<LoadedSleepStress?>(null) }
+    LaunchedEffect(sleepStressWindow, days, vm.activeStrapId) {
+        loadedSleepStress = null
+        val window = sleepStressWindow ?: return@LaunchedEffect
+        if (window.endTs <= window.startTs) {
+            loadedSleepStress = LoadedSleepStress(window, null)
+            return@LaunchedEffect
+        }
+        val heartRate = runCatching {
+            vm.repo.hrSamplesUnion(
+                vm.activeStrapId,
+                window.startTs,
+                window.endTs,
+                limit = 200_000,
+            )
+        }.getOrDefault(emptyList())
+        val intervals = runCatching {
+            vm.repo.rrIntervalsUnion(
+                vm.activeStrapId,
+                window.startTs,
+                window.endTs,
+                limit = 200_000,
+            )
+        }.getOrDefault(emptyList())
+        val stress = withContext(Dispatchers.Default) {
+            SleepStress.analyze(
+                heartRate,
+                intervals,
+                window.startTs,
+                window.endTs,
+            )
+        }
+        loadedSleepStress = LoadedSleepStress(window, stress)
+    }
 
     // #940: ONE stage-less SELECTED day (typically the newest, after an impossible hand-edit staged
     // it all-awake) must not hide the whole tab's history. The tiles / ledger / trends are
@@ -667,6 +712,29 @@ fun SleepScreen(
                 independentlyStagedImport = night?.independentlyStagedImport == true,
                 canPublishDetailedStages = canPublishSelectedStages,
             )
+            }
+            val selectedNight = night
+            val selectedStressWindow = sleepStressWindow
+            if (selectedNight != null && selectedStressWindow != null) {
+                val wakeEvents = if (canPublishSelectedStages) {
+                    days.lastOrNull { it.day == selectedNight.dayKey }?.disturbances
+                } else {
+                    null
+                }
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                item {
+                    WakeEventsCard(
+                        count = wakeEvents,
+                        hasStageEvidence = canPublishSelectedStages,
+                    )
+                }
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                item {
+                    SleepStressCard(
+                        window = selectedStressWindow,
+                        loaded = loadedSleepStress?.takeIf { it.window == selectedStressWindow },
+                    )
+                }
             }
             // Tiles / ledger / trends read the FULL-history model (#940): they stay up when only the
             // selected day's model failed to build, exactly as iOS keeps them while browsing.
@@ -2432,6 +2500,259 @@ private fun NightNavHeader(
                 }
             },
         )
+    }
+}
+
+private data class SleepStressWindow(val startTs: Long, val endTs: Long)
+
+private data class LoadedSleepStress(
+    val window: SleepStressWindow,
+    val result: SleepStress.Result?,
+)
+
+@Composable
+private fun WakeEventsCard(count: Int?, hasStageEvidence: Boolean) {
+    NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics {
+                    contentDescription = if (count != null) {
+                        "$count stage-detected wake events"
+                    } else {
+                        "Wake events unavailable"
+                    }
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Bedtime,
+                contentDescription = null,
+                tint = Palette.restColor,
+                modifier = Modifier.size(34.dp),
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Wake Events", style = NoopType.headline, color = Palette.textPrimary)
+                Text(
+                    if (hasStageEvidence) "Stage-detected awakenings"
+                    else "Needs verified stage evidence",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            Text(
+                count?.toString() ?: "-",
+                style = NoopType.chartValue,
+                color = Palette.textPrimary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress?) {
+    val finished = loaded?.window == window
+    val result = if (finished) loaded?.result else null
+
+    NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+            SectionHeader(
+                "Sleep Stress",
+                overline = "Overnight load",
+                trailing = result?.let {
+                    "${(it.fraction(SleepStress.Band.HIGH) * 100).roundToInt()}% high"
+                },
+            )
+
+            if (result != null) {
+                SleepStressTrace(result, window)
+                SleepStressBandRow(
+                    "High",
+                    SleepStress.Band.HIGH,
+                    Palette.statusCritical,
+                    result,
+                )
+                SleepStressBandRow(
+                    "Medium",
+                    SleepStress.Band.MEDIUM,
+                    Palette.statusPositive,
+                    result,
+                )
+                SleepStressBandRow(
+                    "Low",
+                    SleepStress.Band.LOW,
+                    Palette.restBright,
+                    result,
+                )
+                Text(
+                    "NOOP estimate from five-minute heart-rate and HRV windows · " +
+                        "${(result.coverageFraction * 100).roundToInt()}% coverage",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (finished) {
+                            "Sleep Stress needs dense heart-rate and clean R-R coverage for this night."
+                        } else {
+                            "Reading overnight signals..."
+                        },
+                        style = NoopType.subhead,
+                        color = Palette.textTertiary,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepStressTrace(result: SleepStress.Result, window: SleepStressWindow) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription =
+                    "Sleep Stress timeline, " +
+                    "${(result.fraction(SleepStress.Band.HIGH) * 100).roundToInt()} percent high"
+            },
+        verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+            Column(
+                modifier = Modifier
+                    .width(18.dp)
+                    .height(150.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.End,
+            ) {
+                listOf("3", "2", "1", "0").forEach {
+                    Text(it, style = NoopType.footnote, color = Palette.textTertiary)
+                }
+            }
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(150.dp),
+            ) {
+                val bandHeight = size.height / 3f
+                drawRect(
+                    color = Palette.statusCritical.copy(alpha = 0.055f),
+                    size = Size(size.width, bandHeight),
+                )
+                drawRect(
+                    color = Palette.statusPositive.copy(alpha = 0.045f),
+                    topLeft = Offset(0f, bandHeight),
+                    size = Size(size.width, bandHeight),
+                )
+                drawRect(
+                    color = Palette.restBright.copy(alpha = 0.05f),
+                    topLeft = Offset(0f, bandHeight * 2f),
+                    size = Size(size.width, bandHeight),
+                )
+                for (value in 0..3) {
+                    val y = size.height * (1f - value / 3f)
+                    drawLine(
+                        color = Palette.hairline.copy(alpha = 0.8f),
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
+
+                val span = (window.endTs - window.startTs).coerceAtLeast(1L)
+                val path = Path()
+                var previousStart: Long? = null
+                for (point in result.points) {
+                    val x = size.width * (point.startTs - window.startTs).toFloat() / span.toFloat()
+                    val y = size.height * (1f - (point.level / 3.0).toFloat())
+                    val previous = previousStart
+                    if (previous != null &&
+                        point.startTs - previous <= SleepStress.BUCKET_SECONDS * 2
+                    ) {
+                        path.lineTo(x, y)
+                    } else {
+                        path.moveTo(x, y)
+                    }
+                    previousStart = point.startTs
+                }
+                drawPath(
+                    path = path,
+                    color = Palette.textPrimary,
+                    style = Stroke(
+                        width = 2.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                    ),
+                )
+            }
+        }
+        val formatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+        Row(modifier = Modifier.fillMaxWidth().padding(start = 26.dp)) {
+            Text(
+                formatter.format(Date(window.startTs * 1_000L)),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                formatter.format(Date(window.endTs * 1_000L)),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SleepStressBandRow(
+    label: String,
+    band: SleepStress.Band,
+    color: Color,
+    result: SleepStress.Result,
+) {
+    val fraction = result.fraction(band)
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Overline(label)
+            Spacer(Modifier.width(Metrics.space6))
+            Text(
+                "${(fraction * 100).roundToInt()}%",
+                style = NoopType.subhead,
+                color = color,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                durationText(result.durationSeconds(band) / 60.0),
+                style = NoopType.captionNumber,
+                color = Palette.textPrimary,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Metrics.space8)
+                .clip(RoundedCornerShape(Metrics.cornerPill))
+                .background(Palette.surfaceInset),
+        ) {
+            if (fraction > 0.0) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction.toFloat())
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(Metrics.cornerPill))
+                        .background(color),
+                )
+            }
+        }
     }
 }
 

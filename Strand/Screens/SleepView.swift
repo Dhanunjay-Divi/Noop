@@ -112,6 +112,9 @@ struct SleepView: View {
     /// Sleeping heart-rate for the displayed night (1-min buckets), for the WHOOP-style HR chart above
     /// the stage rows. Loaded once per night via `.task(id:)` on the stage card. (ryanAtriumAi #988)
     @State private var nightHR: [HRBucket] = []
+    /// Evidence-gated five-minute overnight autonomic load for the displayed night. The window key
+    /// prevents a previous night's result flashing while a browse or fresh sync is being loaded.
+    @State private var loadedSleepStress: LoadedSleepStress?
 
     /// The transient UNDO banner shown after a suppressing delete (#65). Non-nil for ~7 seconds: carries
     /// the snapshot needed to restore the deleted night into its ORIGINAL namespace and the window text
@@ -742,11 +745,15 @@ struct SleepView: View {
                 sleepWindowRow(model.night)
                 stageCard(model.night, intervals: model.intervals)
                 napSection(model.night)
+                wakeEventsCard(model.night)
+                sleepStressCard(model.night)
             } else if let night = navNight {
                 nightNavHeader(trailing: night.spanLabel)
                 sleepWindowRow(night)
                 stageCard(night, intervals: night.intervals)
                 napSection(night)
+                wakeEventsCard(night)
+                sleepStressCard(night)
             } else if let session = sessionRow(at: nightOffset) {
                 // Stage-less stub purely to reuse Night's date/time formatting.
                 let stub = Night(session: session, stages: Stages(awake: 0, light: 0, deep: 0, rem: 0),
@@ -767,6 +774,222 @@ struct SleepView: View {
         // Stale-highlight guard: browsing to another night clears the stage selection. Attached to
         // the always-present hero container (not a branch that gets swapped out mid-navigation).
         .onChangeCompat(of: nightOffset) { _ in selectedStage = nil }
+    }
+
+    /// Stage-derived awakenings for the selected night. Detailed-stage publication is the evidence
+    /// gate: a legacy aggregate cannot silently authorize a precise event count.
+    @ViewBuilder
+    private func wakeEventsCard(_ night: Night) -> some View {
+        let wakeDay = Self.finalLocalWakeDay(night.mainGroup)
+        let count = canPublishDetailedStages(for: night)
+            ? wakeDay.flatMap { day in repo.days.last(where: { $0.day == day })?.disturbances }
+            : nil
+
+        NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
+            HStack(spacing: NoopMetrics.cardInnerSpacing) {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(StrandFont.title2)
+                    .foregroundStyle(StrandPalette.restColor)
+                    .frame(width: 34, height: 34)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Wake Events")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(count == nil
+                         ? "Needs verified stage evidence"
+                         : "Stage-detected awakenings")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                Spacer(minLength: 8)
+                Text(count.map(String.init) ?? "-")
+                    .font(StrandFont.number(30))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// WHOOP-reference parity without pretending to reproduce its proprietary score: five-minute
+    /// windows need dense HR plus clean R-R-derived RMSSD, and the whole read fails closed below 60%.
+    @ViewBuilder
+    private func sleepStressCard(_ night: Night) -> some View {
+        let window = SleepStressWindow(
+            startTs: night.session.effectiveStartTs,
+            endTs: night.session.endTs,
+            refreshSeq: repo.refreshSeq)
+        let finished = loadedSleepStress?.window == window
+        let result = finished ? loadedSleepStress?.result : nil
+
+        NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                SectionHeader(
+                    "Sleep Stress",
+                    overline: "Overnight load",
+                    trailing: result.map {
+                        "\(Int(($0.fraction(in: .high) * 100).rounded()))% high"
+                    })
+
+                if let result {
+                    sleepStressTrace(result, window: window)
+                    sleepStressBandRow("High", band: .high, color: StrandPalette.statusCritical, result: result)
+                    sleepStressBandRow("Medium", band: .medium, color: StrandPalette.statusPositive, result: result)
+                    sleepStressBandRow("Low", band: .low, color: StrandPalette.restBright, result: result)
+
+                    Text("NOOP estimate from five-minute heart-rate and HRV windows · \(Int((result.coverageFraction * 100).rounded()))% coverage")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                } else {
+                    Text(finished
+                         ? "Sleep Stress needs dense heart-rate and clean R-R coverage for this night."
+                         : "Reading overnight signals...")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .task(id: window) {
+            loadedSleepStress = nil
+            guard window.endTs > window.startTs else {
+                loadedSleepStress = LoadedSleepStress(window: window, result: nil)
+                return
+            }
+            async let hr = repo.hrSamples(
+                from: window.startTs,
+                to: window.endTs,
+                limit: 200_000)
+            async let rr = repo.rrIntervals(
+                from: window.startTs,
+                to: window.endTs,
+                limit: 200_000)
+            let (heartRate, intervals) = await (hr, rr)
+            let stress = await Task.detached(priority: .utility) {
+                SleepStress.analyze(
+                    hr: heartRate,
+                    rr: intervals,
+                    startTs: window.startTs,
+                    endTs: window.endTs)
+            }.value
+            guard !Task.isCancelled else { return }
+            loadedSleepStress = LoadedSleepStress(window: window, result: stress)
+        }
+    }
+
+    @ViewBuilder
+    private func sleepStressTrace(
+        _ result: SleepStress.Result,
+        window: SleepStressWindow
+    ) -> some View {
+        VStack(spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack {
+                    Text("3")
+                    Spacer()
+                    Text("2")
+                    Spacer()
+                    Text("1")
+                    Spacer()
+                    Text("0")
+                }
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 14, height: 150)
+
+                Canvas { context, size in
+                    let bandHeight = size.height / 3
+                    context.fill(
+                        Path(CGRect(x: 0, y: 0, width: size.width, height: bandHeight)),
+                        with: .color(StrandPalette.statusCritical.opacity(0.055)))
+                    context.fill(
+                        Path(CGRect(x: 0, y: bandHeight, width: size.width, height: bandHeight)),
+                        with: .color(StrandPalette.statusPositive.opacity(0.045)))
+                    context.fill(
+                        Path(CGRect(x: 0, y: bandHeight * 2, width: size.width, height: bandHeight)),
+                        with: .color(StrandPalette.restBright.opacity(0.05)))
+
+                    for value in 0...3 {
+                        let y = size.height * (1 - CGFloat(value) / 3)
+                        var grid = Path()
+                        grid.move(to: CGPoint(x: 0, y: y))
+                        grid.addLine(to: CGPoint(x: size.width, y: y))
+                        context.stroke(
+                            grid,
+                            with: .color(StrandPalette.hairline.opacity(0.8)),
+                            lineWidth: 1)
+                    }
+
+                    let span = max(1, window.endTs - window.startTs)
+                    var line = Path()
+                    var previous: SleepStress.Point?
+                    for point in result.points {
+                        let x = size.width
+                            * CGFloat(point.startTs - window.startTs)
+                            / CGFloat(span)
+                        let y = size.height * (1 - CGFloat(point.level / 3))
+                        if let previous,
+                           point.startTs - previous.startTs <= SleepStress.bucketSeconds * 2 {
+                            line.addLine(to: CGPoint(x: x, y: y))
+                        } else {
+                            line.move(to: CGPoint(x: x, y: y))
+                        }
+                        previous = point
+                    }
+                    context.stroke(
+                        line,
+                        with: .color(StrandPalette.textPrimary),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+                .frame(height: 150)
+            }
+
+            HStack {
+                Text(Night.clockString(window.startTs))
+                Spacer()
+                Text(Night.clockString(window.endTs))
+            }
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.textTertiary)
+            .padding(.leading, 22)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Sleep Stress timeline, \(Int((result.fraction(in: .high) * 100).rounded())) percent high")
+    }
+
+    @ViewBuilder
+    private func sleepStressBandRow(
+        _ label: LocalizedStringKey,
+        band: SleepStress.Band,
+        color: Color,
+        result: SleepStress.Result
+    ) -> some View {
+        let fraction = result.fraction(in: band)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label).strandOverline()
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(color)
+                Spacer()
+                Text(durationText(Double(result.durationSeconds(in: band)) / 60))
+                    .font(StrandFont.number(17))
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(StrandPalette.surfaceInset)
+                    Capsule()
+                        .fill(color)
+                        .frame(width: proxy.size.width * CGFloat(fraction))
+                }
+            }
+            .frame(height: 8)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// Naps card (#508): each of the day's sleep blocks OTHER than the night's main block, individually
@@ -3126,6 +3349,17 @@ private struct SleepModel {
     /// Rolling 14-night sleep-debt ledger: Σ(slept − personal need) across the recent
     /// fortnight, with the per-night deltas behind it. Computed once per data change.
     let sleepDebtLedger: SleepDebtLedger
+}
+
+private struct SleepStressWindow: Hashable, Sendable {
+    let startTs: Int
+    let endTs: Int
+    let refreshSeq: Int
+}
+
+private struct LoadedSleepStress: Sendable {
+    let window: SleepStressWindow
+    let result: SleepStress.Result?
 }
 
 private struct Stages {
