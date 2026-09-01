@@ -42,6 +42,61 @@ final class StrengthTrainerContractTests: XCTestCase {
         XCTAssertFalse(editorSource.contains(".accessibilityElement(children: .combine)"))
     }
 
+    func testGuidedPlayerAndRichTodayPlanStayMounted() throws {
+        let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
+        let motion = try sourceText("Strand/Screens/StrengthExerciseMotionView.swift")
+
+        XCTAssertTrue(source.contains("StrengthExerciseMotionView(exercise: value.exercise)"))
+        XCTAssertTrue(source.contains("@State private var currentBlockID: String?"))
+        XCTAssertTrue(source.contains("finishTimedSet(id: setID, useTargetDuration: true)"))
+        XCTAssertTrue(source.contains("todayExercisePlans(for: routine, data: data)"))
+        XCTAssertTrue(source.contains("\"Start today’s workout\""))
+        XCTAssertTrue(source.contains("StrengthAdaptivePlanner.recommendation("))
+        XCTAssertTrue(source.contains("StrengthProgramBuilder("))
+        XCTAssertTrue(source.contains("sourceRoutineExerciseID"))
+        XCTAssertTrue(source.contains("updateRoutine: Bool"))
+        XCTAssertTrue(source.contains("AVSpeechSynthesizer()"))
+        XCTAssertTrue(source.contains("completePacedSet(id: setID)"))
+        XCTAssertTrue(source.contains("exercisePerformanceContext(for: value)"))
+        XCTAssertTrue(source.contains("@State private var exerciseGuide: StrengthExerciseRow?"))
+        XCTAssertTrue(source.contains("StrengthExerciseGuidePreview(exercise: exercise)"))
+        XCTAssertTrue(source.contains("exerciseGuide = plan.exercise"))
+        XCTAssertTrue(motion.contains("TimelineView("))
+        XCTAssertTrue(motion.contains("StrengthMotionRenderer.draw("))
+        XCTAssertTrue(motion.contains("drawMotionTrack("))
+        XCTAssertFalse(motion.contains("pose: ghost"))
+    }
+
+    func testInstructorProfileAndInteractiveBodyMapStayMounted() throws {
+        let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
+        let motion = try sourceText("Strand/Screens/StrengthExerciseMotionView.swift")
+        let planner = try sourceText(
+            "Packages/WhoopStore/Sources/WhoopStore/StrengthAdaptivePlanning.swift"
+        )
+        let progress = try sourceText(
+            "Packages/WhoopStore/Sources/WhoopStore/StrengthProgress.swift"
+        )
+
+        XCTAssertTrue(source.contains("StrengthProgramRequest("))
+        XCTAssertTrue(source.contains("\"strength.profile.experience\""))
+        XCTAssertTrue(source.contains("\"strength.profile.style\""))
+        XCTAssertTrue(source.contains("\"strength.profile.sessionMinutes\""))
+        XCTAssertTrue(source.contains("\"strength.profile.dayCount\""))
+        XCTAssertTrue(source.contains("\"strength.profile.weekdays\""))
+        XCTAssertTrue(source.contains("\"strength.profile.focusMuscles\""))
+        XCTAssertTrue(source.contains("@State private var didOfferProgramBuilder"))
+        XCTAssertTrue(source.contains("let draft = StrengthSessionSnapshot(session: session, sets: sets)"))
+        XCTAssertTrue(source.contains("muscleCoachSection(snapshot)"))
+        XCTAssertTrue(source.contains("StrengthBodyMapView("))
+        XCTAssertTrue(source.contains("startFocusSession("))
+        XCTAssertTrue(source.contains("selectedFocusExerciseIDs"))
+        XCTAssertTrue(motion.contains("enum StrengthBodyMapMode"))
+        XCTAssertTrue(motion.contains("StrengthBodySilhouette"))
+        XCTAssertTrue(planner.contains("public static func focusWorkout("))
+        XCTAssertTrue(progress.contains("recoveryWindowSeconds = 72 * 60 * 60"))
+        XCTAssertTrue(progress.contains("$0.setType != \"warmup\""))
+    }
+
     func testRoutineAndCustomEditorsCannotSwipeAwayUnsavedChanges() throws {
         let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
 

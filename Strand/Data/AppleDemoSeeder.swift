@@ -82,6 +82,11 @@ enum AppleDemoSeeder {
         guard requested else { return }
         seedDemoDeviceIfNeeded(into: store)
         await seedNutritionIfRequested(into: store)
+        do {
+            try await seedStrengthFixture(into: store)
+        } catch {
+            NSLog("AppleDemoSeeder: strength fixture failed - \(error)")
+        }
         let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
         guard existing.isEmpty else {
             // Screenshot databases survive app reinstalls between UI-test runs. Repair only the
@@ -110,6 +115,96 @@ enum AppleDemoSeeder {
             )
         }
         catch { NSLog("AppleDemoSeeder: seed failed - \(error)") }
+    }
+
+    /// Keep the DEBUG workout walkthrough populated with a scheduled plan. Stable IDs make this an
+    /// idempotent upsert, while updating the weekday keeps "Today" useful across persisted test runs.
+    private static func seedStrengthFixture(into store: WhoopStore) async throws {
+        let now = Int(Date().timeIntervalSince1970)
+        let systemWeekday = Calendar.current.component(.weekday, from: Date())
+        let isoWeekday = ((systemWeekday + 5) % 7) + 1
+        let routineID = "demo-noop-foundation"
+        let routine = StrengthRoutineRow(
+            id: routineID,
+            name: "NOOP Foundation",
+            note: "Controlled strength, full range of motion, and two steady breaths between sets.",
+            scheduledWeekdaysJSON: StrengthTrainingContract.encodeScheduledWeekdays([isoWeekday]),
+            createdAt: now - 86_400,
+            updatedAt: now
+        )
+
+        struct DemoExercise {
+            let id: String
+            let sets: Int
+            let minimum: Int?
+            let maximum: Int?
+            let rest: Int
+            let plan: StrengthExercisePlan
+            let note: String
+        }
+        let exercises = [
+            DemoExercise(
+                id: "barbell_back_squat",
+                sets: 3,
+                minimum: 6,
+                maximum: 8,
+                rest: 150,
+                plan: StrengthExercisePlan(targetLoadKg: 70, warmupSets: 2),
+                note: "Brace before each rep and keep pressure through the whole foot."
+            ),
+            DemoExercise(
+                id: "barbell_bench_press",
+                sets: 3,
+                minimum: 8,
+                maximum: 10,
+                rest: 120,
+                plan: StrengthExercisePlan(targetLoadKg: 50, warmupSets: 1),
+                note: "Keep the shoulder blades set and lower with control."
+            ),
+            DemoExercise(
+                id: "seated_cable_row",
+                sets: 3,
+                minimum: 10,
+                maximum: 12,
+                rest: 90,
+                plan: StrengthExercisePlan(targetLoadKg: 40),
+                note: "Pause briefly with the handle close to the ribs."
+            ),
+            DemoExercise(
+                id: "plank",
+                sets: 3,
+                minimum: nil,
+                maximum: nil,
+                rest: 60,
+                plan: StrengthExercisePlan(
+                    mode: "timed",
+                    targetDurationS: 30,
+                    progression: "time"
+                ),
+                note: "Keep a straight line from shoulders to heels."
+            ),
+        ]
+        let rows = try exercises.enumerated().map { index, item in
+            guard let planJSON = StrengthTrainingContract.encodeExercisePlan(item.plan) else {
+                throw StrengthTrainingContract.ValidationError.invalidRoutineExercise
+            }
+            return StrengthRoutineExerciseRow(
+                id: "demo-foundation-\(index)",
+                routineId: routineID,
+                exerciseId: item.id,
+                position: index,
+                targetSets: item.sets,
+                targetRepsMin: item.minimum,
+                targetRepsMax: item.maximum,
+                targetRPE: 7.5,
+                restSeconds: item.rest,
+                note: item.note,
+                planJSON: planJSON,
+                createdAt: now - 86_400,
+                updatedAt: now
+            )
+        }
+        _ = try await store.saveStrengthRoutine(routine, exercises: rows)
     }
 
     /// Upgrades a persisted DEBUG demo fixture after either age-model marker changes. This is

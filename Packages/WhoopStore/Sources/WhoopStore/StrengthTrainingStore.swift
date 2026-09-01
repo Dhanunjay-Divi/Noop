@@ -696,6 +696,11 @@ public struct StrengthRoutineSnapshot: Equatable, Sendable {
 public struct StrengthSessionSnapshot: Equatable, Sendable {
     public let session: StrengthSessionRow
     public let sets: [StrengthSetRow]
+
+    public init(session: StrengthSessionRow, sets: [StrengthSetRow]) {
+        self.session = session
+        self.sets = sets
+    }
 }
 
 public struct StrengthSummary: Equatable, Sendable {

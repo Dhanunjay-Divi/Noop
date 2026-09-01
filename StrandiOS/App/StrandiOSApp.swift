@@ -769,6 +769,7 @@ enum DemoScreens {
         case "live":     return AnyView(LiveView())
         case "stress":   return AnyView(StressView())
         case "workouts": return AnyView(WorkoutsView())
+        case "strength": return AnyView(StrengthTrainerView())
         case "startworkout": return AnyView(StartWorkoutSheet { _ in })
         case "workoutcoach": return AnyView(LiveSessionView(onClose: {}))
         case "health":   return AnyView(HealthView())

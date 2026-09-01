@@ -32,8 +32,33 @@ public struct StrengthMuscleFocus: Equatable, Sendable, Identifiable {
     public var id: String { muscle }
 }
 
+/// A transparent body-map estimate derived only from completed working sets.
+///
+/// Load is seven-day weighted set exposure normalized to 12 sets. Recovery is the inverse of
+/// residual exposure, with each completed set fading linearly over 72 hours. It is not a
+/// physiological readiness measurement.
+public struct StrengthMuscleStatus: Equatable, Sendable, Identifiable {
+    public let muscle: String
+    public let sevenDayExposure: Double
+    public let loadScore: Double
+    public let recoveryScore: Double
+    public let lastTrainedAt: Int?
+
+    public var id: String { muscle }
+    public var residualLoadScore: Double { 1 - recoveryScore }
+}
+
 /// Pure progress views over the normalized strength log. The Kotlin mirror must stay value-for-value.
 public enum StrengthProgressCalculator {
+    public static let bodyMapMuscles = [
+        "chest", "back", "shoulders", "biceps", "triceps", "forearms", "core",
+        "quadriceps", "hamstrings", "glutes", "calves",
+    ]
+    public static let loadWindowSeconds = 7 * 24 * 60 * 60
+    public static let recoveryWindowSeconds = 72 * 60 * 60
+    public static let fullLoadExposure = 12.0
+    public static let fullResidualExposure = 6.0
+
     public static func exerciseHistory(
         exerciseId: String,
         sessions: [StrengthSessionSnapshot]
@@ -136,6 +161,64 @@ public enum StrengthProgressCalculator {
                 return $0.weightedSetExposure > $1.weightedSetExposure
             }
             return $0.muscle < $1.muscle
+        }
+    }
+
+    public static func muscleStatus(
+        exercises: [StrengthExerciseRow],
+        sessions: [StrengthSessionSnapshot],
+        now: Int
+    ) -> [StrengthMuscleStatus] {
+        let exerciseByID = Dictionary(
+            exercises.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var exposure: [String: Double] = [:]
+        var residual: [String: Double] = [:]
+        var lastTrained: [String: Int] = [:]
+
+        func add(_ amount: Double, to muscle: String, completedAt: Int) {
+            guard bodyMapMuscles.contains(muscle) else { return }
+            let age = now - completedAt
+            guard age >= 0 else { return }
+            if age <= loadWindowSeconds {
+                exposure[muscle, default: 0] += amount
+            }
+            if age <= recoveryWindowSeconds {
+                let remaining = 1 - Double(age) / Double(recoveryWindowSeconds)
+                residual[muscle, default: 0] += amount * max(0, remaining)
+            }
+            lastTrained[muscle] = max(lastTrained[muscle, default: 0], completedAt)
+        }
+
+        for snapshot in sessions {
+            for set in snapshot.sets where set.setType != "warmup" {
+                guard let completedAt = set.completedAt,
+                      let exercise = exerciseByID[set.exerciseId] else { continue }
+                add(1, to: exercise.primaryMuscle, completedAt: completedAt)
+                let secondary = StrengthTrainingContract.secondaryMuscles(
+                    from: exercise.secondaryMusclesJSON
+                ) ?? []
+                for muscle in Set(secondary) where muscle != exercise.primaryMuscle {
+                    add(0.5, to: muscle, completedAt: completedAt)
+                }
+            }
+        }
+
+        return bodyMapMuscles.map { muscle in
+            let sevenDayExposure = exposure[muscle, default: 0]
+            let loadScore = min(1, sevenDayExposure / fullLoadExposure)
+            let residualScore = min(
+                1,
+                residual[muscle, default: 0] / fullResidualExposure
+            )
+            return StrengthMuscleStatus(
+                muscle: muscle,
+                sevenDayExposure: sevenDayExposure,
+                loadScore: loadScore,
+                recoveryScore: 1 - residualScore,
+                lastTrainedAt: lastTrained[muscle]
+            )
         }
     }
 }

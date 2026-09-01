@@ -56,6 +56,7 @@ object DemoSeeder {
         profileAge: Double,
         profileSex: String,
     ) {
+        seedStrengthFixture(repo)
         val existingDays = repo.days(WHOOP)
         if (existingDays.isNotEmpty()) {
             repairFitnessAgeProfileMarkers(repo, profileAge, profileSex)
@@ -63,6 +64,91 @@ object DemoSeeder {
             return
         }
         seed(repo, profileAge, profileSex)
+    }
+
+    /** Idempotent DEBUG fixture for the real Today-plan and guided workout surfaces. */
+    private suspend fun seedStrengthFixture(repo: WhoopRepository) {
+        val now = java.time.Instant.now().epochSecond
+        val routineId = "demo-noop-foundation"
+        val routine = StrengthRoutineRow(
+            id = routineId,
+            name = "NOOP Foundation",
+            note = "Controlled strength, full range of motion, and two steady breaths between sets.",
+            createdAt = now - 86_400,
+            updatedAt = now,
+            scheduledWeekdaysJSON = StrengthTrainingContract.encodeScheduledWeekdays(
+                listOf(LocalDate.now().dayOfWeek.value),
+            ),
+        )
+        data class DemoExercise(
+            val id: String,
+            val sets: Int,
+            val minimum: Int?,
+            val maximum: Int?,
+            val rest: Int,
+            val plan: StrengthExercisePlan,
+            val note: String,
+        )
+        val exercises = listOf(
+            DemoExercise(
+                "barbell_back_squat",
+                3,
+                6,
+                8,
+                150,
+                StrengthExercisePlan(targetLoadKg = 70.0, warmupSets = 2),
+                "Brace before each rep and keep pressure through the whole foot.",
+            ),
+            DemoExercise(
+                "barbell_bench_press",
+                3,
+                8,
+                10,
+                120,
+                StrengthExercisePlan(targetLoadKg = 50.0, warmupSets = 1),
+                "Keep the shoulder blades set and lower with control.",
+            ),
+            DemoExercise(
+                "seated_cable_row",
+                3,
+                10,
+                12,
+                90,
+                StrengthExercisePlan(targetLoadKg = 40.0),
+                "Pause briefly with the handle close to the ribs.",
+            ),
+            DemoExercise(
+                "plank",
+                3,
+                null,
+                null,
+                60,
+                StrengthExercisePlan(
+                    mode = "timed",
+                    targetDurationS = 30,
+                    progression = "time",
+                ),
+                "Keep a straight line from shoulders to heels.",
+            ),
+        )
+        val rows = exercises.mapIndexed { index, item ->
+            StrengthRoutineExerciseRow(
+                id = "demo-foundation-$index",
+                routineId = routineId,
+                exerciseId = item.id,
+                position = index,
+                targetSets = item.sets,
+                targetRepsMin = item.minimum,
+                targetRepsMax = item.maximum,
+                targetRPE = 7.5,
+                restSeconds = item.rest,
+                note = item.note,
+                createdAt = now - 86_400,
+                updatedAt = now,
+                planJSON = requireNotNull(StrengthTrainingContract.encodeExercisePlan(item.plan)),
+            )
+        }
+        repo.saveStrengthRoutine(routine, rows)
     }
 
     /** Upgrade an older persisted demo fixture to the current fail-closed Fitness Age provenance. */

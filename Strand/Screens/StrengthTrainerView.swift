@@ -1,6 +1,9 @@
 import StrandDesign
 import SwiftUI
 import WhoopStore
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 #if os(iOS)
 import UIKit
 #endif
@@ -53,6 +56,14 @@ struct StrengthTrainerView: View {
         }
     }
 
+    private struct TodayExercisePlan: Identifiable {
+        let prescription: StrengthRoutineExerciseRow
+        let exercise: StrengthExerciseRow
+        let workout: StrengthWorkoutPrescription
+
+        var id: String { prescription.id }
+    }
+
     @EnvironmentObject private var repo: Repository
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
@@ -63,17 +74,28 @@ struct StrengthTrainerView: View {
     @State private var starting = false
     @State private var editor: EditorTarget?
     @State private var exerciseDetail: ExerciseDetailTarget?
+    @State private var exerciseGuide: StrengthExerciseRow?
     @State private var deleteCandidate: StrengthSessionSnapshot?
     @State private var selectedTab = GymTab.today
     @State private var routineEditor: RoutineEditorTarget?
+    @State private var showingProgramBuilder = false
+    @State private var didOfferProgramBuilder = false
     @State private var showingCustomExercise = false
     @State private var libraryQuery = ""
     @State private var libraryMuscle = "all"
     @State private var libraryEquipment = "all"
+    @State private var bodyMapMode = StrengthBodyMapMode.load
+    @State private var selectedFocusMuscle: String?
+    @State private var selectedFocusExerciseIDs = Set<String>()
     @State private var errorMessage: String?
     @State private var reloadToken = 0
     @AppStorage("strength.goal.weeklySessions") private var weeklySessionGoal = 3
     @AppStorage("strength.goal.weeklySets") private var weeklySetGoal = 12
+    @AppStorage("strength.profile.experience") private var experienceRaw =
+        StrengthTrainingExperience.beginner.rawValue
+    @AppStorage("strength.profile.style") private var trainingStyleRaw =
+        StrengthTrainingStyle.balanced.rawValue
+    @AppStorage("strength.profile.sessionMinutes") private var sessionMinutes = 45
     #if DEBUG
     @State private var didHandleDemoEditorRoute = false
     #endif
@@ -101,6 +123,7 @@ struct StrengthTrainerView: View {
                             activeSessionCard(active)
                         }
                         todayPlanSection(snapshot)
+                        muscleCoachSection(snapshot)
                         startSection(snapshot)
                         weeklyGoalsSection(snapshot)
                         historySection(snapshot)
@@ -149,6 +172,7 @@ struct StrengthTrainerView: View {
                     initial: target.snapshot,
                     exercises: snapshot.exercises,
                     routines: snapshot.routines,
+                    history: snapshot.sessions,
                     massUnit: massUnit
                 )
                 .environmentObject(repo)
@@ -169,12 +193,34 @@ struct StrengthTrainerView: View {
             .noopSheetPresentation(largeFirst: true)
             #endif
         }
+        .sheet(item: $exerciseGuide) { exercise in
+            StrengthExerciseGuidePreview(exercise: exercise)
+            #if os(iOS)
+            .noopSheetPresentation(largeFirst: false)
+            #endif
+        }
         .sheet(item: $routineEditor, onDismiss: { reloadToken += 1 }) { target in
             if let snapshot {
                 StrengthRoutineEditor(
                     initial: target.routine,
                     exercises: snapshot.exercises,
                     massUnit: massUnit
+                )
+                .environmentObject(repo)
+                .interactiveDismissDisabled()
+                #if os(iOS)
+                .noopSheetPresentation(largeFirst: true)
+                #endif
+            }
+        }
+        .sheet(isPresented: $showingProgramBuilder, onDismiss: { reloadToken += 1 }) {
+            if let snapshot {
+                StrengthProgramBuilder(
+                    routines: snapshot.routines,
+                    onSaved: {
+                        showingProgramBuilder = false
+                        reloadToken += 1
+                    }
                 )
                 .environmentObject(repo)
                 .interactiveDismissDisabled()
@@ -229,18 +275,42 @@ struct StrengthTrainerView: View {
     }
 
     private func todayPlanSection(_ data: StrengthTrainerSnapshot) -> some View {
-        let weekday = isoWeekday(Date())
-        let scheduled = data.routines.filter {
-            StrengthTrainingContract.scheduledWeekdays(
-                from: $0.routine.scheduledWeekdaysJSON
-            ).contains(weekday)
+        let recommendation = adaptiveRecommendation(for: data)
+        let routine = recommendation.routineId.flatMap { id in
+            data.routines.first { $0.routine.id == id }
         }
         return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
             SectionHeader(
                 "appwide.gym.todays_training",
                 overline: LocalizedStringKey(Date().formatted(.dateTime.weekday(.wide)))
             )
-            if scheduled.isEmpty {
+            if recommendation.reason == .completed {
+                NoopCard(tint: StrandPalette.statusPositive) {
+                    HStack(spacing: NoopMetrics.space3) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(StrandPalette.statusPositive)
+                            .frame(width: 42, height: 42)
+                            .background(StrandPalette.statusPositive.opacity(0.12), in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Today’s strength work is complete")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("Your next target will use the sets you actually completed.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                    }
+                }
+            } else if let routine {
+                todayRoutineCard(
+                    routine,
+                    data: data,
+                    makeUpDateKey: recommendation.reason == .makeUp
+                        ? recommendation.originallyScheduledDateKey
+                        : nil
+                )
+            } else {
                 NoopCard {
                     HStack(spacing: NoopMetrics.space3) {
                         Image(systemName: "moon.zzz")
@@ -257,40 +327,128 @@ struct StrengthTrainerView: View {
                                 .foregroundStyle(StrandPalette.textSecondary)
                         }
                         Spacer()
-                        Button("appwide.gym.plan") { selectedTab = .plan }
+                        Button("appwide.gym.plan") {
+                            if data.routines.isEmpty {
+                                showingProgramBuilder = true
+                            } else {
+                                selectedTab = .plan
+                            }
+                        }
                             .buttonStyle(NoopButtonStyle(.secondary))
                     }
                 }
-            } else {
-                ForEach(scheduled, id: \.routine.id) { routine in
-                    NoopCard(tint: StrandPalette.effortColor) {
-                        HStack(spacing: NoopMetrics.space3) {
-                            Image(systemName: "dumbbell.fill")
+            }
+        }
+    }
+
+    private func todayRoutineCard(
+        _ routine: StrengthRoutineSnapshot,
+        data: StrengthTrainerSnapshot,
+        makeUpDateKey: String?
+    ) -> some View {
+        let plans = todayExercisePlans(for: routine, data: data)
+        let totalSets = plans.reduce(0) { $0 + $1.workout.sets.count }
+        let durationMinutes = max(
+            1,
+            Int(ceil(Double(estimatedDurationSeconds(for: plans)) / 60))
+        )
+        let muscleNames = orderedUnique(
+            plans.map { strengthDescriptor($0.exercise.primaryMuscle) }
+        )
+        return NoopCard(tint: StrandPalette.effortColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(spacing: NoopMetrics.space3) {
+                    Image(systemName: "dumbbell.fill")
+                        .foregroundStyle(StrandPalette.effortColor)
+                        .frame(width: 42, height: 42)
+                        .background(StrandPalette.effortColor.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(routine.routine.name)
+                            .font(StrandFont.title2)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(localized: "%lld exercises · %lld sets · about %lld min"),
+                                plans.count,
+                                totalSets,
+                                durationMinutes
+                            )
+                        )
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer()
+                }
+
+                if let makeUpDateKey {
+                    Label(
+                        "Moved from \(displayDateKey(makeUpDateKey)); today was a recovery day.",
+                        systemImage: "calendar.badge.clock"
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !muscleNames.isEmpty {
+                    Label(
+                        muscleNames.joined(separator: " · "),
+                        systemImage: "figure.strengthtraining.traditional"
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                }
+
+                Divider().foregroundStyle(StrandPalette.hairline)
+
+                ForEach(Array(plans.enumerated()), id: \.element.id) { index, plan in
+                    HStack(spacing: NoopMetrics.space3) {
+                        Text("\(index + 1)")
+                            .font(StrandFont.number(15))
+                            .foregroundStyle(StrandPalette.effortColor)
+                            .frame(width: 30, height: 30)
+                            .background(StrandPalette.surfaceInset, in: Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(strengthExerciseName(plan.exercise))
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(todayTargetLabel(plan))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Text(strengthDescriptor(plan.exercise.primaryMuscle))
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        Spacer()
+                        Button {
+                            exerciseGuide = plan.exercise
+                        } label: {
+                            Image(systemName: "figure.strengthtraining.traditional")
+                                .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(StrandPalette.effortColor)
                                 .frame(width: 42, height: 42)
-                                .background(StrandPalette.effortColor.opacity(0.12), in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(routine.routine.name)
-                                    .font(StrandFont.title2)
-                                    .foregroundStyle(StrandPalette.textPrimary)
-                                Text(routineDetail(routine, exercises: data.exercises))
-                                    .font(StrandFont.footnote)
-                                    .foregroundStyle(StrandPalette.textSecondary)
-                                    .lineLimit(2)
-                            }
-                            Spacer()
-                            Button {
-                                Task { await startSession(routine: routine) }
-                            } label: {
-                                Image(systemName: "play.fill")
-                                    .frame(width: 42, height: 42)
-                            }
-                            .buttonStyle(NoopButtonStyle(.primary))
-                            .disabled(starting || data.activeSession != nil)
-                            .accessibilityLabel("Start \(routine.routine.name)")
+                                .background(StrandPalette.surfaceInset, in: Circle())
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Exercise guide")
+                        .help("Exercise guide")
+                    }
+                    if index < plans.count - 1 {
+                        Divider()
+                            .padding(.leading, 42)
+                            .foregroundStyle(StrandPalette.hairline)
                     }
                 }
+
+                NoopButton(
+                    "Start today’s workout",
+                    systemImage: "play.fill",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    Task { await startSession(routine: routine) }
+                }
+                .disabled(starting || data.activeSession != nil)
             }
         }
     }
@@ -347,7 +505,15 @@ struct StrengthTrainerView: View {
                 overline: "Sets, targets, and progression",
                 trailing: data.routines.isEmpty ? nil : "\(data.routines.count)"
             )
-            NoopButton("New routine", systemImage: "plus", kind: .primary, fullWidth: true) {
+            NoopButton(
+                "Build a smart plan",
+                systemImage: "sparkles",
+                kind: .primary,
+                fullWidth: true
+            ) {
+                showingProgramBuilder = true
+            }
+            NoopButton("New routine", systemImage: "plus", kind: .secondary, fullWidth: true) {
                 routineEditor = RoutineEditorTarget()
             }
             if data.routines.isEmpty {
@@ -499,6 +665,59 @@ struct StrengthTrainerView: View {
     private func isoWeekday(_ date: Date) -> Int {
         let apple = Calendar.current.component(.weekday, from: date)
         return ((apple + 5) % 7) + 1
+    }
+
+    private func adaptiveRecommendation(
+        for data: StrengthTrainerSnapshot,
+        now: Date = Date()
+    ) -> StrengthDayRecommendation {
+        let calendar = Calendar.current
+        let today = StrengthScheduleDay(
+            dateKey: localDateKey(now),
+            isoWeekday: isoWeekday(now)
+        )
+        let previous = (1...StrengthAdaptivePlanner.maximumMakeUpAgeDays).compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: now).map {
+                StrengthScheduleDay(dateKey: localDateKey($0), isoWeekday: isoWeekday($0))
+            }
+        }
+        let completions = data.sessions.compactMap { item -> StrengthRoutineCompletion? in
+            guard item.session.endedAt != nil, let routineID = item.session.routineId else {
+                return nil
+            }
+            return StrengthRoutineCompletion(
+                dateKey: localDateKey(
+                    Date(timeIntervalSince1970: TimeInterval(item.session.startedAt))
+                ),
+                routineId: routineID
+            )
+        }
+        return StrengthAdaptivePlanner.recommendation(
+            today: today,
+            previousDaysNearestFirst: previous,
+            routines: data.routines,
+            completions: completions
+        )
+    }
+
+    private func localDateKey(_ date: Date) -> String {
+        let value = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            value.year ?? 0,
+            value.month ?? 0,
+            value.day ?? 0
+        )
+    }
+
+    private func displayDateKey(_ key: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: key) else { return key }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 
     private func weekdayName(_ isoDay: Int) -> String {
@@ -656,6 +875,282 @@ struct StrengthTrainerView: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                 }
             }
+        }
+    }
+
+    private func muscleCoachSection(_ data: StrengthTrainerSnapshot) -> some View {
+        let statuses = StrengthProgressCalculator.muscleStatus(
+            exercises: data.exercises,
+            sessions: data.sessions,
+            now: Int(Date().timeIntervalSince1970)
+        )
+        let matching = focusExercises(for: selectedFocusMuscle, in: data.exercises)
+        let selectedStatus = statuses.first { $0.muscle == selectedFocusMuscle }
+        let selectedExercises = matching.filter { selectedFocusExerciseIDs.contains($0.id) }
+
+        return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader("Train by muscle", overline: "Load and recovery")
+            NoopCard(tint: StrandPalette.effortColor) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    Picker("Body map", selection: $bodyMapMode) {
+                        Text("Load").tag(StrengthBodyMapMode.load)
+                        Text("Recovery").tag(StrengthBodyMapMode.recovery)
+                    }
+                    .pickerStyle(.segmented)
+
+                    StrengthBodyMapView(
+                        statuses: statuses,
+                        mode: bodyMapMode,
+                        selectedMuscle: selectedFocusMuscle
+                    ) { muscle in
+                        selectFocusMuscle(muscle, exercises: data.exercises)
+                    }
+
+                    if let muscle = selectedFocusMuscle {
+                        Divider().overlay(StrandPalette.hairline)
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(strengthMuscleName(muscle))
+                                .font(StrandFont.title2)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Spacer()
+                            if let selectedStatus {
+                                Text(bodyStatusLabel(selectedStatus))
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .monospacedDigit()
+                            }
+                        }
+
+                        Text(
+                            bodyMapMode == .load
+                                ? "Completed working sets from the last seven days."
+                                : "Estimated from logged sets fading over 72 hours, not a physiological readiness score."
+                        )
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        ForEach(matching.prefix(6)) { exercise in
+                            HStack(spacing: NoopMetrics.space3) {
+                                Button {
+                                    toggleFocusExercise(exercise.id)
+                                } label: {
+                                    HStack(spacing: NoopMetrics.space3) {
+                                        Image(
+                                            systemName: selectedFocusExerciseIDs.contains(exercise.id)
+                                                ? "checkmark.circle.fill"
+                                                : "circle"
+                                        )
+                                        .font(.system(size: 19, weight: .semibold))
+                                        .foregroundStyle(
+                                            selectedFocusExerciseIDs.contains(exercise.id)
+                                                ? StrandPalette.effortColor
+                                                : StrandPalette.textTertiary
+                                        )
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(strengthExerciseName(exercise))
+                                                .font(StrandFont.headline)
+                                                .foregroundStyle(StrandPalette.textPrimary)
+                                            Text(strengthDescriptorPair(exercise))
+                                                .font(StrandFont.caption)
+                                                .foregroundStyle(StrandPalette.textSecondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    exerciseGuide = exercise
+                                } label: {
+                                    Image(systemName: "figure.strengthtraining.traditional")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(StrandPalette.effortColor)
+                                        .frame(width: 40, height: 40)
+                                        .background(StrandPalette.surfaceInset, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Exercise guide")
+                            }
+                        }
+
+                        NoopButton(
+                            data.activeSession == nil
+                                ? "Start \(selectedExercises.count)-exercise focus"
+                                : "Resume active workout",
+                            systemImage: data.activeSession == nil ? "play.fill" : "arrow.right",
+                            kind: .primary,
+                            fullWidth: true
+                        ) {
+                            if let active = data.activeSession {
+                                editor = EditorTarget(active)
+                            } else {
+                                Task {
+                                    await startFocusSession(
+                                        muscle: muscle,
+                                        exercises: selectedExercises,
+                                        data: data
+                                    )
+                                }
+                            }
+                        }
+                        .disabled(
+                            starting
+                                || (data.activeSession == nil && selectedExercises.isEmpty)
+                        )
+                    } else {
+                        Text("Select a muscle to build an editable focus workout.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    private func focusExercises(
+        for muscle: String?,
+        in exercises: [StrengthExerciseRow]
+    ) -> [StrengthExerciseRow] {
+        guard let muscle else { return [] }
+        return exercises.filter { exercise in
+            exercise.primaryMuscle == muscle
+                || (StrengthTrainingContract.secondaryMuscles(
+                    from: exercise.secondaryMusclesJSON
+                ) ?? []).contains(muscle)
+        }
+        .sorted { lhs, rhs in
+            let lhsPrimary = lhs.primaryMuscle == muscle
+            let rhsPrimary = rhs.primaryMuscle == muscle
+            if lhsPrimary != rhsPrimary { return lhsPrimary }
+            if lhs.isCustom != rhs.isCustom { return !lhs.isCustom }
+            return strengthExerciseName(lhs) < strengthExerciseName(rhs)
+        }
+    }
+
+    private func selectFocusMuscle(
+        _ muscle: String,
+        exercises: [StrengthExerciseRow]
+    ) {
+        selectedFocusMuscle = muscle
+        let candidates = focusExercises(for: muscle, in: exercises)
+        let limit: Int
+        switch sessionMinutes {
+        case ...30: limit = 3
+        case ...45: limit = 4
+        case ...60: limit = 5
+        default: limit = 6
+        }
+        selectedFocusExerciseIDs = Set(candidates.prefix(limit).map(\.id))
+    }
+
+    private func toggleFocusExercise(_ id: String) {
+        if selectedFocusExerciseIDs.contains(id) {
+            selectedFocusExerciseIDs.remove(id)
+        } else {
+            selectedFocusExerciseIDs.insert(id)
+        }
+    }
+
+    private func bodyStatusLabel(_ status: StrengthMuscleStatus) -> String {
+        switch bodyMapMode {
+        case .load:
+            return String(
+                format: "%.1f weighted sets",
+                status.sevenDayExposure
+            )
+        case .recovery:
+            return "\(Int((status.recoveryScore * 100).rounded()))% recovered"
+        }
+    }
+
+    private func startFocusSession(
+        muscle: String,
+        exercises: [StrengthExerciseRow],
+        data: StrengthTrainerSnapshot
+    ) async {
+        guard !starting, !exercises.isEmpty else { return }
+        if let active = data.activeSession {
+            editor = EditorTarget(active)
+            return
+        }
+        starting = true
+        defer { starting = false }
+        do {
+            let experience = StrengthTrainingExperience(rawValue: experienceRaw) ?? .beginner
+            let style = StrengthTrainingStyle(rawValue: trainingStyleRaw) ?? .balanced
+            let templates = StrengthAdaptivePlanner.focusWorkout(
+                exercises: exercises,
+                experience: experience,
+                style: style,
+                sessionMinutes: sessionMinutes
+            )
+            let now = Int(Date().timeIntervalSince1970)
+            let sessionID = UUID().uuidString.lowercased()
+            let session = StrengthSessionRow(
+                id: sessionID,
+                name: "\(strengthMuscleName(muscle)) focus",
+                startedAt: now,
+                createdAt: now,
+                updatedAt: now
+            )
+            let exerciseByID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
+            let sets = try templates.enumerated().flatMap { position, template in
+                guard let exercise = exerciseByID[template.exerciseId],
+                      let planJSON = StrengthTrainingContract.encodeExercisePlan(template.plan)
+                else {
+                    throw StrengthTrainingContract.ValidationError.invalidRoutineExercise
+                }
+                let prescription = StrengthRoutineExerciseRow(
+                    id: "focus-\(sessionID)-\(position)",
+                    routineId: "focus-\(sessionID)",
+                    exerciseId: template.exerciseId,
+                    position: position,
+                    targetSets: template.targetSets,
+                    targetRepsMin: template.targetRepsMin,
+                    targetRepsMax: template.targetRepsMax,
+                    targetRPE: template.targetRPE,
+                    restSeconds: template.restSeconds,
+                    planJSON: planJSON,
+                    createdAt: now,
+                    updatedAt: now
+                )
+                let planned = StrengthWorkoutPlanner.prescription(
+                    exercise: exercise,
+                    prescription: prescription,
+                    history: data.sessions
+                )
+                return planned.sets.enumerated().map { setPosition, target in
+                    StrengthSetRow(
+                        id: UUID().uuidString.lowercased(),
+                        sessionId: sessionID,
+                        exerciseId: template.exerciseId,
+                        exercisePosition: position,
+                        setPosition: setPosition,
+                        setType: target.setType,
+                        reps: target.reps,
+                        loadKg: target.loadKg,
+                        durationS: target.durationS,
+                        restSeconds: StrengthWorkoutPlanner.resolvedRestSeconds(
+                            for: target,
+                            prescriptionRestSeconds: template.restSeconds,
+                            continuesSuperset: false
+                        ),
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                }
+            }
+            let draft = StrengthSessionSnapshot(session: session, sets: sets)
+            editor = EditorTarget(draft)
+            starting = false
+            let saved = try await repo.saveStrengthSession(session, sets: sets)
+            reloadToken += 1
+            editor = EditorTarget(saved)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -1014,8 +1509,15 @@ struct StrengthTrainerView: View {
     private func load() async {
         loading = true
         do {
-            snapshot = try await repo.strengthTrainerSnapshot()
+            let loaded = try await repo.strengthTrainerSnapshot()
+            snapshot = loaded
             errorMessage = nil
+            if loaded.routines.isEmpty,
+               loaded.activeSession == nil,
+               !didOfferProgramBuilder {
+                didOfferProgramBuilder = true
+                showingProgramBuilder = true
+            }
         } catch {
             if snapshot == nil { errorMessage = error.localizedDescription }
         }
@@ -1027,7 +1529,12 @@ struct StrengthTrainerView: View {
         starting = true
         defer { starting = false }
         do {
-            let saved = try await repo.startStrengthSession(routineID: routine?.routine.id)
+            let saved = try await repo.startStrengthSession(
+                routineID: routine?.routine.id
+            ) { prepared in
+                editor = EditorTarget(prepared)
+                starting = false
+            }
             reloadToken += 1
             editor = EditorTarget(saved)
         } catch {
@@ -1046,7 +1553,13 @@ struct StrengthTrainerView: View {
         if let active = snapshot.activeSession {
             editor = EditorTarget(active)
         } else {
-            await startSession(routine: nil)
+            let weekday = isoWeekday(Date())
+            let scheduled = snapshot.routines.first {
+                StrengthTrainingContract.scheduledWeekdays(
+                    from: $0.routine.scheduledWeekdaysJSON
+                ).contains(weekday)
+            }
+            await startSession(routine: scheduled ?? snapshot.routines.first)
         }
     }
     #endif
@@ -1073,6 +1586,78 @@ struct StrengthTrainerView: View {
             names.joined(separator: " · "),
             sets
         )
+    }
+
+    private func todayExercisePlans(
+        for routine: StrengthRoutineSnapshot,
+        data: StrengthTrainerSnapshot
+    ) -> [TodayExercisePlan] {
+        routine.exercises
+            .sorted { $0.position < $1.position }
+            .compactMap { prescription in
+                guard let exercise = data.exercises.first(where: {
+                    $0.id == prescription.exerciseId
+                }) else { return nil }
+                return TodayExercisePlan(
+                    prescription: prescription,
+                    exercise: exercise,
+                    workout: StrengthWorkoutPlanner.prescription(
+                        exercise: exercise,
+                        prescription: prescription,
+                        history: data.sessions
+                    )
+                )
+            }
+    }
+
+    private func estimatedDurationSeconds(for plans: [TodayExercisePlan]) -> Int {
+        plans.enumerated().reduce(0) { total, item in
+            let (exerciseIndex, plan) = item
+            let setSeconds = plan.workout.sets.enumerated().reduce(0) { subtotal, setItem in
+                let (setIndex, set) = setItem
+                let work = set.durationS ?? min(75, max(20, (set.reps ?? 8) * 4))
+                let rest = setIndex < plan.workout.sets.count - 1
+                    ? (set.restSecondsAfter ?? plan.prescription.restSeconds)
+                    : 0
+                return subtotal + work + rest
+            }
+            return total + setSeconds + (exerciseIndex < plans.count - 1 ? 45 : 0)
+        }
+    }
+
+    private func todayTargetLabel(_ plan: TodayExercisePlan) -> String {
+        let working = plan.workout.sets.filter { $0.setType != "warmup" }
+        let representative = working.first ?? plan.workout.sets.first
+        guard let representative else { return String(localized: "No planned sets") }
+        if let seconds = representative.durationS {
+            return String.localizedStringWithFormat(
+                String(localized: "%lld sets × %lld sec"),
+                working.count,
+                seconds
+            )
+        }
+        let reps = representative.reps ?? plan.prescription.targetRepsMin ?? 8
+        var result = String.localizedStringWithFormat(
+            String(localized: "%lld sets × %lld reps"),
+            working.count,
+            reps
+        )
+        if let loadKg = representative.loadKg {
+            result += " · \(UnitFormatter.massFromKilograms(loadKg, unit: massUnit))"
+        }
+        let warmups = plan.workout.sets.count - working.count
+        if warmups > 0 {
+            result += String.localizedStringWithFormat(
+                String(localized: " · %lld warm-up"),
+                warmups
+            )
+        }
+        return result
+    }
+
+    private func orderedUnique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     private func sessionDetail(
@@ -1116,6 +1701,29 @@ struct StrengthTrainerView: View {
     }
 }
 
+private struct StrengthExerciseGuidePreview: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let exercise: StrengthExerciseRow
+
+    var body: some View {
+        NavigationStack {
+            ScreenScaffold(
+                title: LocalizedStringKey(strengthExerciseName(exercise)),
+                subtitle: LocalizedStringKey(strengthDescriptorPair(exercise)),
+                topBackground: liquidScaffoldSky()
+            ) {
+                StrengthExerciseMotionView(exercise: exercise)
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 private struct StrengthExerciseBlock: Identifiable {
     let id: String
     var exercise: StrengthExerciseRow
@@ -1123,11 +1731,376 @@ private struct StrengthExerciseBlock: Identifiable {
     var restSeconds: Int
     var sets: [StrengthSetRow]
     var supersetGroup: Int?
+    var sourceRoutineExerciseID: String?
 }
 
 private struct StrengthNextSetTarget {
     let block: StrengthExerciseBlock
     let set: StrengthSetRow
+}
+
+private struct StrengthExerciseReplacement: Identifiable {
+    let blockID: String
+    let exercise: StrengthExerciseRow
+
+    var id: String { "\(blockID)-\(exercise.id)" }
+}
+
+@MainActor
+private final class StrengthVoiceCoach: ObservableObject {
+    #if canImport(AVFoundation)
+    private let synthesizer = AVSpeechSynthesizer()
+    #endif
+
+    func speak(_ text: String) {
+        #if canImport(AVFoundation)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier)
+        utterance.rate = 0.48
+        synthesizer.speak(utterance)
+        #endif
+    }
+
+    func stop() {
+        #if canImport(AVFoundation)
+        synthesizer.stopSpeaking(at: .immediate)
+        #endif
+    }
+}
+
+private struct StrengthProgramBuilder: View {
+    @EnvironmentObject private var repo: Repository
+    @Environment(\.dismiss) private var dismiss
+
+    let routines: [StrengthRoutineSnapshot]
+    let onSaved: () -> Void
+
+    @AppStorage("strength.profile.dayCount") private var dayCount = 3
+    @AppStorage("strength.profile.weekdays") private var weekdaysRaw = ""
+    @AppStorage("strength.profile.focusMuscles") private var focusMusclesRaw = ""
+    @State private var selectedDays = Set(StrengthAdaptivePlanner.suggestedWeekdays(for: 3))
+    @State private var focusMuscles = Set<String>()
+    @State private var didRestoreProfile = false
+    @State private var replaceSchedule = true
+    @State private var saving = false
+    @State private var errorMessage: String?
+    @AppStorage("strength.profile.experience") private var experienceRaw =
+        StrengthTrainingExperience.beginner.rawValue
+    @AppStorage("strength.profile.style") private var trainingStyleRaw =
+        StrengthTrainingStyle.balanced.rawValue
+    @AppStorage("strength.profile.sessionMinutes") private var sessionMinutes = 45
+
+    private var program: [StrengthProgramRoutine] {
+        StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: Array(selectedDays),
+                experience: StrengthTrainingExperience(rawValue: experienceRaw) ?? .beginner,
+                style: StrengthTrainingStyle(rawValue: trainingStyleRaw) ?? .balanced,
+                sessionMinutes: sessionMinutes,
+                focusMuscles: Array(focusMuscles)
+            )
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScreenScaffold(
+                title: "Build your training week",
+                subtitle: "Tell NOOP how you train. The result stays editable and advances only from work you complete.",
+                topBackground: liquidScaffoldSky()
+            ) {
+                SectionHeader("About your training", overline: "Starting point")
+                NoopCard {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        Picker("Experience", selection: $experienceRaw) {
+                            Text("Beginner").tag(StrengthTrainingExperience.beginner.rawValue)
+                            Text("Intermediate").tag(
+                                StrengthTrainingExperience.intermediate.rawValue
+                            )
+                            Text("Experienced").tag(
+                                StrengthTrainingExperience.experienced.rawValue
+                            )
+                        }
+                        .pickerStyle(.menu)
+
+                        Divider().overlay(StrandPalette.hairline)
+
+                        Picker("Workout style", selection: $trainingStyleRaw) {
+                            Text("Balanced fitness").tag(StrengthTrainingStyle.balanced.rawValue)
+                            Text("Strength").tag(StrengthTrainingStyle.strength.rawValue)
+                            Text("Build muscle").tag(StrengthTrainingStyle.muscle.rawValue)
+                            Text("Conditioning").tag(
+                                StrengthTrainingStyle.conditioning.rawValue
+                            )
+                        }
+                        .pickerStyle(.menu)
+
+                        Divider().overlay(StrandPalette.hairline)
+
+                        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                            Text("Time per workout")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Picker("Time per workout", selection: $sessionMinutes) {
+                                ForEach([30, 45, 60, 75], id: \.self) {
+                                    Text("\($0)m").tag($0)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        Divider().overlay(StrandPalette.hairline)
+
+                        Menu {
+                            ForEach(StrengthProgressCalculator.bodyMapMuscles, id: \.self) {
+                                muscle in
+                                Button {
+                                    var updated = focusMuscles
+                                    if focusMuscles.contains(muscle) {
+                                        updated.remove(muscle)
+                                    } else if focusMuscles.count < 2 {
+                                        updated.insert(muscle)
+                                    }
+                                    focusMuscles = updated
+                                    focusMusclesRaw = encodeStringSet(updated)
+                                } label: {
+                                    Label(
+                                        strengthMuscleName(muscle),
+                                        systemImage: focusMuscles.contains(muscle)
+                                            ? "checkmark"
+                                            : "circle"
+                                    )
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Label("Priority muscles", systemImage: "figure.arms.open")
+                                Spacer()
+                                Text(
+                                    focusMuscles.isEmpty
+                                        ? "Balanced"
+                                        : focusMuscles
+                                            .sorted()
+                                            .map(strengthMuscleName)
+                                            .joined(separator: ", ")
+                                )
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .font(StrandFont.subhead)
+                        }
+                    }
+                }
+
+                SectionHeader("Gym days", overline: "Two to six sessions")
+                Picker("Days per week", selection: $dayCount) {
+                    ForEach(2...6, id: \.self) { Text("\($0)").tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: dayCount) { count in
+                    let suggested = Set(
+                        StrengthAdaptivePlanner.suggestedWeekdays(for: count)
+                    )
+                    selectedDays = suggested
+                    weekdaysRaw = encodeIntSet(suggested)
+                }
+
+                HStack(spacing: 6) {
+                    ForEach(1...7, id: \.self) { day in
+                        Button {
+                            var updated = selectedDays
+                            if selectedDays.contains(day) {
+                                updated.remove(day)
+                            } else if selectedDays.count < dayCount {
+                                updated.insert(day)
+                            }
+                            selectedDays = updated
+                            weekdaysRaw = encodeIntSet(updated)
+                        } label: {
+                            Text(shortWeekdayName(day))
+                                .font(StrandFont.caption)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                                .foregroundStyle(
+                                    selectedDays.contains(day)
+                                        ? Color.white
+                                        : StrandPalette.textSecondary
+                                )
+                                .background(
+                                    selectedDays.contains(day)
+                                        ? StrandPalette.effortColor
+                                        : StrandPalette.surfaceInset,
+                                    in: RoundedRectangle(cornerRadius: 7)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(weekdayNameForProgram(day))
+                    }
+                }
+
+                if selectedDays.count != dayCount {
+                    Label(
+                        "Choose exactly \(dayCount) gym days.",
+                        systemImage: "exclamationmark.circle"
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                }
+
+                SectionHeader("Your program", overline: "Editable after creation")
+                ForEach(program, id: \.name) { routine in
+                    NoopCard(tint: StrandPalette.effortColor) {
+                        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                            Text("\(weekdayNameForProgram(routine.isoWeekday)) · \(routine.name)")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(
+                                routine.exercises.map { item in
+                                    StrengthTrainingContract.builtInExercises.first { exercise in
+                                        exercise.id == item.exerciseId
+                                    }?.name ?? item.exerciseId
+                                }.joined(separator: " · ")
+                            )
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                    }
+                }
+
+                Toggle(
+                    "Replace current weekday assignments",
+                    isOn: $replaceSchedule
+                )
+                .tint(StrandPalette.effortColor)
+
+                NoopButton(
+                    "Create \(dayCount)-day plan",
+                    systemImage: "sparkles",
+                    kind: .primary,
+                    fullWidth: true
+                ) {
+                    Task { await save() }
+                }
+                .disabled(saving || program.count != dayCount)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .alert("Couldn’t build plan", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .onAppear { restoreProfile() }
+    }
+
+    private func restoreProfile() {
+        guard !didRestoreProfile else { return }
+        didRestoreProfile = true
+        dayCount = min(max(dayCount, 2), 6)
+
+        let storedDays = Set(
+            weekdaysRaw
+                .split(separator: ",")
+                .compactMap { Int($0) }
+                .filter { (1...7).contains($0) }
+        )
+        selectedDays = storedDays.count == dayCount
+            ? storedDays
+            : Set(StrengthAdaptivePlanner.suggestedWeekdays(for: dayCount))
+
+        let allowedMuscles = Set(StrengthProgressCalculator.bodyMapMuscles)
+        focusMuscles = Set(
+            focusMusclesRaw
+                .split(separator: ",")
+                .map(String.init)
+                .filter { allowedMuscles.contains($0) }
+                .prefix(2)
+        )
+        weekdaysRaw = encodeIntSet(selectedDays)
+        focusMusclesRaw = encodeStringSet(focusMuscles)
+    }
+
+    private func encodeIntSet(_ values: Set<Int>) -> String {
+        values.sorted().map(String.init).joined(separator: ",")
+    }
+
+    private func encodeStringSet(_ values: Set<String>) -> String {
+        values.sorted().joined(separator: ",")
+    }
+
+    private func save() async {
+        guard program.count == dayCount else { return }
+        saving = true
+        do {
+            if replaceSchedule {
+                for item in routines {
+                    var unscheduled = item.routine
+                    unscheduled.scheduledWeekdaysJSON =
+                        StrengthTrainingContract.encodeScheduledWeekdays([])
+                    unscheduled.updatedAt = Int(Date().timeIntervalSince1970)
+                    _ = try await repo.saveStrengthRoutine(
+                        unscheduled,
+                        exercises: item.exercises
+                    )
+                }
+            }
+            let now = Int(Date().timeIntervalSince1970)
+            for template in program {
+                let routineID = UUID().uuidString.lowercased()
+                let routine = StrengthRoutineRow(
+                    id: routineID,
+                    name: template.name,
+                    note: "Adaptive NOOP plan for \(experienceRaw), \(trainingStyleRaw), \(sessionMinutes)-minute sessions. Change any exercise or target to fit your training.",
+                    scheduledWeekdaysJSON: StrengthTrainingContract.encodeScheduledWeekdays(
+                        [template.isoWeekday]
+                    ),
+                    createdAt: now,
+                    updatedAt: now
+                )
+                let rows = try template.exercises.enumerated().map { index, item in
+                    guard let planJSON = StrengthTrainingContract.encodeExercisePlan(item.plan) else {
+                        throw StrengthTrainingContract.ValidationError.invalidRoutineExercise
+                    }
+                    return StrengthRoutineExerciseRow(
+                        id: UUID().uuidString.lowercased(),
+                        routineId: routineID,
+                        exerciseId: item.exerciseId,
+                        position: index,
+                        targetSets: item.targetSets,
+                        targetRepsMin: item.targetRepsMin,
+                        targetRepsMax: item.targetRepsMax,
+                        targetRPE: item.targetRPE,
+                        restSeconds: item.restSeconds,
+                        planJSON: planJSON,
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                }
+                _ = try await repo.saveStrengthRoutine(routine, exercises: rows)
+            }
+            onSaved()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        saving = false
+    }
+
+    private func shortWeekdayName(_ day: Int) -> String {
+        String(weekdayNameForProgram(day).prefix(2))
+    }
+
+    private func weekdayNameForProgram(_ isoDay: Int) -> String {
+        Calendar.current.weekdaySymbols[isoDay % 7]
+    }
 }
 
 private struct StrengthSessionEditor: View {
@@ -1136,26 +2109,46 @@ private struct StrengthSessionEditor: View {
 
     let exercises: [StrengthExerciseRow]
     let routines: [StrengthRoutineSnapshot]
+    let history: [StrengthSessionSnapshot]
     let massUnit: MassUnit
 
     @State private var session: StrengthSessionRow
     @State private var blocks: [StrengthExerciseBlock]
+    @State private var currentBlockID: String?
     @State private var exercisePicker = false
+    @State private var replacementBlockID: String?
+    @State private var pendingReplacement: StrengthExerciseReplacement?
     @State private var routineName = ""
     @State private var showingRoutinePrompt = false
     @State private var saving = false
     @State private var pendingSave = false
     @State private var restUntil: Date?
+    @State private var workSetID: String?
+    @State private var workStartedAt: Date?
+    @State private var workUntil: Date?
+    @State private var timedCountdownSetID: String?
+    @State private var timedCountdownDuration = 0
+    @State private var timedCountdownUntil: Date?
+    @State private var pacedSetID: String?
+    @State private var pacedStartedAt: Date?
+    @State private var pacedRepetitions = 0
+    @State private var pacedFinished = false
     @State private var errorMessage: String?
+    @AppStorage("workoutKeepScreenOn") private var keepScreenOn = false
+    @AppStorage("strength.voiceCoaching") private var voiceCoaching = false
+    @AppStorage("strength.repTempoSeconds") private var repTempoSeconds = 4
+    @StateObject private var voiceCoach = StrengthVoiceCoach()
 
     init(
         initial: StrengthSessionSnapshot,
         exercises: [StrengthExerciseRow],
         routines: [StrengthRoutineSnapshot],
+        history: [StrengthSessionSnapshot],
         massUnit: MassUnit
     ) {
         self.exercises = exercises
         self.routines = routines
+        self.history = history
         self.massUnit = massUnit
         _session = State(initialValue: initial.session)
 
@@ -1176,20 +2169,33 @@ private struct StrengthSessionEditor: View {
                 sets: (grouped[position] ?? []).sorted { $0.setPosition < $1.setPosition },
                 supersetGroup: prescription.flatMap {
                     StrengthTrainingContract.exercisePlan(from: $0.planJSON).supersetGroup
-                }
+                },
+                sourceRoutineExerciseID: prescription?.id
             )
         }
         _blocks = State(initialValue: built)
+        _currentBlockID = State(
+            initialValue: built.first(where: { block in
+                block.sets.contains { $0.completedAt == nil }
+            })?.id ?? built.first?.id
+        )
     }
 
     var body: some View {
         NavigationStack {
             ScreenScaffold(
-                title: session.endedAt == nil ? "Log strength workout" : "Edit strength workout",
-                subtitle: "Manual entries stay authoritative. Load is stored in kilograms and displayed in \(massUnit.rawValue).",
+                title: session.endedAt == nil ? "Strength workout" : "Edit strength workout",
+                subtitle: "Follow today’s plan one movement at a time. Your set results remain manual and authoritative.",
                 topBackground: liquidScaffoldSky()
             ) {
-                sessionHeader
+                playerSessionHeader
+                if let currentBlock {
+                    currentExerciseGuide(currentBlock)
+                }
+                coachingControls
+                timedCountdown
+                pacedSetCoach
+                workTimer
                 restTimer
                 if blocks.isEmpty {
                     ScreenStateCard(
@@ -1199,9 +2205,16 @@ private struct StrengthSessionEditor: View {
                         symbol: "dumbbell"
                     )
                 } else {
-                    nextSetGuide
-                    ForEach($blocks) { $block in
-                        exerciseCard($block)
+                    if let currentBlock {
+                        exerciseCard(currentBlock)
+                        exerciseNavigation
+                    } else {
+                        ScreenStateCard(
+                            kind: .empty,
+                            title: "Workout complete",
+                            message: "Every planned set is marked complete. Finish when you are ready.",
+                            symbol: "checkmark.circle"
+                        )
                     }
                 }
                 NoopButton("Add exercise", systemImage: "plus", kind: .secondary, fullWidth: true) {
@@ -1217,12 +2230,15 @@ private struct StrengthSessionEditor: View {
             }
             .interactiveDismissDisabled()
         }
-        .sheet(isPresented: $exercisePicker) {
+        .sheet(
+            isPresented: $exercisePicker,
+            onDismiss: { replacementBlockID = nil }
+        ) {
             StrengthExercisePicker(
                 exercises: exercises.filter { candidate in
                     !blocks.contains(where: { $0.exercise.id == candidate.id })
                 },
-                onPick: addExercise
+                onPick: selectExercise
             )
             #if os(iOS)
             .noopSheetPresentation(largeFirst: true)
@@ -1236,6 +2252,31 @@ private struct StrengthSessionEditor: View {
         } message: {
             Text("The routine will store exercise order, set count, rep targets, and rest-not completed results.")
         }
+        .confirmationDialog(
+            "Use this replacement next time?",
+            isPresented: Binding(
+                get: { pendingReplacement != nil },
+                set: { if !$0 { pendingReplacement = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Today only") {
+                guard let choice = pendingReplacement else { return }
+                pendingReplacement = nil
+                Task { await replaceExercise(choice, updateRoutine: false) }
+            }
+            if let choice = pendingReplacement,
+               blocks.first(where: { $0.id == choice.blockID })?
+                .sourceRoutineExerciseID != nil {
+                Button("Today and future workouts") {
+                    pendingReplacement = nil
+                    Task { await replaceExercise(choice, updateRoutine: true) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingReplacement = nil }
+        } message: {
+            Text("Completed sets are never relabeled. Future changes update the routine while keeping this workout’s recorded results authoritative.")
+        }
         .alert("Strength Trainer", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -1244,29 +2285,598 @@ private struct StrengthSessionEditor: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .onAppear {
+            if keepScreenOn { ScreenIdle.keepAwake(true) }
+        }
+        .onDisappear {
+            ScreenIdle.keepAwake(false)
+            voiceCoach.stop()
+        }
+        .task(id: workSetID) {
+            guard let setID = workSetID, let workUntil else { return }
+            let wait = max(0, workUntil.timeIntervalSinceNow)
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, workSetID == setID,
+                  self.workUntil == workUntil else { return }
+            finishTimedSet(id: setID, useTargetDuration: true)
+        }
+        .task(id: timedCountdownSetID) {
+            guard let setID = timedCountdownSetID,
+                  let countdownUntil = timedCountdownUntil
+            else { return }
+            if voiceCoaching {
+                for number in stride(from: 3, through: 1, by: -1) {
+                    guard !Task.isCancelled, timedCountdownSetID == setID else { return }
+                    voiceCoach.speak(String(number))
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            } else {
+                let wait = max(0, countdownUntil.timeIntervalSinceNow)
+                try? await Task.sleep(for: .seconds(wait))
+            }
+            guard !Task.isCancelled, timedCountdownSetID == setID else { return }
+            let duration = timedCountdownDuration
+            clearTimedCountdown()
+            activateTimedSet(id: setID, duration: duration)
+            if voiceCoaching { voiceCoach.speak(String(localized: "Go")) }
+        }
+        .task(id: pacedSetID) {
+            guard let setID = pacedSetID else { return }
+            if voiceCoaching {
+                for number in stride(from: 3, through: 1, by: -1) {
+                    guard !Task.isCancelled, pacedSetID == setID else { return }
+                    voiceCoach.speak(String(number))
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            } else {
+                try? await Task.sleep(for: .seconds(3))
+            }
+            guard !Task.isCancelled, pacedSetID == setID else { return }
+            pacedStartedAt = Date()
+            for repetition in 1...max(1, pacedRepetitions) {
+                guard !Task.isCancelled, pacedSetID == setID else { return }
+                if voiceCoaching {
+                    voiceCoach.speak(
+                        String.localizedStringWithFormat(
+                            String(localized: "Rep %lld. Controlled phase, inhale."),
+                            repetition
+                        )
+                    )
+                }
+                let controlled = Double(repTempoSeconds) * 0.6
+                try? await Task.sleep(for: .seconds(controlled))
+                guard !Task.isCancelled, pacedSetID == setID else { return }
+                if voiceCoaching {
+                    voiceCoach.speak(String(localized: "Effort phase, exhale."))
+                }
+                try? await Task.sleep(
+                    for: .seconds(max(0.5, Double(repTempoSeconds) - controlled))
+                )
+            }
+            guard !Task.isCancelled, pacedSetID == setID else { return }
+            pacedFinished = true
+            if voiceCoaching {
+                voiceCoach.speak(String(localized: "Pacing complete. Confirm the set when ready."))
+            }
+        }
+        .task(id: restUntil) {
+            guard let restUntil else { return }
+            let wait = max(0, restUntil.timeIntervalSinceNow)
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, self.restUntil == restUntil else { return }
+            if voiceCoaching {
+                voiceCoach.speak(String(localized: "Rest complete. Ready for the next set."))
+            }
+        }
     }
 
-    private var sessionHeader: some View {
+    private var playerSessionHeader: some View {
         NoopCard(tint: StrandPalette.effortColor) {
             VStack(alignment: .leading, spacing: NoopMetrics.space3) {
-                TextField("Workout name (optional)", text: Binding(
-                    get: { session.name ?? "" },
-                    set: { session.name = $0.isEmpty ? nil : $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Workout name")
-
-                HStack {
-                    Label(startedLabel, systemImage: "clock")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                    Spacer()
-                    Text(String.localizedStringWithFormat(
-                        String(localized: "%lld completed"),
-                        completedSetCount
+                HStack(alignment: .firstTextBaseline) {
+                    TextField("Workout name (optional)", text: Binding(
+                        get: { session.name ?? "" },
+                        set: { session.name = $0.isEmpty ? nil : $0 }
                     ))
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.effortColor)
+                    .font(StrandFont.title2)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel("Workout name")
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(elapsedLabel(at: context.date))
+                            .font(StrandFont.number(18))
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .monospacedDigit()
+                    }
+                }
+                HStack {
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "%lld of %lld sets"),
+                            completedSetCount,
+                            totalSetCount
+                        )
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer()
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "Exercise %lld of %lld"),
+                            currentBlockIndex + 1,
+                            blocks.count
+                        )
+                    )
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.effortColor)
+                }
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(StrandPalette.surfaceInset)
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(StrandPalette.effortColor)
+                                .frame(
+                                    width: proxy.size.width
+                                        * CGFloat(completedSetCount)
+                                        / CGFloat(max(1, totalSetCount))
+                                )
+                        }
+                }
+                .frame(height: 5)
+            }
+        }
+    }
+
+    private var coachingControls: some View {
+        NoopCard(tint: voiceCoaching ? StrandPalette.metricCyan : nil) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                Toggle(isOn: $voiceCoaching) {
+                    Label(
+                        "Voice coaching",
+                        systemImage: voiceCoaching ? "speaker.wave.2.fill" : "speaker.slash.fill"
+                    )
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .tint(StrandPalette.metricCyan)
+                if voiceCoaching {
+                    Picker("Rep tempo", selection: $repTempoSeconds) {
+                        Text("3 sec").tag(3)
+                        Text("4 sec").tag(4)
+                        Text("5 sec").tag(5)
+                        Text("6 sec").tag(6)
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var timedCountdown: some View {
+        if let timedCountdownUntil {
+            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                let remaining = max(
+                    1,
+                    Int(ceil(timedCountdownUntil.timeIntervalSince(context.date)))
+                )
+                NoopCard(tint: StrandPalette.effortColor) {
+                    HStack(spacing: NoopMetrics.space3) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(StrandPalette.effortColor)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Get ready")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("\(remaining)")
+                                .font(StrandFont.number(28))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .monospacedDigit()
+                        }
+                        Spacer()
+                        Button("Cancel") { clearTimedCountdown() }
+                            .buttonStyle(NoopButtonStyle(.secondary))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var pacedSetCoach: some View {
+        if let setID = pacedSetID {
+            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                let status = pacedStatus(at: context.date)
+                NoopCard(tint: StrandPalette.metricCyan) {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        HStack(spacing: NoopMetrics.space3) {
+                            Image(systemName: "metronome.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(StrandPalette.metricCyan)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(status.title)
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text(status.cue)
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                            }
+                            Spacer()
+                            Button("Cancel") { cancelPacedSet() }
+                                .buttonStyle(NoopButtonStyle(.tertiary))
+                            Button("Complete set") { completePacedSet(id: setID) }
+                                .buttonStyle(NoopButtonStyle(.primary))
+                        }
+                        GeometryReader { proxy in
+                            Capsule()
+                                .fill(StrandPalette.surfaceInset)
+                                .overlay(alignment: .leading) {
+                                    Capsule()
+                                        .fill(StrandPalette.metricCyan)
+                                        .frame(width: proxy.size.width * status.progress)
+                                }
+                        }
+                        .frame(height: 5)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pacedStatus(at date: Date) -> (
+        title: String,
+        cue: String,
+        progress: CGFloat
+    ) {
+        if pacedFinished {
+            return (
+                String(localized: "Pacing complete"),
+                String(localized: "Confirm the set when ready."),
+                1
+            )
+        }
+        guard let started = pacedStartedAt else {
+            return (
+                String(localized: "Get ready"),
+                String(localized: "Paced repetitions start after the countdown."),
+                0
+            )
+        }
+        let tempo = Double(max(3, repTempoSeconds))
+        let elapsed = max(0, date.timeIntervalSince(started))
+        let repetition = min(
+            max(1, pacedRepetitions),
+            Int(elapsed / tempo) + 1
+        )
+        let phase = elapsed.truncatingRemainder(dividingBy: tempo)
+        let controlled = phase < tempo * 0.6
+        let total = tempo * Double(max(1, pacedRepetitions))
+        return (
+            String.localizedStringWithFormat(
+                String(localized: "Rep %lld of %lld"),
+                repetition,
+                pacedRepetitions
+            ),
+            controlled
+                ? String(localized: "Controlled phase · inhale")
+                : String(localized: "Effort phase · exhale"),
+            CGFloat(min(1, elapsed / max(1, total)))
+        )
+    }
+
+    private var currentBlock: Binding<StrengthExerciseBlock>? {
+        guard !blocks.isEmpty else { return nil }
+        let id = currentBlockID ?? blocks.first?.id
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else {
+            return $blocks[0]
+        }
+        return $blocks[index]
+    }
+
+    private var currentBlockIndex: Int {
+        guard let id = currentBlockID,
+              let index = blocks.firstIndex(where: { $0.id == id })
+        else { return 0 }
+        return index
+    }
+
+    private var totalSetCount: Int {
+        blocks.reduce(0) { $0 + $1.sets.count }
+    }
+
+    private func elapsedLabel(at date: Date) -> String {
+        let elapsed = max(0, Int(date.timeIntervalSince1970) - session.startedAt)
+        return "\(elapsed / 60):\(String(format: "%02d", elapsed % 60))"
+    }
+
+    private func currentExerciseGuide(
+        _ block: Binding<StrengthExerciseBlock>
+    ) -> some View {
+        let value = block.wrappedValue
+        let next = value.sets.first(where: { $0.completedAt == nil })
+        return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space3) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(strengthExerciseName(value.exercise))
+                        .font(StrandFont.title1)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(strengthDescriptorPair(value.exercise))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+                Spacer()
+                if let group = value.supersetGroup {
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.gym.superset_format"),
+                            supersetLabel(group)
+                        )
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.effortColor)
+                }
+            }
+
+            StrengthExerciseMotionView(exercise: value.exercise)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 48)
+                        .onEnded { gesture in
+                            guard abs(gesture.translation.width)
+                                    > abs(gesture.translation.height) * 1.25
+                            else { return }
+                            moveCurrentBlock(by: gesture.translation.width < 0 ? 1 : -1)
+                        }
+                )
+
+            exercisePerformanceContext(for: value)
+
+            if let guidance = progressionGuidance(for: value) {
+                Label(guidance, systemImage: "lightbulb.fill")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.metricCyan)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let note = routineNote(for: value), !note.isEmpty {
+                Label(note, systemImage: "list.bullet.clipboard")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let next {
+                NoopCard(tint: StrandPalette.effortColor) {
+                    HStack(spacing: NoopMetrics.space3) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("appwide.gym.up_next")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.effortColor)
+                            Text(currentTargetLabel(next, in: value))
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(strengthSetType(next.setType))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                        Spacer()
+                        if next.reps == nil, let duration = next.durationS, duration > 0 {
+                            Button {
+                                startTimedSet(next, duration: duration)
+                            } label: {
+                                Image(systemName: "play.fill")
+                                    .frame(width: 42, height: 42)
+                            }
+                            .buttonStyle(NoopButtonStyle(.primary))
+                            .disabled(
+                                workSetID != nil
+                                    || timedCountdownSetID != nil
+                                    || pacedSetID != nil
+                            )
+                            .accessibilityLabel(
+                                String.localizedStringWithFormat(
+                                    String(localized: "Start %lld second set"),
+                                    duration
+                                )
+                            )
+                        } else if let repetitions = next.reps, repetitions > 0 {
+                            Button {
+                                startPacedSet(next, repetitions: repetitions)
+                            } label: {
+                                Image(systemName: "waveform")
+                                    .frame(width: 42, height: 42)
+                            }
+                            .buttonStyle(NoopButtonStyle(.secondary))
+                            .disabled(
+                                workSetID != nil
+                                    || timedCountdownSetID != nil
+                                    || pacedSetID != nil
+                            )
+                            .accessibilityLabel(
+                                String.localizedStringWithFormat(
+                                    String(localized: "Coach %lld repetitions"),
+                                    repetitions
+                                )
+                            )
+                        }
+                    }
+                }
+            } else {
+                Label("All sets complete", systemImage: "checkmark.circle.fill")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.statusPositive)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func exercisePerformanceContext(
+        for block: StrengthExerciseBlock
+    ) -> some View {
+        let completedSessions = history
+            .filter {
+                $0.session.id != session.id && $0.session.endedAt != nil
+            }
+            .sorted { $0.session.startedAt > $1.session.startedAt }
+        let lastSets = completedSessions.lazy.compactMap { item -> [StrengthSetRow]? in
+            let rows = item.sets
+                .filter {
+                    $0.exerciseId == block.exercise.id
+                        && $0.completedAt != nil
+                        && $0.setType != "warmup"
+                }
+                .sorted { $0.setPosition < $1.setPosition }
+            return rows.isEmpty ? nil : rows
+        }.first
+        let allSets = completedSessions.flatMap(\.sets).filter {
+            $0.exerciseId == block.exercise.id
+                && $0.completedAt != nil
+                && $0.setType != "warmup"
+        }
+        let best = allSets.max { lhs, rhs in
+            performanceValue(lhs) < performanceValue(rhs)
+        }
+
+        if lastSets != nil || best != nil {
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    if let lastSets {
+                        performanceRow(
+                            title: String(localized: "Last session"),
+                            value: lastSets.prefix(3)
+                                .map(setPerformanceLabel)
+                                .joined(separator: " · ")
+                        )
+                    }
+                    if let best {
+                        performanceRow(
+                            title: String(localized: "Best set"),
+                            value: setPerformanceLabel(best)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func performanceRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space3) {
+            Text(title)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 82, alignment: .leading)
+            Text(value)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func performanceValue(_ set: StrengthSetRow) -> Double {
+        if let volume = set.volumeKg { return volume * 1_000 }
+        if let duration = set.durationS { return Double(duration) }
+        return Double(set.reps ?? 0)
+    }
+
+    private func setPerformanceLabel(_ set: StrengthSetRow) -> String {
+        if let duration = set.durationS, set.reps == nil {
+            return String.localizedStringWithFormat(
+                String(localized: "%lld sec"),
+                duration
+            )
+        }
+        let repetitions = set.reps ?? 0
+        if let load = set.loadKg {
+            return String.localizedStringWithFormat(
+                String(localized: "%lld × %@"),
+                repetitions,
+                UnitFormatter.massFromKilograms(load, unit: massUnit)
+            )
+        }
+        return String.localizedStringWithFormat(
+            String(localized: "%lld reps"),
+            repetitions
+        )
+    }
+
+    private var exerciseNavigation: some View {
+        HStack(spacing: NoopMetrics.space3) {
+            NoopButton(
+                "Previous",
+                systemImage: "chevron.left",
+                kind: .secondary
+            ) {
+                moveCurrentBlock(by: -1)
+            }
+            .disabled(currentBlockIndex == 0)
+
+            Spacer()
+
+            Text("\(currentBlockIndex + 1) / \(blocks.count)")
+                .font(StrandFont.number(17))
+                .foregroundStyle(StrandPalette.textSecondary)
+                .monospacedDigit()
+
+            Spacer()
+
+            NoopButton(
+                "Next",
+                systemImage: "chevron.right",
+                kind: .secondary
+            ) {
+                moveCurrentBlock(by: 1)
+            }
+            .disabled(currentBlockIndex >= blocks.count - 1)
+        }
+    }
+
+    @ViewBuilder private var workTimer: some View {
+        if let workSetID, let workStartedAt, let workUntil {
+            TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                let total = max(1, workUntil.timeIntervalSince(workStartedAt))
+                let remaining = max(0, workUntil.timeIntervalSince(context.date))
+                NoopCard(tint: StrandPalette.effortColor) {
+                    VStack(spacing: NoopMetrics.space3) {
+                        HStack(spacing: NoopMetrics.space3) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(StrandPalette.effortColor)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Timed set")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text(
+                                    String.localizedStringWithFormat(
+                                        String(localized: "%lld seconds"),
+                                        Int(ceil(remaining))
+                                    )
+                                )
+                                .font(StrandFont.number(24))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .monospacedDigit()
+                            }
+                            Spacer()
+                            Button("Cancel") { cancelTimedSet() }
+                                .buttonStyle(NoopButtonStyle(.tertiary))
+                            Button("Done") {
+                                finishTimedSet(id: workSetID, useTargetDuration: false)
+                            }
+                            .buttonStyle(NoopButtonStyle(.primary))
+                        }
+                        GeometryReader { proxy in
+                            Capsule()
+                                .fill(StrandPalette.surfaceInset)
+                                .overlay(alignment: .leading) {
+                                    Capsule()
+                                        .fill(StrandPalette.effortColor)
+                                        .frame(
+                                            width: proxy.size.width
+                                                * CGFloat(max(0, min(1, remaining / total)))
+                                        )
+                                }
+                        }
+                        .frame(height: 5)
+                    }
                 }
             }
         }
@@ -1442,6 +3052,17 @@ private struct StrengthSessionEditor: View {
                             Text("3 minutes").tag(180)
                             Text("5 minutes").tag(300)
                         }
+                        Button("Replace exercise", systemImage: "arrow.triangle.2.circlepath") {
+                            beginExerciseReplacement(blockID: block.wrappedValue.id)
+                        }
+                        Button("Move earlier", systemImage: "arrow.up") {
+                            reorderExercise(id: block.wrappedValue.id, offset: -1)
+                        }
+                        .disabled(block.wrappedValue.position == 0)
+                        Button("Move later", systemImage: "arrow.down") {
+                            reorderExercise(id: block.wrappedValue.id, offset: 1)
+                        }
+                        .disabled(block.wrappedValue.position >= blocks.count - 1)
                         Button("Remove exercise", role: .destructive) {
                             removeExercise(id: block.wrappedValue.id)
                         }
@@ -1601,6 +3222,93 @@ private struct StrengthSessionEditor: View {
             .formatted(date: .abbreviated, time: .shortened)
     }
 
+    private func beginExerciseReplacement(blockID: String) {
+        guard let block = blocks.first(where: { $0.id == blockID }) else { return }
+        guard block.sets.allSatisfy({ $0.completedAt == nil }) else {
+            errorMessage = String(
+                localized: "Completed sets keep their original exercise. Add another exercise for any remaining work."
+            )
+            return
+        }
+        guard workSetID == nil,
+              timedCountdownSetID == nil,
+              pacedSetID == nil else {
+            errorMessage = String(localized: "Finish or cancel the active timer before replacing this exercise.")
+            return
+        }
+        replacementBlockID = blockID
+        exercisePicker = true
+    }
+
+    private func selectExercise(_ exercise: StrengthExerciseRow) {
+        if let blockID = replacementBlockID {
+            pendingReplacement = StrengthExerciseReplacement(
+                blockID: blockID,
+                exercise: exercise
+            )
+            exercisePicker = false
+        } else {
+            addExercise(exercise)
+        }
+    }
+
+    private func replaceExercise(
+        _ choice: StrengthExerciseReplacement,
+        updateRoutine: Bool
+    ) async {
+        guard let blockIndex = blocks.firstIndex(where: { $0.id == choice.blockID }),
+              blocks[blockIndex].sets.allSatisfy({ $0.completedAt == nil })
+        else {
+            errorMessage = String(
+                localized: "Completed sets keep their original exercise. Add another exercise for any remaining work."
+            )
+            return
+        }
+
+        if updateRoutine {
+            guard let routineID = session.routineId,
+                  let sourceID = blocks[blockIndex].sourceRoutineExerciseID,
+                  let sourceRoutine = routines.first(where: { $0.routine.id == routineID }),
+                  let sourceIndex = sourceRoutine.exercises.firstIndex(where: {
+                      $0.id == sourceID
+                  })
+            else {
+                errorMessage = String(localized: "NOOP could not find the source routine for this exercise.")
+                return
+            }
+            var routine = sourceRoutine.routine
+            var prescriptions = sourceRoutine.exercises
+            let now = Int(Date().timeIntervalSince1970)
+            routine.updatedAt = now
+            prescriptions[sourceIndex].exerciseId = choice.exercise.id
+            prescriptions[sourceIndex].updatedAt = now
+            do {
+                _ = try await repo.saveStrengthRoutine(routine, exercises: prescriptions)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+
+        let now = Int(Date().timeIntervalSince1970)
+        blocks[blockIndex].exercise = choice.exercise
+        for setIndex in blocks[blockIndex].sets.indices {
+            blocks[blockIndex].sets[setIndex].exerciseId = choice.exercise.id
+            blocks[blockIndex].sets[setIndex].updatedAt = now
+        }
+        _ = await persist(silently: false)
+    }
+
+    private func reorderExercise(id: String, offset: Int) {
+        guard let source = blocks.firstIndex(where: { $0.id == id }) else { return }
+        let destination = min(max(0, source + offset), blocks.count - 1)
+        guard source != destination else { return }
+        let block = blocks.remove(at: source)
+        blocks.insert(block, at: destination)
+        normalizePositions()
+        Task { await persist(silently: true) }
+    }
+
     private func addExercise(_ exercise: StrengthExerciseRow) {
         exercisePicker = false
         let now = Int(Date().timeIntervalSince1970)
@@ -1625,9 +3333,13 @@ private struct StrengthSessionEditor: View {
                 position: position,
                 restSeconds: 120,
                 sets: sets,
-                supersetGroup: nil
+                supersetGroup: nil,
+                sourceRoutineExerciseID: nil
             )
         )
+        if currentBlockID == nil {
+            currentBlockID = blocks.last?.id
+        }
         Task { await persist(silently: true) }
     }
 
@@ -1664,8 +3376,18 @@ private struct StrengthSessionEditor: View {
     }
 
     private func removeExercise(id: String) {
+        let removedIndex = blocks.firstIndex(where: { $0.id == id })
+        let removedCurrent = currentBlockID == id
         blocks.removeAll { $0.id == id }
         normalizePositions()
+        if removedCurrent {
+            guard !blocks.isEmpty else {
+                currentBlockID = nil
+                Task { await persist(silently: true) }
+                return
+            }
+            currentBlockID = blocks[min(removedIndex ?? 0, blocks.count - 1)].id
+        }
         Task { await persist(silently: true) }
     }
 
@@ -1689,6 +3411,9 @@ private struct StrengthSessionEditor: View {
     }
 
     private func toggleCompleted(set: Binding<StrengthSetRow>, restSeconds: Int) {
+        if pacedSetID == set.wrappedValue.id {
+            cancelPacedSet()
+        }
         if set.wrappedValue.completedAt != nil {
             set.wrappedValue.completedAt = nil
             Task { await persist(silently: true) }
@@ -1706,6 +3431,7 @@ private struct StrengthSessionEditor: View {
         }
         set.wrappedValue = completed
         if restSeconds > 0 { restUntil = Date().addingTimeInterval(TimeInterval(restSeconds)) }
+        advanceIfCurrentExerciseFinished(afterCompleting: completed.id)
         Task { await persist(silently: true) }
     }
 
@@ -1864,6 +3590,202 @@ private struct StrengthSessionEditor: View {
             plan.setStyle = "straight"
         }
         return plan
+    }
+
+    private func moveCurrentBlock(by offset: Int) {
+        guard !blocks.isEmpty else { return }
+        let next = min(max(0, currentBlockIndex + offset), blocks.count - 1)
+        guard next != currentBlockIndex else { return }
+        currentBlockID = blocks[next].id
+    }
+
+    private func advanceIfCurrentExerciseFinished(afterCompleting setID: String) {
+        guard let completedBlockIndex = blocks.firstIndex(where: { block in
+            block.sets.contains(where: { $0.id == setID })
+        }), blocks[completedBlockIndex].sets.allSatisfy({ $0.completedAt != nil }),
+        currentBlockID == blocks[completedBlockIndex].id
+        else { return }
+
+        let later = blocks.indices.dropFirst(completedBlockIndex + 1).first {
+            blocks[$0].sets.contains { $0.completedAt == nil }
+        }
+        let earlier = blocks.indices.prefix(completedBlockIndex).first {
+            blocks[$0].sets.contains { $0.completedAt == nil }
+        }
+        if let next = later ?? earlier {
+            currentBlockID = blocks[next].id
+        }
+    }
+
+    private func startTimedSet(_ set: StrengthSetRow, duration: Int) {
+        guard workSetID == nil, pacedSetID == nil,
+              timedCountdownSetID == nil, duration > 0
+        else { return }
+        if voiceCoaching {
+            restUntil = nil
+            timedCountdownDuration = duration
+            timedCountdownUntil = Date().addingTimeInterval(3)
+            timedCountdownSetID = set.id
+        } else {
+            activateTimedSet(id: set.id, duration: duration)
+        }
+    }
+
+    private func activateTimedSet(id: String, duration: Int) {
+        guard blocks.contains(where: { block in
+            block.sets.contains(where: { $0.id == id && $0.completedAt == nil })
+        }), workSetID == nil, duration > 0
+        else { return }
+        let now = Date()
+        restUntil = nil
+        workStartedAt = now
+        workUntil = now.addingTimeInterval(TimeInterval(duration))
+        workSetID = id
+    }
+
+    private func clearTimedCountdown() {
+        timedCountdownSetID = nil
+        timedCountdownDuration = 0
+        timedCountdownUntil = nil
+    }
+
+    private func cancelTimedSet() {
+        workSetID = nil
+        workStartedAt = nil
+        workUntil = nil
+    }
+
+    private func startPacedSet(_ set: StrengthSetRow, repetitions: Int) {
+        guard pacedSetID == nil, workSetID == nil,
+              timedCountdownSetID == nil, repetitions > 0
+        else { return }
+        restUntil = nil
+        pacedRepetitions = repetitions
+        pacedStartedAt = nil
+        pacedFinished = false
+        pacedSetID = set.id
+    }
+
+    private func cancelPacedSet() {
+        pacedSetID = nil
+        pacedStartedAt = nil
+        pacedRepetitions = 0
+        pacedFinished = false
+        voiceCoach.stop()
+    }
+
+    private func completePacedSet(id: String) {
+        guard let blockIndex = blocks.firstIndex(where: { block in
+            block.sets.contains(where: { $0.id == id })
+        }), let setIndex = blocks[blockIndex].sets.firstIndex(where: { $0.id == id })
+        else {
+            cancelPacedSet()
+            return
+        }
+        let restSeconds = blocks[blockIndex].sets[setIndex].restSeconds
+            ?? blocks[blockIndex].restSeconds
+        let binding = Binding<StrengthSetRow>(
+            get: { blocks[blockIndex].sets[setIndex] },
+            set: { blocks[blockIndex].sets[setIndex] = $0 }
+        )
+        cancelPacedSet()
+        toggleCompleted(set: binding, restSeconds: restSeconds)
+    }
+
+    private func finishTimedSet(id: String, useTargetDuration: Bool) {
+        guard let blockIndex = blocks.firstIndex(where: { block in
+            block.sets.contains(where: { $0.id == id })
+        }), let setIndex = blocks[blockIndex].sets.firstIndex(where: { $0.id == id })
+        else {
+            cancelTimedSet()
+            return
+        }
+        let target = blocks[blockIndex].sets[setIndex].durationS ?? 1
+        let elapsed = workStartedAt.map {
+            max(1, Int(Date().timeIntervalSince($0).rounded(.down)))
+        } ?? target
+        blocks[blockIndex].sets[setIndex].durationS = useTargetDuration
+            ? target
+            : min(target, elapsed)
+        let restSeconds = blocks[blockIndex].sets[setIndex].restSeconds
+            ?? blocks[blockIndex].restSeconds
+        let binding = Binding<StrengthSetRow>(
+            get: { blocks[blockIndex].sets[setIndex] },
+            set: { blocks[blockIndex].sets[setIndex] = $0 }
+        )
+        cancelTimedSet()
+        toggleCompleted(set: binding, restSeconds: restSeconds)
+        if voiceCoaching {
+            voiceCoach.speak(String(localized: "Timed set complete."))
+        }
+    }
+
+    private func currentTargetLabel(
+        _ set: StrengthSetRow,
+        in block: StrengthExerciseBlock
+    ) -> String {
+        var target = String.localizedStringWithFormat(
+            String(localized: "Set %lld"),
+            set.setPosition + 1
+        )
+        if let duration = set.durationS, set.reps == nil {
+            target += String.localizedStringWithFormat(
+                String(localized: " · %lld seconds"),
+                duration
+            )
+            return target
+        }
+        if let load = set.loadKg {
+            let display = massUnit == .pounds ? UnitFormatter.kgToPounds(load) : load
+            target += " · \(formatNumber(display)) \(massUnit.rawValue)"
+        } else if block.exercise.equipment == "bodyweight" {
+            target += " · \(String(localized: "Bodyweight"))"
+        }
+        if let reps = set.reps {
+            target += String.localizedStringWithFormat(
+                String(localized: " × %lld reps"),
+                reps
+            )
+        }
+        return target
+    }
+
+    private func sourceRoutineExercise(
+        for block: StrengthExerciseBlock
+    ) -> StrengthRoutineExerciseRow? {
+        routines.first(where: { $0.routine.id == session.routineId })?.exercises.first {
+            $0.position == block.position && $0.exerciseId == block.exercise.id
+        }
+    }
+
+    private func routineNote(for block: StrengthExerciseBlock) -> String? {
+        sourceRoutineExercise(for: block)?.note?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func progressionGuidance(for block: StrengthExerciseBlock) -> String? {
+        guard let prescription = sourceRoutineExercise(for: block) else {
+            return String(localized: "Freestyle target · adjust each set to match the work you do.")
+        }
+        let planned = StrengthWorkoutPlanner.prescription(
+            exercise: block.exercise,
+            prescription: prescription,
+            history: history
+        )
+        switch planned.reason {
+        case .firstSession:
+            return String(localized: "Starting target from this routine. Adjust it if today’s session differs.")
+        case .repeatLoad:
+            return String(localized: "Target carries forward your latest completed session.")
+        case .repRangeAdvanced:
+            return String(localized: "You reached the top of the rep range, so today’s load advances one step.")
+        case .linearAdvanced:
+            return String(localized: "Your completed working sets support the routine’s next linear load step.")
+        case .timeAdvanced:
+            return String(localized: "You completed the prior hold target, so today adds five seconds.")
+        case .bodyweightRepProgress:
+            return String(localized: "You completed the prior bodyweight target, so today adds repetitions.")
+        }
     }
 
     private func integerBinding(_ value: Binding<Int?>) -> Binding<String> {
@@ -2822,7 +4744,7 @@ private struct StrengthExerciseProgressView: View {
     }
 }
 
-private func strengthExerciseName(_ exercise: StrengthExerciseRow) -> String {
+func strengthExerciseName(_ exercise: StrengthExerciseRow) -> String {
     switch exercise.id {
     case "barbell_back_squat":
         return String(localized: "strength.exercise.back_squat", defaultValue: "Back Squat")

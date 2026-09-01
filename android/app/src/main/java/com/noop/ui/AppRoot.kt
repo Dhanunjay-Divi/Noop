@@ -88,6 +88,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.noop.BuildConfig
 import com.noop.R
 import com.noop.analytics.FusionSource
 import androidx.compose.ui.Alignment
@@ -331,7 +332,11 @@ fun AppRoot(
     }
     val selectedTab = Destination.forRoute(selectedTabRoute)
     var showQuickActions by remember { mutableStateOf(false) }
-    var quickOverlay by remember { mutableStateOf<QuickActionKind?>(null) }
+    var quickOverlay by remember(initialRoute) {
+        mutableStateOf<QuickActionKind?>(
+            if (BuildConfig.DEBUG && initialRoute == "strength") QuickActionKind.STRENGTH else null,
+        )
+    }
     // The Updates inbox sheet (opened by the Today header bell). The store is a process singleton so
     // the Today cards and the import path post to the same inbox this sheet renders.
     val context = androidx.compose.ui.platform.LocalContext.current

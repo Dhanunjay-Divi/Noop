@@ -105,7 +105,10 @@ extension Repository {
     /// Start one resumable manual session, optionally from a routine. An existing active session wins,
     /// making repeated WatchConnectivity delivery idempotent.
     @discardableResult
-    func startStrengthSession(routineID: String?) async throws -> StrengthSessionSnapshot {
+    func startStrengthSession(
+        routineID: String?,
+        onPrepared: (StrengthSessionSnapshot) -> Void = { _ in }
+    ) async throws -> StrengthSessionSnapshot {
         guard let store = await storeHandle() else {
             throw StrengthTrainingRepositoryError.storeUnavailable
         }
@@ -113,6 +116,7 @@ extension Repository {
         if let active = sessions.first(where: {
             $0.session.endedAt == nil
         }) {
+            onPrepared(active)
             return active
         }
         let routine = try await store.strengthRoutines().first(where: {
@@ -174,6 +178,8 @@ extension Repository {
                 )
             }
         } ?? []
+        let draft = StrengthSessionSnapshot(session: session, sets: sets)
+        onPrepared(draft)
         let saved = try await store.saveStrengthSession(session, sets: sets)
         NotificationCenter.default.post(name: .strengthTrainingChanged, object: nil)
         return saved

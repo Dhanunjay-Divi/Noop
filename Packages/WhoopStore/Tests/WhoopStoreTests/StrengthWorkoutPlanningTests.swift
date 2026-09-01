@@ -4,6 +4,255 @@ import XCTest
 final class StrengthWorkoutPlanningTests: XCTestCase {
     private let now = 1_800_000_000
 
+    func testEveryBuiltInExerciseHasSpecificPositiveMotionGuidance() {
+        XCTAssertEqual(StrengthTrainingContract.builtInExercises.count, 56)
+        for exercise in StrengthTrainingContract.builtInExercises {
+            let guide = StrengthExerciseGuidance.guide(for: exercise)
+            XCTAssertTrue(guide.isExerciseSpecific, exercise.id)
+            XCTAssertNotEqual(guide.profile, .generic, exercise.id)
+            XCTAssertGreaterThan(guide.cycleDuration, 0, exercise.id)
+        }
+
+        let custom = StrengthExerciseRow(
+            id: "custom-squat",
+            name: "Custom squat",
+            primaryMuscle: "quadriceps",
+            equipment: "other",
+            movementPattern: "squat",
+            isCustom: true,
+            createdAt: now,
+            updatedAt: now
+        )
+        let fallback = StrengthExerciseGuidance.guide(for: custom)
+        XCTAssertEqual(fallback.profile, .squat)
+        XCTAssertFalse(fallback.isExerciseSpecific)
+    }
+
+    func testAdaptiveProgramsCoverTwoThroughSixGymDaysWithKnownExercises() {
+        let known = Set(StrengthTrainingContract.builtInExercises.map(\.id))
+        for count in 2...6 {
+            let weekdays = StrengthAdaptivePlanner.suggestedWeekdays(for: count)
+            let program = StrengthAdaptivePlanner.program(for: weekdays)
+            XCTAssertEqual(weekdays.count, count)
+            XCTAssertEqual(program.count, count)
+            XCTAssertEqual(program.map(\.isoWeekday), weekdays)
+            XCTAssertTrue(program.allSatisfy { !$0.exercises.isEmpty })
+            XCTAssertTrue(
+                program.flatMap(\.exercises).allSatisfy {
+                    known.contains($0.exerciseId)
+                        && $0.targetSets > 0
+                        && $0.restSeconds > 0
+                }
+            )
+        }
+        XCTAssertTrue(StrengthAdaptivePlanner.program(for: [1]).isEmpty)
+        XCTAssertTrue(StrengthAdaptivePlanner.program(for: [1, 1]).isEmpty)
+    }
+
+    func testProfileDrivenProgramScalesSessionWithoutInventingProgress() throws {
+        let beginner = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 3, 5],
+                experience: .beginner,
+                style: .balanced,
+                sessionMinutes: 30,
+                focusMuscles: ["chest"]
+            )
+        )
+        XCTAssertEqual(beginner.count, 3)
+        XCTAssertTrue(beginner.allSatisfy { $0.exercises.count == 3 })
+        XCTAssertTrue(beginner.flatMap(\.exercises).allSatisfy {
+            $0.targetSets <= 2 && $0.targetRPE == 6.5
+        })
+        XCTAssertTrue(beginner.allSatisfy { routine in
+            routine.exercises.contains { item in
+                StrengthTrainingContract.builtInExercises.first {
+                    $0.id == item.exerciseId
+                }?.primaryMuscle == "chest"
+            }
+        })
+
+        let experienced = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 4],
+                experience: .experienced,
+                style: .strength,
+                sessionMinutes: 75
+            )
+        )
+        XCTAssertTrue(experienced.flatMap(\.exercises).prefix(2).allSatisfy {
+            $0.targetRepsMin == 4
+                && $0.targetRepsMax == 6
+                && $0.restSeconds >= 180
+                && $0.targetRPE == 7.5
+        })
+
+        let custom = StrengthExerciseRow(
+            id: "custom-row",
+            name: "Custom row",
+            primaryMuscle: "back",
+            equipment: "band",
+            movementPattern: "horizontal_pull",
+            isCustom: true,
+            createdAt: now,
+            updatedAt: now
+        )
+        let focus = StrengthAdaptivePlanner.focusWorkout(
+            exercises: [custom],
+            experience: .beginner,
+            style: .muscle,
+            sessionMinutes: 30
+        )
+        XCTAssertEqual(focus.map(\.exerciseId), [custom.id])
+        XCTAssertEqual(focus.first?.targetSets, 2)
+        XCTAssertEqual(focus.first?.targetRepsMin, 8)
+        XCTAssertEqual(focus.first?.targetRepsMax, 12)
+    }
+
+    func testMuscleStatusUsesCompletedSetExposureAndFadesOverSeventyTwoHours() throws {
+        let bench = try XCTUnwrap(
+            StrengthTrainingContract.builtInExercises.first {
+                $0.id == "barbell_bench_press"
+            }
+        )
+        let session = StrengthSessionSnapshot(
+            session: StrengthSessionRow(
+                id: "body-map",
+                startedAt: now - 3_600,
+                endedAt: now - 1_800,
+                createdAt: now - 3_600,
+                updatedAt: now - 1_800
+            ),
+            sets: [
+                StrengthSetRow(
+                    id: "working",
+                    sessionId: "body-map",
+                    exerciseId: bench.id,
+                    exercisePosition: 0,
+                    setPosition: 0,
+                    reps: 8,
+                    completedAt: now - 3_600,
+                    createdAt: now - 3_600,
+                    updatedAt: now - 3_600
+                ),
+                StrengthSetRow(
+                    id: "warmup",
+                    sessionId: "body-map",
+                    exerciseId: bench.id,
+                    exercisePosition: 0,
+                    setPosition: 1,
+                    setType: "warmup",
+                    reps: 5,
+                    completedAt: now - 3_600,
+                    createdAt: now - 3_600,
+                    updatedAt: now - 3_600
+                ),
+            ]
+        )
+
+        let current = StrengthProgressCalculator.muscleStatus(
+            exercises: [bench],
+            sessions: [session],
+            now: now
+        )
+        XCTAssertEqual(current.first { $0.muscle == "chest" }?.sevenDayExposure, 1)
+        XCTAssertEqual(current.first { $0.muscle == "triceps" }?.sevenDayExposure, 0.5)
+        XCTAssertLessThan(current.first { $0.muscle == "chest" }?.recoveryScore ?? 1, 1)
+
+        let recovered = StrengthProgressCalculator.muscleStatus(
+            exercises: [bench],
+            sessions: [session],
+            now: now + StrengthProgressCalculator.recoveryWindowSeconds + 1
+        )
+        XCTAssertEqual(recovered.first { $0.muscle == "chest" }?.recoveryScore, 1)
+        XCTAssertGreaterThan(
+            recovered.first { $0.muscle == "chest" }?.loadScore ?? 0,
+            0
+        )
+    }
+
+    func testAdaptiveScheduleUsesRestDayForRecentMissedRoutineWithoutStacking() {
+        let push = scheduledRoutine(id: "push", weekday: 1, createdAt: 10)
+        let pull = scheduledRoutine(id: "pull", weekday: 3, createdAt: 20)
+        let routines = [pull, push]
+        let monday = StrengthScheduleDay(dateKey: "2026-08-31", isoWeekday: 1)
+        let tuesday = StrengthScheduleDay(dateKey: "2026-09-01", isoWeekday: 2)
+        let wednesday = StrengthScheduleDay(dateKey: "2026-09-02", isoWeekday: 3)
+
+        XCTAssertEqual(
+            StrengthAdaptivePlanner.recommendation(
+                today: tuesday,
+                previousDaysNearestFirst: [monday],
+                routines: routines,
+                completions: []
+            ),
+            StrengthDayRecommendation(
+                routineId: "push",
+                reason: .makeUp,
+                originallyScheduledDateKey: monday.dateKey
+            )
+        )
+
+        XCTAssertEqual(
+            StrengthAdaptivePlanner.recommendation(
+                today: wednesday,
+                previousDaysNearestFirst: [tuesday, monday],
+                routines: routines,
+                completions: []
+            ).routineId,
+            "pull",
+            "A scheduled day must not stack or get replaced by missed work."
+        )
+
+        XCTAssertEqual(
+            StrengthAdaptivePlanner.recommendation(
+                today: tuesday,
+                previousDaysNearestFirst: [monday],
+                routines: routines,
+                completions: [
+                    StrengthRoutineCompletion(dateKey: tuesday.dateKey, routineId: "push"),
+                ]
+            ).reason,
+            .completed
+        )
+    }
+
+    func testAdaptiveScheduleDoesNotCarryStaleOrSupersededWork() {
+        let push = scheduledRoutine(id: "push", weekday: 1, createdAt: 10)
+        let friday = StrengthScheduleDay(dateKey: "2026-09-04", isoWeekday: 5)
+        let previous = [
+            StrengthScheduleDay(dateKey: "2026-09-03", isoWeekday: 4),
+            StrengthScheduleDay(dateKey: "2026-09-02", isoWeekday: 3),
+            StrengthScheduleDay(dateKey: "2026-09-01", isoWeekday: 2),
+            StrengthScheduleDay(dateKey: "2026-08-31", isoWeekday: 1),
+        ]
+        let result = StrengthAdaptivePlanner.recommendation(
+            today: friday,
+            previousDaysNearestFirst: previous,
+            routines: [push],
+            completions: []
+        )
+        XCTAssertEqual(result.reason, .rest)
+        XCTAssertNil(result.routineId)
+    }
+
+    private func scheduledRoutine(
+        id: String,
+        weekday: Int,
+        createdAt: Int
+    ) -> StrengthRoutineSnapshot {
+        StrengthRoutineSnapshot(
+            routine: StrengthRoutineRow(
+                id: id,
+                name: id,
+                scheduledWeekdaysJSON: StrengthTrainingContract.encodeScheduledWeekdays([weekday]),
+                createdAt: createdAt,
+                updatedAt: createdAt
+            ),
+            exercises: []
+        )
+    }
+
     private func routine(
         exerciseId: String,
         sets: Int = 3,

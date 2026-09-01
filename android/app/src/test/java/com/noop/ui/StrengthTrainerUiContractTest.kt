@@ -48,7 +48,8 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer!!.contains("R.string.strength_manual_authority_body"))
         assertTrue(trainer.contains("R.string.strength_numbers_meaning_body"))
         assertTrue(trainer.contains("containerColor = Palette.surfaceBase"))
-        assertTrue(trainer.contains("SceneScreenBackground(maxAlpha = 0.82f)"))
+        assertTrue(trainer.contains("LiquidScreenSky(fillHeight = true)"))
+        assertFalse(trainer.contains("SceneScreenBackground(maxAlpha = 0.82f)"))
         assertTrue(trainer.contains("Icons.Filled.Bedtime"))
         assertFalse(trainer.contains("Text(\""))
         assertFalse(trainer.contains("contentDescription = \""))
@@ -61,16 +62,66 @@ class StrengthTrainerUiContractTest {
         val text = trainer!!
 
         assertTrue(text.contains("target != SheetValue.Hidden"))
-        assertTrue(
-            text.contains(
-                "if (editor == null && routineEditor == null && !customExerciseEditor) onDismiss()",
-            ),
-        )
+        assertTrue(text.contains("routineEditor == null &&"))
+        assertTrue(text.contains("!programBuilder &&"))
+        assertTrue(text.contains("!customExerciseEditor"))
+        assertTrue(text.contains("onDismiss()"))
         assertTrue(text.contains("if (persist() != null) onClose()"))
         assertTrue(text.contains("var pendingSave by remember"))
         assertTrue(text.contains("} while (pendingSave)"))
         assertTrue(text.contains("var blocks by remember(initial.session.id)"))
         assertTrue(text.contains("val completedAt = session.endedAt ?: now"))
+    }
+
+    @Test
+    fun guidedPlayerAndRichTodayPlanStayMounted() {
+        val trainer = source("StrengthTrainerScreen.kt")
+        val motion = source("StrengthExerciseMotionView.kt")
+        assumeTrue("Strength guided-player sources unavailable", trainer != null && motion != null)
+
+        assertTrue(trainer!!.contains("StrengthExerciseMotionView("))
+        assertTrue(trainer.contains("var currentBlockKey by rememberSaveable"))
+        assertTrue(trainer.contains("finishTimedSet(useTargetDuration = true)"))
+        assertTrue(trainer.contains("strengthTodayPlans(routine, exercises, history)"))
+        assertTrue(trainer.contains("showHeader = false"))
+        assertTrue(trainer.contains("StrengthAdaptivePlanner.recommendation("))
+        assertTrue(trainer.contains("StrengthProgramBuilder("))
+        assertTrue(trainer.contains("sourceRoutineExerciseId"))
+        assertTrue(trainer.contains("updateRoutine: Boolean"))
+        assertTrue(trainer.contains("TextToSpeech(context)"))
+        assertTrue(trainer.contains("completePacedSet(setId)"))
+        assertTrue(trainer.contains("StrengthExercisePerformanceContext("))
+        assertTrue(trainer.contains("var exerciseGuide by remember"))
+        assertTrue(trainer.contains("onGuide = { exerciseGuide = it }"))
+        assertTrue(trainer.contains("onGuide(plan.exercise)"))
+        assertTrue(motion!!.contains("withFrameNanos"))
+        assertTrue(motion.contains("drawStrengthMotion("))
+        assertTrue(motion.contains("drawStrengthMotionTrack("))
+        assertFalse(motion.contains("pair.second,\n        exercise.primaryMuscle"))
+    }
+
+    @Test
+    fun instructorProfileAndInteractiveBodyMapStayMounted() {
+        val trainer = source("StrengthTrainerScreen.kt")
+        val motion = source("StrengthExerciseMotionView.kt")
+        assumeTrue("Strength instructor sources unavailable", trainer != null && motion != null)
+
+        assertTrue(trainer!!.contains("StrengthProgramRequest("))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_EXPERIENCE"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_STYLE"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_SESSION_MINUTES"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_DAY_COUNT"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_WEEKDAYS"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_FOCUS_MUSCLES"))
+        assertTrue(trainer.contains("didOfferProgramBuilder"))
+        assertTrue(trainer.contains("val draft = StrengthSessionSnapshot(session, sets)"))
+        assertTrue(trainer.contains("StrengthMuscleCoach("))
+        assertTrue(trainer.contains("StrengthBodyMapView("))
+        assertTrue(trainer.contains("startFocusSession("))
+        assertTrue(trainer.contains("selectedFocusExerciseIds"))
+        assertTrue(motion!!.contains("enum class StrengthBodyMapMode"))
+        assertTrue(motion.contains("StrengthBodyRegion("))
+        assertTrue(motion.contains("contentDescription = accessibilityDescription"))
     }
 
     @Test
@@ -118,7 +169,7 @@ class StrengthTrainerUiContractTest {
         val values = files.mapValues { strengthStrings(it.value!!) }
         val base = values.getValue("values")
 
-        assertEquals(133, base.size)
+        assertEquals(241, base.size)
         val placeholder = Regex("""%\d+\$[dsf]""")
         for ((folder, localized) in values) {
             assertEquals("$folder Strength key parity", base.keys, localized.keys)
