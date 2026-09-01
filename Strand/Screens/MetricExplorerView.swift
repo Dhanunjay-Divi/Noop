@@ -3,9 +3,6 @@ import Foundation
 import StrandDesign
 import StrandAnalytics
 import WhoopStore
-#if os(iOS)
-import UIKit
-#endif
 
 // MARK: - Explore (Metric Explorer + Detail)
 //
@@ -775,7 +772,6 @@ struct MetricDetailView: View {
                     // the explanation/setup state, so an empty range cannot look like the headline.
                     metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     metricMeaningCard
-                    MetricReminderCard(metric: metric)
                     if metric.key == "fitness_age" {
                         // Fitness Age is COMPUTED on-device from resting HR + activity — not imported — so
                         // the generic "import your history" copy was wrong (and a dead end) here. Lead with
@@ -826,7 +822,6 @@ struct MetricDetailView: View {
                     // labels the current hero, so a monthly chart cannot look like a monthly headline.
                     metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     heroHeader
-                    MetricReminderCard(metric: metric)
                     if isEnergyMetric { energyBreakdownCard }
 
                     metricDetailSectionHeader(.compareHistory, trailing: effRange.name)
@@ -1948,148 +1943,6 @@ struct MetricDetailView: View {
     private func correlationColor(_ r: Double) -> Color {
         let base = r >= 0 ? StrandPalette.statusPositive : StrandPalette.statusCritical
         return base.opacity(0.55 + 0.45 * min(abs(r), 1.0))
-    }
-}
-
-/// Contextual entry point shared by every metric dossier. It edits the same single coalesced schedule,
-/// so selecting several signals produces one calm review rather than a notification storm.
-private struct MetricReminderCard: View {
-    let metric: MetricDescriptor
-
-    @State private var enabled = false
-    @State private var cadence: MetricReviewReminders.Cadence = .daily
-    @State private var showPermissionAlert = false
-    @AppStorage(MetricReviewReminders.minuteOfDayKey) private var minuteOfDay = 18 * 60
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        NoopCard(tint: enabled ? metricAccent(metric) : nil) {
-            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
-                HStack(alignment: .center, spacing: NoopMetrics.space3) {
-                    Image(systemName: "bell.badge.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(enabled ? metricAccent(metric) : StrandPalette.textTertiary)
-                        .frame(width: 28)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Metric review")
-                            .font(StrandFont.headline)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Remind me to review \(metric.title)")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                    }
-                    Spacer(minLength: NoopMetrics.space2)
-                    Toggle("", isOn: reminderToggle)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(metricAccent(metric))
-                        .accessibilityLabel("\(metric.title) review reminder")
-                        .accessibilityIdentifier("noop.metric.reminder.\(metric.id)")
-                }
-
-                if enabled {
-                    Divider().overlay(StrandPalette.hairline)
-                    HStack(spacing: NoopMetrics.space3) {
-                        Label("Review cadence", systemImage: "calendar")
-                            .font(StrandFont.body)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Spacer()
-                        Picker("Review cadence", selection: cadenceBinding) {
-                            ForEach(MetricReviewReminders.Cadence.allCases) { option in
-                                Text(option.label).tag(option)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-
-                    HStack(spacing: NoopMetrics.space3) {
-                        Label("Review at", systemImage: "clock")
-                            .font(StrandFont.body)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Spacer()
-                        DatePicker("", selection: timeBinding, displayedComponents: .hourAndMinute)
-                            .labelsHidden()
-                            .datePickerStyle(.compact)
-                            .accessibilityLabel("Metric review time")
-                    }
-                }
-
-                Text("Collection stays automatic. This private reminder only opens Trends; it does not trigger a reading or judge whether movement is good or bad.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .onAppear {
-            enabled = MetricReviewReminders.isEnabled(metricID: metric.id)
-            cadence = MetricReviewReminders.cadence(metricID: metric.id)
-        }
-        .alert("Notifications are off", isPresented: $showPermissionAlert) {
-            Button("Open Settings") {
-                #if os(iOS)
-                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
-                #elseif os(macOS)
-                if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
-                    openURL(url)
-                }
-                #endif
-            }
-            Button("Not now", role: .cancel) {}
-        } message: {
-            Text("Allow notifications in Settings to use optional metric reviews.")
-        }
-    }
-
-    private var reminderToggle: Binding<Bool> {
-        Binding(
-            get: { enabled },
-            set: { on in
-                if !on {
-                    MetricReviewReminders.setMetric(id: metric.id, enabled: false)
-                    enabled = false
-                    return
-                }
-                MetricReviewReminders.setMetric(id: metric.id, enabled: true) { outcome in
-                    switch outcome {
-                    case .scheduled:
-                        enabled = true
-                    case .denied:
-                        enabled = false
-                        showPermissionAlert = true
-                    case .off:
-                        enabled = false
-                    }
-                }
-            }
-        )
-    }
-
-    private var timeBinding: Binding<Date> {
-        Binding(
-            get: {
-                var components = DateComponents()
-                components.hour = minuteOfDay / 60
-                components.minute = minuteOfDay % 60
-                return Calendar.current.date(from: components) ?? Date()
-            },
-            set: { date in
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-                let minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
-                minuteOfDay = minutes
-                MetricReviewReminders.setMinuteOfDay(minutes)
-            }
-        )
-    }
-
-    private var cadenceBinding: Binding<MetricReviewReminders.Cadence> {
-        Binding(
-            get: { cadence },
-            set: { value in
-                cadence = value
-                MetricReviewReminders.setCadence(metricID: metric.id, cadence: value)
-            }
-        )
     }
 }
 

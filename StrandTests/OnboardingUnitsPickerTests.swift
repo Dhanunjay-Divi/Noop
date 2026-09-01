@@ -97,3 +97,47 @@ final class OnboardingUnitsPickerTests: XCTestCase {
         XCTAssertTrue(onboarding.contains("Import Apple Health export"))
     }
 }
+
+/// Pins the final onboarding map that teaches the same stable everyday entry points on iOS and Android.
+final class OnboardingDiscoveryContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func source(_ relativePath: String) throws -> String {
+        try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
+    }
+
+    func testDailyRhythmAppearsBeforeDoneAndUsesLocalizedCopy() throws {
+        let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
+
+        XCTAssertTrue(onboarding.contains("case .dailyRhythm: DailyRhythmStep()"))
+        XCTAssertTrue(onboarding.contains("case .dailyRhythm: return String(localized: \"Continue\")"))
+        XCTAssertLessThan(
+            try XCTUnwrap(onboarding.range(of: "appearance, dailyRhythm, done")?.lowerBound),
+            try XCTUnwrap(onboarding.range(of: "private struct DoneStep")?.lowerBound)
+        )
+        for key in [
+            "onboarding.rhythm.title",
+            "onboarding.rhythm.morning.body",
+            "onboarding.rhythm.quick.body",
+            "onboarding.rhythm.journal.body",
+            "onboarding.rhythm.automations.body",
+        ] {
+            XCTAssertTrue(onboarding.contains("String(localized: \"\(key)\")"), key)
+        }
+    }
+
+    func testDailyRhythmOnlyExplainsOptInAutomations() throws {
+        let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
+        let step = try XCTUnwrap(
+            onboarding.components(separatedBy: "private struct DailyRhythmStep").dropFirst().first
+        ).components(separatedBy: "private struct StepShell").first ?? ""
+
+        XCTAssertFalse(step.contains("setEnabled("))
+        XCTAssertFalse(step.contains("requestAuthorization"))
+        XCTAssertFalse(step.contains("Toggle("))
+    }
+}

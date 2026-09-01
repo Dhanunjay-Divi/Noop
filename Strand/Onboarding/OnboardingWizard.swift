@@ -14,14 +14,19 @@ import UIKit
 //
 // Steps:
 //  1 Welcome           - NOOP + "all your data, none of the cloud"
-//  2 What it does      — 3 calm value slides
-//  3 Bluetooth priming — explain BEFORE the OS prompt
-//  4 Wear & wake       — put your strap on, make sure it's charged
-//  5 Scan              — radar sweep; auto-scans, Scan retries via model.scan()
-//  6 Bonding           — celebration when live.bonded (a RecoveryRing blooms in)
-//  7 Profile           — age / sex / weight / height bound to ProfileStore
-//  8 Import (optional)  — WHOOP / Apple Health import from the wizard
-//  9 Done              - "Your thread starts here." → onFinished()
+//  2 What it does      - 3 calm value slides
+//  3 Expectations      - what scores need and what NOOP does not claim
+//  4 Bluetooth priming - explain BEFORE the OS prompt
+//  5 Wear & wake       - put your strap on, make sure it is charged
+//  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
+//  7 Bonding           - celebration when live.bonded
+//  8 Profile           - age / sex / weight / height bound to ProfileStore
+//  9 Import (optional) - wearable / Apple Health history
+// 10 Notifications     - explicit, default-off daily guidance choice
+// 11 Safety contacts   - optional contact setup
+// 12 Appearance        - app finish
+// 13 Daily rhythm      - where everyday reviews, logs, and automations live
+// 14 Done              - "Your thread starts here." -> onFinished()
 //
 // Presentation is wired centrally; this view only calls onFinished() when complete.
 
@@ -49,7 +54,7 @@ public struct OnboardingWizard: View {
     // handles the bond→celebration transition without re-rendering the root.
 
     private enum Step: Int, CaseIterable {
-        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, safetyContacts, appearance, done
+        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, safetyContacts, appearance, dailyRhythm, done
 
         var isFirst: Bool { self == .welcome }
         var isLast: Bool { self == .done }
@@ -89,6 +94,7 @@ public struct OnboardingWizard: View {
                     case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
                     case .safetyContacts: SafetyContactsStep()
                     case .appearance: AppearanceStep()
+                    case .dailyRhythm: DailyRhythmStep()
                     case .done:       DoneStep()
                     }
                 }
@@ -225,6 +231,7 @@ public struct OnboardingWizard: View {
                 : String(localized: "Not now")
         case .safetyContacts: return String(localized: "Finish later")
         case .appearance: return String(localized: "Continue")
+        case .dailyRhythm: return String(localized: "Continue")
         case .done:       return String(localized: "Enter NOOP")
         }
     }
@@ -1554,41 +1561,47 @@ private struct SafetyContactsStep: View {
 
 private struct DoneStep: View {
     @State private var appear = false
-    var body: some View {
-        StepShell {
-            VStack(spacing: 22) {
-                Spacer()
-                ZStack {
-                    Circle()
-                        .fill(StrandPalette.recovery100)
-                        .frame(width: 120, height: 120)
-                        .blur(radius: 64)
-                        .opacity(appear ? 0.5 : 0)
-                        .blendMode(.plusLighter)
-                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                        .font(.system(size: 52, weight: .light))
-                        .foregroundStyle(
-                            LinearGradient(gradient: StrandPalette.recoveryGradient,
-                                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                        .scaleEffect(appear ? 1 : 0.8)
-                        .opacity(appear ? 1 : 0)
-                }
-                .frame(height: 130)
 
-                VStack(spacing: 10) {
-                    Text("Your thread starts here.")
-                        .font(StrandFont.title1)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Text("Every beat, every night, every day, woven into one quiet picture of you. Welcome to NOOP.")
-                        .font(StrandFont.body)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 420)
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 26) {
+                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                        .font(.system(size: 62, weight: .light))
+                        .foregroundStyle(
+                            LinearGradient(
+                                gradient: StrandPalette.recoveryGradient,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 116, height: 116)
+                        .scaleEffect(appear ? 1 : 0.82)
+                        .opacity(appear ? 1 : 0)
+                        .accessibilityHidden(true)
+
+                    VStack(spacing: 12) {
+                        Text("Your thread starts here.")
+                            .font(StrandFont.title1)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("noop.onboarding.done.title")
+                        Text("Every beat, every night, every day, woven into one quiet picture of you. Welcome to NOOP.")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("noop.onboarding.done.body")
+                    }
+                    .frame(maxWidth: 420)
+                    .opacity(appear ? 1 : 0)
                 }
-                .opacity(appear ? 1 : 0)
-                Spacer()
+                .frame(maxWidth: .infinity, minHeight: max(360, proxy.size.height - 28))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 14)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
         .onAppear { withAnimation(StrandMotion.hero) { appear = true } }
     }
@@ -1617,6 +1630,46 @@ private struct AppearanceStep: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: 460)
+        }
+    }
+}
+
+// MARK: - Daily rhythm
+
+/// A compact map of the real app shell just before hand-off. It teaches stable entry points instead of
+/// adding another setup catalogue or enabling optional automations on the user's behalf.
+private struct DailyRhythmStep: View {
+    var body: some View {
+        StepShell(
+            title: String(localized: "onboarding.rhythm.title"),
+            subtitle: String(localized: "onboarding.rhythm.subtitle")
+        ) {
+            VStack(spacing: 12) {
+                InfoCard(
+                    icon: "sun.horizon.fill",
+                    tint: StrandPalette.statusWarning,
+                    title: String(localized: "onboarding.rhythm.morning.title"),
+                    message: String(localized: "onboarding.rhythm.morning.body")
+                )
+                InfoCard(
+                    icon: "plus.circle.fill",
+                    tint: StrandPalette.metricCyan,
+                    title: String(localized: "onboarding.rhythm.quick.title"),
+                    message: String(localized: "onboarding.rhythm.quick.body")
+                )
+                InfoCard(
+                    icon: "square.and.pencil",
+                    tint: StrandPalette.accent,
+                    title: String(localized: "onboarding.rhythm.journal.title"),
+                    message: String(localized: "onboarding.rhythm.journal.body")
+                )
+                InfoCard(
+                    icon: "wand.and.stars",
+                    tint: StrandPalette.statusPositive,
+                    title: String(localized: "onboarding.rhythm.automations.title"),
+                    message: String(localized: "onboarding.rhythm.automations.body")
+                )
+            }
         }
     }
 }

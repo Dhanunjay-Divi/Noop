@@ -390,7 +390,7 @@ struct RootView: View {
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
-            MetricReviewReminders.restoreScheduleIfAuthorized()
+            MetricReviewReminders.retireLegacySchedule()
             WindDownNudge.restoreScheduleIfAuthorized()
             Task { await repo.reconcileDailyReviewJournalReminders() }
             // Defer one turn so NavigationSplitView has installed its initial selection before a

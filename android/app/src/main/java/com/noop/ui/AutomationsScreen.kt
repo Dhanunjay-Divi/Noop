@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import com.noop.R
@@ -46,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,15 +58,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.HrZones
 import com.noop.analytics.NapCandidate
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
+import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StressBreathingNotifier
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -74,9 +81,26 @@ import kotlin.math.roundToInt
  * biometrics into on-device actions and haptic coaching. HR-zone coaching, the smart alarm
  * and the illness watch are real + persisted (ViewModel-backed).
  */
+private enum class AutomationReportKind {
+    MORNING,
+    WORKOUT,
+}
+
+private fun automationReportsCanNotify(context: Context): Boolean {
+    val runtimePermissionGranted =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+    return runtimePermissionGranted &&
+        NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
 @Composable
 fun AutomationsScreen(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Double-tap action (parity since 4.2.8) — real + persisted via the ViewModel (NoopPrefs). The
     // dispatch runs in the ViewModel on a fresh strap DOUBLE_TAP event; this card just edits the choice.
@@ -139,6 +163,24 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var dailyReviewNotificationsUnavailable by remember {
         mutableStateOf(dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx))
     }
+    val reportsInitiallyAvailable = automationReportsCanNotify(ctx)
+    var morningRecapEnabled by remember {
+        mutableStateOf(NoopPrefs.morningReportEnabled(ctx))
+    }
+    var postWorkoutSummaryEnabled by remember {
+        mutableStateOf(NoopPrefs.postWorkoutReportEnabled(ctx))
+    }
+    var reportNotificationsUnavailable by remember {
+        mutableStateOf(
+            !reportsInitiallyAvailable &&
+                (NoopPrefs.morningReportEnabled(ctx) ||
+                    NoopPrefs.postWorkoutReportEnabled(ctx)),
+        )
+    }
+    var pendingReportPermission by remember {
+        mutableStateOf<AutomationReportKind?>(null)
+    }
+    var postWorkoutEnablePending by remember { mutableStateOf(false) }
 
     // Hydration reminders are independently opt-in and live in their own prefs file, so adding this
     // automation cannot overwrite hydration totals or any existing dashboard preference. Phone delivery
@@ -177,6 +219,51 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     ) { granted ->
         dailyReviewEnabled = granted && DailyReviewReminders.setEnabled(ctx, true)
         dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+    }
+    fun applyReportPreference(kind: AutomationReportKind, allowed: Boolean) {
+        if (allowed) reportNotificationsUnavailable = false
+        when (kind) {
+            AutomationReportKind.MORNING -> {
+                morningRecapEnabled = allowed
+                NoopPrefs.setMorningReportEnabled(ctx, allowed)
+                if (!allowed) ScheduledReportNotifier.cancelMorning(ctx)
+            }
+            AutomationReportKind.WORKOUT -> {
+                if (!allowed) {
+                    postWorkoutEnablePending = false
+                    postWorkoutSummaryEnabled = false
+                    viewModel.setPostWorkoutReportEnabled(false)
+                } else {
+                    postWorkoutEnablePending = true
+                    viewModel.setPostWorkoutReportEnabled(true) { enabled ->
+                        postWorkoutEnablePending = false
+                        postWorkoutSummaryEnabled = enabled
+                    }
+                }
+            }
+        }
+    }
+    val reportPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val kind = pendingReportPermission
+        pendingReportPermission = null
+        if (kind != null) {
+            val allowed = granted && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+            applyReportPreference(kind, allowed)
+            reportNotificationsUnavailable = !allowed
+        }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                reportNotificationsUnavailable =
+                    !automationReportsCanNotify(ctx) &&
+                        (morningRecapEnabled || postWorkoutSummaryEnabled)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     var pendingContextualPermission by remember { mutableStateOf<String?>(null) }
     val contextualPermissionLauncher = rememberLauncherForActivityResult(
@@ -245,6 +332,25 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         }
         dailyReviewEnabled = DailyReviewReminders.setEnabled(ctx, true)
         dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+    }
+
+    fun setReportPreference(kind: AutomationReportKind, enabled: Boolean) {
+        if (!enabled) {
+            applyReportPreference(kind, false)
+            return
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingReportPermission = kind
+            reportPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        val allowed = automationReportsCanNotify(ctx)
+        applyReportPreference(kind, allowed)
+        reportNotificationsUnavailable = !allowed
     }
 
     fun setStressCheckInEnabled(enabled: Boolean) {
@@ -459,7 +565,9 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             icon = Icons.Filled.NotificationsActive,
             title = stringResource(R.string.daily_review_section_title),
             blurb = stringResource(R.string.daily_review_section_body),
-            active = dailyReviewEnabled && !dailyReviewNotificationsUnavailable,
+            active = (dailyReviewEnabled && !dailyReviewNotificationsUnavailable) ||
+                morningRecapEnabled ||
+                postWorkoutSummaryEnabled,
         ) {
             ToggleRow(
                 label = stringResource(R.string.daily_review_toggle),
@@ -515,6 +623,29 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     color = Palette.textTertiary,
                 )
             }
+            RowDivider()
+            ToggleRow(
+                label = uiString(
+                    R.string.l10n_notifications_settings_screen_morning_recap_45ec05c5,
+                ),
+                help = stringResource(R.string.automation_morning_recap_help),
+                checked = morningRecapEnabled,
+                onChange = {
+                    setReportPreference(AutomationReportKind.MORNING, it)
+                },
+            )
+            RowDivider()
+            ToggleRow(
+                label = uiString(
+                    R.string.l10n_notifications_settings_screen_post_workout_summary_13e488f5,
+                ),
+                help = stringResource(R.string.automation_post_workout_summary_help),
+                checked = postWorkoutSummaryEnabled,
+                enabled = !postWorkoutEnablePending,
+                onChange = {
+                    setReportPreference(AutomationReportKind.WORKOUT, it)
+                },
+            )
             if (dailyReviewNotificationsUnavailable) {
                 RowDivider()
                 Text(
@@ -542,6 +673,14 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         style = NoopType.body,
                     )
                 }
+            }
+            if (reportNotificationsUnavailable) {
+                RowDivider()
+                Text(
+                    stringResource(R.string.appwide_notifications_system_disabled),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                )
             }
         }
         }
@@ -1157,6 +1296,7 @@ private fun ToggleRow(
     label: String,
     help: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1168,6 +1308,7 @@ private fun ToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = onChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Palette.surfaceBase,
                 checkedTrackColor = Palette.accent,

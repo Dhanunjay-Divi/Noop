@@ -2201,4 +2201,16 @@
     <string name="daily_review_channel_description">Private morning review and evening journal reminders.</string>
     <string name="daily_review_onboarding_label">Daily guidance reminders</string>
     <string name="daily_review_onboarding_help">Optional and off by default. Morning opens Sleep; evening opens Journal without showing health values on the Lock Screen.</string>
+    <string name="onboarding_rhythm_title">Your daily rhythm</string>
+    <string name="onboarding_rhythm_subtitle">Four simple entry points help you review, act, and reflect. Use only what fits your day.</string>
+    <string name="onboarding_rhythm_morning_title">Review the morning</string>
+    <string name="onboarding_rhythm_morning_body">Open Sleep after your latest device sync, then Today for the current day’s scores and signals.</string>
+    <string name="onboarding_rhythm_quick_title">Log it when it happens</string>
+    <string name="onboarding_rhythm_quick_body">Tap the center + from any tab for Workout, Journal, Hydration, Breathe, and more.</string>
+    <string name="onboarding_rhythm_journal_title">Close the loop with Journal</string>
+    <string name="onboarding_rhythm_journal_body">Record what shaped the day. Open + → Journal or More → Journal &amp; Insights.</string>
+    <string name="onboarding_rhythm_automations_title">Choose your nudges</string>
+    <string name="onboarding_rhythm_automations_body">Open More → Automations for morning recaps, workout summaries, battery alerts, movement, hydration, and stress coaching. Optional automations stay off until you enable them.</string>
+    <string name="automation_morning_recap_help">Notifies once after a newly synced night has a Recovery or Sleep Score. Delayed wearable sync means delayed delivery.</string>
+    <string name="automation_post_workout_summary_help">Notifies once when a newer workout reaches NOOP after sync. Existing history does not trigger notifications when you enable it.</string>
 </resources>

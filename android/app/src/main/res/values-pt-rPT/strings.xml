@@ -2165,4 +2165,16 @@
     <string name="daily_review_channel_description">Lembretes privados para a revisão da manhã e o diário da noite.</string>
     <string name="daily_review_onboarding_label">Lembretes de orientação diária</string>
     <string name="daily_review_onboarding_help">Opcionais e desativados por predefinição. De manhã abre Sono; à noite abre Diário sem mostrar valores de saúde no ecrã bloqueado.</string>
+    <string name="onboarding_rhythm_title">O teu ritmo diário</string>
+    <string name="onboarding_rhythm_subtitle">Quatro pontos de entrada simples ajudam-te a rever, agir e refletir. Usa apenas o que se adapta ao teu dia.</string>
+    <string name="onboarding_rhythm_morning_title">Revê a manhã</string>
+    <string name="onboarding_rhythm_morning_body">Abre Sono após a última sincronização do dispositivo e depois Hoje para consultar as pontuações e sinais do dia atual.</string>
+    <string name="onboarding_rhythm_quick_title">Regista no momento</string>
+    <string name="onboarding_rhythm_quick_body">Toca no + central a partir de qualquer separador para Treino, Diário, Hidratação, Respirar e muito mais.</string>
+    <string name="onboarding_rhythm_journal_title">Fecha o dia com o Diário</string>
+    <string name="onboarding_rhythm_journal_body">Regista o que influenciou o teu dia. Abre + → Diário ou Mais → Diário e análises.</string>
+    <string name="onboarding_rhythm_automations_title">Escolhe os teus lembretes</string>
+    <string name="onboarding_rhythm_automations_body">Abre Mais → Automatizações para resumos matinais, resumos de treinos, avisos de bateria, movimento, hidratação e apoio para o stress. As automatizações opcionais permanecem desativadas até as ativares.</string>
+    <string name="automation_morning_recap_help">Notifica uma vez quando uma noite recém-sincronizada tem uma pontuação de Recuperação ou Sono. Se a sincronização do dispositivo se atrasar, a notificação também se atrasa.</string>
+    <string name="automation_post_workout_summary_help">Notifica uma vez quando um treino mais recente chega à NOOP após a sincronização. O histórico existente não gera notificações ao ativar.</string>
 </resources>

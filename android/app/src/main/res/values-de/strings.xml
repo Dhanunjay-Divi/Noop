@@ -2187,4 +2187,16 @@
     <string name="daily_review_channel_description">Private Erinnerungen für die morgendliche Übersicht und das abendliche Tagebuch.</string>
     <string name="daily_review_onboarding_label">Erinnerungen für die tägliche Begleitung</string>
     <string name="daily_review_onboarding_help">Optional und standardmäßig deaktiviert. Morgens wird Schlaf geöffnet, abends das Tagebuch, ohne Gesundheitswerte auf dem Sperrbildschirm anzuzeigen.</string>
+    <string name="onboarding_rhythm_title">Dein Tagesrhythmus</string>
+    <string name="onboarding_rhythm_subtitle">Vier einfache Einstiegspunkte helfen dir beim Rückblick, Handeln und Reflektieren. Nutze nur, was zu deinem Tag passt.</string>
+    <string name="onboarding_rhythm_morning_title">Morgens zurückblicken</string>
+    <string name="onboarding_rhythm_morning_body">Öffne nach der letzten Gerätesynchronisierung Schlaf und danach Heute für die Werte und Signale des aktuellen Tages.</string>
+    <string name="onboarding_rhythm_quick_title">Im Moment festhalten</string>
+    <string name="onboarding_rhythm_quick_body">Tippe in einem beliebigen Tab auf das + in der Mitte, um Training, Journal, Flüssigkeit, Atmen und mehr zu öffnen.</string>
+    <string name="onboarding_rhythm_journal_title">Den Tag im Journal abschließen</string>
+    <string name="onboarding_rhythm_journal_body">Halte fest, was deinen Tag geprägt hat. Öffne + → Journal oder Mehr → Journal &amp; Einblicke.</string>
+    <string name="onboarding_rhythm_automations_title">Deine Hinweise auswählen</string>
+    <string name="onboarding_rhythm_automations_body">Öffne Mehr → Automationen für Morgenrückblicke, Trainingszusammenfassungen, Akkuhinweise, Bewegung, Flüssigkeit und Stress-Coaching. Optionale Automationen bleiben aus, bis du sie aktivierst.</string>
+    <string name="automation_morning_recap_help">Benachrichtigt einmal, wenn eine neu synchronisierte Nacht einen Erholungs- oder Schlafwert hat. Eine verzögerte Synchronisierung des Wearables verzögert auch die Zustellung.</string>
+    <string name="automation_post_workout_summary_help">Benachrichtigt einmal, wenn nach der Synchronisierung ein neueres Workout NOOP erreicht. Vorhandene Verläufe lösen beim Aktivieren keine Benachrichtigungen aus.</string>
 </resources>

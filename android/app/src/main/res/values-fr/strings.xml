@@ -2171,4 +2171,16 @@
     <string name="daily_review_channel_description">Rappels privés pour le bilan du matin et le journal du soir.</string>
     <string name="daily_review_onboarding_label">Rappels d’accompagnement quotidien</string>
     <string name="daily_review_onboarding_help">Facultatifs et désactivés par défaut. Le matin ouvre Sommeil ; le soir ouvre Journal sans afficher de valeurs de santé sur l’écran verrouillé.</string>
+    <string name="onboarding_rhythm_title">Votre rythme quotidien</string>
+    <string name="onboarding_rhythm_subtitle">Quatre points d’accès simples vous aident à faire le point, agir et prendre du recul. N’utilisez que ce qui convient à votre journée.</string>
+    <string name="onboarding_rhythm_morning_title">Faites le point le matin</string>
+    <string name="onboarding_rhythm_morning_body">Après la dernière synchronisation de l’appareil, ouvrez Sommeil, puis Aujourd’hui pour consulter les scores et signaux du jour.</string>
+    <string name="onboarding_rhythm_quick_title">Consignez au bon moment</string>
+    <string name="onboarding_rhythm_quick_body">Touchez le + central depuis n’importe quel onglet pour accéder à Entraînement, Journal, Hydratation, Respiration et plus encore.</string>
+    <string name="onboarding_rhythm_journal_title">Terminez la journée avec le Journal</string>
+    <string name="onboarding_rhythm_journal_body">Notez ce qui a influencé votre journée. Ouvrez + → Journal ou Plus → Journal et analyses.</string>
+    <string name="onboarding_rhythm_automations_title">Choisissez vos rappels</string>
+    <string name="onboarding_rhythm_automations_body">Ouvrez Plus → Automatisations pour les bilans du matin, résumés d’entraînement, alertes de batterie, mouvement, hydratation et accompagnement du stress. Les automatisations facultatives restent désactivées tant que vous ne les activez pas.</string>
+    <string name="automation_morning_recap_help">Envoie une notification lorsqu’une nuit nouvellement synchronisée comporte un score de Récupération ou de Sommeil. Une synchronisation tardive retarde aussi l’envoi.</string>
+    <string name="automation_post_workout_summary_help">Envoie une notification lorsqu’un entraînement plus récent atteint NOOP après la synchronisation. L’historique existant ne déclenche aucune notification lors de l’activation.</string>
 </resources>

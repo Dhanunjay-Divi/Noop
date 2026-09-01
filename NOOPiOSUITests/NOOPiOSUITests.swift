@@ -406,6 +406,68 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "se-accessibility-onboarding-clear-footer")
     }
 
+    func testOnboardingDailyRhythmKeepsAutomationsReachableAboveFooter() {
+        let app = launchDemoScreen(
+            "onboarding",
+            extraArguments: ["--demo-onboarding-step", "12"]
+        )
+        let primaryAction = app.buttons["noop.onboarding.primary"]
+        let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
+        let automationsCopy =
+            "Open More \u{2192} Automations for morning recaps, workout summaries, battery alerts, "
+                + "movement, hydration, and stress coaching. Optional automations stay off until "
+                + "you enable them."
+        let automations = app.staticTexts
+            .matching(NSPredicate(format: "label == %@", automationsCopy))
+            .firstMatch
+        XCTAssertTrue(primaryAction.waitForExistence(timeout: 20))
+        XCTAssertTrue(footer.waitForExistence(timeout: 5))
+        XCTAssertTrue(automations.waitForExistence(timeout: 5))
+
+        for _ in 0..<8
+            where !automations.isHittable
+                || automations.frame.maxY + 12 > footer.frame.minY {
+            app.swipeUp()
+        }
+
+        XCTAssertTrue(
+            automations.isHittable,
+            "The Automations guidance must be reachable on compact screens."
+        )
+        XCTAssertLessThanOrEqual(
+            automations.frame.maxY + 12,
+            footer.frame.minY,
+            "The fixed onboarding footer must not cover the Automations guidance."
+        )
+        XCTAssertFalse(automations.frame.intersects(primaryAction.frame))
+        keepScreenshot(app, name: "se-onboarding-daily-rhythm-clear-footer")
+    }
+
+    func testOnboardingCompletionFitsAndCentersOnCompactScreen() {
+        let app = launchDemoScreen(
+            "onboarding",
+            extraArguments: ["--demo-onboarding-step", "13"]
+        )
+        let title = app.staticTexts["noop.onboarding.done.title"]
+        let body = app.staticTexts["noop.onboarding.done.body"]
+        let primaryAction = app.buttons["noop.onboarding.primary"]
+        let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
+
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        XCTAssertTrue(primaryAction.waitForExistence(timeout: 5))
+        XCTAssertTrue(footer.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(title.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(title.frame.maxX, app.frame.maxX)
+        XCTAssertGreaterThanOrEqual(body.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(body.frame.maxX, app.frame.maxX)
+        XCTAssertEqual(title.frame.midX, app.frame.midX, accuracy: 2)
+        XCTAssertEqual(body.frame.midX, app.frame.midX, accuracy: 2)
+        XCTAssertFalse(title.frame.intersects(footer.frame))
+        XCTAssertFalse(body.frame.intersects(footer.frame))
+        keepScreenshot(app, name: "se-onboarding-completion-centered")
+    }
+
     func testProfileMeasurementsCanBeClearedAndRetyped() {
         let app = launchDemoScreen(
             "onboarding",

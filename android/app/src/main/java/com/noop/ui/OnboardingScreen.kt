@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,10 +46,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
@@ -59,6 +63,7 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Watch
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -77,9 +82,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -258,6 +267,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                             )
                             OnboardingPage.SafetyContacts -> SafetyContactsStep()
                             OnboardingPage.Appearance -> AppearanceStep()
+                            OnboardingPage.DailyRhythm -> DailyRhythmStep()
                             OnboardingPage.Done -> DoneStep()
                         }
                     }
@@ -292,6 +302,7 @@ private enum class OnboardingPage(val cta: String) {
     Notifications("Continue"),
     SafetyContacts("Finish later"),
     Appearance("Continue"),
+    DailyRhythm("Continue"),
     Done("Enter NOOP");
 }
 
@@ -1278,6 +1289,48 @@ private fun AppearanceStep() {
     }
 }
 
+/**
+ * A compact map of the real app shell just before hand-off. Optional automations remain untouched;
+ * this page only shows where everyday reviews, logs, and controls live.
+ */
+@Composable
+private fun DailyRhythmStep() {
+    StepShell(
+        title = stringResource(R.string.onboarding_rhythm_title),
+        subtitle = stringResource(R.string.onboarding_rhythm_subtitle),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            FeatureRow(
+                icon = Icons.Filled.WbSunny,
+                tint = Palette.statusWarning,
+                title = stringResource(R.string.onboarding_rhythm_morning_title),
+                body = stringResource(R.string.onboarding_rhythm_morning_body),
+            )
+            FeatureRow(
+                icon = Icons.Filled.AddCircle,
+                tint = Palette.metricCyan,
+                title = stringResource(R.string.onboarding_rhythm_quick_title),
+                body = stringResource(R.string.onboarding_rhythm_quick_body),
+            )
+            FeatureRow(
+                icon = Icons.Filled.Edit,
+                tint = Palette.accent,
+                title = stringResource(R.string.onboarding_rhythm_journal_title),
+                body = stringResource(R.string.onboarding_rhythm_journal_body),
+            )
+            FeatureRow(
+                icon = Icons.Filled.Bolt,
+                tint = Palette.statusPositive,
+                title = stringResource(R.string.onboarding_rhythm_automations_title),
+                body = stringResource(R.string.onboarding_rhythm_automations_body),
+            )
+        }
+    }
+}
+
 /** A small fixed-palette look-swatch (a surface chip + accent ring + hairline) so the user can see a
  *  theme without switching to it. Uses the passed token set directly (not the live Palette) so each
  *  finish stays visible whatever the current theme. */
@@ -1351,26 +1404,76 @@ private fun DoneStep() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 430.dp),
+                .heightIn(min = 430.dp)
+                .padding(horizontal = 4.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            IconBadge(icon = Icons.Filled.CheckCircle, tint = Palette.statusPositive, size = 100)
-            Spacer(Modifier.height(22.dp))
+            CompletionThreadMark()
+            Spacer(Modifier.height(26.dp))
             Text(
                 uiString(R.string.l10n_onboarding_screen_your_thread_starts_here_acdccf92),
                 style = NoopType.title1,
                 color = Palette.textPrimary,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
                 uiString(R.string.l10n_onboarding_screen_every_beat_every_night_every_day_ab536123),
                 style = NoopType.body,
                 color = Palette.textSecondary,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
+    }
+}
+
+@Composable
+private fun CompletionThreadMark() {
+    val startColor = Palette.statusCritical
+    val middleColor = Palette.statusWarning
+    val endColor = Palette.statusPositive
+    Canvas(
+        modifier = Modifier.size(116.dp),
+    ) {
+        val strokeWidth = 6.dp.toPx()
+        val radius = 12.dp.toPx()
+        val start = Offset(size.width * 0.34f, size.height * 0.28f)
+        val end = Offset(size.width * 0.66f, size.height * 0.72f)
+        val path = Path().apply {
+            moveTo(start.x, start.y + radius)
+            cubicTo(
+                start.x,
+                size.height * 0.50f,
+                end.x,
+                size.height * 0.46f,
+                end.x,
+                end.y - radius,
+            )
+        }
+        drawPath(
+            path = path,
+            brush = Brush.linearGradient(
+                colors = listOf(startColor, middleColor, endColor),
+                start = start,
+                end = end,
+            ),
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+        )
+        drawCircle(
+            color = startColor,
+            radius = radius,
+            center = start,
+            style = Stroke(width = strokeWidth),
+        )
+        drawCircle(
+            color = endColor,
+            radius = radius,
+            center = end,
+            style = Stroke(width = strokeWidth),
+        )
     }
 }
 

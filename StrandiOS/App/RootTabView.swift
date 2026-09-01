@@ -300,7 +300,7 @@ struct RootTabView: View {
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
-            MetricReviewReminders.restoreScheduleIfAuthorized()
+            MetricReviewReminders.retireLegacySchedule()
             WindDownNudge.restoreScheduleIfAuthorized()
             SafetyContactReminders.restore()
             // Let TabView finish mounting before a cold-launch notification changes its selection.

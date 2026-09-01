@@ -149,27 +149,14 @@ enum MetricReviewReminders {
         if !enabledIDs.isEmpty { schedule() }
     }
 
-    /// Relaunch restoration never prompts; it only repairs the request when permission already exists.
-    static func restoreScheduleIfAuthorized() {
-        guard !enabledIDs.isEmpty else {
-            removeRequest()
-            return
-        }
-        Task { @MainActor in
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                schedule()
-            default:
-                for cadence in Cadence.allCases {
-                    LocalNotificationLifecycle.suppressed(
-                        identifier: cadence.requestID,
-                        categoryIdentifier: DailyReviewNotifications.privacyCategoryID
-                    )
-                }
-                break
-            }
-        }
+    /// Per-metric reminders were retired in favor of the central Daily guidance automations. Clear
+    /// existing selections and pending requests so an upgrade cannot keep sending an alert the user
+    /// can no longer manage.
+    static func retireLegacySchedule() {
+        UserDefaults.standard.removeObject(forKey: enabledIDsKey)
+        UserDefaults.standard.removeObject(forKey: minuteOfDayKey)
+        UserDefaults.standard.removeObject(forKey: cadenceByIDKey)
+        removeRequest()
     }
 
     static func reminderSpec(

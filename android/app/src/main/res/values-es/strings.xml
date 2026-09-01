@@ -2171,4 +2171,16 @@
     <string name="daily_review_channel_description">Recordatorios privados para la revisión matutina y el diario nocturno.</string>
     <string name="daily_review_onboarding_label">Recordatorios de guía diaria</string>
     <string name="daily_review_onboarding_help">Opcionales y desactivados de forma predeterminada. Por la mañana abre Sueño; por la noche abre Diario sin mostrar valores de salud en la pantalla de bloqueo.</string>
+    <string name="onboarding_rhythm_title">Tu ritmo diario</string>
+    <string name="onboarding_rhythm_subtitle">Cuatro accesos sencillos te ayudan a revisar, actuar y reflexionar. Usa solo lo que encaje en tu día.</string>
+    <string name="onboarding_rhythm_morning_title">Revisa la mañana</string>
+    <string name="onboarding_rhythm_morning_body">Abre Sueño después de la última sincronización del dispositivo y luego Hoy para ver las puntuaciones y señales del día actual.</string>
+    <string name="onboarding_rhythm_quick_title">Regístralo cuando ocurra</string>
+    <string name="onboarding_rhythm_quick_body">Toca el + central desde cualquier pestaña para acceder a Entrenamiento, Diario, Hidratación, Respirar y más.</string>
+    <string name="onboarding_rhythm_journal_title">Cierra el día con Diario</string>
+    <string name="onboarding_rhythm_journal_body">Registra lo que influyó en tu día. Abre + → Diario o Más → Diario y análisis.</string>
+    <string name="onboarding_rhythm_automations_title">Elige tus avisos</string>
+    <string name="onboarding_rhythm_automations_body">Abre Más → Automatizaciones para resúmenes matutinos, resúmenes de entrenamientos, avisos de batería, movimiento, hidratación y orientación ante el estrés. Las automatizaciones opcionales permanecen desactivadas hasta que las actives.</string>
+    <string name="automation_morning_recap_help">Notifica una vez cuando una noche recién sincronizada tiene una puntuación de Recuperación o Sueño. Si se retrasa la sincronización del wearable, también se retrasa la notificación.</string>
+    <string name="automation_post_workout_summary_help">Notifica una vez cuando un entrenamiento más reciente llega a NOOP tras la sincronización. El historial existente no genera notificaciones al activarlo.</string>
 </resources>
