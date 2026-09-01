@@ -8,7 +8,7 @@ import WhoopStore
 public enum NoopScoreAlgorithmRevision {
     /// Charge v2 personalizes the Rest-quality center and uses causal per-day baselines.
     public static let charge = "noop-charge-v2"
-    public static let effort = "noop-effort-v1"
+    public static let effort = "noop-effort-v2"
     public static let rest = "noop-rest-v1"
 }
 

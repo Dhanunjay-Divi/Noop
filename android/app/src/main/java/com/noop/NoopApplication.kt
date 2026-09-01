@@ -72,8 +72,8 @@ class NoopApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         resolveActiveDeviceId()
-        // The current live path has no timestamp-matched wrist-motion + R-R evidence contract. Disarm
-        // any pre-upgrade automatic stress opt-in before BLE/background readers can observe it.
+        // Canonicalize the stress-check-in choices against this build's evidence capability before
+        // BLE/background readers observe them. The live path still fails closed per event.
         BiofeedbackPrefs.migrateAutomaticStressNudgePreferences(this)
         lastWidgetNightMode = resources.configuration.isNightMode()
         // Restore any process-killed, actively-recording GPS workout before the foreground service or

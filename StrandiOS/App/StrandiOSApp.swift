@@ -152,6 +152,11 @@ struct StrandiOSApp: App {
             // is a no-op while disconnected, busy, recently synced, or backed off after empty history.
             let strapSyncCompleted = await model.ble.requestSyncAndWait(.periodic)
             guard !Task.isCancelled else { return false }
+            if strapSyncCompleted {
+                await BandSyncStaleReminder.scheduleIfEligible(
+                    hasPairedBand: Self.hasRememberedBand(live: model.live)
+                )
+            }
             model.ble.pruneRaw()
 
             bridge.refreshAuthIfPreviouslyGranted() // status-only; never opens the permission sheet
@@ -334,6 +339,30 @@ struct StrandiOSApp: App {
                           scenePhase == .active else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                 }
+                // Keep one OS-owned countdown anchored to the latest durable write. Replacing the stable
+                // request here matters when iOS suspends the process before HISTORY_COMPLETE can arrive.
+                .onReceive(model.live.historyDataPublisher) { _ in
+                    let hasPairedBand = Self.hasRememberedBand(live: model.live)
+                    guard BandSyncStaleReminderPolicy.shouldRefreshAfterDurableProgress(
+                        appIsActive: scenePhase == .active,
+                        hasPairedBand: hasPairedBand
+                    ) else { return }
+                    Task {
+                        await BandSyncStaleReminder.scheduleIfEligible(
+                            hasPairedBand: hasPairedBand
+                        )
+                    }
+                }
+                .onReceive(model.live.$lastSyncedAt.dropFirst()) { _ in
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion,
+                          scenePhase == .background else { return }
+                    Task {
+                        await BandSyncStaleReminder.scheduleIfEligible(
+                            hasPairedBand: Self.hasRememberedBand(live: model.live)
+                        )
+                    }
+                }
                 // #114 (follow-up): `WidgetSnapshot.bpm` reads `model.bpm` (WidgetPublish.swift), the
                 // smoothed live HR — same LIVE-not-repo-cache category as battery/connected above, so it
                 // has the same gap: nothing bumped `refreshSeq` while a heart-rate stream was live, so the
@@ -430,6 +459,7 @@ struct StrandiOSApp: App {
             }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
+                BandSyncStaleReminder.cancel()
                 model.refreshAgeMetricsIfProfileChanged()
                 // Re-check packet age and ActivityKit's persisted list whenever NOOP returns. This ends a
                 // stale activity even when iOS suspended the in-process expiry task while in background.
@@ -457,6 +487,11 @@ struct StrandiOSApp: App {
                 // Single-shot and best-effort: iOS chooses whether/when this runs. The handler re-arms
                 // itself after delivery; every later background transition also repairs the schedule.
                 BackgroundSyncScheduler.scheduleNext()
+                Task {
+                    await BandSyncStaleReminder.scheduleIfEligible(
+                        hasPairedBand: Self.hasRememberedBand(live: model.live)
+                    )
+                }
                 // #114: capture the LAST in-app live state on the way out so the Home widget matches what
                 // the user just saw — its battery/HR/score otherwise lag to the last FOREGROUND refreshSeq
                 // bump. One reload per app-exit is low-frequency and well within WidgetKit's daily budget.
@@ -467,6 +502,13 @@ struct StrandiOSApp: App {
                 Task { await ShortcutHealthExport.writeIfEnabled(repo: model.repo) }
             }
         }
+    }
+
+    private static func hasRememberedBand(live: LiveState) -> Bool {
+        BluetoothAvailabilityNotifications.hasRelevantWearable(
+            pairedEvidence: live.bonded,
+            explicitExpectation: BluetoothAvailabilityNotifications.monitoringExpected
+        )
     }
 
     private func reconcileLiveActivity(repairHydration: Bool = false) {

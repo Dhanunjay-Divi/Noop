@@ -2144,4 +2144,8 @@
     <string name="weekly_digest_signed_delta">%1$s%2$s</string>
     <string name="workouts_custom_date_from">起始日期</string>
     <string name="workouts_custom_date_to">结束日期</string>
+    <string name="stale_sync_notification_title">让 NOOP 保持同步</string>
+    <string name="stale_sync_notification_body">打开 NOOP 以同步手环数据。让应用在后台运行，使历史记录保持最新。</string>
+    <string name="stale_sync_notification_channel_name">手环同步</string>
+    <string name="stale_sync_notification_channel_description">手环历史记录未能在后台同步时发送提醒。</string>
 </resources>

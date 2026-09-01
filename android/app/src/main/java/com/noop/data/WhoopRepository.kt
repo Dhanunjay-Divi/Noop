@@ -406,62 +406,64 @@ class WhoopRepository private constructor(
     suspend fun insert(streams: StreamBatch, deviceId: String): InsertCounts {
         if (streams.isEmpty) return InsertCounts()
 
-        val hrIds = if (streams.hr.isEmpty()) emptyList() else
-            dao.insertHr(streams.hr.map { HrSample(deviceId, it.ts, it.bpm) })
-        val rrIds = if (streams.rr.isEmpty()) emptyList() else
-            dao.insertRr(assignRrSeq(deviceId, streams.rr))
-        val evIds = if (streams.events.isEmpty()) emptyList() else
-            dao.insertEvents(streams.events.map { EventRow(deviceId, it.ts, it.kind, it.payloadJSON) })
-        val batIds = if (streams.battery.isEmpty()) emptyList() else
-            dao.insertBattery(streams.battery.map { BatterySample(deviceId, it.ts, it.soc, it.mv, it.charging) })
-        val spo2Ids = if (streams.spo2.isEmpty()) emptyList() else
-            dao.insertSpo2(streams.spo2.map { Spo2Sample(deviceId, it.ts, it.red, it.ir) })
-        val skinIds = if (streams.skinTemp.isEmpty()) emptyList() else
-            dao.insertSkinTemp(streams.skinTemp.map { SkinTempSample(deviceId, it.ts, it.raw) })
-        // activityClass (#316, v13 column) is the @63 activity-class enum (0=still/1=walk/2=run) the decoder
-        // already carries on each StepRow; it was dropped here before v13 (the insert listed only ts/counter).
-        // it.activityClass is null when the @63 byte was 0xFF/invalid/absent → stored as SQL NULL.
-        val stepIds = if (streams.steps.isEmpty()) emptyList() else
-            dao.insertSteps(streams.steps.map { StepSample(deviceId, it.ts, it.counter, it.activityClass) })
-        // Band sleep_state (#175). The strap's OWN @81 high-nibble state
-        // (0 wake/1 still/2 asleep/3 up), decoded and streamed but dropped at storage until now. Idempotent
-        // by (deviceId, ts); included in InsertCounts so persistence diagnostics and scoring fingerprints
-        // account for sleep-state-only chunks. The raw 0-3 code is stored verbatim.
-        val sleepStateIds = if (streams.sleepState.isEmpty()) emptyList() else
-            dao.insertSleepState(streams.sleepState.map { SleepStateSampleEntity(deviceId, it.ts, it.state) })
-        val respIds = if (streams.resp.isEmpty()) emptyList() else
-            dao.insertResp(streams.resp.map { RespSample(deviceId, it.ts, it.raw) })
-        val gravIds = if (streams.gravity.isEmpty()) emptyList() else
-            dao.insertGravity(streams.gravity.map { GravitySample(deviceId, it.ts, it.x, it.y, it.z) })
-        // v26 PPG-derived HR (#156). Idempotent by (deviceId, ts); counted into InsertCounts.hr so the
-        // backfill "persisted N" summary reflects HR recovered from the optical waveform too.
-        val ppgHrIds = if (streams.ppgHr.isEmpty()) emptyList() else
-            dao.insertPpgHr(streams.ppgHr.map { PpgHrSample(deviceId, it.ts, it.bpm, it.conf) })
-        // RAW v26 optical PPG waveform (#156 follow-up) — the samples ppgHr above is derived FROM.
-        // Included in InsertCounts so PPG-only nights advance persistence diagnostics. Idempotent by
-        // (deviceId, ts), IGNORE-on-conflict keeps the FIRST-seen waveform for a second (mirrors every
-        // other per-second stream). Packed into one compact i16 BLOB per row (see packPpgSamples).
-        val ppgWaveformIds = if (streams.ppgWaveform.isEmpty()) emptyList() else
-            dao.insertPpgWaveform(
-                streams.ppgWaveform.map {
-                    PpgWaveformSampleEntity(deviceId, it.ts, StreamPersistence.packPpgSamples(it.samples))
-                },
-            )
+        return transactor.run {
+            val hrIds = if (streams.hr.isEmpty()) emptyList() else
+                dao.insertHr(streams.hr.map { HrSample(deviceId, it.ts, it.bpm) })
+            val rrIds = if (streams.rr.isEmpty()) emptyList() else
+                dao.insertRr(assignRrSeq(deviceId, streams.rr))
+            val evIds = if (streams.events.isEmpty()) emptyList() else
+                dao.insertEvents(streams.events.map { EventRow(deviceId, it.ts, it.kind, it.payloadJSON) })
+            val batIds = if (streams.battery.isEmpty()) emptyList() else
+                dao.insertBattery(streams.battery.map { BatterySample(deviceId, it.ts, it.soc, it.mv, it.charging) })
+            val spo2Ids = if (streams.spo2.isEmpty()) emptyList() else
+                dao.insertSpo2(streams.spo2.map { Spo2Sample(deviceId, it.ts, it.red, it.ir) })
+            val skinIds = if (streams.skinTemp.isEmpty()) emptyList() else
+                dao.insertSkinTemp(streams.skinTemp.map { SkinTempSample(deviceId, it.ts, it.raw) })
+            // activityClass (#316, v13 column) is the @63 activity-class enum (0=still/1=walk/2=run) the decoder
+            // already carries on each StepRow; it was dropped here before v13 (the insert listed only ts/counter).
+            // it.activityClass is null when the @63 byte was 0xFF/invalid/absent -> stored as SQL NULL.
+            val stepIds = if (streams.steps.isEmpty()) emptyList() else
+                dao.insertSteps(streams.steps.map { StepSample(deviceId, it.ts, it.counter, it.activityClass) })
+            // Band sleep_state (#175). The strap's OWN @81 high-nibble state
+            // (0 wake/1 still/2 asleep/3 up), decoded and streamed but dropped at storage until now. Idempotent
+            // by (deviceId, ts); included in InsertCounts so persistence diagnostics and scoring fingerprints
+            // account for sleep-state-only chunks. The raw 0-3 code is stored verbatim.
+            val sleepStateIds = if (streams.sleepState.isEmpty()) emptyList() else
+                dao.insertSleepState(streams.sleepState.map { SleepStateSampleEntity(deviceId, it.ts, it.state) })
+            val respIds = if (streams.resp.isEmpty()) emptyList() else
+                dao.insertResp(streams.resp.map { RespSample(deviceId, it.ts, it.raw) })
+            val gravIds = if (streams.gravity.isEmpty()) emptyList() else
+                dao.insertGravity(streams.gravity.map { GravitySample(deviceId, it.ts, it.x, it.y, it.z) })
+            // v26 PPG-derived HR (#156). Idempotent by (deviceId, ts); counted into InsertCounts.hr so the
+            // backfill "persisted N" summary reflects HR recovered from the optical waveform too.
+            val ppgHrIds = if (streams.ppgHr.isEmpty()) emptyList() else
+                dao.insertPpgHr(streams.ppgHr.map { PpgHrSample(deviceId, it.ts, it.bpm, it.conf) })
+            // RAW v26 optical PPG waveform (#156 follow-up) - the samples ppgHr above is derived FROM.
+            // Included in InsertCounts so PPG-only nights advance persistence diagnostics. Idempotent by
+            // (deviceId, ts), IGNORE-on-conflict keeps the FIRST-seen waveform for a second (mirrors every
+            // other per-second stream). Packed into one compact i16 BLOB per row (see packPpgSamples).
+            val ppgWaveformIds = if (streams.ppgWaveform.isEmpty()) emptyList() else
+                dao.insertPpgWaveform(
+                    streams.ppgWaveform.map {
+                        PpgWaveformSampleEntity(deviceId, it.ts, StreamPersistence.packPpgSamples(it.samples))
+                    },
+                )
 
-        // OnConflictStrategy.IGNORE returns -1 for skipped (already-present) rows; count the inserts.
-        return InsertCounts(
-            hr = hrIds.countInserted() + ppgHrIds.countInserted(),
-            rr = rrIds.countInserted(),
-            events = evIds.countInserted(),
-            battery = batIds.countInserted(),
-            spo2 = spo2Ids.countInserted(),
-            skinTemp = skinIds.countInserted(),
-            steps = stepIds.countInserted(),
-            resp = respIds.countInserted(),
-            gravity = gravIds.countInserted(),
-            sleepState = sleepStateIds.countInserted(),
-            ppgWaveform = ppgWaveformIds.countInserted(),
-        )
+            // OnConflictStrategy.IGNORE returns -1 for skipped (already-present) rows; count the inserts.
+            InsertCounts(
+                hr = hrIds.countInserted() + ppgHrIds.countInserted(),
+                rr = rrIds.countInserted(),
+                events = evIds.countInserted(),
+                battery = batIds.countInserted(),
+                spo2 = spo2Ids.countInserted(),
+                skinTemp = skinIds.countInserted(),
+                steps = stepIds.countInserted(),
+                resp = respIds.countInserted(),
+                gravity = gravIds.countInserted(),
+                sleepState = sleepStateIds.countInserted(),
+                ppgWaveform = ppgWaveformIds.countInserted(),
+            )
+        }
     }
 
     /** #836/#1196 - cheap whole-history scoring-input token. It covers every raw stream consumed by daily

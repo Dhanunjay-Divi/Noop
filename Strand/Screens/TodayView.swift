@@ -1575,7 +1575,7 @@ struct TodayView: View {
                     // While the strap is mid-offload, say so, empty tiles read as final otherwise (#77).
                     // Its own subview observes LiveState (backfilling + chunk count tick during an offload)
                     // so it refreshes without re-rendering the rest of Today (scroll-stutter fix).
-                    SyncingHistoryNoteIfBackfilling()
+                    SyncingHistoryNoteIfBackfilling(hasCachedContent: !repo.days.isEmpty)
                     if !scoresBuildingDismissed {
                         DataPendingNote(
                             title: "Live now. Your scores are building.",
@@ -5219,15 +5219,59 @@ private struct RecordingStatusLight: View {
 /// `LiveState` observation so the chunk count ticks without re-rendering the rest of Today.
 private struct SyncingHistoryNoteIfBackfilling: View {
     @EnvironmentObject private var live: LiveState
+    let hasCachedContent: Bool
+    @State private var presentationNow = Date().timeIntervalSince1970
+    @State private var presentationTask: Task<Void, Never>?
+
     var body: some View {
-        if live.backfilling {
-            SyncingHistoryNote(
-                chunks: live.syncChunksThisSession,
-                rows: live.historySyncProgress.rowsPersisted,
-                newestDataUnix: live.historySyncProgress.newestDataUnix,
+        Group {
+            let presentation = HistorySyncPresentationPolicy.state(
+                isSyncing: live.backfilling,
+                hasCachedContent: hasCachedContent,
                 startedAt: live.historySyncStartedAt,
-                lastDurableProgressAt: live.historySyncLastDurableProgressAt
+                lastDurableProgressAt: live.historySyncLastDurableProgressAt,
+                now: presentationNow
             )
+            if presentation == .expanded || presentation == .attention {
+                SyncingHistoryNote(
+                    chunks: live.syncChunksThisSession,
+                    rows: live.historySyncProgress.rowsPersisted,
+                    newestDataUnix: live.historySyncProgress.newestDataUnix,
+                    startedAt: live.historySyncStartedAt,
+                    lastDurableProgressAt: live.historySyncLastDurableProgressAt
+                )
+            }
+        }
+        .onAppear { schedulePresentationClock() }
+        .onChangeCompat(of: live.backfilling) { _ in schedulePresentationClock() }
+        .onChangeCompat(of: live.historySyncStartedAt) { _ in schedulePresentationClock() }
+        .onChangeCompat(of: live.historySyncLastDurableProgressAt) { _ in
+            schedulePresentationClock()
+        }
+        .onChangeCompat(of: hasCachedContent) { _ in schedulePresentationClock() }
+        .onDisappear { presentationTask?.cancel() }
+    }
+
+    private func schedulePresentationClock() {
+        presentationTask?.cancel()
+        presentationNow = Date().timeIntervalSince1970
+        guard live.backfilling, let startedAt = live.historySyncStartedAt else { return }
+
+        let progressReference = live.historySyncLastDurableProgressAt ?? startedAt
+        let deadlines = [
+            startedAt + HistorySyncPresentationPolicy.expandedForSeconds,
+            progressReference + HistorySyncDurableProgressPolicy.stalledAfterSeconds,
+        ].filter { $0 > presentationNow }.sorted()
+
+        presentationTask = Task { @MainActor in
+            for deadline in deadlines {
+                let delay = max(0, deadline - Date().timeIntervalSince1970)
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+                guard !Task.isCancelled else { return }
+                presentationNow = Date().timeIntervalSince1970
+            }
         }
     }
 }

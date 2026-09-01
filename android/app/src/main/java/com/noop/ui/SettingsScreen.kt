@@ -35,7 +35,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.BugReport
@@ -2742,51 +2741,6 @@ fun SettingsScreen(
                         LiveSessionPrefs.setEnabled(context, it)
                     },
                 )
-                RowDivider()
-                // The live source has R-R intervals but no fresh, timestamp-matched wrist-motion
-                // contract. Present the capability truth instead of an inert or misleading opt-in.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            uiString(R.string.settings_automatic_stress_check_ins),
-                            style = NoopType.subhead,
-                            color = Palette.textPrimary,
-                        )
-                        Text(
-                            uiString(R.string.settings_automatic_stress_unavailable_reason),
-                            style = NoopType.footnote,
-                            color = Palette.textTertiary,
-                        )
-                    }
-                    StatePill(
-                        title = uiString(R.string.settings_manual_only),
-                        tone = StrandTone.Neutral,
-                        showsDot = false,
-                    )
-                }
-                RowDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        Icons.Filled.Air,
-                        contentDescription = null,
-                        tint = Palette.restBright,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        uiString(R.string.settings_manual_breathe_available),
-                        style = NoopType.footnote,
-                        color = Palette.textSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
                 RowDivider()
                 ToggleRow(
                     title = uiString(R.string.l10n_settings_screen_rhythm_experimental_12d357da),

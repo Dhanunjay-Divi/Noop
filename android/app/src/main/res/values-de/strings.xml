@@ -2166,4 +2166,8 @@
     <string name="weekly_digest_signed_delta">%1$s%2$s</string>
     <string name="workouts_custom_date_from">Von</string>
     <string name="workouts_custom_date_to">Bis</string>
+    <string name="stale_sync_notification_title">NOOP synchron halten</string>
+    <string name="stale_sync_notification_body">Öffne NOOP, um die Daten deines Bands nachzuladen. Lass die App im Hintergrund laufen, damit der Verlauf aktuell bleibt.</string>
+    <string name="stale_sync_notification_channel_name">Band-Synchronisierung</string>
+    <string name="stale_sync_notification_channel_description">Erinnerungen, wenn der Bandverlauf nicht im Hintergrund synchronisiert wurde.</string>
 </resources>

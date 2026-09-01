@@ -1,7 +1,6 @@
 package com.noop.ui
 
 import android.content.SharedPreferences
-import com.noop.analytics.StressOnsetDetector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,32 +9,28 @@ import org.junit.Test
 class BiofeedbackPrefsTest {
 
     @Test
-    fun currentCapability_forcesLegacyOptInsOffAtEngineBoundary() {
+    fun currentCapability_honorsExplicitOptInsAtEngineBoundary() {
         val config = BiofeedbackPrefs.stressConfig(
             storedCheckInEnabled = true,
             storedAutoNudge = true,
+            storedPhoneNudge = true,
             capability = BiofeedbackPrefs.automaticStressNudgeCapability,
         )
 
-        assertFalse(BiofeedbackPrefs.automaticStressNudgesAvailable)
-        assertFalse(config.enabled)
-        assertFalse(config.autoNudge)
-        val decision = StressOnsetDetector.evaluate(
-            rrBuffer = List(StressOnsetDetector.MIN_BEATS) { 900 },
-            currentHR = 70.0,
-            recentMotionG = 0.0,
-            sessionActive = false,
-            state = StressOnsetDetector.State.INITIAL,
-            config = config,
-            nowSec = 1_700_000_000L,
-            tzOffsetSec = 0L,
+        assertTrue(BiofeedbackPrefs.automaticStressNudgesAvailable)
+        assertTrue(config.enabled)
+        assertTrue(config.autoNudge)
+        val canonical = BiofeedbackPrefs.canonicalAutomaticStressNudgePreferences(
+            storedCheckInEnabled = true,
+            storedAutoNudge = true,
+            storedPhoneNudge = true,
+            capability = BiofeedbackPrefs.automaticStressNudgeCapability,
         )
-        assertEquals(StressOnsetDetector.Reason.DISABLED, decision.reason)
-        assertEquals(StressOnsetDetector.State.INITIAL, decision.nextState)
+        assertTrue(canonical.phoneNudge)
     }
 
     @Test
-    fun verifiedFutureCapability_requiresBothOptIns() {
+    fun availableCapability_requiresHierarchicalOptIns() {
         val available = BiofeedbackPrefs.AutomaticStressNudgeCapability
             .AVAILABLE_WITH_TIMESTAMP_MATCHED_WRIST_MOTION
 
@@ -50,24 +45,51 @@ class BiofeedbackPrefsTest {
         val autoOff = BiofeedbackPrefs.stressConfig(true, false, available)
         assertTrue(autoOff.enabled)
         assertFalse(autoOff.autoNudge)
+
+        val canonicalMasterOff = BiofeedbackPrefs.canonicalAutomaticStressNudgePreferences(
+            storedCheckInEnabled = false,
+            storedAutoNudge = true,
+            storedPhoneNudge = true,
+            capability = available,
+        )
+        assertFalse(canonicalMasterOff.checkInEnabled)
+        assertFalse(canonicalMasterOff.autoNudge)
+        assertFalse(canonicalMasterOff.phoneNudge)
+
+        val automaticOff = BiofeedbackPrefs.canonicalAutomaticStressNudgePreferences(
+            storedCheckInEnabled = true,
+            storedAutoNudge = false,
+            storedPhoneNudge = true,
+            capability = available,
+        )
+        assertTrue(automaticOff.checkInEnabled)
+        assertFalse(automaticOff.autoNudge)
+        assertFalse(automaticOff.phoneNudge)
     }
 
     @Test
-    fun startupMigration_disarmsStaleFlagsAndPreservesManualBreathePrefs() {
+    fun unavailableCapabilityMigration_disarmsAllAutomaticFlagsAndPreservesManualBreathePrefs() {
         val prefs = FakeSharedPreferences().apply {
             map["biofeedback.stressCheckIn"] = true
             map["biofeedback.stressAutoNudge"] = true
+            map["biofeedback.stressPhoneNudge"] = true
             map["biofeedback.resonanceBpm"] = 5.5f
             map["biofeedback.resonanceLockedAt"] = 1_700_000_000_000L
             map["biofeedback.stressUseResonancePace"] = true
         }
 
-        val migrated = BiofeedbackPrefs.migrateAutomaticStressNudgePreferences(prefs)
+        val migrated = BiofeedbackPrefs.migrateAutomaticStressNudgePreferences(
+            prefs,
+            BiofeedbackPrefs.AutomaticStressNudgeCapability
+                .UNAVAILABLE_NEEDS_TIMESTAMP_MATCHED_WRIST_MOTION,
+        )
 
         assertFalse(migrated.checkInEnabled)
         assertFalse(migrated.autoNudge)
+        assertFalse(migrated.phoneNudge)
         assertFalse(prefs.getBoolean("biofeedback.stressCheckIn", true))
         assertFalse(prefs.getBoolean("biofeedback.stressAutoNudge", true))
+        assertFalse(prefs.getBoolean("biofeedback.stressPhoneNudge", true))
         assertEquals(5.5f, prefs.getFloat("biofeedback.resonanceBpm", 0f), 0f)
         assertEquals(1_700_000_000_000L, prefs.getLong("biofeedback.resonanceLockedAt", 0L))
         assertTrue(prefs.getBoolean("biofeedback.stressUseResonancePace", false))

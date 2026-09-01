@@ -68,4 +68,73 @@ class BackfillBurstProgressTest {
             HistorySyncDurableProgressPolicy.activity(100, 150, 120),
         )
     }
+
+    @Test
+    fun cachedAutomaticSyncCollapsesAfterBriefDisclosure() {
+        assertEquals(
+            HistorySyncPresentationState.EXPANDED,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = true,
+                hasCachedContent = true,
+                startedAt = 100,
+                lastDurableProgressAt = 101,
+                now = 102,
+            ),
+        )
+        assertEquals(
+            HistorySyncPresentationState.COMPACT,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = true,
+                hasCachedContent = true,
+                startedAt = 100,
+                lastDurableProgressAt = 101,
+                now = 103,
+            ),
+        )
+    }
+
+    @Test
+    fun noDataManualAndStalledSyncStayExplicit() {
+        assertEquals(
+            HistorySyncPresentationState.EXPANDED,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = true,
+                hasCachedContent = false,
+                startedAt = 100,
+                lastDurableProgressAt = 150,
+                now = 170,
+            ),
+        )
+        assertEquals(
+            HistorySyncPresentationState.EXPANDED,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = true,
+                userInitiated = true,
+                hasCachedContent = true,
+                startedAt = 100,
+                lastDurableProgressAt = 150,
+                now = 170,
+            ),
+        )
+        assertEquals(
+            HistorySyncPresentationState.ATTENTION,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = true,
+                hasCachedContent = true,
+                startedAt = 100,
+                lastDurableProgressAt = null,
+                now = 190,
+            ),
+        )
+        assertEquals(
+            HistorySyncPresentationState.HIDDEN,
+            HistorySyncPresentationPolicy.state(
+                isSyncing = false,
+                hasCachedContent = true,
+                startedAt = 100,
+                lastDurableProgressAt = null,
+                now = 190,
+            ),
+        )
+    }
 }

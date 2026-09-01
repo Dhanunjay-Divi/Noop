@@ -560,7 +560,7 @@ struct LiquidTodayView: View {
     /// visibility decision to `LiquidRefreshIndicator` below, which DOES own LiveState.
     private var liquidRefreshIndicator: some View {
         LiquidRefreshIndicator(pullY: pullY, pullThreshold: pullThreshold, refreshing: refreshing,
-                               liquidHeart: liquidHeart)
+                               liquidHeart: liquidHeart, hasCachedContent: !repo.days.isEmpty)
     }
 
     /// Arm the refresh once the pull passes the threshold; FIRE it when the finger releases (the pull
@@ -4234,6 +4234,7 @@ private struct LiquidRefreshIndicator: View {
     let pullThreshold: CGFloat
     let refreshing: Bool
     let liquidHeart: Color
+    let hasCachedContent: Bool
 
     @EnvironmentObject private var live: LiveState
 
@@ -4263,13 +4264,28 @@ private struct LiquidRefreshIndicator: View {
     @State private var outcome: Outcome?
     @State private var settleTask: Task<Void, Never>?
     @State private var outcomeTask: Task<Void, Never>?
+    @State private var presentationTask: Task<Void, Never>?
+    @State private var presentationNow = Date().timeIntervalSince1970
 
     private static let interChunkDelayNanoseconds: UInt64 = 3_000_000_000
     private static let outcomeDelayNanoseconds: UInt64 = 2_000_000_000
 
     private var phase: Phase {
-        if live.backfilling || presentingBandSync { return .syncing }
         if refreshing { return .refreshing }
+        if live.backfilling || presentingBandSync {
+            switch HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                hasCachedContent: hasCachedContent,
+                startedAt: live.historySyncStartedAt,
+                lastDurableProgressAt: live.historySyncLastDurableProgressAt,
+                now: presentationNow
+            ) {
+            case .expanded, .attention:
+                return .syncing
+            case .hidden, .compact:
+                break
+            }
+        }
         switch outcome {
         case .synced: return .synced
         case .unavailable: return .unavailable
@@ -4338,16 +4354,28 @@ private struct LiquidRefreshIndicator: View {
                 syncStartedAt = live.lastSyncedAt
                 presentingBandSync = true
             }
+            schedulePresentationClock()
         }
         .onChangeCompat(of: refreshing) { active in
             handleRefreshChange(active)
+            schedulePresentationClock()
         }
         .onChangeCompat(of: live.backfilling) { active in
             handleBandSyncChange(active)
         }
+        .onChangeCompat(of: live.historySyncStartedAt) { _ in
+            schedulePresentationClock()
+        }
+        .onChangeCompat(of: live.historySyncLastDurableProgressAt) { _ in
+            schedulePresentationClock()
+        }
+        .onChangeCompat(of: hasCachedContent) { _ in
+            schedulePresentationClock()
+        }
         .onDisappear {
             settleTask?.cancel()
             outcomeTask?.cancel()
+            presentationTask?.cancel()
         }
     }
 
@@ -4449,6 +4477,7 @@ private struct LiquidRefreshIndicator: View {
                 syncStartedAt = refreshStartedAt ?? live.lastSyncedAt
             }
             presentingBandSync = true
+            schedulePresentationClock()
             return
         }
         guard presentingBandSync else { return }
@@ -4462,7 +4491,35 @@ private struct LiquidRefreshIndicator: View {
             presentingBandSync = false
             syncStartedAt = nil
             refreshStartedAt = nil
+            schedulePresentationClock()
             showOutcome(completed ? .synced : .failed)
+        }
+    }
+
+    private func schedulePresentationClock() {
+        presentationTask?.cancel()
+        presentationNow = Date().timeIntervalSince1970
+        guard live.backfilling || presentingBandSync,
+              let startedAt = live.historySyncStartedAt else { return }
+
+        let progressReference = live.historySyncLastDurableProgressAt ?? startedAt
+        let deadlines = [
+            startedAt + HistorySyncPresentationPolicy.expandedForSeconds,
+            progressReference + HistorySyncDurableProgressPolicy.stalledAfterSeconds,
+        ].filter { $0 > presentationNow }.sorted()
+        guard !deadlines.isEmpty else { return }
+
+        presentationTask = Task { @MainActor in
+            for deadline in deadlines {
+                let delay = max(0, deadline - Date().timeIntervalSince1970)
+                if delay > 0 {
+                    try? await Task.sleep(
+                        nanoseconds: UInt64(delay * 1_000_000_000)
+                    )
+                }
+                guard !Task.isCancelled else { return }
+                presentationNow = Date().timeIntervalSince1970
+            }
         }
     }
 

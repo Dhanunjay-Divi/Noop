@@ -284,9 +284,9 @@ final class DailyReviewNotificationsTests: XCTestCase {
     }
 
     func testPendingNotificationRouteIsConsumedOnce() {
-        NotificationRouteBridge.recordPending(.sleep)
+        NotificationRouteBridge.recordPending(.breathe)
 
-        XCTAssertEqual(NotificationRouteBridge.consumePending(), .sleep)
+        XCTAssertEqual(NotificationRouteBridge.consumePending(), .breathe)
         XCTAssertNil(NotificationRouteBridge.consumePending())
     }
 

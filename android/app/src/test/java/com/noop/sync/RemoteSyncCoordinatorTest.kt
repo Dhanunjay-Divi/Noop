@@ -339,7 +339,7 @@ class RemoteSyncCoordinatorTest {
         assertFalse(metrics.containsKey("whoop_strain"))
         assertFalse(metrics.containsKey("skin_temp_c"))
         assertEquals(
-            "noop-charge-v2+noop-effort-v1+noop-rest-v1",
+            "noop-charge-v2+noop-effort-v2+noop-rest-v1",
             draft.source.metadata["algorithm_revision"],
         )
         assertEquals("my-whoop-noop", draft.source.metadata["logical_source_id"])

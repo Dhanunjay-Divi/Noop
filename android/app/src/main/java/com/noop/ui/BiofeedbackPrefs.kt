@@ -8,12 +8,12 @@ import com.noop.analytics.StressOnsetDetector
 /**
  * BiofeedbackPrefs — the small, on-device pref surface for the haptic-biofeedback pillar (the Kotlin twin
  * of Strand/Screens/BiofeedbackPrefs.swift): the locked resonance pace + its date (L1), the
- * retired automatic stress-check-in choices + the replay-safe StressOnsetDetector state (L3).
+ * automatic stress-check-in choices + the replay-safe StressOnsetDetector state (L3).
  *
  * SharedPreferences-backed via [NoopPrefs.of] (the same store the rest of the app uses), single-user,
- * on-device — nothing here leaves the device. Automatic nudges remain capability-gated to OFF until a
- * live source supplies timestamp-matched wrist motion alongside its R-R evidence. The old key strings
- * remain only so upgrades can disarm a stale opt-in without touching manual Breathe preferences.
+ * on-device — nothing here leaves the device. Automatic nudges remain capability-gated and every event
+ * must supply timestamp-matched wrist motion, fresh R-R, and fresh heart rate. Missing evidence fails
+ * closed without touching manual Breathe preferences.
  *
  * See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md.
  */
@@ -25,9 +25,9 @@ object BiofeedbackPrefs {
         AVAILABLE_WITH_TIMESTAMP_MATCHED_WRIST_MOTION(true),
     }
 
-    /** Current live BLE truth. Changing this requires wiring timestamp-aligned wrist motion and R-R. */
+    /** Current live BLE truth. Per-event freshness and overlap remain independently fail-closed. */
     val automaticStressNudgeCapability: AutomaticStressNudgeCapability =
-        AutomaticStressNudgeCapability.UNAVAILABLE_NEEDS_TIMESTAMP_MATCHED_WRIST_MOTION
+        AutomaticStressNudgeCapability.AVAILABLE_WITH_TIMESTAMP_MATCHED_WRIST_MOTION
 
     val automaticStressNudgesAvailable: Boolean
         get() = automaticStressNudgeCapability.isAvailable
@@ -36,6 +36,7 @@ object BiofeedbackPrefs {
     private const val KEY_LOCKED_DATE = "biofeedback.resonanceLockedAt"
     private const val KEY_CHECK_IN = "biofeedback.stressCheckIn"
     private const val KEY_AUTO_NUDGE = "biofeedback.stressAutoNudge"
+    private const val KEY_PHONE_NUDGE = "biofeedback.stressPhoneNudge"
     private const val KEY_QUIET_HOURS = "biofeedback.stressQuietHours"
     private const val KEY_USE_RESONANCE = "biofeedback.stressUseResonancePace"
     private const val KEY_QUIET_START = "biofeedback.stressQuietStartMin"
@@ -70,6 +71,7 @@ object BiofeedbackPrefs {
     internal data class AutomaticStressNudgePreferences(
         val checkInEnabled: Boolean,
         val autoNudge: Boolean,
+        val phoneNudge: Boolean,
     )
 
     /** Pure policy seam: a stale stored opt-in can never bypass the current source capability. */
@@ -77,11 +79,14 @@ object BiofeedbackPrefs {
         storedCheckInEnabled: Boolean,
         storedAutoNudge: Boolean,
         capability: AutomaticStressNudgeCapability,
+        storedPhoneNudge: Boolean = false,
     ): AutomaticStressNudgePreferences {
         val enabled = capability.isAvailable && storedCheckInEnabled
+        val automatic = enabled && storedAutoNudge
         return AutomaticStressNudgePreferences(
             checkInEnabled = enabled,
-            autoNudge = enabled && storedAutoNudge,
+            autoNudge = automatic,
+            phoneNudge = automatic && storedPhoneNudge,
         )
     }
 
@@ -90,19 +95,23 @@ object BiofeedbackPrefs {
         return canonicalAutomaticStressNudgePreferences(
             storedCheckInEnabled = prefs.getBoolean(KEY_CHECK_IN, false),
             storedAutoNudge = prefs.getBoolean(KEY_AUTO_NUDGE, false),
+            storedPhoneNudge = prefs.getBoolean(KEY_PHONE_NUDGE, false),
             capability = automaticStressNudgeCapability,
         ).checkInEnabled
     }
 
-    /** Retained for the future card's Turn off action; unsupported builds refuse a true write. */
     fun setCheckInEnabled(context: Context, on: Boolean) {
-        val enabled = automaticStressNudgesAvailable && on
-        NoopPrefs.of(context).edit()
-            .putBoolean(KEY_CHECK_IN, enabled)
-            .apply {
-                if (!enabled) putBoolean(KEY_AUTO_NUDGE, false)
-            }
-            .apply()
+        val editor = NoopPrefs.of(context).edit()
+        if (automaticStressNudgesAvailable) {
+            // Preserve hidden child choices across a user master-toggle cycle, matching Apple.
+            editor.putBoolean(KEY_CHECK_IN, on)
+        } else {
+            editor
+                .putBoolean(KEY_CHECK_IN, false)
+                .putBoolean(KEY_AUTO_NUDGE, false)
+                .putBoolean(KEY_PHONE_NUDGE, false)
+        }
+        editor.apply()
     }
 
     fun autoNudge(context: Context): Boolean {
@@ -110,6 +119,7 @@ object BiofeedbackPrefs {
         return canonicalAutomaticStressNudgePreferences(
             storedCheckInEnabled = prefs.getBoolean(KEY_CHECK_IN, false),
             storedAutoNudge = prefs.getBoolean(KEY_AUTO_NUDGE, false),
+            storedPhoneNudge = prefs.getBoolean(KEY_PHONE_NUDGE, false),
             capability = automaticStressNudgeCapability,
         ).autoNudge
     }
@@ -121,10 +131,28 @@ object BiofeedbackPrefs {
         prefs.edit().putBoolean(KEY_AUTO_NUDGE, enabled).apply()
     }
 
+    fun phoneNudge(context: Context): Boolean {
+        val prefs = NoopPrefs.of(context)
+        return canonicalAutomaticStressNudgePreferences(
+            storedCheckInEnabled = prefs.getBoolean(KEY_CHECK_IN, false),
+            storedAutoNudge = prefs.getBoolean(KEY_AUTO_NUDGE, false),
+            storedPhoneNudge = prefs.getBoolean(KEY_PHONE_NUDGE, false),
+            capability = automaticStressNudgeCapability,
+        ).phoneNudge
+    }
+
+    fun setPhoneNudge(context: Context, on: Boolean) {
+        val prefs = NoopPrefs.of(context)
+        val enabled = automaticStressNudgesAvailable &&
+            prefs.getBoolean(KEY_CHECK_IN, false) &&
+            prefs.getBoolean(KEY_AUTO_NUDGE, false) &&
+            on
+        prefs.edit().putBoolean(KEY_PHONE_NUDGE, enabled).apply()
+    }
+
     /**
-     * Upgrade migration for the retired automatic permission. Writing explicit false values is
-     * rollback-safe: an older build cannot reinterpret a retained true as permission to interrupt.
-     * Resonance pace/date and every manual Breathe preference are deliberately left untouched.
+     * Upgrade migration canonicalizes automatic permissions against the currently compiled evidence
+     * capability. Resonance pace/date and every manual Breathe preference are deliberately untouched.
      */
     fun migrateAutomaticStressNudgePreferences(context: Context) {
         migrateAutomaticStressNudgePreferences(NoopPrefs.of(context))
@@ -132,21 +160,26 @@ object BiofeedbackPrefs {
 
     internal fun migrateAutomaticStressNudgePreferences(
         prefs: SharedPreferences,
+        capability: AutomaticStressNudgeCapability = automaticStressNudgeCapability,
     ): AutomaticStressNudgePreferences {
         val storedCheckIn = prefs.getBoolean(KEY_CHECK_IN, false)
         val storedAutoNudge = prefs.getBoolean(KEY_AUTO_NUDGE, false)
+        val storedPhoneNudge = prefs.getBoolean(KEY_PHONE_NUDGE, false)
         val canonical = canonicalAutomaticStressNudgePreferences(
             storedCheckInEnabled = storedCheckIn,
             storedAutoNudge = storedAutoNudge,
-            capability = automaticStressNudgeCapability,
+            storedPhoneNudge = storedPhoneNudge,
+            capability = capability,
         )
         if (
             storedCheckIn != canonical.checkInEnabled ||
-            storedAutoNudge != canonical.autoNudge
+            storedAutoNudge != canonical.autoNudge ||
+            storedPhoneNudge != canonical.phoneNudge
         ) {
             prefs.edit()
                 .putBoolean(KEY_CHECK_IN, canonical.checkInEnabled)
                 .putBoolean(KEY_AUTO_NUDGE, canonical.autoNudge)
+                .putBoolean(KEY_PHONE_NUDGE, canonical.phoneNudge)
                 .apply()
         }
         return canonical
@@ -160,8 +193,11 @@ object BiofeedbackPrefs {
     fun setUseResonancePace(context: Context, on: Boolean) =
         NoopPrefs.of(context).edit().putBoolean(KEY_USE_RESONANCE, on).apply()
 
-    private fun quietStartMin(context: Context): Int = NoopPrefs.of(context).getInt(KEY_QUIET_START, 22 * 60)
-    private fun quietEndMin(context: Context): Int = NoopPrefs.of(context).getInt(KEY_QUIET_END, 7 * 60)
+    fun quietStartMinutes(context: Context): Int =
+        NoopPrefs.of(context).getInt(KEY_QUIET_START, 22 * 60)
+
+    fun quietEndMinutes(context: Context): Int =
+        NoopPrefs.of(context).getInt(KEY_QUIET_END, 7 * 60)
 
     /** Build the effective config. The capability gate is repeated here, independent of migration/UI. */
     fun stressConfig(context: Context): StressOnsetDetector.Config {
@@ -169,10 +205,11 @@ object BiofeedbackPrefs {
         return stressConfig(
             storedCheckInEnabled = prefs.getBoolean(KEY_CHECK_IN, false),
             storedAutoNudge = prefs.getBoolean(KEY_AUTO_NUDGE, false),
+            storedPhoneNudge = prefs.getBoolean(KEY_PHONE_NUDGE, false),
             capability = automaticStressNudgeCapability,
             quietHoursEnabled = quietHoursEnabled(context),
-            quietStartMinutes = quietStartMin(context),
-            quietEndMinutes = quietEndMin(context),
+            quietStartMinutes = quietStartMinutes(context),
+            quietEndMinutes = quietEndMinutes(context),
         )
     }
 
@@ -181,6 +218,7 @@ object BiofeedbackPrefs {
         storedCheckInEnabled: Boolean,
         storedAutoNudge: Boolean,
         capability: AutomaticStressNudgeCapability,
+        storedPhoneNudge: Boolean = false,
         quietHoursEnabled: Boolean = true,
         quietStartMinutes: Int = 22 * 60,
         quietEndMinutes: Int = 7 * 60,
@@ -188,6 +226,7 @@ object BiofeedbackPrefs {
         val effective = canonicalAutomaticStressNudgePreferences(
             storedCheckInEnabled = storedCheckInEnabled,
             storedAutoNudge = storedAutoNudge,
+            storedPhoneNudge = storedPhoneNudge,
             capability = capability,
         )
         return StressOnsetDetector.Config(

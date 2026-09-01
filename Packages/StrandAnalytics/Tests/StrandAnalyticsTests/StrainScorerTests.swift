@@ -112,10 +112,9 @@ final class StrainScorerTests: XCTestCase {
         XCTAssertNil(StrainScorer.strain(tooFew, maxHR: 190, restingHR: 60))
     }
 
-    func testLightDayHonestlyScoresZeroNotFabricated() {
-        // #482: HR that never crosses ~50% HRR earns ZERO Effort, by design. With max 184 / rest 60,
-        // zone 1 starts at 122 bpm; a day spent at 82–110 stays below it. The fix must NOT invent
-        // load to make the gauge "look alive" — both a dense (4.0) and a sparse (5/MG) light day = 0.
+    func testLightDayCardiovascularComponentHonestlyScoresZero() {
+        // HR that never crosses ~50% HRR earns zero cardiovascular TRIMP. DailyEffortScorer may add a
+        // measured movement floor later, but this physiology kernel must remain HR-only.
         let denseLight = hr(105, 1200, start: 0)                     // 4.0-style, 20 min at 1 Hz
         let sparseLight = hrEvery(105, 40)                           // 5/MG-style, 40 × 30 s
         XCTAssertEqual(StrainScorer.strain(denseLight, maxHR: 184, restingHR: 60), 0.0)

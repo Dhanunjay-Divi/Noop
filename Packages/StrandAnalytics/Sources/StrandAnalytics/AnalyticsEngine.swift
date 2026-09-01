@@ -791,7 +791,7 @@ public enum AnalyticsEngine {
         // when no deviation is available (no baseline yet / not worn) so the UI shows nothing.
         let skinTempRelative = RecoveryScorer.skinTempRelative(deviationC: skinTempDevC)
 
-        // ── Strain / "Effort" (cardiovascular load over the full CALENDAR day) ──
+        // ── Cardiovascular component of daily "Effort" over the full CALENDAR day ──
         // Integrate dayHr ([localMidnight, localMidnight+24h), clamped to `now` for today) when the
         // caller supplies it, so Effort covers the WHOLE day — an afternoon/evening workout lands in
         // today's Effort same-day instead of being cut off at the night window's ≈ noon bound, and
@@ -799,8 +799,11 @@ public enum AnalyticsEngine {
         // night `hr` for pure-function callers/tests.
         let effMaxHR: Double? = maxHROverride ?? (profile.age > 0 ? StrainScorer.tanakaHRmax(age: profile.age) : nil)
         let restForStrain = restingHRDaily.map(Double.init) ?? StrainScorer.defaultRestingHR
-        let strain = StrainScorer.strain(dayHr ?? hr, maxHR: effMaxHR, restingHR: restForStrain,
-                                         sex: profile.sex)
+        let cardioEffort = StrainScorer.strain(
+            dayHr ?? hr,
+            maxHR: effMaxHR,
+            restingHR: restForStrain,
+            sex: profile.sex)
 
         // ── Workouts ──────────────────────────────────────────────────────────
         // Detect over the full CALENDAR day (dayHr/dayGravity) when the caller supplies it, so a
@@ -840,6 +843,25 @@ public enum AnalyticsEngine {
             let scaled = Int((Double(ticks) / max(profile.stepTicksPerStep, 0.5)).rounded())
             return scaled > 0 ? scaled : nil
         }()
+
+        // ── Final daily Effort (cardiovascular load + ordinary movement) ──────
+        // Edwards TRIMP intentionally gives sub-zone HR zero weight. Daily Effort also needs to reflect
+        // walking and ordinary movement, so calibrated steps provide a conservative low-intensity floor.
+        // On hardware without a step counter, calendar-day gravity is the fallback. `max`, not addition,
+        // prevents a run's HR load and its steps from being counted twice.
+        // Gravity alone cannot prove wear (a charging/off-wrist band can still be moved). Require the
+        // sparse-HR sample floor before gravity may stand in for steps; a real step counter needs no HR gate.
+        let hasWornMotionEvidence = (dayHr ?? hr).lazy
+            .filter { tsInDay($0.ts) && $0.bpm > 0 }
+            .prefix(StrainScorer.minSparseReadings)
+            .count == StrainScorer.minSparseReadings
+        let movementGravity = hasWornMotionEvidence
+            ? (dayGravity ?? gravity).filter { tsInDay($0.ts) }
+            : []
+        let strain = DailyEffortScorer.score(
+            cardioEffort: cardioEffort,
+            steps: stepsTotal,
+            gravity: movementGravity)
 
         // ── Daily calories (APPROXIMATE, HR-only whole-day estimate) ──────────
         // Whole-day active+resting energy from the full HR window, using the same resting/active

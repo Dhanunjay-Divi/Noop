@@ -9,6 +9,7 @@ enum NoopNotificationRoute: String, Equatable, Sendable {
     case workouts
     case sleep
     case hydration
+    case breathe
     case devices
     case safety
     case coach

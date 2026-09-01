@@ -10,9 +10,8 @@ import StrandAnalytics
 /// The strap both *measures* HRV (via R-R intervals) and *buzzes* (haptic strap motor), so we can pace
 /// the user's breath with a felt cue and watch their HRV respond in real time — and now also *find* the
 /// user's personal resonance pace (L1) and offer a below-HR "Calm me" metronome (L2). The passive
-/// stress-check-in card (L3) is retained for a future live source that supplies fresh, timestamp-matched
-/// wrist motion; the current source is capability-gated to manual Breathe. All active layers are opt-in
-/// and user-stoppable.
+/// stress-check-in card (L3) can appear only when fresh, timestamp-matched wrist motion and physiology
+/// qualify through the detector. All active layers are opt-in and user-stoppable.
 ///
 /// Mode switch:
 ///  • **Breathe** — the shipped fixed-pace trainer (presets + the locked resonance pill), unchanged.

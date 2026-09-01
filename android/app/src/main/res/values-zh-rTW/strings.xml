@@ -206,4 +206,8 @@
     <string name="vital_range_summary_one_within">可用讀數在其目前範圍內</string>
     <string name="vital_range_summary_one_outside">可用讀數不在其目前範圍內</string>
     <string name="vital_range_summary_many">%1$d/%2$d 項可用讀數在各自的目前範圍內</string>
+    <string name="stale_sync_notification_title">讓 NOOP 保持同步</string>
+    <string name="stale_sync_notification_body">開啟 NOOP 以同步手環資料。讓應用程式在背景執行，使歷史記錄保持最新。</string>
+    <string name="stale_sync_notification_channel_name">手環同步</string>
+    <string name="stale_sync_notification_channel_description">手環歷史記錄未能在背景同步時傳送提醒。</string>
 </resources>

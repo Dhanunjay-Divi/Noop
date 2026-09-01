@@ -27,4 +27,35 @@ final class BackgroundSyncSchedulerTests: XCTestCase {
         ))
     }
 
+    func testStaleSyncReminderRequiresPairingAndExistingAuthorization() {
+        XCTAssertTrue(BandSyncStaleReminderPolicy.shouldSchedule(
+            hasPairedBand: true,
+            notificationsAuthorized: true
+        ))
+        XCTAssertFalse(BandSyncStaleReminderPolicy.shouldSchedule(
+            hasPairedBand: false,
+            notificationsAuthorized: true
+        ))
+        XCTAssertFalse(BandSyncStaleReminderPolicy.shouldSchedule(
+            hasPairedBand: true,
+            notificationsAuthorized: false
+        ))
+        XCTAssertEqual(BandSyncStaleReminderPolicy.delay, 2 * 60 * 60)
+    }
+
+    func testDurableProgressKeepsCountdownArmedWithoutWaitingForSyncCompletion() {
+        XCTAssertTrue(BandSyncStaleReminderPolicy.shouldRefreshAfterDurableProgress(
+            appIsActive: false,
+            hasPairedBand: true
+        ))
+        XCTAssertFalse(BandSyncStaleReminderPolicy.shouldRefreshAfterDurableProgress(
+            appIsActive: true,
+            hasPairedBand: true
+        ))
+        XCTAssertFalse(BandSyncStaleReminderPolicy.shouldRefreshAfterDurableProgress(
+            appIsActive: false,
+            hasPairedBand: false
+        ))
+    }
+
 }

@@ -13,6 +13,7 @@ class WidgetRouteTest {
         assertEquals(NoopNotificationRoute.SLEEP, NoopNotificationRoute.fromRaw("sleep"))
         assertEquals(NoopNotificationRoute.LIVE, NoopNotificationRoute.fromRaw("live"))
         assertEquals(NoopNotificationRoute.HEALTH, NoopNotificationRoute.fromRaw("health"))
+        assertEquals(NoopNotificationRoute.BREATHE, NoopNotificationRoute.fromRaw("breathe"))
         assertEquals(NoopNotificationRoute.SAFETY, NoopNotificationRoute.fromRaw("safety"))
         assertNull(NoopNotificationRoute.fromRaw("https://example.com"))
     }

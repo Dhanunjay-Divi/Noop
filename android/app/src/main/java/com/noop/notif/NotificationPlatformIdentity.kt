@@ -31,6 +31,8 @@ internal object NotificationPlatformIdentity {
         const val SAFETY_CHECK_IN = 4_315
         const val SAFETY_CONTACT_SETUP = 4_316
         const val COACH_CHECK_IN = 4_318
+        const val STALE_SYNC = 4_319
+        const val STRESS_BREATHING = 4_320
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -52,6 +54,8 @@ internal object NotificationPlatformIdentity {
             SAFETY_CHECK_IN,
             SAFETY_CONTACT_SETUP,
             COACH_CHECK_IN,
+            STALE_SYNC,
+            STRESS_BREATHING,
         )
     }
 
@@ -83,6 +87,8 @@ internal object NotificationPlatformIdentity {
         val SAFETY_CHECK_IN = identity(5_119, "safety_check_in")
         val SAFETY_CONTACT_SETUP = identity(5_120, "safety_contact_setup")
         val COACH_CHECK_IN = identity(5_121, "coach_check_in")
+        val STALE_SYNC = identity(5_122, "stale_sync")
+        val STRESS_BREATHING = identity(5_123, "stress_breathing")
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -106,6 +112,8 @@ internal object NotificationPlatformIdentity {
             SAFETY_CHECK_IN,
             SAFETY_CONTACT_SETUP,
             COACH_CHECK_IN,
+            STALE_SYNC,
+            STRESS_BREATHING,
         )
     }
 

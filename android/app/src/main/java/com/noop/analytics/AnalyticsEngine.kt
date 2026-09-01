@@ -656,7 +656,7 @@ object AnalyticsEngine {
             )
         }
 
-        // ── Strain ("Effort") - cardiovascular load over the full CALENDAR day ──
+        // ── Cardiovascular component of daily "Effort" over the full CALENDAR day ──
         // Integrate dayHr ([localMidnight, +24h), clamped to now for today) when supplied so Effort
         // covers the WHOLE day — an afternoon/evening workout lands in today's Effort same-day instead
         // of being cut off at the night window's ≈ noon bound, and the prior evening's HR no longer
@@ -664,7 +664,7 @@ object AnalyticsEngine {
         val effMaxHR: Double? = maxHROverride
             ?: if (profile.age > 0) StrainScorer.tanakaHRmax(profile.age) else null
         val restForStrain = restingHRDaily?.toDouble() ?: StrainScorer.defaultRestingHR
-        val strain = StrainScorer.strain(
+        val cardioEffort = StrainScorer.strain(
             hr = dayHr ?: hr,
             maxHR = effMaxHR,
             restingHR = restForStrain,
@@ -712,6 +712,28 @@ object AnalyticsEngine {
                 .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             if (scaled > 0) scaled else null
         }
+
+        // ── Final daily Effort (cardiovascular load + ordinary movement) ──────
+        // Edwards TRIMP intentionally gives sub-zone HR zero weight. Calibrated steps provide a
+        // conservative low-intensity floor; calendar-day gravity is the fallback on hardware without
+        // a step counter. max, not addition, prevents workout HR and workout steps being counted twice.
+        // Gravity alone cannot prove wear (a charging/off-wrist band can still be moved). Require the
+        // sparse-HR sample floor before gravity may stand in for steps; a real step counter needs no HR gate.
+        val hasWornMotionEvidence = (dayHr ?: hr)
+            .asSequence()
+            .filter { dayString(it.ts, tzOffsetSeconds) == day && it.bpm > 0 }
+            .take(StrainScorer.minSparseReadings)
+            .count() == StrainScorer.minSparseReadings
+        val movementGravity = if (hasWornMotionEvidence) {
+            (dayGravity ?: gravity).filter { dayString(it.ts, tzOffsetSeconds) == day }
+        } else {
+            emptyList()
+        }
+        val strain = DailyEffortScorer.score(
+            cardioEffort = cardioEffort,
+            steps = stepsTotal,
+            gravity = movementGravity,
+        )
 
         // ── Daily calories (APPROXIMATE, HR-only whole-day estimate) ──────────
         // Whole-day active+resting energy from the full HR window, using the same resting/active

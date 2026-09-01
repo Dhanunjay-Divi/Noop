@@ -7,6 +7,13 @@ internal enum class HistorySyncProgressActivity {
     STALLED,
 }
 
+internal enum class HistorySyncPresentationState {
+    HIDDEN,
+    EXPANDED,
+    COMPACT,
+    ATTENTION,
+}
+
 /** Pure, wall-clock policy shared by the sync watchdog and progress UI. */
 internal object HistorySyncDurableProgressPolicy {
     const val WAITING_AFTER_SECONDS = 10L
@@ -44,6 +51,38 @@ internal object HistorySyncDurableProgressPolicy {
         now = now,
         stalledAfterSeconds = stalledAfterSeconds,
     ) == HistorySyncProgressActivity.STALLED
+}
+
+/** Keeps automatic history recovery visible without making cached screens look blocked for the full drain. */
+internal object HistorySyncPresentationPolicy {
+    const val EXPANDED_FOR_SECONDS = 3L
+
+    fun state(
+        isSyncing: Boolean,
+        userInitiated: Boolean = false,
+        hasCachedContent: Boolean,
+        startedAt: Long?,
+        lastDurableProgressAt: Long?,
+        now: Long,
+    ): HistorySyncPresentationState {
+        if (!isSyncing) return HistorySyncPresentationState.HIDDEN
+        if (HistorySyncDurableProgressPolicy.activity(
+                startedAt = startedAt,
+                lastDurableProgressAt = lastDurableProgressAt,
+                now = now,
+            ) == HistorySyncProgressActivity.STALLED
+        ) {
+            return HistorySyncPresentationState.ATTENTION
+        }
+        if (userInitiated || !hasCachedContent) return HistorySyncPresentationState.EXPANDED
+        if (startedAt == null) return HistorySyncPresentationState.EXPANDED
+        val elapsed = (now - startedAt).coerceAtLeast(0)
+        return if (elapsed < EXPANDED_FOR_SECONDS) {
+            HistorySyncPresentationState.EXPANDED
+        } else {
+            HistorySyncPresentationState.COMPACT
+        }
+    }
 }
 
 /** Honest, total-free progress for one contiguous history drain across auto-continue slices. */

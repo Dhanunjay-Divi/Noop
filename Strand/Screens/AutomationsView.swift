@@ -869,33 +869,33 @@ struct AutomationsView: View {
                           isOn: $behavior.zoneCoaching)
                 rowDivider
                 ToggleRow(
-                    label: String(localized: "Stress check-ins"),
-                    help: String(localized: "Opt in to private breathing suggestions based on your own resting heart-timing baseline. This is a wellness signal, not a stress diagnosis."),
+                    label: String(localized: "appwide.stress_checkin.label"),
+                    help: String(localized: "appwide.stress_checkin.help"),
                     isOn: $behavior.stressCheckIn
                 )
                 if behavior.stressCheckIn {
                     rowDivider
                     ToggleRow(
-                        label: String(localized: "Detect automatically"),
-                        help: String(localized: "Requires fresh R-R timing, fresh heart rate, a worn encrypted band, and dense timestamp-matched wrist motion. Missing or moving data never triggers a suggestion."),
+                        label: String(localized: "appwide.stress_checkin.detect_label"),
+                        help: String(localized: "appwide.stress_checkin.detect_help"),
                         isOn: $behavior.stressAutoNudge
                     )
                     if behavior.stressAutoNudge {
                         rowDivider
                         ToggleRow(
-                            label: String(localized: "Phone notification"),
-                            help: String(localized: "Also sends one detail-free phone prompt when a qualified check-in appears. Off by default and rate-limited."),
+                            label: String(localized: "appwide.stress_checkin.phone_label"),
+                            help: String(localized: "appwide.stress_checkin.phone_help"),
                             isOn: stressPhoneNudgeToggle
                         )
                         rowDivider
                         ToggleRow(
-                            label: String(localized: "Respect quiet hours"),
-                            help: String(localized: "Suppress automatic check-ins from 10 PM to 7 AM. Manual Breathe stays available."),
+                            label: String(localized: "appwide.stress_checkin.quiet_label"),
+                            help: String(localized: "appwide.stress_checkin.quiet_help"),
                             isOn: $behavior.stressQuietHours
                         )
                         if !notifMasterOn {
                             rowDivider
-                            Text("Wrist alerts are off. A qualified event can still show an in-app check-in and, if enabled, a phone notification, but it will not buzz the band.")
+                            Text("appwide.stress_checkin.wrist_alerts_off")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.statusWarning)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -909,7 +909,7 @@ struct AutomationsView: View {
                     Image(systemName: "wind")
                         .foregroundStyle(StrandPalette.restBright)
                         .accessibilityHidden(true)
-                    Text("Manual Breathe remains available from Today’s + menu and More. Automatic checks never poll sensors more often; they evaluate fresh data already received during normal sync.")
+                    Text("appwide.stress_checkin.manual_note")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

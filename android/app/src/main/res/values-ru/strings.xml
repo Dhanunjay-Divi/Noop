@@ -206,4 +206,8 @@
     <string name="vital_range_summary_one_within">Доступное значение находится в своём текущем диапазоне</string>
     <string name="vital_range_summary_one_outside">Доступное значение находится вне своего текущего диапазона</string>
     <string name="vital_range_summary_many">%1$d из %2$d доступных значений находятся в своих текущих диапазонах</string>
+    <string name="stale_sync_notification_title">Поддерживайте синхронизацию NOOP</string>
+    <string name="stale_sync_notification_body">Откройте NOOP, чтобы синхронизировать данные браслета. Оставьте приложение работать в фоновом режиме, чтобы история оставалась актуальной.</string>
+    <string name="stale_sync_notification_channel_name">Синхронизация браслета</string>
+    <string name="stale_sync_notification_channel_description">Напоминания, если история браслета не синхронизируется в фоновом режиме.</string>
 </resources>

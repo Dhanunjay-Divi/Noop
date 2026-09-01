@@ -157,7 +157,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "safety_check_in", "safety_contact_setup", "safety_sos_result",
             "illness_check_in", "daily_review", "inactivity", "smart_alarm",
             "battery", "wind_down", "hydration", "metric_review",
-            "contextual_vital", "caffeine_cutoff", "unknown",
+            "contextual_vital", "caffeine_cutoff", "stale_sync", "unknown",
         ])
         if canonical.contains(raw) {
             return raw
@@ -172,6 +172,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "noop.safety.contacts.setup": "safety_contact_setup",
             "safety-gesture-result": "safety_sos_result",
             "wellness-check-in": "illness_check_in",
+            "noop.band-sync.stale": "stale_sync",
         ]
         if let mapped = exact[raw] {
             return mapped

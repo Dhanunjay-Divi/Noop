@@ -59,6 +59,7 @@ import com.noop.analytics.NapVerdict
 import com.noop.analytics.RestScorer
 import com.noop.analytics.SedentaryDetector
 import com.noop.analytics.StressMotionEvidence
+import com.noop.analytics.StressEvidencePolicy
 import com.noop.analytics.StressOnsetDetector
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutDetector
@@ -67,6 +68,8 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.InactivityNotifier
 import com.noop.notif.ScheduledReportNotifier
+import com.noop.notif.StaleSyncReminderScheduler
+import com.noop.notif.StressBreathingNotifier
 import com.noop.notif.scorePctOrNull
 import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.ActiveWorkoutStore
@@ -132,12 +135,17 @@ data class LiveState(
      *  branch and false at every teardown. Twin of macOS LiveState.streamingLiveHR (#903). */
     val streamingLiveHR: Boolean = false,
     val heartRate: Int? = null,
+    /** Wall-clock receipt time for the latest accepted HR packet. Display state alone cannot prove
+     *  freshness for an interruptive stress cue. */
+    val heartRateReceivedAtMillis: Long? = null,
     /** Monotonic in-process identity of the last accepted HR packet. A repeated BPM is still a new
      *  sample and increments this value; merely reading the cached [heartRate] does not. Consumers that
      *  tick on a clock (notably Live Session) use this to distinguish a genuinely fresh sensor event
      *  from the same cached number after realtime transport has stopped or the app backgrounds. */
     val heartRateSampleSequence: Long = 0L,
     val rr: List<Int> = emptyList(),
+    /** Wall-clock receipt time for the latest accepted non-empty R-R packet. */
+    val rrReceivedAtMillis: Long? = null,
     /** Rolling UI buffer of recent R-R intervals (capped, oldest dropped first). The standard BLE HR
      *  notification usually carries only one or two intervals per packet, so the Live console needs a
      *  short history to render a moving R-R strip / rolling RMSSD. Appended (never replaced) via
@@ -243,17 +251,39 @@ data class LiveState(
     /** Set the fresh-packet [rr] AND append the valid intervals onto the bounded [rrRecent] rolling
      *  buffer (oldest fall off first). Non-positive sentinels are dropped from the rolling buffer.
      *  Twin of macOS LiveState.setRRIntervals (PR#191). */
-    fun withRRIntervals(intervals: List<Int>, recentLimit: Int = 60): LiveState {
+    fun withRRIntervals(
+        intervals: List<Int>,
+        receivedAtMillis: Long = System.currentTimeMillis(),
+        recentLimit: Int = 60,
+    ): LiveState {
         val valid = intervals.filter { it > 0 }
         if (valid.isEmpty()) return copy(rr = intervals)
-        val merged = rrRecent + valid
+        val prior = if (
+            StressEvidencePolicy.shouldResetRrBuffer(
+                previousReceivedAtMillis = rrReceivedAtMillis,
+                currentReceivedAtMillis = receivedAtMillis,
+            )
+        ) {
+            emptyList()
+        } else {
+            rrRecent
+        }
+        val merged = prior + valid
         val capped = if (merged.size > recentLimit) merged.takeLast(recentLimit) else merged
-        return copy(rr = intervals, rrRecent = capped)
+        return copy(
+            rr = intervals,
+            rrRecent = capped,
+            rrReceivedAtMillis = receivedAtMillis,
+        )
     }
 
     /** Publish one accepted HR packet and advance its event identity, even when the BPM is unchanged. */
-    fun withHeartRate(bpm: Int): LiveState = copy(
+    fun withHeartRate(
+        bpm: Int,
+        receivedAtMillis: Long = System.currentTimeMillis(),
+    ): LiveState = copy(
         heartRate = bpm,
+        heartRateReceivedAtMillis = receivedAtMillis,
         heartRateSampleSequence = heartRateSampleSequence + 1L,
     )
 
@@ -266,8 +296,14 @@ data class LiveState(
     /** Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or R-R
      *  strip can't outlive the link. Applied on disconnect alongside the charging/bond clears. Twin of
      *  macOS LiveState.clearBiometrics (PR#191). */
-    fun clearedBiometrics(): LiveState = copy(heartRate = null, rr = emptyList(), rrRecent = emptyList(),
-                                              streamingLiveHR = false)   // #56: a dropped link is no longer streaming
+    fun clearedBiometrics(): LiveState = copy(
+        heartRate = null,
+        heartRateReceivedAtMillis = null,
+        rr = emptyList(),
+        rrReceivedAtMillis = null,
+        rrRecent = emptyList(),
+        streamingLiveHR = false,
+    )   // #56: a dropped link is no longer streaming
 }
 
 /**
@@ -1722,7 +1758,10 @@ class WhoopBleClient(
      * `persist` closure — this method touches only the live readout.
      */
     fun publishExternalLiveHr(hr: Int, rr: List<Int>) {
-        if (rr.isNotEmpty()) _state.update { it.withRRIntervals(rr) }
+        val receivedAtMillis = System.currentTimeMillis()
+        if (rr.isNotEmpty()) {
+            _state.update { it.withRRIntervals(rr, receivedAtMillis = receivedAtMillis) }
+        }
         if (hr in 30..220) {
             // #56: a non-WHOOP source (the Oura ring, an FTMS machine, a generic HR strap) is actively
             // streaming live HR. Set streamingLiveHR so the Live console reads it as a trusted stream
@@ -1730,7 +1769,10 @@ class WhoopBleClient(
             // paused, so it never sets the flag for a WHOOP. `bonded` stays false (no encrypted bond), so
             // the buzz/alarm/HRV feature gates keep keying off the WHOOP bond. Twin of iOS OuraLiveSource
             // → LiveState.streamingLiveHR (PR #56).
-            _state.update { it.withHeartRate(hr).copy(connected = true, streamingLiveHR = true) }
+            _state.update {
+                it.withHeartRate(hr, receivedAtMillis = receivedAtMillis)
+                    .copy(connected = true, streamingLiveHR = true)
+            }
         }
     }
 
@@ -3275,10 +3317,11 @@ class WhoopBleClient(
      * L3 closed-loop stress check-in (v5 haptic-biofeedback). On the same natural offload completion that
      * drives [maybeBuzzInactivity], run the shipped, unit-tested [StressOnsetDetector] over the live R-R
      * buffer: a fresh short-window HRV shift with observed low motion may fire one buzz + a passive in-app
-     * card via [StressNudgeCenter.present]. NEVER a push, NEVER a diagnosis - "stress" is an autonomic
-     * proxy vs the user's OWN baseline. All gating + de-dup is in the engine; we only supply honest inputs
-     * (the rolling R-R, the live HR, recent motion, the worn flag) and persist the engine's [nextState] so
-     * a replayed window can't re-fire. Master/sub toggles + quiet hours come from [BiofeedbackPrefs].
+     * card via [StressNudgeCenter.present], plus an optional detail-free phone prompt. It is never a
+     * diagnosis: "stress" is an autonomic proxy vs the user's OWN baseline. All gating + de-dup is in the
+     * engine; we only supply honest inputs (the rolling R-R, the live HR, recent motion, the worn flag) and
+     * persist the engine's [nextState] so a replayed window can't re-fire. Master/sub toggles + quiet hours
+     * come from [BiofeedbackPrefs].
      *
      * See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md (L3).
      */
@@ -3289,7 +3332,8 @@ class WhoopBleClient(
         ioScope.launch {
             try {
                 stressNudgeLock.withLock {
-                    val nowSec = System.currentTimeMillis() / 1000L
+                    val nowMillis = System.currentTimeMillis()
+                    val nowSec = nowMillis / 1000L
                     val live = _state.value
                     // Haptic-first and worn-only. A live-HR shortcut without an encrypted bond cannot deliver
                     // the promised confirming buzz, and off-wrist physiology cannot train a resting baseline.
@@ -3304,13 +3348,24 @@ class WhoopBleClient(
                         return@withLock
                     }
 
-                    // Recent wrist-motion (g): accept only a dense ten-second gravity window whose newest row
-                    // is no more than two minutes old. A four-hour query is needed to find data after an offload,
-                    // but old/sparse rows are NOT evidence of current stillness and become null here.
-                    val from = nowSec - INACTIVITY_LOOKBACK_S
+                    // Accept only a dense, current wrist window that overlaps fresh R-R and HR receipts.
+                    // Historical motion, stale cached physiology, an unencrypted link, or off-wrist data
+                    // cannot train the baseline or trigger any user-facing action.
+                    val from = nowSec - StressMotionEvidence.LOOKBACK_SECONDS
                     val grav = runCatching { repository.gravitySamples(deviceId, from, nowSec) }
                         .getOrDefault(emptyList())
-                    val recentMotionG = StressMotionEvidence.recentIntensityG(grav, nowSec)
+                    val motion = StressMotionEvidence.derive(grav, nowSec)
+                    val recentMotionG = StressEvidencePolicy.qualifiedMotion(
+                        nowMillis = nowMillis,
+                        rrReceivedAtMillis = live.rrReceivedAtMillis,
+                        heartRateReceivedAtMillis = live.heartRateReceivedAtMillis,
+                        motion = motion,
+                        connected = live.connected,
+                        bonded = live.bonded,
+                        encryptedBond = live.encryptedBond,
+                        worn = live.worn,
+                    ) ?: return@withLock
+                    val observedAtMillis = live.rrReceivedAtMillis ?: return@withLock
 
                     val decision = StressOnsetDetector.evaluate(
                         rrBuffer = live.rrRecent,
@@ -3333,11 +3388,20 @@ class WhoopBleClient(
                             val currentConfig = BiofeedbackPrefs.stressConfig(context)
                             if (!currentConfig.enabled || !currentConfig.autoNudge) return@post
                             if (stressNudgeSessionActiveOrNull() != false) return@post
-                            buzz(decision.buzzLoops)
+                            if (NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) {
+                                buzz(decision.buzzLoops)
+                            }
                             StressNudgeCenter.present(
                                 fastRMSSD = decision.fastRMSSD,
                                 baselineRMSSD = decision.baselineRMSSD,
                             )
+                            if (BiofeedbackPrefs.phoneNudge(context)) {
+                                StressBreathingNotifier.onQualifiedOnset(
+                                    context = context,
+                                    observedAtMillis = observedAtMillis,
+                                    fingerprint = decision.nextState.lastFireAt.toString(),
+                                )
+                            }
                             log("Stress check-in: nudged on a fresh HRV shift with observed low motion.")
                         }
                     }
@@ -5105,15 +5169,24 @@ class WhoopBleClient(
 
         when (parsed.typeName) {
             "REALTIME_DATA" -> {
+                val receivedAtMillis = System.currentTimeMillis()
                 // Reject 0 / out-of-range spikes; only accept physiologically plausible HR.
                 (parsed.parsed["heart_rate"] as? Int)?.let { hr ->
-                    if (hr in 30..220) _state.update { it.withHeartRate(hr) }
+                    if (hr in 30..220) {
+                        _state.update {
+                            it.withHeartRate(hr, receivedAtMillis = receivedAtMillis)
+                        }
+                    }
                 }
                 // The realtime stream usually reports rr_count=0; only update R-R when this frame
                 // actually carries intervals, so we don't wipe R-R sourced from the 0x2A37 profile.
                 // withRRIntervals also feeds the Live console's rolling rrRecent buffer.
                 intArrayValue(parsed.parsed["rr_intervals"])?.let { rr ->
-                    if (rr.isNotEmpty()) _state.update { it.withRRIntervals(rr) }
+                    if (rr.isNotEmpty()) {
+                        _state.update {
+                            it.withRRIntervals(rr, receivedAtMillis = receivedAtMillis)
+                        }
+                    }
                 }
             }
 
@@ -5340,6 +5413,7 @@ class WhoopBleClient(
      */
     private fun parseStandardHr(data: ByteArray) {
         if (data.isEmpty()) return
+        val receivedAtMillis = System.currentTimeMillis()
         val flags = data[0].toInt() and 0xFF
         val hr16 = (flags and 0x01) != 0
         val rrPresent = (flags and 0x10) != 0
@@ -5373,10 +5447,12 @@ class WhoopBleClient(
 
         // R-R: the standard profile is the reliable source — surface whenever present. withRRIntervals
         // also feeds the Live console's rolling rrRecent buffer.
-        if (rr.isNotEmpty()) _state.update { it.withRRIntervals(rr) }
+        if (rr.isNotEmpty()) {
+            _state.update { it.withRRIntervals(rr, receivedAtMillis = receivedAtMillis) }
+        }
         // HR: accept only physiologically plausible values; reject 0/garbage (off-wrist).
         if (hr in 30..220) {
-            _state.update { it.withHeartRate(hr) }
+            _state.update { it.withHeartRate(hr, receivedAtMillis = receivedAtMillis) }
             // EXPERIMENTAL WHOOP 5.0/MG: there is no confirmed-write bond for a 5/MG strap, so once
             // live HR actually streams over the standard profile we treat the link as established —
             // otherwise the UI sits on "Connecting…" forever even though data is flowing (issue #8).
@@ -6373,6 +6449,7 @@ class WhoopBleClient(
         if (!backfilling) return
         val nowSec = System.currentTimeMillis() / 1_000L
         _state.update { it.copy(syncLastDurableProgressAt = nowSec) }
+        StaleSyncReminderScheduler.onSyncProgress(context)
         armBackfillDurableProgressTimeout()
     }
 
@@ -6516,8 +6593,10 @@ class WhoopBleClient(
         // Record the last time rows actually landed, and the last time an offload STALLED on a persist
         // failure (the closed-DB-after-restore class) - so a future "sync stuck at 0" report is decidable.
         runCatching {
+            if (backfiller.sessionRowsPersisted > 0) {
+                NoopPrefs.setLastSyncWriteAt(context, nowSec)
+            }
             val p = NoopPrefs.of(context).edit()
-            if (backfiller.sessionRowsPersisted > 0) p.putLong("sync.lastWriteOkAt", nowSec)
             if (backfiller.persistStalled) p.putLong("sync.lastWriteStalledAt", nowSec)
             p.apply()
         }
@@ -6613,6 +6692,7 @@ class WhoopBleClient(
         handler.removeCallbacks(backfillDurableProgressTimeoutRunnable)
         backfillDrain.clear()
         closeWhoop5BackfillCapture(flushSummary = true)
+        StaleSyncReminderScheduler.onSyncSettled(context)
         log("Backfill: session ended - reason=$reason")
         // Inactivity reminder (#419): read-only hook on the natural offload completion (no cadence
         // change). Only on a true HISTORY_COMPLETE — a timeout/disconnect didn't bring a fresh window.

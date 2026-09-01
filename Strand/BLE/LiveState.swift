@@ -11,6 +11,13 @@ enum HistorySyncProgressActivity: Equatable {
     case stalled
 }
 
+enum HistorySyncPresentationState: Equatable {
+    case hidden
+    case expanded
+    case compact
+    case attention
+}
+
 /// Pure, wall-clock policy shared by the sync watchdog and progress UI.
 enum HistorySyncDurableProgressPolicy {
     static let waitingAfterSeconds: TimeInterval = 10
@@ -47,6 +54,33 @@ enum HistorySyncDurableProgressPolicy {
             now: now,
             stalledAfterSeconds: stalledAfterSeconds
         ) == .stalled
+    }
+}
+
+/// Keeps automatic history recovery visible without making cached screens look blocked for the whole drain.
+enum HistorySyncPresentationPolicy {
+    static let expandedForSeconds: TimeInterval = 3
+
+    static func state(
+        isSyncing: Bool,
+        userInitiated: Bool = false,
+        hasCachedContent: Bool,
+        startedAt: TimeInterval?,
+        lastDurableProgressAt: TimeInterval?,
+        now: TimeInterval
+    ) -> HistorySyncPresentationState {
+        guard isSyncing else { return .hidden }
+        if HistorySyncDurableProgressPolicy.activity(
+            startedAt: startedAt,
+            lastDurableProgressAt: lastDurableProgressAt,
+            now: now
+        ) == .stalled {
+            return .attention
+        }
+        if userInitiated || !hasCachedContent { return .expanded }
+        guard let startedAt else { return .expanded }
+        let elapsed = max(0, now - startedAt)
+        return elapsed < expandedForSeconds ? .expanded : .compact
     }
 }
 

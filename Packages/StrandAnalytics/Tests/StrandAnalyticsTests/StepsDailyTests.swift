@@ -141,4 +141,20 @@ final class StepsDailyTests: XCTestCase {
         let s = [step(0, 100), step(60, 150), step(120, 220)]
         XCTAssertEqual(stepsFor(s, ticksPerStep: 0.1), 240)
     }
+
+    func testDailyEffortIncludesOrdinaryWalkingWithoutExerciseHR() {
+        // 1,715 calibrated steps and no HR stream: the daily movement floor should keep Effort from
+        // reading zero, while the same calibrated total remains visible on the Steps metric.
+        let counters = [100, 400, 700, 1_000, 1_300, 1_600, 1_815]
+        let samples = counters.enumerated().map { step($0.offset * 60, $0.element) }
+        let result = AnalyticsEngine.analyzeDay(
+            day: dayUtc,
+            steps: samples,
+            profile: profile
+        )
+
+        XCTAssertEqual(result.daily.steps, 1_715)
+        XCTAssertEqual(result.daily.strain!, 18.75, accuracy: 1e-9)
+        XCTAssertEqual(result.strain, result.daily.strain)
+    }
 }

@@ -206,4 +206,8 @@
     <string name="vital_range_summary_one_within">La lettura disponibile rientra nel suo intervallo attuale</string>
     <string name="vital_range_summary_one_outside">La lettura disponibile è fuori dal suo intervallo attuale</string>
     <string name="vital_range_summary_many">%1$d letture disponibili su %2$d rientrano nei rispettivi intervalli attuali</string>
+    <string name="stale_sync_notification_title">Mantieni NOOP sincronizzato</string>
+    <string name="stale_sync_notification_body">Apri NOOP per aggiornare i dati del bracciale. Lasciala in esecuzione in background per mantenere aggiornata la cronologia.</string>
+    <string name="stale_sync_notification_channel_name">Sincronizzazione del bracciale</string>
+    <string name="stale_sync_notification_channel_description">Promemoria quando la cronologia del bracciale non è stata sincronizzata in background.</string>
 </resources>

@@ -2144,4 +2144,8 @@
     <string name="weekly_digest_signed_delta">%1$s%2$s</string>
     <string name="workouts_custom_date_from">De</string>
     <string name="workouts_custom_date_to">Até</string>
+    <string name="stale_sync_notification_title">Manter o NOOP sincronizado</string>
+    <string name="stale_sync_notification_body">Abra o NOOP para atualizar os dados da pulseira. Deixe a aplicação em execução em segundo plano para manter o histórico atualizado.</string>
+    <string name="stale_sync_notification_channel_name">Sincronização da pulseira</string>
+    <string name="stale_sync_notification_channel_description">Lembretes quando o histórico da pulseira não foi sincronizado em segundo plano.</string>
 </resources>

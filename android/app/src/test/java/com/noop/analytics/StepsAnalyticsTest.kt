@@ -155,4 +155,19 @@ class StepsAnalyticsTest {
         val s = listOf(step(0, 100), step(60, 150), step(120, 220))
         assertEquals(240, stepsFor(s, ticksPerStep = 0.1))
     }
+
+    @Test
+    fun dailyEffortIncludesOrdinaryWalkingWithoutExerciseHr() {
+        val counters = listOf(100, 400, 700, 1_000, 1_300, 1_600, 1_815)
+        val samples = counters.mapIndexed { index, counter -> step(index * 60L, counter) }
+        val result = AnalyticsEngine.analyzeDay(
+            day = dayUtc,
+            steps = samples,
+            profile = profile,
+        )
+
+        assertEquals(1_715, result.daily.steps)
+        assertEquals(18.75, result.daily.strain!!, 0.0)
+        assertEquals(result.daily.strain, result.strain)
+    }
 }

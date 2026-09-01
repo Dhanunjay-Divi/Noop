@@ -2150,4 +2150,8 @@
     <string name="weekly_digest_signed_delta">%1$s%2$s</string>
     <string name="workouts_custom_date_from">Du</string>
     <string name="workouts_custom_date_to">Au</string>
+    <string name="stale_sync_notification_title">Gardez NOOP synchronisé</string>
+    <string name="stale_sync_notification_body">Ouvrez NOOP pour actualiser les données de votre bracelet. Laissez l’application active en arrière-plan pour que l’historique reste à jour.</string>
+    <string name="stale_sync_notification_channel_name">Synchronisation du bracelet</string>
+    <string name="stale_sync_notification_channel_description">Rappels lorsque l’historique du bracelet ne s’est pas synchronisé en arrière-plan.</string>
 </resources>

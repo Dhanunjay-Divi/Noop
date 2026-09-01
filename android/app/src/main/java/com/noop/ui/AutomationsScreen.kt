@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Bedtime
@@ -57,8 +58,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.HrZones
 import com.noop.analytics.NapCandidate
 import com.noop.notif.HydrationReminderPrefs
@@ -115,6 +117,19 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     // enabling the reminder while master is off isn't silently inert.
     val notifMasterOn = NotifPrefs.getBool(ctx, NotifPrefs.MASTER, false)
 
+    // Automatic stress check-ins are opt-in at every layer. Runtime evidence still has to pass the
+    // timestamped motion, fresh HR/R-R, worn/encrypted, no-active-session, quiet-hours, and cooldown gates.
+    var stressCheckIn by remember { mutableStateOf(BiofeedbackPrefs.checkInEnabled(ctx)) }
+    var stressAutoNudge by remember { mutableStateOf(BiofeedbackPrefs.autoNudge(ctx)) }
+    var stressPhoneNudge by remember { mutableStateOf(BiofeedbackPrefs.phoneNudge(ctx)) }
+    var stressQuietHours by remember { mutableStateOf(BiofeedbackPrefs.quietHoursEnabled(ctx)) }
+    var stressNotificationsUnavailable by remember {
+        mutableStateOf(
+            stressPhoneNudge &&
+                !NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+        )
+    }
+
     // Hydration reminders are independently opt-in and live in their own prefs file, so adding this
     // automation cannot overwrite hydration totals or any existing dashboard preference. Phone delivery
     // is a persisted WorkManager one-shot; the optional strap lane only fires on a fresh encrypted packet.
@@ -138,6 +153,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         hydrationRemindersEnabled = granted
         HydrationReminderPrefs.setEnabled(ctx, granted)
         HydrationReminderScheduler.reconcile(ctx)
+    }
+    val stressNotificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        stressNotificationsUnavailable = !granted
+        BiofeedbackPrefs.setPhoneNudge(ctx, granted)
+        stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
     }
     var pendingContextualPermission by remember { mutableStateOf<String?>(null) }
     val contextualPermissionLauncher = rememberLauncherForActivityResult(
@@ -187,6 +209,49 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         hydrationRemindersEnabled = true
         HydrationReminderPrefs.setEnabled(ctx, true)
         HydrationReminderScheduler.reconcile(ctx)
+    }
+
+    fun setStressCheckInEnabled(enabled: Boolean) {
+        BiofeedbackPrefs.setCheckInEnabled(ctx, enabled)
+        stressCheckIn = BiofeedbackPrefs.checkInEnabled(ctx)
+        if (stressCheckIn) {
+            stressAutoNudge = BiofeedbackPrefs.autoNudge(ctx)
+            stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
+        }
+    }
+
+    fun setStressAutoNudgeEnabled(enabled: Boolean) {
+        BiofeedbackPrefs.setAutoNudge(ctx, enabled)
+        stressAutoNudge = BiofeedbackPrefs.autoNudge(ctx)
+        if (stressAutoNudge) {
+            stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
+        }
+    }
+
+    fun setStressPhoneNudgeEnabled(enabled: Boolean) {
+        if (!enabled) {
+            stressPhoneNudge = false
+            stressNotificationsUnavailable = false
+            BiofeedbackPrefs.setPhoneNudge(ctx, false)
+            return
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            stressNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+            stressPhoneNudge = false
+            stressNotificationsUnavailable = true
+            BiofeedbackPrefs.setPhoneNudge(ctx, false)
+            return
+        }
+        stressNotificationsUnavailable = false
+        BiofeedbackPrefs.setPhoneNudge(ctx, true)
+        stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
     }
 
     // PERF (#707): lazy scaffold — each settings section is an unconditional top-level child, so each
@@ -259,7 +324,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             icon = Icons.Filled.Bolt,
             title = uiString(R.string.l10n_automations_screen_haptic_coaching_e2fab286),
             blurb = "Train by feel. Noop Band vibrates so you don't have to watch a screen.",
-            active = zoneCoaching,
+            active = zoneCoaching || (stressCheckIn && stressAutoNudge),
         ) {
             ToggleRow(
                 label = uiString(R.string.l10n_automations_screen_hr_zone_coaching_9306e6e1),
@@ -274,6 +339,76 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     help = "Also buzz once when your heart rate drops back to Zone 1, a cue that you've recovered.",
                     checked = zoneCoachRecovery,
                     onChange = { viewModel.setZoneCoachRecovery(it) },
+                )
+            }
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.appwide_stress_checkin_label),
+                help = stringResource(R.string.appwide_stress_checkin_help),
+                checked = stressCheckIn,
+                onChange = ::setStressCheckInEnabled,
+            )
+            if (stressCheckIn) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.appwide_stress_checkin_detect_label),
+                    help = stringResource(R.string.appwide_stress_checkin_detect_help),
+                    checked = stressAutoNudge,
+                    onChange = ::setStressAutoNudgeEnabled,
+                )
+                if (stressAutoNudge) {
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.appwide_stress_checkin_phone_label),
+                        help = stringResource(R.string.appwide_stress_checkin_phone_help),
+                        checked = stressPhoneNudge,
+                        onChange = ::setStressPhoneNudgeEnabled,
+                    )
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.appwide_stress_checkin_quiet_label),
+                        help = stringResource(R.string.appwide_stress_checkin_quiet_help),
+                        checked = stressQuietHours,
+                        onChange = {
+                            stressQuietHours = it
+                            BiofeedbackPrefs.setQuietHoursEnabled(ctx, it)
+                        },
+                    )
+                    if (stressNotificationsUnavailable) {
+                        RowDivider()
+                        Text(
+                            stringResource(R.string.appwide_stress_checkin_notifications_unavailable),
+                            style = NoopType.footnote,
+                            color = Palette.statusWarning,
+                        )
+                    }
+                    if (!notifMasterOn) {
+                        RowDivider()
+                        Text(
+                            stringResource(R.string.appwide_stress_checkin_wrist_alerts_off),
+                            style = NoopType.footnote,
+                            color = Palette.statusWarning,
+                        )
+                    }
+                }
+            }
+            RowDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    Icons.Filled.Air,
+                    contentDescription = null,
+                    tint = Palette.restBright,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    stringResource(R.string.appwide_stress_checkin_manual_note),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }

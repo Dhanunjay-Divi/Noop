@@ -2180,4 +2180,8 @@
     <string name="weekly_digest_signed_delta">%1$s%2$s</string>
     <string name="workouts_custom_date_from">From</string>
     <string name="workouts_custom_date_to">To</string>
+    <string name="stale_sync_notification_title">Keep NOOP syncing</string>
+    <string name="stale_sync_notification_body">Open NOOP to catch up with your band. Leave it running in the background so history stays up to date.</string>
+    <string name="stale_sync_notification_channel_name">Band sync</string>
+    <string name="stale_sync_notification_channel_description">Reminders when band history has not synced in the background.</string>
 </resources>

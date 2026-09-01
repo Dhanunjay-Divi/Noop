@@ -4640,5 +4640,170 @@
     "ru": "%1$d ч %2$d мин",
     "zh-Hans": "%1$d 小时 %2$d 分钟",
     "zh-Hant": "%1$d 小時 %2$d 分鐘"
+  },
+  "appwide.stress_checkin.label": {
+    "de": "Stress-Check-ins",
+    "en": "Stress check-ins",
+    "es": "Chequeos de estrés",
+    "fr": "Bilans de stress",
+    "it": "Check-in sullo stress",
+    "pt-PT": "Check-ins de stress",
+    "ru": "Отметки стресса",
+    "zh-Hans": "压力签到",
+    "zh-Hant": "壓力簽到"
+  },
+  "appwide.stress_checkin.help": {
+    "de": "Private Atemvorschläge auf Basis deines eigenen Ruhe-Herzrhythmus aktivieren. Dies ist ein Wellness-Signal, keine Stressdiagnose.",
+    "en": "Opt in to private breathing suggestions based on your own resting heart-timing baseline. This is a wellness signal, not a stress diagnosis.",
+    "es": "Activa sugerencias privadas de respiración basadas en tu propio ritmo cardiaco en reposo. Es una señal de bienestar, no un diagnóstico de estrés.",
+    "fr": "Activez des suggestions respiratoires privées basées sur votre propre rythme cardiaque au repos. Il s’agit d’un signal de bien-être, pas d’un diagnostic de stress.",
+    "it": "Attiva suggerimenti privati di respirazione basati sul tuo ritmo cardiaco a riposo. È un segnale di benessere, non una diagnosi di stress.",
+    "pt-PT": "Ative sugestões privadas de respiração com base no seu ritmo cardíaco em repouso. É um sinal de bem-estar, não um diagnóstico de stress.",
+    "ru": "Включите приватные рекомендации по дыханию на основе собственного ритма сердца в покое. Это сигнал самочувствия, а не диагноз стресса.",
+    "zh-Hans": "根据你自己的静息心搏节律提供私密呼吸建议。这是健康提示，并非压力诊断。",
+    "zh-Hant": "根據你自己的靜息心搏節律提供私密呼吸建議。這是健康提示，並非壓力診斷。"
+  },
+  "appwide.stress_checkin.detect_label": {
+    "de": "Automatisch erkennen",
+    "en": "Detect automatically",
+    "es": "Detectar automáticamente",
+    "fr": "Détecter automatiquement",
+    "it": "Rileva automaticamente",
+    "pt-PT": "Detetar automaticamente",
+    "ru": "Определять автоматически",
+    "zh-Hans": "自动检测",
+    "zh-Hant": "自動偵測"
+  },
+  "appwide.stress_checkin.detect_help": {
+    "de": "Erfordert aktuelle R-R-Zeiten, Herzfrequenz, ein getragenes verschlüsseltes Band und dichte, zeitlich passende Handgelenkbewegung. Fehlende Daten oder Bewegung lösen nie einen Hinweis aus.",
+    "en": "Requires fresh R-R timing, fresh heart rate, a worn encrypted band, and dense timestamp-matched wrist motion. Missing or moving data never triggers a suggestion.",
+    "es": "Requiere intervalos R-R y frecuencia cardiaca recientes, una banda cifrada puesta y movimiento denso de muñeca con marcas de tiempo coincidentes. Los datos ausentes o en movimiento nunca activan una sugerencia.",
+    "fr": "Nécessite des intervalles R-R et une fréquence cardiaque récents, un bracelet porté et chiffré, ainsi qu’un mouvement dense du poignet aux horodatages correspondants. Des données absentes ou en mouvement ne déclenchent jamais de suggestion.",
+    "it": "Richiede intervalli R-R e frequenza cardiaca recenti, una fascia indossata e cifrata e movimento del polso denso con timestamp corrispondenti. Dati mancanti o in movimento non attivano mai un suggerimento.",
+    "pt-PT": "Requer intervalos R-R e frequência cardíaca recentes, uma banda usada e encriptada e movimento denso do pulso com carimbos de data/hora correspondentes. Dados em falta ou em movimento nunca acionam uma sugestão.",
+    "ru": "Нужны свежие интервалы R-R и пульс, надетый браслет с защищённым соединением и плотные данные движения запястья с совпадающим временем. Отсутствующие данные или движение никогда не вызывают подсказку.",
+    "zh-Hans": "需要最新的 R-R 间期、心率、已佩戴且加密连接的手环，以及时间戳匹配的密集腕部动作数据。数据缺失或正在移动时绝不会触发建议。",
+    "zh-Hant": "需要最新的 R-R 間期、心率、已佩戴且加密連線的手環，以及時間戳記相符的密集手腕動作資料。資料缺失或正在移動時絕不會觸發建議。"
+  },
+  "appwide.stress_checkin.phone_label": {
+    "de": "Telefonbenachrichtigung",
+    "en": "Phone notification",
+    "es": "Notificación del teléfono",
+    "fr": "Notification du téléphone",
+    "it": "Notifica sul telefono",
+    "pt-PT": "Notificação no telemóvel",
+    "ru": "Уведомление на телефоне",
+    "zh-Hans": "手机通知",
+    "zh-Hant": "手機通知"
+  },
+  "appwide.stress_checkin.phone_help": {
+    "de": "Sendet zusätzlich einen detailfreien Hinweis, wenn ein qualifizierter Check-in erscheint. Standardmäßig aus und zeitlich begrenzt.",
+    "en": "Also sends one detail-free phone prompt when a qualified check-in appears. Off by default and rate-limited.",
+    "es": "También envía un aviso sin detalles cuando aparece un chequeo válido. Está desactivado de forma predeterminada y tiene límite de frecuencia.",
+    "fr": "Envoie aussi une invite sans détail lorsqu’un bilan qualifié apparaît. Désactivée par défaut et limitée en fréquence.",
+    "it": "Invia anche un avviso senza dettagli quando compare un check-in qualificato. Disattivato per impostazione predefinita e con frequenza limitata.",
+    "pt-PT": "Também envia um aviso sem detalhes quando surge um check-in qualificado. Desativado por predefinição e com frequência limitada.",
+    "ru": "Также отправляет одно уведомление без подробностей при подтверждённой отметке. По умолчанию выключено, частота ограничена.",
+    "zh-Hans": "出现符合条件的签到时，还会发送一条不含详细数据的手机提示。默认关闭，并限制发送频率。",
+    "zh-Hant": "出現符合條件的簽到時，還會傳送一則不含詳細資料的手機提示。預設關閉，並限制傳送頻率。"
+  },
+  "appwide.stress_checkin.quiet_label": {
+    "de": "Ruhezeiten beachten",
+    "en": "Respect quiet hours",
+    "es": "Respetar horas de silencio",
+    "fr": "Respecter les heures silencieuses",
+    "it": "Rispetta le ore di silenzio",
+    "pt-PT": "Respeitar as horas de silêncio",
+    "ru": "Учитывать тихие часы",
+    "zh-Hans": "遵守免打扰时段",
+    "zh-Hant": "遵守勿擾時段"
+  },
+  "appwide.stress_checkin.quiet_help": {
+    "de": "Unterdrückt automatische Check-ins von 22:00 bis 07:00 Uhr. Manuelles Atmen bleibt verfügbar.",
+    "en": "Suppress automatic check-ins from 10 PM to 7 AM. Manual Breathe stays available.",
+    "es": "Suprime los chequeos automáticos de 22:00 a 07:00. La respiración manual sigue disponible.",
+    "fr": "Suspend les bilans automatiques de 22 h à 7 h. La respiration manuelle reste disponible.",
+    "it": "Sospende i check-in automatici dalle 22:00 alle 07:00. La respirazione manuale resta disponibile.",
+    "pt-PT": "Suprime os check-ins automáticos das 22:00 às 07:00. A respiração manual continua disponível.",
+    "ru": "Отключает автоматические отметки с 22:00 до 07:00. Ручной режим дыхания остаётся доступен.",
+    "zh-Hans": "晚上 10 点至早上 7 点不发送自动签到。仍可手动开始呼吸练习。",
+    "zh-Hant": "晚上 10 點至早上 7 點不傳送自動簽到。仍可手動開始呼吸練習。"
+  },
+  "appwide.stress_checkin.manual_note": {
+    "de": "Manuelles Atmen bleibt im +-Menü von Heute und unter Mehr verfügbar. Automatische Prüfungen fragen Sensoren nicht häufiger ab, sondern werten nur neue Daten aus der normalen Synchronisierung aus.",
+    "en": "Manual Breathe remains available from Today’s + menu and More. Automatic checks never poll sensors more often; they evaluate fresh data already received during normal sync.",
+    "es": "La respiración manual sigue disponible en el menú + de Hoy y en Más. Las comprobaciones automáticas no consultan los sensores con más frecuencia; evalúan datos recientes ya recibidos durante la sincronización normal.",
+    "fr": "La respiration manuelle reste disponible dans le menu + d’Aujourd’hui et dans Plus. Les contrôles automatiques n’interrogent jamais les capteurs plus souvent ; ils évaluent les données récentes déjà reçues pendant la synchronisation normale.",
+    "it": "La respirazione manuale resta disponibile nel menu + di Oggi e in Altro. I controlli automatici non interrogano più spesso i sensori; valutano i dati recenti già ricevuti durante la normale sincronizzazione.",
+    "pt-PT": "A respiração manual continua disponível no menu + de Hoje e em Mais. As verificações automáticas nunca consultam os sensores com maior frequência; avaliam dados recentes já recebidos durante a sincronização normal.",
+    "ru": "Ручной режим дыхания остаётся доступен в меню + на экране «Сегодня» и в разделе «Ещё». Автоматические проверки не опрашивают датчики чаще, а оценивают свежие данные обычной синхронизации.",
+    "zh-Hans": "仍可从“今天”的 + 菜单和“更多”手动开始呼吸练习。自动检查不会更频繁地轮询传感器，只会评估正常同步期间已收到的最新数据。",
+    "zh-Hant": "仍可從「今天」的 + 選單和「更多」手動開始呼吸練習。自動檢查不會更頻繁地輪詢感測器，只會評估正常同步期間已收到的最新資料。"
+  },
+  "appwide.stress_checkin.notifications_unavailable": {
+    "de": "Benachrichtigungen sind in den Systemeinstellungen deaktiviert. Aktiviere sie dort, um Telefonhinweise zu erhalten.",
+    "en": "Notifications are disabled in system settings. Enable them there to receive phone prompts.",
+    "es": "Las notificaciones están desactivadas en los ajustes del sistema. Actívalas allí para recibir avisos en el teléfono.",
+    "fr": "Les notifications sont désactivées dans les réglages système. Activez-les pour recevoir les invites sur le téléphone.",
+    "it": "Le notifiche sono disattivate nelle impostazioni di sistema. Attivale per ricevere avvisi sul telefono.",
+    "pt-PT": "As notificações estão desativadas nas definições do sistema. Ative-as para receber avisos no telemóvel.",
+    "ru": "Уведомления отключены в системных настройках. Включите их там, чтобы получать подсказки на телефоне.",
+    "zh-Hans": "系统设置中已关闭通知。请在那里启用通知以接收手机提示。",
+    "zh-Hant": "系統設定中已關閉通知。請在該處啟用通知以接收手機提示。"
+  },
+  "appwide.stress_checkin.wrist_alerts_off": {
+    "de": "Handgelenkhinweise sind aus. Der In-App-Check-in und ein aktivierter Telefonhinweis funktionieren weiterhin, aber das Band vibriert nicht.",
+    "en": "Wrist alerts are off. The in-app check-in and an enabled phone prompt still work, but the band will not buzz.",
+    "es": "Los avisos de muñeca están desactivados. El chequeo en la app y un aviso del teléfono activado siguen funcionando, pero la banda no vibrará.",
+    "fr": "Les alertes au poignet sont désactivées. Le bilan dans l’app et une invite téléphonique activée fonctionnent toujours, mais le bracelet ne vibrera pas.",
+    "it": "Gli avvisi al polso sono disattivati. Il check-in nell’app e un avviso sul telefono attivato funzionano comunque, ma la fascia non vibrerà.",
+    "pt-PT": "Os alertas no pulso estão desativados. O check-in na app e um aviso no telemóvel ativado continuam a funcionar, mas a banda não vibrará.",
+    "ru": "Оповещения на запястье отключены. Отметка в приложении и включённая подсказка на телефоне продолжат работать, но браслет не завибрирует.",
+    "zh-Hans": "腕部提醒已关闭。应用内签到和已启用的手机提示仍会工作，但手环不会振动。",
+    "zh-Hant": "手腕提醒已關閉。App 內簽到和已啟用的手機提示仍會運作，但手環不會震動。"
+  },
+  "appwide.stress_checkin.notification_title": {
+    "de": "Nimm dir eine ruhige Minute",
+    "en": "Take a quiet minute",
+    "es": "Tómate un minuto de calma",
+    "fr": "Prenez une minute au calme",
+    "it": "Prenditi un minuto di calma",
+    "pt-PT": "Reserve um minuto de calma",
+    "ru": "Уделите минуту спокойствию",
+    "zh-Hans": "安静地休息一分钟",
+    "zh-Hant": "安靜地休息一分鐘"
+  },
+  "appwide.stress_checkin.notification_body": {
+    "de": "Ein aktuelles Signal am Handgelenk deutet darauf hin, dass ein kurzer Atem-Check-in hilfreich sein könnte. Öffne NOOP, wenn du bereit bist.",
+    "en": "A fresh wrist signal suggests a short breathing check-in may be useful. Open NOOP when you are ready.",
+    "es": "Una señal reciente de la muñeca sugiere que una breve pausa para respirar podría ser útil. Abre NOOP cuando estés listo.",
+    "fr": "Un signal récent au poignet suggère qu’une courte pause respiratoire pourrait être utile. Ouvrez NOOP lorsque vous êtes prêt.",
+    "it": "Un segnale recente dal polso suggerisce che una breve pausa di respirazione potrebbe essere utile. Apri NOOP quando sei pronto.",
+    "pt-PT": "Um sinal recente no pulso sugere que uma breve pausa para respirar poderá ser útil. Abra o NOOP quando estiver pronto.",
+    "ru": "Свежий сигнал с запястья указывает, что короткая дыхательная пауза может быть полезна. Откройте NOOP, когда будете готовы.",
+    "zh-Hans": "最新的腕部信号表明，短暂的呼吸练习可能会有帮助。准备好后打开 NOOP。",
+    "zh-Hant": "最新的手腕訊號顯示，短暫的呼吸練習可能會有幫助。準備好後開啟 NOOP。"
+  },
+  "appwide.stress_checkin.channel_name": {
+    "de": "Private Atem-Check-ins",
+    "en": "Private breathing check-ins",
+    "es": "Chequeos privados de respiración",
+    "fr": "Bilans respiratoires privés",
+    "it": "Check-in privati di respirazione",
+    "pt-PT": "Check-ins privados de respiração",
+    "ru": "Приватные дыхательные отметки",
+    "zh-Hans": "私密呼吸签到",
+    "zh-Hant": "私密呼吸簽到"
+  },
+  "appwide.stress_checkin.channel_description": {
+    "de": "Optionale, detailfreie Atemhinweise nach einem qualifizierten Ruhe-Signal.",
+    "en": "Optional detail-free breathing prompts after a qualified resting signal.",
+    "es": "Avisos opcionales de respiración sin detalles tras una señal válida en reposo.",
+    "fr": "Invites respiratoires facultatives sans détail après un signal au repos qualifié.",
+    "it": "Avvisi facoltativi di respirazione senza dettagli dopo un segnale a riposo qualificato.",
+    "pt-PT": "Avisos opcionais de respiração sem detalhes após um sinal de repouso qualificado.",
+    "ru": "Необязательные дыхательные подсказки без подробностей после подтверждённого сигнала в покое.",
+    "zh-Hans": "在符合条件的静息信号后发送可选且不含详细数据的呼吸提示。",
+    "zh-Hant": "在符合條件的靜息訊號後傳送可選且不含詳細資料的呼吸提示。"
   }
 }

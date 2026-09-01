@@ -534,6 +534,8 @@ struct RootTabView: View {
                 selectedTab = IPhonePrimaryTab.sleep.rawValue
             case .hydration:
                 quickAction = .hydration
+            case .breathe:
+                quickAction = .breathe
             case .today:
                 tabPaths[IPhonePrimaryTab.today.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.today.rawValue

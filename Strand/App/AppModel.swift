@@ -1485,9 +1485,9 @@ final class AppModel: ObservableObject {
                     observedAt: rrAt,
                     maximumAge: 5 * 60,
                     fingerprint: String(decision.nextState.lastFireAt),
-                    title: String(localized: "Take a quiet minute"),
-                    body: String(localized: "A fresh wrist signal suggests a short breathing check-in may be useful. Open NOOP when you are ready."),
-                    route: .today
+                    title: String(localized: "appwide.stress_checkin.notification_title"),
+                    body: String(localized: "appwide.stress_checkin.notification_body"),
+                    route: .breathe
                 ),
                 now: now
             )

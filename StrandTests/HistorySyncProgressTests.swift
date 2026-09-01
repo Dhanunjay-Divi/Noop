@@ -136,4 +136,71 @@ final class HistorySyncDurableProgressPolicyTests: XCTestCase {
             .advancing
         )
     }
+
+    func testCachedAutomaticSyncCollapsesAfterBriefDisclosure() {
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                hasCachedContent: true,
+                startedAt: 100,
+                lastDurableProgressAt: 101,
+                now: 102
+            ),
+            .expanded
+        )
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                hasCachedContent: true,
+                startedAt: 100,
+                lastDurableProgressAt: 101,
+                now: 103
+            ),
+            .compact
+        )
+    }
+
+    func testNoDataManualAndStalledSyncStayExplicit() {
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                hasCachedContent: false,
+                startedAt: 100,
+                lastDurableProgressAt: 150,
+                now: 170
+            ),
+            .expanded
+        )
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                userInitiated: true,
+                hasCachedContent: true,
+                startedAt: 100,
+                lastDurableProgressAt: 150,
+                now: 170
+            ),
+            .expanded
+        )
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: true,
+                hasCachedContent: true,
+                startedAt: 100,
+                lastDurableProgressAt: nil,
+                now: 190
+            ),
+            .attention
+        )
+        XCTAssertEqual(
+            HistorySyncPresentationPolicy.state(
+                isSyncing: false,
+                hasCachedContent: true,
+                startedAt: 100,
+                lastDurableProgressAt: nil,
+                now: 190
+            ),
+            .hidden
+        )
+    }
 }

@@ -96,6 +96,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -193,6 +194,9 @@ import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import com.noop.ingest.HealthConnectImporter
 import com.noop.notif.StrainTargetNotifier
+import com.noop.ble.HistorySyncPresentationPolicy
+import com.noop.ble.HistorySyncPresentationState
+import com.noop.ble.HistorySyncDurableProgressPolicy
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -1393,6 +1397,45 @@ fun TodayScreen(
             pullToSyncState.endRefresh()
         }
     }
+    // A new logical day may not have its own row yet while Today still shows carried Recovery,
+    // Sleep, and vitals from existing history. That is cached content too: disclose an automatic
+    // offload briefly, then return the space to the dashboard while the transfer continues.
+    val hasCachedTodayContent = days.isNotEmpty()
+    var syncPresentationNow by remember(
+        liveSnap.backfilling,
+        liveSnap.syncStartedAt,
+        hasCachedTodayContent,
+    ) {
+        mutableLongStateOf(System.currentTimeMillis() / 1_000L)
+    }
+    LaunchedEffect(
+        liveSnap.backfilling,
+        liveSnap.syncStartedAt,
+        liveSnap.syncLastDurableProgressAt,
+        hasCachedTodayContent,
+    ) {
+        syncPresentationNow = System.currentTimeMillis() / 1_000L
+        val startedAt = liveSnap.syncStartedAt
+        if (liveSnap.backfilling && startedAt != null) {
+            val progressReference = liveSnap.syncLastDurableProgressAt ?: startedAt
+            val deadlines = listOf(
+                startedAt + HistorySyncPresentationPolicy.EXPANDED_FOR_SECONDS,
+                progressReference + HistorySyncDurableProgressPolicy.STALLED_AFTER_SECONDS,
+            ).filter { it > syncPresentationNow }.sorted()
+            for (deadline in deadlines) {
+                val remaining = (deadline - System.currentTimeMillis() / 1_000L).coerceAtLeast(0)
+                if (remaining > 0) kotlinx.coroutines.delay(remaining * 1_000L)
+                syncPresentationNow = System.currentTimeMillis() / 1_000L
+            }
+        }
+    }
+    val historySyncPresentation = HistorySyncPresentationPolicy.state(
+        isSyncing = liveSnap.backfilling,
+        hasCachedContent = hasCachedTodayContent,
+        startedAt = liveSnap.syncStartedAt,
+        lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
+        now = syncPresentationNow,
+    )
 
     Box(
         modifier = Modifier
@@ -1487,6 +1530,24 @@ fun TodayScreen(
             }
         }
 
+        if (
+            liveSnap.backfilling &&
+            (
+                historySyncPresentation == HistorySyncPresentationState.EXPANDED ||
+                    historySyncPresentation == HistorySyncPresentationState.ATTENTION
+                )
+        ) {
+            item {
+                SyncingHistoryNote(
+                    chunks = liveSnap.syncChunksThisSession,
+                    rows = liveSnap.syncRowsThisSession,
+                    newestDataUnix = liveSnap.syncDataNewestAt,
+                    startedAt = liveSnap.syncStartedAt,
+                    lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
+                )
+            }
+        }
+
         // Design Reset (iOS parity): the "New here?" first-run card is off the Today dashboard for the
         // clean look, the scoring guide stays reachable from the i on each score and in Settings.
 
@@ -1496,16 +1557,6 @@ fun TodayScreen(
         // the Updates inbox (restorable from there). Only anchored to today (offset 0).
         if (displayMetric?.recovery == null) {
             item {
-            // While the strap is mid-offload, say so, empty tiles read as final otherwise (#77).
-            if (liveSnap.backfilling) {
-                SyncingHistoryNote(
-                    chunks = liveSnap.syncChunksThisSession,
-                    rows = liveSnap.syncRowsThisSession,
-                    newestDataUnix = liveSnap.syncDataNewestAt,
-                    startedAt = liveSnap.syncStartedAt,
-                    lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
-                )
-            }
             // Explained score state (COMPONENT 2): when there's no own number to show, say WHY and WHAT to
             // do. "Calibrating" (N more nights, no fake number), "Last night · <date>" (#802 carry-over)
             // or "Needs the strap" (no data overnight). The carried Charge now draws a dimmed filled ring on

@@ -20,9 +20,121 @@ enum BackgroundSyncPolicy {
     }
 }
 
+/// Shared policy for the quiet reminder that a paired band has gone two hours without app-visible sync.
+enum BandSyncStaleReminderPolicy {
+    static let delay: TimeInterval = 2 * 60 * 60
+
+    static func shouldSchedule(
+        hasPairedBand: Bool,
+        notificationsAuthorized: Bool
+    ) -> Bool {
+        hasPairedBand && notificationsAuthorized
+    }
+
+    static func shouldRefreshAfterDurableProgress(
+        appIsActive: Bool,
+        hasPairedBand: Bool
+    ) -> Bool {
+        !appIsActive && hasPairedBand
+    }
+}
+
 #if os(iOS)
 @preconcurrency import BackgroundTasks
 import UIKit
+import UserNotifications
+
+/// Hands one privacy-safe stale-sync reminder to Notification Center when NOOP leaves the foreground.
+///
+/// Notification access is never requested here. A fresh sync replaces the two-hour countdown, while
+/// foregrounding removes it. Durable in-flight progress replaces the same stable request so process
+/// suspension before HISTORY_COMPLETE cannot leave the user without a later stale-data reminder.
+@MainActor
+enum BandSyncStaleReminder {
+    static let requestIdentifier = "noop.band-sync.stale"
+
+    private static var generation: UInt64 = 0
+
+    static func scheduleIfEligible(hasPairedBand: Bool) async {
+        generation &+= 1
+        let expectedGeneration = generation
+        guard UIApplication.shared.applicationState != .active else {
+            cancel()
+            return
+        }
+        guard hasPairedBand else {
+            cancel()
+            return
+        }
+
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard expectedGeneration == generation else { return }
+        guard BandSyncStaleReminderPolicy.shouldSchedule(
+            hasPairedBand: hasPairedBand,
+            notificationsAuthorized: canPost(using: settings.authorizationStatus)
+        ) else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestIdentifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            cancel()
+            return
+        }
+
+        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+        guard expectedGeneration == generation else { return }
+
+        let content = UNMutableNotificationContent()
+        content.applyProminence(.ambient)
+        content.title = String(
+            localized: "sync.stale.notification.title",
+            defaultValue: "Keep NOOP syncing"
+        )
+        content.body = String(
+            localized: "sync.stale.notification.body",
+            defaultValue: "Open NOOP to catch up with your band. Leave it running in the background so history stays up to date."
+        )
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.connection-health"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.devices.rawValue,
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: requestIdentifier,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: BandSyncStaleReminderPolicy.delay,
+                repeats: false
+            )
+        )
+        do {
+            try await LocalNotificationLifecycle.schedule(request, on: center)
+            if expectedGeneration != generation { cancel() }
+        } catch {
+            if expectedGeneration != generation { cancel() }
+        }
+    }
+
+    static func cancel() {
+        generation &+= 1
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestIdentifier],
+            presented: true
+        )
+    }
+
+    private static func canPost(using status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
+        }
+    }
+}
 
 /// Best-effort maintenance wake for recent HealthKit ingestion, an already-connected strap's history
 /// request, and explicitly enabled self-hosted/Friends delivery.

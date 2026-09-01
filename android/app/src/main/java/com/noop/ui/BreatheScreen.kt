@@ -764,8 +764,8 @@ private fun timeString(total: Int): String =
  * The L3 closed-loop JITAI surface — Kotlin twin of StressCheckInCard.swift. Observes
  * [StressNudgeCenter.pending]; when the shipped [com.noop.analytics.StressOnsetDetector] fires (a fresh,
  * short-window HRV shift with observed low motion), the central hook calls [StressNudgeCenter.present] and
- * this dismissible card appears. NEVER an alarm, NEVER a push, NEVER a diagnosis — with Breathe now /
- * Not now / Turn off.
+ * this dismissible card appears. NEVER an alarm, NEVER a push unless separately enabled, NEVER a
+ * diagnosis - with Breathe now / Not now / Turn off.
  */
 @Composable
 private fun StressCheckInCard(onBreatheNow: () -> Unit) {

@@ -41,6 +41,8 @@ object NotificationLifecycleId {
     const val SAFETY_CHECK_IN = "safety_check_in"
     const val SAFETY_CONTACT_SETUP = "safety_contact_setup"
     const val SAFETY_SOS_RESULT = "safety_sos_result"
+    const val STALE_SYNC = "stale_sync"
+    const val STRESS_BREATHING = "stress_breathing"
 
     internal val all = setOf(
         CONNECTION_SERVICE,
@@ -62,6 +64,8 @@ object NotificationLifecycleId {
         SAFETY_CHECK_IN,
         SAFETY_CONTACT_SETUP,
         SAFETY_SOS_RESULT,
+        STALE_SYNC,
+        STRESS_BREATHING,
     )
 }
 

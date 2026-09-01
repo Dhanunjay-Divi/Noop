@@ -31,6 +31,7 @@ import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.notif.HydrationReminderScheduler
+import com.noop.notif.StaleSyncReminderScheduler
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.sync.RemoteSyncScheduler
@@ -104,6 +105,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         deferLaunchMaintenance()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
+    }
+
+    override fun onStop() {
+        StaleSyncReminderScheduler.onAppBackgrounded(applicationContext)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1098,12 +1109,23 @@ object NoopPrefs {
      *  (reimpl of @tavelli's PR #556) so the Live screen's "Last synced N ago" SURVIVES a BLE-client
      *  recreation / process restart and stops reverting to "Never". 0 = never synced on this install. */
     const val KEY_LAST_SYNC_AT = "noop.lastSyncAtSec"
+    const val KEY_LAST_SYNC_WRITE_AT = "sync.lastWriteOkAt"
 
     fun lastSyncAt(context: Context): Long = of(context).getLong(KEY_LAST_SYNC_AT, 0L)
 
     fun setLastSyncAt(context: Context, epochSec: Long) {
         of(context).edit().putLong(KEY_LAST_SYNC_AT, epochSec).apply()
     }
+
+    fun lastSyncWriteAt(context: Context): Long =
+        of(context).getLong(KEY_LAST_SYNC_WRITE_AT, 0L)
+
+    fun setLastSyncWriteAt(context: Context, epochSec: Long) {
+        of(context).edit().putLong(KEY_LAST_SYNC_WRITE_AT, epochSec).apply()
+    }
+
+    fun syncFreshnessAt(context: Context): Long =
+        maxOf(lastSyncAt(context), lastSyncWriteAt(context))
 
     /** Last-known strap firmware string, persisted on connect so the debug export can name it OFFLINE
      *  (LiveState.strapFirmware is cleared on disconnect and gone in the scheduled/background export). */
