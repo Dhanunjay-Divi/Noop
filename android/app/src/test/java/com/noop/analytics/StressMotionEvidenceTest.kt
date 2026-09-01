@@ -76,4 +76,24 @@ class StressMotionEvidenceTest {
         assertTrue(StressEvidencePolicy.shouldResetRrBuffer(1_000L, 1_001L + limit))
         assertTrue(StressEvidencePolicy.shouldResetRrBuffer(1_000L, 999L))
     }
+
+    @Test
+    fun liveEvaluationCadence_isBoundedButForceAndClockRepairCanRun() {
+        val now = 10_000L
+        assertTrue(StressEvaluationCadence.shouldRequest(null, now))
+        assertFalse(
+            StressEvaluationCadence.shouldRequest(
+                now,
+                now + StressEvaluationCadence.MINIMUM_INTERVAL_MILLIS - 1L,
+            ),
+        )
+        assertTrue(
+            StressEvaluationCadence.shouldRequest(
+                now,
+                now + StressEvaluationCadence.MINIMUM_INTERVAL_MILLIS,
+            ),
+        )
+        assertTrue(StressEvaluationCadence.shouldRequest(now, now + 1L, force = true))
+        assertTrue(StressEvaluationCadence.shouldRequest(now, now - 1L))
+    }
 }

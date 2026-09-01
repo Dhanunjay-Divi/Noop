@@ -392,6 +392,7 @@ struct RootView: View {
             HydrationReminders.restoreScheduleIfAuthorized()
             MetricReviewReminders.restoreScheduleIfAuthorized()
             WindDownNudge.restoreScheduleIfAuthorized()
+            Task { await repo.reconcileDailyReviewJournalReminders() }
             // Defer one turn so NavigationSplitView has installed its initial selection before a
             // cold-launch reminder replaces it.
             Task { @MainActor in
@@ -413,6 +414,7 @@ struct RootView: View {
         guard let route = NotificationRouteBridge.consumePending() else { return }
         switch route {
         case .sleep: selection = .sleep
+        case .journal: selection = .insights
         case .hydration: selection = .today
         case .breathe: selection = .breathe
         case .today: selection = .today

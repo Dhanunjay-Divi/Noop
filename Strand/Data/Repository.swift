@@ -3359,9 +3359,12 @@ final class Repository: ObservableObject {
     /// Write one native answer (day per the importer's wake-day convention).
     func saveJournalAnswer(day: String, question: String, answeredYes: Bool, notes: String? = nil) async {
         guard let store = await ensureStore() else { return }
-        _ = try? await store.upsertJournal(
-            [JournalEntry(day: day, question: question, answeredYes: answeredYes, notes: notes)],
-            deviceId: Self.journalDeviceId)
+        do {
+            _ = try await store.upsertJournal(
+                [JournalEntry(day: day, question: question, answeredYes: answeredYes, notes: notes)],
+                deviceId: Self.journalDeviceId)
+            DailyReviewNotifications.setJournalCompleted(true, day: day)
+        } catch {}
     }
 
     /// Write one native NUMERIC answer (#322): stores the value AND answeredYes=true, so the existing
@@ -3369,10 +3372,13 @@ final class Repository: ObservableObject {
     /// while the value is carried for dose-response. Day per the importer's wake-day convention.
     func saveJournalNumeric(day: String, question: String, value: Double, notes: String? = nil) async {
         guard let store = await ensureStore() else { return }
-        _ = try? await store.upsertJournal(
-            [JournalEntry(day: day, question: question, answeredYes: true, notes: notes,
-                          numericValue: value)],
-            deviceId: Self.journalDeviceId)
+        do {
+            _ = try await store.upsertJournal(
+                [JournalEntry(day: day, question: question, answeredYes: true, notes: notes,
+                              numericValue: value)],
+                deviceId: Self.journalDeviceId)
+            DailyReviewNotifications.setJournalCompleted(true, day: day)
+        } catch {}
     }
 
     /// Per-question numeric series (question → [day: value]) over the imported ∪ native union, native
@@ -3392,7 +3398,44 @@ final class Repository: ObservableObject {
     /// Clear one native answer (never touches imported rows , scoped to the dedicated source id).
     func clearJournalAnswer(day: String, question: String) async {
         guard let store = await ensureStore() else { return }
-        _ = try? await store.deleteJournal(deviceId: Self.journalDeviceId, day: day, question: question)
+        do {
+            _ = try await store.deleteJournal(
+                deviceId: Self.journalDeviceId,
+                day: day,
+                question: question
+            )
+            await reconcileDailyReviewJournalDay(day, store: store)
+        } catch {}
+    }
+
+    /// Repair the bounded evening schedule after launch, restore, or an out-of-band data refresh.
+    func reconcileDailyReviewJournalReminders(now: Date = Date()) async {
+        let horizon = DailyReviewNotifications.journalHorizonDayKeys(now: now)
+        guard let store = await ensureStore(),
+              let first = horizon.first,
+              let last = horizon.last
+        else { return }
+        guard let rows = try? await store.journalEntries(
+            deviceId: Self.journalDeviceId,
+            from: first,
+            to: last
+        ) else { return }
+        DailyReviewNotifications.reconcileCompletedJournalDays(
+            Set(rows.map(\.day)),
+            now: now
+        )
+    }
+
+    private func reconcileDailyReviewJournalDay(
+        _ day: String,
+        store: WhoopStore
+    ) async {
+        guard let rows = try? await store.journalEntries(
+            deviceId: Self.journalDeviceId,
+            from: day,
+            to: day
+        ) else { return }
+        DailyReviewNotifications.setJournalCompleted(!rows.isEmpty, day: day)
     }
 
     /// All workouts (Whoop + Apple Health + on-device detected bouts), newest first.

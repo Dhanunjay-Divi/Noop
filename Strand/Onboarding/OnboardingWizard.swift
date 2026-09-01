@@ -1492,7 +1492,7 @@ private struct NotificationsStep: View {
                                 Text("Daily review reminders")
                                     .font(StrandFont.headline)
                                     .foregroundStyle(StrandPalette.textPrimary)
-                                Text("Morning opens Sleep; evening opens Today. Scores appear only after your latest device sync.")
+                                Text("Morning opens Sleep; evening opens Journal. Scores appear only after your latest device sync.")
                                     .font(StrandFont.footnote)
                                     .foregroundStyle(StrandPalette.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)

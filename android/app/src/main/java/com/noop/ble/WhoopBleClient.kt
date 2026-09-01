@@ -58,6 +58,7 @@ import com.noop.analytics.NapPrefs
 import com.noop.analytics.NapVerdict
 import com.noop.analytics.RestScorer
 import com.noop.analytics.SedentaryDetector
+import com.noop.analytics.StressEvaluationCadence
 import com.noop.analytics.StressMotionEvidence
 import com.noop.analytics.StressEvidencePolicy
 import com.noop.analytics.StressOnsetDetector
@@ -2213,6 +2214,9 @@ class WhoopBleClient(
         if ((!hadRows && syncBurstProgress.rows > 0) || syncBurstProgress.batches % 10 == 0) {
             publishHistorySyncProgress()
         }
+        // A committed chunk can provide the timestamped wrist motion needed to qualify a fresh live
+        // R-R window. Evaluate on the bounded cadence instead of waiting for HISTORY_COMPLETE.
+        maybeNudgeStress()
         postBackfillAnalysisWorker.noteCommit(sourceId)
     }
 
@@ -2500,6 +2504,8 @@ class WhoopBleClient(
     /** Serialize stress detector state from preference load through persistence/action scheduling. Two
      * overlapping offload completions must never evaluate the same pre-fire state and queue two buzzes. */
     private val stressNudgeLock = Mutex()
+    private val stressEvaluationCadenceLock = Any()
+    private var lastStressEvaluationRequestAtMillis: Long? = null
 
     /** #364 auto-continue: consecutive immediate re-kicks after a 60s idle-cap OR HISTORY_COMPLETE exit on
      *  THIS connection. Bounded by [MAX_AUTO_CONTINUES] so a pathological strap can't pin the radio. Reset
@@ -3325,10 +3331,25 @@ class WhoopBleClient(
      *
      * See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md (L3).
      */
-    private fun maybeNudgeStress() {
+    private fun maybeNudgeStress(force: Boolean = false) {
         val config = BiofeedbackPrefs.stressConfig(context)
         // Cheap master gate before any DB work — inert when the feature/auto-nudge is off.
         if (!config.enabled || !config.autoNudge) return
+        val requestedAtMillis = System.currentTimeMillis()
+        val shouldRequest = synchronized(stressEvaluationCadenceLock) {
+            if (!StressEvaluationCadence.shouldRequest(
+                    lastRequestAtMillis = lastStressEvaluationRequestAtMillis,
+                    nowMillis = requestedAtMillis,
+                    force = force,
+                )
+            ) {
+                false
+            } else {
+                lastStressEvaluationRequestAtMillis = requestedAtMillis
+                true
+            }
+        }
+        if (!shouldRequest) return
         ioScope.launch {
             try {
                 stressNudgeLock.withLock {
@@ -5170,6 +5191,7 @@ class WhoopBleClient(
         when (parsed.typeName) {
             "REALTIME_DATA" -> {
                 val receivedAtMillis = System.currentTimeMillis()
+                var receivedRR = false
                 // Reject 0 / out-of-range spikes; only accept physiologically plausible HR.
                 (parsed.parsed["heart_rate"] as? Int)?.let { hr ->
                     if (hr in 30..220) {
@@ -5186,8 +5208,10 @@ class WhoopBleClient(
                         _state.update {
                             it.withRRIntervals(rr, receivedAtMillis = receivedAtMillis)
                         }
+                        receivedRR = true
                     }
                 }
+                if (receivedRR) maybeNudgeStress()
             }
 
             "COMMAND_RESPONSE" -> {
@@ -5466,6 +5490,7 @@ class WhoopBleClient(
                 startKeepAlive()
             }
         }
+        if (rr.isNotEmpty()) maybeNudgeStress()
 
         // Record it continuously — independent of the realtime stream or which screen is open.
         // Port of BLEManager.parseStandardHR -> collector.ingestStandardHR(hr:rr:at:).
@@ -6700,7 +6725,7 @@ class WhoopBleClient(
             maybeBuzzInactivity()
             // L3 stress check-in (v5): same read-only hook — fire the StressOnsetDetector over the live
             // R-R buffer. Self-gates on the BiofeedbackPrefs master/auto toggles (inert when off).
-            maybeNudgeStress()
+            maybeNudgeStress(force = true)
             // On-device short-nap detection (PR #569 reimpl): same read-only hook — judge the freshly
             // offloaded daytime window and queue a confident nap for review. Self-gates on NapPrefs (OFF
             // by default); never auto-writes a sleep session.

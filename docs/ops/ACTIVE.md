@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-08-27**
+Last updated: **2026-08-31**
 
 ## Repository
 
@@ -17,6 +17,19 @@ Last updated: **2026-08-27**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The latest round improves stress and daily-guidance notification reliability.
+Android now evaluates qualified stress evidence from fresh live R-R and
+committed motion updates, while retaining conservative sensor, wear, session,
+quiet-hour, replay, and cooldown gates. Android gains the same default-off
+morning Sleep and evening Journal guidance offered on Apple; both platforms
+use private copy, trusted routes, and completion-aware evening suppression.
+Local verification completed with 1,563 macOS tests, 28 iOS production-shell
+tests, the Android unit and managed-emulator matrices, and the localization and
+policy gates passing. Physical-device BLE, background, haptic, battery, and
+operating-system delivery evidence remains open. The implementation and
+evidence are recorded in
+[Stress and daily guidance notification reliability](rounds/2026-08-31-stress-daily-guidance-notifications.md).
 
 Round 24 completed the local performance, health-profile, notification, and
 testing release. Android startup work moves Room and WorkManager off the first
@@ -64,6 +77,8 @@ participant, and native-speaker gates remain separate.
 - Existing app identity and local data must be preserved during in-place
   upgrades.
 - NOOP's PolyForm license and independent dependency notices remain intact.
+- Daily guidance and automatic stress interruptions remain explicit opt-ins,
+  private, evidence-gated, and honest about best-effort OS delivery.
 
 ## Next priorities after this round
 

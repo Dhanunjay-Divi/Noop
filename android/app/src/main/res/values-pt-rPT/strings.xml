@@ -2148,4 +2148,21 @@
     <string name="stale_sync_notification_body">Abra o NOOP para atualizar os dados da pulseira. Deixe a aplicação em execução em segundo plano para manter o histórico atualizado.</string>
     <string name="stale_sync_notification_channel_name">Sincronização da pulseira</string>
     <string name="stale_sync_notification_channel_description">Lembretes quando o histórico da pulseira não foi sincronizado em segundo plano.</string>
+    <string name="daily_review_section_title">Orientação diária</string>
+    <string name="daily_review_section_body">Lembretes privados opcionais que enquadram o seu dia com uma revisão útil e um registo no diário.</string>
+    <string name="daily_review_toggle">Lembretes de manhã e à noite</string>
+    <string name="daily_review_toggle_help">Desativados por predefinição. De manhã abre Sono; à noite abre Diário e é ignorado quando esse dia já foi registado.</string>
+    <string name="daily_review_morning_time">De manhã, abre Sono</string>
+    <string name="daily_review_evening_time">À noite, abre Diário</string>
+    <string name="daily_review_privacy_note">Os lembretes nunca incluem pontuações nem valores de saúde.</string>
+    <string name="daily_review_notifications_unavailable">A orientação diária está ativada, mas as notificações do Android ou o canal Orientação diária estão desativados.</string>
+    <string name="daily_review_open_notification_settings">Abrir definições de notificações</string>
+    <string name="daily_review_morning_title">Check-in da manhã</string>
+    <string name="daily_review_morning_body">Reveja o Sono e a Recuperação e registe depois o quanto se sente descansado.</string>
+    <string name="daily_review_evening_title">Check-in da noite</string>
+    <string name="daily_review_evening_body">Reveja o Esforço de hoje e registe depois o que moldou o seu dia.</string>
+    <string name="daily_review_channel_name">Orientação diária</string>
+    <string name="daily_review_channel_description">Lembretes privados para a revisão da manhã e o diário da noite.</string>
+    <string name="daily_review_onboarding_label">Lembretes de orientação diária</string>
+    <string name="daily_review_onboarding_help">Opcionais e desativados por predefinição. De manhã abre Sono; à noite abre Diário sem mostrar valores de saúde no ecrã bloqueado.</string>
 </resources>

@@ -2154,4 +2154,21 @@
     <string name="stale_sync_notification_body">Abre NOOP para poner al día los datos de tu banda. Déjala ejecutándose en segundo plano para mantener el historial actualizado.</string>
     <string name="stale_sync_notification_channel_name">Sincronización de la banda</string>
     <string name="stale_sync_notification_channel_description">Avisos cuando el historial de la banda no se ha sincronizado en segundo plano.</string>
+    <string name="daily_review_section_title">Guía diaria</string>
+    <string name="daily_review_section_body">Recordatorios privados opcionales que enmarcan tu día con una revisión útil y una entrada en el diario.</string>
+    <string name="daily_review_toggle">Recordatorios de mañana y noche</string>
+    <string name="daily_review_toggle_help">Desactivados de forma predeterminada. Por la mañana abre Sueño; por la noche abre Diario y se omite cuando ya has registrado ese día.</string>
+    <string name="daily_review_morning_time">Por la mañana, abre Sueño</string>
+    <string name="daily_review_evening_time">Por la noche, abre Diario</string>
+    <string name="daily_review_privacy_note">Los avisos de recordatorio nunca incluyen puntuaciones ni valores de salud.</string>
+    <string name="daily_review_notifications_unavailable">La guía diaria está activada, pero las notificaciones de Android o el canal Guía diaria están desactivados.</string>
+    <string name="daily_review_open_notification_settings">Abrir ajustes de notificaciones</string>
+    <string name="daily_review_morning_title">Revisión matutina</string>
+    <string name="daily_review_morning_body">Revisa Sueño y Recuperación y luego registra cómo de descansado te sientes.</string>
+    <string name="daily_review_evening_title">Revisión nocturna</string>
+    <string name="daily_review_evening_body">Revisa el Esfuerzo de hoy y luego registra qué influyó en tu día.</string>
+    <string name="daily_review_channel_name">Guía diaria</string>
+    <string name="daily_review_channel_description">Recordatorios privados para la revisión matutina y el diario nocturno.</string>
+    <string name="daily_review_onboarding_label">Recordatorios de guía diaria</string>
+    <string name="daily_review_onboarding_help">Opcionales y desactivados de forma predeterminada. Por la mañana abre Sueño; por la noche abre Diario sin mostrar valores de salud en la pantalla de bloqueo.</string>
 </resources>

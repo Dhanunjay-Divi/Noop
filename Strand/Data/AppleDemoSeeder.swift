@@ -198,23 +198,56 @@ enum AppleDemoSeeder {
         return try await store.upsertMetricSeries(repairs, deviceId: whoop)
     }
 
-    /// Adds Active Minutes to a persisted DEBUG fixture created before that metric existed.
-    /// The repair is presence-gated and writes only the computed metric keys, so repeated launches
-    /// are no-ops and the rest of the synthetic history remains byte-for-byte unchanged.
+    /// Adds Active Minutes to a persisted DEBUG fixture created before that metric existed and keeps
+    /// its trailing week current across later UI-test runs. Screenshot databases survive reinstalls,
+    /// so a once-current fixture otherwise ages out of the production "last 7 calendar days" window.
+    /// Only missing/incomplete target days are written; repeated launches on the same day are no-ops.
     @discardableResult
     static func repairActiveZoneFixtures(
         in store: WhoopStore,
-        existingDays: [DailyMetric]
+        existingDays: [DailyMetric],
+        now: Date = Date(),
+        timeZone: TimeZone = .current
     ) async throws -> Int {
         let computedDevice = "\(whoop)-noop"
-        let existingCoverage = try await store.metricSeries(
-            deviceId: computedDevice,
-            key: ActiveZoneMinutesCalculator.observedSeriesKey,
-            from: "0000-00-00",
-            to: "9999-99-99"
-        )
-        guard existingCoverage.isEmpty else { return 0 }
-        let points = activeZoneFixturePoints(for: existingDays)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = calendar.startOfDay(for: now)
+        let targetDays = (0..<7).reversed().compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: today).map(formatter.string)
+        }
+        guard let firstTarget = targetDays.first, let lastTarget = targetDays.last else {
+            return 0
+        }
+
+        let managedKeys = ActiveZoneMinutesCalculator.managedSeriesKeys
+        var keysByDay: [String: Set<String>] = [:]
+        for key in managedKeys.sorted() {
+            let rows = try await store.metricSeries(
+                deviceId: computedDevice,
+                key: key,
+                from: firstTarget,
+                to: lastTarget
+            )
+            for row in rows {
+                keysByDay[row.day, default: []].insert(key)
+            }
+        }
+        let incompleteDays = Set(targetDays.filter { keysByDay[$0] != managedKeys })
+        guard !incompleteDays.isEmpty else { return 0 }
+
+        let sourceDays = Array(existingDays.sorted { $0.day < $1.day }.suffix(targetDays.count))
+        let alignedTargets = targetDays.suffix(sourceDays.count)
+        let points = zip(alignedTargets, sourceDays).flatMap { targetDay, daily in
+            incompleteDays.contains(targetDay)
+                ? activeZoneFixturePoints(for: daily, day: targetDay)
+                : []
+        }
         guard !points.isEmpty else { return 0 }
         return try await store.upsertMetricSeries(points, deviceId: computedDevice)
     }
@@ -222,29 +255,34 @@ enum AppleDemoSeeder {
     /// Deterministic fallback for fixture upgrades. Existing effort and workout count keep activity
     /// correlated with the demo's own training history; coverage remains synthetic but plausible.
     static func activeZoneFixturePoints(for days: [DailyMetric]) -> [MetricPoint] {
-        days.flatMap { daily -> [MetricPoint] in
-            let effort = (daily.strain ?? 0).clamped(0, 100)
-            let sessions = max(daily.exerciseCount ?? 0, 0)
-            let moderate = sessions == 0
-                ? (effort * 0.14 - 1).clamped(0, 12)
-                : (18 + effort * 0.45 + Double(sessions - 1) * 12).clamped(8, 100)
-            let vigorous = sessions == 0
-                ? 0
-                : ((effort - 35) * 0.22 + Double(sessions) * 4).clamped(0, 45)
-            let dayVariation = Double(
-                daily.day.utf8.reduce(0) { ($0 + Int($1)) % 91 }
-            )
-            let observed = (930 + dayVariation).clamped(600, 1_300)
-            let minutes = ActiveZoneMinutes(
-                moderateMinutes: round1(moderate),
-                vigorousMinutes: round1(vigorous),
-                weeklyTarget: ActiveZoneMinutesCalculator.defaultWeeklyTarget,
-                observedMinutes: round1(observed)
-            )
-            return ActiveZoneMinutesCalculator.seriesValues(minutes)
-                .sorted(by: { $0.key < $1.key })
-                .map { MetricPoint(day: daily.day, key: $0.key, value: $0.value) }
-        }
+        days.flatMap { activeZoneFixturePoints(for: $0, day: $0.day) }
+    }
+
+    private static func activeZoneFixturePoints(
+        for daily: DailyMetric,
+        day: String
+    ) -> [MetricPoint] {
+        let effort = (daily.strain ?? 0).clamped(0, 100)
+        let sessions = max(daily.exerciseCount ?? 0, 0)
+        let moderate = sessions == 0
+            ? (effort * 0.14 - 1).clamped(0, 12)
+            : (18 + effort * 0.45 + Double(sessions - 1) * 12).clamped(8, 100)
+        let vigorous = sessions == 0
+            ? 0
+            : ((effort - 35) * 0.22 + Double(sessions) * 4).clamped(0, 45)
+        let dayVariation = Double(
+            day.utf8.reduce(0) { ($0 + Int($1)) % 91 }
+        )
+        let observed = (930 + dayVariation).clamped(600, 1_300)
+        let minutes = ActiveZoneMinutes(
+            moderateMinutes: round1(moderate),
+            vigorousMinutes: round1(vigorous),
+            weeklyTarget: ActiveZoneMinutesCalculator.defaultWeeklyTarget,
+            observedMinutes: round1(observed)
+        )
+        return ActiveZoneMinutesCalculator.seriesValues(minutes)
+            .sorted(by: { $0.key < $1.key })
+            .map { MetricPoint(day: day, key: $0.key, value: $0.value) }
     }
 
     /// Deterministic mixed-source day plus reusable prior manual meals for provenance and quick-repeat

@@ -112,19 +112,12 @@ object StressBreathingNotifier {
     ) {
         if (!BiofeedbackPrefs.phoneNudge(context)) return
         runCatching {
-            if (
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-                PackageManager.PERMISSION_GRANTED
-            ) {
+            ensureChannel(context)
+            if (!canNotify(context)) {
                 suppress(context)
                 return
             }
             val manager = NotificationManagerCompat.from(context)
-            if (!manager.areNotificationsEnabled()) {
-                suppress(context)
-                return
-            }
 
             val local = java.time.Instant.ofEpochMilli(nowMillis)
                 .atZone(java.time.ZoneId.systemDefault())
@@ -145,7 +138,6 @@ object StressBreathingNotifier {
                 return
             }
 
-            ensureChannel(context)
             val title = context.getString(R.string.appwide_stress_checkin_notification_title)
             val body = context.getString(R.string.appwide_stress_checkin_notification_body)
             val openBreathe = NotificationPlatformIdentity.activityPendingIntent(
@@ -183,6 +175,28 @@ object StressBreathingNotifier {
                 NotificationLifecycleCategory.RECOMMENDATION,
             )
         }
+    }
+
+    /** Explicit-enable check used by Automations so a disabled feature channel cannot look active. */
+    fun prepareAndCanNotify(context: Context): Boolean {
+        ensureChannel(context.applicationContext)
+        return canNotify(context.applicationContext)
+    }
+
+    fun canNotify(context: Context): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return false
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+        }
+        return true
     }
 
     private fun suppress(context: Context) {

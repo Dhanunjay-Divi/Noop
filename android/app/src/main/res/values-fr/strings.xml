@@ -2154,4 +2154,21 @@
     <string name="stale_sync_notification_body">Ouvrez NOOP pour actualiser les données de votre bracelet. Laissez l’application active en arrière-plan pour que l’historique reste à jour.</string>
     <string name="stale_sync_notification_channel_name">Synchronisation du bracelet</string>
     <string name="stale_sync_notification_channel_description">Rappels lorsque l’historique du bracelet ne s’est pas synchronisé en arrière-plan.</string>
+    <string name="daily_review_section_title">Accompagnement quotidien</string>
+    <string name="daily_review_section_body">Des rappels privés facultatifs pour encadrer votre journée avec un bilan utile et une note dans le journal.</string>
+    <string name="daily_review_toggle">Rappels matin et soir</string>
+    <string name="daily_review_toggle_help">Désactivés par défaut. Le matin ouvre Sommeil ; le soir ouvre Journal et le rappel est ignoré une fois la journée renseignée.</string>
+    <string name="daily_review_morning_time">Matin, ouvre Sommeil</string>
+    <string name="daily_review_evening_time">Soir, ouvre Journal</string>
+    <string name="daily_review_privacy_note">Les rappels n’incluent jamais de scores ni de valeurs de santé.</string>
+    <string name="daily_review_notifications_unavailable">L’accompagnement quotidien est activé, mais les notifications Android ou le canal Accompagnement quotidien sont désactivés.</string>
+    <string name="daily_review_open_notification_settings">Ouvrir les réglages des notifications</string>
+    <string name="daily_review_morning_title">Bilan du matin</string>
+    <string name="daily_review_morning_body">Consultez Sommeil et Récupération, puis notez à quel point vous vous sentez reposé.</string>
+    <string name="daily_review_evening_title">Bilan du soir</string>
+    <string name="daily_review_evening_body">Consultez l’Effort du jour, puis notez ce qui a façonné votre journée.</string>
+    <string name="daily_review_channel_name">Accompagnement quotidien</string>
+    <string name="daily_review_channel_description">Rappels privés pour le bilan du matin et le journal du soir.</string>
+    <string name="daily_review_onboarding_label">Rappels d’accompagnement quotidien</string>
+    <string name="daily_review_onboarding_help">Facultatifs et désactivés par défaut. Le matin ouvre Sommeil ; le soir ouvre Journal sans afficher de valeurs de santé sur l’écran verrouillé.</string>
 </resources>

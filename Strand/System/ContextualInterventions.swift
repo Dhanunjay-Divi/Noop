@@ -195,7 +195,7 @@ enum ContextualInterventionCenter {
                 return
             }
 
-            DailyReviewNotifications.registerPrivacyCategory(on: center)
+            await DailyReviewNotifications.ensurePrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
             content.title = candidate.title
             content.body = candidate.body

@@ -1,5 +1,6 @@
 #if DEBUG
 import XCTest
+import StrandAnalytics
 import WhoopStore
 @testable import Strand
 
@@ -127,6 +128,63 @@ final class AppleDemoSeederTests: XCTestCase {
             to: "9999-99-99"
         )
         XCTAssertTrue(fitnessMarkers.isEmpty)
+    }
+
+    func testExistingFixtureRepairsAStaleActiveMinutesWeekIdempotently() async throws {
+        let store = try await WhoopStore.inMemory()
+        let staleDays = (1...7).map { day in
+            DailyMetric(
+                day: String(format: "2026-08-%02d", day),
+                totalSleepMin: 420,
+                efficiency: 90,
+                deepMin: 80,
+                remMin: 90,
+                lightMin: 250,
+                disturbances: 4,
+                restingHr: 55,
+                avgHrv: 70,
+                recovery: 72,
+                strain: Double(day * 8),
+                exerciseCount: day.isMultiple(of: 2) ? 1 : 0
+            )
+        }
+        try await store.upsertMetricSeries(
+            AppleDemoSeeder.activeZoneFixturePoints(for: staleDays),
+            deviceId: "\(AppleDemoSeeder.whoop)-noop"
+        )
+
+        var calendar = Calendar(identifier: .gregorian)
+        let utc = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        calendar.timeZone = utc
+        let now = try XCTUnwrap(calendar.date(
+            from: DateComponents(year: 2026, month: 8, day: 31, hour: 12)
+        ))
+        let firstRepair = try await AppleDemoSeeder.repairActiveZoneFixtures(
+            in: store,
+            existingDays: staleDays,
+            now: now,
+            timeZone: utc
+        )
+        XCTAssertEqual(firstRepair, 28)
+
+        let expectedDays = (25...31).map { String(format: "2026-08-%02d", $0) }
+        for key in ActiveZoneMinutesCalculator.managedSeriesKeys {
+            let rows = try await store.metricSeries(
+                deviceId: "\(AppleDemoSeeder.whoop)-noop",
+                key: key,
+                from: expectedDays[0],
+                to: expectedDays[6]
+            )
+            XCTAssertEqual(rows.map(\.day), expectedDays)
+        }
+
+        let secondRepair = try await AppleDemoSeeder.repairActiveZoneFixtures(
+            in: store,
+            existingDays: staleDays,
+            now: now,
+            timeZone: utc
+        )
+        XCTAssertEqual(secondRepair, 0)
     }
 }
 #endif

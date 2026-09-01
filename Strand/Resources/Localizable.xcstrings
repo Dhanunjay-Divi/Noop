@@ -165729,30 +165729,30 @@
         }
       }
     },
-    "Morning opens Sleep; evening opens Today. Scores appear only after your latest device sync.": {
+    "Morning opens Sleep; evening opens Journal. Scores appear only after your latest device sync.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Der Morgen öffnet den Schlaf; Abend öffnet heute. Ergebnisse werden erst nach der letzten Gerätesynchronisierung angezeigt."
+            "value": "Morgens wird Schlaf geöffnet, abends das Tagebuch. Scores erscheinen erst nach der letzten Gerätesynchronisierung."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "La mañana abre el sueño; La tarde abre hoy. Las puntuaciones aparecen solo después de la última sincronización de su dispositivo."
+            "value": "Por la mañana se abre Sueño; por la noche, Diario. Las puntuaciones solo aparecen después de la última sincronización del dispositivo."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le matin ouvre le sommeil ; la soirée s'ouvre aujourd'hui. Les scores n'apparaissent qu'après la dernière synchronisation de votre appareil."
+            "value": "Le matin ouvre Sommeil ; le soir ouvre Journal. Les scores n’apparaissent qu’après la dernière synchronisation de votre appareil."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "A manhã abre o sono; a noite abre hoje. As pontuações aparecem apenas após a última sincronização do dispositivo."
+            "value": "De manhã abre Sono; à noite abre Diário. As pontuações só aparecem após a última sincronização do dispositivo."
           }
         }
       }

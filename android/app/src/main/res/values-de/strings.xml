@@ -2170,4 +2170,21 @@
     <string name="stale_sync_notification_body">Öffne NOOP, um die Daten deines Bands nachzuladen. Lass die App im Hintergrund laufen, damit der Verlauf aktuell bleibt.</string>
     <string name="stale_sync_notification_channel_name">Band-Synchronisierung</string>
     <string name="stale_sync_notification_channel_description">Erinnerungen, wenn der Bandverlauf nicht im Hintergrund synchronisiert wurde.</string>
+    <string name="daily_review_section_title">Tägliche Begleitung</string>
+    <string name="daily_review_section_body">Optionale private Erinnerungen, die deinen Tag mit einer hilfreichen Übersicht und einem Tagebuch-Check-in einrahmen.</string>
+    <string name="daily_review_toggle">Erinnerungen morgens und abends</string>
+    <string name="daily_review_toggle_help">Standardmäßig deaktiviert. Morgens wird Schlaf geöffnet, abends das Tagebuch. Sobald der Tag protokolliert wurde, wird die Erinnerung übersprungen.</string>
+    <string name="daily_review_morning_time">Morgens, öffnet Schlaf</string>
+    <string name="daily_review_evening_time">Abends, öffnet Tagebuch</string>
+    <string name="daily_review_privacy_note">Erinnerungsbanner enthalten niemals Scores oder Gesundheitswerte.</string>
+    <string name="daily_review_notifications_unavailable">Die tägliche Begleitung ist aktiviert, aber Android-Benachrichtigungen oder der Kanal „Tägliche Begleitung“ sind deaktiviert.</string>
+    <string name="daily_review_open_notification_settings">Benachrichtigungseinstellungen öffnen</string>
+    <string name="daily_review_morning_title">Morgendlicher Check-in</string>
+    <string name="daily_review_morning_body">Überprüfe Schlaf und Erholung und protokolliere dann, wie erholt du dich fühlst.</string>
+    <string name="daily_review_evening_title">Abendlicher Check-in</string>
+    <string name="daily_review_evening_body">Überprüfe die heutige Belastung und protokolliere dann, was deinen Tag geprägt hat.</string>
+    <string name="daily_review_channel_name">Tägliche Begleitung</string>
+    <string name="daily_review_channel_description">Private Erinnerungen für die morgendliche Übersicht und das abendliche Tagebuch.</string>
+    <string name="daily_review_onboarding_label">Erinnerungen für die tägliche Begleitung</string>
+    <string name="daily_review_onboarding_help">Optional und standardmäßig deaktiviert. Morgens wird Schlaf geöffnet, abends das Tagebuch, ohne Gesundheitswerte auf dem Sperrbildschirm anzuzeigen.</string>
 </resources>

@@ -2184,4 +2184,21 @@
     <string name="stale_sync_notification_body">Open NOOP to catch up with your band. Leave it running in the background so history stays up to date.</string>
     <string name="stale_sync_notification_channel_name">Band sync</string>
     <string name="stale_sync_notification_channel_description">Reminders when band history has not synced in the background.</string>
+    <string name="daily_review_section_title">Daily guidance</string>
+    <string name="daily_review_section_body">Optional private reminders that bookend your day with a useful review and journal check-in.</string>
+    <string name="daily_review_toggle">Morning and evening reminders</string>
+    <string name="daily_review_toggle_help">Off by default. Morning opens Sleep; evening opens Journal and is skipped once that day is logged.</string>
+    <string name="daily_review_morning_time">Morning, opens Sleep</string>
+    <string name="daily_review_evening_time">Evening, opens Journal</string>
+    <string name="daily_review_privacy_note">Reminder banners never include scores or health values.</string>
+    <string name="daily_review_notifications_unavailable">Daily guidance is enabled, but Android notifications or the Daily guidance channel are off.</string>
+    <string name="daily_review_open_notification_settings">Open notification settings</string>
+    <string name="daily_review_morning_title">Morning check-in</string>
+    <string name="daily_review_morning_body">Review Sleep and Recovery, then log how rested you feel.</string>
+    <string name="daily_review_evening_title">Evening check-in</string>
+    <string name="daily_review_evening_body">Review today’s Effort, then log what shaped your day.</string>
+    <string name="daily_review_channel_name">Daily guidance</string>
+    <string name="daily_review_channel_description">Private morning review and evening journal reminders.</string>
+    <string name="daily_review_onboarding_label">Daily guidance reminders</string>
+    <string name="daily_review_onboarding_help">Optional and off by default. Morning opens Sleep; evening opens Journal without showing health values on the Lock Screen.</string>
 </resources>

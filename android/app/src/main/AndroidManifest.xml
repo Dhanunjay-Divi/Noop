@@ -342,6 +342,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- Rebuild the two opt-in daily-guidance one-shot chains after local wall-clock changes. -->
+        <receiver
+            android:name="com.noop.notif.DailyReviewTimeChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Restore only a previously paired, user-kept WHOOP connection after reboot. The receiver
              never enables realtime HR; it starts the same low-rate connected-device FGS already gated
              by Settings → Keep connected in the background. -->

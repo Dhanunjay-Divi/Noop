@@ -325,6 +325,7 @@ struct RootTabView: View {
                     try? await Task.sleep(nanoseconds: 50_000_000)
                 }
             }
+            await repo.reconcileDailyReviewJournalReminders()
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             await refreshAdaptiveHydrationContext()
             // Backup & Sync: on-launch catch-up (see RootView). Detached + utility priority so a
@@ -532,6 +533,8 @@ struct RootTabView: View {
             case .sleep:
                 tabPaths[IPhonePrimaryTab.sleep.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.sleep.rawValue
+            case .journal:
+                routeToMore(.insights)
             case .hydration:
                 quickAction = .hydration
             case .breathe:

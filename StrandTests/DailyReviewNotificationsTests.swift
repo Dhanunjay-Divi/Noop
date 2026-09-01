@@ -220,6 +220,8 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.enabledKey,
         DailyReviewNotifications.morningMinutesKey,
         DailyReviewNotifications.eveningMinutesKey,
+        DailyReviewNotifications.completedJournalDaysKey,
+        DailyReviewNotifications.scheduledEveningIDsKey,
         NotificationRouteBridge.pendingRouteKey,
         AutoWorkoutNotifications.enabledKey,
         MorningRecapNotifications.enabledKey,
@@ -260,7 +262,7 @@ final class DailyReviewNotificationsTests: XCTestCase {
     func testReminderRoutesAndCopyArePrivacySafe() {
         let specs = DailyReviewNotifications.reminderSpecs(morning: 7 * 60, evening: 20 * 60)
 
-        XCTAssertEqual(specs.map(\.route), [.sleep, .today])
+        XCTAssertEqual(specs.map(\.route), [.sleep, .journal])
         XCTAssertEqual(specs.map(\.minuteOfDay), [7 * 60, 20 * 60])
         XCTAssertTrue(specs[0].body.contains("Sleep"))
         XCTAssertTrue(specs[0].body.contains("Recovery"))
@@ -288,6 +290,29 @@ final class DailyReviewNotificationsTests: XCTestCase {
 
         XCTAssertEqual(NotificationRouteBridge.consumePending(), .breathe)
         XCTAssertNil(NotificationRouteBridge.consumePending())
+    }
+
+    func testEveningJournalScheduleSkipsCompletedDaysAndPastToday() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 31,
+            hour: 20
+        ))!
+
+        let specs = DailyReviewNotifications.eveningReminderSpecs(
+            now: now,
+            minuteOfDay: 19 * 60,
+            completedDays: ["2026-09-01"],
+            calendar: calendar
+        )
+
+        XCTAssertFalse(specs.map(\.day).contains("2026-08-31"))
+        XCTAssertFalse(specs.map(\.day).contains("2026-09-01"))
+        XCTAssertEqual(specs.first?.reminder.route, .journal)
+        XCTAssertEqual(specs.first?.day, "2026-09-02")
     }
 
     func testUnknownNotificationRouteIsIgnored() {

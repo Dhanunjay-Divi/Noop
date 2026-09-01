@@ -2148,4 +2148,21 @@
     <string name="stale_sync_notification_body">打开 NOOP 以同步手环数据。让应用在后台运行，使历史记录保持最新。</string>
     <string name="stale_sync_notification_channel_name">手环同步</string>
     <string name="stale_sync_notification_channel_description">手环历史记录未能在后台同步时发送提醒。</string>
+    <string name="daily_review_section_title">每日引导</string>
+    <string name="daily_review_section_body">可选的私密提醒，通过实用回顾和日记记录为一天建立节奏。</string>
+    <string name="daily_review_toggle">早晚提醒</string>
+    <string name="daily_review_toggle_help">默认关闭。早晨打开睡眠，晚上打开日记；当天完成记录后会跳过晚间提醒。</string>
+    <string name="daily_review_morning_time">早晨，打开睡眠</string>
+    <string name="daily_review_evening_time">晚上，打开日记</string>
+    <string name="daily_review_privacy_note">提醒横幅绝不会包含评分或健康数值。</string>
+    <string name="daily_review_notifications_unavailable">每日引导已启用，但 Android 通知或“每日引导”通知渠道已关闭。</string>
+    <string name="daily_review_open_notification_settings">打开通知设置</string>
+    <string name="daily_review_morning_title">早晨回顾</string>
+    <string name="daily_review_morning_body">回顾睡眠和恢复情况，然后记录你的休息感受。</string>
+    <string name="daily_review_evening_title">晚间回顾</string>
+    <string name="daily_review_evening_body">回顾今天的负荷，然后记录影响你这一天的因素。</string>
+    <string name="daily_review_channel_name">每日引导</string>
+    <string name="daily_review_channel_description">用于早晨回顾和晚间日记的私密提醒。</string>
+    <string name="daily_review_onboarding_label">每日引导提醒</string>
+    <string name="daily_review_onboarding_help">可选且默认关闭。早晨打开睡眠，晚上打开日记，不会在锁定屏幕上显示健康数值。</string>
 </resources>

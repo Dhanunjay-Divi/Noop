@@ -145,4 +145,28 @@ final class ActiveZoneWeekSnapshotTests: XCTestCase {
         XCTAssertEqual(Set(points.map(\.key)), ActiveZoneMinutesCalculator.managedSeriesKeys)
         XCTAssertTrue(points.allSatisfy { $0.value.isFinite && $0.value >= 0 })
     }
+
+    @MainActor
+    func testExploreSeriesReadsActiveMinutesFromCanonicalComputedSibling() async throws {
+        let store = try await WhoopStore.inMemory()
+        let day = Repository.dayString(Date())
+        try await store.upsertMetricSeries([
+            MetricPoint(
+                day: day,
+                key: ActiveZoneMinutesCalculator.moderateSeriesKey,
+                value: 42
+            )
+        ], deviceId: "my-whoop-noop")
+        let repo = Repository(deviceId: "whoop-readded")
+        repo.setStoreForTesting(store)
+
+        let rows = await repo.exploreSeries(
+            key: ActiveZoneMinutesCalculator.moderateSeriesKey,
+            source: "my-whoop",
+            days: 8
+        )
+
+        XCTAssertEqual(rows.map(\.day), [day])
+        XCTAssertEqual(rows.map(\.value), [42])
+    }
 }

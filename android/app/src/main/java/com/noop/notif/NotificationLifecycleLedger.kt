@@ -43,6 +43,8 @@ object NotificationLifecycleId {
     const val SAFETY_SOS_RESULT = "safety_sos_result"
     const val STALE_SYNC = "stale_sync"
     const val STRESS_BREATHING = "stress_breathing"
+    const val DAILY_REVIEW_MORNING = "daily_review_morning"
+    const val DAILY_REVIEW_EVENING = "daily_review_evening"
 
     internal val all = setOf(
         CONNECTION_SERVICE,
@@ -66,6 +68,8 @@ object NotificationLifecycleId {
         SAFETY_SOS_RESULT,
         STALE_SYNC,
         STRESS_BREATHING,
+        DAILY_REVIEW_MORNING,
+        DAILY_REVIEW_EVENING,
     )
 }
 

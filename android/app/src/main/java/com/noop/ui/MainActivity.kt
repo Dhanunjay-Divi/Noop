@@ -30,6 +30,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectSyncScheduler
+import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.StaleSyncReminderScheduler
 import com.noop.safety.SafetyIncidentStatusMonitor
@@ -164,6 +165,7 @@ class MainActivity : ComponentActivity() {
 
             // Health Connect and hydration automation remain independently opt-in.
             runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
+            runCatching { DailyReviewReminders.reconcile(applicationContext) }
             runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
 
             // Restore only an already-open Safety incident; this never creates one.

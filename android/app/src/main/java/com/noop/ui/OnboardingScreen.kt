@@ -64,6 +64,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -91,6 +92,7 @@ import com.noop.data.ImportSummary
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.WhoopCsvImporter
+import com.noop.notif.DailyReviewReminders
 import com.noop.safety.SafetyPagingController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -118,6 +120,9 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     // multi-window) doesn't recreate the Activity and throw the user back to page 1.
     var pageIndex by rememberSaveable { mutableIntStateOf(0) }
     val page = pages[pageIndex]
+    var dailyReviewOptIn by rememberSaveable {
+        mutableStateOf(DailyReviewReminders.isEnabled(context))
+    }
     // Onboarding can compose while Activity attachment is still wiring its lifecycle owner.
     // These are cheap hot StateFlows, so avoid the lifecycle-owner-dependent collector here.
     val live by viewModel.live.collectAsState()
@@ -145,7 +150,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     ) { pageIndex++ }
     val notifAdvanceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { pageIndex++ }
+    ) { granted ->
+        dailyReviewOptIn = dailyReviewOptIn && granted &&
+            DailyReviewReminders.setEnabled(context, true)
+        if (!dailyReviewOptIn) DailyReviewReminders.setEnabled(context, false)
+        pageIndex++
+    }
 
     fun advance() {
         if (page == OnboardingPage.Profile) {
@@ -169,6 +179,9 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED
                 if (needsNotif) { notifAdvanceLauncher.launch(Manifest.permission.POST_NOTIFICATIONS); return }
+                dailyReviewOptIn = dailyReviewOptIn &&
+                    DailyReviewReminders.setEnabled(context, true)
+                if (!dailyReviewOptIn) DailyReviewReminders.setEnabled(context, false)
             }
             else -> {}
         }
@@ -239,7 +252,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                             OnboardingPage.Bonded -> BondedStep(viewModel)
                             OnboardingPage.Profile -> ProfileStep()
                             OnboardingPage.Import -> ImportStep(viewModel)
-                            OnboardingPage.Notifications -> NotificationsStep()
+                            OnboardingPage.Notifications -> NotificationsStep(
+                                dailyReviewOptIn = dailyReviewOptIn,
+                                onDailyReviewOptIn = { dailyReviewOptIn = it },
+                            )
                             OnboardingPage.SafetyContacts -> SafetyContactsStep()
                             OnboardingPage.Appearance -> AppearanceStep()
                             OnboardingPage.Done -> DoneStep()
@@ -1094,7 +1110,10 @@ private fun ImportStep(viewModel: AppViewModel) {
 }
 
 @Composable
-private fun NotificationsStep() {
+private fun NotificationsStep(
+    dailyReviewOptIn: Boolean,
+    onDailyReviewOptIn: (Boolean) -> Unit,
+) {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_stay_in_the_loop_f54254af),
         subtitle = "NOOP keeps Noop Band connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
@@ -1113,6 +1132,33 @@ private fun NotificationsStep() {
             )
             Checkline("Wrist alerts (strain nudges and your smart alarm) arrive as notifications too.")
             Checkline("When Android asks, allow notifications so NOOP can keep you informed.")
+            NoopCard(padding = 18.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.daily_review_onboarding_label),
+                            style = NoopType.body,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(R.string.daily_review_onboarding_help),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    Switch(
+                        checked = dailyReviewOptIn,
+                        onCheckedChange = onDailyReviewOptIn,
+                    )
+                }
+            }
         }
     }
 }

@@ -9,6 +9,22 @@ data class TimestampedWristMotionEvidence(
     val sampleCount: Int,
 )
 
+/** Bounds opted-in live stress DB reads while still reacting far sooner than a full history handover. */
+object StressEvaluationCadence {
+    const val MINIMUM_INTERVAL_MILLIS = 15_000L
+
+    fun shouldRequest(
+        lastRequestAtMillis: Long?,
+        nowMillis: Long,
+        force: Boolean = false,
+    ): Boolean {
+        if (force) return true
+        val last = lastRequestAtMillis ?: return true
+        val elapsed = nowMillis - last
+        return elapsed < 0L || elapsed >= MINIMUM_INTERVAL_MILLIS
+    }
+}
+
 /**
  * Converts banked wrist-gravity rows into the one contemporaneous motion value the stress detector may
  * trust. Historical offload can return hours of perfectly valid motion; that does not prove the wearer is

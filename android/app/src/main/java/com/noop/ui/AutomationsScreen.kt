@@ -58,13 +58,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.HrZones
 import com.noop.analytics.NapCandidate
+import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
+import com.noop.notif.StressBreathingNotifier
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -126,8 +127,17 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var stressNotificationsUnavailable by remember {
         mutableStateOf(
             stressPhoneNudge &&
-                !NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
+                !StressBreathingNotifier.canNotify(ctx),
         )
+    }
+
+    // Daily guidance mirrors iOS's explicit opt-in pair: a persisted morning Sleep review and an
+    // evening Journal prompt that checks completion at delivery time.
+    var dailyReviewEnabled by remember { mutableStateOf(DailyReviewReminders.isEnabled(ctx)) }
+    var dailyReviewMorning by remember { mutableStateOf(DailyReviewReminders.morningMinutes(ctx)) }
+    var dailyReviewEvening by remember { mutableStateOf(DailyReviewReminders.eveningMinutes(ctx)) }
+    var dailyReviewNotificationsUnavailable by remember {
+        mutableStateOf(dailyReviewEnabled && !DailyReviewReminders.canNotify(ctx))
     }
 
     // Hydration reminders are independently opt-in and live in their own prefs file, so adding this
@@ -157,9 +167,16 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val stressNotificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        stressNotificationsUnavailable = !granted
-        BiofeedbackPrefs.setPhoneNudge(ctx, granted)
+        val available = granted && StressBreathingNotifier.prepareAndCanNotify(ctx)
+        stressNotificationsUnavailable = !available
+        BiofeedbackPrefs.setPhoneNudge(ctx, available)
         stressPhoneNudge = BiofeedbackPrefs.phoneNudge(ctx)
+    }
+    val dailyReviewPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        dailyReviewEnabled = granted && DailyReviewReminders.setEnabled(ctx, true)
+        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
     }
     var pendingContextualPermission by remember { mutableStateOf<String?>(null) }
     val contextualPermissionLauncher = rememberLauncherForActivityResult(
@@ -211,6 +228,25 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         HydrationReminderScheduler.reconcile(ctx)
     }
 
+    fun setDailyReviewEnabled(enabled: Boolean) {
+        if (!enabled) {
+            dailyReviewEnabled = false
+            dailyReviewNotificationsUnavailable = false
+            DailyReviewReminders.setEnabled(ctx, false)
+            return
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            dailyReviewPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        dailyReviewEnabled = DailyReviewReminders.setEnabled(ctx, true)
+        dailyReviewNotificationsUnavailable = !dailyReviewEnabled
+    }
+
     fun setStressCheckInEnabled(enabled: Boolean) {
         BiofeedbackPrefs.setCheckInEnabled(ctx, enabled)
         stressCheckIn = BiofeedbackPrefs.checkInEnabled(ctx)
@@ -243,7 +279,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             stressNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+        if (!StressBreathingNotifier.prepareAndCanNotify(ctx)) {
             stressPhoneNudge = false
             stressNotificationsUnavailable = true
             BiofeedbackPrefs.setPhoneNudge(ctx, false)
@@ -417,6 +453,98 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         // #766: the strap's silent wake-alarm card used to sit here, which let users conflate it with the
         // Wake Window + Wind-Down reminder over on the Alarms screen. It's moved to SmartAlarmScreen so
         // every wake/alarm control lives in one place. Automations is just inputs-to-actions now.
+
+        item {
+        SettingsSection(
+            icon = Icons.Filled.NotificationsActive,
+            title = stringResource(R.string.daily_review_section_title),
+            blurb = stringResource(R.string.daily_review_section_body),
+            active = dailyReviewEnabled && !dailyReviewNotificationsUnavailable,
+        ) {
+            ToggleRow(
+                label = stringResource(R.string.daily_review_toggle),
+                help = stringResource(R.string.daily_review_toggle_help),
+                checked = dailyReviewEnabled,
+                onChange = ::setDailyReviewEnabled,
+            )
+            if (dailyReviewEnabled) {
+                RowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.daily_review_morning_time),
+                        style = NoopType.body,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TimeChip(
+                        minutes = dailyReviewMorning,
+                        accessibilityLabel = stringResource(R.string.daily_review_morning_time),
+                        onPicked = {
+                            dailyReviewMorning = it
+                            DailyReviewReminders.setMorningMinutes(ctx, it)
+                        },
+                    )
+                }
+                RowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.daily_review_evening_time),
+                        style = NoopType.body,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TimeChip(
+                        minutes = dailyReviewEvening,
+                        accessibilityLabel = stringResource(R.string.daily_review_evening_time),
+                        onPicked = {
+                            dailyReviewEvening = it
+                            DailyReviewReminders.setEveningMinutes(ctx, it)
+                        },
+                    )
+                }
+                RowDivider()
+                Text(
+                    stringResource(R.string.daily_review_privacy_note),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            if (dailyReviewNotificationsUnavailable) {
+                RowDivider()
+                Text(
+                    stringResource(R.string.daily_review_notifications_unavailable),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                )
+                OutlinedButton(
+                    onClick = {
+                        runCatching {
+                            ctx.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+                                ).putExtra(
+                                    android.provider.Settings.EXTRA_APP_PACKAGE,
+                                    ctx.packageName,
+                                ),
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.accent),
+                ) {
+                    Text(
+                        stringResource(R.string.daily_review_open_notification_settings),
+                        style = NoopType.body,
+                    )
+                }
+            }
+        }
+        }
 
         // Hydration check-ins — opt-in, privacy-safe local notification; optional live WHOOP haptic.
         item {

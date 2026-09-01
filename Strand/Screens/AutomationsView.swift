@@ -179,7 +179,7 @@ struct AutomationsView: View {
                     )
                     rowDivider
                     reviewTimeRow(
-                        label: String(localized: "Evening · opens Today"),
+                        label: String(localized: "Evening · opens Journal"),
                         minutes: eveningTimeBinding
                     )
                     rowDivider
