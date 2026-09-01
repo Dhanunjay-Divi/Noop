@@ -12,6 +12,7 @@ internal enum class NoopNotificationRoute(val navRoute: String) {
     TRENDS("trends"),
     SLEEP("sleep"),
     LIVE("live"),
+    WORKOUTS("workouts"),
     HEALTH("health"),
     HYDRATION("hydration"),
     BREATHE("breathe"),

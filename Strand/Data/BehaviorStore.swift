@@ -15,6 +15,7 @@ enum SmartAlarmMode: String, CaseIterable, Identifiable, Sendable {
 /// live event + biometric stream. UserDefaults-backed (single-user, on-device).
 @MainActor
 final class BehaviorStore: ObservableObject {
+    nonisolated static let zoneCoachingKey = "behavior.zoneCoaching"
 
     // MARK: Double-tap → Mac action
     @Published var doubleTapAction: MacActionKind { didSet { d.set(doubleTapAction.rawValue, forKey: K.dtAction) } }
@@ -28,7 +29,7 @@ final class BehaviorStore: ObservableObject {
     /// Run a Shortcut when the strap goes back on the wrist.
     @Published var wristOnShortcut: String { didSet { d.set(wristOnShortcut, forKey: K.wristOnShortcut) } }
 
-    // MARK: HR-zone haptic coaching (during a live session)
+    // MARK: Sustained workout-exertion guidance
     @Published var zoneCoaching: Bool { didSet { d.set(zoneCoaching, forKey: K.zoneCoaching) } }
 
     // MARK: Haptic biofeedback — Stress check-ins (L3)
@@ -102,7 +103,7 @@ final class BehaviorStore: ObservableObject {
         static let autoLock = "behavior.autoLockOnWristOff"
         static let wristOffShortcut = "behavior.wristOffShortcut"
         static let wristOnShortcut = "behavior.wristOnShortcut"
-        static let zoneCoaching = "behavior.zoneCoaching"
+        static let zoneCoaching = BehaviorStore.zoneCoachingKey
         // Haptic biofeedback L3 — keys MATCH BiofeedbackPrefs (one source of truth, two readers).
         static let stressCheckIn = "biofeedback.stressCheckIn"
         static let stressAutoNudge = "biofeedback.stressAutoNudge"

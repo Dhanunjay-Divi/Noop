@@ -156,7 +156,8 @@ object StressBreathingNotifier {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
-            if (!NotificationLifecycleLedger.posted(
+            val postResult = ContextualPromptDeliveryLedger.postIfAllowed(context, nowMillis) {
+                NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.STRESS_BREATHING,
                     NotificationLifecycleCategory.RECOMMENDATION,
@@ -166,7 +167,11 @@ object StressBreathingNotifier {
                         notification,
                     )
                 }
-            ) return
+            }
+            if (postResult != ContextualPromptPostResult.POSTED) {
+                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
+                return
+            }
             saveState(context, decision.nextState)
         }.onFailure {
             NotificationLifecycleLedger.unknown(

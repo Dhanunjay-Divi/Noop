@@ -83,6 +83,7 @@ struct StrandApp: App {
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
                         model.refreshAgeMetricsIfProfileChanged()
+                        model.reevaluateContextualInterventions()
                         model.ble.requestSync(.foreground)
                         Task { await FriendsService.catchUpIfDue(repo: model.repo) }
                     }

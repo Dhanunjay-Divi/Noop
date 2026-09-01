@@ -10,7 +10,6 @@ import com.noop.alarm.SmartAlarmStore
 import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
 import com.noop.analytics.Baselines
-import com.noop.analytics.HrZones
 import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
 import com.noop.analytics.IllnessSignalEngine
@@ -33,6 +32,7 @@ import com.noop.analytics.ReadinessEngine
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
+import com.noop.analytics.WorkoutCautionPolicy
 import com.noop.location.GpsSession
 import kotlinx.coroutines.Job
 import com.noop.ble.HrBroadcaster
@@ -57,12 +57,15 @@ import com.noop.ble.ForegroundRealtimeLeasePolicy
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
+import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.ContextualVitalNotifier
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
+import com.noop.notif.WorkoutCautionNotifier
 import com.noop.notif.ScheduledReportPolicy
 import com.noop.protocol.CommandNumber
 import com.noop.safety.SafetySosDispatcher
@@ -89,6 +92,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 
 /**
@@ -473,6 +477,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var workoutHeartRateCursor = WorkoutHeartRateCursor(
         consumedSequence = ble.state.value.heartRateSampleSequence,
     )
+    /** Sustained, artifact-gated policy for the active manual workout. */
+    private var workoutCautionPolicy: WorkoutCautionPolicy? = null
 
     // MARK: - Illness watch banner
 
@@ -499,6 +505,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         MutableStateFlow(NoopPrefs.contextualVo2Review(appContext))
     val contextualVo2ReviewEnabled: StateFlow<Boolean> =
         _contextualVo2ReviewEnabled.asStateFlow()
+    private val _adaptiveDayGuidanceEnabled =
+        MutableStateFlow(NoopPrefs.adaptiveDayGuidance(appContext))
+    val adaptiveDayGuidanceEnabled: StateFlow<Boolean> =
+        _adaptiveDayGuidanceEnabled.asStateFlow()
 
     // Cycle awareness (v5 skin-temp suite) — OPT-IN, default OFF (manual-first). Declared BEFORE init for
     // the same reason as _illnessWatchEnabled: the recentDays collector reads it on its synchronous first
@@ -559,20 +569,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _smartAlarmDayOverrides = MutableStateFlow(NoopPrefs.smartAlarmDayOverrides(appContext))
     val smartAlarmDayOverrides: StateFlow<Map<Int, Int>> = _smartAlarmDayOverrides.asStateFlow()
 
-    // HR-zone haptic coaching (persisted; zone-based, mirrors macOS AppModel.coachZone). Buzzes when you
-    // climb into the top zone (ease off) and — if the recovery buzz is on — when you drop back to Zone 1.
-    // Declared ABOVE the init block (like _smartAlarmEnabled) because the init HR collector calls
-    // coachZone() on its synchronous first (cached) emission; a declaration after init is null there and
-    // would NPE the constructor on a fast device where the strap is already bonded (the #84 class).
-    // Reimplemented from @cbarrado's PR #350.
+    // Sustained workout-exertion guidance. It only consumes fresh samples inside an explicitly tracked
+    // workout or Live Session; the policy rejects isolated jumps and requires dwell before any cue.
     private val _zoneCoaching = MutableStateFlow(NoopPrefs.zoneCoaching(appContext))
     val zoneCoaching: StateFlow<Boolean> = _zoneCoaching.asStateFlow()
     private val _zoneCoachRecovery = MutableStateFlow(NoopPrefs.zoneCoachRecovery(appContext))
-    /** Whether to also buzz on recovering to Zone 1 (the macOS default; some users want only the top-zone buzz). */
+    /** Whether to buzz once after a delivered high-effort cue when accepted HR settles below reset. */
     val zoneCoachRecovery: StateFlow<Boolean> = _zoneCoachRecovery.asStateFlow()
-    /** Last HR zone the coach saw (1..5, 0 = below Zone 1); -1 until the first sample. Mirrors macOS lastCoachZone. */
-    private var lastZone = -1
-
     // Double-tap action (parity since 4.2.8) — persisted in SharedPreferences (NoopPrefs). Default NONE,
     // manual-first. The Automations screen edits this; the live double-tap dispatch (init collector below)
     // reads it. Port of macOS BehaviorStore.doubleTapAction + AppModel.runMacAction (the Apple-applicable
@@ -719,6 +722,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             analyzeKick.trySend(Unit)
             viewModelScope.launch { refreshAdaptiveHydrationContext() }
             viewModelScope.launch { refreshCycleTracking() }
+            viewModelScope.launch { evaluateAdaptiveDayGuidance() }
             refreshAgeMetricsIfProfileChanged()
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
@@ -782,7 +786,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Health hero falls to "-" rather than freezing on the last value; a transient gap with R-R
                 // still flowing keeps the median (matches AppModel.ingestHR's disconnect guard).
                 if (state.heartRate == null && state.rr.isEmpty()) resetSmoothing()
-                coachZone(state)
                 dispatchDoubleTap(state)
                 if (state.bonded && !lastBonded) {
                     // #59/#536: re-arm the strap on (re)bond. One reconcile covers BOTH the smart wake-alarm
@@ -868,6 +871,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Optional contextual reviews are independent of the illness score. They consume only
                 // explicit, source-preserving data and have their own restart-safe cooldown gate.
                 runCatching { evaluateContextualVitalInterventions(illnessTodayKey) }
+                evaluateAdaptiveDayGuidance(days)
                 _today.value?.let { todayRow ->
                     // Morning recap delivery intentionally does not live in this generic database
                     // collector. An old/imported row can republish here on launch; the recap is posted
@@ -1419,6 +1423,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         workoutHeartRateCursor = WorkoutHeartRateCursor(
             consumedSequence = ble.state.value.heartRateSampleSequence,
         )
+        val liveState = ble.state.value
+        workoutCautionPolicy = if (
+            _zoneCoaching.value &&
+            liveState.bonded &&
+            liveState.encryptedBond &&
+            liveState.worn
+        ) {
+            WorkoutCautionPolicy(
+                config = WorkoutCautionPolicy.Config(hrMax = profileStore.hrMax.toDouble()),
+                startTs = startMs / 1_000L,
+            )
+        } else {
+            null
+        }
         lastActiveWorkoutCheckpointSec = null
         holdActiveWorkoutRealtimeLease()
         buzz(1)
@@ -1543,6 +1561,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 consumedSequence = ble.state.value.heartRateSampleSequence,
                 lastTimestampSec = snap.samples.maxOfOrNull { it.ts },
             )
+            val liveState = ble.state.value
+            workoutCautionPolicy = if (
+                w.endMs == null &&
+                _zoneCoaching.value &&
+                liveState.bonded &&
+                liveState.encryptedBond &&
+                liveState.worn
+            ) {
+                WorkoutCautionPolicy(
+                    config = WorkoutCautionPolicy.Config(hrMax = profileStore.hrMax.toDouble()),
+                    startTs = snap.startMs / 1_000L,
+                )
+            } else {
+                null
+            }
             lastActiveWorkoutCheckpointSec = snap.samples.maxOfOrNull { it.ts } ?: (snap.startMs / 1_000L)
 
             if (w.endMs != null) {
@@ -1577,6 +1610,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 distanceM = gps.distanceM,
                 paceSecPerKm = gps.paceSecPerKm,
             )
+            val liveState = ble.state.value
+            workoutCautionPolicy = if (
+                _zoneCoaching.value &&
+                liveState.bonded &&
+                liveState.encryptedBond &&
+                liveState.worn
+            ) {
+                WorkoutCautionPolicy(
+                    config = WorkoutCautionPolicy.Config(hrMax = profileStore.hrMax.toDouble()),
+                    startTs = gps.startMs / 1_000L,
+                )
+            } else {
+                null
+            }
             persistActiveWorkout(
                 _activeWorkout.value,
                 checkpointSec = gps.startMs / 1_000L,
@@ -1642,6 +1689,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 releaseActiveWorkoutRealtimeLease()
                 activeWorkoutStore.clear()
                 _activeWorkout.value = null
+                workoutCautionPolicy = null
                 lastActiveWorkoutCheckpointSec = null
                 _workoutSaveError.value = null
                 // Workouts & GPS test mode: record WHY a session vanished (too short / no track), tagged .workouts.
@@ -1664,6 +1712,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             w = ended
             _activeWorkout.value = ended
+            workoutCautionPolicy = null
             releaseActiveWorkoutRealtimeLease()
             gpsJob?.cancel(); gpsJob = null
             if (w.gpsEnabled) {
@@ -1710,6 +1759,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             when (result) {
                 ActiveWorkoutPersistence.SaveResult.Saved -> {
                     _activeWorkout.value = null
+                    workoutCautionPolicy = null
                     lastActiveWorkoutCheckpointSec = null
                     _workoutSaveError.value = null
                     _lastWorkout.value = row
@@ -1747,6 +1797,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         releaseActiveWorkoutRealtimeLease()
         activeWorkoutStore.clear()
         _activeWorkout.value = null
+        workoutCautionPolicy = null
         lastActiveWorkoutCheckpointSec = null
         _lastWorkout.value = null
         _workoutSaveError.value = null
@@ -1775,7 +1826,40 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = s.maxOf { it.bpm }, liveStrain = strain,
         )
         _activeWorkout.value = updated
+        evaluateWorkoutCaution(nowSec = fresh.ts, bpm = fresh.bpm)
         persistActiveWorkout(updated, checkpointSec = fresh.ts)
+    }
+
+    private fun evaluateWorkoutCaution(nowSec: Long, bpm: Int) {
+        val state = ble.state.value
+        if (
+            !_zoneCoaching.value ||
+            !state.bonded ||
+            !state.encryptedBond ||
+            !state.worn
+        ) {
+            workoutCautionPolicy = null
+            return
+        }
+        val policy = workoutCautionPolicy ?: WorkoutCautionPolicy(
+            config = WorkoutCautionPolicy.Config(hrMax = profileStore.hrMax.toDouble()),
+            startTs = nowSec,
+        ).also { workoutCautionPolicy = it }
+        val cue = policy.update(nowSec, bpm).cue ?: return
+        val canBuzz = state.bonded && state.encryptedBond && state.worn
+        val wristHapticsEnabled =
+            NotifPrefs.getBool(appContext, NotifPrefs.MASTER, false)
+        when (cue) {
+            WorkoutCautionPolicy.Cue.EASE_OFF ->
+                if (wristHapticsEnabled && canBuzz) ble.buzz(3)
+            WorkoutCautionPolicy.Cue.PAUSE_AND_ASSESS -> {
+                if (wristHapticsEnabled && canBuzz) ble.buzz(5)
+                WorkoutCautionNotifier.onPauseAndAssess(appContext)
+            }
+            WorkoutCautionPolicy.Cue.RECOVERED -> {
+                if (wristHapticsEnabled && canBuzz && _zoneCoachRecovery.value) ble.buzz(1)
+            }
+        }
     }
 
     // MARK: - Workouts screen (load + manual edit · relabel · dismiss · delete) (#107)
@@ -2741,6 +2825,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setAdaptiveDayGuidanceEnabled(enabled: Boolean) {
+        _adaptiveDayGuidanceEnabled.value = enabled
+        NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
+        if (!enabled) {
+            AdaptiveDayTimeZoneStore.discardPending(appContext)
+            return
+        }
+        viewModelScope.launch { evaluateAdaptiveDayGuidance() }
+    }
+
+    /**
+     * Rank current sleep, personal timing, and a persisted timezone transition. Missing or stale data
+     * fails closed in the pure engine; the notifier independently owns permission, quiet hours, and
+     * restart-safe delivery cooldowns.
+     */
+    private suspend fun evaluateAdaptiveDayGuidance(
+        days: List<DailyMetric> = recentDays.value,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
+        AdaptiveDayEvaluator.evaluateAndNotify(
+            context = appContext,
+            repository = repository,
+            deviceId = deviceId,
+            days = days,
+            now = now,
+            sleepTargetMinutes = windDownStore.sleepNeedMinutes,
+        )
+    }
+
     /**
      * Source-preserving Android parity for Apple's contextual vital reviews. This never feeds the
      * illness score, produces an all-clear, or pages contacts. Every candidate is independently fresh,
@@ -3210,34 +3323,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return !pattern.contains('a', ignoreCase = true)
     }
 
-    // --- HR-zone haptic coaching setters + behaviour. State (_zoneCoaching/_zoneCoachRecovery/lastZone)
-    // is declared ABOVE the init block (see the note there) so the synchronous first emission is safe. ---
+    // --- Sustained workout-exertion guidance settings. ---
 
     fun setZoneCoaching(enabled: Boolean) {
         _zoneCoaching.value = enabled
+        if (!enabled) workoutCautionPolicy = null
         NoopPrefs.setZoneCoaching(appContext, enabled)
-        if (enabled) lastZone = -1   // a fresh enable shouldn't buzz on the first sample
     }
 
     fun setZoneCoachRecovery(enabled: Boolean) {
         _zoneCoachRecovery.value = enabled
         NoopPrefs.setZoneCoachRecovery(appContext, enabled)
-    }
-
-    /** HR-zone coaching: buzz on climbing into the top zone (ease off) or back to Zone 1 (recovered).
-     *  Fires once per zone change; mirrors macOS AppModel.coachZone. The buzz decision is the pure
-     *  [zoneCoachBuzzLoops] so it can be unit-tested without a strap. */
-    private fun coachZone(state: LiveState) {
-        if (!_zoneCoaching.value || !state.bonded || !state.worn) return
-        val hr = _bpm.value ?: return
-        if (hr < 30) return
-        val maxHR = profileStore.hrMax.toDouble()
-        if (maxHR <= 0) return
-        val zone = HrZones.zones(maxHR = maxHR).zoneNumber(hr.toDouble())
-        val previous = lastZone
-        lastZone = zone
-        val loops = zoneCoachBuzzLoops(previous, zone, _zoneCoachRecovery.value)
-        if (loops > 0) ble.buzz(loops)
     }
 
     override fun onCleared() {
@@ -3315,23 +3411,6 @@ enum class DoubleTapAction {
         /** Decode a persisted name back to an action; tolerant of an unknown/blank value (→ [NONE]). */
         fun fromRaw(raw: String?): DoubleTapAction =
             entries.firstOrNull { it.name == raw } ?: NONE
-    }
-}
-
-/**
- * HR-zone coaching buzz decision (pure; mirrors macOS AppModel.coachZone). Returns how many haptic
- * loops to fire on a zone change, or 0 for none:
- *  - Climbing into the top zone (5) from below → 3 loops ("ease off").
- *  - Dropping back to Zone 1 or below from above → 1 loop, only when [recoveryEnabled].
- * No buzz on the first observation ([previousZone] == -1) or when the zone is unchanged.
- * Reimplemented from @cbarrado's PR #350.
- */
-internal fun zoneCoachBuzzLoops(previousZone: Int, zone: Int, recoveryEnabled: Boolean): Int {
-    if (previousZone == -1 || zone == previousZone) return 0
-    return when {
-        zone == 5 && previousZone < 5 -> 3
-        zone <= 1 && previousZone > 1 && recoveryEnabled -> 1
-        else -> 0
     }
 }
 

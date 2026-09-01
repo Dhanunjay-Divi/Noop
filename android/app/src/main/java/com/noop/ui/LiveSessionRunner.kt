@@ -2,6 +2,7 @@ package com.noop.ui
 
 import android.content.Context
 import com.noop.analytics.LiveSessionEngine
+import com.noop.analytics.WorkoutCautionPolicy
 import com.noop.data.LiveSessionRow
 import com.noop.protocol.LiveSessionHaptics
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,14 @@ class LiveSessionRunner(
     private val persist: suspend (LiveSessionRow) -> Unit,
     /** Arm (true) / release (false) the ref-counted realtime HR stream around the session. */
     private val realtimeHr: (Boolean) -> Unit,
+    /** Explicit opt-in gate for the additional sustained high-exertion layer. */
+    private val workoutGuidanceEnabled: () -> Boolean = { false },
+    /** Current provenance/wear gate. Untrusted time clears the warning window instead of accruing. */
+    private val workoutGuidanceSignalTrusted: () -> Boolean = { false },
+    /** Wrist-alert master. Phone guidance remains independent when this is false. */
+    private val workoutGuidanceHapticsEnabled: () -> Boolean = { true },
+    /** Phone companion for the strongest sustained cue; injected to keep this runner JVM-testable. */
+    private val pauseAndAssess: () -> Unit = {},
     /** Provenance token stored on the row (which live source fed the session). */
     private val hrSource: String = "whoop",
     /** Injectable clock (epoch seconds) so the tick/accrual/auto-end logic is testable. */
@@ -74,6 +83,7 @@ class LiveSessionRunner(
     val band: LiveSessionEngine.Band = LiveSessionEngine.band(config)
 
     private val engine = LiveSessionEngine(config, startTs.toInt())
+    private var cautionPolicy: WorkoutCautionPolicy? = null
 
     private val _snapshot = MutableStateFlow(
         Snapshot(
@@ -151,6 +161,18 @@ class LiveSessionRunner(
             null
         }
         val out = engine.update(now.toInt(), freshBpm)
+        val caution = if (workoutGuidanceEnabled() && workoutGuidanceSignalTrusted()) {
+            val policy = cautionPolicy ?: WorkoutCautionPolicy(
+                WorkoutCautionPolicy.Config(hrMax = config.hrMax),
+                startTs = now,
+            ).also { cautionPolicy = it }
+            policy.update(now, freshBpm)
+        } else {
+            // Enabling later or restoring trusted wear starts a fresh warm-up and dwell window.
+            // Disabled/off-wrist time never accrues toward an opt-in cue.
+            cautionPolicy = null
+            null
+        }
 
         if (out.status == LiveSessionEngine.Status.STALE) {
             // Never fabricate: a stale stream accrues nothing and coaches nothing (the engine already
@@ -166,7 +188,16 @@ class LiveSessionRunner(
             }
         }
 
-        out.cue?.let { fireCue(it) }
+        when {
+            caution?.cue == WorkoutCautionPolicy.Cue.PAUSE_AND_ASSESS -> {
+                if (workoutGuidanceHapticsEnabled()) firePauseAndAssess()
+                pauseAndAssess()
+            }
+            out.cue != null -> fireCue(out.cue)
+            caution?.cue == WorkoutCautionPolicy.Cue.EASE_OFF &&
+                workoutGuidanceHapticsEnabled() ->
+                fireCue(LiveSessionEngine.Cue.EASE_OFF)
+        }
         publish(out)
 
         if (staleRunSec >= AUTO_END_AFTER_STALE_SEC) end(auto = true)
@@ -195,6 +226,14 @@ class LiveSessionRunner(
                 delay((pulse.durationMs + pulse.gapMs).toLong())
             }
         }
+    }
+
+    /** One distinct five-loop command. The short guard job makes it share the drop-not-queue gate. */
+    private fun firePauseAndAssess() {
+        if (walkJob?.isActive == true) return
+        easeCount += 1
+        buzz(5)
+        walkJob = scope.launch { delay(PAUSE_HAPTIC_GUARD_MILLIS) }
     }
 
     private fun publish(out: LiveSessionEngine.Output? = _snapshot.value.output) {
@@ -231,6 +270,7 @@ class LiveSessionRunner(
     companion object {
         /** 10 minutes of continuous STALE and the guardian bows out (nothing honest left to guard). */
         const val AUTO_END_AFTER_STALE_SEC = 600
+        private const val PAUSE_HAPTIC_GUARD_MILLIS = 4_000L
 
         // The single in-flight (or just-ended, awaiting its summary "Done") session, process-visible so
         // Today's entry card and a re-opened dialog find the SAME session after a dismissal — mirroring

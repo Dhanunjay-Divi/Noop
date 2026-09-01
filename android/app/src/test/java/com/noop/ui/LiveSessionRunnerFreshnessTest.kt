@@ -119,4 +119,213 @@ class LiveSessionRunnerFreshnessTest {
         assertTrue(runner.snapshot.value.endedAutomatically)
         assertEquals(listOf(true, false), transitions)
     }
+
+    @Test
+    fun sustainedVeryHighTraceUsesDistinctCueAndPhoneCompanionOnce() = runTest {
+        var sequence = 0L
+        val buzzes = mutableListOf<Int>()
+        var phonePrompts = 0
+        val runner = LiveSessionRunner(
+            config = LiveSessionEngine.Config(restingHR = 60.0, hrMax = 190.0, charge = 50.0),
+            deviceId = "my-whoop",
+            scope = this,
+            readHeartRate = {
+                LiveSessionRunner.HeartRateSample(bpm = 185, sequence = sequence)
+            },
+            buzz = { buzzes += it },
+            persist = {},
+            realtimeHr = {},
+            workoutGuidanceEnabled = { true },
+            workoutGuidanceSignalTrusted = { true },
+            pauseAndAssess = { phonePrompts += 1 },
+            nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
+        )
+        runner.start()
+        runCurrent()
+
+        repeat(70) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+
+        assertEquals(1, phonePrompts)
+        assertTrue(5 in buzzes)
+        runner.end()
+        runCurrent()
+    }
+
+    @Test
+    fun disabledWorkoutGuidanceNeverAddsStrongCueOrPhonePrompt() = runTest {
+        var sequence = 0L
+        val buzzes = mutableListOf<Int>()
+        var phonePrompts = 0
+        val runner = LiveSessionRunner(
+            config = LiveSessionEngine.Config(restingHR = 60.0, hrMax = 190.0, charge = 50.0),
+            deviceId = "my-whoop",
+            scope = this,
+            readHeartRate = {
+                LiveSessionRunner.HeartRateSample(bpm = 185, sequence = sequence)
+            },
+            buzz = { buzzes += it },
+            persist = {},
+            realtimeHr = {},
+            workoutGuidanceEnabled = { false },
+            pauseAndAssess = { phonePrompts += 1 },
+            nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
+        )
+        runner.start()
+        runCurrent()
+
+        repeat(70) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+
+        assertEquals(0, phonePrompts)
+        assertFalse(5 in buzzes)
+        runner.end()
+        runCurrent()
+    }
+
+    @Test
+    fun mutedWristGuidanceKeepsPhoneCompanionWithoutStrongBandCue() = runTest {
+        var sequence = 0L
+        val buzzes = mutableListOf<Int>()
+        var phonePrompts = 0
+        val runner = LiveSessionRunner(
+            config = LiveSessionEngine.Config(restingHR = 60.0, hrMax = 190.0, charge = 50.0),
+            deviceId = "my-whoop",
+            scope = this,
+            readHeartRate = {
+                LiveSessionRunner.HeartRateSample(bpm = 185, sequence = sequence)
+            },
+            buzz = { buzzes += it },
+            persist = {},
+            realtimeHr = {},
+            workoutGuidanceEnabled = { true },
+            workoutGuidanceSignalTrusted = { true },
+            workoutGuidanceHapticsEnabled = { false },
+            pauseAndAssess = { phonePrompts += 1 },
+            nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
+        )
+        runner.start()
+        runCurrent()
+
+        repeat(70) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+
+        assertEquals(1, phonePrompts)
+        assertFalse(5 in buzzes)
+        runner.end()
+        runCurrent()
+    }
+
+    @Test
+    fun offWristTimeCannotAccrueTowardWorkoutGuidance() = runTest {
+        var sequence = 0L
+        var trusted = false
+        val buzzes = mutableListOf<Int>()
+        var phonePrompts = 0
+        val runner = LiveSessionRunner(
+            config = LiveSessionEngine.Config(restingHR = 60.0, hrMax = 190.0, charge = 50.0),
+            deviceId = "my-whoop",
+            scope = this,
+            readHeartRate = {
+                LiveSessionRunner.HeartRateSample(bpm = 185, sequence = sequence)
+            },
+            buzz = { buzzes += it },
+            persist = {},
+            realtimeHr = {},
+            workoutGuidanceEnabled = { true },
+            workoutGuidanceSignalTrusted = { trusted },
+            pauseAndAssess = { phonePrompts += 1 },
+            nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
+        )
+        runner.start()
+        runCurrent()
+
+        repeat(120) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+        trusted = true
+        repeat(50) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+
+        assertEquals(0, phonePrompts)
+        assertFalse(5 in buzzes)
+
+        repeat(20) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+        assertEquals(1, phonePrompts)
+        assertTrue(5 in buzzes)
+        runner.end()
+        runCurrent()
+    }
+
+    @Test
+    fun disablingThenReenablingStartsAWholeNewWarningWindow() = runTest {
+        var sequence = 0L
+        var enabled = true
+        val buzzes = mutableListOf<Int>()
+        var phonePrompts = 0
+        val runner = LiveSessionRunner(
+            config = LiveSessionEngine.Config(restingHR = 60.0, hrMax = 190.0, charge = 50.0),
+            deviceId = "my-whoop",
+            scope = this,
+            readHeartRate = {
+                LiveSessionRunner.HeartRateSample(bpm = 185, sequence = sequence)
+            },
+            buzz = { buzzes += it },
+            persist = {},
+            realtimeHr = {},
+            workoutGuidanceEnabled = { enabled },
+            workoutGuidanceSignalTrusted = { true },
+            pauseAndAssess = { phonePrompts += 1 },
+            nowEpochSec = { baseEpochSec + testScheduler.currentTime / 1_000L },
+        )
+        runner.start()
+        runCurrent()
+
+        repeat(55) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+        enabled = false
+        sequence += 1
+        advanceTimeBy(1_000L)
+        runCurrent()
+        enabled = true
+        repeat(55) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+
+        assertEquals(0, phonePrompts)
+        assertFalse(5 in buzzes)
+
+        repeat(15) {
+            sequence += 1
+            advanceTimeBy(1_000L)
+            runCurrent()
+        }
+        assertEquals(1, phonePrompts)
+        assertTrue(5 in buzzes)
+        runner.end()
+        runCurrent()
+    }
 }

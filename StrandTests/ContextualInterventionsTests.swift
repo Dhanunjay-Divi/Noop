@@ -163,6 +163,125 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertEqual(ContextualInterventionCenter.loadState(defaults: defaults), state)
     }
 
+    func testTravelAndRoutineSuppressWeakerAdaptiveFollowUpsForTheDay() {
+        let now = date()
+        let travel = candidate(
+            kind: .adaptiveTravel,
+            observedAt: now,
+            maximumAge: 36 * 60 * 60,
+            fingerprint: "travel-a"
+        )
+        let deliveredTravel = ContextualInterventionPolicy.evaluate(
+            travel,
+            state: .empty,
+            now: now,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        )
+        XCTAssertTrue(deliveredTravel.shouldDeliver)
+
+        let later = now.addingTimeInterval(31 * 60)
+        let routine = candidate(
+            kind: .adaptiveRoutineRecovery,
+            observedAt: later,
+            maximumAge: 18 * 60 * 60,
+            fingerprint: "routine-a"
+        )
+        XCTAssertEqual(
+            ContextualInterventionPolicy.evaluate(
+                routine,
+                state: deliveredTravel.nextState,
+                now: later,
+                quietHoursEnabled: false,
+                quietStartMinutes: 22 * 60,
+                quietEndMinutes: 7 * 60,
+                calendar: calendar
+            ).reason,
+            .topicCooldown
+        )
+
+        let sleep = candidate(
+            kind: .adaptiveSleepRecovery,
+            observedAt: later,
+            maximumAge: 18 * 60 * 60,
+            fingerprint: "sleep-a"
+        )
+        XCTAssertEqual(
+            ContextualInterventionPolicy.evaluate(
+                sleep,
+                state: deliveredTravel.nextState,
+                now: later,
+                quietHoursEnabled: false,
+                quietStartMinutes: 22 * 60,
+                quietEndMinutes: 7 * 60,
+                calendar: calendar
+            ).reason,
+            .topicCooldown
+        )
+    }
+
+    func testTimeZoneObservationIgnoresDSTAndSurvivesRestartForTravelRetry() {
+        let suiteName = "adaptive-time-zone.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(AdaptiveDayTimeZoneStore.observe(
+            offsetSec: 0,
+            nowSec: 1_000,
+            defaults: defaults
+        ))
+        XCTAssertNil(AdaptiveDayTimeZoneStore.observe(
+            offsetSec: 60 * 60,
+            nowSec: 2_000,
+            defaults: defaults
+        ))
+        let travel = AdaptiveDayTimeZoneStore.observe(
+            offsetSec: 3 * 60 * 60,
+            nowSec: 3_000,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(travel?.previousOffsetSec, 60 * 60)
+        XCTAssertEqual(travel?.currentOffsetSec, 3 * 60 * 60)
+        XCTAssertEqual(AdaptiveDayTimeZoneStore.pending(defaults: defaults), travel)
+        AdaptiveDayTimeZoneStore.discardPending(defaults: defaults)
+        XCTAssertNil(AdaptiveDayTimeZoneStore.pending(defaults: defaults))
+    }
+
+    func testAdaptiveRecommendationMapsToPrivateSleepRoute() {
+        let candidate = AdaptiveDayInterventionFactory.candidate(from: .init(
+            kind: .routineRecovery,
+            observedAtSec: 1_700_000_000,
+            maximumAgeSeconds: 18 * 60 * 60,
+            confidence: .strong,
+            fingerprint: "routine-window",
+            evidence: ["personal-sleep-timing"]
+        ))
+
+        XCTAssertEqual(candidate.kind, .adaptiveRoutineRecovery)
+        XCTAssertEqual(candidate.route, .sleep)
+        XCTAssertEqual(candidate.fingerprint, "routine-window")
+        XCTAssertFalse(candidate.body.contains("party"))
+    }
+
+    func testWorkoutCautionNotificationHasRestartSafeCooldown() {
+        let now = date()
+        XCTAssertTrue(WorkoutCautionNotificationPolicy.shouldDeliver(
+            state: .init(lastPostedAt: nil),
+            now: now
+        ))
+        XCTAssertFalse(WorkoutCautionNotificationPolicy.shouldDeliver(
+            state: .init(lastPostedAt: now),
+            now: now.addingTimeInterval(599)
+        ))
+        XCTAssertTrue(WorkoutCautionNotificationPolicy.shouldDeliver(
+            state: .init(lastPostedAt: now),
+            now: now.addingTimeInterval(600)
+        ))
+    }
+
     func testOxygenNeedsTwoDistinctFreshLowDays() {
         let now = date()
         let rows = [

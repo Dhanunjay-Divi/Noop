@@ -11,9 +11,11 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.noop.data.WhoopRepository
 import com.noop.NoopApplication
+import com.noop.notif.AdaptiveDayEvaluator
 import com.noop.ui.NoopPrefs
 import com.noop.ui.ProfileStore
 import com.noop.widget.WidgetSnapshotPublisher
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -144,19 +146,32 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
             )
             if (outcome is HealthConnectReconcileResult.Success) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())
+                val activeId = (applicationContext as? NoopApplication)?.activeDeviceId
+                    ?: WhoopRepository.WHOOP_SOURCE
                 // The worker may run with no Activity and no BLE foreground service, so neither normal
                 // widget producer is necessarily alive. Republish the newly-imported scores directly;
                 // this is best-effort and can never turn a successful health import into a retry loop.
                 runCatching {
-                    val activeId = (applicationContext as? NoopApplication)?.activeDeviceId
-                        ?: WhoopRepository.WHOOP_SOURCE
                     WidgetSnapshotPublisher.refreshScores(applicationContext, repository, activeId)
+                }
+                try {
+                    AdaptiveDayEvaluator.evaluateAndNotify(
+                        context = applicationContext,
+                        repository = repository,
+                        deviceId = activeId,
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // Guidance is best-effort and cannot turn a successful health import into a retry.
                 }
                 Result.success()
             } else {
                 // Do not stamp a failed read/save as a successful sync; WorkManager applies backoff.
                 Result.retry()
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             Result.retry()
         }

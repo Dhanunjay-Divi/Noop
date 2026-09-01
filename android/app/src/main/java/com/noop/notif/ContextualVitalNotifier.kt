@@ -181,7 +181,11 @@ object ContextualVitalNotifier {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
-            if (!NotificationLifecycleLedger.posted(
+            val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
+                context,
+                now.toInstant().toEpochMilli(),
+            ) {
+                NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.CONTEXTUAL_VITAL,
                     NotificationLifecycleCategory.RECOMMENDATION,
@@ -191,7 +195,17 @@ object ContextualVitalNotifier {
                         notification,
                     )
                 }
-            ) return
+            }
+            if (postResult != ContextualPromptPostResult.POSTED) {
+                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) {
+                    NotificationLifecycleLedger.suppressed(
+                        context,
+                        NotificationLifecycleId.CONTEXTUAL_VITAL,
+                        NotificationLifecycleCategory.RECOMMENDATION,
+                    )
+                }
+                return
+            }
             saveState(context, decision.nextState)
         }.onFailure {
             NotificationLifecycleLedger.unknown(

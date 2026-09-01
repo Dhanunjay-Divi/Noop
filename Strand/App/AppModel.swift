@@ -227,7 +227,6 @@ final class AppModel: ObservableObject {
 
     private var lastDoubleTapAt: Date = .distantPast
     private var safetySOSGestureAccumulator = SafetySOSGestureAccumulator()
-    private var lastCoachZone: Int = -1
     // L3 stress-onset detector state: a rolling R-R buffer + the replay-safe detector state (persisted
     // via BiofeedbackPrefs so a relaunch can't re-fire), carried verbatim between evaluations.
     private var rrBuf: [Int] = []
@@ -293,6 +292,9 @@ final class AppModel: ObservableObject {
     private var lastAgeMetricProfileState: String?
     /// Manual workouts consume the live sensor EVENT stream, never repeated reads of cached display HR.
     private var workoutHeartRateCursor = WorkoutHeartRateCursor(consumedSequence: 0)
+    /// Sustained, artifact-gated exertion policy for the current manual workout. It is recreated from
+    /// the durable session start after a relaunch; warm-up and dwell then rebuild from fresh samples.
+    private var workoutCautionPolicy: WorkoutCautionPolicy?
     /// Drives the READ spine off the registry's active device (#814 HIGH-1). A Devices-screen
     /// switch/remove/re-add calls `registry.setActive` DIRECTLY (not through `registerDevice`), so without
     /// this subscription the reads stayed pinned to whatever id was active at wiring time for the whole
@@ -440,6 +442,18 @@ final class AppModel: ObservableObject {
         live.heartRateSamplePublisher.sink { [weak self] sample in
             self?.captureWorkoutSample(sample)
         }.store(in: &hrCancellables)
+        behavior.$zoneCoaching.dropFirst().sink { [weak self] enabled in
+            if !enabled {
+                self?.workoutCautionPolicy = nil
+            }
+        }.store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: NSNotification.Name.NSSystemTimeZoneDidChange)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                WindDownNudge.restoreScheduleIfAuthorized()
+                self.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
 
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
@@ -488,12 +502,11 @@ final class AppModel: ObservableObject {
                                               enabled: self.behavior.batteryAlerts
                                                     && self.behavior.batteryPredictiveAlerts)
         }
-        // HR-zone haptic coaching watches the smoothed bpm.
-        $bpm.sink { [weak self] hr in self?.coachZone(hr) }.store(in: &hrCancellables)
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in
             self?.evaluateIllness(days)
             self?.evaluateStrainTarget()
+            self?.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
             self?.scheduleContextualInterventionEvaluation()
@@ -1101,6 +1114,15 @@ final class AppModel: ObservableObject {
             computedSampleCount: 0,
             computedAtSec: Int(started.timeIntervalSince1970)
         )
+        workoutCautionPolicy = behavior.zoneCoaching
+            && live.bonded
+            && live.encryptedBond
+            && live.worn
+            ? WorkoutCautionPolicy(
+                config: .init(hrMax: Double(profile.hrMax)),
+                startTs: Int(started.timeIntervalSince1970)
+            )
+            : nil
         activeWorkout = ActiveWorkout(start: started, sport: resolved)
         workoutSaveError = nil
         workoutSaveInProgress = false
@@ -1220,6 +1242,16 @@ final class AppModel: ObservableObject {
             consumedSequence: live.heartRateSampleSequence,
             lastTimestamp: snap.samples.map(\.ts).max()
         )
+        workoutCautionPolicy = w.endedAt == nil
+            && behavior.zoneCoaching
+            && live.bonded
+            && live.encryptedBond
+            && live.worn
+            ? WorkoutCautionPolicy(
+                config: .init(hrMax: Double(profile.hrMax)),
+                startTs: snap.startSec
+            )
+            : nil
         if w.endedAt == nil {
             if snap.shouldResumeGps {
                 gpsRecorder.resume(
@@ -1261,6 +1293,7 @@ final class AppModel: ObservableObject {
         if w.endedAt == nil {
             w.endedAt = Date()
             activeWorkout = w
+            workoutCautionPolicy = nil
             if activeWorkoutGpsEnabled {
                 // Force the exact final accepted track into the recovery snapshot before stopping GPS.
                 // If no fix ever landed this remains nil—honest no route/no distance.
@@ -1334,6 +1367,7 @@ final class AppModel: ObservableObject {
                 self.activeWorkoutSamples.removeAll(keepingCapacity: false)
                 self.activeWorkoutHeartRateTotal = 0
                 self.workoutLiveStrainCadence = WorkoutLiveStrainCadence()
+                self.workoutCautionPolicy = nil
                 self.activeWorkoutGpsEnabled = false
                 self.activeWorkoutRouteCheckpoint = nil
                 self.workoutSaveError = nil
@@ -1363,6 +1397,7 @@ final class AppModel: ObservableObject {
         RouteStore.remove(startTs: Int(w.start.timeIntervalSince1970), sport: w.sport)
         ActiveWorkoutPersistence.clear()
         activeWorkout = nil
+        workoutCautionPolicy = nil
         activeWorkoutSamples.removeAll(keepingCapacity: false)
         activeWorkoutHeartRateTotal = 0
         workoutLiveStrainCadence = WorkoutLiveStrainCadence()
@@ -1387,6 +1422,7 @@ final class AppModel: ObservableObject {
         w.peakHr = max(w.peakHr, hr)
         w.avgHr = Int((Double(activeWorkoutHeartRateTotal) / Double(sampleCount)).rounded())
         let nowSec = sample.ts
+        evaluateWorkoutCaution(nowSec: nowSec, bpm: hr)
         if workoutLiveStrainCadence.isDue(
             sampleCount: sampleCount,
             firstSampleSec: activeWorkoutSamples.first?.ts,
@@ -1406,6 +1442,38 @@ final class AppModel: ObservableObject {
         // recovery writes at 30 accepted samples / 30 seconds; End and GPS lifecycle checkpoints force.
         if workoutRecoveryCadence.isDue(sampleCount: sampleCount, nowSec: nowSec) {
             persistActiveWorkout()
+        }
+    }
+
+    /// Apply the pure sustained-exertion policy only to a real accepted workout packet. The strongest
+    /// cue gets a distinct wrist pattern plus a phone prompt when permission exists. It never claims a
+    /// medical event; the notification asks the user to pause and assess symptoms.
+    private func evaluateWorkoutCaution(nowSec: Int, bpm: Int) {
+        guard behavior.zoneCoaching,
+              live.bonded,
+              live.encryptedBond,
+              live.worn else {
+            workoutCautionPolicy = nil
+            return
+        }
+        var policy = workoutCautionPolicy ?? WorkoutCautionPolicy(
+            config: .init(hrMax: Double(profile.hrMax)),
+            startTs: nowSec
+        )
+        let output = policy.update(now: nowSec, bpm: bpm)
+        workoutCautionPolicy = policy
+        guard let cue = output.cue else { return }
+        let wristHapticsEnabled = UserDefaults.standard.bool(
+            forKey: Self.wristAlertsMasterKey
+        )
+        switch cue {
+        case .easeOff:
+            if wristHapticsEnabled, canBuzz, live.worn { buzz(loops: 3) }
+        case .pauseAndAssess:
+            if wristHapticsEnabled, canBuzz, live.worn { buzz(loops: 5) }
+            WorkoutCautionNotifier.post()
+        case .recovered:
+            if wristHapticsEnabled, canBuzz, live.worn { buzz(loops: 1) }
         }
     }
 
@@ -2369,19 +2437,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// HR-zone haptic coaching: buzz when crossing into the top zone (ease off) or back to recovery.
-    private func coachZone(_ hr: Int?) {
-        guard behavior.zoneCoaching, live.bonded, live.worn, let hr, hr >= 30 else { return }
-        let maxHR = Double(profile.hrMax)
-        guard maxHR > 0 else { return }
-        let pct = Double(hr) / maxHR
-        let zone = pct >= 0.9 ? 5 : pct >= 0.8 ? 4 : pct >= 0.7 ? 3 : pct >= 0.6 ? 2 : 1
-        defer { lastCoachZone = zone }
-        guard lastCoachZone != -1, zone != lastCoachZone else { return }
-        if zone == 5, lastCoachZone < 5 { buzz(loops: 3) }          // entered max , ease off
-        else if zone <= 1, lastCoachZone > 1 { buzz(loops: 1) }     // recovered
-    }
-
     /// Illness/strain early-warning (v5). Each signal gets its own calendar freshness and trusted
     /// personal baseline through `IllnessSignalPipeline`; nearby journal context is explanatory and can
     /// never hide a corroborated shift. An explicit feeling-unwell entry remains visible even when the
@@ -2518,6 +2573,14 @@ final class AppModel: ObservableObject {
         scheduleContextualInterventionEvaluation()
     }
 
+    /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
+    /// and evaluating newly imported sleep/vital evidence.
+    func reevaluateContextualInterventionsNow() async {
+        contextualEvaluationTask?.cancel()
+        contextualEvaluationTask = nil
+        await evaluateContextualInterventions()
+    }
+
     private func scheduleContextualInterventionEvaluation() {
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
@@ -2532,6 +2595,8 @@ final class AppModel: ObservableObject {
     /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
     /// rule and is never treated as body temperature.
     private func evaluateContextualInterventions() async {
+        evaluateAdaptiveDayGuidance()
+
         if ContextualInterventionSettings.vitalReviewEnabled {
             if let oxygen = ContextualVitalPolicy.oxygenCandidate(sourceRows: repo.vitalRows) {
                 ContextualInterventionCenter.post(oxygen)
@@ -2617,6 +2682,41 @@ final class AppModel: ObservableObject {
         ) {
             ContextualInterventionCenter.post(candidate)
         }
+    }
+
+    /// Evaluate fresh sleep, personal sleep timing, and a persisted timezone transition through one
+    /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
+    /// later cannot resurrect an old trip as a new observation.
+    private func evaluateAdaptiveDayGuidance(now: Date = Date()) {
+        let nowSec = Int(now.timeIntervalSince1970)
+        let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
+        let change = AdaptiveDayTimeZoneStore.observe(
+            offsetSec: offset,
+            nowSec: nowSec
+        )
+        guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
+            AdaptiveDayTimeZoneStore.discardPending()
+            return
+        }
+        let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
+        let recommendation = AdaptiveDayGuidance.recommendation(.init(
+            today: today,
+            nowSec: nowSec,
+            currentTimeZoneOffsetSec: offset,
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepDays: repo.days.map {
+                .init(day: $0.day, totalSleepMinutes: $0.totalSleepMin)
+            },
+            sleepWindows: repo.sleeps.map {
+                .init(startSec: $0.effectiveStartTs, endSec: $0.endTs)
+            },
+            timeZoneChange: change
+        ))
+        guard let recommendation else { return }
+        ContextualInterventionCenter.post(
+            AdaptiveDayInterventionFactory.candidate(from: recommendation),
+            now: now
+        )
     }
 
     // MARK: - v5 skin-temp suite engines (cycle phase + body clock)

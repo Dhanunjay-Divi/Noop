@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.noop.analytics.LiveSessionEngine
+import com.noop.notif.WorkoutCautionNotifier
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
@@ -131,6 +132,15 @@ fun startOrResumeLiveSession(vm: AppViewModel, context: Context): LiveSessionRun
         buzz = { loops -> vm.ble.buzz(loops) },
         persist = { row -> vm.repo.upsertLiveSession(row) },
         realtimeHr = { arm -> if (arm) vm.requestRealtimeHr() else vm.releaseRealtimeHr() },
+        workoutGuidanceEnabled = { vm.zoneCoaching.value },
+        workoutGuidanceSignalTrusted = {
+            val live = vm.live.value
+            live.bonded && live.encryptedBond && live.worn
+        },
+        workoutGuidanceHapticsEnabled = {
+            NotifPrefs.getBool(context.applicationContext, NotifPrefs.MASTER, false)
+        },
+        pauseAndAssess = { WorkoutCautionNotifier.onPauseAndAssess(context.applicationContext) },
     )
     // begin() is replace-guarded: an in-flight session is returned as-is and the fresh runner (which has
     // no side effects until started) is simply dropped, so a double-tap can never fork two sessions.

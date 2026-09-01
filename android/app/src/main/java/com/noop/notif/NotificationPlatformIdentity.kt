@@ -35,6 +35,8 @@ internal object NotificationPlatformIdentity {
         const val STRESS_BREATHING = 4_320
         const val DAILY_REVIEW_MORNING = 4_321
         const val DAILY_REVIEW_EVENING = 4_322
+        const val ADAPTIVE_DAY = 4_323
+        const val WORKOUT_CAUTION = 4_324
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -60,6 +62,8 @@ internal object NotificationPlatformIdentity {
             STRESS_BREATHING,
             DAILY_REVIEW_MORNING,
             DAILY_REVIEW_EVENING,
+            ADAPTIVE_DAY,
+            WORKOUT_CAUTION,
         )
     }
 
@@ -95,6 +99,8 @@ internal object NotificationPlatformIdentity {
         val STRESS_BREATHING = identity(5_123, "stress_breathing")
         val DAILY_REVIEW_MORNING = identity(5_124, "daily_review_morning")
         val DAILY_REVIEW_EVENING = identity(5_125, "daily_review_evening")
+        val ADAPTIVE_DAY = identity(5_126, "adaptive_day")
+        val WORKOUT_CAUTION = identity(5_127, "workout_caution")
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -122,6 +128,8 @@ internal object NotificationPlatformIdentity {
             STRESS_BREATHING,
             DAILY_REVIEW_MORNING,
             DAILY_REVIEW_EVENING,
+            ADAPTIVE_DAY,
+            WORKOUT_CAUTION,
         )
     }
 

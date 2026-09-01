@@ -67,6 +67,7 @@ import com.noop.analytics.WorkoutDetector
 import com.noop.data.NapStore
 import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.AutoWorkoutCandidateNotifier
+import com.noop.notif.AdaptiveDayEvaluator
 import com.noop.notif.InactivityNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StaleSyncReminderScheduler
@@ -2399,6 +2400,18 @@ class WhoopBleClient(
                     throw cancelled
                 } catch (failure: Throwable) {
                     log("Backfill: post-sync workout suggestion failed: ${failure.message}")
+                }
+
+                try {
+                    AdaptiveDayEvaluator.evaluateAndNotify(
+                        context = context,
+                        repository = repository,
+                        deviceId = sourceId,
+                    )
+                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    log("Backfill: adaptive day guidance failed: ${failure.message}")
                 }
 
                 if (NoopPrefs.hcWriteback(context)) {

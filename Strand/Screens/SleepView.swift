@@ -793,12 +793,14 @@ struct SleepView: View {
                     .frame(width: 34, height: 34)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Wake Events")
+                    Text("appwide.wake_events.title")
                         .font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text(count == nil
-                         ? "Needs verified stage evidence"
-                         : "Stage-detected awakenings")
+                    Text(
+                        count == nil
+                            ? String(localized: "appwide.wake_events.needs_evidence")
+                            : String(localized: "appwide.wake_events.detected")
+                    )
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -808,7 +810,15 @@ struct SleepView: View {
                     .foregroundStyle(StrandPalette.textPrimary)
                     .monospacedDigit()
             }
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                count.map {
+                    String.localizedStringWithFormat(
+                        String(localized: "appwide.wake_events.count_a11y_format"),
+                        Int64($0)
+                    )
+                } ?? String(localized: "appwide.wake_events.unavailable_a11y")
+            )
         }
     }
 
@@ -826,31 +836,55 @@ struct SleepView: View {
         NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 SectionHeader(
-                    "Sleep Stress",
-                    overline: "Overnight load",
+                    "appwide.sleep_stress.title",
+                    overline: "appwide.sleep_stress.overline",
                     trailing: nil)
 
                 if let result {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(Int((result.fraction(in: .high) * 100).rounded()))%")
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(localized: "appwide.sleep_stress.percent_format"),
+                                Int64((result.fraction(in: .high) * 100).rounded())
+                            )
+                        )
                             .font(StrandFont.number(42))
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("high stress")
+                        Text("appwide.sleep_stress.high_label")
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
                     sleepStressTrace(result, window: window)
-                    sleepStressBandRow("High", band: .high, color: StrandPalette.statusCritical, result: result)
-                    sleepStressBandRow("Medium", band: .medium, color: StrandPalette.statusPositive, result: result)
-                    sleepStressBandRow("Low", band: .low, color: StrandPalette.restBright, result: result)
+                    sleepStressBandRow(
+                        "appwide.sleep_stress.band.high",
+                        band: .high,
+                        color: StrandPalette.statusCritical,
+                        result: result)
+                    sleepStressBandRow(
+                        "appwide.sleep_stress.band.medium",
+                        band: .medium,
+                        color: StrandPalette.statusPositive,
+                        result: result)
+                    sleepStressBandRow(
+                        "appwide.sleep_stress.band.low",
+                        band: .low,
+                        color: StrandPalette.restBright,
+                        result: result)
 
-                    Text("NOOP estimate from five-minute heart-rate and HRV windows · \(Int((result.coverageFraction * 100).rounded()))% coverage")
+                    Text(
+                        String.localizedStringWithFormat(
+                            String(localized: "appwide.sleep_stress.estimate_format"),
+                            Int64((result.coverageFraction * 100).rounded())
+                        )
+                    )
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 } else {
-                    Text(finished
-                         ? "Sleep Stress needs dense heart-rate and clean R-R coverage for this night."
-                         : "Reading overnight signals...")
+                    Text(
+                        finished
+                            ? String(localized: "appwide.sleep_stress.insufficient")
+                            : String(localized: "appwide.sleep_stress.loading")
+                    )
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
@@ -963,7 +997,11 @@ struct SleepView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Sleep Stress timeline, \(Int((result.fraction(in: .high) * 100).rounded())) percent high")
+            String.localizedStringWithFormat(
+                String(localized: "appwide.sleep_stress.timeline_a11y_format"),
+                Int64((result.fraction(in: .high) * 100).rounded())
+            )
+        )
     }
 
     @ViewBuilder
@@ -977,7 +1015,12 @@ struct SleepView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label).strandOverline()
-                Text("\(Int((fraction * 100).rounded()))%")
+                Text(
+                    String.localizedStringWithFormat(
+                        String(localized: "appwide.sleep_stress.percent_format"),
+                        Int64((fraction * 100).rounded())
+                    )
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(color)
                 Spacer()

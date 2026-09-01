@@ -3,6 +3,7 @@ package com.noop.alarm
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.noop.notif.AdaptiveDayNotifier
 
 /**
  * Re-arms local wall-clock alarms after reboot, manual clock changes, DST, or travel (#207).
@@ -25,6 +26,7 @@ class SmartAlarmBootReceiver : BroadcastReceiver() {
                     SmartAlarmScheduler.rearmPersisted(context, SmartAlarmStore.from(context))
                 }
                 rearmWindDown(context)
+                runCatching { AdaptiveDayNotifier.onTimeZoneChanged(context) }
             }
 
             Intent.ACTION_TIMEZONE_CHANGED,
@@ -35,6 +37,9 @@ class SmartAlarmBootReceiver : BroadcastReceiver() {
                     if (smart.enabled) SmartAlarmScheduler.arm(context, smart)
                 }
                 rearmWindDown(context)
+                if (intent.action == Intent.ACTION_TIMEZONE_CHANGED) {
+                    runCatching { AdaptiveDayNotifier.onTimeZoneChanged(context) }
+                }
             }
         }
     }

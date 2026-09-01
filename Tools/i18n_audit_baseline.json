@@ -454,10 +454,6 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Noop Band vibrates when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Re-scan"
     ],
     [
@@ -479,10 +475,6 @@
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Syncing…"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Turn on HR-zone coaching in Automations for a wrist buzz when you reach Zone 5 (≥ $zone5Bpm bpm)."
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
@@ -1261,14 +1253,6 @@
     [
       "Strand/Screens/MetricExplorerView.swift",
       "Latest estimate"
-    ],
-    [
-      "Strand/Screens/MetricExplorerView.swift",
-      "Review cadence"
-    ],
-    [
-      "Strand/Screens/MetricExplorerView.swift",
-      "\\(metric.title) review reminder"
     ],
     [
       "Strand/Screens/MetricExplorerView.swift",

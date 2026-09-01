@@ -405,7 +405,9 @@ private fun OnboardingFooter(
         animationSpec = tween(Motion.durationStandard),
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
-    val pulseTransition = rememberInfiniteTransition(label = "onboarding thread pulse")
+    val pulseTransition = rememberInfiniteTransition(
+        label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
+    )
     val pulsePhase by pulseTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -413,7 +415,7 @@ private fun OnboardingFooter(
             animation = tween(durationMillis = 2_400, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse,
         ),
-        label = "onboarding thread pulse phase",
+        label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
     )
 
     Column(

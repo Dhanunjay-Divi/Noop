@@ -123,8 +123,8 @@ final class NOOPiOSUITests: XCTestCase {
             tab: "more",
             preferredContentSize: PreferredContentSize.accessibilityLarge
         )
-        let explore = app.buttons["Explore"]
-        XCTAssertTrue(explore.waitForExistence(timeout: 20))
+        let moreSubtitle = app.staticTexts["Everything else, one tap away"]
+        XCTAssertTrue(moreSubtitle.waitForExistence(timeout: 20))
         assertExpandedNavigationLabels(selectedTab: 4, in: app)
         app.swipeUp()
         assertExpandedNavigationLabels(selectedTab: 4, in: app)
@@ -555,7 +555,7 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "today-complete-key-metric-catalog")
     }
 
-    func testMetricScreensExposeTheirOwnReminderControls() {
+    func testHydrationAndSleepScreensExposeReminderControls() {
         var app = launchDemoScreen("hydration")
         let waterReminders = app.staticTexts["Water reminders"]
         for _ in 0..<6 where !waterReminders.exists { app.swipeUp() }
@@ -572,23 +572,6 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.switches["Band wake alarm"].exists)
         XCTAssertTrue(app.buttons["noop.sleep.planner"].exists)
         keepScreenshot(app, name: "sleep-reminders-and-alarms")
-
-        app.terminate()
-        app = launchDemoScreen(
-            "metricdetail",
-            extraArguments: ["--demo-metric", "hrv", "--demo-source", "my-whoop"]
-        )
-        let metricReminder = app.staticTexts["Metric review"]
-        for _ in 0..<6 where !metricReminder.exists { app.swipeUp() }
-        XCTAssertTrue(metricReminder.waitForExistence(timeout: 3))
-        let metricReminderToggle = app.switches.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "noop.metric.reminder.")
-        ).firstMatch
-        XCTAssertTrue(
-            metricReminderToggle.waitForExistence(timeout: 3),
-            app.debugDescription
-        )
-        keepScreenshot(app, name: "metric-detail-reminder")
     }
 
     func testAgeMetricHeroesExposeHonestModelRanges() {
@@ -616,9 +599,11 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Daily review"].waitForExistence(timeout: 20))
         keepScreenshot(app, name: "automations-top")
 
-        let coaching = app.staticTexts["Haptic coaching"]
+        let coaching = app.staticTexts["Adaptive coaching"]
         for _ in 0..<10 where !coaching.exists { app.swipeUp() }
         XCTAssertTrue(coaching.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Adaptive day guidance"].exists)
+        XCTAssertTrue(app.staticTexts["Workout exertion guidance"].exists)
         XCTAssertTrue(app.staticTexts["Stress check-ins"].exists)
         keepScreenshot(app, name: "automations-stress")
 

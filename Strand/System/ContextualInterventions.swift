@@ -13,6 +13,9 @@ import WhoopProtocol
 /// must be outside quiet hours. It never turns a wellness signal into a diagnosis or emergency.
 enum ContextualInterventionKind: String, Codable, CaseIterable, Sendable {
     case stressBreathing
+    case adaptiveSleepRecovery
+    case adaptiveRoutineRecovery
+    case adaptiveTravel
     case caffeineCutoff
     case oxygenTrend
     case bodyTemperatureReview
@@ -21,9 +24,20 @@ enum ContextualInterventionKind: String, Codable, CaseIterable, Sendable {
     var cooldown: TimeInterval {
         switch self {
         case .stressBreathing: return 4 * 60 * 60
+        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery: return 20 * 60 * 60
+        case .adaptiveTravel: return 24 * 60 * 60
         case .caffeineCutoff: return 6 * 60 * 60
         case .oxygenTrend, .bodyTemperatureReview: return 24 * 60 * 60
         case .vo2Trend: return 21 * 24 * 60 * 60
+        }
+    }
+
+    var isAdaptiveDayGuidance: Bool {
+        switch self {
+        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery, .adaptiveTravel:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -93,6 +107,16 @@ enum ContextualInterventionPolicy {
             }
         }
 
+        // A stronger adaptive prompt already covers the weaker same-day guidance. Travel blocks
+        // routine and short-sleep follow-ups; a routine-recovery prompt also blocks a later generic
+        // short-sleep prompt. A new travel observation can still supersede either lower-priority topic.
+        for blocker in adaptivePriorityBlockers(for: candidate.kind) {
+            if let prior = state.deliveries[blocker.rawValue],
+               now.timeIntervalSince(prior.at) < 20 * 60 * 60 {
+                return .init(shouldDeliver: false, reason: .topicCooldown, nextState: state)
+            }
+        }
+
         if let last = state.lastGlobalDelivery,
            now.timeIntervalSince(last) < globalCooldown {
             return .init(shouldDeliver: false, reason: .globalCooldown, nextState: state)
@@ -124,6 +148,19 @@ enum ContextualInterventionPolicy {
         guard lo != hi else { return false }
         return lo < hi ? (value >= lo && value < hi) : (value >= lo || value < hi)
     }
+
+    private static func adaptivePriorityBlockers(
+        for kind: ContextualInterventionKind
+    ) -> [ContextualInterventionKind] {
+        switch kind {
+        case .adaptiveSleepRecovery:
+            return [.adaptiveTravel, .adaptiveRoutineRecovery]
+        case .adaptiveRoutineRecovery:
+            return [.adaptiveTravel]
+        default:
+            return []
+        }
+    }
 }
 
 /// Notification side effect for immediate contextual prompts. Authorization is requested only from an
@@ -135,7 +172,14 @@ enum ContextualInterventionCenter {
     private static let quietHoursEnabledKey = "notif.quietHoursEnabled"
     private static let quietStartMinutesKey = "notif.quietStartMinutes"
     private static let quietEndMinutesKey = "notif.quietEndMinutes"
+    private struct PendingDelivery {
+        let candidate: ContextualInterventionCandidate
+        let now: Date
+    }
+
     private static var deliveriesInFlight = Set<ContextualInterventionKind>()
+    private static var pendingDeliveries: [PendingDelivery] = []
+    private static var deliveryLoopRunning = false
 
     enum EnableOutcome: Equatable, Sendable {
         case enabled
@@ -163,61 +207,90 @@ enum ContextualInterventionCenter {
     }
 
     static func post(_ candidate: ContextualInterventionCandidate, now: Date = Date()) {
+        guard !candidate.kind.isAdaptiveDayGuidance
+                || ContextualInterventionSettings.adaptiveDayGuidanceEnabled
+        else { return }
         guard !deliveriesInFlight.contains(candidate.kind) else { return }
         deliveriesInFlight.insert(candidate.kind)
+        pendingDeliveries.append(.init(candidate: candidate, now: now))
+        guard !deliveryLoopRunning else { return }
+        deliveryLoopRunning = true
         Task { @MainActor in
-            defer { deliveriesInFlight.remove(candidate.kind) }
-            let center = UNUserNotificationCenter.current()
-            let settings = await center.notificationSettings()
-            guard isAuthorized(settings.authorizationStatus) else {
-                LocalNotificationLifecycle.suppressed(
-                    identifier: "contextual-\(candidate.kind.rawValue)",
-                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
-                )
-                return
-            }
+            await drainPendingDeliveries()
+        }
+    }
 
-            let defaults = UserDefaults.standard
-            let current = loadState(defaults: defaults)
-            let decision = ContextualInterventionPolicy.evaluate(
-                candidate,
-                state: current,
-                now: now,
-                quietHoursEnabled: defaults.bool(forKey: quietHoursEnabledKey),
-                quietStartMinutes: defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60,
-                quietEndMinutes: defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
+    private static func drainPendingDeliveries() async {
+        while !pendingDeliveries.isEmpty {
+            let pending = pendingDeliveries.removeFirst()
+            await deliver(pending.candidate, now: pending.now)
+            deliveriesInFlight.remove(pending.candidate.kind)
+        }
+        deliveryLoopRunning = false
+    }
+
+    private static func deliver(
+        _ candidate: ContextualInterventionCandidate,
+        now: Date
+    ) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard (!candidate.kind.isAdaptiveDayGuidance
+                || ContextualInterventionSettings.adaptiveDayGuidanceEnabled),
+              isAuthorized(settings.authorizationStatus) else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: "contextual-\(candidate.kind.rawValue)",
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
             )
-            guard decision.shouldDeliver else {
-                LocalNotificationLifecycle.suppressed(
-                    identifier: "contextual-\(candidate.kind.rawValue)",
-                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
-                )
-                return
-            }
+            return
+        }
 
-            await DailyReviewNotifications.ensurePrivacyCategory(on: center)
-            let content = UNMutableNotificationContent()
-            content.title = candidate.title
-            content.body = candidate.body
-            content.sound = .default
-            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
-            content.threadIdentifier = "noop.contextual.\(candidate.kind.rawValue)"
-            content.userInfo = [
-                NotificationRouteBridge.userInfoKey: candidate.route.rawValue
-            ]
-            do {
-                try await LocalNotificationLifecycle.schedule(
-                    UNNotificationRequest(
-                        identifier: "contextual-\(candidate.kind.rawValue)",
-                        content: content,
-                        trigger: nil
-                    ),
-                    on: center
-                )
-                saveState(decision.nextState, defaults: defaults)
-            } catch {
-                // A rejected request remains eligible while its evidence is fresh.
+        let defaults = UserDefaults.standard
+        let current = loadState(defaults: defaults)
+        let decision = ContextualInterventionPolicy.evaluate(
+            candidate,
+            state: current,
+            now: now,
+            quietHoursEnabled: defaults.bool(forKey: quietHoursEnabledKey),
+            quietStartMinutes: defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60,
+            quietEndMinutes: defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
+        )
+        guard decision.shouldDeliver else {
+            if candidate.kind == .adaptiveTravel, decision.reason == .duplicate {
+                AdaptiveDayTimeZoneStore.discardPending()
             }
+            LocalNotificationLifecycle.suppressed(
+                identifier: "contextual-\(candidate.kind.rawValue)",
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return
+        }
+
+        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+        let content = UNMutableNotificationContent()
+        content.title = candidate.title
+        content.body = candidate.body
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.contextual.\(candidate.kind.rawValue)"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: candidate.route.rawValue
+        ]
+        do {
+            try await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: "contextual-\(candidate.kind.rawValue)",
+                    content: content,
+                    trigger: nil
+                ),
+                on: center
+            )
+            saveState(decision.nextState, defaults: defaults)
+            if candidate.kind == .adaptiveTravel {
+                AdaptiveDayTimeZoneStore.discardPending()
+            }
+        } catch {
+            // A rejected request remains eligible while its evidence is fresh.
         }
     }
 
@@ -247,6 +320,8 @@ enum ContextualInterventionCenter {
 enum ContextualInterventionSettings {
     static let vitalReviewEnabledKey = "contextualInterventions.vitalReviewEnabled"
     static let vo2ReviewEnabledKey = "contextualInterventions.vo2ReviewEnabled"
+    static let adaptiveDayGuidanceEnabledKey =
+        "contextualInterventions.adaptiveDayGuidanceEnabled"
 
     static var vitalReviewEnabled: Bool {
         UserDefaults.standard.bool(forKey: vitalReviewEnabledKey)
@@ -254,6 +329,185 @@ enum ContextualInterventionSettings {
 
     static var vo2ReviewEnabled: Bool {
         UserDefaults.standard.bool(forKey: vo2ReviewEnabledKey)
+    }
+
+    static var adaptiveDayGuidanceEnabled: Bool {
+        UserDefaults.standard.bool(forKey: adaptiveDayGuidanceEnabledKey)
+    }
+}
+
+// MARK: - Adaptive day guidance
+
+/// Restart-safe timezone observation. A qualified transition remains available for 36 hours so a prompt
+/// suppressed by quiet hours or missing notification permission can retry without treating the same zone
+/// as a fresh change. One-hour DST transitions advance the baseline but never create travel guidance.
+enum AdaptiveDayTimeZoneStore {
+    private static let currentOffsetKey = "adaptiveDay.timeZone.currentOffsetSec"
+    private static let changeFromKey = "adaptiveDay.timeZone.changeFromSec"
+    private static let changeToKey = "adaptiveDay.timeZone.changeToSec"
+    private static let changeAtKey = "adaptiveDay.timeZone.changeAtSec"
+
+    static func observe(
+        offsetSec: Int,
+        nowSec: Int,
+        defaults: UserDefaults = .standard
+    ) -> AdaptiveDayGuidance.TimeZoneChange? {
+        if let prior = defaults.object(forKey: currentOffsetKey) as? Int,
+           prior != offsetSec {
+            let shift = AdaptiveDayGuidance.normalizedTravelDeltaSeconds(
+                previousOffsetSec: prior,
+                currentOffsetSec: offsetSec
+            )
+            if abs(shift) >= AdaptiveDayGuidance.travelThresholdSeconds {
+                defaults.set(prior, forKey: changeFromKey)
+                defaults.set(offsetSec, forKey: changeToKey)
+                defaults.set(nowSec, forKey: changeAtKey)
+            }
+            defaults.set(offsetSec, forKey: currentOffsetKey)
+        } else if defaults.object(forKey: currentOffsetKey) == nil {
+            defaults.set(offsetSec, forKey: currentOffsetKey)
+        }
+        return pending(defaults: defaults)
+    }
+
+    static func pending(
+        defaults: UserDefaults = .standard
+    ) -> AdaptiveDayGuidance.TimeZoneChange? {
+        guard let from = defaults.object(forKey: changeFromKey) as? Int,
+              let to = defaults.object(forKey: changeToKey) as? Int,
+              let at = defaults.object(forKey: changeAtKey) as? Int else { return nil }
+        return .init(
+            previousOffsetSec: from,
+            currentOffsetSec: to,
+            observedAtSec: at
+        )
+    }
+
+    static func discardPending(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: changeFromKey)
+        defaults.removeObject(forKey: changeToKey)
+        defaults.removeObject(forKey: changeAtKey)
+    }
+}
+
+enum AdaptiveDayInterventionFactory {
+    static func candidate(
+        from recommendation: AdaptiveDayGuidance.Recommendation
+    ) -> ContextualInterventionCandidate {
+        let copy: (ContextualInterventionKind, String, String)
+        switch recommendation.kind {
+        case .travelAdjustment:
+            copy = (
+                .adaptiveTravel,
+                String(localized: "appwide.adaptive_day_guidance.travel.title"),
+                String(localized: "appwide.adaptive_day_guidance.travel.body")
+            )
+        case .routineRecovery:
+            copy = (
+                .adaptiveRoutineRecovery,
+                String(localized: "appwide.adaptive_day_guidance.routine.title"),
+                String(localized: "appwide.adaptive_day_guidance.routine.body")
+            )
+        case .sleepRecovery:
+            copy = (
+                .adaptiveSleepRecovery,
+                String(localized: "appwide.adaptive_day_guidance.sleep.title"),
+                String(localized: "appwide.adaptive_day_guidance.sleep.body")
+            )
+        }
+        return ContextualInterventionCandidate(
+            kind: copy.0,
+            observedAt: Date(timeIntervalSince1970: TimeInterval(recommendation.observedAtSec)),
+            maximumAge: TimeInterval(recommendation.maximumAgeSeconds),
+            fingerprint: recommendation.fingerprint,
+            title: copy.1,
+            body: copy.2,
+            route: .sleep
+        )
+    }
+}
+
+/// The strongest workout cue bypasses routine quiet hours and the wellness anti-pileup window. It still
+/// requires notification authorization and has its own restart-safe cooldown. The policy that calls this
+/// has already required a fresh, plausible, sustained HR trace.
+struct WorkoutCautionNotificationState: Equatable, Sendable {
+    let lastPostedAt: Date?
+}
+
+enum WorkoutCautionNotificationPolicy {
+    static let cooldown: TimeInterval = 10 * 60
+
+    static func shouldDeliver(
+        state: WorkoutCautionNotificationState,
+        now: Date
+    ) -> Bool {
+        guard let prior = state.lastPostedAt else { return true }
+        return now.timeIntervalSince(prior) >= cooldown
+    }
+}
+
+@MainActor
+enum WorkoutCautionNotifier {
+    private static let requestID = "workout-caution-pause"
+    private static let lastPostedKey = "workoutCaution.lastPauseNotificationAt"
+    private static var inFlight = false
+
+    static func post(now: Date = Date()) {
+        guard !inFlight,
+              UserDefaults.standard.bool(forKey: BehaviorStore.zoneCoachingKey)
+        else { return }
+        let defaults = UserDefaults.standard
+        let state = WorkoutCautionNotificationState(
+            lastPostedAt: defaults.object(forKey: lastPostedKey) as? Date
+        )
+        guard WorkoutCautionNotificationPolicy.shouldDeliver(state: state, now: now) else {
+            return
+        }
+        inFlight = true
+        Task { @MainActor in
+            defer { inFlight = false }
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            guard UserDefaults.standard.bool(forKey: BehaviorStore.zoneCoachingKey),
+                  isAuthorized(settings.authorizationStatus) else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: requestID,
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
+
+            await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+            let content = UNMutableNotificationContent()
+            content.title = String(localized: "appwide.workout_guidance.notification_title")
+            content.body = String(localized: "appwide.workout_guidance.notification_body")
+            content.sound = .default
+            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.threadIdentifier = "noop.workout.caution"
+            content.userInfo = [
+                NotificationRouteBridge.userInfoKey: NoopNotificationRoute.workouts.rawValue
+            ]
+            do {
+                try await LocalNotificationLifecycle.schedule(
+                    UNNotificationRequest(
+                        identifier: requestID,
+                        content: content,
+                        trigger: nil
+                    ),
+                    on: center
+                )
+                defaults.set(now, forKey: lastPostedKey)
+            } catch {
+                // Keep the cue eligible if the OS rejected the request.
+            }
+        }
+    }
+
+    private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
     }
 }
 

@@ -56,6 +56,8 @@ struct AutomationsView: View {
     private var contextualVitalReviews = false
     @AppStorage(ContextualInterventionSettings.vo2ReviewEnabledKey)
     private var contextualVO2Reviews = false
+    @AppStorage(ContextualInterventionSettings.adaptiveDayGuidanceEnabledKey)
+    private var adaptiveDayGuidance = false
     @State private var notificationPermissionDenied = false
     @State private var notificationsAuthorized = false
     @State private var showNotificationPermissionAlert = false
@@ -860,13 +862,32 @@ struct AutomationsView: View {
     // MARK: - Coaching
 
     private var coachingCard: some View {
-        Section2(icon: "bolt.heart.fill", title: String(localized: "Haptic coaching"),
-                 blurb: String(localized: "Train by feel. Noop Band vibrates so you don't have to watch a screen."),
-                 active: behavior.zoneCoaching || behavior.automaticStressNudgeEffective) {
+        Section2(icon: "bolt.heart.fill",
+                 title: String(localized: "appwide.adaptive_coaching.title"),
+                 blurb: String(localized: "appwide.adaptive_coaching.summary"),
+                 active: adaptiveDayGuidance || behavior.zoneCoaching
+                    || behavior.automaticStressNudgeEffective) {
             VStack(spacing: 0) {
-                ToggleRow(label: String(localized: "HR-zone coaching"),
-                          help: String(localized: "Buzz when you hit your top zone (ease off) and again when you recover. Uses your max HR from Settings."),
-                          isOn: $behavior.zoneCoaching)
+                ToggleRow(
+                    label: String(localized: "appwide.adaptive_day_guidance.label"),
+                    help: String(localized: "appwide.adaptive_day_guidance.help"),
+                    isOn: adaptiveDayGuidanceToggle
+                )
+                rowDivider
+                ToggleRow(label: String(localized: "appwide.workout_guidance.label"),
+                          help: String(localized: "appwide.workout_guidance.help"),
+                          isOn: workoutGuidanceToggle)
+                #if os(iOS)
+                if behavior.zoneCoaching && !wristAlertsMaster {
+                    rowDivider
+                    Text("appwide.workout_guidance.wrist_alerts_off")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+                #endif
                 rowDivider
                 ToggleRow(
                     label: String(localized: "appwide.stress_checkin.label"),
@@ -919,6 +940,55 @@ struct AutomationsView: View {
                 .padding(.vertical, 6)
             }
         }
+    }
+
+    private var adaptiveDayGuidanceToggle: Binding<Bool> {
+        Binding(
+            get: { adaptiveDayGuidance },
+            set: { on in
+                guard on else {
+                    adaptiveDayGuidance = false
+                    model.reevaluateContextualInterventions()
+                    return
+                }
+                ContextualInterventionCenter.requestAuthorization { outcome in
+                    switch outcome {
+                    case .enabled:
+                        adaptiveDayGuidance = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                        model.reevaluateContextualInterventions()
+                    case .denied:
+                        adaptiveDayGuidance = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        adaptiveDayGuidance = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var workoutGuidanceToggle: Binding<Bool> {
+        Binding(
+            get: { behavior.zoneCoaching },
+            set: { on in
+                behavior.zoneCoaching = on
+                guard on else { return }
+                // Wrist guidance remains useful if permission is declined. Authorization only adds the
+                // strongest "pause and assess" phone prompt.
+                ContextualInterventionCenter.requestAuthorization { outcome in
+                    if outcome == .denied {
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    } else if outcome == .enabled {
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    }
+                }
+            }
+        )
     }
 
     private var stressPhoneNudgeToggle: Binding<Bool> {

@@ -164,6 +164,7 @@ struct StrandiOSApp: App {
                 _ = await bridge.sync(days: 2)
             }
             guard !Task.isCancelled else { return false }
+            await model.reevaluateContextualInterventionsNow()
 
             // A first/full self-hosted replay can be large and belongs in a foreground/manual run. Normal
             // incremental delivery is bounded, cursor-backed, and only runs when the user enabled it.
@@ -461,6 +462,7 @@ struct StrandiOSApp: App {
             if phase == .active {
                 BandSyncStaleReminder.cancel()
                 model.refreshAgeMetricsIfProfileChanged()
+                model.reevaluateContextualInterventions()
                 // Re-check packet age and ActivityKit's persisted list whenever NOOP returns. This ends a
                 // stale activity even when iOS suspended the in-process expiry task while in background.
                 reconcileLiveActivity(repairHydration: true)
@@ -572,6 +574,7 @@ struct StrandiOSApp: App {
         model.drainPendingIntents()
         model.applySmartAlarm()
         model.refreshAgeMetricsIfProfileChanged()
+        model.reevaluateContextualInterventions()
         model.ble.requestSync(.foreground)
         Task {
             await model.reconcileAutomaticWorkoutSurfaces()

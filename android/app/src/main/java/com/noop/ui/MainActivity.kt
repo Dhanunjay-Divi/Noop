@@ -618,10 +618,7 @@ object NoopPrefs {
         of(context).edit().putStringSet(KEY_SMART_ALARM_OVERRIDES, clean).apply()
     }
 
-    /** HR-zone haptic coaching: buzz the strap on entering the top zone (ease off) and, when the
-     *  recovery buzz is on, on dropping back to Zone 1. Zone-based off the profile's HR-max; mirrors
-     *  macOS. Coaching default off; recovery buzz default on (matches macOS's always-both behaviour).
-     *  Reimplemented from @cbarrado's PR #350. */
+    /** Sustained workout-exertion guidance. The preference key is retained for upgrade continuity. */
     const val KEY_ZONE_COACHING = "noop.zoneCoaching"
     const val KEY_ZONE_COACH_RECOVERY = "noop.zoneCoachRecovery"
 
@@ -670,6 +667,16 @@ object NoopPrefs {
 
     fun setContextualVo2Review(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_CONTEXTUAL_VO2_REVIEW, enabled).apply()
+    }
+
+    /** Optional evidence-gated guidance after short sleep, a learned routine shift, or travel. */
+    const val KEY_ADAPTIVE_DAY_GUIDANCE = "noop.adaptiveDayGuidance"
+
+    fun adaptiveDayGuidance(context: Context): Boolean =
+        of(context).getBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, false)
+
+    fun setAdaptiveDayGuidance(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, enabled).apply()
     }
 
     /** Cycle awareness (v5): read a coarse menstrual-cycle PHASE from the nightly skin-temperature

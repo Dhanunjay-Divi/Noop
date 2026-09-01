@@ -77,6 +77,8 @@ final class LiveSessionRunner: ObservableObject {
     // MARK: Session wiring (held only while running)
 
     private var engine: LiveSessionEngine?
+    private var cautionPolicy: WorkoutCautionPolicy?
+    private var cautionHrMax: Double?
     private var timer: Timer?
     /// Balanced AppModel suppression lease while this coaching session is running.
     private var suppressesStressNudges = false
@@ -133,6 +135,13 @@ final class LiveSessionRunner: ObservableObject {
         startTs = now
         lastTickTs = now
         engine = LiveSessionEngine(config: config, startTs: now)
+        cautionHrMax = config.hrMax
+        cautionPolicy = model.behavior.zoneCoaching
+            && model.live.bonded
+            && model.live.encryptedBond
+            && model.live.worn
+            ? WorkoutCautionPolicy(config: .init(hrMax: config.hrMax), startTs: now)
+            : nil
         heartRateCursor = LiveSessionHeartRateCursor(
             consumedSequence: model.live.heartRateSampleSequence
         )
@@ -183,6 +192,8 @@ final class LiveSessionRunner: ObservableObject {
         finalRow = final
 
         engine = nil
+        cautionPolicy = nil
+        cautionHrMax = nil
         model = nil
         ble = nil
         repo = nil
@@ -198,6 +209,25 @@ final class LiveSessionRunner: ObservableObject {
         // timer/sample ticks over the same sequence pass nil so the engine's own stale guard remains honest.
         let freshBpm = model.map { heartRateCursor.consume($0.live.heartRateSample) } ?? nil
         guard let out = engine?.update(now: now, bpm: freshBpm) else { return }
+        let caution: WorkoutCautionPolicy.Output?
+        if model?.behavior.zoneCoaching == true,
+           model?.live.bonded == true,
+           model?.live.encryptedBond == true,
+           model?.live.worn == true,
+           let cautionHrMax {
+            if cautionPolicy == nil {
+                // Enabling mid-session starts a fresh warm-up and dwell window; disabled time never
+                // accrues toward a cue that the user did not opt into.
+                cautionPolicy = WorkoutCautionPolicy(
+                    config: .init(hrMax: cautionHrMax),
+                    startTs: now
+                )
+            }
+            caution = cautionPolicy?.update(now: now, bpm: freshBpm)
+        } else {
+            cautionPolicy = nil
+            caution = nil
+        }
 
         // Mirror the engine's clamped accrual for the two out-of-band buckets (it only accrues in-band
         // itself). Same rules: dt clamped to maxAccrualDtSec, nothing accrues on a stale tick.
@@ -223,7 +253,15 @@ final class LiveSessionRunner: ObservableObject {
             staleSinceTs = nil
         }
 
-        if let cue = out.cue { fire(cue) }
+        if caution?.cue == .pauseAndAssess {
+            firePauseAndAssess()
+            WorkoutCautionNotifier.post()
+        } else if let cue = out.cue {
+            fire(cue)
+        } else if caution?.cue == .easeOff,
+                  UserDefaults.standard.bool(forKey: AppModel.wristAlertsMasterKey) {
+            fire(.easeOff)
+        }
         output = out
     }
 
@@ -257,6 +295,18 @@ final class LiveSessionRunner: ObservableObject {
         case .pushNudge: pushCount += 1
         case .easeOff:   easeCount += 1
         }
+    }
+
+    /// Distinct strongest cue: one five-loop hardware command. It shares the same drop-not-queue gate
+    /// as ordinary session cues, so a delayed warning is never delivered after the physiology changed.
+    private func firePauseAndAssess() {
+        let nowDate = Date()
+        guard UserDefaults.standard.bool(forKey: AppModel.wristAlertsMasterKey),
+              nowDate >= hapticWalkUntil,
+              let ble else { return }
+        ble.send(.runHapticsPattern, payload: [2, 5, 0, 0, 0])
+        hapticWalkUntil = nowDate.addingTimeInterval(4)
+        easeCount += 1
     }
 
     // MARK: - Persistence

@@ -2512,16 +2512,17 @@ private data class LoadedSleepStress(
 
 @Composable
 private fun WakeEventsCard(count: Int?, hasStageEvidence: Boolean) {
+    val accessibilityDescription = if (count != null) {
+        stringResource(R.string.appwide_wake_events_count_a11y_format, count)
+    } else {
+        stringResource(R.string.appwide_wake_events_unavailable_a11y)
+    }
     NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics {
-                    contentDescription = if (count != null) {
-                        "$count stage-detected wake events"
-                    } else {
-                        "Wake events unavailable"
-                    }
+                    contentDescription = accessibilityDescription
                 },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
@@ -2533,10 +2534,17 @@ private fun WakeEventsCard(count: Int?, hasStageEvidence: Boolean) {
                 modifier = Modifier.size(34.dp),
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Wake Events", style = NoopType.headline, color = Palette.textPrimary)
                 Text(
-                    if (hasStageEvidence) "Stage-detected awakenings"
-                    else "Needs verified stage evidence",
+                    stringResource(R.string.appwide_wake_events_title),
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                )
+                Text(
+                    if (hasStageEvidence) {
+                        stringResource(R.string.appwide_wake_events_detected)
+                    } else {
+                        stringResource(R.string.appwide_wake_events_needs_evidence)
+                    },
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -2558,8 +2566,8 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
     NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
             SectionHeader(
-                "Sleep Stress",
-                overline = "Overnight load",
+                stringResource(R.string.appwide_sleep_stress_title),
+                overline = stringResource(R.string.appwide_sleep_stress_overline),
                 trailing = null,
             )
 
@@ -2569,34 +2577,43 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
                     horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
                 ) {
                     Text(
-                        "${(result.fraction(SleepStress.Band.HIGH) * 100).roundToInt()}%",
+                        stringResource(
+                            R.string.appwide_sleep_stress_percent_format,
+                            (result.fraction(SleepStress.Band.HIGH) * 100).roundToInt(),
+                        ),
                         style = NoopType.number(42f),
                         color = Palette.textPrimary,
                     )
-                    Text("high stress", style = NoopType.subhead, color = Palette.textTertiary)
+                    Text(
+                        stringResource(R.string.appwide_sleep_stress_high_label),
+                        style = NoopType.subhead,
+                        color = Palette.textTertiary,
+                    )
                 }
                 SleepStressTrace(result, window)
                 SleepStressBandRow(
-                    "High",
+                    stringResource(R.string.appwide_sleep_stress_band_high),
                     SleepStress.Band.HIGH,
                     Palette.statusCritical,
                     result,
                 )
                 SleepStressBandRow(
-                    "Medium",
+                    stringResource(R.string.appwide_sleep_stress_band_medium),
                     SleepStress.Band.MEDIUM,
                     Palette.statusPositive,
                     result,
                 )
                 SleepStressBandRow(
-                    "Low",
+                    stringResource(R.string.appwide_sleep_stress_band_low),
                     SleepStress.Band.LOW,
                     Palette.restBright,
                     result,
                 )
                 Text(
-                    "NOOP estimate from five-minute heart-rate and HRV windows · " +
-                        "${(result.coverageFraction * 100).roundToInt()}% coverage",
+                    stringResource(
+                        R.string.appwide_sleep_stress_estimate_format,
+                        (result.coverageFraction * 100).roundToInt(),
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -2609,9 +2626,9 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
                 ) {
                     Text(
                         if (finished) {
-                            "Sleep Stress needs dense heart-rate and clean R-R coverage for this night."
+                            stringResource(R.string.appwide_sleep_stress_insufficient)
                         } else {
-                            "Reading overnight signals..."
+                            stringResource(R.string.appwide_sleep_stress_loading)
                         },
                         style = NoopType.subhead,
                         color = Palette.textTertiary,
@@ -2625,13 +2642,15 @@ private fun SleepStressCard(window: SleepStressWindow, loaded: LoadedSleepStress
 
 @Composable
 private fun SleepStressTrace(result: SleepStress.Result, window: SleepStressWindow) {
+    val accessibilityDescription = stringResource(
+        R.string.appwide_sleep_stress_timeline_a11y_format,
+        (result.fraction(SleepStress.Band.HIGH) * 100).roundToInt(),
+    )
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .semantics {
-                contentDescription =
-                    "Sleep Stress timeline, " +
-                    "${(result.fraction(SleepStress.Band.HIGH) * 100).roundToInt()} percent high"
+                contentDescription = accessibilityDescription
             },
         verticalArrangement = Arrangement.spacedBy(Metrics.space4),
     ) {
@@ -2734,7 +2753,10 @@ private fun SleepStressBandRow(
             Overline(label)
             Spacer(Modifier.width(Metrics.space6))
             Text(
-                "${(fraction * 100).roundToInt()}%",
+                stringResource(
+                    R.string.appwide_sleep_stress_percent_format,
+                    (fraction * 100).roundToInt(),
+                ),
                 style = NoopType.subhead,
                 color = color,
             )

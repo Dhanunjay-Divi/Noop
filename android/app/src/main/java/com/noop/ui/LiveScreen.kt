@@ -160,7 +160,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val zoneSet = remember(profile.hrMax) { HrZones.zones(maxHR = profile.hrMax.toDouble()) }
     val liveZone = bpm?.let { zoneSet.zoneNumber(it.toDouble()) } ?: 0
 
-    // HR-zone coaching state, shown read-only here; the toggles live in Automations.
+    // Sustained workout-guidance state, shown read-only here; the toggles live in Automations.
     val zoneCoaching by viewModel.zoneCoaching.collectAsStateWithLifecycle()
     val zone5Bpm = zoneSet.zones.firstOrNull { it.number == 5 }?.lower?.roundToInt() ?: 0
 
@@ -379,7 +379,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
             }
         }
 
-        // Max HR + the top-zone entry threshold (read-only; manage coaching in Automations).
+        // Max HR + the high-effort reference (read-only; manage coaching in Automations).
         item {
         MaxHrZoneCard(hrMax = profile.hrMax, zone5Bpm = zone5Bpm, coachingOn = zoneCoaching)
         }
@@ -765,9 +765,8 @@ private fun LiveTrackingControl(
 }
 
 /**
- * Read-only Max-HR + top-zone card. Max HR is the age-based value from Settings; the Zone 5 entry
- * (≥ 90% of max) is where HR-zone coaching buzzes. Managing coaching lives in Automations.
- * Reimplemented from @cbarrado's PR #350.
+ * Read-only max-HR reference. Guidance only runs inside a tracked workout or Live Session and requires
+ * a plausible sustained trace; this card never turns a one-sample zone crossing into a warning.
  */
 @Composable
 private fun MaxHrZoneCard(hrMax: Int, zone5Bpm: Int, coachingOn: Boolean) {
@@ -789,9 +788,12 @@ private fun MaxHrZoneCard(hrMax: Int, zone5Bpm: Int, coachingOn: Boolean) {
             }
             Text(
                 if (coachingOn)
-                    "Noop Band vibrates when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
+                    stringResource(
+                        R.string.appwide_workout_guidance_live_enabled_format,
+                        zone5Bpm,
+                    )
                 else
-                    "Turn on HR-zone coaching in Automations for a wrist buzz when you reach Zone 5 (≥ $zone5Bpm bpm).",
+                    stringResource(R.string.appwide_workout_guidance_live_disabled),
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
                 modifier = Modifier.fillMaxWidth(),

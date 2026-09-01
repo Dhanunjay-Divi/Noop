@@ -66,19 +66,19 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.noop.analytics.HrZones
 import com.noop.analytics.NapCandidate
 import com.noop.notif.DailyReviewReminders
+import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.HydrationReminderPrefs
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StressBreathingNotifier
+import com.noop.notif.WorkoutCautionNotifier
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 /**
  * Automations — turn the strap's physical inputs (double-tap, wrist on/off) and live
- * biometrics into on-device actions and haptic coaching. HR-zone coaching, the smart alarm
+ * biometrics into on-device actions and adaptive coaching. Workout guidance, the smart alarm
  * and the illness watch are real + persisted (ViewModel-backed).
  */
 private enum class AutomationReportKind {
@@ -112,20 +112,21 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val illnessWatch by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
     val contextualVitalReview by viewModel.contextualVitalReviewEnabled.collectAsStateWithLifecycle()
     val contextualVo2Review by viewModel.contextualVo2ReviewEnabled.collectAsStateWithLifecycle()
+    val adaptiveDayGuidance by viewModel.adaptiveDayGuidanceEnabled.collectAsStateWithLifecycle()
     // Battery alerts are real + persisted (opt-OUT, default ON; #368, thanks @ujix).
     val batteryAlerts by viewModel.batteryAlertsEnabled.collectAsStateWithLifecycle()
     val predictiveBatteryAlerts by viewModel.predictiveBatteryAlertsEnabled.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
+    var adaptiveNotificationsUnavailable by remember {
+        mutableStateOf(
+            adaptiveDayGuidance && !AdaptiveDayNotifier.canNotify(ctx),
+        )
+    }
+    var workoutNotificationsUnavailable by remember { mutableStateOf(false) }
 
-    // HR-zone coaching is real + persisted (zone-based, mirrors macOS): the ViewModel owns the toggle +
-    // recovery option and buzzes the strap on entering the top zone (and Zone 1 if recovery is on).
-    val profile = remember { ProfileStore.from(ctx.applicationContext) }
+    // Workout guidance is persisted; the ViewModel owns sustained sample evaluation and band cues.
     val zoneCoaching by viewModel.zoneCoaching.collectAsStateWithLifecycle()
     val zoneCoachRecovery by viewModel.zoneCoachRecovery.collectAsStateWithLifecycle()
-    // The Zone 5 entry threshold (≥ 90% of HR-max), from the same HrZones model used everywhere.
-    val zone5Bpm = remember(profile.hrMax) {
-        HrZones.zones(maxHR = profile.hrMax.toDouble()).zones.firstOrNull { it.number == 5 }?.lower?.roundToInt() ?: 0
-    }
 
     // Inactivity reminder (#419) — real + persisted via InactivityPrefs (opt-in, default OFF). Seeded
     // once, written through on change (SharedPreferences isn't reactive). The buzz itself fires from the
@@ -220,6 +221,12 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         dailyReviewEnabled = granted && DailyReviewReminders.setEnabled(ctx, true)
         dailyReviewNotificationsUnavailable = !dailyReviewEnabled
     }
+    val workoutPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        workoutNotificationsUnavailable =
+            !granted || !WorkoutCautionNotifier.prepareAndCanNotify(ctx)
+    }
     fun applyReportPreference(kind: AutomationReportKind, allowed: Boolean) {
         if (allowed) reportNotificationsUnavailable = false
         when (kind) {
@@ -273,7 +280,15 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             when (pendingContextualPermission) {
                 "vitals" -> viewModel.setContextualVitalReviewEnabled(true)
                 "vo2" -> viewModel.setContextualVo2ReviewEnabled(true)
+                "adaptive" -> {
+                    val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
+                    adaptiveNotificationsUnavailable = !available
+                    viewModel.setAdaptiveDayGuidanceEnabled(available)
+                }
             }
+        } else if (pendingContextualPermission == "adaptive") {
+            adaptiveNotificationsUnavailable = true
+            viewModel.setAdaptiveDayGuidanceEnabled(false)
         }
         pendingContextualPermission = null
     }
@@ -281,7 +296,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     fun setContextualReview(target: String, enabled: Boolean) {
         if (!enabled) {
             if (target == "vitals") viewModel.setContextualVitalReviewEnabled(false)
-            else viewModel.setContextualVo2ReviewEnabled(false)
+            else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(false)
+            else {
+                adaptiveNotificationsUnavailable = false
+                viewModel.setAdaptiveDayGuidanceEnabled(false)
+            }
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -293,7 +312,29 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             return
         }
         if (target == "vitals") viewModel.setContextualVitalReviewEnabled(true)
-        else viewModel.setContextualVo2ReviewEnabled(true)
+        else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(true)
+        else {
+            val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
+            adaptiveNotificationsUnavailable = !available
+            viewModel.setAdaptiveDayGuidanceEnabled(available)
+        }
+    }
+
+    fun setWorkoutGuidanceEnabled(enabled: Boolean) {
+        viewModel.setZoneCoaching(enabled)
+        if (!enabled) {
+            workoutNotificationsUnavailable = false
+            return
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            workoutPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        workoutNotificationsUnavailable = !WorkoutCautionNotifier.prepareAndCanNotify(ctx)
     }
 
     fun setHydrationReminderEnabled(enabled: Boolean) {
@@ -460,27 +501,60 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         }
         }
 
-        // Haptic coaching.
+        // Adaptive coaching.
         item {
         SettingsSection(
             icon = Icons.Filled.Bolt,
-            title = uiString(R.string.l10n_automations_screen_haptic_coaching_e2fab286),
-            blurb = "Train by feel. Noop Band vibrates so you don't have to watch a screen.",
-            active = zoneCoaching || (stressCheckIn && stressAutoNudge),
+            title = stringResource(R.string.appwide_adaptive_coaching_title),
+            blurb = stringResource(R.string.appwide_adaptive_coaching_summary),
+            active = adaptiveDayGuidance || zoneCoaching || (stressCheckIn && stressAutoNudge),
         ) {
             ToggleRow(
-                label = uiString(R.string.l10n_automations_screen_hr_zone_coaching_9306e6e1),
-                help = "A triple-buzz when you climb into your top zone (Zone 5, ≥ $zone5Bpm bpm), a cue to ease off. Max HR comes from Settings.",
-                checked = zoneCoaching,
-                onChange = { viewModel.setZoneCoaching(it) },
+                label = stringResource(R.string.appwide_adaptive_day_guidance_label),
+                help = stringResource(R.string.appwide_adaptive_day_guidance_help),
+                checked = adaptiveDayGuidance,
+                onChange = { setContextualReview("adaptive", it) },
             )
+            if (adaptiveNotificationsUnavailable) {
+                RowDivider()
+                Text(
+                    stringResource(
+                        R.string.appwide_adaptive_day_guidance_notifications_unavailable,
+                    ),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                )
+            }
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.appwide_workout_guidance_label),
+                help = stringResource(R.string.appwide_workout_guidance_help),
+                checked = zoneCoaching,
+                onChange = ::setWorkoutGuidanceEnabled,
+            )
+            if (zoneCoaching && !notifMasterOn) {
+                RowDivider()
+                Text(
+                    stringResource(R.string.appwide_workout_guidance_wrist_alerts_off),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
+                )
+            }
             if (zoneCoaching) {
                 RowDivider()
                 ToggleRow(
                     label = uiString(R.string.l10n_automations_screen_recovery_buzz_1abc9a51),
-                    help = "Also buzz once when your heart rate drops back to Zone 1, a cue that you've recovered.",
+                    help = stringResource(R.string.appwide_workout_guidance_recovery_help),
                     checked = zoneCoachRecovery,
                     onChange = { viewModel.setZoneCoachRecovery(it) },
+                )
+            }
+            if (workoutNotificationsUnavailable) {
+                RowDivider()
+                Text(
+                    stringResource(R.string.appwide_workout_guidance_phone_unavailable),
+                    style = NoopType.footnote,
+                    color = Palette.statusWarning,
                 )
             }
             RowDivider()

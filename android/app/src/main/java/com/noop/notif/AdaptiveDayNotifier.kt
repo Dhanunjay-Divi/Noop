@@ -1,0 +1,541 @@
+package com.noop.notif
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.noop.R
+import com.noop.alarm.WindDownStore
+import com.noop.analytics.AdaptiveDayGuidance
+import com.noop.data.DailyMetric
+import com.noop.data.WhoopRepository
+import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NoopPrefs
+import com.noop.ui.NotifPrefs
+import com.noop.ui.NotificationRouteBridge
+import com.noop.ui.logicalDay
+import kotlinx.coroutines.CancellationException
+import java.time.Duration
+import java.time.ZonedDateTime
+import kotlin.math.abs
+
+internal enum class AdaptiveDayDeliveryKind {
+    SLEEP_RECOVERY,
+    ROUTINE_RECOVERY,
+    TRAVEL,
+}
+
+internal data class AdaptiveDayDeliveryCandidate(
+    val kind: AdaptiveDayDeliveryKind,
+    val observedAtMillis: Long,
+    val maximumAgeMillis: Long,
+    val fingerprint: String,
+)
+
+internal data class AdaptiveDayDelivery(
+    val atMillis: Long,
+    val fingerprint: String,
+)
+
+internal data class AdaptiveDayDeliveryState(
+    val lastGlobalDeliveryMillis: Long? = null,
+    val deliveries: Map<AdaptiveDayDeliveryKind, AdaptiveDayDelivery> = emptyMap(),
+)
+
+internal enum class AdaptiveDayDeliveryReason {
+    DELIVER,
+    STALE,
+    DUPLICATE,
+    TOPIC_COOLDOWN,
+    GLOBAL_COOLDOWN,
+    QUIET_HOURS,
+}
+
+internal data class AdaptiveDayDeliveryDecision(
+    val shouldDeliver: Boolean,
+    val reason: AdaptiveDayDeliveryReason,
+    val nextState: AdaptiveDayDeliveryState,
+)
+
+/** Restart-safe arbitration for routine wellness prompts. */
+internal object AdaptiveDayDeliveryPolicy {
+    private const val FUTURE_TOLERANCE_MILLIS = 5L * 60L * 1_000L
+    private const val GLOBAL_COOLDOWN_MILLIS = 30L * 60L * 1_000L
+
+    fun evaluate(
+        candidate: AdaptiveDayDeliveryCandidate,
+        state: AdaptiveDayDeliveryState,
+        nowMillis: Long,
+        localMinuteOfDay: Int,
+        quietHoursEnabled: Boolean,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+    ): AdaptiveDayDeliveryDecision {
+        val age = nowMillis - candidate.observedAtMillis
+        if (age !in -FUTURE_TOLERANCE_MILLIS..candidate.maximumAgeMillis) {
+            return reject(AdaptiveDayDeliveryReason.STALE, state)
+        }
+        state.deliveries[candidate.kind]?.let { prior ->
+            if (prior.fingerprint == candidate.fingerprint) {
+                return reject(AdaptiveDayDeliveryReason.DUPLICATE, state)
+            }
+            if (nowMillis - prior.atMillis < topicCooldownMillis(candidate.kind)) {
+                return reject(AdaptiveDayDeliveryReason.TOPIC_COOLDOWN, state)
+            }
+        }
+        for (blocker in adaptivePriorityBlockers(candidate.kind)) {
+            state.deliveries[blocker]?.let { prior ->
+                if (nowMillis - prior.atMillis < Duration.ofHours(20).toMillis()) {
+                    return reject(AdaptiveDayDeliveryReason.TOPIC_COOLDOWN, state)
+                }
+            }
+        }
+        state.lastGlobalDeliveryMillis?.let { prior ->
+            if (nowMillis - prior < GLOBAL_COOLDOWN_MILLIS) {
+                return reject(AdaptiveDayDeliveryReason.GLOBAL_COOLDOWN, state)
+            }
+        }
+        if (
+            quietHoursEnabled &&
+            ContextualVitalDeliveryPolicy.windowContains(
+                localMinuteOfDay,
+                quietStartMinutes,
+                quietEndMinutes,
+            )
+        ) {
+            return reject(AdaptiveDayDeliveryReason.QUIET_HOURS, state)
+        }
+        return AdaptiveDayDeliveryDecision(
+            shouldDeliver = true,
+            reason = AdaptiveDayDeliveryReason.DELIVER,
+            nextState = state.copy(
+                lastGlobalDeliveryMillis = nowMillis,
+                deliveries = state.deliveries + (
+                    candidate.kind to AdaptiveDayDelivery(nowMillis, candidate.fingerprint)
+                ),
+            ),
+        )
+    }
+
+    private fun topicCooldownMillis(kind: AdaptiveDayDeliveryKind): Long = when (kind) {
+        AdaptiveDayDeliveryKind.SLEEP_RECOVERY,
+        AdaptiveDayDeliveryKind.ROUTINE_RECOVERY,
+        -> Duration.ofHours(20).toMillis()
+        AdaptiveDayDeliveryKind.TRAVEL -> Duration.ofHours(24).toMillis()
+    }
+
+    private fun adaptivePriorityBlockers(
+        kind: AdaptiveDayDeliveryKind,
+    ): List<AdaptiveDayDeliveryKind> = when (kind) {
+        AdaptiveDayDeliveryKind.SLEEP_RECOVERY ->
+            listOf(AdaptiveDayDeliveryKind.TRAVEL, AdaptiveDayDeliveryKind.ROUTINE_RECOVERY)
+        AdaptiveDayDeliveryKind.ROUTINE_RECOVERY ->
+            listOf(AdaptiveDayDeliveryKind.TRAVEL)
+        AdaptiveDayDeliveryKind.TRAVEL -> emptyList()
+    }
+
+    private fun reject(
+        reason: AdaptiveDayDeliveryReason,
+        state: AdaptiveDayDeliveryState,
+    ) = AdaptiveDayDeliveryDecision(false, reason, state)
+}
+
+internal data class AdaptiveDayTimeZoneState(
+    val currentOffsetSec: Int? = null,
+    val pending: AdaptiveDayGuidance.TimeZoneChange? = null,
+)
+
+/** Pure transition rule behind the persisted timezone observation. */
+internal object AdaptiveDayTimeZonePolicy {
+    fun observe(
+        state: AdaptiveDayTimeZoneState,
+        offsetSec: Int,
+        nowSec: Long,
+    ): AdaptiveDayTimeZoneState {
+        val prior = state.currentOffsetSec
+        if (prior == null || prior == offsetSec) {
+            return state.copy(currentOffsetSec = offsetSec)
+        }
+        val shift = AdaptiveDayGuidance.normalizedTravelDeltaSeconds(
+            previousOffsetSec = prior,
+            currentOffsetSec = offsetSec,
+        )
+        val pending = if (abs(shift) >= AdaptiveDayGuidance.TRAVEL_THRESHOLD_SECONDS) {
+            AdaptiveDayGuidance.TimeZoneChange(
+                previousOffsetSec = prior,
+                currentOffsetSec = offsetSec,
+                observedAtSec = nowSec,
+            )
+        } else {
+            state.pending
+        }
+        return AdaptiveDayTimeZoneState(currentOffsetSec = offsetSec, pending = pending)
+    }
+}
+
+/** SharedPreferences boundary for timezone state; qualified changes survive process death for retry. */
+object AdaptiveDayTimeZoneStore {
+    private const val PREFS_FILE = "noop_adaptive_day_timezone"
+    private const val KEY_CURRENT_OFFSET = "current.offset.sec"
+    private const val KEY_CHANGE_FROM = "change.from.sec"
+    private const val KEY_CHANGE_TO = "change.to.sec"
+    private const val KEY_CHANGE_AT = "change.at.sec"
+    private val lock = Any()
+
+    fun observe(
+        context: Context,
+        offsetSec: Int,
+        nowSec: Long,
+    ): AdaptiveDayGuidance.TimeZoneChange? = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        val next = AdaptiveDayTimeZonePolicy.observe(load(prefs), offsetSec, nowSec)
+        val editor = prefs.edit().putInt(KEY_CURRENT_OFFSET, offsetSec)
+        next.pending?.let {
+            editor
+                .putInt(KEY_CHANGE_FROM, it.previousOffsetSec)
+                .putInt(KEY_CHANGE_TO, it.currentOffsetSec)
+                .putLong(KEY_CHANGE_AT, it.observedAtSec)
+        }
+        editor.apply()
+        next.pending
+    }
+
+    fun pending(context: Context): AdaptiveDayGuidance.TimeZoneChange? = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        load(prefs).pending
+    }
+
+    fun discardPending(context: Context) = synchronized(lock) {
+        context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_CHANGE_FROM)
+            .remove(KEY_CHANGE_TO)
+            .remove(KEY_CHANGE_AT)
+            .apply()
+    }
+
+    private fun load(prefs: android.content.SharedPreferences): AdaptiveDayTimeZoneState {
+        val current = prefs.getInt(KEY_CURRENT_OFFSET, 0)
+            .takeIf { prefs.contains(KEY_CURRENT_OFFSET) }
+        val pending = if (
+            prefs.contains(KEY_CHANGE_FROM) &&
+            prefs.contains(KEY_CHANGE_TO) &&
+            prefs.contains(KEY_CHANGE_AT)
+        ) {
+            AdaptiveDayGuidance.TimeZoneChange(
+                previousOffsetSec = prefs.getInt(KEY_CHANGE_FROM, 0),
+                currentOffsetSec = prefs.getInt(KEY_CHANGE_TO, 0),
+                observedAtSec = prefs.getLong(KEY_CHANGE_AT, 0),
+            )
+        } else {
+            null
+        }
+        return AdaptiveDayTimeZoneState(current, pending)
+    }
+}
+
+/**
+ * Process-safe evaluation boundary shared by foreground UI, band post-offload analysis, and background
+ * Health Connect ingestion. Every path ranks the same evidence and converges on the notifier's durable
+ * duplicate/cooldown state.
+ */
+object AdaptiveDayEvaluator {
+    suspend fun evaluateAndNotify(
+        context: Context,
+        repository: WhoopRepository,
+        deviceId: String,
+        days: List<DailyMetric>? = null,
+        now: ZonedDateTime = ZonedDateTime.now(),
+        sleepTargetMinutes: Int = WindDownStore.from(context).sleepNeedMinutes,
+    ): AdaptiveDayGuidance.Recommendation? {
+        val appContext = context.applicationContext
+        val nowSec = now.toEpochSecond()
+        val offsetSec = now.offset.totalSeconds
+        val timeZoneChange = AdaptiveDayTimeZoneStore.observe(
+            appContext,
+            offsetSec = offsetSec,
+            nowSec = nowSec,
+        )
+        if (!NoopPrefs.adaptiveDayGuidance(appContext)) {
+            AdaptiveDayTimeZoneStore.discardPending(appContext)
+            return null
+        }
+
+        val resolvedDays = days ?: try {
+            repository.daysMerged(
+                deviceId = deviceId,
+                fromDay = now.minusDays(
+                    AdaptiveDayGuidance.ROUTINE_LOOKBACK_DAYS.toLong() + 2L,
+                ).toLocalDate().toString(),
+                toDay = now.plusDays(1).toLocalDate().toString(),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val sleepWindows = try {
+            repository.sleepSessionsMerged(
+                deviceId = deviceId,
+                from = now.minusDays(
+                    AdaptiveDayGuidance.ROUTINE_LOOKBACK_DAYS.toLong() + 1L,
+                ).toEpochSecond(),
+                to = nowSec,
+                limit = 1_000,
+            ).map {
+                AdaptiveDayGuidance.SleepWindow(
+                    startSec = it.effectiveStartTs,
+                    endSec = it.endTs,
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val recommendation = AdaptiveDayGuidance.recommendation(
+            AdaptiveDayGuidance.Input(
+                today = maxOf(logicalDay(now).toString(), now.toLocalDate().toString()),
+                nowSec = nowSec,
+                currentTimeZoneOffsetSec = offsetSec,
+                sleepTargetMinutes = sleepTargetMinutes,
+                sleepDays = resolvedDays.map {
+                    AdaptiveDayGuidance.SleepDay(
+                        day = it.day,
+                        totalSleepMinutes = it.totalSleepMin,
+                    )
+                },
+                sleepWindows = sleepWindows,
+                timeZoneChange = timeZoneChange,
+            ),
+        ) ?: return null
+        AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+        return recommendation
+    }
+}
+
+/**
+ * Privacy-safe notification side effect for evidence already ranked by [AdaptiveDayGuidance].
+ * It never infers work, a party, alcohol, illness, or a medical condition.
+ */
+object AdaptiveDayNotifier {
+    private const val CHANNEL_ID = "noop_adaptive_day"
+    private const val PREFS_FILE = "noop_adaptive_day_delivery"
+    private const val KEY_GLOBAL_AT = "global.at"
+
+    @SuppressLint("MissingPermission")
+    @Synchronized
+    fun onRecommendation(
+        context: Context,
+        recommendation: AdaptiveDayGuidance.Recommendation,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
+        if (!NoopPrefs.adaptiveDayGuidance(context)) return
+        runCatching {
+            ensureChannel(context)
+            if (!canNotify(context)) {
+                suppress(context)
+                return
+            }
+            val candidate = candidate(recommendation)
+            val decision = AdaptiveDayDeliveryPolicy.evaluate(
+                candidate = candidate,
+                state = loadState(context),
+                nowMillis = now.toInstant().toEpochMilli(),
+                localMinuteOfDay = now.hour * 60 + now.minute,
+                quietHoursEnabled = NotifPrefs.getBool(context, NotifPrefs.QUIET, false),
+                quietStartMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60),
+                quietEndMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
+            )
+            if (!decision.shouldDeliver) {
+                if (
+                    recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT &&
+                    decision.reason == AdaptiveDayDeliveryReason.DUPLICATE
+                ) {
+                    AdaptiveDayTimeZoneStore.discardPending(context)
+                }
+                if (decision.reason == AdaptiveDayDeliveryReason.QUIET_HOURS) suppress(context)
+                return
+            }
+
+            val (title, body) = copy(context, recommendation.kind)
+            val openSleep = NotificationPlatformIdentity.activityPendingIntent(
+                context,
+                NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
+                NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.SLEEP),
+            )
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_heart)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setContentIntent(openSleep)
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .build()
+            val manager = NotificationManagerCompat.from(context)
+            val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
+                context,
+                now.toInstant().toEpochMilli(),
+            ) {
+                NotificationLifecycleLedger.posted(
+                    context,
+                    NotificationLifecycleId.ADAPTIVE_DAY,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    manager.notify(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY, notification)
+                }
+            }
+            if (postResult != ContextualPromptPostResult.POSTED) {
+                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
+                return
+            }
+            saveState(context, decision.nextState)
+            if (recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
+                AdaptiveDayTimeZoneStore.discardPending(context)
+            }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.ADAPTIVE_DAY,
+                NotificationLifecycleCategory.RECOMMENDATION,
+            )
+        }
+    }
+
+    /**
+     * Broadcast-receiver entry point. Travel can be evaluated without opening Room because the qualified
+     * offset transition is itself the complete evidence; sleep/routine guidance waits for app data.
+     */
+    fun onTimeZoneChanged(
+        context: Context,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
+        val nowSec = now.toEpochSecond()
+        val change = AdaptiveDayTimeZoneStore.observe(context, now.offset.totalSeconds, nowSec)
+        if (!NoopPrefs.adaptiveDayGuidance(context)) {
+            AdaptiveDayTimeZoneStore.discardPending(context)
+            return
+        }
+        AdaptiveDayGuidance.recommendation(
+            AdaptiveDayGuidance.Input(
+                today = now.toLocalDate().toString(),
+                nowSec = nowSec,
+                currentTimeZoneOffsetSec = now.offset.totalSeconds,
+                sleepTargetMinutes = 8 * 60,
+                sleepDays = emptyList(),
+                sleepWindows = emptyList(),
+                timeZoneChange = change,
+            ),
+        )?.let { onRecommendation(context, it, now) }
+    }
+
+    fun prepareAndCanNotify(context: Context): Boolean {
+        ensureChannel(context.applicationContext)
+        return canNotify(context.applicationContext)
+    }
+
+    fun canNotify(context: Context): Boolean {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return false
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (manager.getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+        }
+        return true
+    }
+
+    internal fun candidate(
+        recommendation: AdaptiveDayGuidance.Recommendation,
+    ): AdaptiveDayDeliveryCandidate {
+        val kind = when (recommendation.kind) {
+            AdaptiveDayGuidance.Kind.SLEEP_RECOVERY -> AdaptiveDayDeliveryKind.SLEEP_RECOVERY
+            AdaptiveDayGuidance.Kind.ROUTINE_RECOVERY -> AdaptiveDayDeliveryKind.ROUTINE_RECOVERY
+            AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT -> AdaptiveDayDeliveryKind.TRAVEL
+        }
+        return AdaptiveDayDeliveryCandidate(
+            kind = kind,
+            observedAtMillis = recommendation.observedAtSec * 1_000L,
+            maximumAgeMillis = recommendation.maximumAgeSeconds * 1_000L,
+            fingerprint = recommendation.fingerprint,
+        )
+    }
+
+    private fun copy(
+        context: Context,
+        kind: AdaptiveDayGuidance.Kind,
+    ): Pair<String, String> = when (kind) {
+        AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT ->
+            context.getString(R.string.appwide_adaptive_day_guidance_travel_title) to
+                context.getString(R.string.appwide_adaptive_day_guidance_travel_body)
+        AdaptiveDayGuidance.Kind.ROUTINE_RECOVERY ->
+            context.getString(R.string.appwide_adaptive_day_guidance_routine_title) to
+                context.getString(R.string.appwide_adaptive_day_guidance_routine_body)
+        AdaptiveDayGuidance.Kind.SLEEP_RECOVERY ->
+            context.getString(R.string.appwide_adaptive_day_guidance_sleep_title) to
+                context.getString(R.string.appwide_adaptive_day_guidance_sleep_body)
+    }
+
+    private fun loadState(context: Context): AdaptiveDayDeliveryState {
+        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        val deliveries = AdaptiveDayDeliveryKind.entries.mapNotNull { kind ->
+            val atKey = "${kind.name}.at"
+            val fingerprint = prefs.getString("${kind.name}.fingerprint", null)
+            if (!prefs.contains(atKey) || fingerprint == null) null
+            else kind to AdaptiveDayDelivery(prefs.getLong(atKey, 0), fingerprint)
+        }.toMap()
+        return AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = prefs.getLong(KEY_GLOBAL_AT, 0)
+                .takeIf { prefs.contains(KEY_GLOBAL_AT) },
+            deliveries = deliveries,
+        )
+    }
+
+    private fun saveState(context: Context, state: AdaptiveDayDeliveryState) {
+        val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit()
+        state.lastGlobalDeliveryMillis?.let { editor.putLong(KEY_GLOBAL_AT, it) }
+        for ((kind, delivery) in state.deliveries) {
+            editor.putLong("${kind.name}.at", delivery.atMillis)
+            editor.putString("${kind.name}.fingerprint", delivery.fingerprint)
+        }
+        editor.apply()
+    }
+
+    private fun suppress(context: Context) {
+        NotificationLifecycleLedger.suppressed(
+            context,
+            NotificationLifecycleId.ADAPTIVE_DAY,
+            NotificationLifecycleCategory.RECOMMENDATION,
+        )
+    }
+
+    private fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID,
+                context.getString(R.string.appwide_adaptive_day_guidance_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = context.getString(
+                    R.string.appwide_adaptive_day_guidance_channel_description,
+                )
+            },
+        )
+    }
+}

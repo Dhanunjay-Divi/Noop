@@ -34,7 +34,7 @@ object Hrv {
 /**
  * Heart-rate training zones.
  *
- * Ported from the zone ladder in `AppModel.coachZone` (`Strand/App/AppModel.swift`):
+ * Shared heart-rate zone ladder used by workout scoring and presentation:
  * pct >= 0.9 → 5, >= 0.8 → 4, >= 0.7 → 3, >= 0.6 → 2, else 1.
  */
 object Zones {

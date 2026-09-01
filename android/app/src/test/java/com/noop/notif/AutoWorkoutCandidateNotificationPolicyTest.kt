@@ -61,7 +61,7 @@ class AutoWorkoutCandidateNotificationPolicyTest {
             assertFalse(combined.contains("heart rate"))
         }
         assertEquals(NoopNotificationRoute.TODAY, NoopNotificationRoute.fromRaw("today"))
-        assertNull(NoopNotificationRoute.fromRaw("workouts"))
+        assertEquals(NoopNotificationRoute.WORKOUTS, NoopNotificationRoute.fromRaw("workouts"))
         assertNull(NoopNotificationRoute.fromRaw("https://example.com"))
     }
 }
