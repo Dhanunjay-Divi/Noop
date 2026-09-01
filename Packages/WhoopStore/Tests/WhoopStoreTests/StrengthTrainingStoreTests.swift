@@ -26,6 +26,7 @@ final class StrengthTrainingStoreTests: XCTestCase {
         loadKg: Double? = 100,
         durationS: Int? = nil,
         restSeconds: Int? = 120,
+        setType: String = "working",
         completedAt: Int? = 1_777_000_100
     ) -> StrengthSetRow {
         StrengthSetRow(
@@ -34,6 +35,7 @@ final class StrengthTrainingStoreTests: XCTestCase {
             exerciseId: exerciseId,
             exercisePosition: exercisePosition,
             setPosition: setPosition,
+            setType: setType,
             reps: reps,
             loadKg: loadKg,
             durationS: durationS,
@@ -81,6 +83,25 @@ final class StrengthTrainingStoreTests: XCTestCase {
         )
         XCTAssertNil(draft.completedAt)
         XCTAssertNil(draft.volumeKg)
+    }
+
+    func testRoutineMetadataRejectsCoercedWeekdaysAndSupersetZero() {
+        XCTAssertThrowsError(
+            try StrengthTrainingContract.validated(
+                StrengthRoutineRow(
+                    id: "routine-a",
+                    name: "Day A",
+                    scheduledWeekdaysJSON: "[\"1\",4]",
+                    createdAt: now,
+                    updatedAt: now
+                )
+            )
+        )
+        XCTAssertNil(
+            StrengthTrainingContract.encodeExercisePlan(
+                StrengthExercisePlan(supersetGroup: 0)
+            )
+        )
     }
 
     func testRoutineSaveReplacesOrderedPrescriptionAtomically() async throws {
@@ -150,6 +171,10 @@ final class StrengthTrainingStoreTests: XCTestCase {
             sets: [
                 set(id: "loaded", setPosition: 0, reps: 5, loadKg: 100),
                 set(
+                    id: "warmup", setPosition: 1, reps: 20, loadKg: 150,
+                    setType: "warmup"
+                ),
+                set(
                     id: "bodyweight", exerciseId: "pull_up", exercisePosition: 1,
                     setPosition: 0, reps: 10, loadKg: nil
                 ),
@@ -171,6 +196,7 @@ final class StrengthTrainingStoreTests: XCTestCase {
         XCTAssertEqual(squat.maxLoadKg, 100)
         XCTAssertEqual(squat.maxReps, 5)
         XCTAssertEqual(squat.bestSetVolumeKg, 500)
+        XCTAssertEqual(squat.completedSetCount, 1)
         let pullUp = try await store.strengthExerciseProgress(exerciseId: "pull_up")
         XCTAssertNil(pullUp.maxLoadKg)
         XCTAssertEqual(pullUp.maxReps, 10)

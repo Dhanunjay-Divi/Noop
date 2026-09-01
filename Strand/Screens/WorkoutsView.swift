@@ -994,7 +994,10 @@ struct WorkoutsView: View {
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .frame(maxWidth: .infinity)
                         }
-                        ForEach(0..<leading, id: \.self) { _ in
+                        ForEach(
+                            (0..<leading).map { "activity-calendar-leading-\($0)" },
+                            id: \.self
+                        ) { _ in
                             Color.clear.frame(height: 44)
                         }
                         ForEach(dates, id: \.self) { date in

@@ -41,7 +41,9 @@ public enum StrengthProgressCalculator {
         sessions.compactMap { snapshot in
             guard snapshot.session.endedAt != nil else { return nil }
             let sets = snapshot.sets.filter {
-                $0.exerciseId == exerciseId && $0.completedAt != nil
+                $0.exerciseId == exerciseId
+                    && $0.completedAt != nil
+                    && $0.setType != "warmup"
             }
             guard !sets.isEmpty else { return nil }
             let loadedVolumes = sets.compactMap(\.volumeKg)
@@ -79,7 +81,9 @@ public enum StrengthProgressCalculator {
                 && $0.session.startedAt >= from
                 && $0.session.startedAt <= to
         }
-        let sets = included.flatMap(\.sets).filter { $0.completedAt != nil }
+        let sets = included.flatMap(\.sets).filter {
+            $0.completedAt != nil && $0.setType != "warmup"
+        }
         return StrengthWeeklyProgress(
             sessionCount: included.count,
             completedSetCount: sets.count,
@@ -105,7 +109,7 @@ public enum StrengthProgressCalculator {
         for snapshot in sessions where snapshot.session.endedAt != nil
             && snapshot.session.startedAt >= from
             && snapshot.session.startedAt <= to {
-            for set in snapshot.sets where set.completedAt != nil {
+            for set in snapshot.sets where set.completedAt != nil && set.setType != "warmup" {
                 guard let exercise = exerciseByID[set.exerciseId] else { continue }
                 direct[exercise.primaryMuscle, default: 0] += 1
                 let secondary = StrengthTrainingContract.secondaryMuscles(

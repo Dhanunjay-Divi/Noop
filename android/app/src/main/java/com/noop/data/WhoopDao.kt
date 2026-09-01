@@ -1379,7 +1379,7 @@ interface WhoopDao : DeviceRegistryDao {
             "COALESCE(SUM(CASE WHEN st.loadKg IS NOT NULL AND st.reps IS NOT NULL " +
             "THEN 1 ELSE 0 END), 0) AS loadedVolumeSetCount " +
             "FROM strengthSession s LEFT JOIN strengthSet st " +
-            "ON st.sessionId = s.id AND st.completedAt IS NOT NULL " +
+            "ON st.sessionId = s.id AND st.completedAt IS NOT NULL AND st.setType != 'warmup' " +
             "WHERE s.startedAt >= :from AND s.startedAt <= :to AND s.endedAt IS NOT NULL",
     )
     suspend fun strengthSummary(from: Long, to: Long): StrengthSummary
@@ -1389,7 +1389,8 @@ interface WhoopDao : DeviceRegistryDao {
             "MAX(loadKg) AS maxLoadKg, MAX(reps) AS maxReps, " +
             "MAX(CASE WHEN loadKg IS NOT NULL AND reps IS NOT NULL " +
             "THEN loadKg * reps END) AS bestSetVolumeKg " +
-            "FROM strengthSet WHERE exerciseId = :exerciseId AND completedAt IS NOT NULL",
+            "FROM strengthSet WHERE exerciseId = :exerciseId " +
+            "AND completedAt IS NOT NULL AND setType != 'warmup'",
     )
     suspend fun strengthExerciseProgress(exerciseId: String): StrengthExerciseProgress
 

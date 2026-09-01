@@ -34,7 +34,7 @@ class StrengthTrainingContractTest {
 
     @Test
     fun builtInCatalogHasStableOwnedIdentity() {
-        val expectedIds = listOf(
+        val originalIds = listOf(
             "barbell_back_squat",
             "barbell_bench_press",
             "conventional_deadlift",
@@ -49,7 +49,10 @@ class StrengthTrainingContractTest {
             "triceps_pushdown",
             "plank",
         )
-        assertEquals(expectedIds, StrengthTrainingContract.BUILT_IN_EXERCISES.map { it.id })
+        val ids = StrengthTrainingContract.BUILT_IN_EXERCISES.map { it.id }
+        assertEquals(originalIds, ids.take(originalIds.size))
+        assertEquals(ids.size, ids.distinct().size)
+        assertTrue(ids.size > originalIds.size)
         assertTrue(StrengthTrainingContract.BUILT_IN_EXERCISES.all { !it.isCustom })
         assertTrue(
             StrengthTrainingContract.BUILT_IN_EXERCISES.all {
@@ -125,5 +128,70 @@ class StrengthTrainingContractTest {
         assertThrows(IllegalArgumentException::class.java) {
             StrengthTrainingContract.validated(tooLong)
         }
+    }
+
+    @Test
+    fun malformedOrIncompleteExercisePlanIsRejectedInsteadOfDefaulted() {
+        fun row(planJSON: String) = StrengthRoutineExerciseRow(
+            id = "routine-exercise-1",
+            routineId = "routine-1",
+            exerciseId = "barbell_back_squat",
+            position = 0,
+            planJSON = planJSON,
+            createdAt = now,
+            updatedAt = now,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            StrengthTrainingContract.validated(row("not-json"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            StrengthTrainingContract.validated(row("{}"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            StrengthTrainingContract.validated(
+                row(
+                    """
+                    {
+                      "dropPercent": 20,
+                      "loadStepKg": 2.5,
+                      "mode": "reps",
+                      "progression": "double_progression",
+                      "repsPerSide": false,
+                      "restPauseSeconds": 15,
+                      "setStyle": "straight",
+                      "supersetGroup": null,
+                      "targetDurationS": null,
+                      "targetLoadKg": null,
+                      "warmupSets": "2"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+        }
+
+        val plan = StrengthExercisePlan(warmupSets = 2, setStyle = "rest_pause")
+        val encoded = requireNotNull(StrengthTrainingContract.encodeExercisePlan(plan))
+        val validated = StrengthTrainingContract.validated(row(encoded))
+        assertEquals(plan, StrengthTrainingContract.exercisePlan(validated.planJSON))
+    }
+
+    @Test
+    fun scheduledWeekdaysRejectCoercedValuesAndSupersetZero() {
+        val routine = StrengthRoutineRow(
+            id = "routine-1",
+            name = "Day A",
+            scheduledWeekdaysJSON = """["1",4]""",
+            createdAt = now,
+            updatedAt = now,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            StrengthTrainingContract.validated(routine)
+        }
+        assertNull(
+            StrengthTrainingContract.encodeExercisePlan(
+                StrengthExercisePlan(supersetGroup = 0),
+            ),
+        )
     }
 }

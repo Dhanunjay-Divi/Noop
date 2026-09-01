@@ -39,7 +39,9 @@ object StrengthProgressCalculator {
         sessions.mapNotNull { snapshot ->
             if (snapshot.session.endedAt == null) return@mapNotNull null
             val sets = snapshot.sets.filter {
-                it.exerciseId == exerciseId && it.completedAt != null
+                it.exerciseId == exerciseId &&
+                    it.completedAt != null &&
+                    it.setType != "warmup"
             }
             if (sets.isEmpty()) return@mapNotNull null
             StrengthExerciseHistoryPoint(
@@ -65,7 +67,8 @@ object StrengthProgressCalculator {
         val included = sessions.filter {
             it.session.endedAt != null && it.session.startedAt in from..to
         }
-        val sets = included.flatMap { it.sets }.filter { it.completedAt != null }
+        val sets = included.flatMap { it.sets }
+            .filter { it.completedAt != null && it.setType != "warmup" }
         return StrengthWeeklyProgress(
             sessionCount = included.size,
             completedSetCount = sets.size,
@@ -87,7 +90,7 @@ object StrengthProgressCalculator {
         sessions.asSequence()
             .filter { it.session.endedAt != null && it.session.startedAt in from..to }
             .flatMap { it.sets.asSequence() }
-            .filter { it.completedAt != null }
+            .filter { it.completedAt != null && it.setType != "warmup" }
             .forEach { set ->
                 val exercise = exerciseById[set.exerciseId] ?: return@forEach
                 direct[exercise.primaryMuscle] = direct.getOrDefault(exercise.primaryMuscle, 0) + 1

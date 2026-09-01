@@ -47,6 +47,9 @@ class StrengthTrainerUiContractTest {
         assertTrue(workouts.contains("R.string.strength_title"))
         assertTrue(trainer!!.contains("R.string.strength_manual_authority_body"))
         assertTrue(trainer.contains("R.string.strength_numbers_meaning_body"))
+        assertTrue(trainer.contains("containerColor = Palette.surfaceBase"))
+        assertTrue(trainer.contains("SceneScreenBackground(maxAlpha = 0.82f)"))
+        assertTrue(trainer.contains("Icons.Filled.Bedtime"))
         assertFalse(trainer.contains("Text(\""))
         assertFalse(trainer.contains("contentDescription = \""))
     }
@@ -58,8 +61,16 @@ class StrengthTrainerUiContractTest {
         val text = trainer!!
 
         assertTrue(text.contains("target != SheetValue.Hidden"))
-        assertTrue(text.contains("onDismissRequest = { if (editor == null) onDismiss() }"))
+        assertTrue(
+            text.contains(
+                "if (editor == null && routineEditor == null && !customExerciseEditor) onDismiss()",
+            ),
+        )
         assertTrue(text.contains("if (persist() != null) onClose()"))
+        assertTrue(text.contains("var pendingSave by remember"))
+        assertTrue(text.contains("} while (pendingSave)"))
+        assertTrue(text.contains("var blocks by remember(initial.session.id)"))
+        assertTrue(text.contains("val completedAt = session.endedAt ?: now"))
     }
 
     @Test
@@ -68,11 +79,25 @@ class StrengthTrainerUiContractTest {
         assumeTrue("StrengthTrainerScreen.kt unavailable", trainer != null)
         val text = trainer!!
 
-        assertTrue(text.contains("restSeconds = prescription.restSeconds"))
+        assertTrue(text.contains("StrengthWorkoutPlanner.resolvedRestSeconds("))
+        assertTrue(text.contains("continuesSuperset = continuesSuperset"))
         assertTrue(text.contains("first.restSeconds ?: prescription?.restSeconds ?: 120"))
         assertTrue(text.contains("restSeconds = block.restSeconds"))
         assertTrue(text.contains("sets = candidate.sets.map { it.copy(restSeconds = seconds) }"))
         assertTrue(text.contains("autosave()"))
+    }
+
+    @Test
+    fun recentSessionTotalsExcludeWarmupSets() {
+        val trainer = source("StrengthTrainerScreen.kt")
+        assumeTrue("StrengthTrainerScreen.kt unavailable", trainer != null)
+
+        assertTrue(
+            Regex(
+                """val completed = item\.sets\.filter\s*\{\s*"""
+                    + """it\.completedAt != null && it\.setType != "warmup"\s*\}""",
+            ).containsMatchIn(trainer!!),
+        )
     }
 
     @Test

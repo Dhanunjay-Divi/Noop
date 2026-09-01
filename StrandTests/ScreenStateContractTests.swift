@@ -425,6 +425,8 @@ final class ReferenceSurfaceContractTests: XCTestCase {
 
         XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
         XCTAssertTrue(fitness.contains("WorkoutActivityCalendarSummary.resolve("))
+        XCTAssertTrue(fitness.contains(#""activity-calendar-leading-\($0)""#))
+        XCTAssertFalse(fitness.contains("ForEach(0..<leading, id: \\.self)"))
         XCTAssertTrue(fitness.contains(
             #"String(localized: "appwide.workouts.activity_calendar.one_recorded_activity")"#
         ))
@@ -544,7 +546,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 477)
+        XCTAssertEqual(source.count, 631)
         XCTAssertEqual(
             source["appwide.terms.title"]?["en"],
             "NOOP Band is coming"

@@ -27,6 +27,7 @@ class PortableUserDataCodecTest {
             id = "routine-1",
             name = "Lower A",
             note = "Controlled tempo",
+            scheduledWeekdaysJSON = "[1,4]",
             createdAt = now,
             updatedAt = now + 100,
         )
@@ -83,6 +84,15 @@ class PortableUserDataCodecTest {
                     targetRepsMax = 10,
                     targetRPE = 8.0,
                     restSeconds = 120,
+                    planJSON = StrengthTrainingContract.encodeExercisePlan(
+                        StrengthExercisePlan(
+                            targetLoadKg = 24.0,
+                            warmupSets = 2,
+                            supersetGroup = 1,
+                            setStyle = "drop",
+                            dropPercent = 20,
+                        ),
+                    ),
                     createdAt = now,
                     updatedAt = now + 100,
                 ),
@@ -131,6 +141,13 @@ class PortableUserDataCodecTest {
         assertEquals(30.0, decoded.nutritionEntries.single().proteinG)
         assertEquals("Tofu bowl", decoded.nutritionCatalogItems.single().name)
         assertEquals(8.0, decoded.strengthRoutineExercises.single().targetRPE)
+        assertEquals("[1,4]", decoded.strengthRoutines.single().scheduledWeekdaysJSON)
+        assertEquals(
+            "drop",
+            StrengthTrainingContract.exercisePlan(
+                decoded.strengthRoutineExercises.single().planJSON,
+            ).setStyle,
+        )
         assertEquals(120, decoded.strengthSets.single().restSeconds)
         assertEquals(8.5, decoded.strengthSets.single().rpe)
     }

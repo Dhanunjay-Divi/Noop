@@ -1,7 +1,55 @@
 import Foundation
 import GRDB
 
-// MARK: - Strength training source of truth (v40)
+// MARK: - Strength training source of truth (v40+)
+
+/// Optional routine-level prescription details that do not belong on a completed set.
+///
+/// The JSON envelope keeps the normalized routine table stable while allowing the native clients
+/// to add planning features without turning historical workout rows into configuration storage.
+public struct StrengthExercisePlan: Codable, Equatable, Sendable {
+    public static let modes = ["reps", "timed"]
+    public static let progressions = ["none", "double_progression", "linear", "time"]
+    public static let setStyles = ["straight", "drop", "rest_pause"]
+
+    public var mode: String
+    public var targetLoadKg: Double?
+    public var targetDurationS: Int?
+    public var progression: String
+    public var loadStepKg: Double
+    public var warmupSets: Int
+    public var supersetGroup: Int?
+    public var repsPerSide: Bool
+    public var setStyle: String
+    public var dropPercent: Int
+    public var restPauseSeconds: Int
+
+    public init(
+        mode: String = "reps",
+        targetLoadKg: Double? = nil,
+        targetDurationS: Int? = nil,
+        progression: String = "double_progression",
+        loadStepKg: Double = 2.5,
+        warmupSets: Int = 0,
+        supersetGroup: Int? = nil,
+        repsPerSide: Bool = false,
+        setStyle: String = "straight",
+        dropPercent: Int = 20,
+        restPauseSeconds: Int = 15
+    ) {
+        self.mode = mode
+        self.targetLoadKg = targetLoadKg
+        self.targetDurationS = targetDurationS
+        self.progression = progression
+        self.loadStepKg = loadStepKg
+        self.warmupSets = warmupSets
+        self.supersetGroup = supersetGroup
+        self.repsPerSide = repsPerSide
+        self.setStyle = setStyle
+        self.dropPercent = dropPercent
+        self.restPauseSeconds = restPauseSeconds
+    }
+}
 
 /// Stable cross-platform rules for the local-first strength log.
 ///
@@ -27,9 +75,11 @@ public enum StrengthTrainingContract {
     ]
     public static let movementPatterns = [
         "squat", "hinge", "lunge", "horizontal_push", "vertical_push",
-        "horizontal_pull", "vertical_pull", "carry", "rotation", "isolation", "other",
+        "horizontal_pull", "vertical_pull", "carry", "rotation", "isolation", "cardio", "other",
     ]
-    public static let setTypes = ["warmup", "working", "drop", "failure", "bodyweight"]
+    public static let setTypes = [
+        "warmup", "working", "drop", "rest_pause", "failure", "bodyweight",
+    ]
 
     public enum ValidationError: Error, Equatable, LocalizedError {
         case invalidID
@@ -67,8 +117,9 @@ public enum StrengthTrainingContract {
         }
     }
 
-    /// Small, owned starter catalog. Stable ids are the storage contract; names and categories can be
-    /// presented differently later without rewriting historical sets.
+    /// Owned starter catalog. Stable ids are the storage contract; names and categories can be
+    /// presented differently later without rewriting historical sets. Names and classifications are
+    /// factual metadata authored for NOOP; no third-party exercise media is bundled.
     public static let builtInExercises: [StrengthExerciseRow] = [
         .builtIn(id: "barbell_back_squat", name: "Back Squat", primary: "quadriceps",
                  secondary: ["glutes", "hamstrings"], equipment: "barbell", pattern: "squat"),
@@ -97,7 +148,136 @@ public enum StrengthTrainingContract {
                  secondary: [], equipment: "cable", pattern: "isolation"),
         .builtIn(id: "plank", name: "Plank", primary: "core",
                  secondary: ["shoulders"], equipment: "bodyweight", pattern: "isolation"),
+        .builtIn(id: "barbell_front_squat", name: "Front Squat", primary: "quadriceps",
+                 secondary: ["glutes", "core"], equipment: "barbell", pattern: "squat"),
+        .builtIn(id: "goblet_squat", name: "Goblet Squat", primary: "quadriceps",
+                 secondary: ["glutes", "core"], equipment: "dumbbell", pattern: "squat"),
+        .builtIn(id: "hack_squat", name: "Hack Squat", primary: "quadriceps",
+                 secondary: ["glutes"], equipment: "machine", pattern: "squat"),
+        .builtIn(id: "leg_extension", name: "Leg Extension", primary: "quadriceps",
+                 secondary: [], equipment: "machine", pattern: "isolation"),
+        .builtIn(id: "lying_leg_curl", name: "Lying Leg Curl", primary: "hamstrings",
+                 secondary: ["calves"], equipment: "machine", pattern: "isolation"),
+        .builtIn(id: "barbell_hip_thrust", name: "Hip Thrust", primary: "glutes",
+                 secondary: ["hamstrings"], equipment: "barbell", pattern: "hinge"),
+        .builtIn(id: "glute_bridge", name: "Glute Bridge", primary: "glutes",
+                 secondary: ["hamstrings"], equipment: "bodyweight", pattern: "hinge"),
+        .builtIn(id: "bulgarian_split_squat", name: "Bulgarian Split Squat",
+                 primary: "quadriceps", secondary: ["glutes", "hamstrings"],
+                 equipment: "dumbbell", pattern: "lunge"),
+        .builtIn(id: "walking_lunge", name: "Walking Lunge", primary: "quadriceps",
+                 secondary: ["glutes", "hamstrings"], equipment: "dumbbell", pattern: "lunge"),
+        .builtIn(id: "standing_calf_raise", name: "Standing Calf Raise", primary: "calves",
+                 secondary: [], equipment: "machine", pattern: "isolation"),
+        .builtIn(id: "seated_calf_raise", name: "Seated Calf Raise", primary: "calves",
+                 secondary: [], equipment: "machine", pattern: "isolation"),
+        .builtIn(id: "incline_barbell_bench_press", name: "Incline Bench Press", primary: "chest",
+                 secondary: ["shoulders", "triceps"], equipment: "barbell",
+                 pattern: "horizontal_push"),
+        .builtIn(id: "dumbbell_bench_press", name: "Dumbbell Bench Press", primary: "chest",
+                 secondary: ["shoulders", "triceps"], equipment: "dumbbell",
+                 pattern: "horizontal_push"),
+        .builtIn(id: "push_up", name: "Push-up", primary: "chest",
+                 secondary: ["shoulders", "triceps", "core"], equipment: "bodyweight",
+                 pattern: "horizontal_push"),
+        .builtIn(id: "chest_fly", name: "Chest Fly", primary: "chest",
+                 secondary: ["shoulders"], equipment: "dumbbell", pattern: "isolation"),
+        .builtIn(id: "cable_crossover", name: "Cable Crossover", primary: "chest",
+                 secondary: ["shoulders"], equipment: "cable", pattern: "isolation"),
+        .builtIn(id: "machine_chest_press", name: "Machine Chest Press", primary: "chest",
+                 secondary: ["shoulders", "triceps"], equipment: "machine",
+                 pattern: "horizontal_push"),
+        .builtIn(id: "one_arm_dumbbell_row", name: "One-arm Dumbbell Row", primary: "back",
+                 secondary: ["biceps", "forearms"], equipment: "dumbbell",
+                 pattern: "horizontal_pull"),
+        .builtIn(id: "seated_cable_row", name: "Seated Cable Row", primary: "back",
+                 secondary: ["biceps"], equipment: "cable", pattern: "horizontal_pull"),
+        .builtIn(id: "chest_supported_row", name: "Chest-supported Row", primary: "back",
+                 secondary: ["biceps"], equipment: "dumbbell", pattern: "horizontal_pull"),
+        .builtIn(id: "chin_up", name: "Chin-up", primary: "back",
+                 secondary: ["biceps", "forearms"], equipment: "bodyweight",
+                 pattern: "vertical_pull"),
+        .builtIn(id: "face_pull", name: "Face Pull", primary: "shoulders",
+                 secondary: ["back"], equipment: "cable", pattern: "horizontal_pull"),
+        .builtIn(id: "dumbbell_shoulder_press", name: "Dumbbell Shoulder Press",
+                 primary: "shoulders", secondary: ["triceps"], equipment: "dumbbell",
+                 pattern: "vertical_push"),
+        .builtIn(id: "lateral_raise", name: "Lateral Raise", primary: "shoulders",
+                 secondary: [], equipment: "dumbbell", pattern: "isolation"),
+        .builtIn(id: "rear_delt_fly", name: "Rear Delt Fly", primary: "shoulders",
+                 secondary: ["back"], equipment: "dumbbell", pattern: "isolation"),
+        .builtIn(id: "hammer_curl", name: "Hammer Curl", primary: "biceps",
+                 secondary: ["forearms"], equipment: "dumbbell", pattern: "isolation"),
+        .builtIn(id: "preacher_curl", name: "Preacher Curl", primary: "biceps",
+                 secondary: ["forearms"], equipment: "barbell", pattern: "isolation"),
+        .builtIn(id: "skull_crusher", name: "Skull Crusher", primary: "triceps",
+                 secondary: [], equipment: "barbell", pattern: "isolation"),
+        .builtIn(id: "overhead_triceps_extension", name: "Overhead Triceps Extension",
+                 primary: "triceps", secondary: [], equipment: "dumbbell", pattern: "isolation"),
+        .builtIn(id: "parallel_bar_dip", name: "Dip", primary: "triceps",
+                 secondary: ["chest", "shoulders"], equipment: "bodyweight",
+                 pattern: "vertical_push"),
+        .builtIn(id: "hanging_leg_raise", name: "Hanging Leg Raise", primary: "core",
+                 secondary: ["forearms"], equipment: "bodyweight", pattern: "isolation"),
+        .builtIn(id: "cable_crunch", name: "Cable Crunch", primary: "core",
+                 secondary: [], equipment: "cable", pattern: "isolation"),
+        .builtIn(id: "side_plank", name: "Side Plank", primary: "core",
+                 secondary: ["shoulders"], equipment: "bodyweight", pattern: "isolation"),
+        .builtIn(id: "ab_wheel_rollout", name: "Ab Wheel Rollout", primary: "core",
+                 secondary: ["shoulders", "back"], equipment: "other", pattern: "isolation"),
+        .builtIn(id: "farmers_carry", name: "Farmer's Carry", primary: "full_body",
+                 secondary: ["forearms", "core", "shoulders"], equipment: "dumbbell",
+                 pattern: "carry"),
+        .builtIn(id: "kettlebell_swing", name: "Kettlebell Swing", primary: "full_body",
+                 secondary: ["glutes", "hamstrings", "core"], equipment: "kettlebell",
+                 pattern: "hinge"),
+        .builtIn(id: "back_extension", name: "Back Extension", primary: "back",
+                 secondary: ["glutes", "hamstrings"], equipment: "bodyweight", pattern: "hinge"),
+        .builtIn(id: "band_pull_apart", name: "Band Pull-apart", primary: "shoulders",
+                 secondary: ["back"], equipment: "band", pattern: "horizontal_pull"),
+        .builtIn(id: "resistance_band_row", name: "Resistance Band Row", primary: "back",
+                 secondary: ["biceps"], equipment: "band", pattern: "horizontal_pull"),
+        .builtIn(id: "treadmill_run", name: "Treadmill Run", primary: "full_body",
+                 secondary: ["quadriceps", "hamstrings", "calves"], equipment: "other",
+                 pattern: "cardio"),
+        .builtIn(id: "indoor_cycling", name: "Indoor Cycling", primary: "quadriceps",
+                 secondary: ["glutes", "hamstrings", "calves"], equipment: "other",
+                 pattern: "cardio"),
+        .builtIn(id: "rowing_ergometer", name: "Rowing Ergometer", primary: "full_body",
+                 secondary: ["back", "quadriceps", "biceps"], equipment: "other",
+                 pattern: "cardio"),
+        .builtIn(id: "stair_climber", name: "Stair Climber", primary: "quadriceps",
+                 secondary: ["glutes", "calves"], equipment: "machine", pattern: "cardio"),
     ]
+
+    public static func scheduledWeekdays(from json: String?) -> [Int] {
+        guard let json, let data = json.data(using: .utf8),
+              let values = try? JSONDecoder().decode([Int].self, from: data)
+        else { return [] }
+        return Array(Set(values.filter { (1...7).contains($0) })).sorted()
+    }
+
+    public static func encodeScheduledWeekdays(_ values: [Int]) -> String? {
+        let clean = Array(Set(values.filter { (1...7).contains($0) })).sorted()
+        guard !clean.isEmpty, let data = try? JSONEncoder().encode(clean) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    public static func exercisePlan(from json: String?) -> StrengthExercisePlan {
+        guard let json, let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(StrengthExercisePlan.self, from: data),
+              isValid(decoded)
+        else { return StrengthExercisePlan() }
+        return decoded
+    }
+
+    public static func encodeExercisePlan(_ plan: StrengthExercisePlan) -> String? {
+        guard isValid(plan) else { return nil }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(plan) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 
     public static func validated(_ row: StrengthExerciseRow) throws -> StrengthExerciseRow {
         var clean = row
@@ -122,6 +302,14 @@ public enum StrengthTrainingContract {
         clean.id = try validatedID(clean.id)
         clean.name = try validatedName(clean.name)
         clean.note = boundedText(clean.note, max: maxNoteCharacters, singleLine: false)
+        if clean.scheduledWeekdaysJSON != nil {
+            guard !scheduledWeekdays(from: clean.scheduledWeekdaysJSON).isEmpty else {
+                throw ValidationError.invalidRoutineExercise
+            }
+            clean.scheduledWeekdaysJSON = encodeScheduledWeekdays(
+                scheduledWeekdays(from: clean.scheduledWeekdaysJSON)
+            )
+        }
         guard clean.createdAt > 0, clean.updatedAt >= clean.createdAt,
               clean.archivedAt == nil || clean.archivedAt! >= clean.createdAt
         else { throw ValidationError.invalidTimestamps }
@@ -147,6 +335,13 @@ public enum StrengthTrainingContract {
         }
         if let min = clean.targetRepsMin, let max = clean.targetRepsMax, min > max {
             throw ValidationError.invalidRoutineExercise
+        }
+        if let planJSON = clean.planJSON {
+            guard let data = planJSON.data(using: .utf8),
+                  let plan = try? JSONDecoder().decode(StrengthExercisePlan.self, from: data),
+                  isValid(plan)
+            else { throw ValidationError.invalidRoutineExercise }
+            clean.planJSON = encodeExercisePlan(plan)
         }
         try validateRPE(clean.targetRPE)
         return clean
@@ -228,6 +423,32 @@ public enum StrengthTrainingContract {
         guard value.isFinite, value >= 1, value <= 10 else { throw ValidationError.invalidRPE }
     }
 
+    private static func isValid(_ plan: StrengthExercisePlan) -> Bool {
+        guard StrengthExercisePlan.modes.contains(plan.mode),
+              StrengthExercisePlan.progressions.contains(plan.progression),
+              StrengthExercisePlan.setStyles.contains(plan.setStyle)
+        else { return false }
+        let progressionMatchesMode = plan.mode == "timed"
+            ? ["none", "time"].contains(plan.progression)
+            : plan.progression != "time"
+        guard progressionMatchesMode else { return false }
+        if let load = plan.targetLoadKg,
+           (!load.isFinite || load <= 0 || load > maxLoadKg) {
+            return false
+        }
+        if let duration = plan.targetDurationS,
+           !(1...maxDurationSeconds).contains(duration) {
+            return false
+        }
+        return plan.loadStepKg.isFinite
+            && plan.loadStepKg > 0
+            && plan.loadStepKg <= 100
+            && (0...5).contains(plan.warmupSets)
+            && (plan.supersetGroup == nil || (1...20).contains(plan.supersetGroup!))
+            && (5...50).contains(plan.dropPercent)
+            && (5...60).contains(plan.restPauseSeconds)
+    }
+
     private static func boundedText(_ value: String?, max: Int, singleLine: Bool) -> String? {
         guard var text = value else { return nil }
         if singleLine {
@@ -299,17 +520,20 @@ public struct StrengthRoutineRow: Equatable, Codable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var note: String?
+    public var scheduledWeekdaysJSON: String?
     public var archivedAt: Int?
     public var createdAt: Int
     public var updatedAt: Int
 
     public init(
-        id: String, name: String, note: String? = nil, archivedAt: Int? = nil,
+        id: String, name: String, note: String? = nil, scheduledWeekdaysJSON: String? = nil,
+        archivedAt: Int? = nil,
         createdAt: Int, updatedAt: Int
     ) {
         self.id = id
         self.name = name
         self.note = note
+        self.scheduledWeekdaysJSON = scheduledWeekdaysJSON
         self.archivedAt = archivedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -317,7 +541,8 @@ public struct StrengthRoutineRow: Equatable, Codable, Sendable, Identifiable {
 
     static func decode(_ row: Row) -> StrengthRoutineRow {
         StrengthRoutineRow(
-            id: row["id"], name: row["name"], note: row["note"], archivedAt: row["archivedAt"],
+            id: row["id"], name: row["name"], note: row["note"],
+            scheduledWeekdaysJSON: row["scheduledWeekdaysJSON"], archivedAt: row["archivedAt"],
             createdAt: row["createdAt"], updatedAt: row["updatedAt"]
         )
     }
@@ -334,6 +559,7 @@ public struct StrengthRoutineExerciseRow: Equatable, Codable, Sendable, Identifi
     public var targetRPE: Double?
     public var restSeconds: Int
     public var note: String?
+    public var planJSON: String?
     public var createdAt: Int
     public var updatedAt: Int
 
@@ -341,6 +567,7 @@ public struct StrengthRoutineExerciseRow: Equatable, Codable, Sendable, Identifi
         id: String, routineId: String, exerciseId: String, position: Int,
         targetSets: Int = 3, targetRepsMin: Int? = nil, targetRepsMax: Int? = nil,
         targetRPE: Double? = nil, restSeconds: Int = 120, note: String? = nil,
+        planJSON: String? = nil,
         createdAt: Int, updatedAt: Int
     ) {
         self.id = id
@@ -353,6 +580,7 @@ public struct StrengthRoutineExerciseRow: Equatable, Codable, Sendable, Identifi
         self.targetRPE = targetRPE
         self.restSeconds = restSeconds
         self.note = note
+        self.planJSON = planJSON
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -363,6 +591,7 @@ public struct StrengthRoutineExerciseRow: Equatable, Codable, Sendable, Identifi
             position: row["position"], targetSets: row["targetSets"],
             targetRepsMin: row["targetRepsMin"], targetRepsMax: row["targetRepsMax"],
             targetRPE: row["targetRPE"], restSeconds: row["restSeconds"], note: row["note"],
+            planJSON: row["planJSON"],
             createdAt: row["createdAt"], updatedAt: row["updatedAt"]
         )
     }
@@ -540,15 +769,18 @@ extension WhoopStore {
         return try syncWrite { db in
             try ensureStrengthExerciseIDsExist(db, ids: cleanExercises.map(\.exerciseId))
             try db.execute(sql: """
-                INSERT INTO strengthRoutine (id, name, note, archivedAt, createdAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO strengthRoutine
+                    (id, name, note, scheduledWeekdaysJSON, archivedAt, createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     note = excluded.note,
+                    scheduledWeekdaysJSON = excluded.scheduledWeekdaysJSON,
                     archivedAt = excluded.archivedAt,
                     updatedAt = excluded.updatedAt
                 """, arguments: [
-                    cleanRoutine.id, cleanRoutine.name, cleanRoutine.note, cleanRoutine.archivedAt,
+                    cleanRoutine.id, cleanRoutine.name, cleanRoutine.note,
+                    cleanRoutine.scheduledWeekdaysJSON, cleanRoutine.archivedAt,
                     cleanRoutine.createdAt, cleanRoutine.updatedAt,
                 ])
             try db.execute(sql: "DELETE FROM strengthRoutineExercise WHERE routineId = ?",
@@ -673,7 +905,8 @@ extension WhoopStore {
                     COALESCE(SUM(CASE WHEN st.loadKg IS NOT NULL AND st.reps IS NOT NULL
                                       THEN 1 ELSE 0 END), 0) AS loadedVolumeSetCount
                 FROM strengthSession s
-                LEFT JOIN strengthSet st ON st.sessionId = s.id AND st.completedAt IS NOT NULL
+                LEFT JOIN strengthSet st ON st.sessionId = s.id
+                    AND st.completedAt IS NOT NULL AND st.setType <> 'warmup'
                 WHERE s.startedAt >= ? AND s.startedAt <= ? AND s.endedAt IS NOT NULL
                 """, arguments: [from, to])
             return StrengthSummary(
@@ -698,7 +931,7 @@ extension WhoopStore {
                     MAX(CASE WHEN loadKg IS NOT NULL AND reps IS NOT NULL
                              THEN loadKg * reps END) AS bestSetVolumeKg
                 FROM strengthSet
-                WHERE exerciseId = ? AND completedAt IS NOT NULL
+                WHERE exerciseId = ? AND completedAt IS NOT NULL AND setType <> 'warmup'
                 """, arguments: [exerciseId])
             return StrengthExerciseProgress(
                 exerciseId: exerciseId,
@@ -722,12 +955,12 @@ extension WhoopStore {
         try db.execute(sql: """
             INSERT INTO strengthRoutineExercise
                 (id, routineId, exerciseId, position, targetSets, targetRepsMin, targetRepsMax,
-                 targetRPE, restSeconds, note, createdAt, updatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 targetRPE, restSeconds, note, planJSON, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, arguments: [
                 row.id, row.routineId, row.exerciseId, row.position, row.targetSets,
                 row.targetRepsMin, row.targetRepsMax, row.targetRPE, row.restSeconds, row.note,
-                row.createdAt, row.updatedAt,
+                row.planJSON, row.createdAt, row.updatedAt,
             ])
     }
 

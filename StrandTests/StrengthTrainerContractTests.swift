@@ -36,16 +36,65 @@ final class StrengthTrainerContractTests: XCTestCase {
 
         XCTAssertTrue(editorSource.contains(".interactiveDismissDisabled()"))
         XCTAssertTrue(editorSource.contains("if await persist(silently: false) { dismiss() }"))
+        XCTAssertTrue(editorSource.contains("@State private var pendingSave = false"))
+        XCTAssertTrue(editorSource.contains("} while succeeded && pendingSave"))
+        XCTAssertTrue(editorSource.contains("completed.completedAt = session.endedAt ?? now"))
         XCTAssertFalse(editorSource.contains(".accessibilityElement(children: .combine)"))
+    }
+
+    func testRoutineAndCustomEditorsCannotSwipeAwayUnsavedChanges() throws {
+        let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
+
+        XCTAssertTrue(
+            source.contains(
+                """
+                StrengthRoutineEditor(
+                                    initial: target.routine,
+                                    exercises: snapshot.exercises,
+                                    massUnit: massUnit
+                                )
+                                .environmentObject(repo)
+                                .interactiveDismissDisabled()
+                """
+            )
+        )
+        XCTAssertTrue(
+            source.contains(
+                """
+                StrengthCustomExerciseEditor()
+                                .environmentObject(repo)
+                                .interactiveDismissDisabled()
+                """
+            )
+        )
+    }
+
+    func testRecentSessionTotalsExcludeWarmupSets() throws {
+        let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
+
+        XCTAssertTrue(
+            source.contains(
+                """
+                let completed = session.sets.filter {
+                            $0.completedAt != nil && $0.setType != "warmup"
+                        }
+                """
+            )
+        )
     }
 
     func testRestTargetIsPersistedAcrossEveryEditorMutation() throws {
         let source = try sourceText("Strand/Screens/StrengthTrainerView.swift")
         let repository = try sourceText("Strand/Data/StrengthTrainingRepository.swift")
+        let planner = try sourceText(
+            "Packages/WhoopStore/Sources/WhoopStore/StrengthWorkoutPlanning.swift"
+        )
 
-        XCTAssertTrue(repository.contains("restSeconds: prescription.restSeconds"))
+        XCTAssertTrue(repository.contains("StrengthWorkoutPlanner.resolvedRestSeconds("))
+        XCTAssertTrue(repository.contains("continuesSuperset: continuesSuperset"))
+        XCTAssertTrue(planner.contains("if target.setType == \"warmup\""))
         XCTAssertTrue(source.contains("restSeconds: first.restSeconds ?? prescription?.restSeconds ?? 120"))
-        XCTAssertTrue(source.contains("copy.restSeconds = block.restSeconds"))
+        XCTAssertTrue(source.contains("restSeconds: blocks[index].restSeconds"))
         XCTAssertTrue(source.contains("blocks[index].sets[setIndex].restSeconds = seconds"))
         XCTAssertTrue(source.contains("Task { await persist(silently: true) }"))
     }

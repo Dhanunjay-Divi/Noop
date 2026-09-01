@@ -8,6 +8,24 @@ import UIKit
 /// Local-first strength logging. Generic `WorkoutRow` history remains the imported/cardio summary
 /// layer; this screen owns normalized exercises, routines, sessions, and sets.
 struct StrengthTrainerView: View {
+    private enum GymTab: String, CaseIterable, Identifiable {
+        case today
+        case plan
+        case library
+        case progress
+
+        var id: String { rawValue }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .today: "appwide.gym.tab_today"
+            case .plan: "appwide.gym.tab_plan"
+            case .library: "appwide.gym.tab_library"
+            case .progress: "appwide.gym.tab_progress"
+            }
+        }
+    }
+
     private struct EditorTarget: Identifiable {
         let snapshot: StrengthSessionSnapshot
         let id: String
@@ -25,6 +43,16 @@ struct StrengthTrainerView: View {
         var id: String { exercise.id }
     }
 
+    private struct RoutineEditorTarget: Identifiable {
+        let routine: StrengthRoutineSnapshot?
+        let id: String
+
+        init(_ routine: StrengthRoutineSnapshot? = nil) {
+            self.routine = routine
+            id = routine?.routine.id ?? "new"
+        }
+    }
+
     @EnvironmentObject private var repo: Repository
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
@@ -36,6 +64,12 @@ struct StrengthTrainerView: View {
     @State private var editor: EditorTarget?
     @State private var exerciseDetail: ExerciseDetailTarget?
     @State private var deleteCandidate: StrengthSessionSnapshot?
+    @State private var selectedTab = GymTab.today
+    @State private var routineEditor: RoutineEditorTarget?
+    @State private var showingCustomExercise = false
+    @State private var libraryQuery = ""
+    @State private var libraryMuscle = "all"
+    @State private var libraryEquipment = "all"
     @State private var errorMessage: String?
     @State private var reloadToken = 0
     @AppStorage("strength.goal.weeklySessions") private var weeklySessionGoal = 3
@@ -60,17 +94,27 @@ struct StrengthTrainerView: View {
                 topBackground: liquidScaffoldSky()
             ) {
                 if let snapshot {
-                    if let active = snapshot.activeSession {
-                        activeSessionCard(active)
+                    gymTabPicker
+                    switch selectedTab {
+                    case .today:
+                        if let active = snapshot.activeSession {
+                            activeSessionCard(active)
+                        }
+                        todayPlanSection(snapshot)
+                        startSection(snapshot)
+                        weeklyGoalsSection(snapshot)
+                        historySection(snapshot)
+                    case .plan:
+                        weekScheduleSection(snapshot)
+                        routineManagementSection(snapshot)
+                    case .library:
+                        exerciseLibrarySection(snapshot)
+                    case .progress:
+                        summarySection(snapshot.summary)
+                        muscleFocusSection(snapshot)
+                        exerciseProgressSection(snapshot)
                     }
-                    startSection(snapshot)
-                    weeklyGoalsSection(snapshot)
-                    summarySection(snapshot.summary)
-                    muscleFocusSection(snapshot)
-                    routineSection(snapshot)
-                    exerciseProgressSection(snapshot)
-                    historySection(snapshot)
-                    honestyCard
+                    if selectedTab == .progress { honestyCard }
                 } else if loading {
                     ScreenStateCard(
                         kind: .loading,
@@ -125,6 +169,28 @@ struct StrengthTrainerView: View {
             .noopSheetPresentation(largeFirst: true)
             #endif
         }
+        .sheet(item: $routineEditor, onDismiss: { reloadToken += 1 }) { target in
+            if let snapshot {
+                StrengthRoutineEditor(
+                    initial: target.routine,
+                    exercises: snapshot.exercises,
+                    massUnit: massUnit
+                )
+                .environmentObject(repo)
+                .interactiveDismissDisabled()
+                #if os(iOS)
+                .noopSheetPresentation(largeFirst: true)
+                #endif
+            }
+        }
+        .sheet(isPresented: $showingCustomExercise, onDismiss: { reloadToken += 1 }) {
+            StrengthCustomExerciseEditor()
+                .environmentObject(repo)
+                .interactiveDismissDisabled()
+                #if os(iOS)
+                .noopSheetPresentation(largeFirst: true)
+                #endif
+        }
         .confirmationDialog(
             "Delete this strength session?",
             isPresented: Binding(
@@ -150,6 +216,294 @@ struct StrengthTrainerView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+    }
+
+    private var gymTabPicker: some View {
+        Picker("appwide.gym.gym_view", selection: $selectedTab) {
+            ForEach(GymTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("noop.strength.tabs")
+    }
+
+    private func todayPlanSection(_ data: StrengthTrainerSnapshot) -> some View {
+        let weekday = isoWeekday(Date())
+        let scheduled = data.routines.filter {
+            StrengthTrainingContract.scheduledWeekdays(
+                from: $0.routine.scheduledWeekdaysJSON
+            ).contains(weekday)
+        }
+        return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader(
+                "appwide.gym.todays_training",
+                overline: LocalizedStringKey(Date().formatted(.dateTime.weekday(.wide)))
+            )
+            if scheduled.isEmpty {
+                NoopCard {
+                    HStack(spacing: NoopMetrics.space3) {
+                        Image(systemName: "moon.zzz")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .frame(width: 42, height: 42)
+                            .background(StrandPalette.surfaceInset, in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("appwide.gym.no_routine_scheduled")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("appwide.gym.no_routine_scheduled_body")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                        Spacer()
+                        Button("appwide.gym.plan") { selectedTab = .plan }
+                            .buttonStyle(NoopButtonStyle(.secondary))
+                    }
+                }
+            } else {
+                ForEach(scheduled, id: \.routine.id) { routine in
+                    NoopCard(tint: StrandPalette.effortColor) {
+                        HStack(spacing: NoopMetrics.space3) {
+                            Image(systemName: "dumbbell.fill")
+                                .foregroundStyle(StrandPalette.effortColor)
+                                .frame(width: 42, height: 42)
+                                .background(StrandPalette.effortColor.opacity(0.12), in: Circle())
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(routine.routine.name)
+                                    .font(StrandFont.title2)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text(routineDetail(routine, exercises: data.exercises))
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Button {
+                                Task { await startSession(routine: routine) }
+                            } label: {
+                                Image(systemName: "play.fill")
+                                    .frame(width: 42, height: 42)
+                            }
+                            .buttonStyle(NoopButtonStyle(.primary))
+                            .disabled(starting || data.activeSession != nil)
+                            .accessibilityLabel("Start \(routine.routine.name)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func weekScheduleSection(_ data: StrengthTrainerSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader(
+                "appwide.gym.week_schedule",
+                overline: "appwide.gym.repeatable_plan"
+            )
+            NoopCard(padding: 0) {
+                VStack(spacing: 0) {
+                    ForEach(1...7, id: \.self) { day in
+                        let assigned = data.routines.filter {
+                            StrengthTrainingContract.scheduledWeekdays(
+                                from: $0.routine.scheduledWeekdaysJSON
+                            ).contains(day)
+                        }
+                        HStack(spacing: NoopMetrics.space3) {
+                            Text(weekdayName(day))
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .frame(width: 96, alignment: .leading)
+                            if assigned.isEmpty {
+                                Text("appwide.gym.rest")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(StrandPalette.surfaceInset, in: Capsule())
+                            } else {
+                                Text(assigned.map(\.routine.name).joined(separator: " · "))
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.effortColor)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                        }
+                        .padding(NoopMetrics.space4)
+                        if day < 7 {
+                            Divider().padding(.leading, NoopMetrics.space4)
+                                .foregroundStyle(StrandPalette.hairline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func routineManagementSection(_ data: StrengthTrainerSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader(
+                "Routines",
+                overline: "Sets, targets, and progression",
+                trailing: data.routines.isEmpty ? nil : "\(data.routines.count)"
+            )
+            NoopButton("New routine", systemImage: "plus", kind: .primary, fullWidth: true) {
+                routineEditor = RoutineEditorTarget()
+            }
+            if data.routines.isEmpty {
+                ScreenStateCard(
+                    kind: .empty,
+                    title: "Build your first routine",
+                    message: "Choose exercises, targets, warmups, rest, and the days you train.",
+                    symbol: "calendar.badge.plus"
+                )
+            } else {
+                NoopCard(padding: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(data.routines.enumerated()), id: \.element.routine.id) { index, routine in
+                            Button {
+                                routineEditor = RoutineEditorTarget(routine)
+                            } label: {
+                                HStack(spacing: NoopMetrics.space3) {
+                                    Image(systemName: "list.bullet.clipboard")
+                                        .foregroundStyle(StrandPalette.effortColor)
+                                        .frame(width: 38, height: 38)
+                                        .background(StrandPalette.surfaceInset, in: Circle())
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(routine.routine.name)
+                                            .font(StrandFont.headline)
+                                            .foregroundStyle(StrandPalette.textPrimary)
+                                        Text(routineDetail(routine, exercises: data.exercises))
+                                            .font(StrandFont.footnote)
+                                            .foregroundStyle(StrandPalette.textSecondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                }
+                                .padding(NoopMetrics.space4)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if index < data.routines.count - 1 {
+                                Divider().padding(.leading, 68)
+                                    .foregroundStyle(StrandPalette.hairline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func exerciseLibrarySection(_ data: StrengthTrainerSnapshot) -> some View {
+        let query = libraryQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = data.exercises.filter { exercise in
+            (query.isEmpty
+                || strengthExerciseName(exercise).localizedCaseInsensitiveContains(query)
+                || strengthDescriptorPair(exercise).localizedCaseInsensitiveContains(query))
+                && (libraryMuscle == "all" || exercise.primaryMuscle == libraryMuscle)
+                && (libraryEquipment == "all" || exercise.equipment == libraryEquipment)
+        }
+        return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader(
+                "appwide.gym.exercise_library",
+                overline: "appwide.gym.search_and_filter",
+                trailing: "\(filtered.count)"
+            )
+            TextField("Search exercises", text: $libraryQuery)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: NoopMetrics.space3) {
+                Menu {
+                    Picker("appwide.gym.muscle", selection: $libraryMuscle) {
+                        Text("appwide.gym.all_muscles").tag("all")
+                        ForEach(StrengthTrainingContract.muscles, id: \.self) {
+                            Text(strengthDescriptor($0)).tag($0)
+                        }
+                    }
+                } label: {
+                    Label(
+                        libraryMuscle == "all"
+                            ? String(localized: "appwide.gym.all_muscles")
+                            : strengthDescriptor(libraryMuscle),
+                        systemImage: "figure.arms.open"
+                    )
+                }
+                .buttonStyle(NoopButtonStyle(.secondary))
+                Menu {
+                    Picker("appwide.gym.equipment", selection: $libraryEquipment) {
+                        Text("appwide.gym.any_equipment").tag("all")
+                        ForEach(StrengthTrainingContract.equipment, id: \.self) {
+                            Text(strengthDescriptor($0)).tag($0)
+                        }
+                    }
+                } label: {
+                    Label(
+                        libraryEquipment == "all"
+                            ? String(localized: "appwide.gym.any_equipment")
+                            : strengthDescriptor(libraryEquipment),
+                        systemImage: "slider.horizontal.3"
+                    )
+                }
+                .buttonStyle(NoopButtonStyle(.secondary))
+            }
+            NoopButton(
+                "Create exercise",
+                systemImage: "plus",
+                kind: .primary,
+                fullWidth: true
+            ) {
+                showingCustomExercise = true
+            }
+            if filtered.isEmpty {
+                ScreenStateCard(
+                    kind: .empty,
+                    title: "No matching exercises",
+                    message: "Change the filters or create an exercise for your movement.",
+                    symbol: "magnifyingglass"
+                )
+            } else {
+                LazyVStack(spacing: NoopMetrics.space3) {
+                    ForEach(filtered) { exercise in
+                        NoopCard {
+                            HStack(spacing: NoopMetrics.space3) {
+                                Image(systemName: exercise.equipment == "bodyweight"
+                                      ? "figure.core.training" : "dumbbell.fill")
+                                    .foregroundStyle(StrandPalette.effortColor)
+                                    .frame(width: 42, height: 42)
+                                    .background(StrandPalette.surfaceInset, in: Circle())
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(strengthExerciseName(exercise))
+                                        .font(StrandFont.headline)
+                                        .foregroundStyle(StrandPalette.textPrimary)
+                                    Text(strengthDescriptorPair(exercise))
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textSecondary)
+                                }
+                                Spacer()
+                                if exercise.isCustom {
+                                Text("appwide.gym.custom")
+                                        .font(StrandFont.caption)
+                                        .foregroundStyle(StrandPalette.accent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func isoWeekday(_ date: Date) -> Int {
+        let apple = Calendar.current.component(.weekday, from: date)
+        return ((apple + 5) % 7) + 1
+    }
+
+    private func weekdayName(_ isoDay: Int) -> String {
+        let index = isoDay % 7
+        return Calendar.current.weekdaySymbols[index]
     }
 
     private func startSection(_ data: StrengthTrainerSnapshot) -> some View {
@@ -725,7 +1079,9 @@ struct StrengthTrainerView: View {
         _ session: StrengthSessionSnapshot,
         exercises: [StrengthExerciseRow]
     ) -> String {
-        let completed = session.sets.filter { $0.completedAt != nil }
+        let completed = session.sets.filter {
+            $0.completedAt != nil && $0.setType != "warmup"
+        }
         let names = orderedExerciseIDs(session.sets).compactMap { id in
             exercises.first(where: { $0.id == id }).map(strengthExerciseName)
         }
@@ -766,6 +1122,12 @@ private struct StrengthExerciseBlock: Identifiable {
     var position: Int
     var restSeconds: Int
     var sets: [StrengthSetRow]
+    var supersetGroup: Int?
+}
+
+private struct StrengthNextSetTarget {
+    let block: StrengthExerciseBlock
+    let set: StrengthSetRow
 }
 
 private struct StrengthSessionEditor: View {
@@ -782,6 +1144,7 @@ private struct StrengthSessionEditor: View {
     @State private var routineName = ""
     @State private var showingRoutinePrompt = false
     @State private var saving = false
+    @State private var pendingSave = false
     @State private var restUntil: Date?
     @State private var errorMessage: String?
 
@@ -810,7 +1173,10 @@ private struct StrengthSessionEditor: View {
                 exercise: exercise,
                 position: position,
                 restSeconds: first.restSeconds ?? prescription?.restSeconds ?? 120,
-                sets: (grouped[position] ?? []).sorted { $0.setPosition < $1.setPosition }
+                sets: (grouped[position] ?? []).sorted { $0.setPosition < $1.setPosition },
+                supersetGroup: prescription.flatMap {
+                    StrengthTrainingContract.exercisePlan(from: $0.planJSON).supersetGroup
+                }
             )
         }
         _blocks = State(initialValue: built)
@@ -833,6 +1199,7 @@ private struct StrengthSessionEditor: View {
                         symbol: "dumbbell"
                     )
                 } else {
+                    nextSetGuide
                     ForEach($blocks) { $block in
                         exerciseCard($block)
                     }
@@ -943,6 +1310,94 @@ private struct StrengthSessionEditor: View {
         }
     }
 
+    @ViewBuilder private var nextSetGuide: some View {
+        if let target = setQueue.first(where: { $0.set.completedAt == nil }) {
+            NoopCard(tint: StrandPalette.effortColor) {
+                HStack(spacing: NoopMetrics.space3) {
+                    Image(systemName: "play.fill")
+                        .foregroundStyle(StrandPalette.effortColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("appwide.gym.up_next")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.effortColor)
+                        Text(strengthExerciseName(target.block.exercise))
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(nextSetDetail(target))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    private var setQueue: [StrengthNextSetTarget] {
+        let ordered = blocks.sorted { $0.position < $1.position }
+        var handledGroups = Set<Int>()
+        var result: [StrengthNextSetTarget] = []
+        for block in ordered {
+            guard let group = block.supersetGroup else {
+                result.append(contentsOf: block.sets.sorted {
+                    $0.setPosition < $1.setPosition
+                }.map { StrengthNextSetTarget(block: block, set: $0) })
+                continue
+            }
+            guard handledGroups.insert(group).inserted else { continue }
+            let members = ordered.filter { $0.supersetGroup == group }
+            for member in members {
+                result.append(contentsOf: member.sets
+                    .filter { $0.setType == "warmup" }
+                    .map { StrengthNextSetTarget(block: member, set: $0) })
+            }
+            let workSets = Dictionary(
+                uniqueKeysWithValues: members.map { member in
+                    (member.id, member.sets.filter { $0.setType != "warmup" })
+                }
+            )
+            let setCount = workSets.values.map(\.count).max() ?? 0
+            for setIndex in 0..<setCount {
+                for member in members {
+                    guard let sets = workSets[member.id], sets.indices.contains(setIndex) else {
+                        continue
+                    }
+                    result.append(
+                        StrengthNextSetTarget(block: member, set: sets[setIndex])
+                    )
+                }
+            }
+        }
+        return result
+    }
+
+    private func nextSetDetail(_ target: StrengthNextSetTarget) -> String {
+        var parts: [String] = []
+        if let group = target.block.supersetGroup {
+            parts.append(
+                String.localizedStringWithFormat(
+                    String(localized: "appwide.gym.superset_format"),
+                    supersetLabel(group)
+                )
+            )
+        }
+        parts.append(
+            String.localizedStringWithFormat(
+                String(localized: "appwide.gym.set_guide_format"),
+                target.set.setPosition + 1,
+                strengthSetType(target.set.setType)
+            )
+        )
+        return parts.joined(separator: " · ")
+    }
+
+    private func supersetLabel(_ group: Int) -> String {
+        guard group >= 1, group <= 26,
+              let scalar = UnicodeScalar(64 + group)
+        else { return "\(group)" }
+        return String(Character(scalar))
+    }
+
     private func exerciseCard(_ block: Binding<StrengthExerciseBlock>) -> some View {
         NoopCard(padding: 0, tint: StrandPalette.effortColor) {
             VStack(spacing: 0) {
@@ -962,6 +1417,16 @@ private struct StrengthSessionEditor: View {
                             .foregroundStyle(StrandPalette.textSecondary)
                     }
                     Spacer()
+                    if let group = block.wrappedValue.supersetGroup {
+                        Text(
+                            String.localizedStringWithFormat(
+                                String(localized: "appwide.gym.superset_format"),
+                                supersetLabel(group)
+                            )
+                        )
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.effortColor)
+                    }
                     Menu {
                         Picker(
                             "Rest",
@@ -1035,7 +1500,10 @@ private struct StrengthSessionEditor: View {
         let completed = set.wrappedValue.completedAt != nil
         return HStack(spacing: 8) {
             Button {
-                toggleCompleted(set: set, restSeconds: block.wrappedValue.restSeconds)
+                toggleCompleted(
+                    set: set,
+                    restSeconds: set.wrappedValue.restSeconds ?? block.wrappedValue.restSeconds
+                )
             } label: {
                 Image(systemName: completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22, weight: .semibold))
@@ -1074,6 +1542,7 @@ private struct StrengthSessionEditor: View {
                     Text(strengthSetType("working")).tag("working")
                     Text(strengthSetType("warmup")).tag("warmup")
                     Text(strengthSetType("drop")).tag("drop")
+                    Text(strengthSetType("rest_pause")).tag("rest_pause")
                     Text(strengthSetType("failure")).tag("failure")
                     Text(strengthSetType("bodyweight")).tag("bodyweight")
                 }
@@ -1135,6 +1604,7 @@ private struct StrengthSessionEditor: View {
     private func addExercise(_ exercise: StrengthExerciseRow) {
         exercisePicker = false
         let now = Int(Date().timeIntervalSince1970)
+        let recordedAt = session.endedAt ?? now
         let position = blocks.count
         let sets = (0..<3).map { index in
             StrengthSetRow(
@@ -1144,7 +1614,7 @@ private struct StrengthSessionEditor: View {
                 exercisePosition: position,
                 setPosition: index,
                 setType: exercise.equipment == "bodyweight" ? "bodyweight" : "working",
-                createdAt: now,
+                createdAt: recordedAt,
                 updatedAt: now
             )
         }
@@ -1154,7 +1624,8 @@ private struct StrengthSessionEditor: View {
                 exercise: exercise,
                 position: position,
                 restSeconds: 120,
-                sets: sets
+                sets: sets,
+                supersetGroup: nil
             )
         )
         Task { await persist(silently: true) }
@@ -1163,6 +1634,7 @@ private struct StrengthSessionEditor: View {
     private func addSet(to blockID: String) {
         guard let index = blocks.firstIndex(where: { $0.id == blockID }) else { return }
         let now = Int(Date().timeIntervalSince1970)
+        let recordedAt = session.endedAt ?? now
         let previous = blocks[index].sets.last
         blocks[index].sets.append(
             StrengthSetRow(
@@ -1177,7 +1649,7 @@ private struct StrengthSessionEditor: View {
                 durationS: previous?.durationS,
                 rpe: nil,
                 restSeconds: blocks[index].restSeconds,
-                createdAt: now,
+                createdAt: recordedAt,
                 updatedAt: now
             )
         )
@@ -1203,7 +1675,6 @@ private struct StrengthSessionEditor: View {
             for setIndex in blocks[blockIndex].sets.indices {
                 blocks[blockIndex].sets[setIndex].exercisePosition = blockIndex
                 blocks[blockIndex].sets[setIndex].setPosition = setIndex
-                blocks[blockIndex].sets[setIndex].restSeconds = blocks[blockIndex].restSeconds
             }
         }
     }
@@ -1223,13 +1694,17 @@ private struct StrengthSessionEditor: View {
             Task { await persist(silently: true) }
             return
         }
-        guard set.wrappedValue.reps != nil || set.wrappedValue.durationS != nil else {
-            errorMessage = String(localized: "Add reps or seconds before completing this set.")
+        let now = Int(Date().timeIntervalSince1970)
+        var completed = set.wrappedValue
+        completed.completedAt = session.endedAt ?? now
+        completed.updatedAt = now
+        do {
+            completed = try StrengthTrainingContract.validated(completed)
+        } catch {
+            errorMessage = error.localizedDescription
             return
         }
-        let now = Int(Date().timeIntervalSince1970)
-        set.wrappedValue.completedAt = now
-        set.wrappedValue.updatedAt = now
+        set.wrappedValue = completed
         if restSeconds > 0 { restUntil = Date().addingTimeInterval(TimeInterval(restSeconds)) }
         Task { await persist(silently: true) }
     }
@@ -1240,36 +1715,50 @@ private struct StrengthSessionEditor: View {
 
     private func finish() async {
         guard completedSetCount > 0 else { return }
-        let now = Int(Date().timeIntervalSince1970)
-        let latestCompleted = blocks.flatMap(\.sets).compactMap(\.completedAt).max() ?? now
-        session.endedAt = now - session.startedAt <= StrengthTrainingContract.maxDurationSeconds
-            ? now
-            : min(latestCompleted, session.startedAt + StrengthTrainingContract.maxDurationSeconds)
+        if session.endedAt == nil {
+            let now = Int(Date().timeIntervalSince1970)
+            let latestCompleted = blocks.flatMap(\.sets).compactMap(\.completedAt).max() ?? now
+            session.endedAt = now - session.startedAt <= StrengthTrainingContract.maxDurationSeconds
+                ? now
+                : min(latestCompleted, session.startedAt + StrengthTrainingContract.maxDurationSeconds)
+        }
         if await persist(silently: false) { dismiss() }
     }
 
     @discardableResult
     private func persist(silently: Bool) async -> Bool {
-        guard !saving else { return false }
-        saving = true
-        defer { saving = false }
-        let now = Int(Date().timeIntervalSince1970)
-        session.updatedAt = now
-        let rows = blocks.flatMap { block in
-            block.sets.map { row in
-                var copy = row
-                copy.restSeconds = block.restSeconds
-                copy.updatedAt = now
-                return copy
+        if saving {
+            pendingSave = true
+            if silently { return true }
+            while saving {
+                try? await Task.sleep(for: .milliseconds(20))
             }
         }
-        do {
-            _ = try await repo.saveStrengthSession(session, sets: rows)
-            return true
-        } catch {
-            if !silently { errorMessage = error.localizedDescription }
-            return false
-        }
+
+        var succeeded = true
+        repeat {
+            pendingSave = false
+            saving = true
+            let now = Int(Date().timeIntervalSince1970)
+            session.updatedAt = now
+            let rows = blocks.flatMap { block in
+                block.sets.map { row in
+                    var copy = row
+                    copy.updatedAt = now
+                    return copy
+                }
+            }
+            do {
+                _ = try await repo.saveStrengthSession(session, sets: rows)
+            } catch {
+                if !silently { errorMessage = error.localizedDescription }
+                succeeded = false
+            }
+            saving = false
+        } while succeeded && pendingSave
+
+        if !succeeded { pendingSave = false }
+        return succeeded
     }
 
     private func saveRoutine() async {
@@ -1283,26 +1772,98 @@ private struct StrengthSessionEditor: View {
             createdAt: now,
             updatedAt: now
         )
-        let prescriptions = blocks.map { block -> StrengthRoutineExerciseRow in
-            let reps = block.sets.compactMap(\.reps)
-            return StrengthRoutineExerciseRow(
-                id: UUID().uuidString.lowercased(),
-                routineId: routineID,
-                exerciseId: block.exercise.id,
-                position: block.position,
-                targetSets: max(1, block.sets.count),
-                targetRepsMin: reps.min(),
-                targetRepsMax: reps.max(),
-                restSeconds: block.restSeconds,
-                createdAt: now,
-                updatedAt: now
-            )
-        }
+        let sourceRoutine = routines.first { $0.routine.id == session.routineId }
         do {
+            let prescriptions = try blocks.map { block -> StrengthRoutineExerciseRow in
+                let source = sourceRoutine?.exercises.first {
+                    $0.position == block.position && $0.exerciseId == block.exercise.id
+                }
+                let baseSets = routineBaseSets(for: block)
+                let reps = baseSets.compactMap(\.reps)
+                let plan = routinePlan(for: block, source: source, baseSets: baseSets)
+                guard let planJSON = StrengthTrainingContract.encodeExercisePlan(plan) else {
+                    throw StrengthTrainingContract.ValidationError.invalidRoutineExercise
+                }
+                return StrengthRoutineExerciseRow(
+                    id: UUID().uuidString.lowercased(),
+                    routineId: routineID,
+                    exerciseId: block.exercise.id,
+                    position: block.position,
+                    targetSets: max(1, baseSets.count),
+                    targetRepsMin: plan.mode == "timed" ? nil : reps.min(),
+                    targetRepsMax: plan.mode == "timed" ? nil : reps.max(),
+                    targetRPE: source?.targetRPE,
+                    restSeconds: source?.restSeconds ?? block.restSeconds,
+                    note: source?.note,
+                    planJSON: planJSON,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            }
             _ = try await repo.saveStrengthRoutine(routine, exercises: prescriptions)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func routineBaseSets(for block: StrengthExerciseBlock) -> [StrengthSetRow] {
+        let base = block.sets.filter {
+            !["warmup", "drop", "rest_pause"].contains($0.setType)
+        }
+        if !base.isEmpty { return base }
+        let nonWarmups = block.sets.filter { $0.setType != "warmup" }
+        return nonWarmups.isEmpty ? block.sets : nonWarmups
+    }
+
+    private func routinePlan(
+        for block: StrengthExerciseBlock,
+        source: StrengthRoutineExerciseRow?,
+        baseSets: [StrengthSetRow]
+    ) -> StrengthExercisePlan {
+        var plan = source.map {
+            StrengthTrainingContract.exercisePlan(from: $0.planJSON)
+        } ?? StrengthExercisePlan()
+        let timed = block.exercise.movementPattern == "cardio"
+            || (baseSets.contains { $0.durationS != nil } && !baseSets.contains { $0.reps != nil })
+        plan.mode = timed ? "timed" : "reps"
+        plan.supersetGroup = block.supersetGroup
+
+        if timed {
+            if !["none", "time"].contains(plan.progression) { plan.progression = "time" }
+            plan.targetDurationS = baseSets.compactMap(\.durationS).max()
+                ?? plan.targetDurationS
+                ?? 30
+            plan.warmupSets = 0
+            plan.setStyle = "straight"
+            return plan
+        }
+
+        if plan.progression == "time" { plan.progression = "double_progression" }
+        plan.targetDurationS = nil
+        plan.targetLoadKg = baseSets.compactMap(\.loadKg).max() ?? plan.targetLoadKg
+        plan.warmupSets = min(5, block.sets.filter { $0.setType == "warmup" }.count)
+        if block.sets.contains(where: { $0.setType == "drop" }) {
+            plan.setStyle = "drop"
+            if let workLoad = baseSets.compactMap(\.loadKg).max(),
+               let dropLoad = block.sets.first(where: { $0.setType == "drop" })?.loadKg,
+               workLoad > 0, dropLoad < workLoad {
+                plan.dropPercent = min(
+                    50,
+                    max(5, Int(((1 - dropLoad / workLoad) * 100).rounded()))
+                )
+            }
+        } else if let restPauseIndex = block.sets.firstIndex(where: {
+            $0.setType == "rest_pause"
+        }) {
+            plan.setStyle = "rest_pause"
+            if restPauseIndex > 0,
+               let pause = block.sets[restPauseIndex - 1].restSeconds {
+                plan.restPauseSeconds = min(60, max(5, pause))
+            }
+        } else {
+            plan.setStyle = "straight"
+        }
+        return plan
     }
 
     private func integerBinding(_ value: Binding<Int?>) -> Binding<String> {
@@ -1391,6 +1952,673 @@ private enum UIKeyboardTypeCompat {
         }
     }
     #endif
+}
+
+private struct StrengthRoutineExerciseDraft: Identifiable {
+    let id: String
+    var exercise: StrengthExerciseRow
+    var targetSets: Int
+    var targetRepsMin: Int
+    var targetRepsMax: Int
+    var targetRPE: Double?
+    var restSeconds: Int
+    var note: String
+    var plan: StrengthExercisePlan
+    var createdAt: Int
+}
+
+private struct StrengthRoutineEditor: View {
+    @EnvironmentObject private var repo: Repository
+    @Environment(\.dismiss) private var dismiss
+
+    let exercises: [StrengthExerciseRow]
+    let massUnit: MassUnit
+
+    @State private var routineID: String
+    @State private var createdAt: Int
+    @State private var name: String
+    @State private var note: String
+    @State private var weekdays: Set<Int>
+    @State private var items: [StrengthRoutineExerciseDraft]
+    @State private var exercisePicker = false
+    @State private var saving = false
+    @State private var errorMessage: String?
+
+    init(
+        initial: StrengthRoutineSnapshot?,
+        exercises: [StrengthExerciseRow],
+        massUnit: MassUnit
+    ) {
+        self.exercises = exercises
+        self.massUnit = massUnit
+        let now = Int(Date().timeIntervalSince1970)
+        let byID = Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
+        _routineID = State(initialValue: initial?.routine.id ?? UUID().uuidString.lowercased())
+        _createdAt = State(initialValue: initial?.routine.createdAt ?? now)
+        _name = State(initialValue: initial?.routine.name ?? "")
+        _note = State(initialValue: initial?.routine.note ?? "")
+        _weekdays = State(initialValue: Set(
+            StrengthTrainingContract.scheduledWeekdays(
+                from: initial?.routine.scheduledWeekdaysJSON
+            )
+        ))
+        _items = State(initialValue: initial?.exercises.compactMap { row in
+            guard let exercise = byID[row.exerciseId] else { return nil }
+            return StrengthRoutineExerciseDraft(
+                id: row.id,
+                exercise: exercise,
+                targetSets: row.targetSets,
+                targetRepsMin: row.targetRepsMin ?? 8,
+                targetRepsMax: row.targetRepsMax ?? row.targetRepsMin ?? 8,
+                targetRPE: row.targetRPE,
+                restSeconds: row.restSeconds,
+                note: row.note ?? "",
+                plan: StrengthTrainingContract.exercisePlan(from: row.planJSON),
+                createdAt: row.createdAt
+            )
+        } ?? [])
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScreenScaffold(
+                title: LocalizedStringKey(
+                    name.isEmpty ? "appwide.gym.new_routine" : name
+                ),
+                subtitle: "appwide.gym.routine_editor_subtitle",
+                topBackground: liquidScaffoldSky()
+            ) {
+                NoopCard(tint: StrandPalette.effortColor) {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        TextField("Routine name", text: $name)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("appwide.gym.notes_optional", text: $note, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    SectionHeader(
+                        "appwide.gym.training_days",
+                        overline: "appwide.gym.weekly_schedule"
+                    )
+                    HStack(spacing: 6) {
+                        ForEach(1...7, id: \.self) { day in
+                            Button {
+                                if weekdays.contains(day) {
+                                    weekdays.remove(day)
+                                } else {
+                                    weekdays.insert(day)
+                                }
+                            } label: {
+                                Text(shortWeekday(day))
+                                    .font(StrandFont.caption.weight(.semibold))
+                                    .frame(maxWidth: .infinity, minHeight: 38)
+                                    .foregroundStyle(
+                                        weekdays.contains(day)
+                                            ? Color.white
+                                            : StrandPalette.textSecondary
+                                    )
+                                    .background(
+                                        weekdays.contains(day)
+                                            ? StrandPalette.effortColor
+                                            : StrandPalette.surfaceInset,
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                String.localizedStringWithFormat(
+                                    String(localized: "appwide.gym.training_day_format"),
+                                    fullWeekday(day)
+                                )
+                            )
+                            .accessibilityValue(weekdays.contains(day) ? "Selected" : "Not selected")
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    SectionHeader(
+                        "appwide.gym.exercises",
+                        overline: "appwide.gym.ordered_prescription",
+                        trailing: items.isEmpty ? nil : "\(items.count)"
+                    )
+                    if items.isEmpty {
+                        ScreenStateCard(
+                            kind: .empty,
+                            title: "appwide.gym.add_first_exercise",
+                            message: "appwide.gym.add_first_exercise_body",
+                            symbol: "dumbbell"
+                        )
+                    } else {
+                        ForEach($items) { $item in
+                            routineExerciseCard($item)
+                        }
+                    }
+                    NoopButton(
+                        "Add exercise",
+                        systemImage: "plus",
+                        kind: .secondary,
+                        fullWidth: true
+                    ) {
+                        exercisePicker = true
+                    }
+                }
+
+                NoopButton("Save routine", systemImage: "checkmark", kind: .primary, fullWidth: true) {
+                    Task { await save() }
+                }
+                .disabled(
+                    saving
+                        || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || items.isEmpty
+                )
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .sheet(isPresented: $exercisePicker) {
+            StrengthExercisePicker(
+                exercises: exercises.filter { exercise in
+                    !items.contains(where: { $0.exercise.id == exercise.id })
+                },
+                onPick: addExercise
+            )
+            #if os(iOS)
+            .noopSheetPresentation(largeFirst: true)
+            #endif
+        }
+        .alert("appwide.gym.routine", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func routineExerciseCard(
+        _ item: Binding<StrengthRoutineExerciseDraft>
+    ) -> some View {
+        let timed = item.wrappedValue.plan.mode == "timed"
+            || item.wrappedValue.exercise.movementPattern == "cardio"
+        return NoopCard(tint: StrandPalette.effortColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(spacing: NoopMetrics.space3) {
+                    Image(systemName: timed ? "timer" : "dumbbell.fill")
+                        .foregroundStyle(StrandPalette.effortColor)
+                        .frame(width: 38, height: 38)
+                        .background(StrandPalette.surfaceInset, in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(strengthExerciseName(item.wrappedValue.exercise))
+                            .font(StrandFont.headline)
+                        Text(strengthDescriptorPair(item.wrappedValue.exercise))
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer()
+                    Menu {
+                        Button("appwide.gym.move_exercise_up") {
+                            move(item.wrappedValue.id, by: -1)
+                        }
+                        Button("appwide.gym.move_exercise_down") {
+                            move(item.wrappedValue.id, by: 1)
+                        }
+                        Button("Remove", role: .destructive) {
+                            items.removeAll { $0.id == item.wrappedValue.id }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Exercise actions")
+                }
+
+                Picker("appwide.gym.mode", selection: modeBinding(item)) {
+                    Text("Reps").tag("reps")
+                    Text("appwide.gym.timed").tag("timed")
+                }
+                .pickerStyle(.segmented)
+                .disabled(item.wrappedValue.exercise.movementPattern == "cardio")
+
+                HStack(spacing: NoopMetrics.space3) {
+                    compactStepper(
+                        "appwide.gym.sets",
+                        value: item.targetSets,
+                        range: 1...StrengthTrainingContract.maxTargetSets
+                    )
+                    if timed {
+                        compactStepper(
+                            "appwide.gym.seconds",
+                            value: optionalInt(item.plan.targetDurationS, fallback: 30),
+                            range: 5...3_600,
+                            step: 5
+                        )
+                    } else {
+                        compactStepper(
+                            "appwide.gym.min_reps",
+                            value: item.targetRepsMin,
+                            range: 1...100
+                        )
+                        compactStepper(
+                            "appwide.gym.max_reps",
+                            value: item.targetRepsMax,
+                            range: 1...100
+                        )
+                    }
+                }
+
+                if !timed {
+                    HStack(spacing: NoopMetrics.space3) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(
+                                String.localizedStringWithFormat(
+                                    String(localized: "appwide.gym.starting_load_format"),
+                                    massUnit.rawValue
+                                )
+                            )
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            TextField("Optional", text: loadBinding(item.plan.targetLoadKg))
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                                .keyboardType(.decimalPad)
+                                #endif
+                        }
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("appwide.gym.load_step_kg")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            TextField("2.5", text: decimalText(item.plan.loadStepKg))
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                                .keyboardType(.decimalPad)
+                                #endif
+                        }
+                        compactStepper(
+                            "appwide.gym.warmups",
+                            value: item.plan.warmupSets,
+                            range: 0...5
+                        )
+                    }
+                    Toggle("appwide.gym.reps_per_side", isOn: item.plan.repsPerSide)
+                        .font(StrandFont.subhead)
+                }
+
+                HStack(spacing: NoopMetrics.space3) {
+                    Menu {
+                        Picker("Rest", selection: item.restSeconds) {
+                            Text("No timer").tag(0)
+                            Text("appwide.gym.rest_60_short").tag(60)
+                            Text("appwide.gym.rest_90_short").tag(90)
+                            Text("appwide.gym.rest_2_min_short").tag(120)
+                            Text("appwide.gym.rest_3_min_short").tag(180)
+                            Text("appwide.gym.rest_5_min_short").tag(300)
+                        }
+                    } label: {
+                        Label(restLabel(item.wrappedValue.restSeconds), systemImage: "timer")
+                    }
+                    .buttonStyle(NoopButtonStyle(.secondary))
+
+                    Menu {
+                        Picker("appwide.gym.progression", selection: item.plan.progression) {
+                            if timed {
+                                Text("appwide.gym.add_time").tag("time")
+                            } else {
+                                Text("appwide.gym.double_progression")
+                                    .tag("double_progression")
+                                Text("appwide.gym.linear_load").tag("linear")
+                            }
+                            Text("appwide.gym.no_automatic_change").tag("none")
+                        }
+                    } label: {
+                        Label(progressionLabel(item.wrappedValue.plan.progression),
+                              systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                    .buttonStyle(NoopButtonStyle(.secondary))
+
+                    Menu {
+                        Picker("appwide.gym.superset", selection: item.plan.supersetGroup) {
+                            Text("appwide.gym.no_superset").tag(Int?.none)
+                            ForEach(1...4, id: \.self) { group in
+                                Text(
+                                    String.localizedStringWithFormat(
+                                        String(localized: "appwide.gym.superset_format"),
+                                        supersetName(group)
+                                    )
+                                )
+                                .tag(Int?.some(group))
+                            }
+                        }
+                    } label: {
+                        Label(
+                            item.wrappedValue.plan.supersetGroup.map {
+                                String.localizedStringWithFormat(
+                                    String(localized: "appwide.gym.superset_format"),
+                                    supersetName($0)
+                                )
+                            } ?? String(localized: "appwide.gym.no_superset"),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                    .buttonStyle(NoopButtonStyle(.secondary))
+                }
+
+                if !timed {
+                    Picker("appwide.gym.final_set_style", selection: item.plan.setStyle) {
+                        Text("appwide.gym.straight").tag("straight")
+                        Text("appwide.gym.drop_set").tag("drop")
+                        Text("appwide.gym.rest_pause").tag("rest_pause")
+                    }
+                    .pickerStyle(.segmented)
+                    if item.wrappedValue.plan.setStyle == "drop" {
+                        compactStepper(
+                            "appwide.gym.drop_load_percent",
+                            value: item.plan.dropPercent,
+                            range: 5...50,
+                            step: 5
+                        )
+                    } else if item.wrappedValue.plan.setStyle == "rest_pause" {
+                        compactStepper(
+                            "appwide.gym.pause_seconds",
+                            value: item.plan.restPauseSeconds,
+                            range: 5...60,
+                            step: 5
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func compactStepper(
+        _ title: LocalizedStringKey,
+        value: Binding<Int>,
+        range: ClosedRange<Int>,
+        step: Int = 1
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Stepper(value: value, in: range, step: step) {
+                Text("\(value.wrappedValue)")
+                    .font(StrandFont.bodyNumber)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func optionalInt(_ binding: Binding<Int?>, fallback: Int) -> Binding<Int> {
+        Binding(
+            get: { binding.wrappedValue ?? fallback },
+            set: { binding.wrappedValue = $0 }
+        )
+    }
+
+    private func loadBinding(_ binding: Binding<Double?>) -> Binding<String> {
+        Binding(
+            get: {
+                guard let kg = binding.wrappedValue else { return "" }
+                let display = massUnit == .pounds ? UnitFormatter.kgToPounds(kg) : kg
+                return display.formatted(.number.precision(.fractionLength(0...1)))
+            },
+            set: { text in
+                let separator = Locale.current.decimalSeparator ?? "."
+                let value = Double(
+                    text.replacingOccurrences(of: separator, with: ".")
+                        .filter { $0.isNumber || $0 == "." }
+                )
+                binding.wrappedValue = value.map {
+                    massUnit == .pounds ? $0 / UnitFormatter.poundsPerKilogram : $0
+                }
+            }
+        )
+    }
+
+    private func decimalText(_ binding: Binding<Double>) -> Binding<String> {
+        Binding(
+            get: {
+                binding.wrappedValue.formatted(
+                    .number.precision(.fractionLength(0...1))
+                )
+            },
+            set: { text in
+                let separator = Locale.current.decimalSeparator ?? "."
+                let value = Double(
+                    text.replacingOccurrences(of: separator, with: ".")
+                        .filter { $0.isNumber || $0 == "." }
+                )
+                if let value, value.isFinite {
+                    binding.wrappedValue = min(100, max(0.1, value))
+                }
+            }
+        )
+    }
+
+    private func addExercise(_ exercise: StrengthExerciseRow) {
+        let now = Int(Date().timeIntervalSince1970)
+        let timed = exercise.movementPattern == "cardio"
+        items.append(
+            StrengthRoutineExerciseDraft(
+                id: UUID().uuidString.lowercased(),
+                exercise: exercise,
+                targetSets: timed ? 1 : 3,
+                targetRepsMin: 8,
+                targetRepsMax: 12,
+                targetRPE: nil,
+                restSeconds: timed ? 0 : 120,
+                note: "",
+                plan: StrengthExercisePlan(
+                    mode: timed ? "timed" : "reps",
+                    targetDurationS: timed ? 1_200 : nil,
+                    progression: timed ? "time" : "double_progression",
+                    warmupSets: 0
+                ),
+                createdAt: now
+            )
+        )
+        exercisePicker = false
+    }
+
+    private func move(_ id: String, by offset: Int) {
+        guard let source = items.firstIndex(where: { $0.id == id }) else { return }
+        let destination = min(max(0, source + offset), items.count - 1)
+        guard source != destination else { return }
+        items.move(fromOffsets: IndexSet(integer: source), toOffset: destination > source
+                   ? destination + 1 : destination)
+    }
+
+    private func save() async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        let now = Int(Date().timeIntervalSince1970)
+        let routine = StrengthRoutineRow(
+            id: routineID,
+            name: name,
+            note: note.isEmpty ? nil : note,
+            scheduledWeekdaysJSON: StrengthTrainingContract.encodeScheduledWeekdays(
+                Array(weekdays)
+            ),
+            createdAt: createdAt,
+            updatedAt: now
+        )
+        do {
+            let rows = try items.enumerated().map { position, item in
+                guard let planJSON = StrengthTrainingContract.encodeExercisePlan(item.plan) else {
+                    throw StrengthTrainingContract.ValidationError.invalidRoutineExercise
+                }
+                return StrengthRoutineExerciseRow(
+                    id: item.id,
+                    routineId: routineID,
+                    exerciseId: item.exercise.id,
+                    position: position,
+                    targetSets: item.targetSets,
+                    targetRepsMin: item.plan.mode == "timed" ? nil : item.targetRepsMin,
+                    targetRepsMax: item.plan.mode == "timed"
+                        ? nil
+                        : max(item.targetRepsMin, item.targetRepsMax),
+                    targetRPE: item.targetRPE,
+                    restSeconds: item.restSeconds,
+                    note: item.note.isEmpty ? nil : item.note,
+                    planJSON: planJSON,
+                    createdAt: item.createdAt,
+                    updatedAt: now
+                )
+            }
+            _ = try await repo.saveStrengthRoutine(routine, exercises: rows)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func shortWeekday(_ iso: Int) -> String {
+        String(fullWeekday(iso).prefix(2)).uppercased()
+    }
+
+    private func fullWeekday(_ iso: Int) -> String {
+        Calendar.current.weekdaySymbols[iso % 7]
+    }
+
+    private func modeBinding(
+        _ item: Binding<StrengthRoutineExerciseDraft>
+    ) -> Binding<String> {
+        Binding(
+            get: { item.wrappedValue.plan.mode },
+            set: { requestedMode in
+                let timed = requestedMode == "timed"
+                    || item.wrappedValue.exercise.movementPattern == "cardio"
+                item.wrappedValue.plan.mode = timed ? "timed" : "reps"
+                if timed {
+                    if !["none", "time"].contains(item.wrappedValue.plan.progression) {
+                        item.wrappedValue.plan.progression = "time"
+                    }
+                    item.wrappedValue.plan.targetDurationS =
+                        item.wrappedValue.plan.targetDurationS ?? 30
+                } else {
+                    if item.wrappedValue.plan.progression == "time" {
+                        item.wrappedValue.plan.progression = "double_progression"
+                    }
+                    item.wrappedValue.plan.targetDurationS = nil
+                }
+            }
+        )
+    }
+
+    private func restLabel(_ seconds: Int) -> String {
+        seconds == 0 ? "No rest" : seconds < 120 ? "\(seconds)s rest" : "\(seconds / 60)m rest"
+    }
+
+    private func progressionLabel(_ value: String) -> String {
+        switch value {
+        case "linear": return "Linear"
+        case "time": return "Add time"
+        case "none": return "Manual"
+        default: return "Rep range"
+        }
+    }
+
+    private func supersetName(_ group: Int) -> String {
+        guard group >= 1, group <= 26,
+              let scalar = UnicodeScalar(64 + group)
+        else { return "\(group)" }
+        return String(Character(scalar))
+    }
+}
+
+private struct StrengthCustomExerciseEditor: View {
+    @EnvironmentObject private var repo: Repository
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var muscle = "other"
+    @State private var equipment = "other"
+    @State private var pattern = "other"
+    @State private var saving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("appwide.gym.exercise") {
+                    TextField("Name", text: $name)
+                    Picker("appwide.gym.primary_muscle", selection: $muscle) {
+                        ForEach(StrengthTrainingContract.muscles, id: \.self) {
+                            Text(strengthDescriptor($0)).tag($0)
+                        }
+                    }
+                    Picker("appwide.gym.equipment", selection: $equipment) {
+                        ForEach(StrengthTrainingContract.equipment, id: \.self) {
+                            Text(strengthDescriptor($0)).tag($0)
+                        }
+                    }
+                    Picker("Movement", selection: $pattern) {
+                        ForEach(StrengthTrainingContract.movementPatterns, id: \.self) {
+                            Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0)
+                        }
+                    }
+                }
+                Section {
+                    Text("appwide.gym.custom_exercise_body")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+            .navigationTitle("appwide.gym.create_exercise")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(
+                            saving
+                                || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                }
+            }
+        }
+        .alert("appwide.gym.exercise", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    private func save() async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        let now = Int(Date().timeIntervalSince1970)
+        let exercise = StrengthExerciseRow(
+            id: "custom-\(UUID().uuidString.lowercased())",
+            name: name,
+            primaryMuscle: muscle,
+            secondaryMusclesJSON: "[]",
+            equipment: equipment,
+            movementPattern: pattern,
+            isCustom: true,
+            createdAt: now,
+            updatedAt: now
+        )
+        do {
+            _ = try await repo.saveStrengthExercise(exercise)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
 private struct StrengthExercisePicker: View {
@@ -1622,7 +2850,11 @@ private func strengthExerciseName(_ exercise: StrengthExerciseRow) -> String {
         return String(localized: "strength.exercise.triceps_pushdown", defaultValue: "Triceps Pushdown")
     case "plank":
         return String(localized: "strength.exercise.plank", defaultValue: "Plank")
-    default: return exercise.name
+    default:
+        guard !exercise.isCustom else { return exercise.name }
+        let key = "appwide.gym.exercise.\(exercise.id)"
+        let localized = String(localized: String.LocalizationValue(key))
+        return localized == key ? exercise.name : localized
     }
 }
 
@@ -1681,6 +2913,8 @@ private func strengthSetType(_ storage: String) -> String {
         return String(localized: "strength.set_type.warmup", defaultValue: "Warm-up")
     case "drop":
         return String(localized: "strength.set_type.drop", defaultValue: "Drop")
+    case "rest_pause":
+        return String(localized: "appwide.gym.rest_pause", defaultValue: "Rest-pause")
     case "failure":
         return String(localized: "strength.set_type.failure", defaultValue: "To failure")
     case "bodyweight":

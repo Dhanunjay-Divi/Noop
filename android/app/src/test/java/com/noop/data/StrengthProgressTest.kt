@@ -11,6 +11,7 @@ class StrengthProgressTest {
         position: Int,
         reps: Int?,
         load: Double?,
+        setType: String = "working",
         completed: Boolean = true,
     ) = StrengthSetRow(
         id = id,
@@ -18,6 +19,7 @@ class StrengthProgressTest {
         exerciseId = exerciseId,
         exercisePosition = 0,
         setPosition = position,
+        setType = setType,
         reps = reps,
         loadKg = load,
         completedAt = if (completed) 2_000 else null,
@@ -48,7 +50,8 @@ class StrengthProgressTest {
             100,
             sets = listOf(
                 set("a", "old", "barbell_back_squat", 0, 5, 100.0),
-                set("draft", "old", "barbell_back_squat", 1, 8, 120.0, false),
+                set("warm", "old", "barbell_back_squat", 1, 20, 150.0, "warmup"),
+                set("draft", "old", "barbell_back_squat", 2, 8, 120.0, completed = false),
             ),
         )
         val recent = session(
@@ -81,6 +84,7 @@ class StrengthProgressTest {
             sets = listOf(
                 set("squat", "week", "barbell_back_squat", 0, 5, 100.0),
                 set("pull", "week", "pull_up", 1, 8, null),
+                set("warmup", "week", "barbell_back_squat", 2, 10, 20.0, "warmup"),
             ),
         )
         val progress = StrengthProgressCalculator.weeklyProgress(listOf(completed), 100, 200)
@@ -99,5 +103,6 @@ class StrengthProgressTest {
         assertEquals(1.0, focus.first { it.muscle == "quadriceps" }.weightedSetExposure, 0.001)
         assertEquals(0.5, focus.first { it.muscle == "glutes" }.weightedSetExposure, 0.001)
         assertEquals(1, focus.first { it.muscle == "biceps" }.supportingSetCount)
+        assertEquals(1, focus.first { it.muscle == "quadriceps" }.directSetCount)
     }
 }

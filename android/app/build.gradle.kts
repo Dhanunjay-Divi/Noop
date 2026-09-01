@@ -301,6 +301,8 @@ val syncRoomSchemaSnapshot = tasks.register("syncRoomSchemaSnapshot") {
 tasks.withType<Test>().configureEach {
     dependsOn(syncRoomSchemaSnapshot)
     systemProperty("room.schemaLocation", roomSchemaSnapshotDir.get().asFile.absolutePath)
+    val wearableArchive = providers.environmentVariable("NOOP_WEARABLE_EXPORT_ARCHIVE")
+    inputs.property("noopWearableExportArchive", wearableArchive.orElse(""))
     // Do not register the copied directory as a Test input. Android/KSP is free to clean generated
     // build directories while preparing the unit-test variant, and Gradle validates task inputs
     // before the test action; that race made otherwise unrelated focused tests fail before JUnit ran.

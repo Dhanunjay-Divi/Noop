@@ -21,7 +21,7 @@ import XCTest
 final class WhoopExportRecoveryComparisonTests: XCTestCase {
 
     private struct Cycle: Decodable {
-        let start: String
+        let day: String
         let recovery: Double?
         let rhr: Double?
         let hrv: Double?
@@ -45,8 +45,23 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
     }
 
     private func decodeCycles(_ raw: Data) throws -> [Cycle] {
-        try JSONDecoder().decode([Cycle].self, from: raw)
-            .sorted { $0.start < $1.start }
+        let decoded = try JSONDecoder().decode([Cycle].self, from: raw)
+        let duplicateDays = Dictionary(grouping: decoded, by: \.day)
+            .filter { $0.value.count > 1 }
+            .keys
+            .sorted()
+        guard duplicateDays.isEmpty else {
+            throw NSError(
+                domain: "WhoopExportRecoveryComparisonTests",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Prepared fixture has ambiguous duplicate wake days: "
+                        + duplicateDays.joined(separator: ", ")
+                ]
+            )
+        }
+        return decoded.sorted { $0.day < $1.day }
     }
 
     private func cycles() throws -> [Cycle] {
@@ -139,7 +154,7 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
                 restQualityBaseline: restBase
             )
             guard let score else { declined += 1; continue }
-            paired.append((String(c.start.prefix(10)), candidate.referenceRecovery, score))
+            paired.append((c.day, candidate.referenceRecovery, score))
         }
 
         try XCTSkipIf(paired.count < 30, "Only \(paired.count) comparable days after baseline warm-up.")
@@ -238,11 +253,11 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         let raw = Data(
             """
             [
-              {"start":"2026-01-01","recovery":60,"rhr":60,"hrv":50},
-              {"start":"2026-01-02","recovery":null,"rhr":59,"hrv":52},
-              {"start":"2026-01-03","recovery":62,"rhr":58,"hrv":54},
-              {"start":"2026-01-04","recovery":63,"rhr":57,"hrv":56},
-              {"start":"2026-01-05","recovery":64,"rhr":56,"hrv":58}
+              {"day":"2026-01-01","recovery":60,"rhr":60,"hrv":50},
+              {"day":"2026-01-02","recovery":null,"rhr":59,"hrv":52},
+              {"day":"2026-01-03","recovery":62,"rhr":58,"hrv":54},
+              {"day":"2026-01-04","recovery":63,"rhr":57,"hrv":56},
+              {"day":"2026-01-05","recovery":64,"rhr":56,"hrv":58}
             ]
             """.utf8
         )
@@ -283,13 +298,27 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         )
     }
 
+    func testDuplicateWakeDaysAreRejected() {
+        let raw = Data(
+            """
+            [
+              {"day":"2026-01-01","recovery":60,"rhr":60,"hrv":50},
+              {"day":"2026-01-01","recovery":62,"rhr":58,"hrv":54}
+            ]
+            """.utf8
+        )
+        XCTAssertThrowsError(try decodeCycles(raw)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("2026-01-01"))
+        }
+    }
+
     func testNoopRestAssociatesWithReferenceOutcomeWithoutDirectTargetReuse() throws {
         let cycles = try self.cycles()
         try XCTSkipIf(cycles.count < 30, "Set NOOP_WHOOP_CYCLES (see the class documentation).")
         let paired = cycles.compactMap { cycle -> (day: String, reference: Double, noop: Double)? in
             guard let reference = cycle.sleepPerf,
                   let noop = restQuality(cycle).map({ $0 * 100.0 }) else { return nil }
-            return (String(cycle.start.prefix(10)), reference, noop)
+            return (cycle.day, reference, noop)
         }
         try XCTSkipIf(paired.count < 30, "Too few comparable Rest days.")
 

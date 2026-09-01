@@ -197,7 +197,7 @@ public struct OnboardingWizard: View {
     private var bottomBar: some View {
         VStack(spacing: 16) {
             ThreadProgress(progress: progress)
-                .frame(height: 3)
+                .frame(height: 8)
                 .frame(maxWidth: 620)
 
             HStack(spacing: 14) {
@@ -1796,39 +1796,26 @@ private struct ThreadProgress: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { timeline in
             GeometryReader { geo in
-                let cycle = timeline.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 2.4) / 2.4
-                let phase = reduceMotion ? 0.5 : (cycle <= 0.5 ? cycle * 2 : (1 - cycle) * 2)
+                let elapsed = timeline.date.timeIntervalSinceReferenceDate
+                let phase = reduceMotion ? 0.35 : (sin(elapsed * .pi * 2 / 1.8) + 1) / 2
                 let fillWidth = max(6, geo.size.width * min(max(progress, 0), 1))
-                let pulseWidth = min(54, max(6, fillWidth * 0.55))
-                let pulseOffset = phase * max(0, fillWidth - pulseWidth)
+                let activeHeight = 3 + phase * 2.5
 
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(StrandPalette.hairline)
+                        .frame(height: 3)
                     Capsule()
                         .fill(LinearGradient(gradient: StrandPalette.recoveryGradient,
                                              startPoint: .leading, endPoint: .trailing))
-                        .frame(width: fillWidth)
-                        .shadow(color: StrandPalette.recovery078.opacity(0.45), radius: 5)
+                        .frame(width: fillWidth, height: activeHeight)
+                        .shadow(
+                            color: StrandPalette.recovery078.opacity(0.24 + phase * 0.34),
+                            radius: 2 + phase * 4
+                        )
                         .animation(StrandMotion.gentle, value: progress)
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.clear, .white.opacity(0.68), .clear],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: pulseWidth)
-                            .offset(x: pulseOffset)
-                            .opacity(reduceMotion ? 0.24 : 1)
-                    }
-                    .frame(width: fillWidth, alignment: .leading)
-                    .clipShape(Capsule())
                 }
-                .clipShape(Capsule())
+                .frame(maxHeight: .infinity, alignment: .center)
             }
         }
         .accessibilityHidden(true)

@@ -600,15 +600,18 @@ private func upsertPortableExercise(_ db: Database, row: StrengthExerciseRow) th
 
 private func upsertPortableRoutine(_ db: Database, row: StrengthRoutineRow) throws {
     try db.execute(sql: """
-        INSERT INTO strengthRoutine (id, name, note, archivedAt, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO strengthRoutine
+            (id, name, note, scheduledWeekdaysJSON, archivedAt, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             note = excluded.note,
+            scheduledWeekdaysJSON = excluded.scheduledWeekdaysJSON,
             archivedAt = excluded.archivedAt,
             updatedAt = excluded.updatedAt
         """, arguments: [
-            row.id, row.name, row.note, row.archivedAt, row.createdAt, row.updatedAt,
+            row.id, row.name, row.note, row.scheduledWeekdaysJSON, row.archivedAt,
+            row.createdAt, row.updatedAt,
         ])
 }
 
@@ -637,12 +640,12 @@ private func insertPortableRoutineExercise(
     try db.execute(sql: """
         INSERT INTO strengthRoutineExercise
             (id, routineId, exerciseId, position, targetSets, targetRepsMin, targetRepsMax,
-             targetRPE, restSeconds, note, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             targetRPE, restSeconds, note, planJSON, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, arguments: [
             row.id, row.routineId, row.exerciseId, row.position, row.targetSets,
             row.targetRepsMin, row.targetRepsMax, row.targetRPE, row.restSeconds, row.note,
-            row.createdAt, row.updatedAt,
+            row.planJSON, row.createdAt, row.updatedAt,
         ])
 }
 

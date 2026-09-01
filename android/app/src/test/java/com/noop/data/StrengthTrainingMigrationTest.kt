@@ -12,6 +12,8 @@ class StrengthTrainingMigrationTest {
         assertEquals(30, WhoopDatabase.MIGRATION_29_30.endVersion)
         assertEquals(30, WhoopDatabase.MIGRATION_30_31.startVersion)
         assertEquals(31, WhoopDatabase.MIGRATION_30_31.endVersion)
+        assertEquals(36, WhoopDatabase.MIGRATION_36_37.startVersion)
+        assertEquals(37, WhoopDatabase.MIGRATION_36_37.endVersion)
 
         val statements = WhoopDatabase.STRENGTH_TRAINING_MIGRATION_SQL
         val sql = statements.joinToString("\n")
@@ -39,6 +41,17 @@ class StrengthTrainingMigrationTest {
         assertEquals(
             "ALTER TABLE `strengthSet` ADD COLUMN `restSeconds` INTEGER",
             WhoopDatabase.STRENGTH_SET_REST_MIGRATION_SQL,
+        )
+        val planning = WhoopDatabase.STRENGTH_GYM_PLANNING_MIGRATION_SQL
+        assertTrue(planning.contains(
+            "ALTER TABLE `strengthRoutine` ADD COLUMN `scheduledWeekdaysJSON` TEXT",
+        ))
+        assertTrue(planning.contains(
+            "ALTER TABLE `strengthRoutineExercise` ADD COLUMN `planJSON` TEXT",
+        ))
+        assertEquals(
+            StrengthTrainingContract.BUILT_IN_EXERCISES.size,
+            planning.count { it.startsWith("INSERT OR IGNORE INTO `strengthExercise`") },
         )
     }
 }

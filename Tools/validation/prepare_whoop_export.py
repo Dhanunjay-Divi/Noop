@@ -19,7 +19,9 @@ Multiple archives are written to numbered files so each wearer remains a separat
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import csv
+from datetime import datetime, timedelta, timezone
 import glob
 import io
 import json
@@ -49,6 +51,24 @@ FIELDS = {
     "avgHr": "Average HR (bpm)",
     "maxHr": "Max HR (bpm)",
 }
+
+# Only fields consumed by the private recovery/rest comparison determine whether a duplicate day
+# has one usable physiology row or multiple ambiguous outcomes. Activity-only cycles can share the
+# next cycle's wake day; they must not insert a second nil baseline row.
+COMPARISON_FIELDS = {
+    "recovery",
+    "rhr",
+    "hrv",
+    "sleepPerf",
+    "resp",
+    "efficiency",
+    "asleepMin",
+    "inBedMin",
+    "deepMin",
+    "remMin",
+}
+
+
 def num(value: str | None) -> float | None:
     value = (value or "").strip()
     if value in ("", "-"):
@@ -59,10 +79,61 @@ def num(value: str | None) -> float | None:
         return None
 
 
+def timezone_offset(raw: str | None) -> timezone:
+    value = (raw or "").strip().upper()
+    if value in ("", "UTC", "GMT", "Z"):
+        return timezone.utc
+    if value.startswith("UTC") or value.startswith("GMT"):
+        value = value[3:].strip()
+    if value == "Z":
+        return timezone.utc
+
+    sign = -1 if value.startswith("-") else 1
+    if value.startswith(("+", "-")):
+        value = value[1:]
+    try:
+        if ":" in value:
+            hour_text, minute_text = value.split(":", 1)
+        elif len(value) >= 3:
+            hour_text, minute_text = value[:-2], value[-2:]
+        else:
+            hour_text, minute_text = value, "0"
+        minutes = sign * (int(hour_text or "0") * 60 + int(minute_text or "0"))
+        return timezone(timedelta(minutes=minutes))
+    except (OverflowError, ValueError, TypeError):
+        return timezone.utc
+
+
+def parse_timestamp(raw: str | None, cycle_zone: timezone) -> datetime | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.upper().endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=cycle_zone)
+    return parsed.astimezone(cycle_zone)
+
+
+def canonical_day(source: dict[str, str | None]) -> str | None:
+    cycle_zone = timezone_offset(source.get("Cycle timezone"))
+    start = parse_timestamp(source.get("Cycle start time"), cycle_zone)
+    end = parse_timestamp(source.get("Cycle end time"), cycle_zone)
+    # Production ignores a malformed row that has neither a cycle start nor cycle end.
+    if start is None and end is None:
+        return None
+    wake = parse_timestamp(source.get("Wake onset"), cycle_zone)
+    selected = wake or end or start
+    return selected.date().isoformat() if selected is not None else None
+
+
 def prepare(
     archive: str,
     label: str,
-) -> tuple[list[dict[str, float | str | None]], int]:
+) -> tuple[list[dict[str, float | str | None]], int, int, int]:
     with zipfile.ZipFile(archive) as zf:
         names = [n for n in zf.namelist() if n.endswith("physiological_cycles.csv")]
         if len(names) != 1:
@@ -74,17 +145,45 @@ def prepare(
             rows = []
             for source in csv.DictReader(text):
                 start = (source.get("Cycle start time") or "").strip()
-                if not start:
+                day = canonical_day(source)
+                if day is None:
                     continue
-                record: dict[str, float | str | None] = {"start": start}
+                record: dict[str, float | str | None] = {"day": day, "_start": start}
                 record.update({key: num(source.get(column)) for key, column in FIELDS.items()})
                 rows.append(record)
 
-    rows.sort(key=lambda row: str(row["start"]))
-    # Keep every dated physiology row. Reference Recovery availability is an outcome, not a license
-    # to include or exclude that day from a later baseline; production likewise folds any usable prior
-    # HRV/RHR/respiration/Rest value even when the provider did not publish a Recovery score that day.
-    return rows, len(rows)
+    total = len(rows)
+    by_day: dict[str, list[dict[str, float | str | None]]] = defaultdict(list)
+    for row in rows:
+        by_day[str(row["day"])].append(row)
+
+    prepared: list[dict[str, float | str | None]] = []
+    collapsed_activity_rows = 0
+    ambiguous_days = 0
+    for day, candidates in by_day.items():
+        useful = [
+            row for row in candidates
+            if any(row.get(field) is not None for field in COMPARISON_FIELDS)
+        ]
+        if len(useful) > 1:
+            # Two scored sleeps on one wake day do not have a defensible one-to-one daily reference.
+            # Exclude the whole day instead of choosing whichever row happened to sort last.
+            ambiguous_days += 1
+            continue
+        if len(useful) == 1:
+            prepared.append(useful[0])
+            collapsed_activity_rows += len(candidates) - 1
+        else:
+            # Keep one all-missing day so baseline gap semantics remain calendar-aligned.
+            prepared.append(min(candidates, key=lambda row: str(row["_start"])))
+            collapsed_activity_rows += len(candidates) - 1
+
+    prepared.sort(key=lambda row: (str(row["day"]), str(row["_start"])))
+    for row in prepared:
+        del row["_start"]
+    # Reference Recovery availability is an outcome, not a license to exclude a unique day from
+    # baseline history. The only exclusions above are ambiguous multi-outcome wake days.
+    return prepared, total, collapsed_activity_rows, ambiguous_days
 
 
 def write_prepared(
@@ -92,6 +191,8 @@ def write_prepared(
     output: str,
     complete: list[dict[str, float | str | None]],
     total: int,
+    collapsed_activity_rows: int,
+    ambiguous_days: int,
 ) -> None:
     parent = os.path.dirname(output)
     if parent:
@@ -106,7 +207,9 @@ def write_prepared(
 
     print(
         f"{label}: prepared {len(complete)} of {total} cycle rows "
-        "(owner-only fixture; personal data, do not commit)"
+        f"({collapsed_activity_rows} activity-only duplicate rows collapsed; "
+        f"{ambiguous_days} ambiguous wake days excluded; "
+        "owner-only fixture; personal data, do not commit)"
     )
 
 
@@ -133,8 +236,8 @@ def main() -> None:
 
     if len(matches) == 1:
         output = args.out or os.path.join("/tmp", "whoop", "prepared_cycles.json")
-        complete, total = prepare(matches[0], "cohort-1")
-        write_prepared("cohort-1", output, complete, total)
+        complete, total, collapsed, ambiguous = prepare(matches[0], "cohort-1")
+        write_prepared("cohort-1", output, complete, total, collapsed, ambiguous)
         print("Prepared 1 cohort. Run the documented NOOP_WHOOP_CYCLES harness.")
         return
 
@@ -144,8 +247,8 @@ def main() -> None:
     for index, archive in enumerate(matches, start=1):
         output = os.path.join(output_dir, f"export-{index}.json")
         label = f"cohort-{index}"
-        complete, total = prepare(archive, label)
-        write_prepared(label, output, complete, total)
+        complete, total, collapsed, ambiguous = prepare(archive, label)
+        write_prepared(label, output, complete, total, collapsed, ambiguous)
     print(f"Prepared {len(matches)} cohorts. Run each with the documented harness.")
 
 

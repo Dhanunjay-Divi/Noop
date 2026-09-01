@@ -27,6 +27,7 @@ final class StrengthProgressTests: XCTestCase {
         position: Int,
         reps: Int?,
         load: Double?,
+        setType: String = "working",
         completed: Bool = true
     ) -> StrengthSetRow {
         StrengthSetRow(
@@ -35,6 +36,7 @@ final class StrengthProgressTests: XCTestCase {
             exerciseId: exerciseId,
             exercisePosition: 0,
             setPosition: position,
+            setType: setType,
             reps: reps,
             loadKg: load,
             completedAt: completed ? 2_000 : nil,
@@ -50,8 +52,10 @@ final class StrengthProgressTests: XCTestCase {
             sets: [
                 set(id: "a", sessionId: "old", exerciseId: "barbell_back_squat",
                     position: 0, reps: 5, load: 100),
+                set(id: "warm", sessionId: "old", exerciseId: "barbell_back_squat",
+                    position: 1, reps: 20, load: 150, setType: "warmup"),
                 set(id: "draft", sessionId: "old", exerciseId: "barbell_back_squat",
-                    position: 1, reps: 8, load: 120, completed: false),
+                    position: 2, reps: 8, load: 120, completed: false),
             ]
         )
         let recent = session(
@@ -91,6 +95,8 @@ final class StrengthProgressTests: XCTestCase {
                     position: 0, reps: 5, load: 100),
                 set(id: "pull", sessionId: "week", exerciseId: "pull_up",
                     position: 1, reps: 8, load: nil),
+                set(id: "warmup", sessionId: "week", exerciseId: "barbell_back_squat",
+                    position: 2, reps: 10, load: 20, setType: "warmup"),
             ]
         )
         let progress = StrengthProgressCalculator.weeklyProgress(
@@ -113,5 +119,6 @@ final class StrengthProgressTests: XCTestCase {
         XCTAssertEqual(focus.first { $0.muscle == "quadriceps" }?.weightedSetExposure, 1)
         XCTAssertEqual(focus.first { $0.muscle == "glutes" }?.weightedSetExposure, 0.5)
         XCTAssertEqual(focus.first { $0.muscle == "biceps" }?.supportingSetCount, 1)
+        XCTAssertEqual(focus.first { $0.muscle == "quadriceps" }?.directSetCount, 1)
     }
 }

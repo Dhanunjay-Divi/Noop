@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 36
+const val NOOP_DATABASE_SCHEMA_VERSION = 37
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -913,6 +913,17 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        internal val STRENGTH_GYM_PLANNING_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `strengthRoutine` ADD COLUMN `scheduledWeekdaysJSON` TEXT",
+            "ALTER TABLE `strengthRoutineExercise` ADD COLUMN `planJSON` TEXT",
+        ) + strengthBuiltInInsertSQL()
+
+        internal val MIGRATION_36_37 = object : Migration(36, 37) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in STRENGTH_GYM_PLANNING_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
         internal fun strengthBuiltInInsertSQL(): List<String> =
             StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
                 "INSERT OR IGNORE INTO `strengthExercise` " +
@@ -946,7 +957,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
                     MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
                     MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
-                    MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36,
+                    MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

@@ -302,6 +302,7 @@ object PortableUserDataCodec {
         .put("id", row.id)
         .put("name", row.name)
         .putOptional("note", row.note)
+        .putOptional("scheduledWeekdaysJSON", row.scheduledWeekdaysJSON)
         .putOptional("archivedAt", row.archivedAt)
         .put("createdAt", row.createdAt)
         .put("updatedAt", row.updatedAt)
@@ -317,6 +318,7 @@ object PortableUserDataCodec {
         .putOptional("targetRPE", row.targetRPE)
         .put("restSeconds", row.restSeconds)
         .putOptional("note", row.note)
+        .putOptional("planJSON", row.planJSON)
         .put("createdAt", row.createdAt)
         .put("updatedAt", row.updatedAt)
 
@@ -401,6 +403,7 @@ object PortableUserDataCodec {
         id = o.requiredString("id"),
         name = o.requiredString("name"),
         note = o.optionalString("note"),
+        scheduledWeekdaysJSON = o.optionalString("scheduledWeekdaysJSON"),
         archivedAt = o.optionalLong("archivedAt"),
         createdAt = o.requiredLong("createdAt"),
         updatedAt = o.requiredLong("updatedAt"),
@@ -417,6 +420,7 @@ object PortableUserDataCodec {
         targetRPE = o.optionalDouble("targetRPE"),
         restSeconds = o.requiredInt("restSeconds"),
         note = o.optionalString("note"),
+        planJSON = o.optionalString("planJSON"),
         createdAt = o.requiredLong("createdAt"),
         updatedAt = o.requiredLong("updatedAt"),
     )

@@ -12,8 +12,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -412,7 +412,10 @@ private fun OnboardingFooter(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2_400, easing = LinearEasing),
+            animation = tween(
+                durationMillis = 900,
+                easing = CubicBezierEasing(0.37f, 0f, 0.63f, 1f),
+            ),
             repeatMode = RepeatMode.Reverse,
         ),
         label = uiString(R.string.l10n_onboarding_screen_onboardingprogress_6e1e5c29),
@@ -428,41 +431,41 @@ private fun OnboardingFooter(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(3.dp),
+                .height(8.dp),
         ) {
-            val radius = size.height / 2f
+            val trackHeight = 3.dp.toPx()
+            val trackTop = (size.height - trackHeight) / 2f
+            val radius = trackHeight / 2f
             drawRoundRect(
                 color = Palette.hairline,
-                size = size,
+                topLeft = Offset(0f, trackTop),
+                size = Size(size.width, trackHeight),
                 cornerRadius = CornerRadius(radius, radius),
             )
-            val fillWidth = (size.width * animated).coerceAtLeast(size.height)
+            val fillWidth = (size.width * animated).coerceAtLeast(6.dp.toPx())
+            val activeHeight = 3.dp.toPx() + pulsePhase * 2.5.dp.toPx()
+            val activeTop = (size.height - activeHeight) / 2f
+            val activeBrush = Brush.horizontalGradient(
+                colors = listOf(
+                    Palette.statusCritical,
+                    Palette.statusWarning,
+                    Palette.statusPositive,
+                ),
+                endX = fillWidth,
+            )
+            val glowHeight = activeHeight + 2.dp.toPx() + pulsePhase * 2.dp.toPx()
             drawRoundRect(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Palette.statusCritical,
-                        Palette.statusWarning,
-                        Palette.statusPositive,
-                    ),
-                    endX = size.width,
-                ),
-                size = Size(fillWidth, size.height),
-                cornerRadius = CornerRadius(radius, radius),
+                brush = activeBrush,
+                topLeft = Offset(0f, (size.height - glowHeight) / 2f),
+                size = Size(fillWidth, glowHeight),
+                cornerRadius = CornerRadius(glowHeight / 2f, glowHeight / 2f),
+                alpha = 0.08f + pulsePhase * 0.12f,
             )
-            val pulseWidth = minOf(72.dp.toPx(), maxOf(size.height, fillWidth * 0.55f))
-            val pulseStart = pulsePhase * (fillWidth - pulseWidth).coerceAtLeast(0f)
-            drawRect(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        Color.White.copy(alpha = 0.68f),
-                        Color.Transparent,
-                    ),
-                    startX = pulseStart,
-                    endX = pulseStart + pulseWidth,
-                ),
-                topLeft = Offset(pulseStart, 0f),
-                size = Size(pulseWidth, size.height),
+            drawRoundRect(
+                brush = activeBrush,
+                topLeft = Offset(0f, activeTop),
+                size = Size(fillWidth, activeHeight),
+                cornerRadius = CornerRadius(activeHeight / 2f, activeHeight / 2f),
             )
         }
         Button(

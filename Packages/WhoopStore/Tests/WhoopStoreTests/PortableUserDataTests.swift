@@ -70,6 +70,7 @@ final class PortableUserDataTests: XCTestCase {
             id: "routine-1",
             name: "Lower A",
             note: "Controlled tempo",
+            scheduledWeekdaysJSON: "[1,4]",
             createdAt: now,
             updatedAt: routineUpdatedAt ?? now + 100
         )
@@ -83,6 +84,15 @@ final class PortableUserDataTests: XCTestCase {
             targetRepsMax: 10,
             targetRPE: 8,
             restSeconds: 120,
+            planJSON: StrengthTrainingContract.encodeExercisePlan(
+                StrengthExercisePlan(
+                    targetLoadKg: 24,
+                    warmupSets: 2,
+                    supersetGroup: 1,
+                    setStyle: "drop",
+                    dropPercent: 20
+                )
+            ),
             createdAt: now,
             updatedAt: routine.updatedAt
         )
@@ -145,6 +155,13 @@ final class PortableUserDataTests: XCTestCase {
         XCTAssertEqual(decoded.nutritionEntries[0].proteinG, 30)
         XCTAssertEqual(decoded.nutritionCatalogItems[0].name, "Tofu bowl")
         XCTAssertEqual(decoded.strengthRoutineExercises[0].targetRPE, 8)
+        XCTAssertEqual(decoded.strengthRoutines[0].scheduledWeekdaysJSON, "[1,4]")
+        XCTAssertEqual(
+            StrengthTrainingContract.exercisePlan(
+                from: decoded.strengthRoutineExercises[0].planJSON
+            ).setStyle,
+            "drop"
+        )
         XCTAssertEqual(decoded.strengthSets[0].restSeconds, 120)
         XCTAssertEqual(decoded.strengthSets[0].rpe, 8.5)
     }
@@ -251,7 +268,14 @@ final class PortableUserDataTests: XCTestCase {
 
         let routines = try await store.strengthRoutines(includeArchived: true)
         XCTAssertEqual(routines.first?.routine.id, "routine-1")
+        XCTAssertEqual(routines.first?.routine.scheduledWeekdaysJSON, "[1,4]")
         XCTAssertEqual(routines.first?.exercises.first?.targetRepsMax, 10)
+        XCTAssertEqual(
+            StrengthTrainingContract.exercisePlan(
+                from: routines.first?.exercises.first?.planJSON
+            ).supersetGroup,
+            1
+        )
         let sessions = try await store.strengthSessions()
         XCTAssertEqual(sessions.first?.session.id, "session-1")
         XCTAssertEqual(sessions.first?.sets.first?.loadKg, 24)

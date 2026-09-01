@@ -956,6 +956,28 @@ extension WhoopStore {
                 t.add(column: "hrvMethod", .text)
             }
         }
+        // v46: native gym planning metadata. Both columns are optional so every existing routine and
+        // portable export remains valid. Re-seeding with INSERT OR IGNORE expands the owned catalog
+        // without changing historical exercise identities or custom rows.
+        migrator.registerMigration("v46-strength-gym-planning") { db in
+            try db.alter(table: "strengthRoutine") { t in
+                t.add(column: "scheduledWeekdaysJSON", .text)
+            }
+            try db.alter(table: "strengthRoutineExercise") { t in
+                t.add(column: "planJSON", .text)
+            }
+            for exercise in StrengthTrainingContract.builtInExercises {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO strengthExercise
+                        (id, name, primaryMuscle, secondaryMusclesJSON, equipment, movementPattern,
+                         isCustom, archivedAt, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 1, 1)
+                    """, arguments: [
+                        exercise.id, exercise.name, exercise.primaryMuscle,
+                        exercise.secondaryMusclesJSON, exercise.equipment, exercise.movementPattern,
+                    ])
+            }
+        }
         return migrator
     }
 

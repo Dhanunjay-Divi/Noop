@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Local-first strength detail. Generic [WorkoutRow] remains the session-summary substrate; these
@@ -48,6 +49,7 @@ data class StrengthRoutineRow(
     val archivedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    val scheduledWeekdaysJSON: String? = null,
 )
 
 @Entity(
@@ -73,6 +75,7 @@ data class StrengthRoutineExerciseRow(
     val note: String? = null,
     val createdAt: Long,
     val updatedAt: Long,
+    val planJSON: String? = null,
 )
 
 @Entity(
@@ -153,6 +156,26 @@ data class StrengthExerciseProgress(
     val bestSetVolumeKg: Double?,
 )
 
+data class StrengthExercisePlan(
+    val mode: String = "reps",
+    val targetLoadKg: Double? = null,
+    val targetDurationS: Int? = null,
+    val progression: String = "double_progression",
+    val loadStepKg: Double = 2.5,
+    val warmupSets: Int = 0,
+    val supersetGroup: Int? = null,
+    val repsPerSide: Boolean = false,
+    val setStyle: String = "straight",
+    val dropPercent: Int = 20,
+    val restPauseSeconds: Int = 15,
+) {
+    companion object {
+        val MODES = setOf("reps", "timed")
+        val PROGRESSIONS = setOf("none", "double_progression", "linear", "time")
+        val SET_STYLES = setOf("straight", "drop", "rest_pause")
+    }
+}
+
 /** Stable validation, starter-catalog, and storage vocabulary shared with Swift v40. */
 object StrengthTrainingContract {
     const val MAX_NAME_CHARACTERS = 80
@@ -173,9 +196,9 @@ object StrengthTrainingContract {
     )
     val MOVEMENT_PATTERNS = setOf(
         "squat", "hinge", "lunge", "horizontal_push", "vertical_push",
-        "horizontal_pull", "vertical_pull", "carry", "rotation", "isolation", "other",
+        "horizontal_pull", "vertical_pull", "carry", "rotation", "isolation", "cardio", "other",
     )
-    val SET_TYPES = setOf("warmup", "working", "drop", "failure", "bodyweight")
+    val SET_TYPES = setOf("warmup", "working", "drop", "rest_pause", "failure", "bodyweight")
 
     val BUILT_IN_EXERCISES: List<StrengthExerciseRow> = listOf(
         builtIn("barbell_back_squat", "Back Squat", "quadriceps", listOf("glutes", "hamstrings"), "barbell", "squat"),
@@ -191,7 +214,118 @@ object StrengthTrainingContract {
         builtIn("biceps_curl", "Biceps Curl", "biceps", listOf("forearms"), "dumbbell", "isolation"),
         builtIn("triceps_pushdown", "Triceps Pushdown", "triceps", emptyList(), "cable", "isolation"),
         builtIn("plank", "Plank", "core", listOf("shoulders"), "bodyweight", "isolation"),
+        builtIn("barbell_front_squat", "Front Squat", "quadriceps", listOf("glutes", "core"), "barbell", "squat"),
+        builtIn("goblet_squat", "Goblet Squat", "quadriceps", listOf("glutes", "core"), "dumbbell", "squat"),
+        builtIn("hack_squat", "Hack Squat", "quadriceps", listOf("glutes"), "machine", "squat"),
+        builtIn("leg_extension", "Leg Extension", "quadriceps", emptyList(), "machine", "isolation"),
+        builtIn("lying_leg_curl", "Lying Leg Curl", "hamstrings", listOf("calves"), "machine", "isolation"),
+        builtIn("barbell_hip_thrust", "Hip Thrust", "glutes", listOf("hamstrings"), "barbell", "hinge"),
+        builtIn("glute_bridge", "Glute Bridge", "glutes", listOf("hamstrings"), "bodyweight", "hinge"),
+        builtIn(
+            "bulgarian_split_squat", "Bulgarian Split Squat", "quadriceps",
+            listOf("glutes", "hamstrings"), "dumbbell", "lunge",
+        ),
+        builtIn("walking_lunge", "Walking Lunge", "quadriceps", listOf("glutes", "hamstrings"), "dumbbell", "lunge"),
+        builtIn("standing_calf_raise", "Standing Calf Raise", "calves", emptyList(), "machine", "isolation"),
+        builtIn("seated_calf_raise", "Seated Calf Raise", "calves", emptyList(), "machine", "isolation"),
+        builtIn(
+            "incline_barbell_bench_press", "Incline Bench Press", "chest",
+            listOf("shoulders", "triceps"), "barbell", "horizontal_push",
+        ),
+        builtIn(
+            "dumbbell_bench_press", "Dumbbell Bench Press", "chest",
+            listOf("shoulders", "triceps"), "dumbbell", "horizontal_push",
+        ),
+        builtIn("push_up", "Push-up", "chest", listOf("shoulders", "triceps", "core"), "bodyweight", "horizontal_push"),
+        builtIn("chest_fly", "Chest Fly", "chest", listOf("shoulders"), "dumbbell", "isolation"),
+        builtIn("cable_crossover", "Cable Crossover", "chest", listOf("shoulders"), "cable", "isolation"),
+        builtIn(
+            "machine_chest_press", "Machine Chest Press", "chest",
+            listOf("shoulders", "triceps"), "machine", "horizontal_push",
+        ),
+        builtIn(
+            "one_arm_dumbbell_row", "One-arm Dumbbell Row", "back",
+            listOf("biceps", "forearms"), "dumbbell", "horizontal_pull",
+        ),
+        builtIn("seated_cable_row", "Seated Cable Row", "back", listOf("biceps"), "cable", "horizontal_pull"),
+        builtIn("chest_supported_row", "Chest-supported Row", "back", listOf("biceps"), "dumbbell", "horizontal_pull"),
+        builtIn("chin_up", "Chin-up", "back", listOf("biceps", "forearms"), "bodyweight", "vertical_pull"),
+        builtIn("face_pull", "Face Pull", "shoulders", listOf("back"), "cable", "horizontal_pull"),
+        builtIn(
+            "dumbbell_shoulder_press", "Dumbbell Shoulder Press", "shoulders",
+            listOf("triceps"), "dumbbell", "vertical_push",
+        ),
+        builtIn("lateral_raise", "Lateral Raise", "shoulders", emptyList(), "dumbbell", "isolation"),
+        builtIn("rear_delt_fly", "Rear Delt Fly", "shoulders", listOf("back"), "dumbbell", "isolation"),
+        builtIn("hammer_curl", "Hammer Curl", "biceps", listOf("forearms"), "dumbbell", "isolation"),
+        builtIn("preacher_curl", "Preacher Curl", "biceps", listOf("forearms"), "barbell", "isolation"),
+        builtIn("skull_crusher", "Skull Crusher", "triceps", emptyList(), "barbell", "isolation"),
+        builtIn("overhead_triceps_extension", "Overhead Triceps Extension", "triceps", emptyList(), "dumbbell", "isolation"),
+        builtIn("parallel_bar_dip", "Dip", "triceps", listOf("chest", "shoulders"), "bodyweight", "vertical_push"),
+        builtIn("hanging_leg_raise", "Hanging Leg Raise", "core", listOf("forearms"), "bodyweight", "isolation"),
+        builtIn("cable_crunch", "Cable Crunch", "core", emptyList(), "cable", "isolation"),
+        builtIn("side_plank", "Side Plank", "core", listOf("shoulders"), "bodyweight", "isolation"),
+        builtIn("ab_wheel_rollout", "Ab Wheel Rollout", "core", listOf("shoulders", "back"), "other", "isolation"),
+        builtIn(
+            "farmers_carry", "Farmer's Carry", "full_body",
+            listOf("forearms", "core", "shoulders"), "dumbbell", "carry",
+        ),
+        builtIn(
+            "kettlebell_swing", "Kettlebell Swing", "full_body",
+            listOf("glutes", "hamstrings", "core"), "kettlebell", "hinge",
+        ),
+        builtIn("back_extension", "Back Extension", "back", listOf("glutes", "hamstrings"), "bodyweight", "hinge"),
+        builtIn("band_pull_apart", "Band Pull-apart", "shoulders", listOf("back"), "band", "horizontal_pull"),
+        builtIn("resistance_band_row", "Resistance Band Row", "back", listOf("biceps"), "band", "horizontal_pull"),
+        builtIn(
+            "treadmill_run", "Treadmill Run", "full_body",
+            listOf("quadriceps", "hamstrings", "calves"), "other", "cardio",
+        ),
+        builtIn(
+            "indoor_cycling", "Indoor Cycling", "quadriceps",
+            listOf("glutes", "hamstrings", "calves"), "other", "cardio",
+        ),
+        builtIn(
+            "rowing_ergometer", "Rowing Ergometer", "full_body",
+            listOf("back", "quadriceps", "biceps"), "other", "cardio",
+        ),
+        builtIn("stair_climber", "Stair Climber", "quadriceps", listOf("glutes", "calves"), "machine", "cardio"),
     )
+
+    fun scheduledWeekdays(json: String?): List<Int> =
+        runCatching {
+            if (json == null) return emptyList()
+            val array = JSONArray(json)
+            List(array.length()) { index -> strictInt(array.get(index), "weekday[$index]") }
+                .filter { it in 1..7 }
+                .distinct()
+                .sorted()
+        }.getOrDefault(emptyList())
+
+    fun encodeScheduledWeekdays(values: List<Int>): String? {
+        val clean = values.filter { it in 1..7 }.distinct().sorted()
+        return clean.takeIf { it.isNotEmpty() }?.let { JSONArray(it).toString() }
+    }
+
+    fun exercisePlan(json: String?): StrengthExercisePlan =
+        json?.let(::decodedExercisePlan) ?: StrengthExercisePlan()
+
+    fun encodeExercisePlan(plan: StrengthExercisePlan): String? {
+        if (!validPlan(plan)) return null
+        return JSONObject()
+            .put("dropPercent", plan.dropPercent)
+            .put("loadStepKg", plan.loadStepKg)
+            .put("mode", plan.mode)
+            .put("progression", plan.progression)
+            .put("repsPerSide", plan.repsPerSide)
+            .put("restPauseSeconds", plan.restPauseSeconds)
+            .put("setStyle", plan.setStyle)
+            .put("supersetGroup", plan.supersetGroup ?: JSONObject.NULL)
+            .put("targetDurationS", plan.targetDurationS ?: JSONObject.NULL)
+            .put("targetLoadKg", plan.targetLoadKg ?: JSONObject.NULL)
+            .put("warmupSets", plan.warmupSets)
+            .toString()
+    }
 
     fun validated(row: StrengthExerciseRow): StrengthExerciseRow {
         val clean = row.copy(
@@ -218,6 +352,10 @@ object StrengthTrainingContract {
             id = validatedId(row.id),
             name = validatedName(row.name),
             note = boundedText(row.note, MAX_NOTE_CHARACTERS, singleLine = false),
+            scheduledWeekdaysJSON = row.scheduledWeekdaysJSON?.let {
+                require(scheduledWeekdays(it).isNotEmpty()) { "invalid scheduled weekdays" }
+                encodeScheduledWeekdays(scheduledWeekdays(it))
+            },
         )
         require(clean.createdAt > 0L && clean.updatedAt >= clean.createdAt) {
             "invalid strength timestamps"
@@ -234,6 +372,13 @@ object StrengthTrainingContract {
             routineId = validatedId(row.routineId),
             exerciseId = validatedId(row.exerciseId),
             note = boundedText(row.note, MAX_NOTE_CHARACTERS, singleLine = false),
+            planJSON = row.planJSON?.let {
+                val plan = decodedExercisePlan(it)
+                require(plan != null && encodeExercisePlan(plan) != null) {
+                    "invalid strength exercise plan"
+                }
+                encodeExercisePlan(plan)
+            },
         )
         require(clean.position >= 0) { "invalid strength routine position" }
         require(clean.targetSets in 1..MAX_TARGET_SETS) { "invalid target sets" }
@@ -344,6 +489,42 @@ object StrengthTrainingContract {
         require(value.isFinite() && value in 1.0..10.0) { "invalid strength rpe" }
     }
 
+    private fun validPlan(plan: StrengthExercisePlan): Boolean =
+        plan.mode in StrengthExercisePlan.MODES &&
+            plan.progression in StrengthExercisePlan.PROGRESSIONS &&
+            (
+                (plan.mode == "timed" && plan.progression in setOf("none", "time")) ||
+                    (plan.mode == "reps" && plan.progression != "time")
+            ) &&
+            plan.setStyle in StrengthExercisePlan.SET_STYLES &&
+            (plan.targetLoadKg == null ||
+                (plan.targetLoadKg.isFinite() && plan.targetLoadKg > 0.0 &&
+                    plan.targetLoadKg <= MAX_LOAD_KG)) &&
+            (plan.targetDurationS == null || plan.targetDurationS in 1..MAX_DURATION_SECONDS) &&
+            plan.loadStepKg.isFinite() && plan.loadStepKg > 0.0 && plan.loadStepKg <= 100.0 &&
+            plan.warmupSets in 0..5 &&
+            (plan.supersetGroup == null || plan.supersetGroup in 1..20) &&
+            plan.dropPercent in 5..50 &&
+            plan.restPauseSeconds in 5..60
+
+    private fun decodedExercisePlan(json: String): StrengthExercisePlan? =
+        runCatching {
+            val objectValue = JSONObject(json)
+            StrengthExercisePlan(
+                mode = objectValue.requiredString("mode"),
+                targetLoadKg = objectValue.optionalDouble("targetLoadKg"),
+                targetDurationS = objectValue.optionalInt("targetDurationS"),
+                progression = objectValue.requiredString("progression"),
+                loadStepKg = objectValue.requiredDouble("loadStepKg"),
+                warmupSets = objectValue.requiredInt("warmupSets"),
+                supersetGroup = objectValue.optionalInt("supersetGroup"),
+                repsPerSide = objectValue.requiredBoolean("repsPerSide"),
+                setStyle = objectValue.requiredString("setStyle"),
+                dropPercent = objectValue.requiredInt("dropPercent"),
+                restPauseSeconds = objectValue.requiredInt("restPauseSeconds"),
+            ).takeIf(::validPlan)
+        }.getOrNull()
+
     private fun boundedText(value: String?, maximum: Int, singleLine: Boolean): String? {
         val cleaned = value
             ?.mapNotNull { char ->
@@ -357,5 +538,49 @@ object StrengthTrainingContract {
             ?.trim()
             ?.take(maximum)
         return cleaned?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun JSONObject.requiredValue(key: String): Any {
+        require(has(key) && !isNull(key)) { "missing strength plan field: $key" }
+        return get(key)
+    }
+
+    private fun JSONObject.requiredString(key: String): String =
+        requiredValue(key) as? String
+            ?: throw IllegalArgumentException("$key must be a string")
+
+    private fun JSONObject.requiredBoolean(key: String): Boolean =
+        requiredValue(key) as? Boolean
+            ?: throw IllegalArgumentException("$key must be a boolean")
+
+    private fun JSONObject.requiredDouble(key: String): Double {
+        val value = requiredValue(key)
+        require(value is Number) { "$key must be a number" }
+        return value.toDouble().also { require(it.isFinite()) { "$key must be finite" } }
+    }
+
+    private fun JSONObject.optionalDouble(key: String): Double? {
+        if (!has(key) || isNull(key)) return null
+        val value = get(key)
+        require(value is Number) { "$key must be a number" }
+        return value.toDouble().also { require(it.isFinite()) { "$key must be finite" } }
+    }
+
+    private fun JSONObject.requiredInt(key: String): Int =
+        strictInt(requiredValue(key), key)
+
+    private fun JSONObject.optionalInt(key: String): Int? {
+        if (!has(key) || isNull(key)) return null
+        return strictInt(get(key), key)
+    }
+
+    private fun strictInt(value: Any, key: String): Int = when (value) {
+        is Byte, is Short, is Int -> (value as Number).toInt()
+        is Long -> value.also {
+            require(it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) {
+                "$key is outside Int range"
+            }
+        }.toInt()
+        else -> throw IllegalArgumentException("$key must be an integer")
     }
 }

@@ -92,6 +92,16 @@ extension Repository {
         return try await store.strengthExerciseProgress(exerciseId: exerciseId)
     }
 
+    @discardableResult
+    func saveStrengthExercise(_ exercise: StrengthExerciseRow) async throws -> StrengthExerciseRow {
+        guard let store = await storeHandle() else {
+            throw StrengthTrainingRepositoryError.storeUnavailable
+        }
+        _ = try await store.upsertStrengthExercises([exercise])
+        NotificationCenter.default.post(name: .strengthTrainingChanged, object: nil)
+        return exercise
+    }
+
     /// Start one resumable manual session, optionally from a routine. An existing active session wins,
     /// making repeated WatchConnectivity delivery idempotent.
     @discardableResult
@@ -99,7 +109,8 @@ extension Repository {
         guard let store = await storeHandle() else {
             throw StrengthTrainingRepositoryError.storeUnavailable
         }
-        if let active = try await store.strengthSessions().first(where: {
+        let sessions = try await store.strengthSessions()
+        if let active = sessions.first(where: {
             $0.session.endedAt == nil
         }) {
             return active
@@ -121,15 +132,43 @@ extension Repository {
             createdAt: now,
             updatedAt: now
         )
-        let sets = routine?.exercises.flatMap { prescription in
-            (0..<prescription.targetSets).map { setPosition in
+        let exerciseByID = Dictionary(
+            uniqueKeysWithValues: try await store.strengthExercises().map { ($0.id, $0) }
+        )
+        let routineExercises = routine?.exercises ?? []
+        let sets = routine?.exercises.flatMap { prescription -> [StrengthSetRow] in
+            guard let exercise = exerciseByID[prescription.exerciseId] else { return [] }
+            let plan = StrengthTrainingContract.exercisePlan(from: prescription.planJSON)
+            let continuesSuperset: Bool
+            if let group = plan.supersetGroup {
+                let members = routineExercises.filter {
+                    StrengthTrainingContract.exercisePlan(from: $0.planJSON).supersetGroup == group
+                }
+                continuesSuperset = members.last?.id != prescription.id
+            } else {
+                continuesSuperset = false
+            }
+            let planned = StrengthWorkoutPlanner.prescription(
+                exercise: exercise,
+                prescription: prescription,
+                history: sessions
+            )
+            return planned.sets.enumerated().map { setPosition, target in
                 StrengthSetRow(
                     id: UUID().uuidString.lowercased(),
                     sessionId: sessionID,
                     exerciseId: prescription.exerciseId,
                     exercisePosition: prescription.position,
                     setPosition: setPosition,
-                    restSeconds: prescription.restSeconds,
+                    setType: target.setType,
+                    reps: target.reps,
+                    loadKg: target.loadKg,
+                    durationS: target.durationS,
+                    restSeconds: StrengthWorkoutPlanner.resolvedRestSeconds(
+                        for: target,
+                        prescriptionRestSeconds: prescription.restSeconds,
+                        continuesSuperset: continuesSuperset
+                    ),
                     createdAt: now,
                     updatedAt: now
                 )
