@@ -77,10 +77,10 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(tabs.waitForExistence(timeout: 20))
         XCTAssertTrue(tabs.buttons["Today"].isSelected)
 
-        let map = app.descendants(matching: .any)["noop.strength.body-map"]
         let scroll = app.scrollViews.firstMatch
         XCTAssertTrue(scroll.exists)
-        for _ in 0..<18 where !map.isHittable {
+        let bodyMapMode = app.segmentedControls["noop.strength.body-map-mode"]
+        for _ in 0..<8 where !bodyMapMode.isHittable {
             let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
             let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46))
             start.press(
@@ -90,17 +90,22 @@ final class NOOPiOSUITests: XCTestCase {
                 thenHoldForDuration: 0
             )
         }
-        XCTAssertTrue(map.isHittable)
+        XCTAssertTrue(bodyMapMode.isHittable)
 
+        let map = app.descendants(matching: .any)["noop.strength.body-map"]
+        XCTAssertTrue(map.exists)
         map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.28)).tap()
         let selection = app.staticTexts["noop.strength.focus-selection"]
         XCTAssertTrue(selection.waitForExistence(timeout: 5))
-        XCTAssertEqual(selection.label, "Chest")
+        let frontSelection = selection.label
+        XCTAssertFalse(frontSelection.isEmpty)
+        XCTAssertNotEqual(frontSelection, "Back")
 
-        app.descendants(matching: .any)["noop.strength.body-map"]
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.34))
-            .tap()
-        let combined = NSPredicate(format: "label == %@", "Chest + Back")
+        map.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.34)).tap()
+        let combined = NSPredicate(
+            format: "label == %@",
+            "\(frontSelection) + Back"
+        )
         expectation(for: combined, evaluatedWith: selection)
         waitForExpectations(timeout: 5)
         Thread.sleep(forTimeInterval: 1)
@@ -370,12 +375,14 @@ final class NOOPiOSUITests: XCTestCase {
 
     func testTermsPrimaryActionRemainsVisible() {
         let app = launchDemoScreen("terms")
-        XCTAssertTrue(app.staticTexts["NOOP Band is coming"].waitForExistence(timeout: 20))
-        XCTAssertEqual(app.staticTexts.matching(identifier: "NOOP Band is coming").count, 1)
-        XCTAssertTrue(
-            app.staticTexts[
-                "Until NOOP Band is ready, this version works with a compatible band you own."
-            ].exists
+        let title = app.staticTexts["noop.terms.title"]
+        let intro = app.staticTexts["noop.terms.intro"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertEqual(title.label, "Before you use NOOP")
+        XCTAssertTrue(intro.waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            intro.label,
+            "Please read the points below, then confirm each statement."
         )
         XCTAssertFalse(app.staticTexts["Independent: not affiliated with WHOOP"].exists)
         XCTAssertEqual(

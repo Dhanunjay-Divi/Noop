@@ -930,6 +930,7 @@ struct StrengthTrainerView: View {
                         Text("Recovery").tag(StrengthBodyMapMode.recovery)
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier("noop.strength.body-map-mode")
 
                     StrengthBodyMapView(
                         statuses: statuses,

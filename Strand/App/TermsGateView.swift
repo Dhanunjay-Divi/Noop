@@ -22,10 +22,12 @@ struct TermsGateView: View {
                     Text("Before you use NOOP")
                         .font(StrandFont.title1)
                         .foregroundStyle(StrandPalette.textPrimary)
+                        .accessibilityIdentifier("noop.terms.title")
                     Text("Please read the points below, then confirm each statement.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("noop.terms.intro")
                 }
                 .padding(.top, 36)
                 .padding(.bottom, 22)
