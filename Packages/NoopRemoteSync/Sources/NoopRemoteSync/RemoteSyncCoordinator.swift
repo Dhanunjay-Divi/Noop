@@ -464,6 +464,54 @@ public actor RemoteSyncCoordinator {
                     recordedAt: $0.ts, value: Double($0.counter), metadata: metadata
                 )
             },
+            gravity: pending.gravity.map {
+                RemoteSample(
+                    recordedAt: $0.ts,
+                    value: $0.x,
+                    metadata: [
+                        "unit": "g",
+                        "y": String($0.y),
+                        "z": String($0.z),
+                        "provenance": "strap_measured",
+                    ]
+                )
+            },
+            sleepState: pending.sleepState.map {
+                RemoteSample(
+                    recordedAt: $0.ts,
+                    value: Double($0.state),
+                    metadata: [
+                        "unit": "state_code",
+                        "provenance": "strap_reported",
+                    ]
+                )
+            },
+            ppgHr: pending.ppgHr.map {
+                RemoteSample(
+                    recordedAt: $0.ts,
+                    value: $0.bpm,
+                    quality: $0.confidence,
+                    metadata: [
+                        "unit": "bpm",
+                        "derived": "true",
+                        "provenance": "strap_derived_optical",
+                    ]
+                )
+            },
+            ppgWaveform: pending.ppgWaveform.map {
+                RemoteSample(
+                    recordedAt: $0.ts,
+                    value: Double($0.samples.count / MemoryLayout<Int16>.size),
+                    metadata: [
+                        "unit": "samples_per_record",
+                        "encoding": "i16_le_base64",
+                        "samples": $0.samples.base64EncodedString(),
+                        "sample_rate_hz": "24",
+                        "uncalibrated": "true",
+                        "provenance": "strap_raw_optical",
+                    ]
+                )
+            },
             events: pending.events.map {
                 let kind = $0.kind.trimmingCharacters(in: .whitespacesAndNewlines)
                 return RemoteEvent(

@@ -146,6 +146,127 @@ def test_native_device_identity_must_match_platform_and_installation() -> None:
         SyncPayload.model_validate(payload)
 
 
+def test_motion_and_sleep_state_preserve_nonclinical_sensor_semantics() -> None:
+    payload = minimal_payload()
+    payload["streams"] = {
+        "gravity": [
+            {
+                "recorded_at": 1_784_917_770,
+                "value": 0.1,
+                "metadata": {"unit": "g", "y": "-0.2", "z": "0.97"},
+            }
+        ],
+        "sleep_state": [
+            {
+                "recorded_at": 1_784_917_771,
+                "value": 2,
+                "metadata": {"unit": "state_code"},
+            }
+        ],
+    }
+
+    parsed = SyncPayload.model_validate(payload)
+
+    assert parsed.streams.gravity[0].metadata["z"] == "0.97"
+    assert parsed.streams.sleep_state[0].value == 2
+
+
+def test_ppg_products_preserve_derived_and_lossless_raw_semantics() -> None:
+    payload = minimal_payload()
+    payload["streams"] = {
+        "ppg_hr": [
+            {
+                "recorded_at": 1_784_917_770,
+                "value": 63.5,
+                "quality": 0.87,
+                "metadata": {"unit": "bpm", "derived": "true"},
+            }
+        ],
+        "ppg_waveform": [
+            {
+                "recorded_at": 1_784_917_771,
+                "value": 3,
+                "metadata": {
+                    "unit": "samples_per_record",
+                    "encoding": "i16_le_base64",
+                    "samples": "aPoHAAAI",
+                    "sample_rate_hz": "24",
+                    "uncalibrated": "true",
+                },
+            }
+        ],
+    }
+
+    parsed = SyncPayload.model_validate(payload)
+
+    assert parsed.streams.ppg_hr[0].quality == 0.87
+    assert parsed.streams.ppg_waveform[0].metadata["samples"] == "aPoHAAAI"
+
+
+@pytest.mark.parametrize(
+    ("samples", "value", "message"),
+    (
+        ("not base64", 3, "canonical base64"),
+        ("aPoHAAAI", 2, "packed sample count"),
+        ("AQ==", 1, "packed i16"),
+    ),
+)
+def test_ppg_waveform_rejects_malformed_payloads(
+    samples: str, value: int, message: str
+) -> None:
+    payload = minimal_payload()
+    payload["streams"] = {
+        "ppg_waveform": [
+            {
+                "recorded_at": 1_784_917_771,
+                "value": value,
+                "metadata": {
+                    "unit": "samples_per_record",
+                    "encoding": "i16_le_base64",
+                    "samples": samples,
+                    "sample_rate_hz": "24",
+                    "uncalibrated": "true",
+                },
+            }
+        ]
+    }
+
+    with pytest.raises(ValidationError, match=message):
+        SyncPayload.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("stream", "sample", "message"),
+    (
+        (
+            "gravity",
+            {
+                "recorded_at": 1_784_917_770,
+                "value": 0.1,
+                "metadata": {"unit": "g", "y": "bad", "z": "0.97"},
+            },
+            "gravity metadata.y",
+        ),
+        (
+            "sleep_state",
+            {
+                "recorded_at": 1_784_917_770,
+                "value": 1.5,
+                "metadata": {"unit": "state_code"},
+            },
+            "whole numbers",
+        ),
+    ),
+)
+def test_motion_and_sleep_state_reject_malformed_samples(
+    stream: str, sample: dict, message: str
+) -> None:
+    payload = minimal_payload()
+    payload["streams"] = {stream: [sample]}
+    with pytest.raises(ValidationError, match=message):
+        SyncPayload.model_validate(payload)
+
+
 @pytest.mark.parametrize("installation_id", ("bad:scope", "a" * 65))
 def test_installation_identifier_rejects_ambiguous_or_oversized_values(
     installation_id: str,

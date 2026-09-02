@@ -98,6 +98,10 @@ public struct RemoteStreams: Codable, Equatable, Sendable {
     public var skinTemp: [RemoteSample]
     public var respiration: [RemoteSample]
     public var steps: [RemoteSample]
+    public var gravity: [RemoteSample]
+    public var sleepState: [RemoteSample]
+    public var ppgHr: [RemoteSample]
+    public var ppgWaveform: [RemoteSample]
     public var events: [RemoteEvent]
 
     public init(
@@ -108,6 +112,10 @@ public struct RemoteStreams: Codable, Equatable, Sendable {
         skinTemp: [RemoteSample] = [],
         respiration: [RemoteSample] = [],
         steps: [RemoteSample] = [],
+        gravity: [RemoteSample] = [],
+        sleepState: [RemoteSample] = [],
+        ppgHr: [RemoteSample] = [],
+        ppgWaveform: [RemoteSample] = [],
         events: [RemoteEvent] = []
     ) {
         self.hr = hr
@@ -117,12 +125,17 @@ public struct RemoteStreams: Codable, Equatable, Sendable {
         self.skinTemp = skinTemp
         self.respiration = respiration
         self.steps = steps
+        self.gravity = gravity
+        self.sleepState = sleepState
+        self.ppgHr = ppgHr
+        self.ppgWaveform = ppgWaveform
         self.events = events
     }
 
     public var isEmpty: Bool {
         hr.isEmpty && rr.isEmpty && battery.isEmpty && spo2.isEmpty &&
-            skinTemp.isEmpty && respiration.isEmpty && steps.isEmpty && events.isEmpty
+            skinTemp.isEmpty && respiration.isEmpty && steps.isEmpty && gravity.isEmpty &&
+            sleepState.isEmpty && ppgHr.isEmpty && ppgWaveform.isEmpty && events.isEmpty
     }
 }
 

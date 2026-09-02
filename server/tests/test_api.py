@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -94,6 +95,54 @@ def client_payload(*, batch_id: str | None = None) -> dict:
             ],
             "respiration": [],
             "steps": [],
+            "gravity": [
+                {
+                    "recorded_at": 1784917774,
+                    "value": 0.1,
+                    "metadata": {
+                        "unit": "g",
+                        "y": "-0.2",
+                        "z": "0.97",
+                        "provenance": "strap_measured",
+                    },
+                }
+            ],
+            "sleep_state": [
+                {
+                    "recorded_at": 1784917775,
+                    "value": 2,
+                    "metadata": {
+                        "unit": "state_code",
+                        "provenance": "strap_reported",
+                    },
+                }
+            ],
+            "ppg_hr": [
+                {
+                    "recorded_at": 1784917776,
+                    "value": 63.5,
+                    "quality": 0.87,
+                    "metadata": {
+                        "unit": "bpm",
+                        "derived": "true",
+                        "provenance": "strap_derived_optical",
+                    },
+                }
+            ],
+            "ppg_waveform": [
+                {
+                    "recorded_at": 1784917777,
+                    "value": 3,
+                    "metadata": {
+                        "unit": "samples_per_record",
+                        "encoding": "i16_le_base64",
+                        "samples": "aPoHAAAI",
+                        "sample_rate_hz": "24",
+                        "uncalibrated": "true",
+                        "provenance": "strap_raw_optical",
+                    },
+                }
+            ],
             "events": [
                 {
                     "event_id": "strap-abc:1784917773:BLE_CONNECTION_DOWN(12)",
@@ -141,7 +190,7 @@ def test_client_shaped_batch_preserves_rr_and_raw_semantics(
     result = accepted.json()
     assert result["status"] == "accepted"
     assert result["duplicate"] is False
-    assert result["counts"]["metric_samples"] == 7
+    assert result["counts"]["metric_samples"] == 11
 
     rr = client.get(
         f"/v1/devices/{RAW_DEVICE_ID}/streams/rr",
@@ -171,6 +220,16 @@ def test_client_shaped_batch_preserves_rr_and_raw_semantics(
     assert latest["battery"]["source_platform"] == "ios"
     assert latest["battery"]["source_metadata"]["namespace"] == "strap_measured"
     assert latest["battery"]["sync_batch_id"] == payload["batch_id"]
+    assert latest["gravity"]["unit"] == "g"
+    assert latest["gravity"]["measurement_class"] == "motion_vector"
+    assert latest["gravity"]["metadata"]["y"] == "-0.2"
+    assert latest["sleep_state"]["unit"] == "state_code"
+    assert latest["sleep_state"]["measurement_class"] == "device_state"
+    assert latest["ppg_hr"]["value"] == 63.5
+    assert latest["ppg_hr"]["measurement_class"] == "derived_biometric"
+    assert latest["ppg_waveform"]["value"] == 3
+    assert latest["ppg_waveform"]["measurement_class"] == "raw_waveform"
+    assert latest["ppg_waveform"]["metadata"]["samples"] == "aPoHAAAI"
 
     events = client.get(
         f"/v1/devices/{RAW_DEVICE_ID}/events",
@@ -182,6 +241,46 @@ def test_client_shaped_batch_preserves_rr_and_raw_semantics(
     ).json()["events"]
     assert events[0]["kind"] == "BLE_CONNECTION_DOWN(12)"
     assert events[0]["event_id"].endswith("BLE_CONNECTION_DOWN(12)")
+
+
+def test_stream_freshness_reports_recent_gaps_and_empty_channels(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    now = int(datetime.now(UTC).timestamp())
+    payload = client_payload()
+    payload["source"]["sent_at"] = datetime.now(UTC).isoformat()
+    payload["streams"] = {
+        "hr": [
+            {"recorded_at": now - 900, "value": 61},
+            {"recorded_at": now - 100, "value": 62},
+        ],
+        "gravity": [
+            {
+                "recorded_at": now - 90,
+                "value": 0.1,
+                "metadata": {"unit": "g", "y": "0.2", "z": "0.97"},
+            }
+        ],
+    }
+    response = client.post(
+        "/v1/sync",
+        headers={**auth_headers, "Idempotency-Key": payload["batch_id"]},
+        json=payload,
+    )
+    assert response.status_code == 200, response.text
+
+    health = client.get(
+        f"/v1/devices/{RAW_DEVICE_ID}/freshness",
+        params={"hours": 1, "gap_seconds": 300},
+        headers=auth_headers,
+    )
+    assert health.status_code == 200, health.text
+    streams = health.json()["streams"]
+    assert streams["hr"]["sample_count"] == 2
+    assert streams["hr"]["gap_count"] == 1
+    assert streams["hr"]["max_gap_seconds"] == 800
+    assert streams["gravity"]["sample_count"] == 1
+    assert streams["sleep_state"]["sample_count"] == 0
 
 
 def test_checked_in_v1_fixtures_keep_raw_and_official_provenance_separate(
@@ -382,7 +481,7 @@ def test_export_delete_and_retention_are_authenticated_and_confirmed(
     assert export.status_code == 200
     assert "attachment" in export.headers["content-disposition"]
     exported = export.json()
-    assert len(exported["metric_samples"]) == 7
+    assert len(exported["metric_samples"]) == 11
     assert exported["metric_samples"][0]["source_metadata"]["logical_source_id"] == (
         "strap-abc-strap"
     )
@@ -398,7 +497,7 @@ def test_export_delete_and_retention_are_authenticated_and_confirmed(
         headers={**auth_headers, "X-Noop-Confirm": f"DELETE {RAW_DEVICE_ID}"},
     )
     assert deleted.status_code == 200
-    assert deleted.json()["counts"]["metric_samples"] == 7
+    assert deleted.json()["counts"]["metric_samples"] == 11
 
     retired_replay = client.post("/v1/sync", headers=auth_headers, json=payload)
     assert retired_replay.status_code == 410

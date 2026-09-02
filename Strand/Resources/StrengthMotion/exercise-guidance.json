@@ -1,0 +1,450 @@
+{
+  "barbell_back_squat": {
+    "title": "Barbell Back Squat",
+    "setup": "Set the bar across the upper back, hands just outside shoulder width. Stand tall with feet about shoulder width and toes slightly out.",
+    "movement": "Brace, sit the hips down between the feet, and let the knees track over the toes. Reach a controlled depth, then drive the floor away to stand.",
+    "safety": "Keep the whole foot planted and the bar balanced over mid-foot. Stop if the lower back rounds or the knees collapse inward.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "barbell_bench_press": {
+    "title": "Barbell Bench Press",
+    "setup": "Lie with eyes under the bar, shoulder blades pulled down and back, feet planted. Grip slightly wider than shoulder width.",
+    "movement": "Unrack over the shoulders, lower to the lower chest with forearms nearly vertical, then press up and slightly back.",
+    "safety": "Use safeties or a spotter for challenging sets. Keep shoulders pinned and wrists stacked over elbows.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "conventional_deadlift": {
+    "title": "Conventional Deadlift",
+    "setup": "Stand with the bar over mid-foot. Hinge down, grip outside the legs, bring shins close, and brace with a long neutral spine.",
+    "movement": "Push through the floor while keeping the bar close. Extend knees and hips together, stand tall, then hinge to return the bar.",
+    "safety": "Do not jerk the bar or lean back at lockout. End the set if spinal position or bar control changes.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "overhead_press": {
+    "title": "Overhead Press",
+    "setup": "Hold the bar at upper-chest height with wrists stacked over elbows. Set feet firmly and brace glutes and trunk.",
+    "movement": "Move the head slightly back, press the bar vertically, then finish with arms overhead and ribs controlled. Lower to the shoulders.",
+    "safety": "Avoid leaning back to turn the press into an incline press. Use a load that allows a clear vertical path.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "bent_over_row": {
+    "title": "Bent-Over Row",
+    "setup": "Grip the bar, soften the knees, and hinge until the torso is stable and nearly parallel to the floor.",
+    "movement": "Pull the bar toward the lower ribs, bringing elbows behind the body. Pause briefly and lower until the arms are long.",
+    "safety": "Hold the same torso angle throughout. Reduce load if momentum or lower-back extension drives the repetition.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "pull_up": {
+    "title": "Pull-Up",
+    "setup": "Take an overhand grip just outside shoulder width. Hang long with ribs controlled and shoulders active.",
+    "movement": "Drive elbows down and pull the upper chest toward the bar. Lower under control to a full active hang.",
+    "safety": "Avoid swinging, neck reaching, or dropping into the bottom. Use assistance if full-range repetitions are not controlled.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "lat_pulldown": {
+    "title": "Lat Pulldown",
+    "setup": "Secure the thighs under the pad and grip the bar wider than the shoulders. Sit tall with a slight torso lean.",
+    "movement": "Pull elbows down until the bar approaches the upper chest, then let the arms lengthen without shrugging.",
+    "safety": "Do not pull behind the neck or rock the torso. Keep the cable path controlled.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "leg_press": {
+    "title": "Leg Press",
+    "setup": "Place feet shoulder width on the platform and keep hips and back against the pad. Release the safeties with knees soft.",
+    "movement": "Lower the platform until the knees reach a comfortable bend, then press through the whole foot without locking hard.",
+    "safety": "Use a range where the pelvis stays on the pad. Keep knees tracking with toes and re-engage safeties before exiting.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "romanian_deadlift": {
+    "title": "Romanian Deadlift",
+    "setup": "Hold the bar at the thighs, stand tall, and soften the knees. Brace before initiating the hinge.",
+    "movement": "Push hips back while sliding the bar close to the legs. Stop at strong hamstring tension, then drive hips forward.",
+    "safety": "This is a hip hinge, not a deep squat. Keep the spine long and never chase depth by rounding.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "dumbbell_lunge": {
+    "title": "Dumbbell Lunge",
+    "setup": "Stand tall with a dumbbell at each side and enough space to step. Set the trunk before moving.",
+    "movement": "Step forward, lower both knees with the front foot flat, then push through the front foot to return.",
+    "safety": "Keep the front knee tracking over the foot and land under control. Shorten range if balance changes.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "biceps_curl": {
+    "title": "Biceps Curl",
+    "setup": "Stand tall holding the weight with palms forward. Keep elbows close to the ribs and shoulders relaxed.",
+    "movement": "Curl without moving the upper arms, squeeze near the top, then lower until the elbows are straight.",
+    "safety": "Avoid swinging the torso or letting shoulders roll forward. Reduce load if the elbows drift.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "triceps_pushdown": {
+    "title": "Triceps Pushdown",
+    "setup": "Face the cable with elbows tucked to the sides and forearms near parallel to the floor. Stand with a stable base.",
+    "movement": "Extend the elbows until the arms are straight, pause, then return without letting the upper arms move forward.",
+    "safety": "Keep wrists neutral and shoulders down. Do not use body weight to force the cable.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "plank": {
+    "title": "Plank",
+    "setup": "Place elbows under shoulders and extend the legs. Form a straight line from head through heels.",
+    "movement": "Brace the abdomen and glutes, press the floor away, and hold without changing spinal or pelvic position.",
+    "breathing": "Breathe continuously and evenly. Do not hold your breath during a sustained position.",
+    "tempo": "Hold only while alignment and calm breathing remain steady.",
+    "safety": "Stop before the hips sag or the lower back arches. Shorten the lever by using the knees when needed."
+  },
+  "barbell_front_squat": {
+    "title": "Barbell Front Squat",
+    "setup": "Rest the bar across the front shoulders with elbows high. Stand shoulder width and brace the upper back.",
+    "movement": "Descend between the feet while keeping elbows lifted, then drive up with chest and hips rising together.",
+    "safety": "Keep the bar supported by the shoulders rather than the hands. Stop if elbows drop or the back rounds.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "goblet_squat": {
+    "title": "Goblet Squat",
+    "setup": "Hold a dumbbell or kettlebell close to the chest. Set feet around shoulder width with toes slightly out.",
+    "movement": "Sit down between the feet, keep the weight close, then press through the whole foot to stand.",
+    "safety": "Keep knees aligned with toes and ribs stacked over the pelvis. Do not let the weight pull the torso forward.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "hack_squat": {
+    "title": "Hack Squat",
+    "setup": "Set shoulders and back against the machine pad with feet evenly placed on the platform.",
+    "movement": "Release the stops, lower with hips and back supported, then press the platform away through the whole foot.",
+    "safety": "Do not let the pelvis curl off the pad or lock the knees forcefully. Re-engage both stops before leaving.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "leg_extension": {
+    "title": "Leg Extension",
+    "setup": "Align knees with the machine pivot and place the pad above the ankles. Sit fully against the backrest.",
+    "movement": "Extend the knees until the legs are nearly straight, pause, then lower without letting the stack drop.",
+    "safety": "Use a pain-free range and controlled load. Avoid kicking or lifting the hips from the seat.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "lying_leg_curl": {
+    "title": "Lying Leg Curl",
+    "setup": "Align knees near the machine pivot and place the roller just above the heels. Keep hips against the pad.",
+    "movement": "Curl heels toward the glutes, pause, then lower the weight to a long-leg position.",
+    "safety": "Do not arch the lower back or lift the hips. Use a range that remains comfortable behind the knee.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "barbell_hip_thrust": {
+    "title": "Barbell Hip Thrust",
+    "setup": "Place the upper back on a stable bench and the padded bar across the hip crease. Plant feet around hip width.",
+    "movement": "Drive through the heels and extend the hips until the torso is level, then lower under control.",
+    "safety": "Keep the chin tucked and ribs down. Finish with glutes, not lower-back overextension.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "glute_bridge": {
+    "title": "Glute Bridge",
+    "setup": "Lie on the floor with knees bent and feet flat near the hips. Set ribs down and pelvis neutral.",
+    "movement": "Press through the feet, squeeze the glutes to lift the hips, pause, then lower with control.",
+    "safety": "Avoid pushing through the neck or arching the lower back. Adjust foot distance if hamstrings cramp.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "bulgarian_split_squat": {
+    "title": "Bulgarian Split Squat",
+    "setup": "Stand one stride in front of a bench and place the rear foot on it. Square the hips and plant the front foot.",
+    "movement": "Lower mostly through the front leg, then drive through the front foot to rise without bouncing.",
+    "safety": "Choose a stance that keeps balance and front-foot pressure. Hold support before adding load if needed.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "walking_lunge": {
+    "title": "Walking Lunge",
+    "setup": "Stand tall with a clear path ahead. Brace and keep weights stable at the sides if loaded.",
+    "movement": "Step into a lunge, lower under control, then drive through the front leg and continue into the next step.",
+    "safety": "Keep each knee aligned with its foot. Slow down rather than reaching for an excessively long step.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "standing_calf_raise": {
+    "title": "Standing Calf Raise",
+    "setup": "Stand on the balls of the feet with heels free and hold stable support. Keep knees softly extended.",
+    "movement": "Lower heels to a comfortable stretch, rise as high as possible, pause, then descend slowly.",
+    "safety": "Keep ankles tracking straight instead of rolling outward. Use support to prevent balance from limiting the set.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "seated_calf_raise": {
+    "title": "Seated Calf Raise",
+    "setup": "Sit with knees bent, balls of the feet on the platform, and the thigh pad secured above the knees.",
+    "movement": "Lower the heels, press through the forefoot to raise them fully, pause, then return slowly.",
+    "safety": "Keep the pad secure and use a controlled stretch. Do not bounce at the bottom.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "incline_barbell_bench_press": {
+    "title": "Incline Barbell Bench Press",
+    "setup": "Set the bench to a moderate incline, pin shoulder blades to the pad, plant feet, and grip outside shoulder width.",
+    "movement": "Lower the bar toward the upper chest with forearms vertical, then press upward over the shoulders.",
+    "safety": "Keep the shoulders down and avoid an excessively steep bench. Use safeties or a spotter.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "dumbbell_bench_press": {
+    "title": "Dumbbell Bench Press",
+    "setup": "Lie with feet planted and shoulder blades set. Start dumbbells over the chest with wrists stacked.",
+    "movement": "Lower the dumbbells beside the chest, then press them up while maintaining stable shoulders.",
+    "safety": "Do not force depth below a comfortable shoulder range. Bring weights down safely rather than dropping them.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "push_up": {
+    "title": "Push-Up",
+    "setup": "Place hands just outside shoulder width and create a straight line from head to heels.",
+    "movement": "Lower the chest between the hands with elbows angled back, then press the floor away as one unit.",
+    "safety": "Keep hips from sagging and shoulders away from ears. Elevate the hands if full range is not controlled.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "chest_fly": {
+    "title": "Dumbbell Chest Fly",
+    "setup": "Lie on a bench with dumbbells above the chest, palms facing, and elbows softly bent.",
+    "movement": "Open the arms in a wide arc to a comfortable stretch, then bring them together over the chest.",
+    "safety": "Maintain the elbow bend and avoid dropping below a safe shoulder range. Use lighter loads than a press.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "cable_crossover": {
+    "title": "Cable Crossover",
+    "setup": "Stand between high pulleys in a staggered stance, holding handles with elbows softly bent.",
+    "movement": "Sweep hands forward and slightly down until they meet, squeeze, then open under cable control.",
+    "safety": "Keep the torso still and shoulders down. Do not let the stacks pull the arms abruptly backward.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "machine_chest_press": {
+    "title": "Machine Chest Press",
+    "setup": "Adjust the seat so handles align with mid-chest. Set back and shoulders firmly against the pad.",
+    "movement": "Press handles forward without locking hard, then return until the chest is comfortably stretched.",
+    "safety": "Keep wrists stacked and shoulders down. Adjust range rather than letting elbows travel far behind the body.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "one_arm_dumbbell_row": {
+    "title": "One-Arm Dumbbell Row",
+    "setup": "Support one hand and knee on a bench, plant the other foot, and let the dumbbell hang below the shoulder.",
+    "movement": "Pull the elbow toward the hip while keeping the torso square, then lower to a long arm.",
+    "safety": "Avoid twisting the trunk or shrugging. Keep the supporting shoulder stable and spine long.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "seated_cable_row": {
+    "title": "Seated Cable Row",
+    "setup": "Sit tall with feet braced, knees soft, and arms long. Set shoulders down before pulling.",
+    "movement": "Drive elbows back and bring the handle toward the lower ribs, then extend the arms without collapsing forward.",
+    "safety": "Avoid rocking the torso or rounding to chase range. Keep cable tension controlled.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "chest_supported_row": {
+    "title": "Chest-Supported Row",
+    "setup": "Set the bench so the chest is supported and feet are stable. Let weights hang with shoulders away from ears.",
+    "movement": "Pull elbows back toward the ribs, pause, then lower to full arm length.",
+    "safety": "Keep the chest on the pad and neck neutral. Reduce load if the shoulders shrug.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "chin_up": {
+    "title": "Chin-Up",
+    "setup": "Take an underhand shoulder-width grip and begin from an active hang with ribs controlled.",
+    "movement": "Pull elbows down until the chin clears the bar, then lower slowly to full arm length.",
+    "safety": "Avoid swinging or forcing the neck over the bar. Use assistance to preserve full controlled range.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "face_pull": {
+    "title": "Face Pull",
+    "setup": "Set a rope around face height, stand stable, and begin with arms extended and shoulders down.",
+    "movement": "Pull the rope toward the face while separating the hands and rotating elbows outward, then return slowly.",
+    "safety": "Use a light load and avoid leaning backward. Keep the neck relaxed and wrists aligned.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "dumbbell_shoulder_press": {
+    "title": "Dumbbell Shoulder Press",
+    "setup": "Hold dumbbells beside the shoulders with wrists over elbows. Stand or sit tall and brace.",
+    "movement": "Press overhead until arms are long, then lower to the starting position without dropping.",
+    "safety": "Keep ribs controlled and avoid leaning back. Use a neutral grip if that is more comfortable for the shoulders.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "lateral_raise": {
+    "title": "Lateral Raise",
+    "setup": "Stand tall with light dumbbells at the sides, elbows softly bent, and shoulders relaxed.",
+    "movement": "Raise arms out to around shoulder height, lead with the elbows, then lower slowly.",
+    "safety": "Avoid shrugging, swinging, or lifting through pain. Use less weight to preserve control.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "rear_delt_fly": {
+    "title": "Rear Delt Fly",
+    "setup": "Hinge with a long spine and let light dumbbells hang below the shoulders.",
+    "movement": "Open the arms wide with soft elbows, squeeze behind the shoulders, then return slowly.",
+    "safety": "Keep the torso still and shoulders away from ears. Avoid turning it into a heavy row.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "hammer_curl": {
+    "title": "Hammer Curl",
+    "setup": "Stand tall with dumbbells at the sides and palms facing inward. Pin elbows near the ribs.",
+    "movement": "Curl while keeping the neutral grip, pause near the top, then lower to straight arms.",
+    "safety": "Avoid torso swing and wrist bending. Stop the set when the elbows begin moving forward.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "preacher_curl": {
+    "title": "Preacher Curl",
+    "setup": "Adjust the pad so upper arms rest fully on it. Grip the weight with wrists neutral and elbows slightly soft.",
+    "movement": "Curl toward the shoulders without lifting the upper arms, then lower slowly before the elbows lock hard.",
+    "safety": "Use a conservative load at the stretched bottom position. Never bounce out of extension.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "skull_crusher": {
+    "title": "Lying Triceps Extension",
+    "setup": "Lie on a bench with the bar over the shoulders, arms vertical, and a secure shoulder-width grip.",
+    "movement": "Bend only the elbows to lower toward or just behind the forehead, then extend back to vertical.",
+    "safety": "Keep upper arms stable and use a controllable load. Use a spotter or safe bar path near the face.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "overhead_triceps_extension": {
+    "title": "Overhead Triceps Extension",
+    "setup": "Hold the weight overhead with elbows pointing forward and trunk braced.",
+    "movement": "Bend the elbows to lower behind the head, then extend until the arms are long overhead.",
+    "safety": "Keep ribs down and avoid flaring the elbows excessively. Choose a grip that feels natural.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "parallel_bar_dip": {
+    "title": "Parallel-Bar Dip",
+    "setup": "Support the body on parallel bars with shoulders down and legs clear of the floor.",
+    "movement": "Lower by bending the elbows to a comfortable shoulder depth, then press the bars away to rise.",
+    "safety": "Avoid dropping into the bottom or forcing deep range. Use assistance if shoulder position cannot stay controlled.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "hanging_leg_raise": {
+    "title": "Hanging Leg Raise",
+    "setup": "Hang from a secure bar with shoulders active and legs together. Set the pelvis before moving.",
+    "movement": "Curl the pelvis and raise the legs without swinging, then lower slowly to stillness.",
+    "safety": "Do not use momentum or hang on painful shoulders. Bend the knees to reduce difficulty.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "cable_crunch": {
+    "title": "Cable Crunch",
+    "setup": "Kneel facing the cable with the rope beside the head. Keep hips mostly fixed and brace.",
+    "movement": "Flex the trunk to bring ribs toward the pelvis, pause, then return without letting the stack pull you up.",
+    "safety": "Move through the abdomen rather than yanking with the arms. Keep the neck neutral.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "side_plank": {
+    "title": "Side Plank",
+    "setup": "Place the elbow under the shoulder and stack or stagger the feet. Lift into a straight side line.",
+    "movement": "Hold the hips high, brace the side of the trunk, and keep shoulders and pelvis stacked.",
+    "breathing": "Breathe continuously and evenly. Do not hold your breath during a sustained position.",
+    "tempo": "Hold only while the body remains in one straight line.",
+    "safety": "Do not sink into the supporting shoulder. Use a bent lower knee for a shorter lever."
+  },
+  "ab_wheel_rollout": {
+    "title": "Ab Wheel Rollout",
+    "setup": "Kneel with the wheel under the shoulders, glutes lightly engaged, and spine neutral.",
+    "movement": "Roll forward while keeping ribs and pelvis connected, pause before the back arches, then pull back with the trunk.",
+    "safety": "Use a short range first. Stop immediately if the lower back sags or the return requires a hip jerk.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "farmers_carry": {
+    "title": "Farmer's Carry",
+    "setup": "Stand between equal loads, hinge to pick them up safely, then stand tall with shoulders set.",
+    "movement": "Walk with short controlled steps, weights quiet at the sides, and trunk tall. Turn carefully and set down with a hinge.",
+    "breathing": "Take controlled breaths behind a firm brace; avoid breath-holding for the whole carry.",
+    "tempo": "Use an even walking pace that keeps posture and grip stable.",
+    "safety": "Keep the path clear and do not rush turns. End before grip loss changes posture."
+  },
+  "kettlebell_swing": {
+    "title": "Kettlebell Swing",
+    "setup": "Place the bell ahead of the feet, hinge to grip it, and hike it back with a braced neutral spine.",
+    "movement": "Snap the hips forward so the bell floats, then let it return and hinge again. Arms guide rather than lift.",
+    "breathing": "Inhale on the backswing and exhale sharply as the hips extend.",
+    "tempo": "Use a crisp hip drive and let the bell's pendulum set the rhythm.",
+    "safety": "This is a hinge, not a squat or shoulder raise. Stop if the bell pulls the spine out of position."
+  },
+  "back_extension": {
+    "title": "Back Extension",
+    "setup": "Set the pad below the hip crease and anchor the feet. Start in a long neutral line.",
+    "movement": "Hinge forward at the hips, then squeeze glutes and hamstrings to return to a straight body line.",
+    "safety": "Do not hyperextend above neutral or bounce at the bottom. Keep the neck aligned with the spine.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "band_pull_apart": {
+    "title": "Band Pull-Apart",
+    "setup": "Hold a light band at shoulder height with arms straight and hands wider than the shoulders.",
+    "movement": "Pull the band apart until it approaches the chest, squeeze the upper back, then return slowly.",
+    "safety": "Keep shoulders down and ribs controlled. Use a lighter band if elbows bend or the torso leans.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "resistance_band_row": {
+    "title": "Resistance-Band Row",
+    "setup": "Anchor the band securely, sit or stand tall, and begin with arms extended and shoulders set.",
+    "movement": "Pull elbows behind the body, pause with hands near the ribs, then return under band tension.",
+    "safety": "Inspect the band and anchor before use. Keep the face out of the band's recoil path.",
+    "breathing": "Inhale and brace before the lowering phase. Exhale through the hardest part without losing trunk tension.",
+    "tempo": "Lower for about 2 seconds, pause under control, then lift smoothly for 1 second."
+  },
+  "treadmill_run": {
+    "title": "Treadmill Run",
+    "setup": "Start the belt slowly, stand centered, and build speed only after finding a relaxed stride.",
+    "movement": "Run tall with quick quiet foot contacts under the body and relaxed arms swinging front to back.",
+    "breathing": "Use rhythmic breathing that matches the effort; slow down if breathing becomes uncontrolled.",
+    "tempo": "Keep a sustainable cadence and change speed gradually.",
+    "safety": "Use the safety clip, stay away from the rear edge, and reduce speed before stepping off."
+  },
+  "indoor_cycling": {
+    "title": "Indoor Cycling",
+    "setup": "Set saddle height so the knee stays slightly bent at the bottom. Adjust reach so shoulders remain relaxed.",
+    "movement": "Pedal smoothly through the full circle with knees tracking forward and hips steady.",
+    "breathing": "Breathe rhythmically and avoid bracing the upper body during sustained work.",
+    "tempo": "Choose a cadence and resistance that stay smooth without bouncing in the saddle.",
+    "safety": "Secure feet and all adjustment levers. Stop if knee, hip, or back discomfort develops."
+  },
+  "rowing_ergometer": {
+    "title": "Rowing Ergometer",
+    "setup": "Secure the feet, sit tall, and begin at the catch with shins near vertical and arms long.",
+    "movement": "Drive legs first, swing the torso slightly, then pull to the lower ribs. Return arms, torso, then knees.",
+    "breathing": "Exhale through the drive and inhale during the controlled recovery.",
+    "tempo": "Make the recovery slower than the drive and keep stroke timing consistent.",
+    "safety": "Do not round the lower back or yank early with the arms. Keep the chain level and controlled."
+  },
+  "stair_climber": {
+    "title": "Stair Climber",
+    "setup": "Step on while the machine is stopped, select a low speed, and use rails only for balance.",
+    "movement": "Place the whole foot on each step, stay tall, and climb with steady alternating steps.",
+    "breathing": "Use even rhythmic breathing and lower the speed before form or breathing deteriorates.",
+    "tempo": "Maintain a deliberate pace without riding the steps downward.",
+    "safety": "Do not support body weight on the rails or skip steps at speed. Slow the machine before exiting."
+  }
+}

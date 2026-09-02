@@ -23,9 +23,15 @@ class ReleaseLegalGateTests(unittest.TestCase):
             by_ecosystem[ecosystem] = by_ecosystem.get(ecosystem, 0) + 1
         self.assertEqual(
             by_ecosystem,
-            {"swiftpm": 5, "maven": 127, "pypi": 20},
+            {"swiftpm": 5, "maven": 139, "pypi": 20},
         )
         self.assertEqual(len(inventory["containers"]), 3)
+        self.assertEqual(
+            inventory["assetLicenseFiles"],
+            [
+                GATE.license_file("assets/musclemap.txt"),
+            ],
+        )
 
     def test_python_runtime_is_fully_hash_locked(self) -> None:
         requirements = GATE.requirement_entries(ROOT / "server" / "requirements.lock")
@@ -68,6 +74,7 @@ class ReleaseLegalGateTests(unittest.TestCase):
         self.assertIn("Exact license and notice texts", notice)
         self.assertIn("===== ThirdPartyNotices/licenses/android/Apache-2.0.txt", notice)
         self.assertIn("===== ThirdPartyNotices/licenses/apple/grdb.swift.txt", notice)
+        self.assertIn("===== ThirdPartyNotices/licenses/assets/musclemap.txt", notice)
         self.assertIn("===== ThirdPartyNotices/licenses/python/fastapi-", notice)
 
     def test_owner_declaration_is_mandatory(self) -> None:

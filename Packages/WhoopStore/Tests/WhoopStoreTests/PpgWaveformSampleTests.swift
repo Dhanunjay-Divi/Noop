@@ -31,7 +31,7 @@ final class PpgWaveformSampleTests: XCTestCase {
     func testPpgWaveformTableShape() async throws {
         let store = try await WhoopStore.inMemory()
         let cols = try await store.columnNamesForTest(table: "ppgWaveformSample")
-        XCTAssertEqual(Set(cols), ["deviceId", "ts", "samples"])
+        XCTAssertEqual(Set(cols), ["deviceId", "ts", "samples", "synced"])
     }
 
     func testPpgWaveformInsertRoundTripAndDedup() async throws {

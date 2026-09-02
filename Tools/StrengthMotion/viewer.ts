@@ -1,11 +1,11 @@
-import { createIcons, Info, X } from "lucide";
+import { createIcons, ExternalLink, Info, Pause, Play, X } from "lucide";
 import { exerciseInstructions } from "./guidance";
 
 const mediaIds: Record<string, string> = {
   barbell_back_squat: "qXTaZnJ",
   barbell_bench_press: "EIeI8Vf",
   conventional_deadlift: "ila4NZS",
-  overhead_press: "kTbSH9h",
+  overhead_press: "wdRZISl",
   bent_over_row: "eZyBC3j",
   pull_up: "lBDjFxJ",
   lat_pulldown: "CuaWCmC",
@@ -17,11 +17,11 @@ const mediaIds: Record<string, string> = {
   plank: "VBAWRPG",
   barbell_front_squat: "zG0zs85",
   goblet_squat: "yn8yg1r",
-  hack_squat: "5VCj6iH",
+  hack_squat: "Qa55kX1",
   leg_extension: "my33uHU",
   lying_leg_curl: "17lJ1kr",
   barbell_hip_thrust: "qKBpF7I",
-  glute_bridge: "qg2PGl6",
+  glute_bridge: "u0cNiij",
   bulgarian_split_squat: "qx4fgX7",
   walking_lunge: "IZVHb27",
   standing_calf_raise: "8ozhUIZ",
@@ -53,9 +53,9 @@ const mediaIds: Record<string, string> = {
   kettlebell_swing: "UHJlbu3",
   back_extension: "rUXfn3R",
   band_pull_apart: "tc5dYrf",
-  resistance_band_row: "DKBwJrL",
+  resistance_band_row: "Nu7jqFE",
   treadmill_run: "rjiM4L3",
-  indoor_cycling: "a8VDgLw",
+  indoor_cycling: "H1PESYI",
   rowing_ergometer: "7I6LNUG",
   stair_climber: "j9Q5crt",
 };
@@ -65,13 +65,20 @@ const exerciseId =
   "barbell_back_squat";
 const guide = exerciseInstructions(exerciseId);
 const image = required<HTMLImageElement>("motion");
+const still = required<HTMLCanvasElement>("motion-still");
 const loading = required<HTMLElement>("loading");
 const error = required<HTMLElement>("error");
+const motionToggle = required<HTMLButtonElement>("motion-toggle");
+const playbackPlay = required<HTMLElement>("playback-play");
+const playbackPause = required<HTMLElement>("playback-pause");
 const infoButton = required<HTMLButtonElement>("info");
 const instructions = required<HTMLElement>("instructions");
 const closeButton = required<HTMLButtonElement>("close");
+const reduceMotion =
+  new URLSearchParams(window.location.search).get("reduceMotion") === "1";
+let paused = false;
 
-createIcons({ icons: { Info, X } });
+createIcons({ icons: { ExternalLink, Info, Pause, Play, X } });
 populateInstructions();
 
 const mediaId = mediaIds[exerciseId];
@@ -84,9 +91,11 @@ if (mediaId) {
 image.addEventListener("load", () => {
   loading.hidden = true;
   image.hidden = false;
+  if (reduceMotion) setPaused(true);
   document.body.dataset.ready = "true";
 });
 image.addEventListener("error", showError);
+motionToggle.addEventListener("click", togglePlayback);
 infoButton.addEventListener("click", () => {
   instructions.hidden = false;
 });
@@ -100,18 +109,52 @@ instructions.addEventListener("click", (event) => {
 function showError(): void {
   loading.hidden = true;
   image.hidden = true;
+  still.hidden = true;
   error.hidden = false;
   document.body.dataset.error = "true";
 }
 
 function populateInstructions(): void {
-  required<HTMLElement>("exercise-title").textContent = guide.title;
   required<HTMLElement>("instruction-title").textContent = guide.title;
   required<HTMLElement>("instruction-setup").textContent = guide.setup;
   required<HTMLElement>("instruction-movement").textContent = guide.movement;
   required<HTMLElement>("instruction-breathing").textContent = guide.breathing;
   required<HTMLElement>("instruction-tempo").textContent = guide.tempo;
   required<HTMLElement>("instruction-safety").textContent = guide.safety;
+}
+
+function togglePlayback(): void {
+  if (image.hidden && still.hidden) return;
+  setPaused(!paused);
+}
+
+function setPaused(nextPaused: boolean): void {
+  if (nextPaused === paused && !(nextPaused && still.hidden)) return;
+  paused = nextPaused;
+  if (paused) {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    if (width > 0 && height > 0) {
+      still.width = width;
+      still.height = height;
+      const context = still.getContext("2d");
+      context?.drawImage(image, 0, 0, width, height);
+      still.hidden = false;
+      image.hidden = true;
+    }
+  } else {
+    still.hidden = true;
+    image.hidden = false;
+  }
+  renderPlaybackControl();
+}
+
+function renderPlaybackControl(): void {
+  const action = paused ? "Play exercise animation" : "Pause exercise animation";
+  playbackPlay.hidden = !paused;
+  playbackPause.hidden = paused;
+  motionToggle.setAttribute("aria-label", action);
+  motionToggle.title = action;
 }
 
 function required<T extends HTMLElement>(id: string): T {

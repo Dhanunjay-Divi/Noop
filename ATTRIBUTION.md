@@ -49,17 +49,24 @@ remains available as a fallback.
 - **GRDB.swift** (`groue/GRDB.swift`) — SQLite persistence (via Swift Package Manager).
 - **MarkdownUI** (`gonzalezreal/swift-markdown-ui`) — renders the AI Coach's Markdown
   replies (via Swift Package Manager).
-- **Three.js** (`mrdoob/three.js`) — renders NOOP's offline interactive strength
-  exercise guidance. MIT License.
-- **Lucide** (`lucide-icons/lucide`) — supplies controls within the offline strength
-  exercise viewer. ISC License; portions derived from Feather are MIT licensed.
-- **Mixamo X Bot** (Adobe Mixamo; redistributed through the Three.js example
-  repository) — the skinned humanoid base used by NOOP's offline exercise
-  demonstrations. NOOP supplies its own exercise poses, retargeting, materials,
-  equipment, and guidance. Adobe's Mixamo FAQ permits royalty-free use of
-  downloaded characters in commercial and noncommercial projects; the model is
-  not covered by the Three.js MIT license. Provenance and the exact asset hash
-  are recorded in `Tools/StrengthMotion/ASSET-PROVENANCE.md`.
+- **Lucide** (`lucide-icons/lucide`) — supplies controls in the strength media QA
+  viewer used by the asset validation tool. ISC License; portions derived from
+  Feather are MIT licensed.
+- **Coil** (`coil-kt/coil`) — decodes and caches exercise GIF and anatomy SVG media
+  in the Android Strength Trainer. Apache License 2.0.
+- **ExerciseDB V1 / AscendAPI** — NOOP maps its own exercise identifiers to
+  animated media loaded at runtime from `static.exercisedb.dev`.
+  The media is not copied into this repository or either app bundle and remains
+  subject to its provider's terms. The in-viewer attribution links to AscendAPI;
+  details are recorded in `Tools/StrengthMotion/ASSET-PROVENANCE.md`.
+- **Open-Meteo** — supplies opt-in current conditions on Android after the user
+  grants approximate location access. NOOP sends a coordinate rounded to two
+  decimal places, stores no location history, and links attribution from the
+  weather details view.
+- **MuscleMap body geometry** (`melihcolpan/MuscleMap`) — supplies the anatomical
+  SVG path geometry used by NOOP's interactive strength load and recovery map.
+  The path data was converted from MuscleMap's Swift source by openGym and is
+  used under the MIT License. NOOP's renderer and interaction code are original.
 
 The complete resolved runtime dependency inventory and required license texts
 are generated into [`NOTICE`](NOTICE). Those independent dependencies remain

@@ -16,6 +16,7 @@ enum RemoteSyncPreferences {
     private static let replayInProgressKey = "remoteSync.replayInProgress"
     private static let replayWindowKey = "remoteSync.replayWindow"
     private static let backlogKey = "remoteSync.hasPendingBacklog"
+    private static let optimizeStorageKey = "remoteSync.optimizeStorage"
     private static let installIdKey = "remoteSync.installationId"
 
     static var endpoint: String {
@@ -55,6 +56,10 @@ enum RemoteSyncPreferences {
         get { defaults.bool(forKey: backlogKey) }
         set { defaults.set(newValue, forKey: backlogKey) }
     }
+    static var optimizeStorage: Bool {
+        get { defaults.bool(forKey: optimizeStorageKey) }
+        set { defaults.set(newValue, forKey: optimizeStorageKey) }
+    }
     static var installationId: String {
         if let value = defaults.string(forKey: installIdKey), !value.isEmpty { return value }
         let value = UUID().uuidString.lowercased()
@@ -93,6 +98,7 @@ enum RemoteSyncPreferences {
         needsFullReplay = true
         finishReplay()
         hasPendingBacklog = false
+        optimizeStorage = false
     }
 }
 
@@ -260,9 +266,12 @@ enum RemoteSyncService {
         RemoteSyncPreferences.automatic = automatic
     }
 
-    static func disconnect() {
+    static func disconnect(repo: Repository) async {
         RemoteSyncKeyStore.clear()
         RemoteSyncPreferences.clearConfiguration()
+        if let store = await repo.storeHandle() {
+            try? await store.configureRemoteSyncPendingIndexes(enabled: false)
+        }
     }
 
     /// A dedicated installation-scoped producer for the sparse Friends projection. It is deliberately
@@ -337,6 +346,8 @@ enum RemoteSyncService {
             var hasMoreRaw = false
             var hasMoreDerived = false
             var lastResponse: RemoteSyncResponse?
+            var prunedRows = 0
+            var pruneHasMore = false
             var strapIds: [String] = []
             for id in [activeId] + (try await store.pairedDeviceIdsForRemoteSync()) + [canonicalId]
             where !strapIds.contains(id) {
@@ -535,11 +546,30 @@ enum RemoteSyncService {
                 }
                 RemoteSyncPreferences.finishReplay()
             }
+            if RemoteSyncPreferences.optimizeStorage {
+                let cutoff = Int(Date().timeIntervalSince1970) - 14 * 86_400
+                for strapId in strapIds {
+                    let result = try await store.pruneAcknowledgedRemoteRows(
+                        deviceId: strapId,
+                        olderThan: cutoff
+                    )
+                    prunedRows += result.deletedRows
+                    pruneHasMore = pruneHasMore || result.hasMoreEligibleRows
+                }
+            }
             RemoteSyncPreferences.hasPendingBacklog = hasMore
             RemoteSyncPreferences.lastSuccessMs = Int(Date().timeIntervalSince1970 * 1_000)
-            RemoteSyncPreferences.lastStatus = hasMore
-                ? "Uploaded \(totalRows) raw rows; more history will continue next time."
-                : "Up to date - uploaded \(totalRows) pending raw rows."
+            let storageSuffix = (prunedRows > 0
+                ? " Freed \(prunedRows) acknowledged local raw rows."
+                : "")
+                + (pruneHasMore
+                    ? " More acknowledged rows will be trimmed next time."
+                    : "")
+            RemoteSyncPreferences.lastStatus = (
+                hasMore
+                    ? "Uploaded \(totalRows) raw rows; more history will continue next time."
+                    : "Up to date - uploaded \(totalRows) pending raw rows."
+            ) + storageSuffix
             return RemoteSyncRunResult(
                 uploadedRawRows: totalRows,
                 uploadedBatches: totalBatches,

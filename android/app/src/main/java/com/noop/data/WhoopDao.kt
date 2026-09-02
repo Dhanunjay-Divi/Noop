@@ -146,6 +146,36 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun pendingRemoteSteps(deviceId: String, limit: Int): List<StepSample>
 
+    @Query(
+        "SELECT * FROM gravitySample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteGravity(deviceId: String, limit: Int): List<GravitySample>
+
+    @Query(
+        "SELECT * FROM sleepStateSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteSleepState(
+        deviceId: String,
+        limit: Int,
+    ): List<SleepStateSampleEntity>
+
+    @Query(
+        "SELECT * FROM ppgHrSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemotePpgHr(deviceId: String, limit: Int): List<PpgHrSample>
+
+    @Query(
+        "SELECT * FROM ppgWaveformSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemotePpgWaveform(
+        deviceId: String,
+        limit: Int,
+    ): List<PpgWaveformSampleEntity>
+
     /** Exact natural-key acknowledgements. Call only inside the store's transaction after a 2xx. */
     @Query("UPDATE hrSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
     suspend fun acknowledgeRemoteHr(deviceId: String, ts: Long): Int
@@ -176,6 +206,18 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("UPDATE stepSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
     suspend fun acknowledgeRemoteStep(deviceId: String, ts: Long): Int
 
+    @Query("UPDATE gravitySample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteGravity(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE sleepStateSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteSleepState(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE ppgHrSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemotePpgHr(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE ppgWaveformSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemotePpgWaveform(deviceId: String, ts: Long): Int
+
     /**
      * A destination change/full replay makes every decoded scalar row pending again. These are kept
      * as table-specific statements so Room validates every table/column at compile time; the store
@@ -204,6 +246,106 @@ interface WhoopDao : DeviceRegistryDao {
 
     @Query("UPDATE stepSample SET synced = 0 WHERE deviceId = :deviceId")
     suspend fun resetRemoteSteps(deviceId: String): Int
+
+    @Query("UPDATE gravitySample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteGravity(deviceId: String): Int
+
+    @Query("UPDATE sleepStateSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteSleepState(deviceId: String): Int
+
+    @Query("UPDATE ppgHrSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemotePpgHr(deviceId: String): Int
+
+    @Query("UPDATE ppgWaveformSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemotePpgWaveform(deviceId: String): Int
+
+    @Query(
+        "DELETE FROM hrSample WHERE rowid IN (SELECT rowid FROM hrSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteHr(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM rrInterval WHERE rowid IN (SELECT rowid FROM rrInterval " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteRr(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM event WHERE rowid IN (SELECT rowid FROM event " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteEvents(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM battery WHERE rowid IN (SELECT rowid FROM battery " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteBattery(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM spo2Sample WHERE rowid IN (SELECT rowid FROM spo2Sample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteSpo2(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM skinTempSample WHERE rowid IN (SELECT rowid FROM skinTempSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteSkinTemp(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM respSample WHERE rowid IN (SELECT rowid FROM respSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteResp(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM stepSample WHERE rowid IN (SELECT rowid FROM stepSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteSteps(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM gravitySample WHERE rowid IN (SELECT rowid FROM gravitySample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteGravity(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM sleepStateSample WHERE rowid IN (SELECT rowid FROM sleepStateSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemoteSleepState(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM ppgHrSample WHERE rowid IN (SELECT rowid FROM ppgHrSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemotePpgHr(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "DELETE FROM ppgWaveformSample WHERE rowid IN (SELECT rowid FROM ppgWaveformSample " +
+            "WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff ORDER BY ts LIMIT :limit)"
+    )
+    suspend fun pruneRemotePpgWaveform(deviceId: String, cutoff: Long, limit: Int): Int
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM hrSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM rrInterval WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM event WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM battery WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM spo2Sample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM skinTempSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM respSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM stepSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM gravitySample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM sleepStateSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM ppgHrSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff) " +
+            "OR EXISTS(SELECT 1 FROM ppgWaveformSample WHERE deviceId = :deviceId AND synced = 1 AND ts < :cutoff)"
+    )
+    suspend fun hasPrunableRemoteRows(deviceId: String, cutoff: Long): Boolean
 
     /** Bound the raw-IMU table to the newest [keep] rows for [deviceId] (rolling retention, #423). */
     @Query(

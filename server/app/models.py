@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import math
 import re
@@ -79,6 +81,10 @@ StreamMetric = Literal[
     "skin_temp",
     "respiration",
     "steps",
+    "gravity",
+    "sleep_state",
+    "ppg_hr",
+    "ppg_waveform",
 ]
 
 STREAM_RANGES: dict[str, tuple[float, float]] = {
@@ -89,6 +95,10 @@ STREAM_RANGES: dict[str, tuple[float, float]] = {
     "skin_temp": (10.0, 50.0),
     "respiration": (2.0, 80.0),
     "steps": (0.0, 10_000_000.0),
+    "gravity": (-64.0, 64.0),
+    "sleep_state": (0.0, 3.0),
+    "ppg_hr": (20.0, 260.0),
+    "ppg_waveform": (1.0, 2_048.0),
 }
 
 STREAM_UNITS: dict[str, str] = {
@@ -99,9 +109,13 @@ STREAM_UNITS: dict[str, str] = {
     "skin_temp": "celsius",
     "respiration": "breaths_per_minute",
     "steps": "count",
+    "gravity": "g",
+    "sleep_state": "state_code",
+    "ppg_hr": "bpm",
+    "ppg_waveform": "samples_per_record",
 }
 
-RAW_SENSOR_STREAMS = frozenset({"spo2", "skin_temp", "respiration"})
+RAW_SENSOR_STREAMS = frozenset({"spo2", "skin_temp", "respiration", "ppg_waveform"})
 
 
 class StrictModel(BaseModel):
@@ -627,6 +641,16 @@ def sample_semantics(stream_name: str, sample: NumericSample) -> tuple[str, str,
 
     declared_unit = str(sample.metadata.get("unit", "")).casefold()
     uncalibrated = _metadata_truthy(sample.metadata.get("uncalibrated"))
+    if stream_name == "ppg_waveform":
+        if (
+            declared_unit == "samples_per_record"
+            and sample.metadata.get("encoding") == "i16_le_base64"
+            and uncalibrated
+        ):
+            return ("samples_per_record", "raw_waveform", False)
+        return (declared_unit or "unknown", "unclassified_sensor", False)
+    if stream_name == "ppg_hr":
+        return ("bpm", "derived_biometric", False)
     if (
         stream_name in RAW_SENSOR_STREAMS
         and declared_unit == "raw_adc"
@@ -654,6 +678,12 @@ def sample_semantics(stream_name: str, sample: NumericSample) -> tuple[str, str,
             # The decoded WHOOP stream is a wrapping device register, not a daily step total.
             return ("cumulative_counter", "device_counter", False)
         return ("count", "estimated_counter", False)
+    if stream_name == "gravity":
+        if declared_unit == "g":
+            return ("g", "motion_vector", False)
+        return (declared_unit or "unknown", "unclassified_sensor", False)
+    if stream_name == "sleep_state":
+        return ("state_code", "device_state", False)
     return (STREAM_UNITS[stream_name], "decoded_biometric", False)
 
 
@@ -705,6 +735,18 @@ class DecodedStreams(StrictModel):
     steps: list[NumericSample] = Field(
         default_factory=list, max_length=MAX_STREAM_SAMPLES
     )
+    gravity: list[NumericSample] = Field(
+        default_factory=list, max_length=MAX_STREAM_SAMPLES
+    )
+    sleep_state: list[NumericSample] = Field(
+        default_factory=list, max_length=MAX_STREAM_SAMPLES
+    )
+    ppg_hr: list[NumericSample] = Field(
+        default_factory=list, max_length=MAX_STREAM_SAMPLES
+    )
+    ppg_waveform: list[NumericSample] = Field(
+        default_factory=list, max_length=MAX_STREAM_SAMPLES
+    )
     events: list[EventSample] = Field(
         default_factory=list, max_length=MAX_STREAM_SAMPLES
     )
@@ -717,6 +759,39 @@ class DecodedStreams(StrictModel):
             total += len(samples)
             minimum, maximum = accepted_range
             for sample in samples:
+                if stream_name == "ppg_waveform":
+                    encoded = sample.metadata.get("samples")
+                    if not isinstance(encoded, str) or not encoded:
+                        raise ValueError(
+                            "ppg_waveform metadata.samples must be non-empty base64"
+                        )
+                    try:
+                        packed = base64.b64decode(encoded, validate=True)
+                    except (binascii.Error, ValueError) as exc:
+                        raise ValueError(
+                            "ppg_waveform metadata.samples must be canonical base64"
+                        ) from exc
+                    if len(packed) % 2 != 0 or not 2 <= len(packed) <= 4_096:
+                        raise ValueError(
+                            "ppg_waveform samples must contain 1 to 2048 packed i16 values"
+                        )
+                    sample_count = len(packed) // 2
+                    if sample.value != float(sample_count):
+                        raise ValueError(
+                            "ppg_waveform value must equal the packed sample count"
+                        )
+                    if sample.metadata.get("encoding") != "i16_le_base64":
+                        raise ValueError("ppg_waveform encoding must be i16_le_base64")
+                    if str(sample.metadata.get("sample_rate_hz", "")) != "24":
+                        raise ValueError("ppg_waveform sample_rate_hz must be 24")
+                    if str(
+                        sample.metadata.get("unit", "")
+                    ).casefold() != "samples_per_record" or not _metadata_truthy(
+                        sample.metadata.get("uncalibrated")
+                    ):
+                        raise ValueError(
+                            "ppg_waveform must declare uncalibrated samples_per_record"
+                        )
                 if stream_name == "rr":
                     sequence = sample.metadata.get("seq")
                     if isinstance(sequence, bool):
@@ -772,6 +847,24 @@ class DecodedStreams(StrictModel):
                     raise ValueError(f"{stream_name} value must be between {accepted}")
                 if stream_name == "steps" and not sample.value.is_integer():
                     raise ValueError("steps values must be whole numbers")
+                if stream_name == "sleep_state" and not sample.value.is_integer():
+                    raise ValueError("sleep_state values must be whole numbers")
+                if stream_name == "gravity":
+                    for axis in ("y", "z"):
+                        raw_axis = sample.metadata.get(axis)
+                        try:
+                            axis_value = float(raw_axis)
+                        except (TypeError, ValueError) as exc:
+                            raise ValueError(
+                                f"gravity metadata.{axis} must be a finite number"
+                            ) from exc
+                        if (
+                            not math.isfinite(axis_value)
+                            or not -64.0 <= axis_value <= 64.0
+                        ):
+                            raise ValueError(
+                                f"gravity metadata.{axis} must be between -64 and 64"
+                            )
         if total > MAX_TOTAL_SAMPLES:
             raise ValueError(
                 f"a sync batch cannot exceed {MAX_TOTAL_SAMPLES} stream records"

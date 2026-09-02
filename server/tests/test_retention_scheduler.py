@@ -40,7 +40,7 @@ async def test_scheduled_cycle_uses_the_same_global_retention_contract() -> None
         now=now,
     )
 
-    assert counts["metric_samples"] == 7
+    assert counts["metric_samples"] == 11
     assert counts["sync_batches"] == 1
     with pytest.raises(SyncRetiredError):
         await repository.sync(payload, "a" * 64)

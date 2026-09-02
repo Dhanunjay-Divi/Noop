@@ -978,6 +978,45 @@ extension WhoopStore {
                     ])
             }
         }
+        // v47: local-only installs must not carry a second full copy of every high-frequency stream.
+        // The v30 indexes are partial (`WHERE synced = 0`), but rows remain pending forever when the
+        // optional self-hosted destination is disabled, so those indexes covered the entire history and
+        // consumed most of a reporter's 608 MB file. RemoteSyncStore recreates them on demand before an
+        // upload; local collection, scoring, exports, and primary-key time-range reads do not need them.
+        migrator.registerMigration("v47-remote-sync-indexes-on-demand") { db in
+            for name in [
+                "idx_remoteSync_hr_pending",
+                "idx_remoteSync_rr_pending",
+                "idx_remoteSync_event_pending",
+                "idx_remoteSync_battery_pending",
+                "idx_remoteSync_spo2_pending",
+                "idx_remoteSync_skin_pending",
+                "idx_remoteSync_resp_pending",
+                "idx_remoteSync_steps_pending",
+            ] {
+                try db.execute(sql: "DROP INDEX IF EXISTS \(name)")
+            }
+        }
+        // v48: include the strap's per-second sleep-state evidence in the acknowledged cloud
+        // outbox. Gravity has carried `synced` since v5; sleepStateSample was introduced later and
+        // never received the flag. Existing rows become pending so a newly enabled test-cloud
+        // destination receives the complete locally retained history before any opt-in pruning.
+        migrator.registerMigration("v48-sleep-state-sync-outbox") { db in
+            try db.alter(table: "sleepStateSample") { t in
+                t.add(column: "synced", .integer).notNull().defaults(to: 0)
+            }
+        }
+        // v49: preserve the two optical PPG products in the acknowledged cloud outbox. The derived
+        // per-second HR remains distinct from measured HR, while the source waveform stays packed.
+        // Existing rows start pending and can only become retention-eligible after a matching 2xx.
+        migrator.registerMigration("v49-ppg-sync-outbox") { db in
+            try db.alter(table: "ppgHrSample") { t in
+                t.add(column: "synced", .integer).notNull().defaults(to: 0)
+            }
+            try db.alter(table: "ppgWaveformSample") { t in
+                t.add(column: "synced", .integer).notNull().defaults(to: 0)
+            }
+        }
         return migrator
     }
 

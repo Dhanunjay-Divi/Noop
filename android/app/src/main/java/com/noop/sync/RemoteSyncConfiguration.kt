@@ -203,6 +203,7 @@ object RemoteSyncPrefs : RemoteBatchIdentityStore, RemoteDerivedCursorStore {
     private const val KEY_LAST_SUCCESS = "last_success_ms"
     private const val KEY_LAST_STATUS = "last_status"
     private const val KEY_LAST_RAW_ROWS = "last_raw_rows"
+    private const val KEY_OPTIMIZE_STORAGE = "optimize_storage"
     private const val KEY_REPLAY = "needs_full_replay"
     private const val KEY_REPLAY_IN_PROGRESS = "full_replay_in_progress"
     private const val KEY_REPLAY_WINDOW = "full_replay_window"
@@ -243,6 +244,9 @@ object RemoteSyncPrefs : RemoteBatchIdentityStore, RemoteDerivedCursorStore {
 
     fun automatic(): Boolean = state().getBoolean(KEY_AUTO, false)
     fun setAutomatic(enabled: Boolean) = state().edit().putBoolean(KEY_AUTO, enabled).apply()
+    fun optimizeStorage(): Boolean = state().getBoolean(KEY_OPTIMIZE_STORAGE, false)
+    fun setOptimizeStorage(enabled: Boolean) =
+        state().edit().putBoolean(KEY_OPTIMIZE_STORAGE, enabled).apply()
 
     fun lastAttemptMs(): Long = state().getLong(KEY_LAST_ATTEMPT, 0)
     fun lastSuccessMs(): Long = state().getLong(KEY_LAST_SUCCESS, 0)
@@ -376,6 +380,7 @@ object RemoteSyncPrefs : RemoteBatchIdentityStore, RemoteDerivedCursorStore {
             .remove(KEY_LAST_SUCCESS)
             .remove(KEY_LAST_STATUS)
             .remove(KEY_LAST_RAW_ROWS)
+            .remove(KEY_OPTIMIZE_STORAGE)
             .remove(KEY_REPLAY)
             .remove(KEY_REPLAY_IN_PROGRESS)
             .remove(KEY_REPLAY_WINDOW)

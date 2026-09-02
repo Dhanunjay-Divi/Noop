@@ -2,10 +2,14 @@ package com.noop.sync
 
 import com.noop.data.DailyMetric
 import com.noop.data.EventRow
+import com.noop.data.GravitySample
 import com.noop.data.HrSample
 import com.noop.data.JournalEntry
 import com.noop.data.PairedDeviceRow
+import com.noop.data.PpgHrSample
+import com.noop.data.PpgWaveformSampleEntity
 import com.noop.data.SleepSession
+import com.noop.data.SleepStateSampleEntity
 import com.noop.data.WorkoutRow
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
@@ -38,6 +42,22 @@ class RemoteSyncCoordinatorTest {
         val store = FakeStore(
             pendingRows = PendingRemoteStreams(
                 hr = listOf(HrSample("my-whoop", 1_700_000_000, 62)),
+                gravity = listOf(
+                    GravitySample("my-whoop", 1_700_000_001, 0.1, -0.2, 0.97),
+                ),
+                sleepState = listOf(
+                    SleepStateSampleEntity("my-whoop", 1_700_000_002, 2),
+                ),
+                ppgHr = listOf(
+                    PpgHrSample("my-whoop", 1_700_000_003, 63, 0.87),
+                ),
+                ppgWaveform = listOf(
+                    PpgWaveformSampleEntity(
+                        "my-whoop",
+                        1_700_000_004,
+                        byteArrayOf(0x68, 0xFA.toByte(), 0x07, 0x00, 0x00, 0x08),
+                    ),
+                ),
             ),
         )
         val identities = FakeIdentities()
@@ -67,6 +87,22 @@ class RemoteSyncCoordinatorTest {
         val store = FakeStore(
             pendingRows = PendingRemoteStreams(
                 hr = listOf(HrSample("my-whoop", 1_700_000_000, 62)),
+                gravity = listOf(
+                    GravitySample("my-whoop", 1_700_000_001, 0.1, -0.2, 0.97),
+                ),
+                sleepState = listOf(
+                    SleepStateSampleEntity("my-whoop", 1_700_000_002, 2),
+                ),
+                ppgHr = listOf(
+                    PpgHrSample("my-whoop", 1_700_000_003, 63, 0.87),
+                ),
+                ppgWaveform = listOf(
+                    PpgWaveformSampleEntity(
+                        "my-whoop",
+                        1_700_000_004,
+                        byteArrayOf(0x68, 0xFA.toByte(), 0x07, 0x00, 0x00, 0x08),
+                    ),
+                ),
             ),
         )
         val identities = FakeIdentities()
@@ -84,8 +120,12 @@ class RemoteSyncCoordinatorTest {
         )
 
         val result = coordinator.sync(namespace, maxBatches = 1)
-        assertEquals(1, result.uploadedRawRows)
+        assertEquals(5, result.uploadedRawRows)
         assertEquals(1, store.acknowledged.single().hr.size)
+        assertEquals(1, store.acknowledged.single().gravity.size)
+        assertEquals(1, store.acknowledged.single().sleepState.size)
+        assertEquals(1, store.acknowledged.single().ppgHr.size)
+        assertEquals(1, store.acknowledged.single().ppgWaveform.size)
         assertTrue(store.pendingRows.isEmpty)
         assertTrue(identities.saved.isEmpty())
         assertEquals("android:install-1:my-whoop-strap", seen.single().draft.source.deviceId)
@@ -94,6 +134,15 @@ class RemoteSyncCoordinatorTest {
         assertEquals("my-whoop", seen.single().draft.source.metadata["paired_device_id"])
         assertEquals("strap_measured", seen.single().draft.source.metadata["score_provenance"])
         assertEquals("strap_measured", seen.single().draft.streams.hr.single().metadata["provenance"])
+        assertEquals("-0.2", seen.single().draft.streams.gravity.single().metadata["y"])
+        assertEquals(2.0, seen.single().draft.streams.sleepState.single().value, 0.0)
+        assertEquals(63.0, seen.single().draft.streams.ppgHr.single().value, 0.0)
+        assertEquals(0.87, seen.single().draft.streams.ppgHr.single().quality!!, 0.0)
+        assertEquals(3.0, seen.single().draft.streams.ppgWaveform.single().value, 0.0)
+        assertEquals(
+            "aPoHAAAI",
+            seen.single().draft.streams.ppgWaveform.single().metadata["samples"],
+        )
     }
 
     @Test

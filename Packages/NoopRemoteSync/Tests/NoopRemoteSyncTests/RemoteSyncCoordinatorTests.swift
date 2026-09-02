@@ -106,6 +106,14 @@ final class RemoteSyncCoordinatorTests: XCTestCase {
             Streams(
                 hr: [HRSample(ts: 1_700_000_000, bpm: 72)],
                 spo2: [SpO2Sample(ts: 1_700_000_001, red: 18_000, ir: 17_000)],
+                gravity: [
+                    GravitySample(ts: 1_700_000_003, x: 0.1, y: -0.2, z: 0.97),
+                ],
+                sleepState: [SleepStateSample(ts: 1_700_000_004, state: 2)],
+                ppgHr: [PpgHrSample(ts: 1_700_000_005, bpm: 63, conf: 0.87)],
+                ppgWaveform: [
+                    PpgWaveformSample(ts: 1_700_000_006, samples: [-1_432, 7, 2_048]),
+                ],
                 events: [
                     WhoopEvent(
                         ts: 1_700_000_002,
@@ -125,7 +133,7 @@ final class RemoteSyncCoordinatorTests: XCTestCase {
             maxBatches: 1
         )
 
-        XCTAssertEqual(result.uploadedRawRows, 3)
+        XCTAssertEqual(result.uploadedRawRows, 7)
         XCTAssertEqual(result.uploadedBatches, 1)
         XCTAssertFalse(result.hasMoreRawRows)
         let afterUpload = try await store.pendingRemoteSyncStreams(deviceId: deviceId)
@@ -136,6 +144,15 @@ final class RemoteSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(sent.streams.spo2.first?.value, 18_000)
         XCTAssertEqual(sent.streams.spo2.first?.metadata?["infrared"], "17000")
         XCTAssertEqual(sent.streams.spo2.first?.metadata?["uncalibrated"], "true")
+        XCTAssertEqual(sent.streams.gravity.first?.value, 0.1)
+        XCTAssertEqual(sent.streams.gravity.first?.metadata?["y"], "-0.2")
+        XCTAssertEqual(sent.streams.sleepState.first?.value, 2)
+        XCTAssertEqual(sent.streams.ppgHr.first?.value, 63)
+        XCTAssertEqual(sent.streams.ppgHr.first?.quality, 0.87)
+        XCTAssertEqual(sent.streams.ppgHr.first?.metadata?["derived"], "true")
+        XCTAssertEqual(sent.streams.ppgWaveform.first?.value, 3)
+        XCTAssertEqual(sent.streams.ppgWaveform.first?.metadata?["encoding"], "i16_le_base64")
+        XCTAssertEqual(sent.streams.ppgWaveform.first?.metadata?["samples"], "aPoHAAAI")
         XCTAssertEqual(sent.streams.events.first?.kind, "BLE_CONNECTION_DOWN(12)")
         XCTAssertTrue(
             sent.streams.events.first?.eventId.range(

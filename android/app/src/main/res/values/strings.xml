@@ -140,6 +140,29 @@
     <!-- Today screen: header of the workouts feed. Renamed from "Last Workouts" ("Last" read as
          "final", #34/#53 follow-up); wording mirrored on iOS in Localizable.xcstrings. -->
     <string name="today_latest_workouts">Latest Workouts</string>
+    <string name="today_weather">Weather</string>
+    <string name="today_weather_current">Current weather</string>
+    <string name="today_weather_enable">Enable weather</string>
+    <string name="today_weather_enable_accessibility">Enable current weather</string>
+    <string name="today_weather_privacy">Uses one approximate location with Open-Meteo. NOOP does not store location history.</string>
+    <string name="today_weather_location_off">Location is off for weather</string>
+    <string name="today_weather_location_off_accessibility">Weather unavailable. Location access is off.</string>
+    <string name="today_weather_open_settings">Open Settings</string>
+    <string name="today_weather_refresh">Refresh</string>
+    <string name="today_weather_updated_format">Updated %1$s</string>
+    <string name="today_weather_data_attribution">Weather data from Open-Meteo</string>
+    <string name="today_weather_unavailable">Weather is unavailable right now.</string>
+    <string name="today_weather_retry">Try again</string>
+    <string name="today_weather_condition_clear">Clear</string>
+    <string name="today_weather_condition_mostly_clear">Mostly clear</string>
+    <string name="today_weather_condition_partly_cloudy">Partly cloudy</string>
+    <string name="today_weather_condition_overcast">Overcast</string>
+    <string name="today_weather_condition_fog">Fog</string>
+    <string name="today_weather_condition_drizzle">Drizzle</string>
+    <string name="today_weather_condition_rain">Rain</string>
+    <string name="today_weather_condition_snow">Snow</string>
+    <string name="today_weather_condition_thunderstorm">Thunderstorm</string>
+    <string name="today_weather_condition_unknown">Current conditions</string>
 
     <!-- First-run Terms gate (clickwrap). Moved out of TermsGate.kt string literals so the gate is
          localizable (PR #984); English wording kept byte-identical to the macOS/iOS `Terms.points` /
@@ -1833,6 +1856,8 @@
     <string name="remote_sync_bearer_token_placeholder">Bearer token from your server</string>
     <string name="remote_sync_automatic_upload">Automatic upload</string>
     <string name="remote_sync_automatic_upload_description">Off by default. When enabled, WorkManager catches up in bounded batches.</string>
+    <string name="remote_sync_optimize_storage">Reduce phone storage after backup</string>
+    <string name="remote_sync_optimize_storage_description">Keeps 14 days of acknowledged sensor detail on this phone. Daily, sleep, and workout summaries remain local.</string>
     <string name="remote_sync_save_and_test">Save &amp; test connection</string>
     <string name="remote_sync_sync_now">Sync now</string>
     <string name="remote_sync_full_replay">Full replay</string>
@@ -1942,7 +1967,7 @@
     <string name="settings_manual_breathe_available">Manual Breathe remains available from Today’s + menu and More. It stays user-started and can use screen, audio, or supported strap haptics.</string>
     <!-- Round 17: local-first Strength Trainer. -->
     <string name="strength_title">Strength Trainer</string>
-    <string name="strength_subtitle">Routines, sets, reps, rest, and factual records-private on this device.</string>
+    <string name="strength_subtitle">Routines, sets, reps, and rest. Factual records stay private on this device.</string>
     <string name="strength_close_trainer">Close Strength Trainer</string>
     <string name="strength_loading_title">Loading strength log</string>
     <string name="strength_loading_body">Reading your private routines, sessions, and sets from this device.</string>
@@ -1996,6 +2021,21 @@
     <string name="strength_rest_timer">Rest timer</string>
     <string name="strength_pause_guide">Pause exercise guide</string>
     <string name="strength_play_guide">Play exercise guide</string>
+    <string name="strength_expand_guide">Expand exercise guide</string>
+    <string name="strength_minimize_guide">Minimize exercise guide</string>
+    <string name="strength_form_info">How to perform this exercise</string>
+    <string name="strength_form_guide_title">%1$s form guide</string>
+    <string name="strength_form_setup">Setup</string>
+    <string name="strength_form_setup_body">Set up the %1$s so your stance and working joints feel stable before the first repetition.</string>
+    <string name="strength_form_movement">Movement</string>
+    <string name="strength_form_movement_body">Follow the demonstrated path through a comfortable range. Keep each repetition smooth and controlled in both directions.</string>
+    <string name="strength_form_breathing">Breathing</string>
+    <string name="strength_form_breathing_body">Inhale and brace before the effort, then exhale through the hardest part without losing position.</string>
+    <string name="strength_form_tempo">Tempo</string>
+    <string name="strength_form_tempo_body">Control both directions of every repetition.</string>
+    <string name="strength_form_safety">Safety</string>
+    <string name="strength_form_safety_body">Stop for sharp pain, dizziness, or loss of control. Reduce the load or range before continuing.</string>
+    <string name="strength_media_attribution">Media by AscendAPI</string>
     <string name="strength_follow_plan_title">Follow today’s plan</string>
     <string name="strength_elapsed">Elapsed</string>
     <string name="strength_sets_progress">%1$d of %2$d sets</string>
@@ -2300,7 +2340,7 @@
     <string name="strength_load_and_recovery">Load and recovery</string>
     <string name="strength_body_load">Load</string>
     <string name="strength_body_recovery">Recovery</string>
-    <string name="strength_select_muscle_prompt">Select a muscle to build an editable focus workout.</string>
+    <string name="strength_select_muscle_prompt">Select one or more muscles to build an editable focus workout.</string>
     <string name="strength_body_weighted_sets">%1$.1f weighted sets</string>
     <string name="strength_body_recovered">%1$d%% recovered</string>
     <string name="strength_body_load_explanation">Completed working sets from the last seven days.</string>

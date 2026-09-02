@@ -343,7 +343,8 @@ drained, while supported derived history is currently capped at ten years.
 - `GET /v1/status`
 - `GET /v1/devices`
 - `GET /v1/devices/{id}/latest`
-- `GET /v1/devices/{id}/streams/{hr|rr|battery|spo2|skin_temp|respiration|steps}`
+- `GET /v1/devices/{id}/streams/{hr|rr|battery|spo2|skin_temp|respiration|steps|gravity|sleep_state}`
+- `GET /v1/devices/{id}/freshness` (server-observed sample age and gap summary)
 - `GET /v1/devices/{id}/events`
 - `GET /v1/devices/{id}/daily`
 - `GET /v1/devices/{id}/sleep`

@@ -130,6 +130,29 @@
 
     <!-- Today screen: workouts feed header. Matches the iOS German entry for "Latest Workouts". -->
     <string name="today_latest_workouts">Neueste Workouts</string>
+    <string name="today_weather">Wetter</string>
+    <string name="today_weather_current">Aktuelles Wetter</string>
+    <string name="today_weather_enable">Wetter aktivieren</string>
+    <string name="today_weather_enable_accessibility">Aktuelles Wetter aktivieren</string>
+    <string name="today_weather_privacy">Verwendet einmalig einen ungefähren Standort mit Open-Meteo. NOOP speichert keinen Standortverlauf.</string>
+    <string name="today_weather_location_off">Standort ist für Wetter deaktiviert</string>
+    <string name="today_weather_location_off_accessibility">Wetter nicht verfügbar. Der Standortzugriff ist deaktiviert.</string>
+    <string name="today_weather_open_settings">Einstellungen öffnen</string>
+    <string name="today_weather_refresh">Aktualisieren</string>
+    <string name="today_weather_updated_format">Aktualisiert %1$s</string>
+    <string name="today_weather_data_attribution">Wetterdaten von Open-Meteo</string>
+    <string name="today_weather_unavailable">Wetter ist derzeit nicht verfügbar.</string>
+    <string name="today_weather_retry">Erneut versuchen</string>
+    <string name="today_weather_condition_clear">Klar</string>
+    <string name="today_weather_condition_mostly_clear">Überwiegend klar</string>
+    <string name="today_weather_condition_partly_cloudy">Teilweise bewölkt</string>
+    <string name="today_weather_condition_overcast">Bedeckt</string>
+    <string name="today_weather_condition_fog">Nebel</string>
+    <string name="today_weather_condition_drizzle">Nieselregen</string>
+    <string name="today_weather_condition_rain">Regen</string>
+    <string name="today_weather_condition_snow">Schnee</string>
+    <string name="today_weather_condition_thunderstorm">Gewitter</string>
+    <string name="today_weather_condition_unknown">Aktuelle Bedingungen</string>
 
     <!-- First-run Terms gate (clickwrap). Wording kept identical to the iOS German entries in
          Localizable.xcstrings (PR #984) so both platforms present the same text. The German gate is
@@ -1820,6 +1843,8 @@
     <string name="remote_sync_bearer_token_placeholder">Bearer-Token von deinem Server</string>
     <string name="remote_sync_automatic_upload">Automatischer Upload</string>
     <string name="remote_sync_automatic_upload_description">Standardmäßig aus. Wenn aktiviert, holt WorkManager die Daten in begrenzten Stapeln nach.</string>
+    <string name="remote_sync_optimize_storage">Telefonspeicher nach der Sicherung reduzieren</string>
+    <string name="remote_sync_optimize_storage_description">Behält 14 Tage bestätigter Sensordetails auf diesem Telefon. Tages-, Schlaf- und Trainingszusammenfassungen bleiben lokal.</string>
     <string name="remote_sync_save_and_test">Verbindung speichern und testen</string>
     <string name="remote_sync_sync_now">Jetzt synchronisieren</string>
     <string name="remote_sync_full_replay">Vollständige Neuübertragung</string>
@@ -1982,6 +2007,21 @@
     <string name="strength_rest_timer">Pausentimer</string>
     <string name="strength_pause_guide">Übungsanleitung pausieren</string>
     <string name="strength_play_guide">Übungsanleitung abspielen</string>
+    <string name="strength_expand_guide">Übungsanleitung vergrößern</string>
+    <string name="strength_minimize_guide">Übungsanleitung verkleinern</string>
+    <string name="strength_form_info">Übung richtig ausführen</string>
+    <string name="strength_form_guide_title">Technik: %1$s</string>
+    <string name="strength_form_setup">Vorbereitung</string>
+    <string name="strength_form_setup_body">Richte %1$s so ein, dass dein Stand und die beanspruchten Gelenke vor der ersten Wiederholung stabil sind.</string>
+    <string name="strength_form_movement">Bewegung</string>
+    <string name="strength_form_movement_body">Folge dem gezeigten Bewegungsablauf in einem angenehmen Bewegungsumfang. Führe jede Wiederholung in beide Richtungen ruhig und kontrolliert aus.</string>
+    <string name="strength_form_breathing">Atmung</string>
+    <string name="strength_form_breathing_body">Atme vor der Belastung ein und spanne die Körpermitte an. Atme durch den schwersten Teil aus, ohne die Position zu verlieren.</string>
+    <string name="strength_form_tempo">Tempo</string>
+    <string name="strength_form_tempo_body">Kontrolliere beide Richtungen jeder Wiederholung.</string>
+    <string name="strength_form_safety">Sicherheit</string>
+    <string name="strength_form_safety_body">Beende die Übung bei stechenden Schmerzen, Schwindel oder Kontrollverlust. Verringere Gewicht oder Bewegungsumfang, bevor du fortfährst.</string>
+    <string name="strength_media_attribution">Medien von AscendAPI</string>
     <string name="strength_follow_plan_title">Heutigen Plan ausführen</string>
     <string name="strength_elapsed">Vergangen</string>
     <string name="strength_sets_progress">%1$d von %2$d Sätzen</string>
@@ -2286,7 +2326,7 @@
     <string name="strength_load_and_recovery">Belastung und Erholung</string>
     <string name="strength_body_load">Belastung</string>
     <string name="strength_body_recovery">Erholung</string>
-    <string name="strength_select_muscle_prompt">Wähle einen Muskel für ein anpassbares Fokus-Training.</string>
+    <string name="strength_select_muscle_prompt">Wähle einen oder mehrere Muskeln für ein anpassbares Fokus-Training.</string>
     <string name="strength_body_weighted_sets">%1$.1f gewichtete Sätze</string>
     <string name="strength_body_recovered">%1$d%% erholt</string>
     <string name="strength_body_load_explanation">Abgeschlossene Arbeitssätze der letzten sieben Tage.</string>

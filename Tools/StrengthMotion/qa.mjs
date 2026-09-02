@@ -30,7 +30,9 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const relative = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-    const file = relative === "viewer.js" ? join(root, "dist", "viewer.js") : join(root, relative);
+    const file = ["viewer.js", "body-map.js"].includes(relative)
+      ? join(root, "dist", relative)
+      : join(root, relative);
     response.setHeader("Content-Type", mimeType(file));
     response.end(await readFile(file));
   } catch {
@@ -49,17 +51,65 @@ for (const id of exercises) {
     await page.goto(`http://127.0.0.1:${address.port}/?exercise=${id}`);
     await page.locator("body[data-ready='true']").waitFor();
     assert((await page.locator("#motion").evaluate((image) => image.naturalWidth)) > 0);
-    assert((await page.locator("#exercise-title").textContent())?.trim());
+    assert.equal(await page.locator(".caption").count(), 0);
   } catch (error) {
     failures.push(`${id}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
+await page.locator("#motion-toggle").click();
+assert.equal(await page.locator("#motion-still").getAttribute("hidden"), null);
+assert.notEqual(await page.locator("#motion").getAttribute("hidden"), null);
+assert.equal(await page.locator("#playback-play").getAttribute("hidden"), null);
+assert.notEqual(await page.locator("#playback-pause").getAttribute("hidden"), null);
+await page.locator("#motion-toggle").click();
+assert.equal(await page.locator("#motion").getAttribute("hidden"), null);
+assert.equal(await page.locator("#playback-pause").getAttribute("hidden"), null);
+assert.notEqual(await page.locator("#playback-play").getAttribute("hidden"), null);
+assert.equal(await page.locator("#playback").count(), 0);
+await page.setViewportSize({ width: 390, height: 241 });
+const motionBox = await page.locator("#motion").boundingBox();
+const guideBox = await page.locator(".guide").boundingBox();
+assert(motionBox && guideBox, "exercise media must have visible bounds");
+assert(Math.abs(motionBox.width - motionBox.height) < 1, "square media must preserve its aspect");
+assert(motionBox.width <= guideBox.width && motionBox.height <= guideBox.height);
+await page.screenshot({ path: "/tmp/noop-strength-motion-exercisedb.png" });
 await page.locator("#info").click();
 assert.equal(await page.locator("#instructions").getAttribute("hidden"), null);
 for (const id of ["instruction-setup", "instruction-movement", "instruction-safety"]) {
   assert((await page.locator(`#${id}`).textContent())?.trim().length >= 24);
 }
-await page.screenshot({ path: "/tmp/noop-strength-motion-exercisedb.png", fullPage: true });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.screenshot({ path: "/tmp/noop-strength-motion-instructions.png" });
+
+await page.goto(
+  `http://127.0.0.1:${address.port}/body-map.html` +
+    "?mode=load&selected=chest%2Cback&scores=chest%3A0.8%2Cback%3A0.4%2Cquadriceps%3A1",
+);
+await page.setViewportSize({ width: 390, height: 306 });
+await page.locator("body[data-ready='true']").waitFor();
+assert.equal(await page.locator("svg").count(), 2);
+assert((await page.locator("path.muscle").count()) > 20);
+assert((await page.locator('path[data-muscle="chest"].selected').count()) > 0);
+assert((await page.locator('path[data-muscle="back"].selected').count()) > 0);
+assert((await page.locator('path[data-muscle="quadriceps"]').count()) > 0);
+for (const box of await page.locator("svg").evaluateAll((nodes) =>
+  nodes.map((node) => node.getBoundingClientRect().toJSON())
+)) {
+  assert(box.width > 0 && box.height > 0, "body-map figures must have visible bounds");
+}
+await page.screenshot({ path: "/tmp/noop-strength-body-map.png" });
+await page.evaluate(() => {
+  window.noopBodyMapUpdate({
+    mode: "recovery",
+    selected: ["quadriceps", "glutes"],
+    scores: { quadriceps: 0.2, glutes: 0.7 },
+  });
+});
+assert.equal(await page.locator('path[data-muscle="chest"].selected').count(), 0);
+assert.equal(await page.locator('path[data-muscle="back"].selected').count(), 0);
+assert((await page.locator('path[data-muscle="quadriceps"].selected').count()) > 0);
+assert((await page.locator('path[data-muscle="glutes"].selected').count()) > 0);
+
 await browser.close();
 await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 

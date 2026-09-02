@@ -52,6 +52,14 @@ struct StorageView: View {
                     label: "Health database",
                     bytes: r.db,
                     tint: StrandPalette.accent)
+                if !r.databaseCategories.isEmpty {
+                    VStack(spacing: NoopMetrics.space2) {
+                        ForEach(r.databaseCategories) { category in
+                            databaseCategoryRow(category)
+                        }
+                    }
+                    .padding(.leading, 36)
+                }
                 Divider().overlay(StrandPalette.hairline)
                 row(icon: "tray.full",
                     label: "Leftover import copies",
@@ -77,7 +85,7 @@ struct StorageView: View {
                     .foregroundStyle(StrandPalette.textPrimary)
                 Text(reclaimable > 0
                      ? "There's about \(Self.format(reclaimable)) of leftover import scratch space to reclaim. This never removes your imported data."
-                     : "Nothing to reclaim right now. NOOP already cleans up import scratch space automatically.")
+                     : "NOOP already trims temporary captures automatically. Run maintenance to flush pending samples, enforce retention, and compact database working files.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -97,8 +105,8 @@ struct StorageView: View {
                     }
                 }
                 .buttonStyle(NoopButtonStyle(.primary, fullWidth: true))
-                .disabled(cleaning || reclaimable == 0)
-                .accessibilityLabel("Clean up leftover import files")
+                .disabled(cleaning)
+                .accessibilityLabel("Run storage maintenance")
             }
         }
     }
@@ -106,7 +114,7 @@ struct StorageView: View {
     private var explainerCard: some View {
         DataPendingNote(
             title: "Why does this grow?",
-            message: "When you import an Apple Health or wearable export, iOS hands NOOP a private copy of the file. NOOP reads it, saves your data into the health database, then deletes the copy. Older builds didn't delete every copy. This screen reclaims any that were left behind.",
+            message: "The health database retains sensor history for charts, scoring, and exports. Beat-to-beat rhythm, movement, and optical waveforms are denser than daily scores, so the breakdown above shows which group is using space. Maintenance removes only transient captures and import scratch files; it does not delete decoded health history.",
             symbol: "questionmark.circle")
     }
 
@@ -137,6 +145,22 @@ struct StorageView: View {
         }
     }
 
+    private func databaseCategoryRow(_ category: AppModel.StorageCategory) -> some View {
+        HStack(spacing: NoopMetrics.space2) {
+            Circle()
+                .fill(StrandPalette.textTertiary.opacity(0.65))
+                .frame(width: 5, height: 5)
+                .accessibilityHidden(true)
+            Text(category.label)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: 8)
+            Text(Self.format(category.bytes))
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
+    }
+
     // MARK: - Data
 
     private func load() async {
@@ -149,12 +173,14 @@ struct StorageView: View {
     private func cleanUp() async {
         guard !cleaning else { return }
         cleaning = true
-        let before = (report?.inbox ?? 0) + (report?.importTemp ?? 0)
+        let before = (report?.db ?? 0) + (report?.inbox ?? 0) + (report?.importTemp ?? 0)
         let r = await model.cleanUpStorage()
-        let after = r.inbox + r.importTemp
+        let after = (r.db ?? 0) + r.inbox + r.importTemp
         let freed = max(0, before - after)
         report = r
-        lastCleanedSummary = freed > 0 ? String(localized: "Reclaimed \(Self.format(freed)).") : String(localized: "Already clean.")
+        lastCleanedSummary = freed > 0
+            ? String(localized: "Reclaimed \(Self.format(freed)).")
+            : String(localized: "Maintenance complete.")
         cleaning = false
     }
 

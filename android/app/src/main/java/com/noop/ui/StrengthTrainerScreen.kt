@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
@@ -72,10 +74,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -199,11 +203,13 @@ fun StrengthTrainerSheet(
     var starting by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<StrengthSessionSnapshot?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var exerciseGuideId by rememberSaveable { mutableStateOf(initialGuideExerciseId) }
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
         confirmValueChange = { target ->
             (
                 editor == null &&
+                    exerciseGuideId == null &&
                     routineEditor == null &&
                     !programBuilder &&
                     !customExerciseEditor
@@ -413,9 +419,15 @@ fun StrengthTrainerSheet(
         }
     }
 
+    val exerciseGuide = exerciseGuideId?.let { id ->
+        exercises.firstOrNull { it.id == id }
+    }
+
     ModalBottomSheet(
         onDismissRequest = {
-            if (
+            if (exerciseGuideId != null) {
+                exerciseGuideId = null
+            } else if (
                 editor == null &&
                 routineEditor == null &&
                 !programBuilder &&
@@ -426,11 +438,12 @@ fun StrengthTrainerSheet(
         },
         sheetState = sheetState,
         containerColor = Palette.surfaceBase,
+        dragHandle = null,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.96f)
+                .fillMaxHeight(if (exerciseGuide == null) 0.96f else 1f)
         ) {
             LiquidScreenSky(fillHeight = true)
             Column(
@@ -441,6 +454,7 @@ fun StrengthTrainerSheet(
             ) {
                 if (
                     editor == null &&
+                    exerciseGuide == null &&
                     exerciseDetail == null &&
                     routineEditor == null &&
                     !programBuilder &&
@@ -465,8 +479,13 @@ fun StrengthTrainerSheet(
                         onBuildProgram = { programBuilder = true },
                         onEditRoutine = { routineEditor = StrengthRoutineEditorTarget(it) },
                         onCreateExercise = { customExerciseEditor = true },
+                        onGuide = { exerciseGuideId = it.id },
                         onClose = onDismiss,
-                        initialGuideExerciseId = initialGuideExerciseId,
+                    )
+                } else if (exerciseGuide != null) {
+                    StrengthExerciseGuidePanel(
+                        exercise = exerciseGuide,
+                        onClose = { exerciseGuideId = null },
                     )
                 } else if (routineEditor != null) {
                     StrengthRoutineEditor(
@@ -605,8 +624,8 @@ private fun StrengthDashboard(
     onBuildProgram: () -> Unit,
     onEditRoutine: (StrengthRoutineSnapshot) -> Unit,
     onCreateExercise: () -> Unit,
+    onGuide: (StrengthExerciseRow) -> Unit,
     onClose: () -> Unit,
-    initialGuideExerciseId: String?,
 ) {
     val context = LocalContext.current
     val active = sessions.firstOrNull { it.session.endedAt == null }
@@ -618,14 +637,13 @@ private fun StrengthDashboard(
         mutableIntStateOf(prefs.getInt("strength.goal.weeklySets", 12).coerceIn(1, 100))
     }
     var selectedTab by rememberSaveable { mutableStateOf(StrengthGymTab.TODAY) }
-    var exerciseGuide by remember(exercises, initialGuideExerciseId) {
-        mutableStateOf(exercises.firstOrNull { it.id == initialGuideExerciseId })
-    }
     var libraryQuery by rememberSaveable { mutableStateOf("") }
     var libraryMuscle by rememberSaveable { mutableStateOf("all") }
     var libraryEquipment by rememberSaveable { mutableStateOf("all") }
     var bodyMapMode by rememberSaveable { mutableStateOf(StrengthBodyMapMode.LOAD) }
-    var selectedFocusMuscle by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedFocusMuscles by rememberSaveable {
+        mutableStateOf(emptyList<String>())
+    }
     var selectedFocusExerciseIds by rememberSaveable {
         mutableStateOf(emptySet<String>())
     }
@@ -688,6 +706,7 @@ private fun StrengthDashboard(
         Column(
             modifier = Modifier
                 .weight(1f)
+                .clipToBounds()
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -750,31 +769,44 @@ private fun StrengthDashboard(
                                     selectedTab = StrengthGymTab.PLAN
                                 }
                             },
-                            onGuide = { exerciseGuide = it },
+                            onGuide = onGuide,
                         )
 
                         StrengthMuscleCoach(
                             exercises = exercises,
                             statuses = muscleStatuses,
                             mode = bodyMapMode,
-                            selectedMuscle = selectedFocusMuscle,
+                            selectedMuscles = selectedFocusMuscles,
                             selectedExerciseIds = selectedFocusExerciseIds,
                             sessionMinutes = profileMinutes,
                             active = active,
                             starting = starting,
                             onMode = { bodyMapMode = it },
                             onMuscle = { muscle ->
-                                selectedFocusMuscle = muscle
+                                selectedFocusMuscles =
+                                    if (muscle in selectedFocusMuscles) {
+                                        selectedFocusMuscles - muscle
+                                    } else {
+                                        selectedFocusMuscles + muscle
+                                    }
                                 val limit = when {
                                     profileMinutes <= 30 -> 3
                                     profileMinutes <= 45 -> 4
                                     profileMinutes <= 60 -> 5
                                     else -> 6
                                 }
-                                selectedFocusExerciseIds = strengthFocusExercises(
-                                    muscle,
+                                val candidates = strengthFocusExercises(
+                                    selectedFocusMuscles,
                                     exercises,
-                                ).take(limit).map { it.id }.toSet()
+                                )
+                                val candidateIds = candidates.mapTo(mutableSetOf()) { it.id }
+                                val retained = selectedFocusExerciseIds.intersect(candidateIds)
+                                selectedFocusExerciseIds = retained + candidates
+                                    .asSequence()
+                                    .map { it.id }
+                                    .filterNot { it in retained }
+                                    .take((limit - retained.size).coerceAtLeast(0))
+                                    .toSet()
                             },
                             onToggleExercise = { id ->
                                 selectedFocusExerciseIds =
@@ -784,7 +816,7 @@ private fun StrengthDashboard(
                                         selectedFocusExerciseIds + id
                                     }
                             },
-                            onGuide = { exerciseGuide = it },
+                            onGuide = onGuide,
                             onStart = { name, selected -> onStartFocus(name, selected) },
                             onResume = onEdit,
                         )
@@ -1045,6 +1077,7 @@ private fun StrengthDashboard(
                             onMuscle = { libraryMuscle = it },
                             onEquipment = { libraryEquipment = it },
                             onCreate = onCreateExercise,
+                            onGuide = onGuide,
                         )
                     }
 
@@ -1069,43 +1102,66 @@ private fun StrengthDashboard(
         }
     }
 
-    exerciseGuide?.let { exercise ->
-        AlertDialog(
-            onDismissRequest = { exerciseGuide = null },
-            containerColor = Palette.surfaceOverlay,
-            title = {
+}
+
+@Composable
+private fun StrengthExerciseGuidePanel(
+    exercise: StrengthExerciseRow,
+    onClose: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.strength_done),
+                    tint = Palette.textPrimary,
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(top = 12.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     strengthExerciseName(exercise),
                     style = NoopType.title2,
                     color = Palette.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        stringResource(
-                            R.string.strength_descriptor_pair,
-                            strengthDescriptor(exercise.primaryMuscle),
-                            strengthDescriptor(exercise.equipment),
-                        ),
-                        style = NoopType.footnote,
-                        color = Palette.textSecondary,
-                    )
-                    StrengthExerciseMotionView(
-                        exercise = exercise,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { exerciseGuide = null }) {
-                    Text(
-                        stringResource(R.string.strength_done),
-                        color = Palette.effortColor,
-                    )
-                }
-            },
-        )
+                Text(
+                    stringResource(
+                        R.string.strength_descriptor_pair,
+                        strengthDescriptor(exercise.primaryMuscle),
+                        strengthDescriptor(exercise.equipment),
+                    ),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            }
+            StrengthExerciseMotionView(
+                exercise = exercise,
+                showsTechniqueButton = false,
+                presentation = StrengthExerciseMediaPresentation.DETAIL,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SectionHeader(
+                stringResource(R.string.strength_form_info),
+                overline = stringResource(R.string.strength_exercise_guide),
+            )
+            StrengthExerciseTechnique(exercise = exercise)
+        }
     }
 }
 
@@ -1128,6 +1184,7 @@ private fun StrengthGymTabs(
                 onClick = { onSelect(tab) },
                 modifier = Modifier
                     .weight(1f)
+                    .testTag("noop.strength.tab.${tab.name.lowercase()}")
                     .clip(RoundedCornerShape(6.dp))
                     .background(
                         if (selected == tab) Palette.surfaceOverlay else Color.Transparent,
@@ -1149,7 +1206,7 @@ private fun StrengthMuscleCoach(
     exercises: List<StrengthExerciseRow>,
     statuses: List<StrengthMuscleStatus>,
     mode: StrengthBodyMapMode,
-    selectedMuscle: String?,
+    selectedMuscles: List<String>,
     selectedExerciseIds: Set<String>,
     sessionMinutes: Int,
     active: StrengthSessionSnapshot?,
@@ -1161,11 +1218,13 @@ private fun StrengthMuscleCoach(
     onStart: (String, List<StrengthExerciseRow>) -> Unit,
     onResume: (StrengthSessionSnapshot) -> Unit,
 ) {
-    val matching = remember(selectedMuscle, exercises) {
-        strengthFocusExercises(selectedMuscle, exercises)
+    val matching = remember(selectedMuscles, exercises) {
+        strengthFocusExercises(selectedMuscles, exercises)
     }
     val selected = matching.filter { it.id in selectedExerciseIds }
-    val status = statuses.firstOrNull { it.muscle == selectedMuscle }
+    val status = selectedMuscles.singleOrNull()?.let { muscle ->
+        statuses.firstOrNull { it.muscle == muscle }
+    }
     SectionHeader(
         stringResource(R.string.strength_train_by_muscle),
         overline = stringResource(R.string.strength_load_and_recovery),
@@ -1209,11 +1268,11 @@ private fun StrengthMuscleCoach(
             StrengthBodyMapView(
                 statuses = statuses,
                 mode = mode,
-                selectedMuscle = selectedMuscle,
+                selectedMuscles = selectedMuscles.toSet(),
                 onSelect = onMuscle,
             )
 
-            if (selectedMuscle == null) {
+            if (selectedMuscles.isEmpty()) {
                 Text(
                     stringResource(R.string.strength_select_muscle_prompt),
                     style = NoopType.footnote,
@@ -1224,7 +1283,9 @@ private fun StrengthMuscleCoach(
             }
 
             HorizontalDivider(color = Palette.hairline)
-            val muscleLabel = strengthDescriptor(selectedMuscle)
+            val muscleLabel = selectedMuscles
+                .map { muscle -> strengthDescriptor(muscle) }
+                .joinToString(" + ")
             val focusSessionName = stringResource(
                 R.string.strength_focus_session_name,
                 muscleLabel,
@@ -1235,6 +1296,8 @@ private fun StrengthMuscleCoach(
                     style = NoopType.title2,
                     color = Palette.textPrimary,
                     modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 status?.let {
                     Text(
@@ -1336,20 +1399,32 @@ private fun StrengthMuscleCoach(
 }
 
 private fun strengthFocusExercises(
-    muscle: String?,
+    muscles: List<String>,
     exercises: List<StrengthExerciseRow>,
 ): List<StrengthExerciseRow> {
-    if (muscle == null) return emptyList()
-    return exercises.filter { exercise ->
-        exercise.primaryMuscle == muscle ||
-            StrengthTrainingContract.secondaryMuscles(exercise.secondaryMusclesJSON)
-                .orEmpty()
-                .contains(muscle)
-    }.sortedWith(
-        compareByDescending<StrengthExerciseRow> { it.primaryMuscle == muscle }
-            .thenBy { it.isCustom }
-            .thenBy { it.name },
-    )
+    if (muscles.isEmpty()) return emptyList()
+    val rankedByMuscle = muscles.map { muscle ->
+        exercises.filter { exercise ->
+            exercise.primaryMuscle == muscle ||
+                StrengthTrainingContract.secondaryMuscles(exercise.secondaryMusclesJSON)
+                    .orEmpty()
+                    .contains(muscle)
+        }.sortedWith(
+            compareByDescending<StrengthExerciseRow> { it.primaryMuscle == muscle }
+                .thenBy { it.isCustom }
+                .thenBy { it.name },
+        )
+    }
+    val interleaved = mutableListOf<StrengthExerciseRow>()
+    val seen = mutableSetOf<String>()
+    for (rank in 0 until (rankedByMuscle.maxOfOrNull { it.size } ?: 0)) {
+        for (candidates in rankedByMuscle) {
+            candidates.getOrNull(rank)?.let { exercise ->
+                if (seen.add(exercise.id)) interleaved += exercise
+            }
+        }
+    }
+    return interleaved
 }
 
 @Composable
@@ -1713,6 +1788,7 @@ private fun StrengthExerciseLibrary(
     onMuscle: (String) -> Unit,
     onEquipment: (String) -> Unit,
     onCreate: () -> Unit,
+    onGuide: (StrengthExerciseRow) -> Unit,
 ) {
     val filtered = exercises.filter { exercise ->
         (
@@ -1777,9 +1853,12 @@ private fun StrengthExerciseLibrary(
         )
     } else {
         filtered.forEach { exercise ->
-            NoopCard {
+            NoopCard(modifier = Modifier.clickable { onGuide(exercise) }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.FitnessCenter, contentDescription = null, tint = Palette.effortColor)
+                    StrengthExerciseThumbnail(
+                        exercise = exercise,
+                        modifier = Modifier.size(52.dp),
+                    )
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(strengthExerciseName(exercise), style = NoopType.headline, color = Palette.textPrimary)
@@ -1798,6 +1877,12 @@ private fun StrengthExerciseLibrary(
                             stringResource(R.string.appwide_gym_custom),
                             style = NoopType.caption,
                             color = Palette.accent,
+                        )
+                    } else {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = Palette.textTertiary,
                         )
                     }
                 }
@@ -5871,7 +5956,7 @@ private fun sessionDetail(
 }
 
 @Composable
-private fun strengthExerciseName(exercise: StrengthExerciseRow): String {
+internal fun strengthExerciseName(exercise: StrengthExerciseRow): String {
     val resource = strengthExerciseNameResource(exercise.id)
     return if (resource == null) exercise.name else stringResource(resource)
 }

@@ -199,6 +199,7 @@ data class SleepStateSampleEntity(
     val deviceId: String,
     val ts: Long,
     val state: Int,   // 0 wake / 1 still / 2 asleep / 3 up (band's own high-nibble code)
+    val synced: Int = 0,
 )
 
 /** Respiration raw-ADC sample (type-47). Swift `respSample` (v3). PK (deviceId, ts). */
@@ -548,18 +549,21 @@ data class PpgWaveformSampleEntity(
     val deviceId: String,
     val ts: Long,
     val samples: ByteArray,
+    val synced: Int = 0,
 ) {
     // ByteArray needs structural equals/hashCode (the generated identity ones break round-trip asserts).
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is PpgWaveformSampleEntity) return false
-        return deviceId == other.deviceId && ts == other.ts && samples.contentEquals(other.samples)
+        return deviceId == other.deviceId && ts == other.ts &&
+            samples.contentEquals(other.samples) && synced == other.synced
     }
 
     override fun hashCode(): Int {
         var result = deviceId.hashCode()
         result = 31 * result + ts.hashCode()
         result = 31 * result + samples.contentHashCode()
+        result = 31 * result + synced
         return result
     }
 }

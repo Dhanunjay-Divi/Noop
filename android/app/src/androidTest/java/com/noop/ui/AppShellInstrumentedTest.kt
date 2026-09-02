@@ -160,4 +160,5 @@ class AppShellInstrumentedTest {
             instrumentation.uiAutomation.executeShellCommand(command),
         ).use { it.readBytes() }
     }
+
 }

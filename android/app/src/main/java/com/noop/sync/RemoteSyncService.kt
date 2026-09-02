@@ -173,11 +173,32 @@ object RemoteSyncService {
                     )
                 }
 
+                var prunedRows = 0
+                var pruneHasMore = false
+                if (RemoteSyncPrefs.optimizeStorage()) {
+                    val cutoff = syncNow.epochSecond - 14L * 86_400L
+                    namespaces
+                        .asSequence()
+                        .filter(RemoteNamespace::includeRaw)
+                        .map(RemoteNamespace::localDeviceId)
+                        .distinct()
+                        .forEach { localDeviceId ->
+                            val result = store.pruneAcknowledged(localDeviceId, cutoff)
+                            prunedRows += result.deletedRows
+                            pruneHasMore = pruneHasMore || result.hasMoreEligibleRows
+                        }
+                    hasMoreRaw = hasMoreRaw || pruneHasMore
+                }
+
                 val status = when {
                     hasMoreRaw || hasMoreDerived ->
-                        "Uploaded $totalRows raw rows; more raw/derived history is queued."
+                        "Uploaded $totalRows raw rows; more sync or storage maintenance is queued."
                     totalBatches == 0 -> "Up to date - no pending changes."
                     else -> "Up to date - uploaded $totalRows pending raw rows and refreshed derived history."
+                } + if (prunedRows > 0) {
+                    " Freed $prunedRows acknowledged local raw rows."
+                } else {
+                    ""
                 }
                 RemoteSyncPrefs.recordSuccess(System.currentTimeMillis(), totalRows, status)
                 RemoteSyncRunResult(

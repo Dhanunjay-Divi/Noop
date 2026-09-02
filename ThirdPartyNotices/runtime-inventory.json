@@ -1,4 +1,10 @@
 {
+  "assetLicenseFiles": [
+    {
+      "path": "ThirdPartyNotices/licenses/assets/musclemap.txt",
+      "sha256": "b008022459fbfd5fb6366cc64821c0083b792b15c80d061d51ceda1a45a8d296"
+    }
+  ],
   "components": [
     {
       "ecosystem": "swiftpm",
@@ -147,6 +153,19 @@
       "name": "androidx.annotation:annotation-jvm",
       "source": "https://search.maven.org/artifact/androidx.annotation/annotation-jvm/1.8.0/jar",
       "version": "1.8.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.appcompat:appcompat-resources",
+      "source": "https://search.maven.org/artifact/androidx.appcompat/appcompat-resources/1.6.1/jar",
+      "version": "1.6.1"
     },
     {
       "ecosystem": "maven",
@@ -833,6 +852,19 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
+      "name": "androidx.exifinterface:exifinterface",
+      "source": "https://search.maven.org/artifact/androidx.exifinterface/exifinterface/1.3.7/jar",
+      "version": "1.3.7"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
       "name": "androidx.glance:glance",
       "source": "https://search.maven.org/artifact/androidx.glance/glance/1.1.1/jar",
       "version": "1.1.1"
@@ -1379,6 +1411,32 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
+      "name": "androidx.vectordrawable:vectordrawable",
+      "source": "https://search.maven.org/artifact/androidx.vectordrawable/vectordrawable/1.1.0/jar",
+      "version": "1.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.vectordrawable:vectordrawable-animated",
+      "source": "https://search.maven.org/artifact/androidx.vectordrawable/vectordrawable-animated/1.1.0/jar",
+      "version": "1.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
       "name": "androidx.versionedparcelable:versionedparcelable",
       "source": "https://search.maven.org/artifact/androidx.versionedparcelable/versionedparcelable/1.1.1/jar",
       "version": "1.1.1"
@@ -1408,6 +1466,32 @@
       "name": "androidx.work:work-runtime-ktx",
       "source": "https://search.maven.org/artifact/androidx.work/work-runtime-ktx/2.9.0/jar",
       "version": "2.9.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.caverock:androidsvg-aar",
+      "source": "https://search.maven.org/artifact/com.caverock/androidsvg-aar/1.4/jar",
+      "version": "1.4"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.accompanist:accompanist-drawablepainter",
+      "source": "https://search.maven.org/artifact/com.google.accompanist/accompanist-drawablepainter/0.32.0/jar",
+      "version": "0.32.0"
     },
     {
       "ecosystem": "maven",
@@ -1566,8 +1650,8 @@
         }
       ],
       "name": "com.squareup.okio:okio",
-      "source": "https://search.maven.org/artifact/com.squareup.okio/okio/3.6.0/jar",
-      "version": "3.6.0"
+      "source": "https://search.maven.org/artifact/com.squareup.okio/okio/3.9.0/jar",
+      "version": "3.9.0"
     },
     {
       "ecosystem": "maven",
@@ -1579,8 +1663,86 @@
         }
       ],
       "name": "com.squareup.okio:okio-jvm",
-      "source": "https://search.maven.org/artifact/com.squareup.okio/okio-jvm/3.6.0/jar",
-      "version": "3.6.0"
+      "source": "https://search.maven.org/artifact/com.squareup.okio/okio-jvm/3.9.0/jar",
+      "version": "3.9.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil/2.7.0/jar",
+      "version": "2.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil-base",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil-base/2.7.0/jar",
+      "version": "2.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil-compose",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil-compose/2.7.0/jar",
+      "version": "2.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil-compose-base",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil-compose-base/2.7.0/jar",
+      "version": "2.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil-gif",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil-gif/2.7.0/jar",
+      "version": "2.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "io.coil-kt:coil-svg",
+      "source": "https://search.maven.org/artifact/io.coil-kt/coil-svg/2.7.0/jar",
+      "version": "2.7.0"
     },
     {
       "ecosystem": "maven",
@@ -1618,8 +1780,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib/1.9.24/jar",
-      "version": "1.9.24"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib/2.0.0/jar",
+      "version": "2.0.0"
     },
     {
       "ecosystem": "maven",
@@ -1631,8 +1793,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib-common",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/1.9.24/jar",
-      "version": "1.9.24"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/2.0.0/jar",
+      "version": "2.0.0"
     },
     {
       "ecosystem": "maven",
@@ -1644,8 +1806,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk7",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.9.10/jar",
-      "version": "1.9.10"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.9.0/jar",
+      "version": "1.9.0"
     },
     {
       "ecosystem": "maven",
@@ -1657,8 +1819,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib-jdk8",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.9.10/jar",
-      "version": "1.9.10"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.9.0/jar",
+      "version": "1.9.0"
     },
     {
       "ecosystem": "maven",
@@ -2007,7 +2169,8 @@
   "generatedFrom": [
     "Strand.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
     "android/app/gradle.lockfile:fullReleaseRuntimeClasspath",
-    "server/requirements.lock"
+    "server/requirements.lock",
+    "ThirdPartyNotices/licenses/assets/musclemap.txt"
   ],
   "schemaVersion": 1
 }

@@ -85,7 +85,7 @@ struct StrengthTrainerView: View {
     @State private var libraryMuscle = "all"
     @State private var libraryEquipment = "all"
     @State private var bodyMapMode = StrengthBodyMapMode.load
-    @State private var selectedFocusMuscle: String?
+    @State private var selectedFocusMuscles: [String] = []
     @State private var selectedFocusExerciseIDs = Set<String>()
     @State private var errorMessage: String?
     @State private var reloadToken = 0
@@ -126,7 +126,7 @@ struct StrengthTrainerView: View {
         NavigationStack {
             ScreenScaffold(
                 title: "Strength Trainer",
-                subtitle: "Routines, sets, reps, rest, and factual records-private on this device.",
+                subtitle: "Routines, sets, reps, and rest. Factual records stay private on this device.",
                 onRefresh: { await load() },
                 topBackground: liquidScaffoldSky()
             ) {
@@ -170,8 +170,20 @@ struct StrengthTrainerView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                if exerciseGuide == nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+            .navigationDestination(
+                isPresented: Binding(
+                    get: { exerciseGuide != nil },
+                    set: { if !$0 { exerciseGuide = nil } }
+                )
+            ) {
+                if let exerciseGuide {
+                    StrengthExerciseGuidePreview(exercise: exerciseGuide)
                 }
             }
         }
@@ -206,12 +218,6 @@ struct StrengthTrainerView: View {
             )
             #if os(iOS)
             .noopSheetPresentation(largeFirst: true)
-            #endif
-        }
-        .sheet(item: $exerciseGuide) { exercise in
-            StrengthExerciseGuidePreview(exercise: exercise)
-            #if os(iOS)
-            .noopSheetPresentation(largeFirst: false)
             #endif
         }
         .sheet(item: $routineEditor, onDismiss: { reloadToken += 1 }) { target in
@@ -648,29 +654,36 @@ struct StrengthTrainerView: View {
             } else {
                 LazyVStack(spacing: NoopMetrics.space3) {
                     ForEach(filtered) { exercise in
-                        NoopCard {
-                            HStack(spacing: NoopMetrics.space3) {
-                                Image(systemName: exercise.equipment == "bodyweight"
-                                      ? "figure.core.training" : "dumbbell.fill")
-                                    .foregroundStyle(StrandPalette.effortColor)
-                                    .frame(width: 42, height: 42)
-                                    .background(StrandPalette.surfaceInset, in: Circle())
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(strengthExerciseName(exercise))
-                                        .font(StrandFont.headline)
-                                        .foregroundStyle(StrandPalette.textPrimary)
-                                    Text(strengthDescriptorPair(exercise))
-                                        .font(StrandFont.footnote)
-                                        .foregroundStyle(StrandPalette.textSecondary)
-                                }
-                                Spacer()
-                                if exercise.isCustom {
-                                Text("appwide.gym.custom")
-                                        .font(StrandFont.caption)
-                                        .foregroundStyle(StrandPalette.accent)
+                        Button {
+                            exerciseGuide = exercise
+                        } label: {
+                            NoopCard {
+                                HStack(spacing: NoopMetrics.space3) {
+                                    StrengthExerciseThumbnailView(exercise: exercise)
+                                        .frame(width: 52, height: 52)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(strengthExerciseName(exercise))
+                                            .font(StrandFont.headline)
+                                            .foregroundStyle(StrandPalette.textPrimary)
+                                        Text(strengthDescriptorPair(exercise))
+                                            .font(StrandFont.footnote)
+                                            .foregroundStyle(StrandPalette.textSecondary)
+                                    }
+                                    Spacer()
+                                    if exercise.isCustom {
+                                        Text("appwide.gym.custom")
+                                            .font(StrandFont.caption)
+                                            .foregroundStyle(StrandPalette.accent)
+                                    } else {
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(StrandPalette.textTertiary)
+                                    }
                                 }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens the exercise guide")
                     }
                 }
             }
@@ -899,9 +912,14 @@ struct StrengthTrainerView: View {
             sessions: data.sessions,
             now: Int(Date().timeIntervalSince1970)
         )
-        let matching = focusExercises(for: selectedFocusMuscle, in: data.exercises)
-        let selectedStatus = statuses.first { $0.muscle == selectedFocusMuscle }
+        let matching = focusExercises(for: selectedFocusMuscles, in: data.exercises)
+        let selectedStatus = selectedFocusMuscles.count == 1
+            ? statuses.first { $0.muscle == selectedFocusMuscles[0] }
+            : nil
         let selectedExercises = matching.filter { selectedFocusExerciseIDs.contains($0.id) }
+        let focusLabel = selectedFocusMuscles
+            .map(strengthMuscleName)
+            .joined(separator: " + ")
 
         return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
             SectionHeader("Train by muscle", overline: "Load and recovery")
@@ -916,23 +934,29 @@ struct StrengthTrainerView: View {
                     StrengthBodyMapView(
                         statuses: statuses,
                         mode: bodyMapMode,
-                        selectedMuscle: selectedFocusMuscle
+                        selectedMuscles: Set(selectedFocusMuscles)
                     ) { muscle in
-                        selectFocusMuscle(muscle, exercises: data.exercises)
+                        toggleFocusMuscle(muscle, exercises: data.exercises)
                     }
 
-                    if let muscle = selectedFocusMuscle {
+                    if !selectedFocusMuscles.isEmpty {
                         Divider().overlay(StrandPalette.hairline)
                         HStack(alignment: .firstTextBaseline) {
-                            Text(strengthMuscleName(muscle))
+                            Text(focusLabel)
                                 .font(StrandFont.title2)
                                 .foregroundStyle(StrandPalette.textPrimary)
+                                .lineLimit(2)
+                                .accessibilityIdentifier("noop.strength.focus-selection")
                             Spacer()
                             if let selectedStatus {
                                 Text(bodyStatusLabel(selectedStatus))
                                     .font(StrandFont.caption)
                                     .foregroundStyle(StrandPalette.textSecondary)
                                     .monospacedDigit()
+                            } else {
+                                Text("\(selectedFocusMuscles.count) selected")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textSecondary)
                             }
                         }
 
@@ -1003,7 +1027,7 @@ struct StrengthTrainerView: View {
                             } else {
                                 Task {
                                     await startFocusSession(
-                                        muscle: muscle,
+                                        muscles: selectedFocusMuscles,
                                         exercises: selectedExercises,
                                         data: data
                                     )
@@ -1015,7 +1039,7 @@ struct StrengthTrainerView: View {
                                 || (data.activeSession == nil && selectedExercises.isEmpty)
                         )
                     } else {
-                        Text("Select a muscle to build an editable focus workout.")
+                        Text("Select one or more muscles to build an editable focus workout.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -1026,39 +1050,67 @@ struct StrengthTrainerView: View {
     }
 
     private func focusExercises(
-        for muscle: String?,
+        for muscles: [String],
         in exercises: [StrengthExerciseRow]
     ) -> [StrengthExerciseRow] {
-        guard let muscle else { return [] }
-        return exercises.filter { exercise in
+        guard !muscles.isEmpty else { return [] }
+        let rankedByMuscle = muscles.map { muscle in
+            exercises.filter { exercise in
             exercise.primaryMuscle == muscle
                 || (StrengthTrainingContract.secondaryMuscles(
                     from: exercise.secondaryMusclesJSON
                 ) ?? []).contains(muscle)
+            }
+            .sorted { lhs, rhs in
+                let lhsPrimary = lhs.primaryMuscle == muscle
+                let rhsPrimary = rhs.primaryMuscle == muscle
+                if lhsPrimary != rhsPrimary { return lhsPrimary }
+                if lhs.isCustom != rhs.isCustom { return !lhs.isCustom }
+                return strengthExerciseName(lhs) < strengthExerciseName(rhs)
+            }
         }
-        .sorted { lhs, rhs in
-            let lhsPrimary = lhs.primaryMuscle == muscle
-            let rhsPrimary = rhs.primaryMuscle == muscle
-            if lhsPrimary != rhsPrimary { return lhsPrimary }
-            if lhs.isCustom != rhs.isCustom { return !lhs.isCustom }
-            return strengthExerciseName(lhs) < strengthExerciseName(rhs)
+        let maximumCount = rankedByMuscle.map(\.count).max() ?? 0
+        var seen = Set<String>()
+        var interleaved: [StrengthExerciseRow] = []
+        for rank in 0..<maximumCount {
+            for candidates in rankedByMuscle where rank < candidates.count {
+                let exercise = candidates[rank]
+                if seen.insert(exercise.id).inserted {
+                    interleaved.append(exercise)
+                }
+            }
         }
+        return interleaved
     }
 
-    private func selectFocusMuscle(
+    private func toggleFocusMuscle(
         _ muscle: String,
         exercises: [StrengthExerciseRow]
     ) {
-        selectedFocusMuscle = muscle
-        let candidates = focusExercises(for: muscle, in: exercises)
-        let limit: Int
-        switch sessionMinutes {
-        case ...30: limit = 3
-        case ...45: limit = 4
-        case ...60: limit = 5
-        default: limit = 6
+        if let index = selectedFocusMuscles.firstIndex(of: muscle) {
+            selectedFocusMuscles.remove(at: index)
+        } else {
+            selectedFocusMuscles.append(muscle)
         }
-        selectedFocusExerciseIDs = Set(candidates.prefix(limit).map(\.id))
+        let candidates = focusExercises(for: selectedFocusMuscles, in: exercises)
+        let candidateIDs = Set(candidates.map(\.id))
+        let retained = selectedFocusExerciseIDs.intersection(candidateIDs)
+        let additions = candidates.lazy
+            .map(\.id)
+            .filter { !retained.contains($0) }
+            .prefix(max(0, focusExerciseLimit - retained.count))
+        var nextSelection = retained
+        nextSelection.formUnion(additions)
+        selectedFocusExerciseIDs = nextSelection
+    }
+
+    private var focusExerciseLimit: Int {
+        switch sessionMinutes {
+        case ...30: return 3
+        case ...45: return 4
+        case ...60: return 5
+        default: return 6
+        }
     }
 
     private func toggleFocusExercise(_ id: String) {
@@ -1082,7 +1134,7 @@ struct StrengthTrainerView: View {
     }
 
     private func startFocusSession(
-        muscle: String,
+        muscles: [String],
         exercises: [StrengthExerciseRow],
         data: StrengthTrainerSnapshot
     ) async {
@@ -1106,7 +1158,7 @@ struct StrengthTrainerView: View {
             let sessionID = UUID().uuidString.lowercased()
             let session = StrengthSessionRow(
                 id: sessionID,
-                name: "\(strengthMuscleName(muscle)) focus",
+                name: focusSessionName(muscles),
                 startedAt: now,
                 createdAt: now,
                 updatedAt: now
@@ -1166,6 +1218,20 @@ struct StrengthTrainerView: View {
             editor = EditorTarget(saved)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func focusSessionName(_ muscles: [String]) -> String {
+        let names = muscles.map(strengthMuscleName)
+        switch names.count {
+        case 0:
+            return String(localized: "Muscle focus")
+        case 1:
+            return "\(names[0]) focus"
+        case 2:
+            return "\(names[0]) + \(names[1]) focus"
+        default:
+            return "\(names[0]) + \(names.count - 1) focus"
         }
     }
 
@@ -1717,24 +1783,24 @@ struct StrengthTrainerView: View {
 }
 
 private struct StrengthExerciseGuidePreview: View {
-    @Environment(\.dismiss) private var dismiss
-
     let exercise: StrengthExerciseRow
 
     var body: some View {
-        NavigationStack {
-            ScreenScaffold(
-                title: LocalizedStringKey(strengthExerciseName(exercise)),
-                subtitle: LocalizedStringKey(strengthDescriptorPair(exercise)),
-                topBackground: liquidScaffoldSky()
-            ) {
-                StrengthExerciseMotionView(exercise: exercise)
-            }
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
+        ScreenScaffold(
+            title: LocalizedStringKey(strengthExerciseName(exercise)),
+            subtitle: LocalizedStringKey(strengthDescriptorPair(exercise)),
+            topBackground: liquidScaffoldSky()
+        ) {
+            StrengthExerciseMotionView(
+                exercise: exercise,
+                showsTechniqueButton: false,
+                presentation: .detail
+            )
+            SectionHeader(
+                "How to perform this exercise",
+                overline: "Exercise guide"
+            )
+            StrengthExerciseTechniqueView(exercise: exercise)
         }
     }
 }

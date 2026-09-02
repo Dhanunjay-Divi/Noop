@@ -76,6 +76,7 @@ deploy.env.*
 secrets.*
 # Generated interactively; contains the distribution-specific launch verifier and salt.
 Config/LaunchGateSecrets.xcconfig
+Config/StrengthMediaSecrets.xcconfig
 android/local.properties
 android/keystore.properties
 android/noop-release.jks

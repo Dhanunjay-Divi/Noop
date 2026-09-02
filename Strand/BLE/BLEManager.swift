@@ -491,6 +491,12 @@ public final class BLEManager: NSObject, ObservableObject {
     public let state: LiveState
     private let router: FrameRouter
     private var collector: Collector?
+    /// Raw capture is transient, but retention used to run only when iOS granted an opportunistic
+    /// BGAppRefreshTask. Keep a cheap process-local cadence so launch, backgrounding, and long-running
+    /// history sessions all enforce the cap without repeatedly scanning the outbox.
+    private var rawMaintenanceInFlight = false
+    private var lastRawMaintenanceAt: TimeInterval = 0
+    private static let rawMaintenanceFloorSeconds: TimeInterval = 15 * 60
     /// Stored on bootstrap so connected GATT + DIS identity evidence can repair the active registry row.
     private var registryStore: DeviceRegistryStore?
     /// App-layer cache refresh hook. The BLE engine owns the durable identity write, while AppModel owns
@@ -1040,6 +1046,13 @@ public final class BLEManager: NSObject, ObservableObject {
         let enableRawCapture = UserDefaults.standard.bool(forKey: "enableRawCapture")
         collector = Collector(store: store, deviceId: deviceId,
                               enableRawCapture: enableRawCapture)
+        // Enforce retention at the reliable store-open boundary. Previously this happened only if iOS
+        // happened to grant a background refresh, so a user who never received that wake could retain
+        // an old raw-capture backlog indefinitely.
+        let prunedAtOpen = await pruneRawIfDue(force: true)
+        if prunedAtOpen > 0 {
+            log("Storage: pruned \(prunedAtOpen) transient raw batch(es) at store open")
+        }
         // The store can finish bootstrapping AFTER connect(model:) already ran (both wait on
         // poweredOn), so apply the family/clock configuration here too — whichever runs last wins.
         configureCollectorFamily()
@@ -1615,10 +1628,34 @@ public final class BLEManager: NSObject, ObservableObject {
         log("Add-a-WHOOP scan: stopped")
     }
 
-    /// Apply the raw-outbox retention policy (24h synced window / 50MB unsynced cap).
-    /// Called when the app enters the background; no-op without a concrete store.
+    /// Flush pending live samples and apply the raw-outbox retention policy (24h synced window / 50MB
+    /// total cap). Awaitable so a finite iOS background execution window does not end before persistence
+    /// and retention finish.
+    @discardableResult
+    func performStorageMaintenance(force: Bool = true) async -> Int {
+        await collector?.flush()
+        await collector?.flushStandardHR()
+        return await pruneRawIfDue(force: force)
+    }
+
+    /// Backwards-compatible fire-and-forget entry used by non-lifecycle callers.
     public func pruneRaw() {
-        Task { @MainActor in await collector?.prune() }
+        Task { @MainActor in
+            _ = await self.performStorageMaintenance(force: true)
+        }
+    }
+
+    @discardableResult
+    private func pruneRawIfDue(force: Bool) async -> Int {
+        guard !rawMaintenanceInFlight, collector != nil else { return 0 }
+        let now = Date().timeIntervalSince1970
+        guard force || now - lastRawMaintenanceAt >= Self.rawMaintenanceFloorSeconds else { return 0 }
+        rawMaintenanceInFlight = true
+        defer {
+            rawMaintenanceInFlight = false
+            lastRawMaintenanceAt = now
+        }
+        return await collector?.prune() ?? 0
     }
 
     /// Light storage summary for the UI (decoded rows, raw batches, raw bytes). nil without a store.
@@ -2217,6 +2254,12 @@ public final class BLEManager: NSObject, ObservableObject {
                 ?? "Sync paused because saved data stopped advancing. Your band history is safe; Noop will retry on the next sync."
         }
         checkStrapLiveness()         // safety-net: strap ahead of us AND our frontier frozen ⇒ stuck?
+        // A user can leave NOOP connected for days without another lifecycle transition. Enforce the
+        // transient raw cap at the natural history-session boundary too; the cadence gate keeps a deep
+        // auto-continue burst from scanning the outbox on every slice.
+        Task { @MainActor in
+            _ = await self.pruneRawIfDue(force: false)
+        }
         // #364 / #25: a session that ended on the 60s IDLE cap OR on a true HISTORY_COMPLETE while still
         // connected, with more backlog to fetch and the trim still advancing, immediately re-kicks another
         // offload instead of tearing down to wait the 15-min floor — so a deep oldest-first backlog drains

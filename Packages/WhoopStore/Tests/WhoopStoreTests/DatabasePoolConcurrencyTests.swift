@@ -39,6 +39,24 @@ final class DatabasePoolConcurrencyTests: XCTestCase {
         XCTAssertEqual(counts.hr, 3, "rows written via the Pool must read back identically")
     }
 
+    func testStorageBreakdownAttributesTableAndIndexPages() async throws {
+        let path = tempPath()
+        defer { removeDB(path) }
+
+        let store = try await WhoopStore(path: path)
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 1_000, bpm: 60)]),
+            deviceId: "dev"
+        )
+
+        let reported = await store.databaseStorageBreakdown()
+        let breakdown = try XCTUnwrap(reported)
+        let hr = try XCTUnwrap(breakdown.objects.first { $0.tableName == "hrSample" })
+        XCTAssertGreaterThan(hr.bytes, 0)
+        XCTAssertGreaterThanOrEqual(breakdown.otherMainBytes, 0)
+        XCTAssertGreaterThanOrEqual(breakdown.sidecarBytes, 0)
+    }
+
     /// CORE #755 ASSERTION: under a `DatabasePool`, a read started while a write transaction is
     /// still open does NOT block on the writer; it returns the last committed snapshot at once.
     ///
@@ -114,7 +132,8 @@ final class DatabasePoolConcurrencyTests: XCTestCase {
     /// bare `Configuration()`, so none drive the production `init(path:)` config. Its `prepareDatabase`
     /// PRAGMA block (synchronous/cache_size/mmap_size/temp_store) must run on EVERY connection a Pool
     /// opens, the writer AND each reader, not just once. This opens the REAL store and reads
-    /// `PRAGMA cache_size` + `journal_mode` back off a pooled reader connection: `-16000` and `wal`
+    /// `PRAGMA cache_size` + `journal_mode` back off a pooled reader connection: the platform-sized
+    /// cache and `wal`
     /// prove `prepareDatabase` applied per-connection, closing the inMemory/Queue blind spot the
     /// migration's read/write concurrency depends on (a writer-only pragma would be the classic footgun).
     func testProductionPoolRunsPrepareDatabaseOnReaderConnections() async throws {
@@ -128,8 +147,14 @@ final class DatabasePoolConcurrencyTests: XCTestCase {
         let cacheSize = try await pool.read { db in
             try Int.fetchOne(db, sql: "PRAGMA cache_size") ?? 0
         }
-        XCTAssertEqual(cacheSize, -16000,
+        XCTAssertEqual(cacheSize, -WhoopStoreInfo.pageCacheKiB,
                        "production prepareDatabase pragmas must apply on pooled reader connections, not just the writer")
+
+        let mmapSize = try await pool.read { db in
+            try Int.fetchOne(db, sql: "PRAGMA mmap_size") ?? 0
+        }
+        XCTAssertEqual(mmapSize, WhoopStoreInfo.memoryMapBytes)
+        XCTAssertEqual(pool.configuration.maximumReaderCount, WhoopStoreInfo.maximumReaderCount)
 
         let journalMode = try await pool.read { db in
             try String.fetchOne(db, sql: "PRAGMA journal_mode") ?? ""

@@ -71,6 +71,42 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Live HR"].exists)
     }
 
+    func testStrengthBodyMapKeepsFrontAndBackRegionsSelectedTogether() {
+        let app = launchDemoScreen("strength")
+        let tabs = app.segmentedControls["noop.strength.tabs"]
+        XCTAssertTrue(tabs.waitForExistence(timeout: 20))
+        XCTAssertTrue(tabs.buttons["Today"].isSelected)
+
+        let map = app.descendants(matching: .any)["noop.strength.body-map"]
+        let scroll = app.scrollViews.firstMatch
+        XCTAssertTrue(scroll.exists)
+        for _ in 0..<18 where !map.isHittable {
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.46))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0
+            )
+        }
+        XCTAssertTrue(map.isHittable)
+
+        map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.28)).tap()
+        let selection = app.staticTexts["noop.strength.focus-selection"]
+        XCTAssertTrue(selection.waitForExistence(timeout: 5))
+        XCTAssertEqual(selection.label, "Chest")
+
+        app.descendants(matching: .any)["noop.strength.body-map"]
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.34))
+            .tap()
+        let combined = NSPredicate(format: "label == %@", "Chest + Back")
+        expectation(for: combined, evaluatedWith: selection)
+        waitForExpectations(timeout: 5)
+        Thread.sleep(forTimeInterval: 1)
+        keepScreenshot(app, name: "strength-body-map-multi-region")
+    }
+
     func testUpdatesInboxOpensFromQuickActions() {
         let app = launchApp(extraArguments: ["--demo-quick-actions"])
         let updates = app.buttons["noop.quick-actions.updates"]

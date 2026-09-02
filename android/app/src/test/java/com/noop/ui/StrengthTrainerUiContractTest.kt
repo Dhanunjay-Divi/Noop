@@ -77,7 +77,11 @@ class StrengthTrainerUiContractTest {
     fun guidedPlayerAndRichTodayPlanStayMounted() {
         val trainer = source("StrengthTrainerScreen.kt")
         val motion = source("StrengthExerciseMotionView.kt")
-        assumeTrue("Strength guided-player sources unavailable", trainer != null && motion != null)
+        val media = source("StrengthNativeMedia.kt")
+        assumeTrue(
+            "Strength guided-player sources unavailable",
+            trainer != null && motion != null && media != null,
+        )
 
         assertTrue(trainer!!.contains("StrengthExerciseMotionView("))
         assertTrue(trainer.contains("var currentBlockKey by rememberSaveable"))
@@ -91,18 +95,42 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer.contains("TextToSpeech(context)"))
         assertTrue(trainer.contains("completePacedSet(setId)"))
         assertTrue(trainer.contains("StrengthExercisePerformanceContext("))
-        assertTrue(trainer.contains("var exerciseGuide by remember"))
-        assertTrue(trainer.contains("onGuide = { exerciseGuide = it }"))
+        assertTrue(trainer.contains("var exerciseGuideId by rememberSaveable"))
+        assertTrue(trainer.contains("onGuide = { exerciseGuideId = it.id }"))
+        assertTrue(trainer.contains("StrengthExerciseGuidePanel("))
+        assertTrue(trainer.contains("presentation = StrengthExerciseMediaPresentation.DETAIL"))
+        assertTrue(trainer.contains("StrengthExerciseThumbnail("))
         assertTrue(trainer.contains("onGuide(plan.exercise)"))
-        assertTrue(motion!!.contains("withFrameNanos"))
-        assertTrue(motion.contains("drawStrengthMotion("))
-        assertTrue(motion.contains("StrengthMotionWebView("))
+        assertTrue(trainer.contains("onGuide = onGuide"))
+        assertTrue(trainer.contains("Modifier.clickable { onGuide(exercise) }"))
+        assertFalse(motion!!.contains("withFrameNanos"))
+        assertFalse(motion.contains("drawStrengthMotion("))
+        assertTrue(motion.contains("StrengthNativeExerciseMedia("))
+        assertFalse(motion.contains("StrengthMotionWebView("))
         assertTrue(
-            motion.contains("STRENGTH_MOTION_HOST = \"appassets.androidplatform.net\""),
+            media!!.contains("STRENGTH_DEMO_MEDIA_HOST = \"https://static.exercisedb.dev/media\""),
         )
-        assertTrue(motion.contains("STRENGTH_MOTION_PREFIX = \"/assets/strength-motion/\""))
-        assertTrue(motion.contains("shouldInterceptRequest("))
-        assertTrue(motion.contains("settings.blockNetworkLoads = true"))
+        assertTrue(media.contains("BuildConfig.STRENGTH_MEDIA_URL_TEMPLATE"))
+        assertTrue(media.contains("BuildConfig.DEBUG && BuildConfig.ALLOW_DEMO_STRENGTH_MEDIA"))
+        assertTrue(media.contains("STRENGTH_MAXIMUM_DOWNLOAD_BYTES"))
+        assertTrue(media.contains("StrengthMediaDownloadCapInterceptor"))
+        assertTrue(media.contains("StrengthMediaValidationDecoderFactory"))
+        assertTrue(media.contains("STRENGTH_MINIMUM_PIXELS_PARAMETER"))
+        assertTrue(media.contains("coil.compose.AsyncImage"))
+        assertTrue(media.contains("diskCacheKey(\"strength-exercise-v2-\$mediaId\")"))
+        assertTrue(media.contains("exercise-guidance.json"))
+        assertTrue(media.contains("StrengthExerciseFormGuide"))
+        assertTrue(media.contains("delay(6_000)"))
+        assertTrue(media.contains("requestVersion += 1"))
+        assertTrue(media.contains("BoxWithConstraints("))
+        assertTrue(media.contains("maxHeight - 12.dp"))
+        assertTrue(media.contains("maxWidth - (controlRailWidth * 2) - 16.dp"))
+        assertTrue(media.contains(".size(mediaSize)"))
+        assertTrue(media.contains(".background(Color.White)"))
+        assertTrue(media.contains("StrengthExerciseThumbnail("))
+        assertTrue(motion.contains("strength.exerciseMediaCompact.v2"))
+        assertTrue(motion.contains("StrengthExerciseMediaPresentation.DETAIL"))
+        assertFalse(media.contains("WebView"))
         assertFalse(motion.contains("pair.second,\n        exercise.primaryMuscle"))
     }
 
@@ -110,7 +138,11 @@ class StrengthTrainerUiContractTest {
     fun instructorProfileAndInteractiveBodyMapStayMounted() {
         val trainer = source("StrengthTrainerScreen.kt")
         val motion = source("StrengthExerciseMotionView.kt")
-        assumeTrue("Strength instructor sources unavailable", trainer != null && motion != null)
+        val media = source("StrengthNativeMedia.kt")
+        assumeTrue(
+            "Strength instructor sources unavailable",
+            trainer != null && motion != null && media != null,
+        )
 
         assertTrue(trainer!!.contains("StrengthProgramRequest("))
         assertTrue(trainer.contains("STRENGTH_PROFILE_EXPERIENCE"))
@@ -125,9 +157,17 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer.contains("StrengthBodyMapView("))
         assertTrue(trainer.contains("startFocusSession("))
         assertTrue(trainer.contains("selectedFocusExerciseIds"))
+        assertTrue(trainer.contains("var selectedFocusMuscles by rememberSaveable"))
+        assertTrue(trainer.contains("selectedMuscles = selectedFocusMuscles"))
+        assertTrue(trainer.contains("if (muscle in selectedFocusMuscles)"))
+        assertTrue(trainer.contains("for (candidates in rankedByMuscle)"))
+        assertTrue(trainer.contains("val retained = selectedFocusExerciseIds.intersect(candidateIds)"))
         assertTrue(motion!!.contains("enum class StrengthBodyMapMode"))
-        assertTrue(motion.contains("StrengthBodyRegion("))
-        assertTrue(motion.contains("contentDescription = accessibilityDescription"))
+        assertTrue(motion.contains("StrengthNativeBodyMap("))
+        assertTrue(media!!.contains("body-map-native.svg"))
+        assertTrue(media.contains("if (muscle in selectedMuscles)"))
+        assertTrue(media.contains("detectTapGestures"))
+        assertTrue(media.contains("strengthBodyMapHit("))
     }
 
     @Test
@@ -175,7 +215,7 @@ class StrengthTrainerUiContractTest {
         val values = files.mapValues { strengthStrings(it.value!!) }
         val base = values.getValue("values")
 
-        assertEquals(241, base.size)
+        assertEquals(256, base.size)
         val placeholder = Regex("""%\d+\$[dsf]""")
         for ((folder, localized) in values) {
             assertEquals("$folder Strength key parity", base.keys, localized.keys)

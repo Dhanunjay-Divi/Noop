@@ -104,6 +104,7 @@ fun BackupSyncScreen() {
     var serverApiKey by remember { mutableStateOf("") }
     var serverHasKey by remember { mutableStateOf(RemoteSyncPrefs.apiKey() != null) }
     var serverAuto by remember { mutableStateOf(RemoteSyncPrefs.automatic()) }
+    var serverOptimizeStorage by remember { mutableStateOf(RemoteSyncPrefs.optimizeStorage()) }
     var serverStatus by remember { mutableStateOf(RemoteSyncPrefs.lastStatus()) }
     var serverLastSuccess by remember { mutableStateOf(RemoteSyncPrefs.lastSuccessMs()) }
     var serverBusy by remember { mutableStateOf(false) }
@@ -262,6 +263,39 @@ fun BackupSyncScreen() {
                                 if (RemoteSyncPrefs.isConfigured()) {
                                     RemoteSyncService.setAutomatic(context, enabled)
                                 }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Palette.surfaceBase,
+                                checkedTrackColor = Palette.accent,
+                                uncheckedThumbColor = Palette.textSecondary,
+                                uncheckedTrackColor = Palette.surfaceInset,
+                                uncheckedBorderColor = Palette.hairline,
+                            ),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                uiString(R.string.remote_sync_optimize_storage),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                uiString(R.string.remote_sync_optimize_storage_description),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(
+                            checked = serverOptimizeStorage,
+                            enabled = !serverBusy && RemoteSyncPrefs.isConfigured(),
+                            onCheckedChange = { enabled ->
+                                serverOptimizeStorage = enabled
+                                RemoteSyncPrefs.setOptimizeStorage(enabled)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Palette.surfaceBase,
@@ -825,6 +859,7 @@ fun BackupSyncScreen() {
                                 serverApiKey = ""
                                 serverHasKey = false
                                 serverAuto = false
+                                serverOptimizeStorage = false
                                 serverStatus = "Disconnected - saved server credentials were removed."
                                 serverLastSuccess = 0L
                                 Toast.makeText(

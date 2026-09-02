@@ -17,6 +17,7 @@ struct BackupSyncView: View {
     @State private var serverURL = RemoteSyncPreferences.endpoint
     @State private var serverKey = ""
     @State private var serverAuto = RemoteSyncPreferences.automatic
+    @State private var optimizeServerStorage = RemoteSyncPreferences.optimizeStorage
     @State private var serverBusy = false
     @State private var serverStatus = RemoteSyncPreferences.lastStatus
     @State private var confirmServerReplay = false
@@ -157,6 +158,30 @@ struct BackupSyncView: View {
                                 serverStatus = "Automatic upload is off."
                                 RemoteSyncPreferences.lastStatus = serverStatus
                             }
+                        }
+                }
+
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reduce phone storage after backup")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Keeps 14 days of acknowledged sensor detail on this phone. Daily, sleep, and workout summaries remain local.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Toggle("Reduce phone storage after backup", isOn: $optimizeServerStorage)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(StrandPalette.accent)
+                        .disabled(
+                            serverBusy || RemoteSyncPreferences.endpoint.isEmpty
+                                || !RemoteSyncKeyStore.hasKey
+                        )
+                        .onChangeCompat(of: optimizeServerStorage) { enabled in
+                            RemoteSyncPreferences.optimizeStorage = enabled
                         }
                 }
 
@@ -354,11 +379,16 @@ struct BackupSyncView: View {
     }
 
     private func disconnectServer() {
-        RemoteSyncService.disconnect()
-        serverURL = ""
-        serverKey = ""
-        serverAuto = false
-        serverStatus = RemoteSyncPreferences.lastStatus
+        serverBusy = true
+        Task {
+            await RemoteSyncService.disconnect(repo: model.repo)
+            serverURL = ""
+            serverKey = ""
+            serverAuto = false
+            optimizeServerStorage = false
+            serverStatus = RemoteSyncPreferences.lastStatus
+            serverBusy = false
+        }
     }
 
     private func chooseFolder() {

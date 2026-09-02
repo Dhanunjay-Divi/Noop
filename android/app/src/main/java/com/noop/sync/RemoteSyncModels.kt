@@ -46,15 +46,21 @@ data class RemoteStreams(
     val skinTemp: List<RemoteSample> = emptyList(),
     val respiration: List<RemoteSample> = emptyList(),
     val steps: List<RemoteSample> = emptyList(),
+    val gravity: List<RemoteSample> = emptyList(),
+    val sleepState: List<RemoteSample> = emptyList(),
+    val ppgHr: List<RemoteSample> = emptyList(),
+    val ppgWaveform: List<RemoteSample> = emptyList(),
     val events: List<RemoteEvent> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = hr.isEmpty() && rr.isEmpty() && battery.isEmpty() && spo2.isEmpty() &&
-            skinTemp.isEmpty() && respiration.isEmpty() && steps.isEmpty() && events.isEmpty()
+            skinTemp.isEmpty() && respiration.isEmpty() && steps.isEmpty() && gravity.isEmpty() &&
+            sleepState.isEmpty() && ppgHr.isEmpty() && ppgWaveform.isEmpty() && events.isEmpty()
 
     val count: Int
         get() = hr.size + rr.size + battery.size + spo2.size + skinTemp.size +
-            respiration.size + steps.size + events.size
+            respiration.size + steps.size + gravity.size + sleepState.size + ppgHr.size +
+            ppgWaveform.size + events.size
 }
 
 data class RemoteSleepSession(
@@ -175,6 +181,10 @@ object RemoteSyncJson {
         .put("skin_temp", samples(streams.skinTemp))
         .put("respiration", samples(streams.respiration))
         .put("steps", samples(streams.steps))
+        .put("gravity", samples(streams.gravity))
+        .put("sleep_state", samples(streams.sleepState))
+        .put("ppg_hr", samples(streams.ppgHr))
+        .put("ppg_waveform", samples(streams.ppgWaveform))
         .put("events", array(streams.events.map(::event)))
 
     private fun samples(samples: List<RemoteSample>): JSONArray = array(samples.map { sample ->

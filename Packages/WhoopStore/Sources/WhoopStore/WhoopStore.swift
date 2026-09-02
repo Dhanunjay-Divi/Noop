@@ -6,7 +6,53 @@ import WhoopProtocol
 /// transient, compressed, prunable outbox. Built on GRDB/SQLite.
 public enum WhoopStoreInfo {
     /// Bumped whenever the migrator gains a new migration.
-    public static let schemaVersion = 46
+    public static let schemaVersion = 49
+
+    // NOOP opens this file through two pools (the BLE writer and the read repository). SQLite's cache
+    // and mmap limits apply per connection, so the old desktop-sized values could make a large iPhone
+    // database resident across several pooled readers at once. Keep desktop throughput unchanged while
+    // bounding the mobile process strongly enough that CoreBluetooth restoration is not competing with
+    // hundreds of megabytes of database cache under iOS memory pressure.
+    #if os(iOS)
+    static let maximumReaderCount = 3
+    static let pageCacheKiB = 4_096
+    static let memoryMapBytes = 32 * 1_024 * 1_024
+    #else
+    static let maximumReaderCount = 5
+    static let pageCacheKiB = 16_000
+    static let memoryMapBytes = 256 * 1_024 * 1_024
+    #endif
+}
+
+/// Allocated SQLite pages attributed to one logical table, including that table's indexes.
+public struct DatabaseObjectStorage: Equatable, Sendable {
+    public let tableName: String
+    public let bytes: Int64
+
+    public init(tableName: String, bytes: Int64) {
+        self.tableName = tableName
+        self.bytes = bytes
+    }
+}
+
+/// Physical composition of the live database. `objects` attributes table and index pages through
+/// SQLite's dbstat view; `otherMainBytes` covers free pages and SQLite bookkeeping, while
+/// `sidecarBytes` covers WAL/SHM working files. The values sum to the same on-disk footprint shown by
+/// `databaseFileSizeBytes()` apart from a file changing between the two snapshots.
+public struct DatabaseStorageBreakdown: Equatable, Sendable {
+    public let objects: [DatabaseObjectStorage]
+    public let otherMainBytes: Int64
+    public let sidecarBytes: Int64
+
+    public init(
+        objects: [DatabaseObjectStorage],
+        otherMainBytes: Int64,
+        sidecarBytes: Int64
+    ) {
+        self.objects = objects
+        self.otherMainBytes = otherMainBytes
+        self.sidecarBytes = sidecarBytes
+    }
 }
 
 /// Serializes `DatabasePool` creation + migration so two concurrent opens of the SAME file can never
@@ -99,15 +145,16 @@ public actor WhoopStore {
     /// run their GRDB migrators at once (#261) — see that actor's note for the failure it prevents.
     public init(path: String) async throws {
         var config = Configuration()
+        config.maximumReaderCount = WhoopStoreInfo.maximumReaderCount
         config.prepareDatabase { db in
             // `DatabasePool` puts the database in WAL mode itself (reads run as concurrent snapshots
             // alongside the single writer, #755), so there is no explicit `PRAGMA journal_mode = WAL`.
             // Bulk-write/read tuning. NORMAL is the durable, recommended pairing with WAL (only an
-            // OS crash/power loss can lose the last transaction — acceptable here). Bigger page cache
-            // + mmap + in-memory temp tables speed the multi-thousand-row import/backfill writes.
+            // OS crash/power loss can lose the last transaction — acceptable here). The limits are
+            // platform-sized above because every pool connection owns its own cache/mmap window.
             try db.execute(sql: "PRAGMA synchronous = NORMAL")
-            try db.execute(sql: "PRAGMA cache_size = -16000")     // ~16 MB page cache
-            try db.execute(sql: "PRAGMA mmap_size = 268435456")   // 256 MB memory-mapped I/O
+            try db.execute(sql: "PRAGMA cache_size = -\(WhoopStoreInfo.pageCacheKiB)")
+            try db.execute(sql: "PRAGMA mmap_size = \(WhoopStoreInfo.memoryMapBytes)")
             try db.execute(sql: "PRAGMA temp_store = MEMORY")
         }
         config.busyMode = .timeout(5)
@@ -301,6 +348,67 @@ public actor WhoopStore {
             }
         }
         return found ? total : nil
+    }
+
+    /// Attribute the database footprint to its logical tables. Unlike row counts, dbstat measures the
+    /// actual pages occupied by both table records and indexes, so a large RR or waveform table is
+    /// visible immediately instead of being hidden inside one aggregate "Health database" number.
+    ///
+    /// Returns nil when the store is in-memory or the platform SQLite lacks the read-only dbstat view.
+    /// The Storage screen treats that as "detail unavailable" and still shows the total file size.
+    public func databaseStorageBreakdown() async -> DatabaseStorageBreakdown? {
+        let base = dbWriter.path
+        guard base != ":memory:", !base.isEmpty else { return nil }
+
+        let main: (objects: [DatabaseObjectStorage], allocatedBytes: Int64)
+        do {
+            main = try syncRead { db in
+                let pageSize = Int64(try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0)
+                let pageCount = Int64(try Int.fetchOne(db, sql: "PRAGMA page_count") ?? 0)
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT COALESCE(m.tbl_name, d.name) AS tableName,
+                           SUM(d.pgsize) AS bytes
+                    FROM dbstat AS d
+                    LEFT JOIN sqlite_master AS m ON m.name = d.name
+                    WHERE d.name <> 'sqlite_schema'
+                    GROUP BY COALESCE(m.tbl_name, d.name)
+                    ORDER BY bytes DESC
+                    """)
+                let objects = rows.compactMap { row -> DatabaseObjectStorage? in
+                    let tableName: String = row["tableName"]
+                    let bytes: Int64 = row["bytes"]
+                    guard !tableName.isEmpty, bytes > 0 else { return nil }
+                    return DatabaseObjectStorage(tableName: tableName, bytes: bytes)
+                }
+                return (objects, pageSize * pageCount)
+            }
+        } catch {
+            return nil
+        }
+
+        let attributed = main.objects.reduce(Int64(0)) { $0 + $1.bytes }
+        let otherMain = max(0, main.allocatedBytes - attributed)
+        let fm = FileManager.default
+        var sidecars: Int64 = 0
+        for suffix in ["-wal", "-shm"] {
+            if let size = (try? fm.attributesOfItem(atPath: base + suffix))?[.size] as? NSNumber {
+                sidecars += size.int64Value
+            }
+        }
+        return DatabaseStorageBreakdown(
+            objects: main.objects,
+            otherMainBytes: otherMain,
+            sidecarBytes: sidecars
+        )
+    }
+
+    /// Rebuild the database file so pages released by retention or dropped optional indexes are returned
+    /// to iOS. This is intentionally explicit: VACUUM takes an exclusive write phase and does not belong
+    /// on the BLE ingestion hot path.
+    public func compactDatabase() async throws {
+        try syncWrite { db in
+            try db.execute(sql: "VACUUM")
+        }
     }
 
     // MARK: - Introspection (used by tests)

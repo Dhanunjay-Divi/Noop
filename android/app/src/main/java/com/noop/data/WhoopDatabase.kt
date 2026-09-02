@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 37
+const val NOOP_DATABASE_SCHEMA_VERSION = 39
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -924,6 +924,24 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        internal const val SLEEP_STATE_SYNC_OUTBOX_MIGRATION_SQL =
+            "ALTER TABLE `sleepStateSample` ADD COLUMN `synced` INTEGER NOT NULL DEFAULT 0"
+
+        internal val MIGRATION_37_38 = object : Migration(37, 38) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(SLEEP_STATE_SYNC_OUTBOX_MIGRATION_SQL)
+            }
+        }
+
+        internal const val PPG_WAVEFORM_SYNC_OUTBOX_MIGRATION_SQL =
+            "ALTER TABLE `ppgWaveformSample` ADD COLUMN `synced` INTEGER NOT NULL DEFAULT 0"
+
+        internal val MIGRATION_38_39 = object : Migration(38, 39) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(PPG_WAVEFORM_SYNC_OUTBOX_MIGRATION_SQL)
+            }
+        }
+
         internal fun strengthBuiltInInsertSQL(): List<String> =
             StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
                 "INSERT OR IGNORE INTO `strengthExercise` " +
@@ -958,6 +976,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
                     MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
                     MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
+                    MIGRATION_37_38, MIGRATION_38_39,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

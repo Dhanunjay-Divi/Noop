@@ -1141,6 +1141,18 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
             row["source_metadata"]["logical_source_id"] == "strap-abc-strap"
             for row in rr
         )
+        health = await repository.stream_health(
+            raw.source.device_id,
+            raw.streams.rr[0].recorded_at - timedelta(seconds=1),
+            raw.streams.events[0].recorded_at + timedelta(seconds=1),
+            1,
+        )
+        assert health["rr"]["sample_count"] == 3
+        assert health["rr"]["observed_timestamps"] == 1
+        assert health["rr"]["gap_count"] == 0
+        assert health["battery"]["sample_count"] == 1
+        assert health["spo2"]["sample_count"] == 1
+        assert health["gravity"]["sample_count"] == 0
 
         export = await repository.export_device(official.source.device_id, None, None)
         assert export["daily_metrics"][0]["source_metadata"]["namespace"] == (

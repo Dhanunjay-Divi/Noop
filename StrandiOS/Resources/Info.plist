@@ -63,6 +63,8 @@
 	<string>$(NOOP_LAUNCH_GATE_VERIFIER_HEX)</string>
 	<key>NOOPLaunchGateVersion</key>
 	<string>$(NOOP_LAUNCH_GATE_VERSION)</string>
+	<key>NOOPStrengthMediaURLTemplate</key>
+	<string>$(NOOP_STRENGTH_MEDIA_URL_TEMPLATE)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

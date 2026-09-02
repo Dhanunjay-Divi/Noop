@@ -8,12 +8,16 @@ import com.noop.data.EventRow
 import com.noop.data.HrSample
 import com.noop.data.JournalEntry
 import com.noop.data.PairedDeviceRow
+import com.noop.data.PpgHrSample
+import com.noop.data.PpgWaveformSampleEntity
 import com.noop.data.RespSample
 import com.noop.data.RrInterval
 import com.noop.data.SkinTempSample
 import com.noop.data.SleepSession
 import com.noop.data.Spo2Sample
 import com.noop.data.StepSample
+import com.noop.data.GravitySample
+import com.noop.data.SleepStateSampleEntity
 import com.noop.data.WhoopDatabase
 import com.noop.data.WorkoutRow
 
@@ -27,14 +31,25 @@ data class PendingRemoteStreams(
     val skinTemp: List<SkinTempSample> = emptyList(),
     val respiration: List<RespSample> = emptyList(),
     val steps: List<StepSample> = emptyList(),
+    val gravity: List<GravitySample> = emptyList(),
+    val sleepState: List<SleepStateSampleEntity> = emptyList(),
+    val ppgHr: List<PpgHrSample> = emptyList(),
+    val ppgWaveform: List<PpgWaveformSampleEntity> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = hr.isEmpty() && rr.isEmpty() && events.isEmpty() && battery.isEmpty() &&
-            spo2.isEmpty() && skinTemp.isEmpty() && respiration.isEmpty() && steps.isEmpty()
+            spo2.isEmpty() && skinTemp.isEmpty() && respiration.isEmpty() && steps.isEmpty() &&
+            gravity.isEmpty() && sleepState.isEmpty() && ppgHr.isEmpty() && ppgWaveform.isEmpty()
     val count: Int
         get() = hr.size + rr.size + events.size + battery.size + spo2.size +
-            skinTemp.size + respiration.size + steps.size
+            skinTemp.size + respiration.size + steps.size + gravity.size + sleepState.size +
+            ppgHr.size + ppgWaveform.size
 }
+
+data class RemotePruneResult(
+    val deletedRows: Int,
+    val hasMoreEligibleRows: Boolean,
+)
 
 data class RemoteDerivedRows(
     val daily: List<DailyMetric> = emptyList(),
@@ -80,6 +95,10 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
                 skinTemp = dao.pendingRemoteSkinTemp(deviceId, limit),
                 respiration = dao.pendingRemoteResp(deviceId, limit),
                 steps = dao.pendingRemoteSteps(deviceId, limit),
+                gravity = dao.pendingRemoteGravity(deviceId, limit),
+                sleepState = dao.pendingRemoteSleepState(deviceId, limit),
+                ppgHr = dao.pendingRemotePpgHr(deviceId, limit),
+                ppgWaveform = dao.pendingRemotePpgWaveform(deviceId, limit),
             )
         }
     }
@@ -99,6 +118,10 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
             rows.skinTemp.forEach { dao.acknowledgeRemoteSkinTemp(deviceId, it.ts) }
             rows.respiration.forEach { dao.acknowledgeRemoteResp(deviceId, it.ts) }
             rows.steps.forEach { dao.acknowledgeRemoteStep(deviceId, it.ts) }
+            rows.gravity.forEach { dao.acknowledgeRemoteGravity(deviceId, it.ts) }
+            rows.sleepState.forEach { dao.acknowledgeRemoteSleepState(deviceId, it.ts) }
+            rows.ppgHr.forEach { dao.acknowledgeRemotePpgHr(deviceId, it.ts) }
+            rows.ppgWaveform.forEach { dao.acknowledgeRemotePpgWaveform(deviceId, it.ts) }
         }
     }
 
@@ -114,6 +137,10 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
                 dao.resetRemoteSkinTemp(deviceId)
                 dao.resetRemoteResp(deviceId)
                 dao.resetRemoteSteps(deviceId)
+                dao.resetRemoteGravity(deviceId)
+                dao.resetRemoteSleepState(deviceId)
+                dao.resetRemotePpgHr(deviceId)
+                dao.resetRemotePpgWaveform(deviceId)
             }
         }
     }
@@ -161,4 +188,31 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
         dao.pairedDevices().firstOrNull { it.id == deviceId }
 
     override suspend fun pairedDevices(): List<PairedDeviceRow> = dao.pairedDevices()
+
+    suspend fun pruneAcknowledged(
+        deviceId: String,
+        cutoff: Long,
+        limitPerStream: Int = 2_000,
+    ): RemotePruneResult {
+        val limit = limitPerStream.coerceIn(100, 5_000)
+        return database.withTransaction {
+            val deleted =
+                dao.pruneRemoteHr(deviceId, cutoff, limit) +
+                    dao.pruneRemoteRr(deviceId, cutoff, limit) +
+                    dao.pruneRemoteEvents(deviceId, cutoff, limit) +
+                    dao.pruneRemoteBattery(deviceId, cutoff, limit) +
+                    dao.pruneRemoteSpo2(deviceId, cutoff, limit) +
+                    dao.pruneRemoteSkinTemp(deviceId, cutoff, limit) +
+                    dao.pruneRemoteResp(deviceId, cutoff, limit) +
+                    dao.pruneRemoteSteps(deviceId, cutoff, limit) +
+                    dao.pruneRemoteGravity(deviceId, cutoff, limit) +
+                    dao.pruneRemoteSleepState(deviceId, cutoff, limit) +
+                    dao.pruneRemotePpgHr(deviceId, cutoff, limit) +
+                    dao.pruneRemotePpgWaveform(deviceId, cutoff, limit)
+            RemotePruneResult(
+                deletedRows = deleted,
+                hasMoreEligibleRows = dao.hasPrunableRemoteRows(deviceId, cutoff),
+            )
+        }
+    }
 }

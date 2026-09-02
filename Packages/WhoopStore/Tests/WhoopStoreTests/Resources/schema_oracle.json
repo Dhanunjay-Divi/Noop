@@ -1,6 +1,6 @@
 {
   "_readme": "SHARED Room<->GRDB SCHEMA ORACLE (#775). Two byte-identical copies: Packages/WhoopStore/Tests/WhoopStoreTests/Resources/schema_oracle.json and android/app/src/test/resources/schema_oracle.json. SchemaOracleTests.swift compares GRDB's PRAGMA table_info/index_list against it; SchemaOracleTest.kt compares Room's exported schema JSON against it. `columns` is the iOS/GRDB shape in GRDB column order (macOS is the reference implementation); every way Android differs is spelled out in an `android` / `iosAbsent` / `androidColumnOrder` override naming a key in `divergenceReasons`. Adding a column, reordering one, or changing a type/nullability on one platform only fails both suites until it is either fixed or written down here.",
-  "roomVersion": 37,
+  "roomVersion": 39,
   "grdbMigrations": [
     "v1",
     "v2",
@@ -47,10 +47,12 @@
     "v43-nutrition-catalog",
     "v44-sleep-rr-window-evidence",
     "v45-daily-hrv-method",
-    "v46-strength-gym-planning"
+    "v46-strength-gym-planning",
+    "v47-remote-sync-indexes-on-demand",
+    "v48-sleep-state-sync-outbox",
+    "v49-ppg-sync-outbox"
   ],
   "divergenceReasons": {
-    "android-orphan-synced-column": "REAL COLUMN DRIFT: `synced` exists on Android only. GRDB's v10 note is explicit that stepSample gets no `synced` column ('unused; see StreamStore'), and v12's ppgHrSample never had one either; the Room entities copied the flag from the older per-second entities. Nothing reads it on Android — the per-row upload flag belongs to an upload path that does not exist there — so it is dead width, not divergent data. Removing it needs a Room table rebuild.",
     "battery-alter-append-order": "REAL COLUMN-ORDER DRIFT (CLAUDE.md: 'column order in a Room CREATE TABLE must match the entity field order'). GRDB appended `synced` (v5) then `charging` (v6) with ALTER TABLE, which can only append; the Room entity declares `charging` before `synced`. Same columns, same types, different positions — so any positional copy (INSERT INTO battery SELECT * FROM …) swaps them. Fixing it means reordering the Room entity's fields, which changes Room's identity hash and therefore needs a version bump plus a no-op migration.",
     "grdb-boolean-affinity": "GRDB's .boolean column type is declared BOOLEAN, which SQLite gives NUMERIC affinity; Room maps Kotlin Boolean to INTEGER. For the 0/1 values both sides write, NUMERIC and INTEGER affinity store bit-identical INTEGERs, so a .noopbak round-trips. Closing it means a GRDB table rebuild.",
     "paired-device-alter-append-order": "REAL COLUMN-ORDER DRIFT, same shape as battery. GRDB's v16-paired-device-peripheral appended `peripheralId` at the end; the Room entity declares it fifth, between `nickname` and `sourceKind`.",
@@ -58,7 +60,6 @@
     "room-omits-sql-default": "GRDB declares these columns NOT NULL DEFAULT 0; Room emits NOT NULL with no SQL DEFAULT, because a Kotlin constructor default never reaches the schema (only @ColumnInfo(defaultValue=) does). Both sides are NOT NULL and both always name the column on insert, so no row differs; an INSERT that omitted the column would fail on Android and get 0 on iOS. Closing it means adding @ColumnInfo(defaultValue = \"0\") plus a Room version bump, since the generated CREATE TABLE — and therefore Room's identity hash — changes.",
     "sqlite-text-pk-nullable": "GRDB writes `id TEXT PRIMARY KEY`; SQLite's legacy quirk leaves a non-INTEGER PRIMARY KEY column NULLable, so PRAGMA reports notnull=0. Room writes `id TEXT NOT NULL, PRIMARY KEY(id)`. Every writer on both platforms supplies a non-null id, so no stored row differs. Closing it means a GRDB table rebuild.",
     "workout-route-polyline-android-only": "REAL COLUMN DRIFT — literally the case #775 was filed about: `workout.routePolyline` (encoded GPS route) was added by Room MIGRATION_3_4 and has no GRDB twin. A .noopbak exported from Android carries a column iOS's `workout` table cannot receive.",
-    "remote-sync-pending-indices-grdb-only": "PERFORMANCE-ONLY INDEX DRIFT: this fork's GRDB v30 adds partial WHERE synced = 0 indices for the self-hosted upload outbox. Room @Index cannot express partial-index predicates, and Android's v23 schema predates an explicit SQL migration for them, so its pending queries remain correct but may scan more history. Closing this needs a Room version bump with CREATE INDEX ... WHERE synced = 0; no user data or scoring value differs.",
     "sleep-gravity-sparse-grdb-only": "REAL COLUMN DRIFT: iOS v38 persists AnalyticsEngine's nullable gravitySparse coverage verdict so classic SleepView can present the same Rest limitation the engine scored. Android has no twin yet; its Liquid surface consumes readiness context through a different path. Closing this requires a Room version bump, nullable sleepSession column, and producer/consumer plumbing."
   },
   "tables": {
@@ -193,18 +194,7 @@
         "synced"
       ],
       "androidColumnOrderDivergence": "battery-alter-append-order",
-      "indices": [
-        {
-          "name": "idx_remoteSync_battery_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "bodyMeasurement": {
       "platform": "ios_only",
@@ -722,19 +712,7 @@
         "ts",
         "kind"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_event_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts",
-            "kind"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "gravitySample": {
       "platform": "both",
@@ -884,18 +862,7 @@
         "deviceId",
         "ts"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_hr_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "journal": {
       "platform": "both",
@@ -1631,9 +1598,11 @@
           "name": "synced",
           "affinity": "INTEGER",
           "notNull": true,
-          "default": null,
-          "iosAbsent": true,
-          "divergence": "android-orphan-synced-column"
+          "default": "0",
+          "android": {
+            "default": null
+          },
+          "divergence": "room-omits-sql-default"
         }
       ],
       "primaryKey": [
@@ -1662,6 +1631,16 @@
           "affinity": "BLOB",
           "notNull": true,
           "default": null
+        },
+        {
+          "name": "synced",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "android": {
+            "default": null
+          },
+          "divergence": "room-omits-sql-default"
         }
       ],
       "primaryKey": [
@@ -1810,18 +1789,7 @@
         "deviceId",
         "ts"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_resp_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "rrInterval": {
       "platform": "both",
@@ -1889,20 +1857,7 @@
         "rrMs",
         "seq"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_rr_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts",
-            "rrMs",
-            "seq"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "skinTempSample": {
       "platform": "both",
@@ -1940,18 +1895,7 @@
         "deviceId",
         "ts"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_skin_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "sleepSession": {
       "platform": "both",
@@ -2077,6 +2021,16 @@
           "affinity": "INTEGER",
           "notNull": true,
           "default": null
+        },
+        {
+          "name": "synced",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "android": {
+            "default": null
+          },
+          "divergence": "room-omits-sql-default"
         }
       ],
       "primaryKey": [
@@ -2127,18 +2081,7 @@
         "deviceId",
         "ts"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_spo2_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "stepSample": {
       "platform": "both",
@@ -2182,18 +2125,7 @@
         "deviceId",
         "ts"
       ],
-      "indices": [
-        {
-          "name": "idx_remoteSync_steps_pending",
-          "unique": false,
-          "columns": [
-            "deviceId",
-            "ts"
-          ],
-          "androidAbsent": true,
-          "divergence": "remote-sync-pending-indices-grdb-only"
-        }
-      ]
+      "indices": []
     },
     "strengthExercise": {
       "platform": "both",

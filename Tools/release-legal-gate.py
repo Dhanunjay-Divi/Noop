@@ -25,6 +25,7 @@ NOTICE_PATHS = [
     ROOT / "server" / "NOTICE",
     ROOT / "server" / "backup" / "NOTICE",
 ]
+ASSET_LICENSE_FILES = ("assets/musclemap.txt",)
 SERVER_LICENSE_PATHS = [
     ROOT / "server" / "LICENSE",
     ROOT / "server" / "backup" / "LICENSE",
@@ -120,8 +121,16 @@ ANDROID_APACHE_PREFIXES = (
     "org.jetbrains.kotlinx:",
 )
 ANDROID_APACHE_COORDINATES = {
+    "com.caverock:androidsvg-aar",
+    "com.google.accompanist:accompanist-drawablepainter",
     "com.google.zxing:core",
     "com.journeyapps:zxing-android-embedded",
+    "io.coil-kt:coil",
+    "io.coil-kt:coil-base",
+    "io.coil-kt:coil-compose",
+    "io.coil-kt:coil-compose-base",
+    "io.coil-kt:coil-gif",
+    "io.coil-kt:coil-svg",
 }
 
 
@@ -322,9 +331,13 @@ def inventory() -> dict[str, object]:
             "Strand.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
             "android/app/gradle.lockfile:fullReleaseRuntimeClasspath",
             "server/requirements.lock",
+            "ThirdPartyNotices/licenses/assets/musclemap.txt",
         ],
         "components": apple_components() + android_components() + python_components(),
         "containers": container_components(),
+        "assetLicenseFiles": [
+            license_file(relative) for relative in ASSET_LICENSE_FILES
+        ],
     }
 
 
@@ -357,6 +370,8 @@ def render_notice(data: dict[str, object]) -> str:
     for item in components:
         for entry in item["licenseFiles"]:
             paths[entry["path"]] = entry["sha256"]
+    for entry in data.get("assetLicenseFiles", []):
+        paths[entry["path"]] = entry["sha256"]
     for relative, digest in sorted(paths.items()):
         chunks.append(f"===== {relative} (sha256:{digest}) =====")
         chunks.append((ROOT / relative).read_text(encoding="utf-8").rstrip())

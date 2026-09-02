@@ -3100,19 +3100,87 @@ final class AppModel: ObservableObject {
 
     /// A point-in-time snapshot of where the app's on-disk footprint is going, for the Storage screen.
     /// All sizes in bytes; `db` is nil only for an unopened/in-memory store.
+    struct StorageCategory: Equatable, Identifiable, Sendable {
+        let id: String
+        let label: String
+        let bytes: Int64
+    }
+
     struct StorageReport: Equatable, Sendable {
         var db: Int64?
         var inbox: Int64
         var importTemp: Int64
+        var databaseCategories: [StorageCategory]
     }
 
     /// Gather the storage report off the main actor: the GRDB file (+ WAL/SHM) from the store, plus the
     /// `Documents/Inbox/` picker-drop directory and the import temp files this app writes.
     func storageReport() async -> StorageReport {
-        let db = await repo.storeHandle()?.databaseFileSizeBytes()
+        let store = await repo.storeHandle()
+        let db = await store?.databaseFileSizeBytes()
+        let detail = await store?.databaseStorageBreakdown()
         let inbox = Self.inboxSizeBytes()
         let temp = Self.importTempSizeBytes()
-        return StorageReport(db: db, inbox: inbox, importTemp: temp)
+        return StorageReport(
+            db: db,
+            inbox: inbox,
+            importTemp: temp,
+            databaseCategories: Self.storageCategories(from: detail)
+        )
+    }
+
+    /// Convert physical SQLite objects into user-meaningful sensor groups. Unknown/future tables stay
+    /// visible under scores and records, so adding a migration can never make bytes disappear from the
+    /// explanation merely because this mapper has not learned the new table name yet.
+    nonisolated static func storageCategories(
+        from detail: DatabaseStorageBreakdown?
+    ) -> [StorageCategory] {
+        guard let detail else { return [] }
+        let heart: Set<String> = ["hrSample", "rrInterval", "ppgHrSample"]
+        let optical: Set<String> = ["ppgWaveformSample"]
+        let movement: Set<String> = ["gravitySample", "stepSample", "sleepStateSample"]
+        let sensors: Set<String> = [
+            "spo2Sample", "skinTempSample", "respSample", "battery", "event",
+        ]
+        let diagnostic: Set<String> = ["rawBatch", "rawImuSample"]
+
+        var totals: [String: Int64] = [:]
+        for object in detail.objects {
+            let key: String
+            if heart.contains(object.tableName) {
+                key = "heart"
+            } else if optical.contains(object.tableName) {
+                key = "optical"
+            } else if movement.contains(object.tableName) {
+                key = "movement"
+            } else if sensors.contains(object.tableName) {
+                key = "sensors"
+            } else if diagnostic.contains(object.tableName) {
+                key = "diagnostic"
+            } else {
+                key = "records"
+            }
+            totals[key, default: 0] += object.bytes
+        }
+        totals["working", default: 0] += detail.otherMainBytes + detail.sidecarBytes
+
+        let labels = [
+            "heart": "Heart & rhythm history",
+            "optical": "Optical waveform history",
+            "movement": "Movement history",
+            "sensors": "Other sensor history",
+            "records": "Scores, workouts & records",
+            "diagnostic": "Diagnostic captures",
+            "working": "Database working space",
+        ]
+        return totals.compactMap { key, bytes in
+            guard bytes > 0, let label = labels[key] else { return nil }
+            return StorageCategory(id: key, label: label, bytes: bytes)
+        }
+        .sorted { lhs, rhs in
+            if lhs.bytes != rhs.bytes { return lhs.bytes > rhs.bytes }
+            return lhs.label < rhs.label
+        }
     }
 
     /// Total bytes in `Documents/Inbox/` (the picker's `asCopy:true` drops). 0 on macOS / when absent.
@@ -3170,7 +3238,14 @@ final class AppModel: ObservableObject {
     func cleanUpStorage() async -> StorageReport {
         Self.purgeImportInbox()
         Self.purgeImportTemp()
-        if let store = await repo.storeHandle() { try? await store.checkpointWAL() }
+        _ = await ble.performStorageMaintenance(force: true)
+        if let store = await repo.storeHandle() {
+            if RemoteSyncPreferences.endpoint.isEmpty {
+                try? await store.configureRemoteSyncPendingIndexes(enabled: false)
+            }
+            try? await store.checkpointWAL()
+            try? await store.compactDatabase()
+        }
         return await storageReport()
     }
 

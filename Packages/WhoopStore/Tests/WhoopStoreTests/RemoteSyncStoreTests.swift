@@ -14,7 +14,13 @@ final class RemoteSyncStoreTests: XCTestCase {
                 spo2: [SpO2Sample(ts: 101, red: 17_000, ir: 16_000)],
                 skinTemp: [SkinTempSample(ts: 102, raw: 3_257)],
                 resp: [RespSample(ts: 103, raw: 2_900)],
+                gravity: [GravitySample(ts: 107, x: 0.1, y: -0.2, z: 0.97)],
                 steps: [StepSample(ts: 104, counter: 512, activityClass: 1)],
+                sleepState: [SleepStateSample(ts: 108, state: 2)],
+                ppgHr: [PpgHrSample(ts: 109, bpm: 63, conf: 0.87)],
+                ppgWaveform: [
+                    PpgWaveformSample(ts: 110, samples: [-1_432, 7, 2_048]),
+                ],
                 events: [
                     WhoopEvent(ts: 105, kind: "TEST(1)", payload: ["value": .int(7)]),
                 ],
@@ -26,10 +32,18 @@ final class RemoteSyncStoreTests: XCTestCase {
         let pending = try await store.pendingRemoteSyncStreams(
             deviceId: deviceId, limitPerStream: 100
         )
-        XCTAssertEqual(pending.count, 9)
+        XCTAssertEqual(pending.count, 13)
         XCTAssertEqual(pending.rr.map(\.seq), [0, 1])
         XCTAssertEqual(pending.steps.first?.activityClass, 1)
         XCTAssertEqual(pending.battery.first?.stateOfCharge, 74.5)
+        XCTAssertEqual(pending.gravity.first?.z, 0.97)
+        XCTAssertEqual(pending.sleepState.first?.state, 2)
+        XCTAssertEqual(pending.ppgHr.first?.bpm, 63)
+        XCTAssertEqual(pending.ppgHr.first?.confidence, 0.87)
+        XCTAssertEqual(
+            pending.ppgWaveform.first?.samples,
+            Data([0x68, 0xFA, 0x07, 0x00, 0x00, 0x08])
+        )
         XCTAssertTrue(pending.events.first?.payloadJSON.contains("\"value\":7") == true)
 
         // A read alone never changes delivery state.
@@ -39,6 +53,48 @@ final class RemoteSyncStoreTests: XCTestCase {
         try await store.markRemoteSyncStreamsSynced(pending, deviceId: deviceId)
         let afterAck = try await store.pendingRemoteSyncStreams(deviceId: deviceId)
         XCTAssertTrue(afterAck.isEmpty)
+    }
+
+    func testCloudRetentionDeletesOnlyAcknowledgedRowsOlderThanCutoff() async throws {
+        let store = try await WhoopStore.inMemory()
+        let deviceId = "strap-retention"
+        try await store.upsertDevice(id: deviceId, mac: nil, name: nil)
+        _ = try await store.insert(
+            Streams(
+                hr: [
+                    HRSample(ts: 100, bpm: 60),
+                    HRSample(ts: 2_000, bpm: 70),
+                ],
+                gravity: [GravitySample(ts: 101, x: 0, y: 0, z: 1)],
+                sleepState: [SleepStateSample(ts: 102, state: 2)],
+                ppgHr: [PpgHrSample(ts: 103, bpm: 61, conf: 0.9)],
+                ppgWaveform: [PpgWaveformSample(ts: 104, samples: [1, -2])]
+            ),
+            deviceId: deviceId
+        )
+
+        let beforeAck = try await store.pruneAcknowledgedRemoteRows(
+            deviceId: deviceId,
+            olderThan: 1_000
+        )
+        XCTAssertEqual(beforeAck.deletedRows, 0)
+
+        let pending = try await store.pendingRemoteSyncStreams(deviceId: deviceId)
+        try await store.markRemoteSyncStreamsSynced(pending, deviceId: deviceId)
+        let afterAck = try await store.pruneAcknowledgedRemoteRows(
+            deviceId: deviceId,
+            olderThan: 1_000
+        )
+        XCTAssertEqual(afterAck.deletedRows, 5)
+        XCTAssertFalse(afterAck.hasMoreEligibleRows)
+
+        try await store.resetRemoteSyncState(deviceId: deviceId)
+        let replay = try await store.pendingRemoteSyncStreams(deviceId: deviceId)
+        XCTAssertEqual(replay.hr, [.init(ts: 2_000, bpm: 70)])
+        XCTAssertTrue(replay.gravity.isEmpty)
+        XCTAssertTrue(replay.sleepState.isEmpty)
+        XCTAssertTrue(replay.ppgHr.isEmpty)
+        XCTAssertTrue(replay.ppgWaveform.isEmpty)
     }
 
     func testResetMakesAcknowledgedRowsPendingForNewDestination() async throws {

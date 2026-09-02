@@ -19,10 +19,10 @@ struct TermsGateView: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 6) {
-                    Text("appwide.terms.title")
+                    Text("Before you use NOOP")
                         .font(StrandFont.title1)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("appwide.terms.subtitle")
+                    Text("Please read the points below, then confirm each statement.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .multilineTextAlignment(.center)

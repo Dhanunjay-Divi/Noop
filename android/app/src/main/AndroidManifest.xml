@@ -5,8 +5,9 @@
     <!--
       NOOP is local-first: it talks to the strap over BLE and stores everything in
       Room. Outbound features are explicit opt-ins only: the bring-your-own-key AI
-      Coach and the user's own self-hosted sync server. Both are off until configured.
-      Hence the single INTERNET permission below.
+      Coach, the user's own self-hosted sync server, current weather, and third-party
+      exercise form media. None sends health data; weather asks for one approximate
+      location only after the person enables it.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />

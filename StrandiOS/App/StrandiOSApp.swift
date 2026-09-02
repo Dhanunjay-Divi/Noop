@@ -3,6 +3,7 @@ import SwiftUI
 import StrandAnalytics
 import StrandDesign
 import UserNotifications
+import UIKit
 import WidgetKit
 
 /// iOS entry point. Unlike the macOS app (which adds a `MenuBarExtra` scene), iOS uses a single
@@ -157,7 +158,7 @@ struct StrandiOSApp: App {
                     hasPairedBand: Self.hasRememberedBand(live: model.live)
                 )
             }
-            model.ble.pruneRaw()
+            _ = await model.ble.performStorageMaintenance(force: true)
 
             bridge.refreshAuthIfPreviouslyGranted() // status-only; never opens the permission sheet
             if bridge.auth == .authorized {
@@ -486,6 +487,10 @@ struct StrandiOSApp: App {
                 }
                 Task { await FriendsService.catchUpIfDue(repo: model.repo) }
             } else if phase == .background {
+                // Ask iOS for a short, finite grace window to commit the last buffered live samples and
+                // enforce transient retention. This is not a claim of continuous execution: CoreBluetooth
+                // restoration + strap backfill remain the durable background path after the window ends.
+                runBackgroundStorageMaintenance()
                 // Single-shot and best-effort: iOS chooses whether/when this runs. The handler re-arms
                 // itself after delivery; every later background transition also repairs the schedule.
                 BackgroundSyncScheduler.scheduleNext()
@@ -511,6 +516,24 @@ struct StrandiOSApp: App {
             pairedEvidence: live.bonded,
             explicitExpectation: BluetoothAvailabilityNotifications.monitoringExpected
         )
+    }
+
+    private func runBackgroundStorageMaintenance() {
+        var work: Task<Void, Never>?
+        var taskID: UIBackgroundTaskIdentifier = .invalid
+        taskID = UIApplication.shared.beginBackgroundTask(
+            withName: "NOOP sensor storage maintenance"
+        ) {
+            Task { @MainActor in work?.cancel() }
+        }
+        work = Task { @MainActor in
+            defer {
+                if taskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(taskID)
+                }
+            }
+            _ = await model.ble.performStorageMaintenance(force: true)
+        }
     }
 
     private func reconcileLiveActivity(repairHydration: Bool = false) {

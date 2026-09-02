@@ -1,34 +1,53 @@
 # Strength trainer asset provenance
 
-## NOOP human trainers
+## Exercise animation media
 
-- Bundled files: `trainer-man.glb`, `trainer-woman.glb`
-- Male SHA-256: `fd3e4652fa8ad8a10de284166ec38cd3a2d3b3d8bbdd463af03f237af4e0f377`
-- Female SHA-256: `8aa9f8fdc6b2925d69d38b25c69f270e501cb74702ed8bcaf3ce28da46fd1262`
-- Generator: `build_humans.py`
-- Generated with: Blender 5.2.1 and MPFB 2.0.17
-- MPFB revision: `80919fa4682335c41847f761a4d79dcad4124732`
-- Source asset pack: `makehuman_system_assets_cc0.zip`
-- Asset source:
-  `https://files2.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip`
-- Retrieved and generated: 2026-09-01
-- Asset license: CC0 1.0
+NOOP's built-in exercise viewer maps its own exercise identifiers to ExerciseDB
+media identifiers and loads each animation at runtime from:
 
-The meshes, targets, rig data, skin textures, clothing, hair, eyes, and shoes
-used by the generator come from the MakeHuman system assets CC0 pack. The
-generated characters may therefore be bundled and redistributed without the
-Adobe Mixamo restrictions that applied to the previous X Bot prototype.
+`https://static.exercisedb.dev/media/<media-id>.gif`
 
-The deterministic Blender generator sets each phenotype, fits athletic
-clothing, applies materials, builds a Mixamo-compatible skeleton, limits
-textures to 1024 pixels, and exports GLB files without sample animation,
-cameras, or lights. NOOP's procedural exercise poses, runtime retargeting,
-equipment, viewer, and written guidance remain project-authored work.
+The media is attributed in the form guide to AscendAPI. It is not stored in
+this repository or distributed in the iOS or Android application bundles.
+Android loads and caches it with Coil; Apple platforms use URLSession's HTTP
+cache and native image views. Both implementations construct URLs only from
+the generated local identifier map and the exact HTTPS host above.
 
-Rebuild from a Blender installation with MPFB and the CC0 system pack enabled:
+ExerciseDB media remains third-party content subject to its provider's terms:
 
-```sh
-BLENDER_USER_CONFIG=/tmp/noop-blender-profile/config \
-BLENDER_USER_EXTENSIONS=/tmp/noop-blender-profile/extensions \
-blender -b --python build_humans.py -- /tmp/noop-human-models
-```
+- https://exercisedb.io/faq
+- https://ascendapi.com
+
+The supplied OpenGym archives also reference this media, but their notice says
+that OpenGym cannot sublicense or redistribute it. NOOP therefore does not copy
+the animation files from those archives.
+
+The former Blender/Three.js prototype remains available for audit on the
+`archive/strength-motion-blender-v1` branch; its generator and robot/humanoid
+sources are not part of `main`.
+
+## NOOP guidance
+
+The viewer layout, exercise-to-media mapping, and setup, movement, breathing,
+tempo, and safety guidance in this directory are maintained as NOOP source.
+`build-native-body-map.mjs` generates the JSON contracts consumed by both apps.
+The generated `dist/viewer.js` is retained only for the 56-exercise browser QA
+and is built from `viewer.ts` and `guidance.ts`.
+
+## Anatomical body map
+
+`body-paths.ts` contains SVG path geometry derived from MuscleMap by Melih
+Colpan and converted from its Swift path source by openGym. MuscleMap is
+licensed under MIT. The conversion is identified as MIT-licensed body geometry
+in openGym's `NOTICE.md`; NOOP does not copy openGym's AGPL React component,
+styling, load calculations, or interaction code. The exact MuscleMap notice is
+preserved at `ThirdPartyNotices/licenses/assets/musclemap.txt` and included in
+each generated release `NOTICE`.
+
+- MuscleMap: https://github.com/melihcolpan/MuscleMap
+- Conversion source reviewed: the user-supplied `opengym_2.zip`, commit
+  `75fb168a03de09f995d05efd4fd2bfda2d595e0f`
+- Imported: 2026-09-02
+
+NOOP's `body-map.ts`, native platform bridges, score mapping, colors, and
+accessibility behavior are project-authored work.

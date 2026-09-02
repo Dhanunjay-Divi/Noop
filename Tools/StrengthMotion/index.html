@@ -9,21 +9,33 @@
 </head>
 <body>
   <main id="stage" aria-label="Animated exercise demonstration">
-    <div class="guide">
-      <img id="motion" alt="" hidden>
-    </div>
+    <section class="media-panel">
+      <button
+        id="motion-toggle"
+        class="guide"
+        type="button"
+        aria-label="Pause exercise animation"
+        title="Pause exercise animation"
+      >
+        <img id="motion" alt="" decoding="async" draggable="false" hidden>
+        <canvas id="motion-still" hidden></canvas>
+        <span class="motion-state" aria-hidden="true">
+          <span id="playback-play" hidden><i data-lucide="play"></i></span>
+          <span id="playback-pause"><i data-lucide="pause"></i></span>
+        </span>
+      </button>
+      <div class="media-toolbar">
+        <button id="info" type="button" aria-label="Exercise instructions" title="Exercise instructions">
+          <i data-lucide="info"></i>
+        </button>
+        <a class="attribution" href="https://ascendapi.com">
+          <span>Media by AscendAPI</span>
+          <i data-lucide="external-link"></i>
+        </a>
+      </div>
+    </section>
     <div id="loading" role="status"><span></span></div>
     <div id="error" role="alert" hidden>Exercise guide unavailable</div>
-    <div class="caption">
-      <h1 id="exercise-title"></h1>
-      <p>Animated form guide</p>
-    </div>
-    <div class="controls">
-      <button id="info" type="button" aria-label="Exercise instructions" title="Exercise instructions">
-        <i data-lucide="info"></i>
-      </button>
-    </div>
-    <a class="attribution" href="https://ascendapi.com">Exercise media by AscendAPI</a>
     <div id="instructions" class="sheet-backdrop" hidden>
       <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="instruction-title">
         <header>

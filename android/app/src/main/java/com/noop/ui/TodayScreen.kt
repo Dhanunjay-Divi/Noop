@@ -1,8 +1,11 @@
 package com.noop.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,7 +53,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Bedtime
@@ -59,6 +64,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.History
@@ -66,17 +72,23 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -197,6 +209,11 @@ import com.noop.notif.StrainTargetNotifier
 import com.noop.ble.HistorySyncPresentationPolicy
 import com.noop.ble.HistorySyncPresentationState
 import com.noop.ble.HistorySyncDurableProgressPolicy
+import com.noop.weather.TodayWeatherCode
+import com.noop.weather.TodayWeatherCondition
+import com.noop.weather.TodayWeatherState
+import com.noop.weather.TodayWeatherStatus
+import com.noop.weather.TodayWeatherStore
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -503,6 +520,24 @@ fun TodayScreen(
     // Display-only units + the SI profile weight, read once like every other Settings-backed
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
+    val weatherStore = remember(context.applicationContext) {
+        TodayWeatherStore(context.applicationContext)
+    }
+    val weatherState by weatherStore.state.collectAsStateWithLifecycle()
+    var showWeatherDetails by rememberSaveable { mutableStateOf(false) }
+    val weatherPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        weatherStore.onPermissionResult(granted)
+        if (!granted) showWeatherDetails = true
+    }
+    DisposableEffect(weatherStore) {
+        onDispose { weatherStore.close() }
+    }
+    LaunchedEffect(weatherStore) {
+        weatherStore.startIfEnabled()
+    }
+    val temperatureUnit = UnitPrefs.temperature(context)
     val massUnit = UnitPrefs.mass(context)
     val reportsAvailableInitially = reportNotificationsAvailable(context)
     val strainTargetInitiallyEnabled = NoopPrefs.strainTargetEnabled(context)
@@ -1510,6 +1545,25 @@ fun TodayScreen(
             syncChunksThisSession = liveSnap.syncChunksThisSession,
             lastSyncAt = liveSnap.lastSyncAt,
             historySyncExperimental = liveSnap.historySyncExperimental,
+            weatherState = weatherState.takeIf { selectedDayOffset == 0 },
+            temperatureUnit = temperatureUnit,
+            onWeatherClick = {
+                when {
+                    weatherState.snapshot != null ||
+                        weatherState.status == TodayWeatherStatus.DENIED ||
+                        weatherState.status == TodayWeatherStatus.UNAVAILABLE ||
+                        weatherState.status == TodayWeatherStatus.FAILED -> {
+                        showWeatherDetails = true
+                    }
+                    weatherState.status != TodayWeatherStatus.LOCATING -> {
+                        weatherStore.enableAndRefresh {
+                            weatherPermissionLauncher.launch(
+                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                            )
+                        }
+                    }
+                }
+            },
             onOpenCalendar = onOpenCalendar,
             onOpenSettings = onOpenSettings,
             onOpenDevices = onOpenDevices,
@@ -1981,6 +2035,39 @@ fun TodayScreen(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
+    }
+
+    if (showWeatherDetails) {
+        TodayWeatherDetailsDialog(
+            state = weatherState,
+            temperatureUnit = temperatureUnit,
+            onDismiss = { showWeatherDetails = false },
+            onEnable = {
+                weatherStore.enableAndRefresh {
+                    weatherPermissionLauncher.launch(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                    )
+                }
+            },
+            onRefresh = weatherStore::refresh,
+            onOpenSettings = {
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                }
+            },
+            onOpenAttribution = {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(TodayWeatherStore.ATTRIBUTION_URL)),
+                    )
+                }
+            },
+        )
     }
 
     // Scoring guide sheet, full-screen Dialog, mirroring Settings' What's-new presentation. Opened
@@ -3127,6 +3214,9 @@ private fun LiquidTodayHeader(
     syncChunksThisSession: Int = 0,
     lastSyncAt: Long? = null,
     historySyncExperimental: Boolean = false,
+    weatherState: TodayWeatherState? = null,
+    temperatureUnit: TemperatureUnit,
+    onWeatherClick: () -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDevices: () -> Unit,
@@ -3270,21 +3360,372 @@ private fun LiquidTodayHeader(
                     historySyncExperimental = historySyncExperimental,
                 )
             }
-            Text(
-                headline,
-                style = NoopType.number(30f, weight = FontWeight.Bold).copy(
-                    shadow = Shadow(
-                        color = Color.Black.copy(alpha = 0.4f),
-                        offset = Offset(0f, 1f),
-                        blurRadius = 10f,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
+                Text(
+                    headline,
+                    style = NoopType.number(30f, weight = FontWeight.Bold).copy(
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.4f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 10f,
+                        ),
                     ),
-                ),
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (weatherState != null) {
+                    TodayWeatherChip(
+                        state = weatherState,
+                        temperatureUnit = temperatureUnit,
+                        onClick = onWeatherClick,
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun TodayWeatherChip(
+    state: TodayWeatherState,
+    temperatureUnit: TemperatureUnit,
+    onClick: () -> Unit,
+) {
+    val snapshot = state.snapshot
+    val condition = snapshot?.let { TodayWeatherCode.condition(it.weatherCode) }
+    val conditionLabel = condition?.let { todayWeatherConditionLabel(it) }
+    val accessibilityLabel = when {
+        snapshot != null && conditionLabel != null -> {
+            "$conditionLabel, ${
+                UnitFormatter.temperatureFromCelsius(
+                    snapshot.temperatureC,
+                    temperatureUnit,
+                    decimals = 0,
+                )
+            }"
+        }
+        state.status == TodayWeatherStatus.DENIED ->
+            stringResource(R.string.today_weather_location_off_accessibility)
+        else -> stringResource(R.string.today_weather_enable_accessibility)
+    }
+    val tint = if (snapshot == null) Palette.textSecondary else Palette.chargeBright
+    val interaction = remember { MutableInteractionSource() }
+
+    Row(
+        modifier = Modifier
+            .width(82.dp)
+            .height(34.dp)
+            .liquidPress(interaction)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(
+                width = 0.8.dp,
+                color = if (snapshot == null) {
+                    Palette.hairlineStrong.copy(alpha = 0.72f)
+                } else {
+                    Palette.chargeColor.copy(alpha = 0.34f)
+                },
+                shape = CircleShape,
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .testTag("noop.today.weather")
+            .semantics {
+                contentDescription = accessibilityLabel
+                role = Role.Button
+            },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            state.status == TodayWeatherStatus.LOCATING -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = tint,
+                    strokeWidth = 1.5.dp,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.today_weather),
+                    style = NoopType.captionNumber,
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            snapshot != null && condition != null -> {
+                Icon(
+                    imageVector = todayWeatherIcon(condition),
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = weatherCompactTemperature(snapshot.temperatureC, temperatureUnit),
+                    style = NoopType.captionNumber,
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            state.status == TodayWeatherStatus.DENIED -> {
+                Icon(
+                    imageVector = Icons.Filled.LocationOff,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.today_weather),
+                    style = NoopType.captionNumber,
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            else -> {
+                Icon(
+                    imageVector = Icons.Filled.Cloud,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.today_weather),
+                    style = NoopType.captionNumber,
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayWeatherDetailsDialog(
+    state: TodayWeatherState,
+    temperatureUnit: TemperatureUnit,
+    onDismiss: () -> Unit,
+    onEnable: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenAttribution: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 360.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = Palette.surfaceRaised,
+            tonalElevation = 0.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(Metrics.space20),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+            ) {
+                val snapshot = state.snapshot
+                when {
+                    snapshot != null -> {
+                        val condition = TodayWeatherCode.condition(snapshot.weatherCode)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = todayWeatherIcon(condition),
+                                contentDescription = null,
+                                tint = Palette.chargeBright,
+                                modifier = Modifier.size(28.dp),
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = todayWeatherConditionLabel(condition),
+                                    style = NoopType.headline,
+                                    color = Palette.textPrimary,
+                                )
+                                Text(
+                                    text = UnitFormatter.temperatureFromCelsius(
+                                        snapshot.temperatureC,
+                                        temperatureUnit,
+                                        decimals = 0,
+                                    ),
+                                    style = NoopType.number(24f),
+                                    color = Palette.textPrimary,
+                                )
+                            }
+                        }
+                        val updated = remember(snapshot.observedAtMs) {
+                            Instant.ofEpochMilli(snapshot.observedAtMs)
+                                .atZone(ZoneId.systemDefault())
+                                .format(
+                                    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+                                        .withLocale(Locale.getDefault()),
+                                )
+                        }
+                        Text(
+                            text = stringResource(R.string.today_weather_updated_format, updated),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                        TextButton(onClick = onRefresh) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                            Text(stringResource(R.string.today_weather_refresh))
+                        }
+                        TextButton(onClick = onOpenAttribution) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                            Text(stringResource(R.string.today_weather_data_attribution))
+                        }
+                    }
+                    state.status == TodayWeatherStatus.DENIED -> {
+                        Icon(
+                            imageVector = Icons.Filled.LocationOff,
+                            contentDescription = null,
+                            tint = Palette.textSecondary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.today_weather_location_off),
+                            style = NoopType.headline,
+                            color = Palette.textPrimary,
+                        )
+                        Button(onClick = onOpenSettings) {
+                            Text(stringResource(R.string.today_weather_open_settings))
+                        }
+                        TextButton(onClick = onRefresh) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                            Text(stringResource(R.string.today_weather_retry))
+                        }
+                    }
+                    state.status == TodayWeatherStatus.FAILED ||
+                        state.status == TodayWeatherStatus.UNAVAILABLE -> {
+                        Icon(
+                            imageVector = Icons.Filled.Cloud,
+                            contentDescription = null,
+                            tint = Palette.textSecondary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.today_weather_unavailable),
+                            style = NoopType.headline,
+                            color = Palette.textPrimary,
+                        )
+                        Button(onClick = onRefresh) {
+                            Text(stringResource(R.string.today_weather_retry))
+                        }
+                    }
+                    state.status == TodayWeatherStatus.LOCATING -> {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Text(
+                                text = stringResource(R.string.today_weather_current),
+                                style = NoopType.headline,
+                                color = Palette.textPrimary,
+                            )
+                        }
+                    }
+                    else -> {
+                        Icon(
+                            imageVector = Icons.Filled.Cloud,
+                            contentDescription = null,
+                            tint = Palette.textSecondary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.today_weather_current),
+                            style = NoopType.headline,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            text = stringResource(R.string.today_weather_privacy),
+                            style = NoopType.subhead,
+                            color = Palette.textSecondary,
+                        )
+                        Button(onClick = onEnable) {
+                            Text(stringResource(R.string.today_weather_enable))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun todayWeatherConditionLabel(condition: TodayWeatherCondition): String =
+    stringResource(
+        when (condition) {
+            TodayWeatherCondition.CLEAR -> R.string.today_weather_condition_clear
+            TodayWeatherCondition.MOSTLY_CLEAR -> R.string.today_weather_condition_mostly_clear
+            TodayWeatherCondition.PARTLY_CLOUDY -> R.string.today_weather_condition_partly_cloudy
+            TodayWeatherCondition.OVERCAST -> R.string.today_weather_condition_overcast
+            TodayWeatherCondition.FOG -> R.string.today_weather_condition_fog
+            TodayWeatherCondition.DRIZZLE -> R.string.today_weather_condition_drizzle
+            TodayWeatherCondition.RAIN -> R.string.today_weather_condition_rain
+            TodayWeatherCondition.SNOW -> R.string.today_weather_condition_snow
+            TodayWeatherCondition.THUNDERSTORM ->
+                R.string.today_weather_condition_thunderstorm
+            TodayWeatherCondition.UNKNOWN -> R.string.today_weather_condition_unknown
+        },
+    )
+
+private fun todayWeatherIcon(condition: TodayWeatherCondition): ImageVector = when (condition) {
+    TodayWeatherCondition.CLEAR,
+    TodayWeatherCondition.MOSTLY_CLEAR -> Icons.Filled.WbSunny
+    TodayWeatherCondition.RAIN,
+    TodayWeatherCondition.DRIZZLE -> Icons.Filled.WaterDrop
+    TodayWeatherCondition.SNOW -> Icons.Filled.AcUnit
+    TodayWeatherCondition.THUNDERSTORM -> Icons.Filled.Thunderstorm
+    TodayWeatherCondition.PARTLY_CLOUDY,
+    TodayWeatherCondition.OVERCAST,
+    TodayWeatherCondition.FOG,
+    TodayWeatherCondition.UNKNOWN -> Icons.Filled.Cloud
+}
+
+private fun weatherCompactTemperature(
+    celsius: Double,
+    unit: TemperatureUnit,
+): String {
+    val value = if (unit == TemperatureUnit.FAHRENHEIT) {
+        UnitFormatter.celsiusToFahrenheit(celsius)
+    } else {
+        celsius
+    }
+    return "${value.roundToInt()}°"
 }
 
 @Composable

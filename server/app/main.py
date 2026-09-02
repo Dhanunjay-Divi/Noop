@@ -3281,6 +3281,35 @@ def create_app(
             "notice": RAW_NOTICE,
         }
 
+    @router.get("/devices/{device_id}/freshness", tags=["read"])
+    async def stream_freshness(
+        request: Request,
+        device_id: str,
+        hours: int = Query(default=48, ge=1, le=168),
+        gap_seconds: int = Query(default=300, ge=30, le=3_600),
+    ) -> dict[str, Any]:
+        _device_id(device_id)
+        await require_device_access(request, device_id)
+        finish = datetime.now(UTC)
+        beginning = finish - timedelta(hours=hours)
+        return {
+            "device_id": device_id,
+            "start": beginning,
+            "end": finish,
+            "gap_threshold_seconds": gap_seconds,
+            "streams": await runtime_repository.stream_health(
+                device_id,
+                beginning,
+                finish,
+                gap_seconds,
+            ),
+            "notice": (
+                "Gaps describe samples received by this server. They cannot distinguish "
+                "a suspended app, a disconnected strap, an off-wrist period, or data that "
+                "is still queued on the phone."
+            ),
+        }
+
     @router.get("/devices/{device_id}/daily", tags=["read"])
     async def daily_values(
         request: Request,

@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.models import (
     FriendVisibility,
+    STREAM_RANGES,
     SyncCounts,
     SyncPayload,
     SyncResult,
@@ -118,6 +119,14 @@ class Repository(Protocol):
 
     async def latest_metrics(
         self, device_id: str, metrics: list[str] | None
+    ) -> dict[str, dict[str, Any]]: ...
+
+    async def stream_health(
+        self,
+        device_id: str,
+        start: datetime,
+        end: datetime,
+        gap_threshold_seconds: int,
     ) -> dict[str, dict[str, Any]]: ...
 
     async def metric_range(
@@ -518,6 +527,55 @@ class MemoryRepository:
                 if current is None or current["recorded_at"] < recorded_at:
                     latest[metric] = dict(sample)
         return dict(sorted(latest.items()))
+
+    async def stream_health(
+        self,
+        device_id: str,
+        start: datetime,
+        end: datetime,
+        gap_threshold_seconds: int,
+    ) -> dict[str, dict[str, Any]]:
+        async with self._lock:
+            by_metric: dict[str, list[datetime]] = {
+                metric: [] for metric in STREAM_RANGES
+            }
+            row_counts = Counter({metric: 0 for metric in STREAM_RANGES})
+            for (
+                stored_device,
+                metric,
+                recorded_at,
+                _sample_key,
+            ) in self._metrics:
+                if (
+                    stored_device == device_id
+                    and metric in by_metric
+                    and start <= recorded_at < end
+                ):
+                    by_metric[metric].append(recorded_at)
+                    row_counts[metric] += 1
+
+        result: dict[str, dict[str, Any]] = {}
+        for metric in STREAM_RANGES:
+            timestamps = sorted(set(by_metric[metric]))
+            gaps = [
+                (right - left).total_seconds()
+                for left, right in zip(timestamps, timestamps[1:], strict=False)
+                if (right - left).total_seconds() > gap_threshold_seconds
+            ]
+            first = timestamps[0] if timestamps else None
+            last = timestamps[-1] if timestamps else None
+            result[metric] = {
+                "sample_count": row_counts[metric],
+                "observed_timestamps": len(timestamps),
+                "first_recorded_at": first,
+                "last_recorded_at": last,
+                "age_seconds": max(0.0, (end - last).total_seconds())
+                if last is not None
+                else None,
+                "gap_count": len(gaps),
+                "max_gap_seconds": max(gaps, default=0.0),
+            }
+        return result
 
     async def metric_range(
         self,
@@ -2270,6 +2328,78 @@ class PostgresRepository:
             }
             for row in rows
         }
+
+    async def stream_health(
+        self,
+        device_id: str,
+        start: datetime,
+        end: datetime,
+        gap_threshold_seconds: int,
+    ) -> dict[str, dict[str, Any]]:
+        pool = self._require_pool()
+        rows = await pool.fetch(
+            """
+            WITH points AS (
+                SELECT metric, recorded_at, count(*)::bigint AS point_rows
+                FROM metric_samples
+                WHERE device_id = $1
+                  AND recorded_at >= $2
+                  AND recorded_at < $3
+                GROUP BY metric, recorded_at
+            ),
+            ordered AS (
+                SELECT metric, recorded_at, point_rows,
+                       EXTRACT(
+                           epoch FROM recorded_at
+                           - lag(recorded_at) OVER (
+                               PARTITION BY metric ORDER BY recorded_at
+                           )
+                       ) AS gap_seconds
+                FROM points
+            )
+            SELECT metric,
+                   sum(point_rows)::bigint AS sample_count,
+                   count(*)::bigint AS observed_timestamps,
+                   min(recorded_at) AS first_recorded_at,
+                   max(recorded_at) AS last_recorded_at,
+                   count(*) FILTER (
+                       WHERE gap_seconds > $4
+                   )::bigint AS gap_count,
+                   COALESCE(
+                       max(gap_seconds) FILTER (WHERE gap_seconds > $4),
+                       0
+                   )::double precision AS max_gap_seconds
+            FROM ordered
+            GROUP BY metric
+            """,
+            device_id,
+            start,
+            end,
+            gap_threshold_seconds,
+        )
+        selected = {row["metric"]: row for row in rows}
+        result: dict[str, dict[str, Any]] = {}
+        for metric in STREAM_RANGES:
+            row = selected.get(metric)
+            last = row["last_recorded_at"] if row is not None else None
+            result[metric] = {
+                "sample_count": int(row["sample_count"]) if row is not None else 0,
+                "observed_timestamps": (
+                    int(row["observed_timestamps"]) if row is not None else 0
+                ),
+                "first_recorded_at": (
+                    row["first_recorded_at"] if row is not None else None
+                ),
+                "last_recorded_at": last,
+                "age_seconds": max(0.0, (end - last).total_seconds())
+                if last is not None
+                else None,
+                "gap_count": int(row["gap_count"]) if row is not None else 0,
+                "max_gap_seconds": (
+                    float(row["max_gap_seconds"]) if row is not None else 0.0
+                ),
+            }
+        return result
 
     async def metric_range(
         self,

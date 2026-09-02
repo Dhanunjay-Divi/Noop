@@ -9,6 +9,7 @@ import com.noop.data.PairedDeviceRow
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.Base64
 import kotlin.math.roundToInt
 
 /**
@@ -405,6 +406,54 @@ class RemoteSyncCoordinator(
                         put("provenance", "strap_counter")
                         it.activityClass?.let { value -> put("activity_class", value.toString()) }
                     },
+                )
+            },
+            gravity = pending.gravity.map {
+                RemoteSample(
+                    it.ts,
+                    it.x,
+                    metadata = mapOf(
+                        "unit" to "g",
+                        "y" to it.y.toString(),
+                        "z" to it.z.toString(),
+                        "provenance" to "strap_measured",
+                    ),
+                )
+            },
+            sleepState = pending.sleepState.map {
+                RemoteSample(
+                    it.ts,
+                    it.state.toDouble(),
+                    metadata = mapOf(
+                        "unit" to "state_code",
+                        "provenance" to "strap_reported",
+                    ),
+                )
+            },
+            ppgHr = pending.ppgHr.map {
+                RemoteSample(
+                    it.ts,
+                    it.bpm.toDouble(),
+                    quality = it.conf,
+                    metadata = mapOf(
+                        "unit" to "bpm",
+                        "derived" to "true",
+                        "provenance" to "strap_derived_optical",
+                    ),
+                )
+            },
+            ppgWaveform = pending.ppgWaveform.map {
+                RemoteSample(
+                    it.ts,
+                    (it.samples.size / Short.SIZE_BYTES).toDouble(),
+                    metadata = mapOf(
+                        "unit" to "samples_per_record",
+                        "encoding" to "i16_le_base64",
+                        "samples" to Base64.getEncoder().encodeToString(it.samples),
+                        "sample_rate_hz" to "24",
+                        "uncalibrated" to "true",
+                        "provenance" to "strap_raw_optical",
+                    ),
                 )
             },
             events = pending.events.map {

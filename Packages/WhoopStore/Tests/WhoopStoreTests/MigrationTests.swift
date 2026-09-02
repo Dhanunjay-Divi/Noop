@@ -73,7 +73,7 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 46)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 49)
         let tableNames = try await store.tableNames()
         XCTAssertTrue(tableNames.contains("healthKitSyncState"))
         XCTAssertTrue(tableNames.contains("nutritionEntry"))
@@ -87,7 +87,7 @@ final class MigrationTests: XCTestCase {
         XCTAssertTrue(tableNames.contains("nutritionCatalogItem"))
     }
 
-    func testV30AddsPartialPendingIndexesForEveryRemoteStream() async throws {
+    func testV47KeepsRemoteIndexesAbsentUntilSelfHostedSyncNeedsThem() async throws {
         let store = try await WhoopStore.inMemory()
         let expected: [String: String] = [
             "hrSample": "idx_remoteSync_hr_pending",
@@ -98,10 +98,38 @@ final class MigrationTests: XCTestCase {
             "skinTempSample": "idx_remoteSync_skin_pending",
             "respSample": "idx_remoteSync_resp_pending",
             "stepSample": "idx_remoteSync_steps_pending",
+            "gravitySample": "idx_remoteSync_gravity_pending",
+            "sleepStateSample": "idx_remoteSync_sleep_state_pending",
+            "ppgHrSample": "idx_remoteSync_ppg_hr_pending",
+            "ppgWaveformSample": "idx_remoteSync_ppg_waveform_pending",
         ]
         for (table, index) in expected {
             let names = try await store.indexNamesForTest(table: table)
-            XCTAssertTrue(names.contains(index), "\(table) missing pending outbox index")
+            XCTAssertFalse(names.contains(index), "\(table) retained an unused pending outbox index")
+        }
+        try await store.configureRemoteSyncPendingIndexes(enabled: true)
+        for (table, index) in expected {
+            let names = try await store.indexNamesForTest(table: table)
+            XCTAssertTrue(names.contains(index), "\(table) did not install pending outbox index")
+        }
+        try await store.configureRemoteSyncPendingIndexes(enabled: false)
+        for (table, index) in expected {
+            let names = try await store.indexNamesForTest(table: table)
+            XCTAssertFalse(names.contains(index), "\(table) did not remove pending outbox index")
+        }
+    }
+
+    func testV48AddsSleepStateSyncOutboxColumn() async throws {
+        let store = try await WhoopStore.inMemory()
+        let columns = try await store.columnNamesForTest(table: "sleepStateSample")
+        XCTAssertTrue(columns.contains("synced"))
+    }
+
+    func testV49AddsPpgSyncOutboxColumns() async throws {
+        let store = try await WhoopStore.inMemory()
+        for table in ["ppgHrSample", "ppgWaveformSample"] {
+            let columns = try await store.columnNamesForTest(table: table)
+            XCTAssertTrue(columns.contains("synced"), "\(table) missing synced column")
         }
     }
 

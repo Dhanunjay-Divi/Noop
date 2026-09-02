@@ -42,6 +42,13 @@ val releaseSigningFailureMessage =
     "Refusing to build a release without private signing credentials. " +
         "Configure gitignored keystore.properties or all four NOOP_RELEASE_* environment variables. " +
         "-PstagingRelease changes the app ID; it does not permit public debug-key signing."
+val strengthMediaUrlTemplate = providers.gradleProperty("noopStrengthMediaUrlTemplate")
+    .orElse(providers.environmentVariable("NOOP_STRENGTH_MEDIA_URL_TEMPLATE"))
+    .getOrElse("")
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+val allowDemoStrengthMedia =
+    providers.gradleProperty("noopAllowDemoStrengthMedia").orNull == "true"
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -90,6 +97,8 @@ android {
         targetSdk = noopTargetSdk
         versionCode = 303
         versionName = "9.2.0"
+        buildConfigField("String", "STRENGTH_MEDIA_URL_TEMPLATE", "\"$strengthMediaUrlTemplate\"")
+        buildConfigField("boolean", "ALLOW_DEMO_STRENGTH_MEDIA", allowDemoStrengthMedia.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -360,6 +369,12 @@ dependencies {
     // --- AI Coach (opt-in, bring-your-own-key). HTTP client + Keystore-backed key storage. ---
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Native exercise media and anatomy rendering. Keeping these in Compose avoids WebView
+    // surface-composition failures inside the scrolling Strength Trainer sheet.
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
+    implementation("io.coil-kt:coil-svg:2.7.0")
 
     // --- Health Connect (optional native Android import of steps/HR/HRV/sleep/etc.) ---
     // Pinned for behavior stability; compileSdk 36 no longer constrains a future Health Connect update.
