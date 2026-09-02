@@ -122,7 +122,7 @@ final class StrengthTrainerContractTests: XCTestCase {
         XCTAssertTrue(motion.contains("StrengthBodyMapWebView"))
         XCTAssertTrue(motion.contains("noop-body-map"))
         XCTAssertTrue(
-            motion.contains("selectedMuscles.sorted().joined(separator: \",\")")
+            motion.contains("\"selected\": selectedMuscles.sorted()")
         )
         XCTAssertTrue(planner.contains("public static func focusWorkout("))
         XCTAssertTrue(progress.contains("recoveryWindowSeconds = 72 * 60 * 60"))
