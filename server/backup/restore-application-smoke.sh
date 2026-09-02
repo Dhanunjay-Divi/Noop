@@ -37,9 +37,12 @@ while read -r checksum version extra; do
         --set=checksum="$checksum" \
         --no-align \
         --tuples-only \
-        --command="SELECT count(*) FROM noop_schema_migrations
-                   WHERE version = :'version'
-                     AND btrim(checksum) = :'checksum';")
+        --file=- <<'SQL'
+SELECT count(*) FROM noop_schema_migrations
+WHERE version = :'version'
+  AND btrim(checksum) = :'checksum';
+SQL
+    )
     if [ "$matched" -ne 1 ]; then
         echo "restored migration checksum mismatch: $version" >&2
         exit 65

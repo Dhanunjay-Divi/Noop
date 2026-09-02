@@ -123,9 +123,14 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "restore-application-smoke.sh" in backup_image
     assert "restore-application-smoke.sql" in backup_image
     assert "migration-manifest.sha256" in backup_image
-    assert "btrim(checksum) = :'checksum'" in (
-        BACKUP_ROOT / "restore-application-smoke.sh"
-    ).read_text(encoding="utf-8")
+    smoke_script = (BACKUP_ROOT / "restore-application-smoke.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "--file=- <<'SQL'" in smoke_script
+    assert "btrim(checksum) = :'checksum'" in smoke_script
+    assert (
+        '--command="SELECT count(*) FROM noop_schema_migrations\n' not in smoke_script
+    )
     assert "BEGIN READ ONLY" in smoke
     assert "010_installation_tenancy.sql" in smoke
     assert "011_safety_data_lifecycle.sql" in smoke
@@ -166,11 +171,16 @@ case "$*" in
   *"SELECT count(*) FROM noop_schema_migrations;"*)
     printf '1\\n'
     ;;
-  *"WHERE version"*)
-    printf '0\\n'
-    ;;
   *)
-    exit 99
+    query=$(cat)
+    case "$query" in
+      *"WHERE version = :'version'"*)
+        printf '0\\n'
+        ;;
+      *)
+        exit 99
+        ;;
+    esac
     ;;
 esac
 """,
