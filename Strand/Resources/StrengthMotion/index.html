@@ -8,31 +8,22 @@
   <title>Exercise guide</title>
 </head>
 <body>
-  <main id="stage" aria-label="Interactive 3D exercise demonstration">
-    <canvas id="motion"></canvas>
+  <main id="stage" aria-label="Animated exercise demonstration">
+    <div class="guide">
+      <img id="motion" alt="" hidden>
+    </div>
     <div id="loading" role="status"><span></span></div>
-    <div id="error" role="alert" hidden>3D guide unavailable</div>
-    <div class="body-style" role="group" aria-label="Trainer body">
-      <button type="button" data-body-style="man" aria-label="Male trainer" title="Male trainer">
-        <i data-lucide="user-round"></i>
-        <span>Man</span>
-      </button>
-      <button type="button" data-body-style="woman" aria-label="Female trainer" title="Female trainer">
-        <i data-lucide="person-standing"></i>
-        <span>Woman</span>
-      </button>
+    <div id="error" role="alert" hidden>Exercise guide unavailable</div>
+    <div class="caption">
+      <h1 id="exercise-title"></h1>
+      <p>Animated form guide</p>
     </div>
     <div class="controls">
       <button id="info" type="button" aria-label="Exercise instructions" title="Exercise instructions">
         <i data-lucide="info"></i>
       </button>
-      <button id="pause" type="button" aria-label="Pause animation" title="Pause animation">
-        <i data-lucide="pause"></i>
-      </button>
-      <button id="reset" type="button" aria-label="Reset 3D view" title="Reset 3D view">
-        <i data-lucide="rotate-ccw"></i>
-      </button>
     </div>
+    <a class="attribution" href="https://ascendapi.com">Exercise media by AscendAPI</a>
     <div id="instructions" class="sheet-backdrop" hidden>
       <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="instruction-title">
         <header>
