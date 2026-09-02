@@ -94,6 +94,7 @@ final class NOOPiOSUITests: XCTestCase {
 
         let map = app.descendants(matching: .any)["noop.strength.body-map"]
         XCTAssertTrue(map.exists)
+        let baselinePixels = selectedPixelCounts(in: map.screenshot().image)
         map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.28)).tap()
         let selection = app.staticTexts["noop.strength.focus-selection"]
         XCTAssertTrue(selection.waitForExistence(timeout: 5))
@@ -109,6 +110,12 @@ final class NOOPiOSUITests: XCTestCase {
         expectation(for: combined, evaluatedWith: selection)
         waitForExpectations(timeout: 5)
         Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(selection.label, "\(frontSelection) + Back")
+        let mapScreenshot = map.screenshot()
+        let selectedPixels = selectedPixelCounts(in: mapScreenshot.image)
+        XCTAssertGreaterThan(selectedPixels.front, baselinePixels.front + 100)
+        XCTAssertGreaterThan(selectedPixels.back, baselinePixels.back + 100)
+        keepScreenshot(mapScreenshot, name: "strength-body-map-multi-region-detail")
         keepScreenshot(app, name: "strength-body-map-multi-region")
     }
 
@@ -908,5 +915,52 @@ final class NOOPiOSUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func keepScreenshot(_ screenshot: XCUIScreenshot, name: String) {
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func selectedPixelCounts(in image: UIImage) -> (front: Int, back: Int) {
+        guard let cgImage = image.cgImage else { return (0, 0) }
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            return (0, 0)
+        }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var counts = (front: 0, back: 0)
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = y * bytesPerRow + x * 4
+                let red = pixels[offset]
+                let green = pixels[offset + 1]
+                let blue = pixels[offset + 2]
+                guard red >= 245, green >= 30, green <= 95, blue >= 40, blue <= 110 else {
+                    continue
+                }
+                if x < width / 2 {
+                    counts.front += 1
+                } else {
+                    counts.back += 1
+                }
+            }
+        }
+        return counts
     }
 }

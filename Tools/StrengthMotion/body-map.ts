@@ -114,7 +114,7 @@ function refreshMusclePath(path: SVGPathElement): void {
   const score = clamp(scores[muscle] ?? 0);
   const isSelected = selected.has(muscle);
   path.classList.toggle("selected", isSelected);
-  path.style.fill = muscleColor(score);
+  path.style.fill = isSelected ? "#ff3445" : muscleColor(score);
   path.setAttribute("aria-pressed", String(isSelected));
   path.setAttribute(
     "aria-label",

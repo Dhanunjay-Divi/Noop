@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -74,22 +75,51 @@ class StrengthBodyMapInstrumentedTest {
             }
         }
 
-        compose.onNodeWithTag("noop.strength.body-map").performTouchInput {
+        val bodyMap = compose.onNodeWithTag("noop.strength.body-map")
+        val baselinePixels = selectedPixelCounts(
+            bodyMap.captureToImage().asAndroidBitmap(),
+        )
+        bodyMap.performTouchInput {
             click(Offset(width * 0.25f, height * 0.28f))
         }
-        compose.onNodeWithTag("noop.strength.body-map").performTouchInput {
+        bodyMap.performTouchInput {
             click(Offset(width * 0.75f, height * 0.34f))
         }
 
         compose.onNodeWithTag("noop.strength.body-map.selection")
             .assertTextEquals("Selected: Back + Chest")
         Thread.sleep(1_000)
+        val selectedPixels = selectedPixelCounts(
+            bodyMap.captureToImage().asAndroidBitmap(),
+        )
+        assertTrue(selectedPixels.first > baselinePixels.first + 100)
+        assertTrue(selectedPixels.second > baselinePixels.second + 100)
         keepScreenshot(
             "strength-body-map-multi-region",
             compose.onNodeWithTag("noop.strength.body-map.test-surface")
                 .captureToImage()
                 .asAndroidBitmap(),
         )
+    }
+
+    private fun selectedPixelCounts(bitmap: Bitmap): Pair<Int, Int> {
+        var front = 0
+        var back = 0
+        for (y in 0 until bitmap.height) {
+            for (x in 0 until bitmap.width) {
+                val color = bitmap.getPixel(x, y)
+                val red = android.graphics.Color.red(color)
+                val green = android.graphics.Color.green(color)
+                val blue = android.graphics.Color.blue(color)
+                if (red < 245 || green !in 30..95 || blue !in 40..110) continue
+                if (x < bitmap.width / 2) {
+                    front += 1
+                } else {
+                    back += 1
+                }
+            }
+        }
+        return front to back
     }
 
     private fun keepScreenshot(name: String, bitmap: Bitmap) {

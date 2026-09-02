@@ -94,6 +94,14 @@ assert((await page.locator("path.muscle").count()) > 20);
 assert((await page.locator('path[data-muscle="chest"].selected').count()) > 0);
 assert((await page.locator('path[data-muscle="back"].selected').count()) > 0);
 assert((await page.locator('path[data-muscle="quadriceps"]').count()) > 0);
+for (const muscle of ["chest", "back"]) {
+  assert.equal(
+    await page.locator(`path[data-muscle="${muscle}"]`).first()
+      .evaluate((node) => getComputedStyle(node).fill),
+    "rgb(255, 52, 69)",
+    `${muscle} selection must be visibly highlighted`,
+  );
+}
 for (const box of await page.locator("svg").evaluateAll((nodes) =>
   nodes.map((node) => node.getBoundingClientRect().toJSON())
 )) {
@@ -111,6 +119,14 @@ assert.equal(await page.locator('path[data-muscle="chest"].selected').count(), 0
 assert.equal(await page.locator('path[data-muscle="back"].selected').count(), 0);
 assert((await page.locator('path[data-muscle="quadriceps"].selected').count()) > 0);
 assert((await page.locator('path[data-muscle="glutes"].selected').count()) > 0);
+for (const muscle of ["quadriceps", "glutes"]) {
+  assert.equal(
+    await page.locator(`path[data-muscle="${muscle}"]`).first()
+      .evaluate((node) => getComputedStyle(node).fill),
+    "rgb(255, 52, 69)",
+    `${muscle} selection must remain visibly highlighted after updates`,
+  );
+}
 
 await browser.close();
 await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
