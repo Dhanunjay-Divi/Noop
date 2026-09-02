@@ -106,8 +106,21 @@ export class ExerciseHumanoid {
     };
     this.fingers = fingerJoints(model);
     this.grip = gripAmount(exerciseId);
-    styleModel(model);
+    prepareModel(model);
     this.update();
+  }
+
+  dispose(): void {
+    this.root.removeFromParent();
+    this.root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      for (const material of Array.isArray(object.material)
+        ? object.material
+        : [object.material]) {
+        material.dispose();
+      }
+    });
   }
 
   update(): void {
@@ -269,23 +282,9 @@ function requiredNode(root: THREE.Object3D, normalizedName: string): THREE.Objec
   return match;
 }
 
-function styleModel(root: THREE.Object3D): void {
-  const body = new THREE.MeshPhysicalMaterial({
-    color: 0xe0192d,
-    roughness: 0.42,
-    metalness: 0.04,
-    clearcoat: 0.24,
-    clearcoatRoughness: 0.55,
-  });
-  const joints = new THREE.MeshPhysicalMaterial({
-    color: 0xc11627,
-    roughness: 0.47,
-    metalness: 0.03,
-    clearcoat: 0.16,
-  });
+function prepareModel(root: THREE.Object3D): void {
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
-    object.material = object.name.toLowerCase().includes("joint") ? joints : body;
     object.castShadow = true;
     object.receiveShadow = true;
     object.frustumCulled = false;

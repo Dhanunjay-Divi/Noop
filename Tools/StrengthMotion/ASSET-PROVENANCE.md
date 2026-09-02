@@ -1,22 +1,34 @@
 # Strength trainer asset provenance
 
-## Mixamo X Bot
+## NOOP human trainers
 
-- Bundled file: `trainer.glb`
-- Bundled SHA-256: `6b85701cec993469cd0a91f8b18407f0c5057bfae0bab6439e848706f137b6f8`
-- Upstream SHA-256: `002f8d269de68e5dce3d25195caf390d1aa359bbfaae3fcf4c8dc78ec36c3ba5`
-- Source: `https://github.com/mrdoob/three.js/blob/dev/examples/models/gltf/Xbot.glb`
-- Upstream origin: Adobe Mixamo X Bot
-- Retrieved: 2026-09-01
-- Terms reference: `https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html`
+- Bundled files: `trainer-man.glb`, `trainer-woman.glb`
+- Male SHA-256: `fd3e4652fa8ad8a10de284166ec38cd3a2d3b3d8bbdd463af03f237af4e0f377`
+- Female SHA-256: `8aa9f8fdc6b2925d69d38b25c69f270e501cb74702ed8bcaf3ce28da46fd1262`
+- Generator: `build_humans.py`
+- Generated with: Blender 5.2.1 and MPFB 2.0.17
+- MPFB revision: `80919fa4682335c41847f761a4d79dcad4124732`
+- Source asset pack: `makehuman_system_assets_cc0.zip`
+- Asset source:
+  `https://files2.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip`
+- Retrieved and generated: 2026-09-01
+- Asset license: CC0 1.0
 
-The model remains subject to Adobe's Mixamo terms and is not relicensed under
-NOOP's source license or the Three.js MIT license. NOOP does not redistribute
-the source Blender project or standalone model outside the application. The
-exercise poses, runtime retargeting, materials, equipment, and written guidance
-in this repository are NOOP work.
+The meshes, targets, rig data, skin textures, clothing, hair, eyes, and shoes
+used by the generator come from the MakeHuman system assets CC0 pack. The
+generated characters may therefore be bundled and redistributed without the
+Adobe Mixamo restrictions that applied to the previous X Bot prototype.
 
-The bundled GLB was re-exported with Blender 5.2.1 from the unchanged upstream
-mesh, armature, bind pose, and skin weights. Unused sample animation tracks,
-source lights, and source cameras were omitted, reducing the offline asset from
-2.8 MB to 1.7 MB. NOOP drives the retained skeleton at runtime.
+The deterministic Blender generator sets each phenotype, fits athletic
+clothing, applies materials, builds a Mixamo-compatible skeleton, limits
+textures to 1024 pixels, and exports GLB files without sample animation,
+cameras, or lights. NOOP's procedural exercise poses, runtime retargeting,
+equipment, viewer, and written guidance remain project-authored work.
+
+Rebuild from a Blender installation with MPFB and the CC0 system pack enabled:
+
+```sh
+BLENDER_USER_CONFIG=/tmp/noop-blender-profile/config \
+BLENDER_USER_EXTENSIONS=/tmp/noop-blender-profile/extensions \
+blender -b --python build_humans.py -- /tmp/noop-human-models
+```

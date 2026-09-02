@@ -44,6 +44,17 @@ const visor = new THREE.MeshPhysicalMaterial({
 export class ExerciseMannequin {
   readonly root = new THREE.Group();
 
+  private readonly ikStart = new THREE.Vector3();
+  private readonly ikTarget = new THREE.Vector3();
+  private readonly ikDirection = new THREE.Vector3();
+  private readonly ikBend = new THREE.Vector3();
+  private readonly ikJoint = new THREE.Vector3();
+  private readonly ikLocal = new THREE.Vector3();
+  private readonly ikParentQuaternion = new THREE.Quaternion();
+  private readonly ikSwing = new THREE.Quaternion();
+  private readonly posePosition = new THREE.Vector3();
+  private readonly poseDirection = new THREE.Vector3();
+  private readonly poseQuaternion = new THREE.Quaternion();
   private readonly pelvis = new THREE.Group();
   private readonly spine = new THREE.Group();
   private readonly chest = new THREE.Group();
@@ -88,8 +99,10 @@ export class ExerciseMannequin {
       case "barbell_back_squat":
       case "barbell_front_squat":
       case "goblet_squat":
-      case "hack_squat":
         this.poseSquat(exerciseId, amount);
+        break;
+      case "hack_squat":
+        this.poseHackSquat(amount);
         break;
       case "conventional_deadlift":
       case "romanian_deadlift":
@@ -112,8 +125,10 @@ export class ExerciseMannequin {
         this.poseChestSupportedRow(amount);
         break;
       case "seated_cable_row":
-      case "resistance_band_row":
         this.poseSeatedRow(amount);
+        break;
+      case "resistance_band_row":
+        this.poseResistanceBandRow(amount);
         break;
       case "pull_up":
       case "chin_up":
@@ -149,7 +164,7 @@ export class ExerciseMannequin {
         break;
       case "barbell_hip_thrust":
       case "glute_bridge":
-        this.poseBridge(amount);
+        this.poseBridge(exerciseId, amount);
         break;
       case "standing_calf_raise":
       case "seated_calf_raise":
@@ -387,6 +402,140 @@ export class ExerciseMannequin {
     rig.ankle.rotation.x = ankle * DEG;
   }
 
+  private armTarget(
+    side: Side,
+    x: number,
+    y: number,
+    z: number,
+    bendX: number,
+    bendY: number,
+    bendZ: number,
+  ): void {
+    const rig = side === "left" ? this.leftArm : this.rightArm;
+    this.solveTwoBone(
+      rig.shoulder,
+      rig.elbow,
+      rig.wrist,
+      x,
+      y,
+      z,
+      bendX,
+      bendY,
+      bendZ,
+    );
+  }
+
+  private legTarget(
+    side: Side,
+    x: number,
+    y: number,
+    z: number,
+    bendX: number,
+    bendY: number,
+    bendZ: number,
+    footX: number,
+    footY: number,
+    footZ: number,
+  ): void {
+    const rig = side === "left" ? this.leftLeg : this.rightLeg;
+    this.solveTwoBone(
+      rig.hip,
+      rig.knee,
+      rig.ankle,
+      x,
+      y,
+      z,
+      bendX,
+      bendY,
+      bendZ,
+    );
+    this.pointJoint(
+      rig.ankle,
+      this.ikDirection.set(footX, footY, footZ),
+      0,
+      0,
+      1,
+    );
+  }
+
+  private solveTwoBone(
+    start: THREE.Object3D,
+    joint: THREE.Object3D,
+    end: THREE.Object3D,
+    targetX: number,
+    targetY: number,
+    targetZ: number,
+    bendX: number,
+    bendY: number,
+    bendZ: number,
+  ): void {
+    this.root.updateMatrixWorld(true);
+    start.getWorldPosition(this.ikStart);
+    this.ikTarget.set(targetX, targetY, targetZ);
+    this.ikDirection.copy(this.ikTarget).sub(this.ikStart);
+    const firstLength = joint.position.length();
+    const secondLength = end.position.length();
+    const maximum = Math.max(0.001, firstLength + secondLength - 0.001);
+    const minimum = Math.abs(firstLength - secondLength) + 0.001;
+    const distance = THREE.MathUtils.clamp(
+      this.ikDirection.length(),
+      minimum,
+      maximum,
+    );
+    this.ikDirection.normalize();
+    const along =
+      (distance * distance + firstLength * firstLength - secondLength * secondLength) /
+      (2 * distance);
+    const height = Math.sqrt(Math.max(0, firstLength * firstLength - along * along));
+    this.ikBend.set(bendX, bendY, bendZ);
+    this.ikBend.addScaledVector(
+      this.ikDirection,
+      -this.ikBend.dot(this.ikDirection),
+    );
+    if (this.ikBend.lengthSq() < 0.000001) {
+      this.ikBend.set(1, 0, 0).cross(this.ikDirection);
+    }
+    this.ikBend.normalize();
+    this.ikJoint
+      .copy(this.ikStart)
+      .addScaledVector(this.ikDirection, along)
+      .addScaledVector(this.ikBend, height);
+    this.pointJoint(
+      start,
+      this.ikLocal.copy(this.ikJoint).sub(this.ikStart),
+    );
+    this.root.updateMatrixWorld(true);
+    joint.getWorldPosition(this.ikStart);
+    this.pointJoint(
+      joint,
+      this.ikLocal.copy(this.ikTarget).sub(this.ikStart),
+    );
+    this.root.updateMatrixWorld(true);
+  }
+
+  private pointJoint(
+    joint: THREE.Object3D,
+    worldDirection: THREE.Vector3,
+    restX = 0,
+    restY = -1,
+    restZ = 0,
+  ): void {
+    const parent = joint.parent;
+    if (!parent || worldDirection.lengthSq() < 0.000001) return;
+    parent.getWorldQuaternion(this.ikParentQuaternion);
+    this.ikLocal
+      .copy(worldDirection)
+      .normalize()
+      .applyQuaternion(this.ikParentQuaternion.invert());
+    this.ikSwing.setFromUnitVectors(
+      this.ikDirection.set(restX, restY, restZ).normalize(),
+      this.ikLocal,
+    );
+    joint.quaternion.copy(this.ikSwing);
+    joint.updateMatrix();
+    joint.updateMatrixWorld(true);
+  }
+
   private poseSquat(id: string, amount: number): void {
     this.root.position.y -= 0.31 * amount;
     this.root.position.z -= 0.06 * amount;
@@ -394,18 +543,43 @@ export class ExerciseMannequin {
     this.leg("left", -68 * amount, 108 * amount, -35 * amount, 4);
     this.leg("right", -68 * amount, 108 * amount, -35 * amount, 4);
     if (id === "barbell_front_squat") {
-      this.arm("left", -84, 18, -102);
-      this.arm("right", -84, 18, -102);
+      this.root.updateMatrixWorld(true);
+      this.leftArm.shoulder.getWorldPosition(this.posePosition);
+      const barY = this.posePosition.y - 0.035;
+      const barZ = this.posePosition.z + 0.19;
+      this.armTarget("left", 0.29, barY, barZ, 1, 0.15, 1);
+      this.armTarget("right", -0.29, barY, barZ, -1, 0.15, 1);
     } else if (id === "goblet_squat") {
       this.arm("left", -30, 14, -112, -18);
       this.arm("right", -30, 14, -112, -18);
-    } else if (id === "hack_squat") {
-      this.arm("left", 8, 5, -18);
-      this.arm("right", 8, 5, -18);
-      this.spine.rotation.x = 3 * amount * DEG;
     } else {
-      this.arm("left", 34, 62, 102);
-      this.arm("right", 34, 62, 102);
+      this.root.updateMatrixWorld(true);
+      this.leftArm.shoulder.getWorldPosition(this.posePosition);
+      const barY = this.posePosition.y - 0.015;
+      const barZ = this.posePosition.z - 0.15;
+      this.armTarget("left", 0.5, barY, barZ, 1, -0.7, -0.35);
+      this.armTarget("right", -0.5, barY, barZ, -1, -0.7, -0.35);
+    }
+  }
+
+  private poseHackSquat(amount: number): void {
+    this.root.rotation.x = -12 * DEG;
+    this.root.position.set(0, 0.94 - 0.28 * amount, -0.24);
+    this.spine.rotation.x = 3 * amount * DEG;
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.legTarget(
+        side,
+        0.17 * sign,
+        0.11,
+        0.43,
+        0.1 * sign,
+        0.45,
+        1,
+        0,
+        0,
+        1,
+      );
+      this.armTarget(side, 0.38 * sign, 1.1 - 0.18 * amount, -0.27, sign, -0.4, 0);
     }
   }
 
@@ -423,13 +597,48 @@ export class ExerciseMannequin {
 
   private poseBenchPress(id: string, amount: number): void {
     const incline = id === "incline_barbell_bench_press";
-    this.root.rotation.x = (incline ? -62 : -90) * DEG;
-    this.root.position.set(0, incline ? 0.62 : 0.52, 0.04);
-    const spread = (id === "dumbbell_bench_press" ? 74 : 66) * (1 - amount);
-    this.arm("left", -88 * amount, spread, -92 * (1 - amount));
-    this.arm("right", -88 * amount, spread, -92 * (1 - amount));
-    this.leg("left", -26, 58, -20, 10);
-    this.leg("right", -26, 58, -20, 10);
+    this.root.rotation.x = (incline ? -50 : -90) * DEG;
+    this.root.position.set(0, incline ? 0.48 : 0.34, incline ? 0.43 : 0.04);
+    if (incline) this.spine.rotation.x = -5 * DEG;
+    this.root.updateMatrixWorld(true);
+    this.chest.getWorldPosition(this.ikTarget);
+    const chestX = this.ikTarget.x;
+    const chestY = this.ikTarget.y;
+    const chestZ = this.ikTarget.z;
+    this.chest.getWorldQuaternion(this.poseQuaternion);
+    this.poseDirection
+      .set(0, 0, 1)
+      .applyQuaternion(this.poseQuaternion)
+      .normalize();
+    const pressX = this.poseDirection.x;
+    const pressY = this.poseDirection.y;
+    const pressZ = this.poseDirection.z;
+    const pressDistance = 0.25 + 0.31 * amount;
+    const handOffset = id === "dumbbell_bench_press" ? 0.34 : 0.38;
+    const footZ = incline ? 0.92 : 0.74;
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.armTarget(
+        side,
+        chestX + handOffset * sign + pressX * pressDistance,
+        chestY + pressY * pressDistance,
+        chestZ + pressZ * pressDistance,
+        sign,
+        -0.35,
+        0,
+      );
+      this.legTarget(
+        side,
+        0.18 * sign,
+        0.055,
+        footZ,
+        0.12 * sign,
+        1,
+        0.35,
+        0,
+        0,
+        1,
+      );
+    }
   }
 
   private poseOverheadPress(amount: number): void {
@@ -440,11 +649,32 @@ export class ExerciseMannequin {
 
   private poseBentRow(id: string, amount: number): void {
     const oneArm = id === "one_arm_dumbbell_row";
+    if (oneArm) {
+      this.poseOneArmRow(amount);
+      return;
+    }
     this.spine.rotation.x = 48 * DEG;
     this.leg("left", -16, 24);
     this.leg("right", -16, 24);
-    this.arm("left", -48 + 30 * amount, oneArm ? 8 : 18, -105 * amount);
-    this.arm("right", -48 + (oneArm ? 0 : 30) * amount, oneArm ? 28 : 18, oneArm ? 0 : -105 * amount);
+    this.arm("left", -48 + 30 * amount, 18, -105 * amount);
+    this.arm("right", -48 + 30 * amount, 18, -105 * amount);
+  }
+
+  private poseOneArmRow(amount: number): void {
+    this.root.position.set(0, 0.72, -0.02);
+    this.spine.rotation.x = 55 * DEG;
+    this.legTarget("left", 0.2, 0.06, 0.1, 0.15, 0.8, 0.25, 0, 0, 1);
+    this.legTarget("right", -0.42, 0.64, -0.12, -0.2, 0.1, 1, 0, 0, 1);
+    this.armTarget("right", -0.47, 0.68, 0.65, -1, -0.8, 0.3);
+    this.armTarget(
+      "left",
+      0.34,
+      THREE.MathUtils.lerp(0.42, 0.66, amount),
+      THREE.MathUtils.lerp(0.43, 0.12, amount),
+      1,
+      -0.2,
+      0.55,
+    );
   }
 
   private poseChestSupportedRow(amount: number): void {
@@ -461,14 +691,25 @@ export class ExerciseMannequin {
     this.leg("left", -88, 92);
     this.leg("right", -88, 92);
     this.spine.rotation.x = 8 * (1 - amount) * DEG;
-    this.arm("left", -90 + 28 * amount, 12, -102 * amount);
-    this.arm("right", -90 + 28 * amount, 12, -102 * amount);
+    this.arm("left", -90 + 66 * amount, 10, -94 * amount);
+    this.arm("right", -90 + 66 * amount, 10, -94 * amount);
+  }
+
+  private poseResistanceBandRow(amount: number): void {
+    this.root.position.y = 0.94;
+    this.spine.rotation.x = 6 * DEG;
+    this.leg("left", -8, 16, -7, 3);
+    this.leg("right", -8, 16, -7, 3);
+    const handZ = THREE.MathUtils.lerp(0.61, 0.24, amount);
+    const handY = THREE.MathUtils.lerp(1.36, 1.43, amount);
+    this.armTarget("left", 0.25, handY, handZ, 1, 0.1, 0.55);
+    this.armTarget("right", -0.25, handY, handZ, -1, 0.1, 0.55);
   }
 
   private posePullUp(amount: number): void {
-    this.root.position.y = 0.78 + 0.2 * amount;
-    this.arm("left", -176 + 36 * amount, 22 + 34 * amount, -102 * amount);
-    this.arm("right", -176 + 36 * amount, 22 + 34 * amount, -102 * amount);
+    this.root.position.y = 0.55 + 0.24 * amount;
+    this.armTarget("left", 0.45, 2.05, 0, 1, 0.1, 0.35);
+    this.armTarget("right", -0.45, 2.05, 0, -1, 0.1, 0.35);
     this.leg("left", 4, 10);
     this.leg("right", 4, 10);
   }
@@ -477,8 +718,12 @@ export class ExerciseMannequin {
     this.root.position.y = 0.54;
     this.leg("left", -86, 92);
     this.leg("right", -86, 92);
-    this.arm("left", -174 + 62 * amount, 25 + 35 * amount, -104 * amount);
-    this.arm("right", -174 + 62 * amount, 25 + 35 * amount, -104 * amount);
+    this.root.updateMatrixWorld(true);
+    this.chest.getWorldPosition(this.posePosition);
+    const handY = THREE.MathUtils.lerp(2.02, 1.43, amount);
+    const handZ = this.posePosition.z + 0.1;
+    this.armTarget("left", 0.5, handY, handZ, 1, 0.1, 0.45);
+    this.armTarget("right", -0.5, handY, handZ, -1, 0.1, 0.45);
   }
 
   private poseLegPress(amount: number): void {
@@ -494,11 +739,24 @@ export class ExerciseMannequin {
   private poseLunge(id: string, amount: number, phase: number): void {
     const alternate = id === "walking_lunge" && phase >= 0.5;
     const leftFront = !alternate;
-    this.root.position.y -= 0.28 * amount;
-    this.root.position.z += (leftFront ? 0.02 : -0.02) * amount;
+    this.root.position.y -= 0.3 * amount;
     this.spine.rotation.x = 7 * amount * DEG;
-    this.leg("left", (leftFront ? -55 : 27) * amount, (leftFront ? 96 : 82) * amount);
-    this.leg("right", (leftFront ? 27 : -55) * amount, (leftFront ? 82 : 96) * amount);
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      const front = (side === "left") === leftFront;
+      const rearElevated = id === "bulgarian_split_squat" && !front;
+      this.legTarget(
+        side,
+        0.14 * sign,
+        rearElevated ? 0.38 : 0.06,
+        front ? 0.46 : -0.46,
+        0.08 * sign,
+        front ? 0.25 : -0.8,
+        front ? 1 : -0.25,
+        0,
+        rearElevated ? -0.2 : 0,
+        1,
+      );
+    }
     this.arm("left", 0, 4, -8);
     this.arm("right", 0, 4, -8);
   }
@@ -518,9 +776,22 @@ export class ExerciseMannequin {
 
   private posePlank(amount: number): void {
     this.root.rotation.x = 90 * DEG;
-    this.root.position.set(0, 0.5 + 0.012 * amount, 0);
-    this.arm("left", -88, 8, -92);
-    this.arm("right", -88, 8, -92);
+    this.root.position.set(0, 0.47 + 0.006 * amount, 0);
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.armTarget(side, 0.27 * sign, 0.075, 0.58, sign, -1, 0.15);
+      this.legTarget(
+        side,
+        0.12 * sign,
+        0.065,
+        -0.7,
+        0.08 * sign,
+        0.35,
+        -0.2,
+        0,
+        0,
+        -1,
+      );
+    }
   }
 
   private poseLegExtension(amount: number): void {
@@ -533,20 +804,50 @@ export class ExerciseMannequin {
 
   private poseLegCurl(amount: number): void {
     this.root.rotation.x = 90 * DEG;
-    this.root.position.set(0, 0.55, 0);
+    this.root.position.set(0, 0.45, 0);
     this.leg("left", 0, 112 * amount);
     this.leg("right", 0, 112 * amount);
     this.arm("left", -40, 8, -50);
     this.arm("right", -40, 8, -50);
   }
 
-  private poseBridge(amount: number): void {
-    this.root.rotation.x = -90 * DEG;
-    this.root.position.set(0, 0.34 + 0.22 * amount, 0);
-    this.leg("left", -52, 96);
-    this.leg("right", -52, 96);
-    this.arm("left", 0, 58, 0);
-    this.arm("right", 0, 58, 0);
+  private poseBridge(id: string, amount: number): void {
+    const thrust = id === "barbell_hip_thrust";
+    this.root.rotation.x = (thrust ? -90 - 24 * amount : -90) * DEG;
+    this.root.position.set(
+      0,
+      (thrust ? 0.38 : 0.27) + (thrust ? 0.28 : 0.19) * amount,
+      0,
+    );
+    this.spine.rotation.x = -(thrust ? 0 : 18) * amount * DEG;
+    if (thrust) this.neck.rotation.x = 24 * amount * DEG;
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.legTarget(
+        side,
+        0.18 * sign,
+        0.055,
+        0.56,
+        0.12 * sign,
+        1,
+        0.2,
+        0,
+        0,
+        1,
+      );
+      if (thrust) {
+        this.armTarget(
+          side,
+          0.32 * sign,
+          this.root.position.y + 0.04,
+          -0.18,
+          sign,
+          -0.3,
+          0,
+        );
+      } else {
+        this.armTarget(side, 0.43 * sign, 0.07, -0.23, sign, -1, 0);
+      }
+    }
   }
 
   private poseCalfRaise(id: string, amount: number): void {
@@ -555,7 +856,7 @@ export class ExerciseMannequin {
       this.leg("left", -88, 92, -18 * amount);
       this.leg("right", -88, 92, -18 * amount);
     } else {
-      this.root.position.y += 0.07 * amount;
+      this.root.position.y += 0.11 + 0.07 * amount;
       this.leg("left", 0, 0, -16 * amount);
       this.leg("right", 0, 0, -16 * amount);
     }
@@ -563,21 +864,62 @@ export class ExerciseMannequin {
 
   private posePushUp(amount: number): void {
     this.root.rotation.x = 90 * DEG;
-    this.root.position.set(0, 0.43 - 0.12 * amount, 0);
-    this.arm("left", -92, 28, -82 * amount);
-    this.arm("right", -92, 28, -82 * amount);
+    this.root.position.set(0, 0.57 - 0.22 * amount, 0);
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.armTarget(side, 0.38 * sign, 0.065, 0.59, sign, -0.45, 0.1);
+      this.legTarget(
+        side,
+        0.12 * sign,
+        0.06,
+        -0.7,
+        0.08 * sign,
+        0.35,
+        -0.2,
+        0,
+        0,
+        -1,
+      );
+    }
   }
 
   private poseFly(id: string, amount: number): void {
     if (id === "chest_fly") {
       this.root.rotation.x = -90 * DEG;
-      this.root.position.set(0, 0.52, 0);
+      this.root.position.set(0, 0.34, 0.04);
+      this.root.updateMatrixWorld(true);
+      this.chest.getWorldPosition(this.ikTarget);
+      const chestY = this.ikTarget.y;
+      const chestZ = this.ikTarget.z;
+      const spread = 0.18 + 0.5 * (1 - amount);
+      for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+        this.armTarget(
+          side,
+          spread * sign,
+          chestY + 0.34,
+          chestZ,
+          sign,
+          -0.45,
+          0,
+        );
+        this.legTarget(
+          side,
+          0.18 * sign,
+          -0.08,
+          0.5,
+          0.12 * sign,
+          1,
+          0.35,
+          0,
+          0,
+          1,
+        );
+      }
     } else {
       this.spine.rotation.x = 7 * DEG;
+      const spread = 82 * (1 - amount) + 12 * amount;
+      this.arm("left", -88, spread, -14);
+      this.arm("right", -88, spread, -14);
     }
-    const spread = 82 * (1 - amount) + 12 * amount;
-    this.arm("left", -88, spread, -14);
-    this.arm("right", -88, spread, -14);
   }
 
   private poseMachinePress(amount: number): void {
@@ -606,14 +948,33 @@ export class ExerciseMannequin {
 
   private poseSkullCrusher(amount: number): void {
     this.root.rotation.x = -90 * DEG;
-    this.root.position.set(0, 0.52, 0);
-    this.arm("left", -90, 10, -108 * (1 - amount));
-    this.arm("right", -90, 10, -108 * (1 - amount));
+    this.root.position.set(0, 0.34, 0.04);
+    this.root.updateMatrixWorld(true);
+    this.chest.getWorldPosition(this.ikTarget);
+    const handY = this.ikTarget.y + 0.2 + 0.32 * amount;
+    const handZ = this.ikTarget.z - 0.2;
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.armTarget(side, 0.2 * sign, handY, handZ, sign, -0.3, -0.2);
+      this.legTarget(
+        side,
+        0.18 * sign,
+        -0.08,
+        0.5,
+        0.12 * sign,
+        1,
+        0.35,
+        0,
+        0,
+        1,
+      );
+    }
   }
 
   private poseOverheadTriceps(amount: number): void {
-    this.arm("left", -174, 14, -116 * (1 - amount));
-    this.arm("right", -174, 14, -116 * (1 - amount));
+    const handY = THREE.MathUtils.lerp(1.76, 2.13, amount);
+    const handZ = THREE.MathUtils.lerp(-0.13, 0.01, amount);
+    this.armTarget("left", 0.095, handY, handZ, 1, 0.1, -0.25);
+    this.armTarget("right", -0.095, handY, handZ, -1, 0.1, -0.25);
   }
 
   private poseDip(amount: number): void {
@@ -651,18 +1012,39 @@ export class ExerciseMannequin {
 
   private poseAbRollout(amount: number): void {
     this.root.rotation.x = 90 * DEG;
-    this.root.position.set(0, 0.54, -0.22 * amount);
-    this.leg("left", -15 * (1 - amount), 48);
-    this.leg("right", -15 * (1 - amount), 48);
-    this.arm("left", -92 - 20 * amount, 7, -8);
-    this.arm("right", -92 - 20 * amount, 7, -8);
+    this.root.position.set(0, 0.48 - 0.07 * amount, -0.13 * amount);
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.legTarget(
+        side,
+        0.13 * sign,
+        0.16,
+        -0.52,
+        0.08 * sign,
+        -1,
+        0.2,
+        0,
+        0,
+        -1,
+      );
+      this.armTarget(
+        side,
+        0.22 * sign,
+        0.15,
+        0.65 + 0.48 * amount,
+        sign,
+        -0.7,
+        0.15,
+      );
+    }
   }
 
   private poseGait(phase: number, running: boolean, loaded: boolean): void {
     const wave = Math.sin(phase * Math.PI * 2);
     const legSwing = running ? 42 : 24;
     const armSwing = running ? 34 : 20;
-    this.root.position.y += (1 - Math.cos(phase * Math.PI * (running ? 4 : 2))) * (running ? 0.025 : 0.01);
+    this.root.position.y +=
+      (1 - Math.cos(phase * Math.PI * (running ? 4 : 2))) *
+        (running ? 0.025 : 0.01);
     this.spine.rotation.x = (running ? 8 : 2) * DEG;
     this.leg("left", -legSwing * wave, Math.max(0, 72 * wave));
     this.leg("right", legSwing * wave, Math.max(0, -72 * wave));
@@ -687,8 +1069,10 @@ export class ExerciseMannequin {
 
   private poseBackExtension(amount: number): void {
     this.root.rotation.x = 90 * DEG;
-    this.root.position.set(0, 0.62, 0);
-    this.spine.rotation.x = -44 * (1 - amount) * DEG;
+    this.root.position.set(0, 0.78, 0.05);
+    this.spine.rotation.x = -42 * (1 - amount) * DEG;
+    this.legTarget("left", 0.14, 0.47, -0.72, 0.1, 0.4, -0.2, 0, 0, -1);
+    this.legTarget("right", -0.14, 0.47, -0.72, -0.1, 0.4, -0.2, 0, 0, -1);
     this.arm("left", -20, 12, -90);
     this.arm("right", -20, 12, -90);
   }
@@ -699,31 +1083,65 @@ export class ExerciseMannequin {
   }
 
   private poseCycling(phase: number): void {
-    const wave = Math.sin(phase * Math.PI * 2);
-    const left = (wave + 1) / 2;
-    const right = 1 - left;
-    this.root.position.set(0, 1.02, -0.1);
-    this.spine.rotation.x = 30 * DEG;
-    this.leg("left", -48 - 40 * left, 36 + 76 * left);
-    this.leg("right", -48 - 40 * right, 36 + 76 * right);
-    this.arm("left", -58, 8, -18);
-    this.arm("right", -58, 8, -18);
+    const angle = phase * Math.PI * 2;
+    this.root.position.set(0, 0.84, -0.08);
+    this.spine.rotation.x = 35 * DEG;
+    for (const [side, sign, offset] of [
+      ["left", 1, 0],
+      ["right", -1, Math.PI],
+    ] as const) {
+      const pedalAngle = angle + offset;
+      this.legTarget(
+        side,
+        0.17 * sign,
+        0.46 + Math.cos(pedalAngle) * 0.2,
+        0.42 + Math.sin(pedalAngle) * 0.2,
+        0.1 * sign,
+        0.7,
+        0.25,
+        0,
+        0,
+        1,
+      );
+      this.armTarget(side, 0.3 * sign, 1.12, 0.72, sign, -0.25, 0.45);
+    }
   }
 
   private poseRower(amount: number): void {
     const catchAmount = 1 - amount;
-    this.root.position.set(0, 0.54, 0.18 * amount);
+    this.root.position.set(0, 0.5, 0.04 + 0.24 * catchAmount);
     this.spine.rotation.x = (26 * catchAmount - 12 * amount) * DEG;
-    this.leg("left", -34 - 50 * catchAmount, 34 + 74 * catchAmount);
-    this.leg("right", -34 - 50 * catchAmount, 34 + 74 * catchAmount);
-    this.arm("left", -64 * catchAmount + 20 * amount, 8, -102 * amount);
-    this.arm("right", -64 * catchAmount + 20 * amount, 8, -102 * amount);
+    for (const [side, sign] of [["left", 1], ["right", -1]] as const) {
+      this.legTarget(
+        side,
+        0.15 * sign,
+        0.14,
+        0.72,
+        0.08 * sign,
+        0.75,
+        0.28,
+        0,
+        0,
+        1,
+      );
+      this.armTarget(
+        side,
+        0.25 * sign,
+        THREE.MathUtils.lerp(0.82, 0.98, amount),
+        THREE.MathUtils.lerp(0.68, 0.25, amount),
+        sign,
+        0.2,
+        0.4,
+      );
+    }
   }
 
   private poseStairs(phase: number): void {
     const wave = Math.sin(phase * Math.PI * 2);
     const left = Math.max(0, wave);
     const right = Math.max(0, -wave);
+    this.root.position.y += 0.3;
+    this.root.position.z -= 0.08;
     this.spine.rotation.x = 8 * DEG;
     this.leg("left", -52 * left, 78 * left);
     this.leg("right", -52 * right, 78 * right);

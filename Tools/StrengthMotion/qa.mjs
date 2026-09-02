@@ -19,7 +19,20 @@ const exercises = requestedExercises.length > 0
   ? requestedExercises.filter((id) => allExercises.includes(id))
   : allExercises;
 assert(exercises.length > 0, "No matching exercises selected for QA");
+const requestedBodies = (process.env.NOOP_STRENGTH_QA_BODIES ?? "")
+  .split(",")
+  .map((style) => style.trim())
+  .filter((style) => style === "man" || style === "woman");
+const bodyStyles = requestedBodies.length > 0 ? requestedBodies : ["man", "woman"];
+const requestedPhases = (process.env.NOOP_STRENGTH_QA_PHASES ?? "")
+  .split(",")
+  .map((phase) => phase.trim())
+  .filter(Boolean)
+  .map(Number)
+  .filter((phase) => Number.isFinite(phase) && phase >= 0 && phase <= 1);
+const phases = requestedPhases.length > 0 ? requestedPhases : [0, 0.25, 0.5];
 const failures = [];
+const staticPhaseExercises = new Set(["plank", "side_plank"]);
 
 await mkdir(output, { recursive: true });
 const server = createServer(async (request, response) => {
@@ -60,21 +73,37 @@ page.on("console", (message) => {
 });
 
 const images = [];
-for (const [index, id] of exercises.entries()) {
-  try {
-    await page.goto(`${baseURL}/index.html?exercise=${id}&reduceMotion=1&phase=0.62`);
-    await page.locator("body[data-ready='true']").waitFor({ state: "attached" });
-    await assertViewerState(page, id);
-    const image = await page.locator("#stage").screenshot();
-    assertVisibleModel(image, id);
-    const filename = `${String(index).padStart(2, "0")}-${id}.png`;
-    await writeFile(join(output, filename), image);
-    images.push({ id, filename, image });
-    process.stdout.write(`rendered ${String(index + 1).padStart(2, "0")}/${exercises.length} ${id}\n`);
-  } catch (error) {
-    failures.push(`${id}: ${error instanceof Error ? error.message : String(error)}`);
+const totalRenders = exercises.length * bodyStyles.length * phases.length;
+let rendered = 0;
+for (const bodyStyle of bodyStyles) {
+  for (const phase of phases) {
+    for (const [index, id] of exercises.entries()) {
+      const label = `${bodyStyle}/${phaseLabel(phase)}/${id}`;
+      try {
+        await page.goto(
+          `${baseURL}/index.html?exercise=${id}&reduceMotion=1&phase=${phase}&body=${bodyStyle}`,
+        );
+        await page.locator("body[data-ready='true']").waitFor({ state: "attached" });
+        await assertViewerState(page, id, bodyStyle);
+        const image = await page.locator("#stage").screenshot();
+        assertVisibleHuman(image, label);
+        const filename =
+          `${bodyStyle}-${phaseLabel(phase)}-${String(index).padStart(2, "0")}-${id}.png`;
+        await writeFile(join(output, filename), image);
+        images.push({ id, bodyStyle, phase, filename, image });
+        rendered += 1;
+        process.stdout.write(
+          `rendered ${String(rendered).padStart(3, "0")}/${totalRenders} ${label}\n`,
+        );
+      } catch (error) {
+        failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 }
+
+verifyBodyStyleDifferences(images, exercises, bodyStyles, phases, failures);
+verifyPhaseMotion(images, exercises, bodyStyles, phases, failures);
 
 try {
   await verifyInteractions(page);
@@ -82,7 +111,7 @@ try {
   failures.push(`interactions: ${error instanceof Error ? error.message : String(error)}`);
 }
 
-await writeContactSheet(page, images);
+const contactSheets = await writeContactSheets(page, images, bodyStyles, phases);
 await context.close();
 await browser.close();
 await new Promise((resolvePromise, reject) =>
@@ -92,7 +121,11 @@ await new Promise((resolvePromise, reject) =>
 const report = {
   generatedAt: new Date().toISOString(),
   exerciseCount: exercises.length,
+  bodyStyles,
+  phases,
+  expectedRenderCount: totalRenders,
   renderedCount: images.length,
+  contactSheets,
   failures,
 };
 await writeFile(join(output, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -100,14 +133,15 @@ if (failures.length > 0) {
   console.error(failures.join("\n"));
   process.exitCode = 1;
 } else {
-  console.log(`QA passed: ${images.length} exercises`);
-  console.log(`Contact sheet: ${join(output, "contact-sheet.png")}`);
+  console.log(`QA passed: ${images.length} renders across ${exercises.length} exercises`);
+  console.log(`Contact sheets: ${contactSheets.map((file) => join(output, file)).join(", ")}`);
 }
 
-async function assertViewerState(currentPage, id) {
+async function assertViewerState(currentPage, id, bodyStyle) {
   const state = await currentPage.evaluate(() => ({
     ready: document.body.dataset.ready,
     model: document.body.dataset.model,
+    bodyStyle: document.body.dataset.bodyStyle,
     error: document.body.dataset.error,
     loadingHidden: document.querySelector("#loading")?.hidden,
     errorHidden: document.querySelector("#error")?.hidden,
@@ -120,6 +154,7 @@ async function assertViewerState(currentPage, id) {
   }));
   assert.equal(state.ready, "true", `${id} did not reach ready state`);
   assert.equal(state.model, "humanoid", `${id} did not load the skinned human model`);
+  assert.equal(state.bodyStyle, bodyStyle, `${id} loaded the wrong body style`);
   assert.equal(state.error, undefined, `${id} entered error state`);
   assert.equal(state.loadingHidden, true, `${id} left loading visible`);
   assert.equal(state.errorHidden, true, `${id} left error visible`);
@@ -129,31 +164,90 @@ async function assertViewerState(currentPage, id) {
   }
 }
 
-function assertVisibleModel(buffer, id) {
+function assertVisibleHuman(buffer, label) {
   const png = PNG.sync.read(buffer);
-  let redPixels = 0;
-  let edgeRedPixels = 0;
+  let humanPixels = 0;
+  let edgeHumanPixels = 0;
   for (let y = 0; y < png.height; y += 1) {
     for (let x = 0; x < png.width; x += 1) {
       const offset = (y * png.width + x) * 4;
       const red = png.data[offset];
       const green = png.data[offset + 1];
       const blue = png.data[offset + 2];
-      const isModelRed = red > 75 && red > green * 1.45 && red > blue * 1.2;
-      if (!isModelRed) continue;
-      redPixels += 1;
+      const isBlueClothing =
+        blue > 55 && blue > red * 1.25 && blue > green * 1.05;
+      const isSkin =
+        red > 58 &&
+        green > 24 &&
+        blue > 12 &&
+        red > green * 1.15 &&
+        green > blue * 1.05;
+      if (!isBlueClothing && !isSkin) continue;
+      humanPixels += 1;
       if (x < 3 || x >= png.width - 3 || y < 3 || y >= png.height - 3) {
-        edgeRedPixels += 1;
+        edgeHumanPixels += 1;
       }
     }
   }
-  assert(redPixels > 600, `${id} rendered too few model pixels (${redPixels})`);
-  assert(edgeRedPixels < 8, `${id} model is clipped (${edgeRedPixels} edge pixels)`);
+  assert(humanPixels > 350, `${label} rendered too few human pixels (${humanPixels})`);
+  assert(
+    edgeHumanPixels < 20,
+    `${label} human is clipped (${edgeHumanPixels} edge pixels)`,
+  );
+}
+
+function verifyBodyStyleDifferences(entries, ids, styles, checkedPhases, errors) {
+  if (!styles.includes("man") || !styles.includes("woman")) return;
+  for (const id of ids) {
+    for (const phase of checkedPhases) {
+      const man = findImage(entries, id, "man", phase);
+      const woman = findImage(entries, id, "woman", phase);
+      if (!man || !woman) continue;
+      const difference = pixelDifference(man.image, woman.image);
+      if (difference < 0.012) {
+        errors.push(
+          `${id}/${phaseLabel(phase)}: body styles are not visually distinct (${difference})`,
+        );
+      }
+    }
+  }
+}
+
+function verifyPhaseMotion(entries, ids, styles, checkedPhases, errors) {
+  if (checkedPhases.length < 2) return;
+  for (const id of ids) {
+    if (staticPhaseExercises.has(id)) continue;
+    for (const style of styles) {
+      const sequence = checkedPhases
+        .map((phase) => findImage(entries, id, style, phase))
+        .filter(Boolean);
+      if (sequence.length < 2) continue;
+      let largestDifference = 0;
+      for (let index = 1; index < sequence.length; index += 1) {
+        largestDifference = Math.max(
+          largestDifference,
+          pixelDifference(sequence[0].image, sequence[index].image),
+        );
+      }
+      if (largestDifference < 0.004) {
+        errors.push(`${style}/${id}: phases do not produce visible motion`);
+      }
+    }
+  }
+}
+
+function findImage(entries, id, bodyStyle, phase) {
+  return entries.find(
+    (entry) =>
+      entry.id === id &&
+      entry.bodyStyle === bodyStyle &&
+      Math.abs(entry.phase - phase) < 0.000001,
+  );
 }
 
 async function verifyInteractions(currentPage) {
   await currentPage.goto(
-    `${baseURL}/index.html?exercise=barbell_back_squat&reduceMotion=1&phase=0.62`,
+    `${baseURL}/index.html?exercise=barbell_back_squat&reduceMotion=1&phase=0.62&body=man`,
   );
   await currentPage.locator("body[data-ready='true']").waitFor({ state: "attached" });
   const stage = currentPage.locator("#stage");
@@ -185,8 +279,20 @@ async function verifyInteractions(currentPage) {
   await currentPage.locator("#close").click();
   await assertHidden(currentPage.locator("#instructions"));
 
+  const manImage = await stage.screenshot();
+  await currentPage.locator("[data-body-style='woman']").click();
+  await currentPage.locator("body[data-body-style='woman']").waitFor({ state: "attached" });
+  await currentPage.waitForTimeout(250);
+  const womanImage = await stage.screenshot();
+  assert(
+    pixelDifference(manImage, womanImage) > 0.012,
+    "body-style selector did not visibly change the trainer",
+  );
+  await currentPage.locator("[data-body-style='man']").click();
+  await currentPage.locator("body[data-body-style='man']").waitFor({ state: "attached" });
+
   await currentPage.goto(
-    `${baseURL}/index.html?exercise=barbell_back_squat&reduceMotion=0&duration=3.2`,
+    `${baseURL}/index.html?exercise=barbell_back_squat&reduceMotion=0&duration=3.2&body=man`,
   );
   await currentPage.locator("body[data-ready='true']").waitFor({ state: "attached" });
   const pause = currentPage.locator("#pause");
@@ -199,26 +305,39 @@ async function verifyInteractions(currentPage) {
   assert(pixelDifference(pausedOne, pausedTwo) < 0.003, "pause did not freeze the model");
 }
 
-async function writeContactSheet(currentPage, entries) {
+async function writeContactSheets(currentPage, entries, styles, checkedPhases) {
   await currentPage.setViewportSize({ width: 1600, height: 900 });
-  const cards = entries.map(({ id, image }, index) => `
-    <figure>
-      <img src="data:image/png;base64,${image.toString("base64")}" alt="">
-      <figcaption><b>${String(index + 1).padStart(2, "0")}</b> ${escapeHTML(id)}</figcaption>
-    </figure>
-  `).join("");
-  await currentPage.setContent(`<!doctype html>
-    <style>
-      * { box-sizing: border-box; }
-      body { margin: 0; padding: 16px; background: #08090c; color: #f5f5f6;
-        font: 12px -apple-system, BlinkMacSystemFont, sans-serif; }
-      main { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-      figure { margin: 0; border: 1px solid #30333a; background: #111318; }
-      img { display: block; width: 100%; aspect-ratio: 1.62; object-fit: cover; }
-      figcaption { padding: 8px 10px; overflow-wrap: anywhere; }
-      b { color: #ed3442; margin-right: 5px; }
-    </style><main>${cards}</main>`);
-  await currentPage.screenshot({ path: join(output, "contact-sheet.png"), fullPage: true });
+  const files = [];
+  for (const style of styles) {
+    for (const phase of checkedPhases) {
+      const group = entries.filter(
+        (entry) =>
+          entry.bodyStyle === style && Math.abs(entry.phase - phase) < 0.000001,
+      );
+      if (group.length === 0) continue;
+      const cards = group.map(({ id, image }, index) => `
+        <figure>
+          <img src="data:image/png;base64,${image.toString("base64")}" alt="">
+          <figcaption><b>${String(index + 1).padStart(2, "0")}</b> ${escapeHTML(id)}</figcaption>
+        </figure>
+      `).join("");
+      await currentPage.setContent(`<!doctype html>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 16px; background: #08090c; color: #f5f5f6;
+            font: 12px -apple-system, BlinkMacSystemFont, sans-serif; }
+          main { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+          figure { margin: 0; border: 1px solid #30333a; background: #111318; }
+          img { display: block; width: 100%; aspect-ratio: 1.62; object-fit: cover; }
+          figcaption { padding: 8px 10px; overflow-wrap: anywhere; }
+          b { color: #ed3442; margin-right: 5px; }
+        </style><main>${cards}</main>`);
+      const file = `contact-sheet-${style}-${phaseLabel(phase)}.png`;
+      await currentPage.screenshot({ path: join(output, file), fullPage: true });
+      files.push(file);
+    }
+  }
+  return files;
 }
 
 async function assertVisible(locator) {
@@ -231,6 +350,10 @@ async function assertHidden(locator) {
 
 function digest(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
+}
+
+function phaseLabel(phase) {
+  return `p${String(Math.round(phase * 100)).padStart(3, "0")}`;
 }
 
 function pixelDifference(first, second) {
