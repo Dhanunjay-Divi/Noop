@@ -21,7 +21,9 @@ for (const id of exercises) assert(mappings.has(id), `missing media mapping for 
 const failures = [];
 await Promise.all(exercises.map(async (id) => {
   const response = await fetch(`https://static.exercisedb.dev/media/${mappings.get(id)}.gif`);
-  if (!response.ok || !response.headers.get("content-type")?.includes("image/gif")) {
+  const isGif = response.ok && response.headers.get("content-type")?.includes("image/gif");
+  await response.body?.cancel();
+  if (!isGif) {
     failures.push(`${id}: media returned ${response.status}`);
   }
 }));
