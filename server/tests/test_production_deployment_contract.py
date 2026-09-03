@@ -121,6 +121,9 @@ def test_gcp_secrets_stay_out_of_opentofu_state() -> None:
 
 def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> None:
     iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    locals_file = (REPOSITORY_ROOT / "infra" / "gcp" / "locals.tf").read_text(
+        encoding="utf-8"
+    )
     build_script = (
         REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "build-runtime-image.sh"
     ).read_text(encoding="utf-8")
@@ -128,6 +131,8 @@ def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> No
     assert 'role   = "roles/storage.objectAdmin"' in iam
     assert 'role   = "roles/storage.bucketViewer"' in iam
     assert '--gcs-log-dir="gs://${source_bucket}/logs"' in build_script
+    assert '"containerscanning.googleapis.com"' in locals_file
+    assert '"ondemandscanning.googleapis.com"' in locals_file
 
 
 def test_capacity_runbook_keeps_tenancy_and_evidence_gates_explicit() -> None:

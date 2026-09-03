@@ -127,9 +127,10 @@ private networking remains a later measured topology decision.
 ## Cost boundary
 
 These foundation resources are near-idle when empty, but they are not described
-as free. Storage, KMS operations, Pub/Sub retention, image storage, BigQuery
-queries, and build minutes can incur charges. The staging billing budget is a
-notification guardrail, not an automatic spending cap.
+as free. Storage, KMS operations, Pub/Sub retention, image storage, automatic
+and on-demand vulnerability scanning, BigQuery queries, and build minutes can
+incur charges. The staging billing budget is a notification guardrail, not an
+automatic spending cap.
 
 Cloud SQL is the first material always-on cost. `db-f1-micro` is a synthetic
 staging choice, not a production sizing claim. The USD 50 budget sends alerts
