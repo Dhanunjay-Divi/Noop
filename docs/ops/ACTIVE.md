@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-08-31**
+Last updated: **2026-09-03**
 
 ## Repository
 
@@ -17,6 +17,18 @@ Last updated: **2026-08-31**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The optional NOOP+ GCP staging foundation is deployed in Mumbai with no mobile
+client connection and no real health data. OpenTofu manages protected state,
+budget alerts, KMS/CMEK storage, Pub/Sub, least-purpose identities, empty
+analytics, PostgreSQL 16, migration, and an internal-only scale-to-zero API.
+The final digest-pinned Alpine runtime passed repeat on-demand scans with zero
+findings, two migration executions, live private-runtime verification, and a
+zero-drift plan. Core NOOP remains local-first and account-free. Identity,
+immutable chunk processing, restore, isolation, load, privacy/legal, and
+physical-device upload gates remain open. The implementation and evidence are
+recorded in
+[GCP synthetic staging foundation](rounds/2026-09-03-gcp-staging-foundation.md).
 
 The latest round improves stress and daily-guidance notification reliability.
 Android now evaluates qualified stress evidence from fresh live R-R and
@@ -79,14 +91,22 @@ participant, and native-speaker gates remain separate.
 - NOOP's PolyForm license and independent dependency notices remain intact.
 - Daily guidance and automatic stress interruptions remain explicit opt-ins,
   private, evidence-gated, and honest about best-effort OS delivery.
+- Core NOOP remains fully local and account-free; NOOP+ managed sync requires
+  explicit enrollment and must never silently upload existing history.
+- No real health data enters the GCP staging project until identity, processor,
+  isolation, restore, privacy/legal, and physical-device gates pass.
 
 ## Next priorities after this round
 
-1. Provision store signing and release records.
-2. Deploy the production-like server topology and prove 10,000-user
-   load/failover/restore behavior.
-3. Complete carrier procurement and the controlled paging matrix.
-4. Complete representative physical-device and in-place upgrade validation.
-5. Complete held-out accuracy studies and native-speaker review.
-6. Keep automatic emergency inference unavailable until its separate
+1. Threat-model and select NOOP+ identity, recovery, deletion, and operator
+   access.
+2. Implement immutable chunk upload, processor idempotency, aggregate
+   provenance, export, and erasure using synthetic data.
+3. Prove restore, isolation, reconnect burst, soak, 10,000-user load, and
+   failover behavior before production sizing.
+4. Provision store signing and release records.
+5. Complete carrier procurement and the controlled paging matrix.
+6. Complete representative physical-device and in-place upgrade validation.
+7. Complete held-out accuracy studies and native-speaker review.
+8. Keep automatic emergency inference unavailable until its separate
    validation and regulatory program is complete.
