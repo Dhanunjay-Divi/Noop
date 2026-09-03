@@ -67,6 +67,15 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     assert "allAuthenticatedUsers" not in runtime
     assert 'command = ["python"]' in runtime
     assert 'args    = ["-m", "app.migrate"]' in runtime
+    migration = runtime.split(
+        'resource "google_cloud_run_v2_job" "migrate"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_service" "api"',
+        maxsplit=1,
+    )[0]
+    assert 'name  = "NOOP_SAFETY_WORKER_ENABLED"' in migration
+    assert 'value = "false"' in migration
     assert 'name  = "NOOP_RUN_MIGRATIONS"' in runtime
     assert 'value = "false"' in runtime
     assert 'path = "/readyz"' in runtime

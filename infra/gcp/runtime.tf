@@ -119,6 +119,10 @@ resource "google_cloud_run_v2_job" "migrate" {
           value = "1"
         }
         env {
+          name  = "NOOP_SAFETY_WORKER_ENABLED"
+          value = "false"
+        }
+        env {
           name = "NOOP_DATABASE_URL"
           value_source {
             secret_key_ref {
