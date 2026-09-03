@@ -139,6 +139,18 @@ def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> No
     assert '"ondemandscanning.googleapis.com"' in locals_file
 
 
+def test_gcp_runtime_scan_is_digest_scoped_and_fails_on_material_findings() -> None:
+    scan_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "scan-runtime-image.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "api@sha256:" in scan_script
+    assert "--remote" in scan_script
+    assert '"effectiveSeverity"' in scan_script
+    assert '{"CRITICAL", "HIGH"}' in scan_script
+    assert "raise SystemExit(1)" in scan_script
+
+
 def test_capacity_runbook_keeps_tenancy_and_evidence_gates_explicit() -> None:
     runbook = (SERVER_ROOT / "PRODUCTION_OPERATIONS.md").read_text(encoding="utf-8")
 

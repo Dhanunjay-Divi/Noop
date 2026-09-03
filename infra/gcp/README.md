@@ -90,29 +90,36 @@ next:
    ./scripts/build-runtime-image.sh
    ```
 
-4. Set `enable_managed_database = true` in the ignored
+4. Run the metered on-demand scan against that exact digest. Do not deploy an
+   image with an effective Critical or High finding:
+
+   ```sh
+   ./scripts/scan-runtime-image.sh "DIGEST_URI_FROM_STEP_3"
+   ```
+
+5. Set `enable_managed_database = true` in the ignored
    `staging.auto.tfvars`, leave `runtime_image = null` and
    `enable_private_api = false`, then review and apply. Cloud SQL has deletion
    protection, CMEK, encrypted connections, daily backups, and seven-day PITR.
-5. Create the runtime database user and first secret versions without putting
+6. Create the runtime database user and first secret versions without putting
    either value in OpenTofu state:
 
    ```sh
    ./scripts/configure-runtime-secrets.sh
    ```
 
-6. Put the digest URI from step 3 in `runtime_image`, review, and apply. This
+7. Put the verified digest URI from step 3 in `runtime_image`, review, and apply. This
    creates the migration job but not the API.
-7. Execute the matching migration exactly once:
+8. Execute the matching migration exactly once:
 
    ```sh
    ./scripts/run-migration.sh
    ```
 
-8. Set `enable_private_api = true`, review, and apply. The service has
+9. Set `enable_private_api = true`, review, and apply. The service has
    internal-only ingress, no public invoker, scale-to-zero, runtime migrations
    disabled, Safety delivery disabled, and a `/readyz` startup probe.
-9. Verify the live controls:
+10. Verify the live controls:
 
    ```sh
    ./scripts/verify-private-runtime.sh
