@@ -42,7 +42,7 @@ resource "google_artifact_registry_repository_iam_member" "builder_writer" {
 
 resource "google_storage_bucket_iam_member" "builder_source_reader" {
   bucket = google_storage_bucket.build_source.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.builder.email}"
 }
 

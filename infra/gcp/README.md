@@ -10,7 +10,7 @@ identity, privacy, isolation, restore, and physical-device gates are complete.
 - required project APIs;
 - a regional Artifact Registry Docker repository;
 - a regional Cloud KMS key and encrypted raw-chunk bucket;
-- a seven-day build-source bucket;
+- a seven-day build-source/log bucket scoped to the build identity;
 - a Pub/Sub raw-object topic and pull subscription;
 - separate build, API, processor, and migration service accounts;
 - empty regional Secret Manager containers;

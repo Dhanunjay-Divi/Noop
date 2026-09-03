@@ -105,6 +105,16 @@ def test_gcp_secrets_stay_out_of_opentofu_state() -> None:
     assert "--data-file=-" in configure_script
 
 
+def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    build_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "build-runtime-image.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'role   = "roles/storage.objectAdmin"' in iam
+    assert '--gcs-log-dir="gs://${source_bucket}/logs"' in build_script
+
+
 def test_capacity_runbook_keeps_tenancy_and_evidence_gates_explicit() -> None:
     runbook = (SERVER_ROOT / "PRODUCTION_OPERATIONS.md").read_text(encoding="utf-8")
 

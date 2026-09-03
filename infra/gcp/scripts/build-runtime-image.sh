@@ -36,6 +36,7 @@ if [[ -z "${existing_digest}" ]]; then
     --region="${region}" \
     --service-account="projects/${project_id}/serviceAccounts/${builder}" \
     --gcs-source-staging-dir="gs://${source_bucket}/source" \
+    --gcs-log-dir="gs://${source_bucket}/logs" \
     --tag="${tag_uri}"
   existing_digest="$(
     gcloud artifacts docker images describe "${tag_uri}" \
