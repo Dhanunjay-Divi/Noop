@@ -112,6 +112,7 @@ def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> No
     ).read_text(encoding="utf-8")
 
     assert 'role   = "roles/storage.objectAdmin"' in iam
+    assert 'role   = "roles/storage.bucketViewer"' in iam
     assert '--gcs-log-dir="gs://${source_bucket}/logs"' in build_script
 
 

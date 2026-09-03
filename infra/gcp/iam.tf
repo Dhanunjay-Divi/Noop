@@ -46,6 +46,12 @@ resource "google_storage_bucket_iam_member" "builder_source_reader" {
   member = "serviceAccount:${google_service_account.builder.email}"
 }
 
+resource "google_storage_bucket_iam_member" "builder_source_bucket_viewer" {
+  bucket = google_storage_bucket.build_source.name
+  role   = "roles/storage.bucketViewer"
+  member = "serviceAccount:${google_service_account.builder.email}"
+}
+
 resource "google_project_iam_member" "builder_log_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
