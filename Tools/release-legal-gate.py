@@ -305,10 +305,36 @@ def container_components() -> list[dict[str, object]]:
     result = []
     for relative in ("server/Dockerfile", "server/backup/Dockerfile"):
         text = (ROOT / relative).read_text(encoding="utf-8")
-        match = re.search(r"^FROM\s+(\S+@sha256:[0-9a-f]{64})\s*$", text, re.MULTILINE)
-        if not match:
+        stages: set[str] = set()
+        external_images: list[str] = []
+        for from_clause in re.findall(
+            r"^FROM\s+(.+?)\s*$",
+            text,
+            re.IGNORECASE | re.MULTILINE,
+        ):
+            parts = from_clause.split()
+            while parts and parts[0].startswith("--"):
+                parts.pop(0)
+            if not parts:
+                raise GateError(f"{relative} has an invalid FROM instruction")
+            image = parts.pop(0)
+            alias = None
+            if parts:
+                if len(parts) != 2 or parts[0].lower() != "as":
+                    raise GateError(f"{relative} has an invalid FROM instruction")
+                alias = parts[1].lower()
+            if image.lower() != "scratch" and image.lower() not in stages:
+                if not re.fullmatch(r"\S+@sha256:[0-9a-f]{64}", image):
+                    raise GateError(f"{relative} base image is not digest pinned")
+                external_images.append(image)
+            if alias is not None:
+                stages.add(alias)
+        if not external_images:
             raise GateError(f"{relative} base image is not digest pinned")
-        result.append({"ecosystem": "oci", "name": match.group(1), "usedBy": relative})
+        result.extend(
+            {"ecosystem": "oci", "name": image, "usedBy": relative}
+            for image in external_images
+        )
     compose = (ROOT / "server/compose.yaml").read_text(encoding="utf-8")
     for image in re.findall(
         r"^\s*image:\s*(\S+@sha256:[0-9a-f]{64})\s*$", compose, re.MULTILINE

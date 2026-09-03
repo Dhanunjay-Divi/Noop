@@ -37,6 +37,15 @@ class ReleaseLegalGateTests(unittest.TestCase):
         requirements = GATE.requirement_entries(ROOT / "server" / "requirements.lock")
         self.assertEqual(set(requirements), set(GATE.PYTHON))
 
+    def test_flattened_runtime_keeps_every_external_base_pinned(self) -> None:
+        server_images = [
+            item["name"]
+            for item in GATE.container_components()
+            if item["usedBy"] == "server/Dockerfile"
+        ]
+        self.assertEqual(len(server_images), 1)
+        self.assertRegex(server_images[0], r"@sha256:[0-9a-f]{64}$")
+
     def test_distribution_passes_for_owner_controlled_repository(self) -> None:
         GATE.distribution_gate()
 
