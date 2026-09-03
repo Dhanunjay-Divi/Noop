@@ -209,7 +209,7 @@ pypi: 20 components
   - websockets 17.0.1 — BSD-3-Clause — https://github.com/python-websockets/websockets
 
 Digest-pinned container inputs
-  - python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36 — server/Dockerfile
+  - python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 — server/Dockerfile
   - postgres:16-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8 — server/backup/Dockerfile
   - timescale/timescaledb:2.20.3-pg16@sha256:559615191e7249779e5f83a74f01d309bce299bfadd6d3177d7a7b99610eef89 — server/compose.yaml (pulled only)
 
