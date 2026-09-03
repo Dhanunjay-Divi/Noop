@@ -52,6 +52,7 @@ def test_production_server_disables_raw_access_logs_with_signed_query_tokens() -
     assert "NOOP_FORWARDED_ALLOW_IPS=127.0.0.1" in dockerfile
     assert '--forwarded-allow-ips \\"$NOOP_FORWARDED_ALLOW_IPS\\"' in dockerfile
     assert "--forwarded-allow-ips=127.0.0.1" not in dockerfile
+    assert "python -m pip uninstall --yes pip" in dockerfile
 
 
 def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:

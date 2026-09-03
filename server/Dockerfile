@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /service
 
 COPY requirements.txt requirements.lock ./
-RUN pip install --no-cache-dir --require-hashes --requirement requirements.lock
+RUN pip install --no-cache-dir --require-hashes --requirement requirements.lock \
+    && python -m pip uninstall --yes pip
 
 RUN addgroup -g 10001 -S noop \
     && adduser -u 10001 -S -D -H -G noop noop
