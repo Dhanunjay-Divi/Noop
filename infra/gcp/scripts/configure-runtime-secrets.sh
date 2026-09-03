@@ -5,7 +5,7 @@ umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-for command in gcloud openssl tofu; do
+for command in gcloud openssl python3 tofu; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'Required command not found: %s\n' "${command}" >&2
     exit 1
@@ -27,44 +27,20 @@ if [[ -z "${instance}" || -z "${connection_name}" ]]; then
 fi
 
 has_enabled_version() {
-  [[ -n "$(
-    gcloud secrets versions list "${1}" \
-      --project="${project_id}" \
-      --filter='state=ENABLED' \
-      --limit=1 \
-      --format='value(name)'
-  )" ]]
+  gcloud secrets versions list "${1}" \
+    --project="${project_id}" \
+    --format='value(state)' \
+    | grep -qx 'ENABLED'
 }
 
 if ! has_enabled_version "${database_secret}"; then
-  database_password="$(openssl rand -hex 32)"
-  existing_user="$(
-    gcloud sql users list \
-      --project="${project_id}" \
-      --instance="${instance}" \
-      --filter="name=${database_user}" \
-      --format='value(name)' \
-      --limit=1
-  )"
-  if [[ -n "${existing_user}" ]]; then
-    gcloud sql users set-password "${database_user}" \
-      --project="${project_id}" \
-      --instance="${instance}" \
-      --password="${database_password}" \
-      --quiet
-  else
-    gcloud sql users create "${database_user}" \
-      --project="${project_id}" \
-      --instance="${instance}" \
-      --password="${database_password}" \
-      --quiet
-  fi
-
-  database_url="postgresql://${database_user}:${database_password}@/noop?host=%2Fcloudsql%2F${connection_name}"
-  printf '%s' "${database_url}" | gcloud secrets versions add "${database_secret}" \
+  python3 "${SCRIPT_DIR}/configure-database-secret.py" \
     --project="${project_id}" \
-    --data-file=-
-  unset database_password database_url
+    --instance="${instance}" \
+    --connection-name="${connection_name}" \
+    --database="noop" \
+    --user="${database_user}" \
+    --secret="${database_secret}"
 fi
 
 if ! has_enabled_version "${admin_secret}"; then

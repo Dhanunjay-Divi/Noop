@@ -98,10 +98,15 @@ def test_gcp_secrets_stay_out_of_opentofu_state() -> None:
     configure_script = (
         REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-runtime-secrets.sh"
     ).read_text(encoding="utf-8")
+    database_helper = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-database-secret.py"
+    ).read_text(encoding="utf-8")
 
     assert "google_secret_manager_secret_version" not in infrastructure
     assert "secret_data" not in infrastructure
-    assert "openssl rand -hex 32" in configure_script
+    assert "--password=" not in configure_script
+    assert "secrets.token_hex(32)" in database_helper
+    assert "password" not in database_helper.split("parser.add_argument", maxsplit=1)[1]
     assert "--data-file=-" in configure_script
 
 
