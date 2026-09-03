@@ -4,7 +4,9 @@ NOOP's account was once auto-suspended by GitHub (later **reinstated on appeal**
 
 NOOP's purpose is legitimate—it reads a device **you own** over Bluetooth,
 stores/analyzes locally without a required account or cloud, and optionally
-replicates a documented subset to a server the user operates. It ships no WHOOP
+replicates a documented subset to a server the user operates. A future managed
+NOOP+ destination remains a separate explicit opt-in and cannot replace local
+operation. It ships no WHOOP
 proprietary code. These safeguards exist so our **behaviour never again *looks*
 like abuse** to an automated filter. They're grounded in [GitHub's Acceptable Use
 Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies)
@@ -43,5 +45,6 @@ change as a supply-chain change.
 Don't evade or create replacement accounts (that makes a suspension permanent
 and violates the rules). Appeal at support.github.com with the facts: NOOP reads
 a device the user owns, has no required account or project-operated biometric
-cloud, and ships no WHOOP proprietary code. Its optional server is user-operated
-and explicit opt-in. The appeal worked once; the core facts have not changed.
+cloud, and ships no WHOOP proprietary code. Network data transfer remains
+explicit opt-in, whether self-hosted or through a future managed NOOP+ service.
+The appeal worked once; the core facts have not changed.

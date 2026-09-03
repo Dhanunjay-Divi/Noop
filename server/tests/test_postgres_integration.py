@@ -29,7 +29,24 @@ from app.tenancy import (
 
 FIXTURES = Path(__file__).resolve().parent / "data"
 MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
+POSTGRESQL_MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations-postgresql"
 DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
+DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "timescaledb")
+
+
+def _repository(
+    *,
+    pool_min_size: int = 1,
+    pool_max_size: int = 8,
+    run_migrations: bool = True,
+) -> PostgresRepository:
+    return PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=pool_min_size,
+        pool_max_size=pool_max_size,
+        run_migrations=run_migrations,
+        database_engine=DATABASE_ENGINE,
+    )
 
 
 def _load_fixture(name: str) -> SyncPayload:
@@ -47,6 +64,58 @@ def _payload_hash(payload: SyncPayload) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def test_postgresql_initial_migration_only_removes_timescale_statements() -> None:
+    canonical = (MIGRATIONS / "001_init.sql").read_text(encoding="utf-8")
+    expected = canonical.replace(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb;\n\n",
+        "",
+    ).replace(
+        """SELECT create_hypertable(
+    'metric_samples',
+    'recorded_at',
+    if_not_exists => TRUE,
+    migrate_data => TRUE
+);
+
+""",
+        "",
+    )
+    actual = (POSTGRESQL_MIGRATIONS / "001_init.sql").read_text(encoding="utf-8")
+
+    assert actual == expected
+
+
+def test_migration_selection_and_checksums_are_engine_specific() -> None:
+    timescaledb = PostgresRepository("postgresql://unused")
+    postgresql = PostgresRepository(
+        "postgresql://unused",
+        database_engine="postgresql",
+    )
+
+    timescale_files = timescaledb._migration_files()
+    postgresql_files = postgresql._migration_files()
+
+    assert [path.name for path in postgresql_files] == [
+        path.name for path in timescale_files
+    ]
+    assert postgresql_files[0].parent == POSTGRESQL_MIGRATIONS
+    assert all(path.parent == MIGRATIONS for path in postgresql_files[1:])
+    assert hashlib.sha256(timescale_files[0].read_bytes()).hexdigest() != (
+        hashlib.sha256(postgresql_files[0].read_bytes()).hexdigest()
+    )
+    assert [
+        hashlib.sha256(path.read_bytes()).hexdigest() for path in postgresql_files[1:]
+    ] == [hashlib.sha256(path.read_bytes()).hexdigest() for path in timescale_files[1:]]
+
+
+def test_repository_rejects_unknown_database_engine() -> None:
+    with pytest.raises(ValueError, match="database_engine"):
+        PostgresRepository(
+            "postgresql://unused",
+            database_engine="cloudsql",
+        )
 
 
 async def _wait_for_advisory_waiters(pool, *, minimum: int) -> None:
@@ -151,12 +220,11 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_installation_tenancy_rotation_and_isolation() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -221,14 +289,13 @@ async def test_postgres_installation_tenancy_rotation_and_isolation() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_cutover_backfills_rows_created_after_tenancy_migration() -> (
     None
 ):
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=3,
     )
@@ -297,12 +364,11 @@ async def test_postgres_cutover_backfills_rows_created_after_tenancy_migration()
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_erasure_wins_against_already_claimed_delayed_sync() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=4,
     )
@@ -403,12 +469,11 @@ async def test_postgres_erasure_wins_against_already_claimed_delayed_sync() -> N
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_safety_lifecycle_export_retention_and_erasure() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -544,12 +609,11 @@ async def test_postgres_safety_lifecycle_export_retention_and_erasure() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_safety_escalation_and_fall_event_contract() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -787,12 +851,11 @@ async def test_postgres_safety_escalation_and_fall_event_contract() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_profile_erasure_drains_provider_submission_permit() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=4,
     )
@@ -903,12 +966,11 @@ async def test_postgres_profile_erasure_drains_provider_submission_permit() -> N
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_safety_control_heartbeat_and_monitoring() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -970,12 +1032,11 @@ async def test_postgres_safety_control_heartbeat_and_monitoring() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
 async def test_postgres_safety_recovers_an_exhausted_final_lease() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -1091,12 +1152,11 @@ async def test_postgres_safety_recovers_an_exhausted_final_lease() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
-async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+async def test_postgres_migrations_idempotency_rr_and_row_provenance() -> None:
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )
@@ -1222,12 +1282,11 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
 )
 @pytest.mark.asyncio
-async def test_timescaledb_friend_join_and_directional_visibility() -> None:
-    repository = PostgresRepository(
-        DATABASE_URL or "",
+async def test_postgres_friend_join_and_directional_visibility() -> None:
+    repository = _repository(
         pool_min_size=1,
         pool_max_size=2,
     )

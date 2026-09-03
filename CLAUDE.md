@@ -14,12 +14,16 @@ strap). It pairs over Bluetooth, stores everything in on-device SQLite, and comp
 public distribution is permitted only after its signing, privacy, device-validation,
 and redistribution gates pass.
 Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
-replication/private friend sharing through a server the user operates. The core BLE, storage, and
-analytics path must remain fully useful offline.
+replication/private friend sharing through a server the user operates. A separately consented NOOP+
+managed-sync service may be developed, but it must never become a dependency of core collection,
+storage, metrics, export, or device control. The core BLE, storage, and analytics path must remain
+fully useful offline.
 
 These are hard constraints, not preferences. A PR is out of scope if it:
-- adds a Noop-operated account/cloud, enables network transfer by default, or sends data anywhere
-  other than the exact destination the user explicitly configured;
+- makes a Noop-operated account/cloud mandatory, enables network transfer by default, or sends data
+  anywhere other than the exact destination and data classes the user explicitly selected;
+- moves core metric computation behind NOOP+, withholds local history to force an upgrade, or
+  silently enrolls an existing user into managed sync;
 - weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
   invites short-lived, and every shared metric revocable server-side;
 - adds analytics/telemetry/crash-reporting that phones home;

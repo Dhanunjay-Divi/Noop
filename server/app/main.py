@@ -945,6 +945,7 @@ def create_app(
             pool_max_size=runtime_settings.pool_max_size,
             statement_cache_size=(runtime_settings.database_statement_cache_size),
             run_migrations=runtime_settings.run_migrations,
+            database_engine=runtime_settings.database_engine,
         )
     else:
         # Startup validation will reject this in normal deployment. Keeping a

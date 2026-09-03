@@ -5,7 +5,11 @@ directly to the strap over Bluetooth Low Energy, stores everything on-device in 
 recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, no account —
 the app interoperates with **your own device and your own data**. It can also import data you already
 own: WHOOP CSV exports and Apple Health exports. An explicit opt-in can replicate
-the supported v1 subset to a user-operated server.
+the supported v1 subset to a user-operated server. A future NOOP+ managed-sync
+destination follows the same local-first rule: it is separate consent, never
+required for collection or scoring, and is not connected to either mobile app
+while its identity, deletion, restore, and isolation gates remain open. See
+[`CLOUD_ARCHITECTURE.md`](CLOUD_ARCHITECTURE.md).
 
 > **Not affiliated with WHOOP.** NOOP is an independent, interoperability project built on
 > community reverse-engineering of the strap's Bluetooth protocol. It is **not a medical device**

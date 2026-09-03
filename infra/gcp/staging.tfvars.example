@@ -1,0 +1,22 @@
+# Copy to the ignored staging.auto.tfvars and replace this value.
+project_id = "replace-with-staging-project-id"
+
+# India-first staging. Changing region later requires a data migration.
+region      = "asia-south1"
+environment = "staging"
+
+# Synthetic raw chunks only. Production retention is a separate reviewed policy.
+raw_retention_days = 30
+
+# Keep these false/null through the foundation apply. Enable the database only
+# after the standard-PostgreSQL integration suite passes.
+enable_managed_database = false
+database_tier           = "db-f1-micro"
+
+# Build from a clean commit, then use the Artifact Registry digest URI rather
+# than a mutable tag. The digest enables the migration job.
+runtime_image = null
+
+# Enable only after the migration job succeeds. The service has internal
+# ingress, IAM authentication, a /readyz startup probe, and no public invoker.
+enable_private_api = false

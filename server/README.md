@@ -57,6 +57,7 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_API_TOKEN` | yes | none | At least 32 random bytes; authenticates full-data and social-admin routes |
 | `NOOP_AUTH_MODE` | no | `single_owner` | `single_owner` permits the administrator credential to access biometric routes; `shared` requires an enrolled `noop_install_...` credential and keeps the operator credential administrative |
 | `NOOP_DATABASE_URL` | in non-Compose deployments | none | PostgreSQL/TimescaleDB URL |
+| `NOOP_DATABASE_ENGINE` | no | `timescaledb` | `timescaledb` uses the canonical initial migration; `postgresql` uses the separately checksummed standard-PostgreSQL initial migration for services such as Cloud SQL |
 | `NOOP_DB_NAME` | Compose only | `noop` | Database selected by the DB, API, and backup services; useful for a staged restore cutover |
 | `NOOP_MAX_REQUEST_BYTES` | no | `10485760` | Hard maximum sync body size |
 | `NOOP_EXPORT_MAX_ROWS` | no | `100000` | Aggregate export row ceiling; oversized exports fail with `413` and require a narrower `start`/`end` window |
@@ -450,10 +451,15 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The production repository applies immutable SQL files from `migrations/` once
-in lexical order, records each checksum in `noop_schema_migrations`, and refuses
-to start if an already-applied migration was edited. Its metric-sample table is
-a TimescaleDB hypertable.
+The production repository applies immutable SQL files in lexical order, records
+each checksum in `noop_schema_migrations`, and refuses to start if an
+already-applied migration was edited. `NOOP_DATABASE_ENGINE=timescaledb` uses
+`migrations/` and makes the metric-sample table a hypertable.
+`NOOP_DATABASE_ENGINE=postgresql` substitutes only
+`migrations-postgresql/001_init.sql`, which removes the Timescale extension and
+hypertable calls; all later migrations remain canonical. The two initial
+migrations intentionally have different checksums, so changing engines under an
+existing database fails rather than silently changing its storage contract.
 
 Migration `002_row_provenance.sql` preserves `sync_batch_id`,
 `source_platform`, and the full `source_metadata` object on each metric, event,

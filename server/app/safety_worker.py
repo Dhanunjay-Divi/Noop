@@ -441,6 +441,7 @@ async def _run_standalone() -> None:
         pool_max_size=settings.pool_max_size,
         statement_cache_size=settings.database_statement_cache_size,
         run_migrations=settings.run_migrations,
+        database_engine=settings.database_engine,
     )
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

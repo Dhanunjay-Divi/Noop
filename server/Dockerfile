@@ -15,6 +15,7 @@ RUN groupadd --system --gid 10001 noop \
 
 COPY app ./app
 COPY migrations ./migrations
+COPY migrations-postgresql ./migrations-postgresql
 COPY NOTICE /usr/share/doc/noop/NOTICE
 COPY LICENSE /usr/share/doc/noop/LICENSE
 

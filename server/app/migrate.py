@@ -15,6 +15,7 @@ async def run() -> None:
         pool_max_size=1,
         statement_cache_size=settings.database_statement_cache_size,
         run_migrations=True,
+        database_engine=settings.database_engine,
     )
     await repository.startup()
     await repository.shutdown()

@@ -63,6 +63,28 @@ The included Compose stack now separates `migrate`, `api`, and
 `safety-worker`. It is a secure single-host reference, not a high-availability
 orchestrator.
 
+### GCP synthetic staging
+
+The checked-in `infra/gcp/` stack is the selected India-first staging path. It
+uses Mumbai, OpenTofu remote state, a regional Artifact Registry, regional KMS,
+Secret Manager containers, a CMEK raw-object bucket, Pub/Sub, and separate
+build/API/processor/migration identities. Its optional runtime is deliberately
+gated:
+
+1. Standard PostgreSQL integration tests must pass.
+2. Provision the deletion-protected PostgreSQL 16 Cloud SQL instance.
+3. Create database credentials and secret versions outside OpenTofu state.
+4. Build from a clean commit and select the immutable image digest.
+5. Execute the one-shot Cloud Run migration job.
+6. Only then enable the internal-ingress, IAM-protected API. Its startup probe
+   calls `/readyz`, runtime migration is disabled, minimum instances are zero,
+   and no broad invoker binding is created.
+
+This is synthetic staging, not the production topology above. The shared-core
+database is single-zone, the API has no public ingress, the Safety worker is
+disabled, and the mobile clients are disconnected. See
+`../docs/CLOUD_ARCHITECTURE.md` and `../infra/gcp/README.md`.
+
 ### Database roles
 
 The Compose defaults retain one `noop` database owner for local operation.
@@ -385,6 +407,11 @@ Infrastructure cannot be provisioned safely until the owner records:
 - APNs/FCM posture: local-only or an optional privacy-minimized NOOP relay for
   store builds; independently signed/expert builds may operate their own push;
 - monthly infrastructure and carrier budget.
+
+For synthetic India staging, GCP and Mumbai are selected and a USD 50 monthly
+budget alert exists. A budget alert is not a hard spending cap. Production
+region redundancy, RPO/RTO, identity/recovery, on-call, legal posture, and a
+measured workload budget remain open.
 
 ## Remaining external launch gates
 

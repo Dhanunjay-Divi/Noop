@@ -1711,7 +1711,7 @@ def _command_count(status: str) -> int:
 
 
 class PostgresRepository:
-    """TimescaleDB/PostgreSQL implementation used by the Docker service.
+    """PostgreSQL implementation with an explicit optional TimescaleDB schema.
 
     ``asyncpg`` is imported lazily so model and API tests can run with the
     in-memory repository and no database client installed.
@@ -1725,12 +1725,16 @@ class PostgresRepository:
         pool_max_size: int = 8,
         statement_cache_size: int = 100,
         run_migrations: bool = True,
+        database_engine: str = "timescaledb",
     ) -> None:
+        if database_engine not in {"postgresql", "timescaledb"}:
+            raise ValueError("database_engine must be postgresql or timescaledb")
         self.database_url = database_url
         self.pool_min_size = pool_min_size
         self.pool_max_size = pool_max_size
         self.statement_cache_size = statement_cache_size
         self.run_migrations = run_migrations
+        self.database_engine = database_engine
         self._pool: Any = None
 
     async def startup(self) -> None:
@@ -1831,12 +1835,26 @@ class PostgresRepository:
         except Exception:
             return False
 
-    @staticmethod
-    def _migration_files() -> list[Path]:
+    def _migration_files(self) -> list[Path]:
         migration_dir = Path(__file__).resolve().parent.parent / "migrations"
         migrations = sorted(migration_dir.glob("*.sql"))
         if not migrations:
             raise RuntimeError("no database migrations were found")
+        if self.database_engine == "postgresql":
+            overlay_dir = (
+                Path(__file__).resolve().parent.parent / "migrations-postgresql"
+            )
+            overlays = {path.name: path for path in overlay_dir.glob("*.sql")}
+            if "001_init.sql" not in overlays:
+                raise RuntimeError("the PostgreSQL migration overlay is incomplete")
+            canonical_names = {path.name for path in migrations}
+            unexpected = sorted(set(overlays) - canonical_names)
+            if unexpected:
+                raise RuntimeError(
+                    "PostgreSQL migration overlays have no canonical version: "
+                    + ", ".join(unexpected)
+                )
+            migrations = [overlays.get(path.name, path) for path in migrations]
         return migrations
 
     def _require_pool(self) -> Any:
@@ -2551,7 +2569,7 @@ class PostgresRepository:
         result = {row["key"]: row["value"] for row in rows}
         result.update(
             {
-                "storage": "timescaledb",
+                "storage": self.database_engine,
                 "latest_sync_at": latest,
             }
         )

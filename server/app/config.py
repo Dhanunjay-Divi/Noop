@@ -69,6 +69,7 @@ class Settings:
 
     api_token: str | None
     database_url: str | None
+    database_engine: str = "timescaledb"
     auth_mode: str = "single_owner"
     max_request_bytes: int = 10 * 1024 * 1024
     export_max_rows: int = 100_000
@@ -127,6 +128,11 @@ class Settings:
         return cls(
             api_token=os.getenv("NOOP_API_TOKEN"),
             database_url=os.getenv("NOOP_DATABASE_URL"),
+            database_engine=_choice(
+                "NOOP_DATABASE_ENGINE",
+                "timescaledb",
+                frozenset({"postgresql", "timescaledb"}),
+            ),
             auth_mode=_choice(
                 "NOOP_AUTH_MODE",
                 "single_owner",
@@ -261,6 +267,8 @@ class Settings:
                 raise RuntimeError("NOOP_API_TOKEN must be at least 32 bytes")
         if needs_database and not self.database_url:
             raise RuntimeError("NOOP_DATABASE_URL is required")
+        if self.database_engine not in {"postgresql", "timescaledb"}:
+            raise RuntimeError("NOOP_DATABASE_ENGINE must be postgresql or timescaledb")
         if self.auth_mode not in {"single_owner", "shared"}:
             raise RuntimeError("NOOP_AUTH_MODE must be single_owner or shared")
         if self.pool_min_size > self.pool_max_size:

@@ -203,9 +203,11 @@ Self-hosted Sync is a replication path to a server the user operates:
   does not send a tombstone, and disconnecting only stops future uploads. Use the
   authenticated server dashboard/API to delete server data. Keep a local
   `.noopbak`/database backup for complete local restore.
-- **Operator responsibility.** The bundled FastAPI/TimescaleDB stack is not a Noop cloud.
-  Whoever deploys it controls access, TLS, storage encryption, backups, retention, export,
-  deletion, patching, and legal compliance.
+- **Operator responsibility.** In self-hosted mode, whoever deploys the bundled
+  service controls access, TLS, storage encryption, backups, retention, export,
+  deletion, patching, and legal compliance. A future NOOP+ destination is a
+  different, separately consented managed-service trust boundary; no released
+  client is connected to its synthetic staging environment.
 
 Raw ADC fields remain labeled raw/unvalidated throughout ingestion and display. Noop does
 not silently turn optical or thermistor register values into clinical SpO₂, temperature,
@@ -862,7 +864,7 @@ visibility alone.
 
 ## 4. What NOOP does *not* collect or transmit
 
-- **No Noop-operated account or login.** Core use requires no identity. An
+- **No required Noop-operated account or login.** Core use requires no identity. An
   optional self-hosted Friends profile uses a local scoped member credential
   (§1.1d)—server-issued for owner bootstrap or client-generated for an invited
   first join. It is not a Noop account and is never sent to a Noop-operated service.
@@ -870,8 +872,10 @@ visibility alone.
   account, at Oura's login page, over OAuth—NOOP never sees your password, only
   the resulting tokens kept in Keychain.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
-- **No Noop-operated cloud.** Self-hosted Sync and Friends (§1.1c–d) use only the
-  endpoint you configure; both are optional. Oura history import is inbound-only.
+- **No required managed cloud.** Self-hosted Sync and Friends (§1.1c–d) use only
+  the endpoint you configure; both are optional. Oura history import is
+  inbound-only. NOOP+ managed sync remains a separate, unreleased explicit
+  opt-in and does not participate in local collection or metric computation.
 - **No advertising identifiers, no tracking.**
 - **No WHOOP account or API credentials.** NOOP talks only to the strap over local
   BLE; it does not authenticate against, or pull from, any WHOOP server. (Oura is the
@@ -883,7 +887,7 @@ visibility alone.
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Three explicit destinations: AI Coach (your provider/key and text summary — §1.1a), Oura import (your OAuth app, inbound-only — §1.1b), and your self-hosted server (Sync plus optional Friends — §1.1c–d). No telemetry or project-operated cloud. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, Android remote-sync client |
+| Process | Data exfiltration / network egress | Released clients have three explicit destinations: AI Coach (your provider/key and text summary — §1.1a), Oura import (your OAuth app, inbound-only — §1.1b), and your self-hosted server (Sync plus optional Friends — §1.1c–d). No telemetry; synthetic NOOP+ staging has no client configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, Android remote-sync client, `infra/gcp/` |
 | Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
 | Private Friends | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain/Keystore token plus idempotent enrollment UUID; explicit interrupted-join recovery and server-confirmed pending cleanup; no biometric summary values before acceptance; empty replacement maps clear stale shares; accepted-friend field union limited to six range-checked keys; dedicated `*-noop-friends` producer; per-friend projection only from acceptance date; explicit not-E2E/operator-trust disclosure; remove/block/token rotation and Leave & delete controls; foreground/WorkManager catch-up is best effort, not guaranteed delivery. | `Strand/Data/FriendsService.swift`, `Strand/Screens/FriendsView.swift`, `android/app/src/main/java/com/noop/social/`, `android/app/src/main/java/com/noop/ui/FriendsScreen.kt`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |
 | Oura history import | OAuth token / scope leakage, cross-account data mixing | Compiled out by default (`OURA_CLOUD_IMPORT`, §1.1b); tokens Keychain-only (`kSecAttrAccessibleAfterFirstUnlock`, never UserDefaults/plist); fixed OAuth scopes set at build time; raw + normalized rows partitioned under `deviceId = "oura-api"`; Oura's own scores kept reference-only (`ref_*`/`oura_*` metricSeries keys, never NOOP's Charge/Effort/Rest); `.cloudImport` is structurally priority-2 so it never seizes a WHOOP day; Forget Oura access purges tokens + every `oura-api` row incl. the raw archive | `Strand/Oura/OuraTokenStore.swift`, `Strand/Oura/OuraConnectModel.swift`, `Packages/WhoopStore/Sources/WhoopStore/OuraRawStore.swift` |

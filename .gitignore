@@ -151,6 +151,20 @@ entradas_diario.csv
 __pycache__/
 *.pyc
 
+# OpenTofu / Terraform local state and environment values
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+backend.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 # JavaScript dependencies
 node_modules/
 

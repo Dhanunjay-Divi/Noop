@@ -5,6 +5,31 @@ import pytest
 from app.config import Settings
 
 
+def test_database_engine_defaults_to_timescaledb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NOOP_DATABASE_ENGINE", raising=False)
+
+    assert Settings.from_env().database_engine == "timescaledb"
+
+
+def test_database_engine_accepts_standard_postgresql(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NOOP_DATABASE_ENGINE", "PostgreSQL")
+
+    assert Settings.from_env().database_engine == "postgresql"
+
+
+def test_database_engine_rejects_unknown_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NOOP_DATABASE_ENGINE", "cloudsql")
+
+    with pytest.raises(ValueError, match="NOOP_DATABASE_ENGINE"):
+        Settings.from_env()
+
+
 def test_non_api_process_can_validate_without_global_administrator_token() -> None:
     Settings(
         api_token=None,

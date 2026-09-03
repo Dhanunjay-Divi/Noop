@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = SERVER_ROOT.parent
 
 
 def test_compose_separates_migrations_api_and_paging_worker() -> None:
@@ -51,6 +52,57 @@ def test_production_server_disables_raw_access_logs_with_signed_query_tokens() -
     assert "NOOP_FORWARDED_ALLOW_IPS=127.0.0.1" in dockerfile
     assert '--forwarded-allow-ips \\"$NOOP_FORWARDED_ALLOW_IPS\\"' in dockerfile
     assert "--forwarded-allow-ips=127.0.0.1" not in dockerfile
+
+
+def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"' in runtime
+    assert "allUsers" not in runtime
+    assert "allAuthenticatedUsers" not in runtime
+    assert 'command = ["python"]' in runtime
+    assert 'args    = ["-m", "app.migrate"]' in runtime
+    assert 'name  = "NOOP_RUN_MIGRATIONS"' in runtime
+    assert 'value = "false"' in runtime
+    assert 'path = "/readyz"' in runtime
+    assert "min_instance_count = 0" in runtime
+    assert "max_instance_count = 2" in runtime
+    assert "var.runtime_image != null" in variables
+    assert "@sha256:" in variables
+
+
+def test_gcp_database_has_staging_recovery_and_encryption_guards() -> None:
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'database_version    = "POSTGRES_16"' in runtime
+    assert "encryption_key_name = google_kms_crypto_key.cloud_sql[0].id" in runtime
+    assert "deletion_protection = true" in runtime
+    assert "deletion_protection_enabled = true" in runtime
+    assert "point_in_time_recovery_enabled = true" in runtime
+    assert "transaction_log_retention_days = 7" in runtime
+    assert 'ssl_mode     = "ENCRYPTED_ONLY"' in runtime
+
+
+def test_gcp_secrets_stay_out_of_opentofu_state() -> None:
+    infrastructure = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (REPOSITORY_ROOT / "infra" / "gcp").glob("*.tf")
+    )
+    configure_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-runtime-secrets.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "google_secret_manager_secret_version" not in infrastructure
+    assert "secret_data" not in infrastructure
+    assert "openssl rand -hex 32" in configure_script
+    assert "--data-file=-" in configure_script
 
 
 def test_capacity_runbook_keeps_tenancy_and_evidence_gates_explicit() -> None:

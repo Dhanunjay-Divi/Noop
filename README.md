@@ -518,9 +518,10 @@ See [`server/README.md`](server/README.md) for deployment, TLS, backups, retenti
 key rotation, export, and deletion. Public endpoints must use HTTPS; plain HTTP is
 accepted only on localhost/private LANs.
 
-This is a personal data service, not a Noop-operated cloud. The operator is
-responsible for access control, updates, backups, retention, applicable privacy
-law, and breach response.
+This self-hosted mode is a personal data service controlled by its operator,
+who is responsible for access, updates, backups, retention, applicable privacy
+law, and breach response. It is distinct from the unreleased, separately
+consented NOOP+ managed-sync staging path.
 
 ---
 
@@ -581,16 +582,17 @@ authorization and projection contract.
 
 ## Privacy
 
-**Local by default.** Noop has no telemetry and no Noop-operated account. Your
-strap data, imports, and computed metrics live in local SQLite. Data-bearing
+**Local by default.** Noop has no telemetry and core use requires no account.
+Your strap data, imports, and computed metrics live in local SQLite. Data-bearing
 network access occurs only through a feature you explicitly configure: your AI
 provider, Oura cloud import, or your self-hosted server (including its optional
-Friends projection). A user-tapped update check reads public release metadata
-without sending biometric data. Server upload is off by default, credentials
-stay in platform secure storage. A destination change schedules a resumable,
-idempotent replay of pending raw rows and up to ten years of the supported
-derived-history subset; records outside the v1 boundary still require a local
-backup/export.
+Friends projection). NOOP+ managed sync is not connected to released clients;
+if shipped, it remains a separate explicit opt-in. A user-tapped update check
+reads public release metadata without sending biometric data. Server upload is
+off by default, credentials stay in platform secure storage. A destination
+change schedules a resumable, idempotent replay of pending raw rows and up to
+ten years of the supported derived-history subset; records outside the v1
+boundary still require a local backup/export.
 
 ---
 

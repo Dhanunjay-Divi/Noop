@@ -1,6 +1,7 @@
 name: noop
 
 x-noop-database-environment: &noop-database-environment
+  NOOP_DATABASE_ENGINE: ${NOOP_DATABASE_ENGINE:-timescaledb}
   NOOP_DB_POOL_MIN_SIZE: ${NOOP_DB_POOL_MIN_SIZE:-1}
   NOOP_DB_POOL_MAX_SIZE: ${NOOP_DB_POOL_MAX_SIZE:-8}
   NOOP_DB_STATEMENT_CACHE_SIZE: ${NOOP_DB_STATEMENT_CACHE_SIZE:-100}
