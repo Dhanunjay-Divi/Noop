@@ -10,6 +10,14 @@ The current local QA sources are:
 
 - `Vital Animations.zip` (`Free50`): 1080 px MP4 demonstrations.
 - `exercises-gifs-main.zip`: 360 px GIF demonstrations and CSV metadata.
+- Two openGym source snapshots and their visual-comparison captures.
+
+The exact supplied ZIPs and complete extracted working trees are preserved at
+`LocalAssets/StrengthMotion`. That directory is intentionally ignored by Git;
+`SOURCE-ARCHIVE.md` documents creation and verification, while
+`source-asset-inventory.json` records compact SHA-256 identities and counts.
+The archive requests APFS copy-on-write clones when available, so deleting or
+later editing a Downloads copy does not change the preserved reference.
 
 The original `exercises-gifs-main.zip` contains an MIT `LICENSE` attributed to
 `omercotkd`, and matches repository commit
@@ -21,6 +29,11 @@ license the GIF copyrights. `Vital Animations.zip` contains no license or
 notice entry. Both binary sets remain git-ignored and the import command
 requires `--acknowledge-local-qa-only`; neither may ship until the relevant
 media owner grants distribution rights.
+
+The GIF metadata contains 1,324 exercise rows but only 1,323 supplied GIF
+files; media ID `0609` is absent. The Vital working tree contains 60 MP4 files,
+while `Free50/50gymworkouts.json` describes 50. These differences are preserved
+rather than silently filled with unrelated exercises.
 
 Production builds accept separate HTTPS templates for licensed MP4 and GIF
 assets. They try a 720 px or larger MP4 first, then a 360 px or larger GIF,
@@ -40,6 +53,13 @@ The mirror is not a release media source.
 The former Blender/Three.js prototype remains available for audit on the
 `archive/strength-motion-blender-v1` branch; its generator and robot/humanoid
 sources are not part of `main`.
+
+The openGym application code is AGPL-3.0 with its stated app-store exception.
+Its `NOTICE.md` explicitly excludes the exercise data and media from that
+license and points to upstream dataset terms. The archived openGym copies are
+therefore references only; NOOP must not copy their exercise media or AGPL
+application implementation into a proprietary release without a separate
+legal review.
 
 ## NOOP guidance
 

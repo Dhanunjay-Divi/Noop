@@ -63,6 +63,7 @@ android/app/release/
 
 # Locally imported third-party workout media is for licensed/dev QA only. Mapping and import tools
 # are tracked; binary media must be distributed through an approved CDN or separately licensed build.
+LocalAssets/StrengthMotion/
 Strand/Resources/StrengthMotion/Media/
 android/app/src/main/assets/strength-motion/media/
 android/app/src/demoDebug/assets/strength-motion/media/

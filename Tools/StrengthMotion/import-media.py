@@ -33,26 +33,39 @@ GIF_MAXIMUM_FRAME_DELAY_HUNDREDTHS = 40
 
 def parse_args() -> argparse.Namespace:
     downloads = Path.home() / "Downloads"
+    archive_sources = REPO_ROOT / "LocalAssets/StrengthMotion/sources"
+    archived_gifs = archive_sources / "exercises-gifs-main"
+    archived_vital = archive_sources / "VitalAnimations"
+    gif_root = (
+        archived_gifs
+        if archived_gifs.is_dir()
+        else downloads / "exercises-gifs-main"
+    )
+    vital_root = (
+        archived_vital
+        if archived_vital.is_dir()
+        else downloads / "VitalAnimations"
+    )
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--gif-assets",
         type=Path,
-        default=downloads / "exercises-gifs-main/assets",
+        default=gif_root / "assets",
     )
     parser.add_argument(
         "--gif-csv",
         type=Path,
-        default=downloads / "exercises-gifs-main/exercises.csv",
+        default=gif_root / "exercises.csv",
     )
     parser.add_argument(
         "--video-assets",
         type=Path,
-        default=downloads / "VitalAnimations/Free50/Free50",
+        default=vital_root / "Free50/Free50",
     )
     parser.add_argument(
         "--video-json",
         type=Path,
-        default=downloads / "VitalAnimations/Free50/50gymworkouts.json",
+        default=vital_root / "Free50/50gymworkouts.json",
     )
     parser.add_argument("--audit-output", type=Path)
     parser.add_argument("--install", action="store_true")
