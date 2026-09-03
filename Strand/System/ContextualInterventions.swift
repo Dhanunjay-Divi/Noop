@@ -50,6 +50,7 @@ struct ContextualInterventionCandidate: Equatable, Sendable {
     let title: String
     let body: String
     let route: NoopNotificationRoute
+    var evidence: [String] = []
     var respectsQuietHours = true
 }
 
@@ -285,6 +286,23 @@ enum ContextualInterventionCenter {
                 ),
                 on: center
             )
+            if candidate.kind.isAdaptiveDayGuidance {
+                ContextualActionCenter.shared.presentRecovery(
+                    title: candidate.title,
+                    detail: candidate.body,
+                    fingerprint: candidate.fingerprint,
+                    evidence: candidate.evidence,
+                    observedAt: candidate.observedAt,
+                    maximumAge: candidate.maximumAge
+                )
+            } else if candidate.kind == .stressBreathing {
+                ContextualActionCenter.shared.presentStress(
+                    fastRMSSD: nil,
+                    baselineRMSSD: nil,
+                    fingerprint: candidate.fingerprint,
+                    now: candidate.observedAt
+                )
+            }
             saveState(decision.nextState, defaults: defaults)
             if candidate.kind == .adaptiveTravel {
                 AdaptiveDayTimeZoneStore.discardPending()
@@ -422,7 +440,8 @@ enum AdaptiveDayInterventionFactory {
             fingerprint: recommendation.fingerprint,
             title: copy.1,
             body: copy.2,
-            route: .sleep
+            route: .sleep,
+            evidence: recommendation.evidence
         )
     }
 }

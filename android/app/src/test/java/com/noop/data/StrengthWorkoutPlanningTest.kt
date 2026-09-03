@@ -123,6 +123,60 @@ class StrengthWorkoutPlanningTest {
     }
 
     @Test
+    fun trainingEmphasisReordersPrioritiesWithoutChangingTheExercisePool() {
+        val balanced = StrengthAdaptivePlanner.program(
+            StrengthProgramRequest(
+                weekdays = listOf(1, 4),
+                physiqueGoal = StrengthPhysiqueGoal.BALANCED,
+            ),
+        )
+        assertEquals(StrengthAdaptivePlanner.program(listOf(1, 4)), balanced)
+
+        val vTaper = StrengthAdaptivePlanner.program(
+            StrengthProgramRequest(
+                weekdays = listOf(1, 4),
+                physiqueGoal = StrengthPhysiqueGoal.V_TAPER,
+            ),
+        )
+        assertEquals("seated_cable_row", vTaper.first().exercises.first().exerciseId)
+        assertEquals(
+            balanced.first().exercises.map { it.exerciseId }.toSet(),
+            vTaper.first().exercises.map { it.exerciseId }.toSet(),
+        )
+
+        val lowerBody = StrengthAdaptivePlanner.program(
+            StrengthProgramRequest(
+                weekdays = listOf(1, 4),
+                physiqueGoal = StrengthPhysiqueGoal.LOWER_BODY_GLUTES,
+            ),
+        )
+        assertEquals(
+            listOf("barbell_back_squat", "romanian_deadlift"),
+            lowerBody.first().exercises.take(2).map { it.exerciseId },
+        )
+
+        val explicitChest = StrengthAdaptivePlanner.program(
+            StrengthProgramRequest(
+                weekdays = listOf(1, 4),
+                physiqueGoal = StrengthPhysiqueGoal.LOWER_BODY_GLUTES,
+                focusMuscles = listOf("chest"),
+            ),
+        )
+        assertEquals("barbell_bench_press", explicitChest.first().exercises.first().exerciseId)
+
+        val focused = StrengthAdaptivePlanner.focusWorkout(
+            exercises = StrengthTrainingContract.BUILT_IN_EXERCISES.filter {
+                it.id in setOf("barbell_bench_press", "seated_cable_row")
+            },
+            experience = StrengthTrainingExperience.INTERMEDIATE,
+            style = StrengthTrainingStyle.BALANCED,
+            physiqueGoal = StrengthPhysiqueGoal.V_TAPER,
+            sessionMinutes = 30,
+        )
+        assertEquals("seated_cable_row", focused.first().exerciseId)
+    }
+
+    @Test
     fun muscleStatusUsesCompletedSetExposureAndFadesOverSeventyTwoHours() {
         val bench = StrengthTrainingContract.BUILT_IN_EXERCISES.first {
             it.id == "barbell_bench_press"

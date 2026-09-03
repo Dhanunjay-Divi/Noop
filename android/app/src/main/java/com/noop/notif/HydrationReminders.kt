@@ -21,6 +21,7 @@ import com.noop.automation.TapAutomationKind
 import com.noop.automation.TapAutomationStore
 import com.noop.R
 import com.noop.ble.LiveState
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
 import com.noop.ui.NotificationRouteBridge
@@ -39,6 +40,7 @@ object HydrationReminderPrefs {
     private const val ADAPTIVE = "hydration.reminders.adaptiveEnabled"
     private const val ADAPTIVE_INTERVAL = "hydration.reminders.adaptiveIntervalMinutes"
     private const val ADAPTIVE_DAY = "hydration.reminders.adaptiveEpochDay"
+    private const val ADAPTIVE_REASONS = "hydration.reminders.adaptiveReasons"
     private const val STRAP_BUZZ = "hydration.reminders.strapBuzz"
     private const val TAP_CONFIRM = "hydration.reminders.tapConfirm"
     private const val TAP_AMOUNT_ML = "hydration.reminders.tapAmountMl"
@@ -113,24 +115,27 @@ object HydrationReminderPrefs {
         .putInt(INTERVAL, HydrationReminderPolicy.clampIntervalMinutes(minutes))
         .remove(ADAPTIVE_INTERVAL)
         .remove(ADAPTIVE_DAY)
+        .remove(ADAPTIVE_REASONS)
         .apply()
 
     fun setStartMinutes(context: Context, minutes: Int) = prefs(context).edit()
         .putInt(START, HydrationReminderPolicy.clampMinuteOfDay(minutes))
         .remove(ADAPTIVE_INTERVAL)
         .remove(ADAPTIVE_DAY)
+        .remove(ADAPTIVE_REASONS)
         .apply()
 
     fun setEndMinutes(context: Context, minutes: Int) = prefs(context).edit()
         .putInt(END, HydrationReminderPolicy.clampMinuteOfDay(minutes))
         .remove(ADAPTIVE_INTERVAL)
         .remove(ADAPTIVE_DAY)
+        .remove(ADAPTIVE_REASONS)
         .apply()
 
     fun setAdaptiveEnabled(context: Context, enabled: Boolean) {
         val edit = prefs(context).edit().putBoolean(ADAPTIVE, enabled)
         if (!enabled) {
-            edit.remove(ADAPTIVE_INTERVAL).remove(ADAPTIVE_DAY)
+            edit.remove(ADAPTIVE_INTERVAL).remove(ADAPTIVE_DAY).remove(ADAPTIVE_REASONS)
         }
         edit.apply()
     }
@@ -166,11 +171,45 @@ object HydrationReminderPrefs {
         val changed =
             prefs.getLong(ADAPTIVE_DAY, Long.MIN_VALUE) != epochDay ||
             current.effectiveIntervalMinutes != plan.intervalMinutes
-        prefs.edit()
+        val editor = prefs.edit()
             .putLong(ADAPTIVE_DAY, epochDay)
             .putInt(ADAPTIVE_INTERVAL, plan.intervalMinutes)
-            .apply()
+        if (plan.reasons.isEmpty()) {
+            editor.remove(ADAPTIVE_REASONS)
+        } else {
+            editor.putString(
+                ADAPTIVE_REASONS,
+                plan.reasons.joinToString(",") { it.name },
+            )
+        }
+        editor.apply()
         return changed
+    }
+
+    fun contextualActionEvidence(context: Context): List<String> = buildList {
+        add(context.getString(R.string.context_action_hydration_scheduled_evidence))
+        val reasons = prefs(context).getString(ADAPTIVE_REASONS, null)
+            .orEmpty()
+            .split(',')
+            .mapNotNull { raw ->
+                runCatching { HydrationAdaptiveReason.valueOf(raw) }.getOrNull()
+            }
+        reasons.distinct().take(2).forEach { reason ->
+            add(
+                context.getString(
+                    when (reason) {
+                        HydrationAdaptiveReason.HIGHER_EFFORT ->
+                            R.string.context_action_hydration_higher_effort
+                        HydrationAdaptiveReason.ACTIVE_DAY ->
+                            R.string.context_action_hydration_active_day
+                        HydrationAdaptiveReason.BEHIND_GOAL ->
+                            R.string.context_action_hydration_behind_goal
+                        HydrationAdaptiveReason.AHEAD_OF_GOAL ->
+                            R.string.context_action_hydration_ahead_goal
+                    },
+                ),
+            )
+        }
     }
 
     fun setStrapBuzzEnabled(context: Context, enabled: Boolean) {
@@ -318,7 +357,7 @@ class HydrationReminderWorker(appContext: Context, params: WorkerParameters) :
             val slot = checkNotNull(due).key
             // Band-first escalation is occurrence-driven. The live delivery path schedules it only
             // after issuing the band cue, so a delayed worker cannot shorten the user's tap window.
-            if (!config.bandFirst && HydrationReminderNotifier.post(applicationContext)) {
+            if (!config.bandFirst && HydrationReminderNotifier.post(applicationContext, slot)) {
                 HydrationReminderPrefs.markNotificationSlot(applicationContext, slot)
             }
         }
@@ -400,7 +439,7 @@ class HydrationReminderEscalationWorker(appContext: Context, params: WorkerParam
                 lastNotifiedSlotKey = HydrationReminderPrefs.lastNotificationSlot(applicationContext),
             )
         ) return Result.success()
-        if (HydrationReminderNotifier.post(applicationContext)) {
+        if (HydrationReminderNotifier.post(applicationContext, slot)) {
             HydrationReminderPrefs.markNotificationSlot(applicationContext, slot)
         }
         return Result.success()
@@ -411,7 +450,7 @@ object HydrationReminderNotifier {
     private const val CHANNEL_ID = "noop_hydration_reminders"
 
     @SuppressLint("MissingPermission")
-    internal fun post(context: Context): Boolean = runCatching {
+    internal fun post(context: Context, slot: String): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -449,7 +488,7 @@ object HydrationReminderNotifier {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        NotificationLifecycleLedger.posted(
+        val posted = NotificationLifecycleLedger.posted(
             context,
             NotificationLifecycleId.HYDRATION,
             NotificationLifecycleCategory.REMINDER,
@@ -459,6 +498,14 @@ object HydrationReminderNotifier {
                 notification,
             )
         }
+        if (posted) {
+            ContextualActionCenter.presentHydration(
+                context = context,
+                fingerprint = slot,
+                amountMl = HydrationReminderPrefs.config(context).tapAmountMl,
+            )
+        }
+        posted
     }.getOrElse {
         NotificationLifecycleLedger.unknown(
             context,

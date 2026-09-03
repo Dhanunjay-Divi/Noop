@@ -3,9 +3,11 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const source = await readFile(new URL("body-paths.ts", import.meta.url), "utf8");
-const viewerSource = await readFile(new URL("viewer.ts", import.meta.url), "utf8");
 const manifest = JSON.parse(
   await readFile(new URL("manifest.json", import.meta.url), "utf8"),
+);
+const mediaDescriptors = JSON.parse(
+  await readFile(new URL("exercise-media.json", import.meta.url), "utf8"),
 );
 const { exerciseInstructions } = await import(
   `${new URL("dist/guidance.js", import.meta.url).href}?build=${Date.now()}`
@@ -63,17 +65,12 @@ const androidOutput = new URL(
   "../../android/app/src/main/assets/strength-motion/body-map-native.svg",
   import.meta.url,
 );
-const mappingBlock = viewerSource.match(
-  /const mediaIds:[\s\S]*?= \{([\s\S]*?)\n\};/,
-)?.[1] ?? "";
-const mediaIds = Object.fromEntries(
-  [...mappingBlock.matchAll(/^\s{2}([a-z0-9_]+): "([A-Za-z0-9]+)",$/gm)]
-    .map((entry) => [entry[1], entry[2]]),
-);
-if (Object.keys(mediaIds).length !== 56) {
-  throw new Error(`Expected 56 exercise media mappings, found ${Object.keys(mediaIds).length}`);
+if (Object.keys(mediaDescriptors).length !== 56) {
+  throw new Error(
+    `Expected 56 exercise media mappings, found ${Object.keys(mediaDescriptors).length}`,
+  );
 }
-const mediaMap = `${JSON.stringify(mediaIds, null, 2)}\n`;
+const mediaMap = `${JSON.stringify(mediaDescriptors, null, 2)}\n`;
 const toolMediaOutput = new URL("exercise-media.json", import.meta.url);
 const androidMediaOutput = new URL(
   "../../android/app/src/main/assets/strength-motion/exercise-media.json",

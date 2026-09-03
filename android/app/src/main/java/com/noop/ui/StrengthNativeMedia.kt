@@ -1,9 +1,14 @@
 package com.noop.ui
 
 import android.content.Context
+import android.graphics.SurfaceTexture
 import android.graphics.drawable.Animatable
+import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.Log
+import android.view.Surface
+import android.view.TextureView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -65,6 +70,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.DecodeResult
@@ -79,12 +88,18 @@ import com.noop.BuildConfig
 import com.noop.R
 import com.noop.data.StrengthExerciseRow
 import com.noop.data.StrengthMuscleStatus
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
 import okio.ForwardingSource
@@ -93,9 +108,15 @@ import org.json.JSONObject
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-private const val STRENGTH_DEMO_MEDIA_HOST = "https://static.exercisedb.dev/media"
+private const val STRENGTH_DEMO_MEDIA_HOST =
+    "https://raw.githubusercontent.com/omercotkd/exercises-gifs/" +
+        "ebf642cd90fdf73a6c73e7127e93b607b12c229e/assets"
 internal const val STRENGTH_MINIMUM_LICENSED_PIXELS = 360
+internal const val STRENGTH_MINIMUM_VIDEO_PIXELS = 720
 internal const val STRENGTH_MAXIMUM_DOWNLOAD_BYTES = 16L * 1_024 * 1_024
+internal const val STRENGTH_MINIMUM_FRAME_DELAY_HUNDREDTHS = 5
+internal const val STRENGTH_MAXIMUM_FRAME_DELAY_HUNDREDTHS = 40
+internal const val STRENGTH_GIF_FRAME_DURATION_PERCENT = 125
 private const val STRENGTH_MINIMUM_PIXELS_PARAMETER = "noop-strength-minimum-pixels"
 
 internal object StrengthExerciseMediaPolicy {
@@ -112,12 +133,142 @@ internal object StrengthExerciseMediaPolicy {
             (header[9].toInt().and(0xff) shl 8)
         return width >= minimumPixels && height >= minimumPixels
     }
+
+    fun mediaUrl(template: String, mediaId: String, extension: String): String? {
+        val cleanTemplate = template.trim()
+        if (
+            cleanTemplate.isEmpty() ||
+            cleanTemplate.contains("\$(") ||
+            !mediaId.matches(Regex("[A-Za-z0-9]+")) ||
+            !extension.matches(Regex("[A-Za-z0-9]+"))
+        ) {
+            return null
+        }
+        val rendered = if (cleanTemplate.contains("{id}")) {
+            cleanTemplate
+                .replace("{id}", mediaId)
+                .replace("{ext}", extension)
+        } else {
+            "${cleanTemplate.trimEnd('/')}/$mediaId.$extension"
+        }
+        return rendered.takeIf { it.startsWith("https://") }
+    }
+
+    /**
+     * ExerciseDB previews contain one-second endpoint frames that can look stalled. Slow the
+     * movement frames slightly while capping those endpoint holds, preserving source frame order.
+     */
+    fun normalizePlaybackDelays(
+        data: ByteArray,
+        maximumDelayHundredths: Int = STRENGTH_MAXIMUM_FRAME_DELAY_HUNDREDTHS,
+    ): ByteArray {
+        if (maximumDelayHundredths !in 1..0xffff || data.size < 14) return data
+        val signature = data.copyOfRange(0, 6).decodeToString()
+        if (signature != "GIF87a" && signature != "GIF89a") return data
+
+        val normalizedDelays = mutableListOf<Pair<Int, Int>>()
+        val logicalScreenPacked = data[10].toInt().and(0xff)
+        val globalColorTableBytes = if (logicalScreenPacked.and(0x80) != 0) {
+            3 * (1 shl (logicalScreenPacked.and(0x07) + 1))
+        } else {
+            0
+        }
+        var offset = 13 + globalColorTableBytes
+        if (offset >= data.size) return data
+
+        while (offset < data.size) {
+            when (data[offset].toInt().and(0xff)) {
+                0x3b -> break
+                0x21 -> {
+                    if (offset + 2 >= data.size) return data
+                    val label = data[offset + 1].toInt().and(0xff)
+                    val blockStart = offset + 2
+                    if (label == 0xf9) {
+                        val blockSize = data[blockStart].toInt().and(0xff)
+                        val terminator = blockStart + blockSize + 1
+                        if (
+                            blockSize != 4 ||
+                            terminator >= data.size ||
+                            data[terminator].toInt().and(0xff) != 0
+                        ) {
+                            return data
+                        }
+                        val delayOffset = blockStart + 2
+                        val delay = data[delayOffset].toInt().and(0xff) or
+                            (data[delayOffset + 1].toInt().and(0xff) shl 8)
+                        val normalizedDelay = (
+                            (delay * STRENGTH_GIF_FRAME_DURATION_PERCENT + 50) / 100
+                            )
+                            .coerceIn(
+                                STRENGTH_MINIMUM_FRAME_DELAY_HUNDREDTHS,
+                                maximumDelayHundredths,
+                            )
+                        if (delay != normalizedDelay) {
+                            normalizedDelays += delayOffset to normalizedDelay
+                        }
+                        offset = terminator + 1
+                    } else {
+                        offset = skipGifSubBlocks(data, blockStart) ?: return data
+                    }
+                }
+                0x2c -> {
+                    if (offset + 9 >= data.size) return data
+                    val imagePacked = data[offset + 9].toInt().and(0xff)
+                    val localColorTableBytes = if (imagePacked.and(0x80) != 0) {
+                        3 * (1 shl (imagePacked.and(0x07) + 1))
+                    } else {
+                        0
+                    }
+                    val imageDataStart = offset + 10 + localColorTableBytes
+                    if (imageDataStart >= data.size) return data
+                    offset = skipGifSubBlocks(data, imageDataStart + 1) ?: return data
+                }
+                else -> return data
+            }
+        }
+
+        if (normalizedDelays.isEmpty()) return data
+        return data.copyOf().also { normalized ->
+            normalizedDelays.forEach { (delayOffset, delay) ->
+                normalized[delayOffset] = delay.and(0xff).toByte()
+                normalized[delayOffset + 1] =
+                    delay.shr(8).and(0xff).toByte()
+            }
+        }
+    }
+
+    private fun skipGifSubBlocks(data: ByteArray, start: Int): Int? {
+        var offset = start
+        while (offset < data.size) {
+            val blockSize = data[offset].toInt().and(0xff)
+            offset += 1
+            if (blockSize == 0) return offset
+            if (offset + blockSize > data.size) return null
+            offset += blockSize
+        }
+        return null
+    }
 }
 
-private data class StrengthExerciseMediaSource(
-    val model: String,
-    val minimumPixels: Int,
+private enum class StrengthExerciseMediaKind {
+    VIDEO,
+    GIF,
+}
+
+internal data class StrengthExerciseMediaDescriptor(
+    val gif: String?,
+    val video: String?,
 )
+
+private data class StrengthExerciseMediaSource(
+    val mediaId: String,
+    val kind: StrengthExerciseMediaKind,
+    val model: String,
+    val assetPath: String? = null,
+    val minimumPixels: Int,
+) {
+    val cacheKey: String = "${kind.name.lowercase()}-$mediaId"
+}
 
 private class StrengthMediaDownloadCapInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
@@ -127,8 +278,19 @@ private class StrengthMediaDownloadCapInterceptor : Interceptor {
             response.close()
             throw IOException("Strength exercise media exceeds the download limit")
         }
+        val boundedBody = StrengthCappedResponseBody(
+            body,
+            STRENGTH_MAXIMUM_DOWNLOAD_BYTES,
+        )
+        val sourceBytes = try {
+            boundedBody.source().use { it.readByteArray() }
+        } catch (error: IOException) {
+            response.close()
+            throw error
+        }
+        val playbackBytes = StrengthExerciseMediaPolicy.normalizePlaybackDelays(sourceBytes)
         return response.newBuilder()
-            .body(StrengthCappedResponseBody(body, STRENGTH_MAXIMUM_DOWNLOAD_BYTES))
+            .body(playbackBytes.toResponseBody(body.contentType()))
             .build()
     }
 }
@@ -207,61 +369,136 @@ internal data class StrengthExerciseFormGuide(
 )
 
 private object StrengthNativeAssets {
-    private var mediaIds: Map<String, String>? = null
+    private var mediaDescriptors: Map<String, StrengthExerciseMediaDescriptor>? = null
     private var formGuides: Map<String, StrengthExerciseFormGuide>? = null
     private var bodyMapTemplate: String? = null
     private var imageLoader: ImageLoader? = null
     private var thumbnailImageLoader: ImageLoader? = null
 
     @Synchronized
-    fun mediaId(context: Context, exerciseId: String): String? {
-        val mapping = mediaIds ?: context.assets
+    fun mediaDescriptor(
+        context: Context,
+        exerciseId: String,
+    ): StrengthExerciseMediaDescriptor? {
+        val mapping = mediaDescriptors ?: context.assets
             .open("strength-motion/exercise-media.json")
             .bufferedReader()
             .use { reader ->
                 val json = JSONObject(reader.readText())
                 buildMap {
-                    json.keys().forEach { key -> put(key, json.getString(key)) }
+                    json.keys().forEach { key ->
+                        val descriptor = json.getJSONObject(key)
+                        put(
+                            key,
+                            StrengthExerciseMediaDescriptor(
+                                gif = descriptor.optString("gif")
+                                    .takeIf(String::isNotBlank),
+                                video = descriptor.optString("video")
+                                    .takeIf(String::isNotBlank),
+                            ),
+                        )
+                    }
                 }
             }
-            .also { mediaIds = it }
+            .also { mediaDescriptors = it }
         return mapping[exerciseId]
     }
 
-    fun mediaSource(context: Context, mediaId: String): StrengthExerciseMediaSource? {
-        val bundled = "strength-motion/media/$mediaId.gif"
-        val hasBundled = runCatching {
-            context.assets.open(bundled).use { it.read() }
-        }.isSuccess
-        if (hasBundled) {
-            return StrengthExerciseMediaSource(
-                model = "file:///android_asset/$bundled",
-                minimumPixels = STRENGTH_MINIMUM_LICENSED_PIXELS,
+    fun mediaSources(
+        context: Context,
+        descriptor: StrengthExerciseMediaDescriptor,
+    ): List<StrengthExerciseMediaSource> {
+        val sources = mutableListOf<StrengthExerciseMediaSource>()
+        descriptor.video?.let { videoId ->
+            appendBundled(
+                context = context,
+                mediaId = videoId,
+                kind = StrengthExerciseMediaKind.VIDEO,
+                extension = "mp4",
+                minimumPixels = STRENGTH_MINIMUM_VIDEO_PIXELS,
+                to = sources,
+            )
+            appendConfigured(
+                template = BuildConfig.STRENGTH_VIDEO_URL_TEMPLATE,
+                mediaId = videoId,
+                kind = StrengthExerciseMediaKind.VIDEO,
+                extension = "mp4",
+                minimumPixels = STRENGTH_MINIMUM_VIDEO_PIXELS,
+                to = sources,
             )
         }
 
-        val template = BuildConfig.STRENGTH_MEDIA_URL_TEMPLATE.trim()
-        if (template.isNotEmpty() && !template.contains("\$(")) {
-            val rendered = if (template.contains("{id}")) {
-                template.replace("{id}", mediaId)
-            } else {
-                "${template.trimEnd('/')}/$mediaId.gif"
-            }
-            if (rendered.startsWith("https://")) {
-                return StrengthExerciseMediaSource(
-                    model = rendered,
-                    minimumPixels = STRENGTH_MINIMUM_LICENSED_PIXELS,
+        descriptor.gif?.let { gifId ->
+            appendBundled(
+                context = context,
+                mediaId = gifId,
+                kind = StrengthExerciseMediaKind.GIF,
+                extension = "gif",
+                minimumPixels = STRENGTH_MINIMUM_LICENSED_PIXELS,
+                to = sources,
+            )
+            appendConfigured(
+                template = BuildConfig.STRENGTH_MEDIA_URL_TEMPLATE,
+                mediaId = gifId,
+                kind = StrengthExerciseMediaKind.GIF,
+                extension = "gif",
+                minimumPixels = STRENGTH_MINIMUM_LICENSED_PIXELS,
+                to = sources,
+            )
+            if (BuildConfig.DEBUG && BuildConfig.ALLOW_DEMO_STRENGTH_MEDIA) {
+                sources += StrengthExerciseMediaSource(
+                    mediaId = gifId,
+                    kind = StrengthExerciseMediaKind.GIF,
+                    model = "$STRENGTH_DEMO_MEDIA_HOST/$gifId.gif",
+                    minimumPixels = 180,
                 )
             }
         }
-        return if (BuildConfig.DEBUG && BuildConfig.ALLOW_DEMO_STRENGTH_MEDIA) {
-            StrengthExerciseMediaSource(
-                model = "$STRENGTH_DEMO_MEDIA_HOST/$mediaId.gif",
-                minimumPixels = 180,
+        return sources.distinctBy(StrengthExerciseMediaSource::model)
+    }
+
+    private fun appendBundled(
+        context: Context,
+        mediaId: String,
+        kind: StrengthExerciseMediaKind,
+        extension: String,
+        minimumPixels: Int,
+        to: MutableList<StrengthExerciseMediaSource>,
+    ) {
+        val assetPath = "strength-motion/media/$mediaId.$extension"
+        val exists = runCatching {
+            context.assets.open(assetPath).use { it.read() }
+        }.isSuccess
+        if (exists) {
+            to += StrengthExerciseMediaSource(
+                mediaId = mediaId,
+                kind = kind,
+                model = "file:///android_asset/$assetPath",
+                assetPath = assetPath,
+                minimumPixels = minimumPixels,
             )
-        } else {
-            null
         }
+    }
+
+    private fun appendConfigured(
+        template: String,
+        mediaId: String,
+        kind: StrengthExerciseMediaKind,
+        extension: String,
+        minimumPixels: Int,
+        to: MutableList<StrengthExerciseMediaSource>,
+    ) {
+        val url = StrengthExerciseMediaPolicy.mediaUrl(
+            template = template,
+            mediaId = mediaId,
+            extension = extension,
+        ) ?: return
+        to += StrengthExerciseMediaSource(
+            mediaId = mediaId,
+            kind = kind,
+            model = url,
+            minimumPixels = minimumPixels,
+        )
     }
 
     @Synchronized
@@ -328,6 +565,331 @@ private object StrengthNativeAssets {
             .also { thumbnailImageLoader = it }
 }
 
+private data class StrengthResolvedVideo(
+    val assetPath: String? = null,
+    val file: File? = null,
+)
+
+private object StrengthVideoCache {
+    private val client = OkHttpClient.Builder().build()
+
+    suspend fun resolve(
+        context: Context,
+        source: StrengthExerciseMediaSource,
+    ): StrengthResolvedVideo? = withContext(Dispatchers.IO) {
+        source.assetPath?.let { assetPath ->
+            val resolved = StrengthResolvedVideo(assetPath = assetPath)
+            val valid = runCatching {
+                context.assets.openFd(assetPath).use { descriptor ->
+                    descriptor.length in 33..STRENGTH_MAXIMUM_DOWNLOAD_BYTES
+                }
+            }.getOrDefault(false) &&
+                meetsPolicy(context, resolved, source.minimumPixels)
+            return@withContext if (valid) {
+                resolved
+            } else {
+                null
+            }
+        }
+
+        if (!source.model.startsWith("https://")) return@withContext null
+        val directory = File(context.cacheDir, "noop-strength-media").apply { mkdirs() }
+        val destination = File(directory, "${source.cacheKey}.mp4")
+        if (
+            destination.isFile &&
+            destination.length() in 33..STRENGTH_MAXIMUM_DOWNLOAD_BYTES
+        ) {
+            val cached = StrengthResolvedVideo(file = destination)
+            if (meetsPolicy(context, cached, source.minimumPixels)) {
+                return@withContext cached
+            }
+            destination.delete()
+        }
+
+        val temporary = File(directory, "${source.cacheKey}.download")
+        runCatching {
+            client.newCall(
+                Request.Builder()
+                    .url(source.model)
+                    .header("Accept", "video/mp4")
+                    .build(),
+            ).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("Video request failed")
+                val body = response.body ?: throw IOException("Video response was empty")
+                if (!StrengthExerciseMediaPolicy.acceptsContentLength(body.contentLength())) {
+                    throw IOException("Strength exercise media exceeds the download limit")
+                }
+                var total = 0L
+                body.byteStream().use { input ->
+                    FileOutputStream(temporary).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > STRENGTH_MAXIMUM_DOWNLOAD_BYTES) {
+                                throw IOException(
+                                    "Strength exercise media exceeds the download limit",
+                                )
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                if (total <= 32) throw IOException("Video response was incomplete")
+            }
+            if (!temporary.renameTo(destination)) {
+                temporary.copyTo(destination, overwrite = true)
+                temporary.delete()
+            }
+            val resolved = StrengthResolvedVideo(file = destination)
+            if (!meetsPolicy(context, resolved, source.minimumPixels)) {
+                destination.delete()
+                throw IOException("Exercise video does not meet the resolution policy")
+            }
+            resolved
+        }.onFailure {
+            temporary.delete()
+            destination.takeIf { file -> file.length() <= 32 }?.delete()
+            Log.w("StrengthNativeMedia", "Exercise video download failed", it)
+        }.getOrNull()
+    }
+
+    private fun meetsPolicy(
+        context: Context,
+        video: StrengthResolvedVideo,
+        minimumPixels: Int,
+    ): Boolean = runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            video.assetPath?.let { path ->
+                context.assets.openFd(path).use { descriptor ->
+                    retriever.setDataSource(
+                        descriptor.fileDescriptor,
+                        descriptor.startOffset,
+                        descriptor.length,
+                    )
+                    videoDimensionsMeetPolicy(retriever, minimumPixels)
+                }
+            } ?: run {
+                retriever.setDataSource(requireNotNull(video.file).absolutePath)
+                videoDimensionsMeetPolicy(retriever, minimumPixels)
+            }
+        } finally {
+            retriever.release()
+        }
+    }.getOrDefault(false)
+
+    private fun videoDimensionsMeetPolicy(
+        retriever: MediaMetadataRetriever,
+        minimumPixels: Int,
+    ): Boolean {
+        val width = retriever.extractMetadata(
+            MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH,
+        )?.toIntOrNull() ?: return false
+        val height = retriever.extractMetadata(
+            MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT,
+        )?.toIntOrNull() ?: return false
+        return width >= minimumPixels && height >= minimumPixels
+    }
+}
+
+private class StrengthLoopingVideoTextureView(
+    context: Context,
+) : TextureView(context), TextureView.SurfaceTextureListener {
+    private var player: MediaPlayer? = null
+    private var playerSurface: Surface? = null
+    private var boundSource: StrengthResolvedVideo? = null
+    private var boundCacheKey: String? = null
+    private var minimumPixels: Int = STRENGTH_MINIMUM_VIDEO_PIXELS
+    private var shouldPlay = false
+    private var prepared = false
+    private var onReady: () -> Unit = {}
+    private var onFailure: () -> Unit = {}
+
+    init {
+        surfaceTextureListener = this
+    }
+
+    fun bind(
+        source: StrengthResolvedVideo,
+        cacheKey: String,
+        minimumPixels: Int,
+        shouldPlay: Boolean,
+        onReady: () -> Unit,
+        onFailure: () -> Unit,
+    ) {
+        this.onReady = onReady
+        this.onFailure = onFailure
+        this.shouldPlay = shouldPlay
+        val changed =
+            boundSource != source ||
+                boundCacheKey != cacheKey ||
+                this.minimumPixels != minimumPixels
+        if (changed) {
+            releasePlayer()
+            boundSource = source
+            boundCacheKey = cacheKey
+            this.minimumPixels = minimumPixels
+            if (isAvailable) preparePlayer()
+        } else {
+            syncPlayback()
+        }
+    }
+
+    fun release() {
+        releasePlayer()
+        boundSource = null
+        boundCacheKey = null
+    }
+
+    private fun preparePlayer() {
+        val source = boundSource ?: return
+        val texture = surfaceTexture ?: return
+        val expectedKey = boundCacheKey
+        runCatching {
+            val surface = Surface(texture)
+            playerSurface = surface
+            MediaPlayer().also { mediaPlayer ->
+                player = mediaPlayer
+                mediaPlayer.isLooping = true
+                mediaPlayer.setVolume(0f, 0f)
+                source.assetPath?.let { path ->
+                    context.assets.openFd(path).use { descriptor ->
+                        mediaPlayer.setDataSource(
+                            descriptor.fileDescriptor,
+                            descriptor.startOffset,
+                            descriptor.length,
+                        )
+                    }
+                } ?: mediaPlayer.setDataSource(
+                    requireNotNull(source.file).absolutePath,
+                )
+                mediaPlayer.setSurface(surface)
+                mediaPlayer.setOnPreparedListener { readyPlayer ->
+                    if (expectedKey != boundCacheKey) return@setOnPreparedListener
+                    if (
+                        readyPlayer.videoWidth < minimumPixels ||
+                        readyPlayer.videoHeight < minimumPixels
+                    ) {
+                        failCurrent()
+                        return@setOnPreparedListener
+                    }
+                    prepared = true
+                    readyPlayer.seekTo(0)
+                    onReady()
+                    syncPlayback()
+                }
+                mediaPlayer.setOnErrorListener { _, _, _ ->
+                    if (expectedKey == boundCacheKey) failCurrent()
+                    true
+                }
+                mediaPlayer.prepareAsync()
+            }
+        }.onFailure {
+            Log.w("StrengthNativeMedia", "Exercise video playback failed", it)
+            failCurrent()
+        }
+    }
+
+    private fun syncPlayback() {
+        val mediaPlayer = player ?: return
+        if (!prepared) return
+        runCatching {
+            if (shouldPlay) {
+                mediaPlayer.start()
+            } else {
+                if (mediaPlayer.isPlaying) mediaPlayer.pause()
+                if (mediaPlayer.currentPosition > 250) mediaPlayer.seekTo(0)
+            }
+        }.onFailure {
+            failCurrent()
+        }
+    }
+
+    private fun failCurrent() {
+        releasePlayer()
+        onFailure()
+    }
+
+    private fun releasePlayer() {
+        prepared = false
+        player?.runCatching { setSurface(null) }
+        player?.release()
+        player = null
+        playerSurface?.release()
+        playerSurface = null
+    }
+
+    override fun onSurfaceTextureAvailable(
+        surface: SurfaceTexture,
+        width: Int,
+        height: Int,
+    ) {
+        preparePlayer()
+    }
+
+    override fun onSurfaceTextureSizeChanged(
+        surface: SurfaceTexture,
+        width: Int,
+        height: Int,
+    ) = Unit
+
+    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+        releasePlayer()
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+}
+
+@Composable
+private fun StrengthExerciseVideo(
+    source: StrengthExerciseMediaSource,
+    requestVersion: Int,
+    shouldPlay: Boolean,
+    onLoading: () -> Unit,
+    onSuccess: () -> Unit,
+    onError: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var resolved by remember(source.model, requestVersion) {
+        mutableStateOf<StrengthResolvedVideo?>(null)
+    }
+    var playerView by remember(source.model, requestVersion) {
+        mutableStateOf<StrengthLoopingVideoTextureView?>(null)
+    }
+
+    LaunchedEffect(source.model, requestVersion) {
+        onLoading()
+        resolved = StrengthVideoCache.resolve(context.applicationContext, source)
+        if (resolved == null) onError()
+    }
+    DisposableEffect(source.model, requestVersion) {
+        onDispose { playerView?.release() }
+    }
+
+    resolved?.let { video ->
+        AndroidView(
+            factory = { viewContext ->
+                StrengthLoopingVideoTextureView(viewContext).also { playerView = it }
+            },
+            update = { view ->
+                view.bind(
+                    source = video,
+                    cacheKey = source.cacheKey,
+                    minimumPixels = source.minimumPixels,
+                    shouldPlay = shouldPlay,
+                    onReady = onSuccess,
+                    onFailure = onError,
+                )
+            },
+            modifier = modifier,
+        )
+    }
+}
+
 @Composable
 internal fun StrengthNativeExerciseMedia(
     exercise: StrengthExerciseRow,
@@ -343,13 +905,13 @@ internal fun StrengthNativeExerciseMedia(
     val imageLoader = remember(context.applicationContext) {
         StrengthNativeAssets.imageLoader(context)
     }
-    val mediaId = remember(exercise.id) {
-        StrengthNativeAssets.mediaId(context, exercise.id)
+    val descriptor = remember(exercise.id) {
+        StrengthNativeAssets.mediaDescriptor(context, exercise.id)
     }
-    val mediaSource = remember(mediaId, context.applicationContext) {
-        mediaId?.let { StrengthNativeAssets.mediaSource(context, it) }
+    val mediaSources = remember(descriptor, context.applicationContext) {
+        descriptor?.let { StrengthNativeAssets.mediaSources(context, it) }.orEmpty()
     }
-    if (mediaId == null || mediaSource == null) {
+    if (descriptor == null || mediaSources.isEmpty()) {
         fallback()
         return
     }
@@ -360,22 +922,60 @@ internal fun StrengthNativeExerciseMedia(
     var animation by remember(exercise.id) { mutableStateOf<Animatable?>(null) }
     var showInfo by remember(exercise.id) { mutableStateOf(false) }
     var requestVersion by remember(exercise.id) { mutableStateOf(0) }
+    var candidateIndex by remember(exercise.id) { mutableStateOf(0) }
+    val mediaSource = mediaSources.getOrNull(candidateIndex)
+    if (mediaSource == null) {
+        fallback()
+        return
+    }
     val formGuide = remember(exercise.id) {
         StrengthNativeAssets.formGuide(context, exercise.id)
     }
     val shape = RoundedCornerShape(8.dp)
-
-    LaunchedEffect(paused, reduceMotion, animation) {
-        if (paused || reduceMotion) animation?.stop() else animation?.start()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleActive by remember(lifecycleOwner) {
+        mutableStateOf(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+        )
     }
-    LaunchedEffect(exercise.id, requestVersion, loading) {
-        if (!loading) return@LaunchedEffect
-        delay(6_000)
-        if (loading) {
-            animation?.stop()
+    val mediaPaused = paused || reduceMotion || !lifecycleActive
+    val sourceModel = mediaSource.model
+    val advanceSource = {
+        animation?.stop()
+        animation = null
+        if (
+            mediaSources.getOrNull(candidateIndex)?.model == sourceModel &&
+            candidateIndex < mediaSources.lastIndex
+        ) {
+            candidateIndex += 1
+            loading = true
+            failed = false
+        } else if (mediaSources.getOrNull(candidateIndex)?.model == sourceModel) {
             loading = false
             failed = true
         }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleActive = lifecycleOwner.lifecycle.currentState
+                .isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(mediaPaused, animation) {
+        if (mediaPaused) animation?.stop() else animation?.start()
+    }
+    LaunchedEffect(sourceModel, requestVersion) {
+        loading = true
+        failed = false
+        animation = null
+    }
+    LaunchedEffect(sourceModel, requestVersion, loading) {
+        if (!loading) return@LaunchedEffect
+        delay(12_000)
+        if (loading) advanceSource()
     }
     DisposableEffect(animation) {
         onDispose { animation?.stop() }
@@ -384,14 +984,10 @@ internal fun StrengthNativeExerciseMedia(
     BoxWithConstraints(
         modifier = modifier
             .clip(shape)
-            .background(Palette.surfaceInset, shape)
+            .background(Color.White, shape)
             .border(1.dp, Palette.hairline, shape),
     ) {
-        val controlRailWidth = if (showsSizeButton || showsTechniqueButton) 46.dp else 40.dp
-        val mediaSize = minOf(
-            maxHeight - 12.dp,
-            maxWidth - (controlRailWidth * 2) - 16.dp,
-        ).coerceAtLeast(0.dp)
+        val mediaSize = minOf(maxHeight, maxWidth).coerceAtLeast(0.dp)
         val mediaPixels = with(LocalDensity.current) {
             mediaSize.roundToPx().coerceAtLeast(1)
         }
@@ -399,61 +995,72 @@ internal fun StrengthNativeExerciseMedia(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(mediaSize)
-                .clip(RoundedCornerShape(6.dp))
                 .background(Color.White)
-                .border(
-                    1.dp,
-                    Color.Black.copy(alpha = 0.08f),
-                    RoundedCornerShape(6.dp),
-                ),
+                .clickable(enabled = !reduceMotion, role = Role.Button) {
+                    paused = !paused
+                },
             contentAlignment = Alignment.Center,
         ) {
             if (!failed) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(mediaSource.model)
-                        .memoryCacheKey("strength-exercise-v2-$mediaId")
-                        .diskCacheKey("strength-exercise-v2-$mediaId")
-                        .setParameter("request-version", requestVersion)
-                        .setParameter(
-                            STRENGTH_MINIMUM_PIXELS_PARAMETER,
-                            mediaSource.minimumPixels,
-                        )
-                        .size(mediaPixels)
-                        .build(),
-                    imageLoader = imageLoader,
-                    contentDescription = stringResource(R.string.strength_exercise_guide),
-                    contentScale = ContentScale.Fit,
-                    filterQuality = FilterQuality.High,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            enabled = !reduceMotion,
-                            role = Role.Button,
-                        ) {
-                            paused = !paused
-                            if (paused) animation?.stop() else animation?.start()
+                when (mediaSource.kind) {
+                    StrengthExerciseMediaKind.VIDEO -> StrengthExerciseVideo(
+                        source = mediaSource,
+                        requestVersion = requestVersion,
+                        shouldPlay = !mediaPaused,
+                        onLoading = {
+                            loading = true
+                            failed = false
                         },
-                    onLoading = {
-                        loading = true
-                        failed = false
-                    },
-                    onSuccess = {
-                        loading = false
-                        failed = false
-                        animation = it.result.drawable as? Animatable
-                        if (paused || reduceMotion) animation?.stop() else animation?.start()
-                    },
-                    onError = {
-                        loading = false
-                        failed = true
-                        Log.e(
-                            "StrengthNativeMedia",
-                            "Exercise media decode failed",
-                            it.result.throwable,
-                        )
-                    },
-                )
+                        onSuccess = {
+                            loading = false
+                            failed = false
+                        },
+                        onError = advanceSource,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    StrengthExerciseMediaKind.GIF -> AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(mediaSource.model)
+                            .memoryCacheKey(
+                                "strength-exercise-v4-${mediaSource.cacheKey}",
+                            )
+                            .diskCacheKey(
+                                "strength-exercise-v4-${mediaSource.cacheKey}",
+                            )
+                            .setParameter("request-version", requestVersion)
+                            .setParameter(
+                                STRENGTH_MINIMUM_PIXELS_PARAMETER,
+                                mediaSource.minimumPixels,
+                            )
+                            .size(mediaPixels)
+                            .build(),
+                        imageLoader = imageLoader,
+                        contentDescription = stringResource(
+                            R.string.strength_exercise_guide,
+                        ),
+                        contentScale = ContentScale.Fit,
+                        filterQuality = FilterQuality.High,
+                        modifier = Modifier.fillMaxSize(),
+                        onLoading = {
+                            loading = true
+                            failed = false
+                        },
+                        onSuccess = {
+                            loading = false
+                            failed = false
+                            animation = it.result.drawable as? Animatable
+                            if (mediaPaused) animation?.stop() else animation?.start()
+                        },
+                        onError = {
+                            Log.w(
+                                "StrengthNativeMedia",
+                                "Exercise media decode failed",
+                                it.result.throwable,
+                            )
+                            advanceSource()
+                        },
+                    )
+                }
             }
             if (loading) {
                 CircularProgressIndicator(
@@ -464,28 +1071,23 @@ internal fun StrengthNativeExerciseMedia(
                 )
             }
             if (failed) {
-                StrengthMediaControl(
-                    imageVector = Icons.Filled.Refresh,
-                    description = stringResource(R.string.today_weather_retry),
-                    alignment = Alignment.Center,
-                    visualSize = 40.dp,
-                    onClick = {
-                        requestVersion += 1
-                        failed = false
-                        loading = true
-                    },
+                Icon(
+                    Icons.Filled.FitnessCenter,
+                    contentDescription = null,
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(30.dp),
                 )
             }
         }
         if (!loading && !failed) {
             StrengthMediaControl(
-                imageVector = if (paused || reduceMotion) {
+                imageVector = if (mediaPaused) {
                     Icons.Filled.PlayArrow
                 } else {
                     Icons.Filled.Pause
                 },
                 description = stringResource(
-                    if (paused || reduceMotion) {
+                    if (mediaPaused) {
                         R.string.strength_play_guide
                     } else {
                         R.string.strength_pause_guide
@@ -495,7 +1097,19 @@ internal fun StrengthNativeExerciseMedia(
                 onClick = {
                     if (reduceMotion) return@StrengthMediaControl
                     paused = !paused
-                    if (paused) animation?.stop() else animation?.start()
+                },
+            )
+        }
+        if (failed) {
+            StrengthMediaControl(
+                imageVector = Icons.Filled.Refresh,
+                description = stringResource(R.string.today_weather_retry),
+                alignment = Alignment.BottomEnd,
+                onClick = {
+                    requestVersion += 1
+                    candidateIndex = 0
+                    failed = false
+                    loading = true
                 },
             )
         }

@@ -117,6 +117,65 @@ final class StrengthWorkoutPlanningTests: XCTestCase {
         XCTAssertEqual(focus.first?.targetRepsMax, 12)
     }
 
+    func testTrainingEmphasisReordersPrioritiesWithoutChangingTheExercisePool() {
+        let balanced = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 4],
+                physiqueGoal: .balanced
+            )
+        )
+        let legacy = StrengthAdaptivePlanner.program(for: [1, 4])
+        XCTAssertEqual(balanced, legacy)
+
+        let vTaper = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 4],
+                physiqueGoal: .vTaper
+            )
+        )
+        XCTAssertEqual(vTaper.first?.exercises.first?.exerciseId, "seated_cable_row")
+        XCTAssertEqual(
+            Set(vTaper.first?.exercises.map(\.exerciseId) ?? []),
+            Set(balanced.first?.exercises.map(\.exerciseId) ?? [])
+        )
+
+        let lowerBody = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 4],
+                physiqueGoal: .lowerBodyGlutes
+            )
+        )
+        XCTAssertEqual(
+            lowerBody.first?.exercises.prefix(2).map(\.exerciseId),
+            ["barbell_back_squat", "romanian_deadlift"]
+        )
+
+        let explicitChest = StrengthAdaptivePlanner.program(
+            for: StrengthProgramRequest(
+                weekdays: [1, 4],
+                physiqueGoal: .lowerBodyGlutes,
+                focusMuscles: ["chest"]
+            )
+        )
+        XCTAssertEqual(
+            explicitChest.first?.exercises.first?.exerciseId,
+            "barbell_bench_press",
+            "A direct muscle choice must override the broader training emphasis."
+        )
+
+        let catalog = StrengthTrainingContract.builtInExercises
+        let focused = StrengthAdaptivePlanner.focusWorkout(
+            exercises: catalog.filter {
+                ["barbell_bench_press", "seated_cable_row"].contains($0.id)
+            },
+            experience: .intermediate,
+            style: .balanced,
+            physiqueGoal: .vTaper,
+            sessionMinutes: 30
+        )
+        XCTAssertEqual(focused.first?.exerciseId, "seated_cable_row")
+    }
+
     func testMuscleStatusUsesCompletedSetExposureAndFadesOverSeventyTwoHours() throws {
         let bench = try XCTUnwrap(
             StrengthTrainingContract.builtInExercises.first {

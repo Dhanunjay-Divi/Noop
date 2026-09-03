@@ -33,10 +33,21 @@ public enum StrengthTrainingStyle: String, CaseIterable, Codable, Sendable {
     case conditioning
 }
 
+public enum StrengthPhysiqueGoal: String, CaseIterable, Codable, Sendable {
+    case balanced
+    case buildSize
+    case leanConditioned
+    case vTaper
+    case upperBody
+    case lowerBodyGlutes
+    case athletic
+}
+
 public struct StrengthProgramRequest: Equatable, Sendable {
     public let weekdays: [Int]
     public let experience: StrengthTrainingExperience
     public let style: StrengthTrainingStyle
+    public let physiqueGoal: StrengthPhysiqueGoal
     public let sessionMinutes: Int
     public let focusMuscles: [String]
 
@@ -44,12 +55,14 @@ public struct StrengthProgramRequest: Equatable, Sendable {
         weekdays: [Int],
         experience: StrengthTrainingExperience = .beginner,
         style: StrengthTrainingStyle = .balanced,
+        physiqueGoal: StrengthPhysiqueGoal = .balanced,
         sessionMinutes: Int = 45,
         focusMuscles: [String] = []
     ) {
         self.weekdays = weekdays
         self.experience = experience
         self.style = style
+        self.physiqueGoal = physiqueGoal
         self.sessionMinutes = sessionMinutes
         self.focusMuscles = focusMuscles
     }
@@ -242,9 +255,13 @@ public enum StrengthAdaptivePlanner {
         }
         return zip(days, specs).enumerated().map { routineIndex, item in
             let (day, spec) = item
+            let goalAdjusted = exercisesPrioritizing(
+                request.physiqueGoal,
+                in: spec.1
+            )
             let focused = exercisesPrioritizing(
                 request.focusMuscles,
-                in: spec.1,
+                in: goalAdjusted,
                 routineIndex: routineIndex
             )
             let exerciseLimit: Int
@@ -269,12 +286,14 @@ public enum StrengthAdaptivePlanner {
         exercises: [StrengthExerciseRow],
         experience: StrengthTrainingExperience,
         style: StrengthTrainingStyle,
+        physiqueGoal: StrengthPhysiqueGoal = .balanced,
         sessionMinutes: Int
     ) -> [StrengthProgramExercise] {
         let request = StrengthProgramRequest(
             weekdays: [],
             experience: experience,
             style: style,
+            physiqueGoal: physiqueGoal,
             sessionMinutes: sessionMinutes
         )
         let limit: Int
@@ -284,9 +303,13 @@ public enum StrengthAdaptivePlanner {
         case 60: limit = 5
         default: limit = 6
         }
-        return exercises.prefix(limit).enumerated().map { index, exercise in
+        let prioritized = exercisesPrioritizing(
+            physiqueGoal,
+            in: exercises.map { starterExercise(for: $0) }
+        )
+        return prioritized.prefix(limit).enumerated().map { index, exercise in
             customized(
-                starterExercise(for: exercise),
+                exercise,
                 position: index,
                 request: request
             )
@@ -436,6 +459,78 @@ public enum StrengthAdaptivePlanner {
     }
 
     private static func exercisesPrioritizing(
+        _ goal: StrengthPhysiqueGoal,
+        in exercises: [StrengthProgramExercise]
+    ) -> [StrengthProgramExercise] {
+        let priorities: (muscles: Set<String>, movements: [String])
+        switch goal {
+        case .balanced:
+            return exercises
+        case .buildSize:
+            priorities = (
+                ["chest", "back", "shoulders", "glutes", "quadriceps", "hamstrings"],
+                ["squat", "hinge", "horizontal_push", "vertical_push",
+                 "horizontal_pull", "vertical_pull"]
+            )
+        case .leanConditioned:
+            priorities = (
+                [],
+                ["cardio", "carry", "lunge", "squat", "horizontal_pull"]
+            )
+        case .vTaper:
+            priorities = (
+                ["back", "shoulders"],
+                ["vertical_pull", "horizontal_pull", "vertical_push"]
+            )
+        case .upperBody:
+            priorities = (
+                ["chest", "back", "shoulders", "biceps", "triceps"],
+                ["horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"]
+            )
+        case .lowerBodyGlutes:
+            priorities = (
+                ["glutes", "quadriceps", "hamstrings", "calves"],
+                ["squat", "hinge", "lunge"]
+            )
+        case .athletic:
+            priorities = (
+                ["glutes", "quadriceps", "hamstrings", "back", "core"],
+                ["carry", "lunge", "squat", "hinge", "horizontal_pull", "vertical_pull"]
+            )
+        }
+        let catalog = Dictionary(
+            uniqueKeysWithValues: StrengthTrainingContract.builtInExercises.map {
+                ($0.id, $0)
+            }
+        )
+        return exercises.enumerated().sorted { lhs, rhs in
+            let left = priorityScore(
+                catalog[lhs.element.exerciseId],
+                muscles: priorities.muscles,
+                movements: priorities.movements
+            )
+            let right = priorityScore(
+                catalog[rhs.element.exerciseId],
+                muscles: priorities.muscles,
+                movements: priorities.movements
+            )
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }.map(\.element)
+    }
+
+    private static func priorityScore(
+        _ exercise: StrengthExerciseRow?,
+        muscles: Set<String>,
+        movements: [String]
+    ) -> Int {
+        guard let exercise else { return 0 }
+        let muscleScore = muscles.contains(exercise.primaryMuscle) ? 100 : 0
+        let movementScore = movements.firstIndex(of: exercise.movementPattern)
+            .map { movements.count - $0 } ?? 0
+        return muscleScore + movementScore
+    }
+
+    private static func exercisesPrioritizing(
         _ requestedMuscles: [String],
         in exercises: [StrengthProgramExercise],
         routineIndex: Int
@@ -448,10 +543,17 @@ public enum StrengthAdaptivePlanner {
 
         let catalog = StrengthTrainingContract.builtInExercises
         let existingIDs = Set(exercises.map(\.exerciseId))
-        let alreadyFocused = catalog.contains { exercise in
+        let existingFocused = catalog.filter { exercise in
             existingIDs.contains(exercise.id) && muscles.contains(exercise.primaryMuscle)
         }
-        guard !alreadyFocused else { return exercises }
+        if !existingFocused.isEmpty {
+            let focusedIDs = Set(existingFocused.map(\.id))
+            return exercises.enumerated().sorted { lhs, rhs in
+                let left = focusedIDs.contains(lhs.element.exerciseId)
+                let right = focusedIDs.contains(rhs.element.exerciseId)
+                return left == right ? lhs.offset < rhs.offset : left && !right
+            }.map(\.element)
+        }
 
         let candidates = catalog.filter {
             muscles.contains($0.primaryMuscle)

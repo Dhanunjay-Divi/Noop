@@ -65,9 +65,11 @@ struct StrengthTrainerView: View {
     }
 
     @EnvironmentObject private var repo: Repository
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
     @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
 
     @State private var snapshot: StrengthTrainerSnapshot?
     @State private var loading = true
@@ -95,6 +97,8 @@ struct StrengthTrainerView: View {
         StrengthTrainingExperience.beginner.rawValue
     @AppStorage("strength.profile.style") private var trainingStyleRaw =
         StrengthTrainingStyle.balanced.rawValue
+    @AppStorage("strength.profile.physiqueGoal") private var physiqueGoalRaw =
+        StrengthPhysiqueGoal.balanced.rawValue
     @AppStorage("strength.profile.sessionMinutes") private var sessionMinutes = 45
     #if DEBUG
     @State private var didHandleDemoEditorRoute = false
@@ -138,6 +142,7 @@ struct StrengthTrainerView: View {
                             activeSessionCard(active)
                         }
                         todayPlanSection(snapshot)
+                        sessionSignalsSection
                         muscleCoachSection(snapshot)
                         startSection(snapshot)
                         weeklyGoalsSection(snapshot)
@@ -283,6 +288,12 @@ struct StrengthTrainerView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .onAppear {
+            model.startRealtimeHR()
+        }
+        .onDisappear {
+            model.stopRealtimeHR()
+        }
     }
 
     private var gymTabPicker: some View {
@@ -360,6 +371,93 @@ struct StrengthTrainerView: View {
                 }
             }
         }
+    }
+
+    private var sessionSignalsSection: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { timeline in
+            let daily = repo.localCalendarToday
+            let liveBPM = freshLiveBPM(at: timeline.date)
+            let effortScale = EffortScale(rawValue: effortScaleRaw) ?? .hundred
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                SectionHeader("Session signals", overline: "Measured context")
+                NoopCard(tint: StrandPalette.metricCyan) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: NoopMetrics.space3),
+                            GridItem(.flexible(), spacing: NoopMetrics.space3),
+                        ],
+                        alignment: .leading,
+                        spacing: NoopMetrics.space3
+                    ) {
+                        strengthSignal(
+                            title: "Heart rate",
+                            value: liveBPM.map(String.init) ?? "Waiting",
+                            unit: liveBPM == nil ? "fresh sensor data" : "bpm · live",
+                            tint: StrandPalette.statusCritical
+                        )
+                        strengthSignal(
+                            title: "Effort",
+                            value: daily?.strain.map {
+                                UnitFormatter.effortDisplay($0, scale: effortScale)
+                            } ?? "No data",
+                            unit: "of \(UnitFormatter.effortScaleMax(effortScale)) today",
+                            tint: StrandPalette.effortColor
+                        )
+                        strengthSignal(
+                            title: "Recovery",
+                            value: daily?.recovery.map {
+                                String(format: "%.0f%%", $0)
+                            } ?? "No data",
+                            unit: "today’s measured context",
+                            tint: StrandPalette.chargeColor
+                        )
+                        strengthSignal(
+                            title: "Sleep",
+                            value: daily?.totalSleepMin.map {
+                                String(format: "%.1f h", $0 / 60)
+                            } ?? "No data",
+                            unit: "measured sleep",
+                            tint: StrandPalette.restBright
+                        )
+                    }
+
+                    Text("Heart rate describes cardiovascular response. Reps and load come only from what you record.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func strengthSignal(
+        title: LocalizedStringKey,
+        value: String,
+        unit: String,
+        tint: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Text(value)
+                .font(StrandFont.number(22))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
+            Text(unit)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 67, alignment: .leading)
+    }
+
+    private func freshLiveBPM(at now: Date) -> Int? {
+        guard let sample = model.live.heartRateSample else { return nil }
+        let age = now.timeIntervalSince(sample.receivedAt)
+        guard age >= -5, age <= 15 else { return nil }
+        return model.bpm
     }
 
     private func todayRoutineCard(
@@ -1149,10 +1247,12 @@ struct StrengthTrainerView: View {
         do {
             let experience = StrengthTrainingExperience(rawValue: experienceRaw) ?? .beginner
             let style = StrengthTrainingStyle(rawValue: trainingStyleRaw) ?? .balanced
+            let physiqueGoal = StrengthPhysiqueGoal(rawValue: physiqueGoalRaw) ?? .balanced
             let templates = StrengthAdaptivePlanner.focusWorkout(
                 exercises: exercises,
                 experience: experience,
                 style: style,
+                physiqueGoal: physiqueGoal,
                 sessionMinutes: sessionMinutes
             )
             let now = Int(Date().timeIntervalSince1970)
@@ -1594,7 +1694,8 @@ struct StrengthTrainerView: View {
             let loaded = try await repo.strengthTrainerSnapshot()
             snapshot = loaded
             errorMessage = nil
-            if loaded.routines.isEmpty,
+            if exerciseGuide == nil,
+               loaded.routines.isEmpty,
                loaded.activeSession == nil,
                !didOfferProgramBuilder {
                 didOfferProgramBuilder = true
@@ -1870,6 +1971,8 @@ private struct StrengthProgramBuilder: View {
         StrengthTrainingExperience.beginner.rawValue
     @AppStorage("strength.profile.style") private var trainingStyleRaw =
         StrengthTrainingStyle.balanced.rawValue
+    @AppStorage("strength.profile.physiqueGoal") private var physiqueGoalRaw =
+        StrengthPhysiqueGoal.balanced.rawValue
     @AppStorage("strength.profile.sessionMinutes") private var sessionMinutes = 45
 
     private var program: [StrengthProgramRoutine] {
@@ -1878,6 +1981,7 @@ private struct StrengthProgramBuilder: View {
                 weekdays: Array(selectedDays),
                 experience: StrengthTrainingExperience(rawValue: experienceRaw) ?? .beginner,
                 style: StrengthTrainingStyle(rawValue: trainingStyleRaw) ?? .balanced,
+                physiqueGoal: StrengthPhysiqueGoal(rawValue: physiqueGoalRaw) ?? .balanced,
                 sessionMinutes: sessionMinutes,
                 focusMuscles: Array(focusMuscles)
             )
@@ -1894,6 +1998,9 @@ private struct StrengthProgramBuilder: View {
                 SectionHeader("About your training", overline: "Starting point")
                 NoopCard {
                     VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        Text("Experience")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
                         Picker("Experience", selection: $experienceRaw) {
                             Text("Beginner").tag(StrengthTrainingExperience.beginner.rawValue)
                             Text("Intermediate").tag(
@@ -1907,6 +2014,9 @@ private struct StrengthProgramBuilder: View {
 
                         Divider().overlay(StrandPalette.hairline)
 
+                        Text("Workout style")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
                         Picker("Workout style", selection: $trainingStyleRaw) {
                             Text("Balanced fitness").tag(StrengthTrainingStyle.balanced.rawValue)
                             Text("Strength").tag(StrengthTrainingStyle.strength.rawValue)
@@ -1916,6 +2026,37 @@ private struct StrengthProgramBuilder: View {
                             )
                         }
                         .pickerStyle(.menu)
+
+                        Divider().overlay(StrandPalette.hairline)
+
+                        Text("Training emphasis")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Picker("Training emphasis", selection: $physiqueGoalRaw) {
+                            Text("Balanced").tag(StrengthPhysiqueGoal.balanced.rawValue)
+                            Text("Build size").tag(StrengthPhysiqueGoal.buildSize.rawValue)
+                            Text("Lean & conditioned").tag(
+                                StrengthPhysiqueGoal.leanConditioned.rawValue
+                            )
+                            Text("V-taper").tag(StrengthPhysiqueGoal.vTaper.rawValue)
+                            Text("Upper-body emphasis").tag(
+                                StrengthPhysiqueGoal.upperBody.rawValue
+                            )
+                            Text("Lower-body & glutes").tag(
+                                StrengthPhysiqueGoal.lowerBodyGlutes.rawValue
+                            )
+                            Text("Athletic performance").tag(
+                                StrengthPhysiqueGoal.athletic.rawValue
+                            )
+                        }
+                        .pickerStyle(.menu)
+
+                        Text(
+                            "Workout style sets reps and rest. Emphasis changes exercise priority, not bone structure or where body fat is stored."
+                        )
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                         Divider().overlay(StrandPalette.hairline)
 
@@ -2141,7 +2282,7 @@ private struct StrengthProgramBuilder: View {
                 let routine = StrengthRoutineRow(
                     id: routineID,
                     name: template.name,
-                    note: "Adaptive NOOP plan for \(experienceRaw), \(trainingStyleRaw), \(sessionMinutes)-minute sessions. Change any exercise or target to fit your training.",
+                    note: "Adaptive NOOP plan for \(experienceRaw), \(trainingStyleRaw), \(physiqueGoalRaw) emphasis, \(sessionMinutes)-minute sessions. Exercise emphasis does not change bone structure or body-fat distribution. Change any exercise or target to fit your training.",
                     scheduledWeekdaysJSON: StrengthTrainingContract.encodeScheduledWeekdays(
                         [template.isoWeekday]
                     ),
@@ -2303,6 +2444,9 @@ private struct StrengthSessionEditor: View {
                     exercisePicker = true
                 }
                 footerActions
+                Color.clear
+                    .frame(height: 24)
+                    .accessibilityHidden(true)
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2680,11 +2824,13 @@ private struct StrengthSessionEditor: View {
             HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space3) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(strengthExerciseName(value.exercise))
-                        .font(StrandFont.title1)
+                        .font(StrandFont.title2)
                         .foregroundStyle(StrandPalette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(strengthDescriptorPair(value.exercise))
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 if let group = value.supersetGroup {
@@ -2699,34 +2845,6 @@ private struct StrengthSessionEditor: View {
                 }
             }
 
-            StrengthExerciseMotionView(exercise: value.exercise)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 48)
-                        .onEnded { gesture in
-                            guard abs(gesture.translation.width)
-                                    > abs(gesture.translation.height) * 1.25
-                            else { return }
-                            moveCurrentBlock(by: gesture.translation.width < 0 ? 1 : -1)
-                        }
-                )
-
-            exercisePerformanceContext(for: value)
-
-            if let guidance = progressionGuidance(for: value) {
-                Label(guidance, systemImage: "lightbulb.fill")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.metricCyan)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let note = routineNote(for: value), !note.isEmpty {
-                Label(note, systemImage: "list.bullet.clipboard")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             if let next {
                 NoopCard(tint: StrandPalette.effortColor) {
                     HStack(spacing: NoopMetrics.space3) {
@@ -2737,9 +2855,11 @@ private struct StrengthSessionEditor: View {
                             Text(currentTargetLabel(next, in: value))
                                 .font(StrandFont.headline)
                                 .foregroundStyle(StrandPalette.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(strengthSetType(next.setType))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
                         if next.reps == nil, let duration = next.durationS, duration > 0 {
@@ -2787,6 +2907,34 @@ private struct StrengthSessionEditor: View {
                 Label("All sets complete", systemImage: "checkmark.circle.fill")
                     .font(StrandFont.headline)
                     .foregroundStyle(StrandPalette.statusPositive)
+            }
+
+            StrengthExerciseMotionView(exercise: value.exercise)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 48)
+                        .onEnded { gesture in
+                            guard abs(gesture.translation.width)
+                                    > abs(gesture.translation.height) * 1.25
+                            else { return }
+                            moveCurrentBlock(by: gesture.translation.width < 0 ? 1 : -1)
+                        }
+                )
+
+            exercisePerformanceContext(for: value)
+
+            if let guidance = progressionGuidance(for: value) {
+                Label(guidance, systemImage: "lightbulb.fill")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.metricCyan)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let note = routineNote(for: value), !note.isEmpty {
+                Label(note, systemImage: "list.bullet.clipboard")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -4266,7 +4414,10 @@ private struct StrengthRoutineEditor: View {
                             Text("appwide.gym.rest_5_min_short").tag(300)
                         }
                     } label: {
-                        Label(restLabel(item.wrappedValue.restSeconds), systemImage: "timer")
+                        compactMenuLabel(
+                            restLabel(item.wrappedValue.restSeconds),
+                            systemImage: "timer"
+                        )
                     }
                     .buttonStyle(NoopButtonStyle(.secondary))
 
@@ -4282,8 +4433,10 @@ private struct StrengthRoutineEditor: View {
                             Text("appwide.gym.no_automatic_change").tag("none")
                         }
                     } label: {
-                        Label(progressionLabel(item.wrappedValue.plan.progression),
-                              systemImage: "chart.line.uptrend.xyaxis")
+                        compactMenuLabel(
+                            progressionLabel(item.wrappedValue.plan.progression),
+                            systemImage: "chart.line.uptrend.xyaxis"
+                        )
                     }
                     .buttonStyle(NoopButtonStyle(.secondary))
 
@@ -4301,7 +4454,7 @@ private struct StrengthRoutineEditor: View {
                             }
                         }
                     } label: {
-                        Label(
+                        compactMenuLabel(
                             item.wrappedValue.plan.supersetGroup.map {
                                 String.localizedStringWithFormat(
                                     String(localized: "appwide.gym.superset_format"),
@@ -4520,6 +4673,27 @@ private struct StrengthRoutineEditor: View {
 
     private func restLabel(_ seconds: Int) -> String {
         seconds == 0 ? "No rest" : seconds < 120 ? "\(seconds)s rest" : "\(seconds / 60)m rest"
+    }
+
+    private func compactMenuLabel(
+        _ title: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(StrandFont.caption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
+                .allowsTightening(true)
+                .layoutPriority(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 22)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
     }
 
     private func progressionLabel(_ value: String) -> String {

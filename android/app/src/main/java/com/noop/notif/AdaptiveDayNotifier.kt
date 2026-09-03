@@ -15,6 +15,7 @@ import com.noop.alarm.WindDownStore
 import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NoopPrefs
 import com.noop.ui.NotifPrefs
@@ -398,6 +399,15 @@ object AdaptiveDayNotifier {
                 if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
                 return
             }
+            ContextualActionCenter.presentRecovery(
+                context = context,
+                title = title,
+                detail = body,
+                fingerprint = recommendation.fingerprint,
+                evidence = recommendation.evidence,
+                observedAtMillis = recommendation.observedAtSec * 1_000L,
+                maximumAgeMillis = recommendation.maximumAgeSeconds * 1_000L,
+            )
             saveState(context, decision.nextState)
             if (recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
                 AdaptiveDayTimeZoneStore.discardPending(context)

@@ -47,8 +47,17 @@ val strengthMediaUrlTemplate = providers.gradleProperty("noopStrengthMediaUrlTem
     .getOrElse("")
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
+val strengthVideoUrlTemplate = providers.gradleProperty("noopStrengthVideoUrlTemplate")
+    .orElse(providers.environmentVariable("NOOP_STRENGTH_VIDEO_URL_TEMPLATE"))
+    .getOrElse("")
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+val demoStrengthMediaSetting = providers.gradleProperty("noopAllowDemoStrengthMedia")
+    .orElse(providers.environmentVariable("NOOP_STRENGTH_DEMO_MEDIA"))
+    .orNull
+    ?.lowercase()
 val allowDemoStrengthMedia =
-    providers.gradleProperty("noopAllowDemoStrengthMedia").orNull == "true"
+    demoStrengthMediaSetting != "0" && demoStrengthMediaSetting != "false"
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -98,6 +107,7 @@ android {
         versionCode = 303
         versionName = "9.2.0"
         buildConfigField("String", "STRENGTH_MEDIA_URL_TEMPLATE", "\"$strengthMediaUrlTemplate\"")
+        buildConfigField("String", "STRENGTH_VIDEO_URL_TEMPLATE", "\"$strengthVideoUrlTemplate\"")
         buildConfigField("boolean", "ALLOW_DEMO_STRENGTH_MEDIA", allowDemoStrengthMedia.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

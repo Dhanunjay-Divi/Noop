@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -84,13 +86,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.noop.BuildConfig
 import com.noop.R
 import com.noop.analytics.FusionSource
+import com.noop.analytics.HydrationStore
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -111,6 +116,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -132,6 +138,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // MARK: - Navigation model
 //
@@ -355,10 +364,61 @@ fun AppRoot(
     val context = androidx.compose.ui.platform.LocalContext.current
     val updateStore = remember { UpdateStore.from(context) }
     var showUpdatesInbox by remember { mutableStateOf(false) }
+    val contextualActions by ContextualActionCenter.actions.collectAsStateWithLifecycle()
+    val contextualProcessingIds by ContextualActionCenter.processingIds.collectAsStateWithLifecycle()
+    var expandedContextualActionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var hydrationConfirmationMl by remember { mutableIntStateOf(0) }
+    val contextualActionScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
 
     fun openTopLevel(route: String) {
         selectedTabRoute = primaryTabForRoute(route).route
         if (route != currentRoute) nav.navigateTopLevel(route)
+    }
+
+    fun performContextualAction(action: ContextualAction) {
+        when (action.kind) {
+            ContextualActionKind.HYDRATION -> {
+                if (!ContextualActionCenter.begin(context, action)) return
+                contextualActionScope.launch {
+                    val amount = action.amountMl ?: 250
+                    val succeeded = runCatching {
+                        HydrationStore.log(viewModel.repo, amount)
+                    }.isSuccess
+                    ContextualActionCenter.finish(context, action, succeeded)
+                    if (!succeeded) return@launch
+                    expandedContextualActionId = null
+                    hydrationConfirmationMl = amount
+                    delay(1_350L)
+                    hydrationConfirmationMl = 0
+                }
+            }
+            ContextualActionKind.BREATHE -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(Destination.Breathe.route)
+            }
+            ContextualActionKind.JOURNAL -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(Destination.Insights.route)
+            }
+            ContextualActionKind.WIND_DOWN,
+            ContextualActionKind.RECOVERY,
+            -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(Destination.Sleep.route)
+            }
+        }
+    }
+
+    LaunchedEffect(context, initialRoute) {
+        ContextualActionCenter.refresh(context)
+        if (BuildConfig.DEBUG && initialRoute == "context-actions") {
+            ContextualActionCenter.applyDemoActions(context)
+        }
     }
 
     // System Back can leave a top-level destination and reveal a different tab root. Keep the persistent
@@ -380,7 +440,7 @@ fun AppRoot(
         }
     }
 
-    run {
+    Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Palette.surfaceBase,
             bottomBar = {
@@ -564,6 +624,34 @@ fun AppRoot(
                     })
                 }
             }
+        }
+
+        if (!keyboardVisible && contextualActions.isNotEmpty()) {
+            ContextualActionRail(
+                actions = contextualActions,
+                processingIds = contextualProcessingIds,
+                expandedId = expandedContextualActionId,
+                onExpandedChange = { expandedContextualActionId = it },
+                onPrimary = ::performContextualAction,
+                onDismiss = { ContextualActionCenter.dismiss(context, it) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(
+                        end = 12.dp,
+                        bottom = if (hydrationConfirmationMl > 0) 128.dp else 68.dp,
+                    ),
+            )
+        }
+
+        if (!keyboardVisible && hydrationConfirmationMl > 0) {
+            HydrationLoggedConfirmation(
+                amountMl = hydrationConfirmationMl,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 12.dp, bottom = 68.dp),
+            )
         }
 
         // Compact 3x3 launcher opened by the persistent floating +. Long forms still live on their
@@ -1083,7 +1171,7 @@ private fun FloatingQuickAddButton(onClick: () -> Unit) {
  * Static Android counterpart to iOS navigation glass. The fixed smoke, specular and lower-rim
  * layers keep the rail lens-like without adding a render effect to every content scroll frame.
  */
-private fun Modifier.navigationGlassSurface(
+internal fun Modifier.navigationGlassSurface(
     shape: androidx.compose.ui.graphics.Shape,
     accentRim: Color? = null,
 ): Modifier = composed {

@@ -36,6 +36,8 @@ struct RootTabView: View {
     /// behind the More list — so a request switches to More and pushes it in that tab's stack.
     @EnvironmentObject private var router: NavRouter
     @EnvironmentObject private var updateStore: UpdateStore
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var contextualActions = ContextualActionCenter.shared
 
     /// Which quick-action screen the centre FAB is presenting (nil = sheet closed).
     @State private var quickAction: QuickAction? = Self.initialQuickAction
@@ -78,6 +80,8 @@ struct RootTabView: View {
     /// up the display. Native tab bars disappear while typing, so mirror that behaviour here and let the
     /// tab content use the keyboard-adjusted safe area on its own.
     @State private var keyboardVisible = false
+    @State private var expandedContextualActionID: String?
+    @State private var hydrationConfirmationML: Int?
     /// One `NavigationPath` per tab, indexed by tab tag. Re-tapping the already-active tab pops
     /// that tab's stack to its root (#135) by clearing its path — an animated pop that leaves the
     /// root view alive, so an at-root re-tap keeps scroll position and never re-runs `.task`
@@ -259,6 +263,31 @@ struct RootTabView: View {
                     }
                 }
             }
+
+            if !keyboardVisible, !contextualActions.visibleActions.isEmpty {
+                ContextualActionRail(
+                    actions: contextualActions.visibleActions,
+                    processingIDs: contextualActions.processingIDs,
+                    expandedID: $expandedContextualActionID,
+                    onPrimary: performContextualAction,
+                    onDismiss: contextualActions.dismiss
+                )
+                .padding(.trailing, 12)
+                .padding(
+                    .bottom,
+                    visibleTabBarHeight + 8 + (hydrationConfirmationML == nil ? 0 : 60)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+
+            if let hydrationConfirmationML {
+                HydrationLoggedConfirmation(amountML: hydrationConfirmationML)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, visibleTabBarHeight + 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .transition(.scale(scale: 0.86, anchor: .trailing).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
@@ -301,6 +330,9 @@ struct RootTabView: View {
             resetTabBarScrollTracking()
         }
         .onAppear {
+            #if DEBUG
+            contextualActions.applyDemoActionsIfRequested()
+            #endif
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
             MetricReviewReminders.retireLegacySchedule()
@@ -328,6 +360,7 @@ struct RootTabView: View {
                     try? await Task.sleep(nanoseconds: 50_000_000)
                 }
             }
+            await contextualActions.importDeliveredNotifications()
             await repo.reconcileDailyReviewJournalReminders()
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             await refreshAdaptiveHydrationContext()
@@ -345,6 +378,10 @@ struct RootTabView: View {
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             Task { await refreshAdaptiveHydrationContext() }
             Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await contextualActions.importDeliveredNotifications() }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
         // the easing is applied where `quickAction` is set (see `presentQuickAction`), keeping the
@@ -379,6 +416,41 @@ struct RootTabView: View {
 
     private var visibleTabBarHeight: CGFloat {
         keyboardVisible ? 0 : measuredTabBarHeight
+    }
+
+    private func performContextualAction(_ action: ContextualAction) {
+        switch action.kind {
+        case .hydration:
+            guard contextualActions.begin(action) else { return }
+            Task { @MainActor in
+                let amountML = action.amountML ?? 250
+                let logged = await repo.logHydrationConfirmed(amountMl: amountML)
+                contextualActions.finish(action, succeeded: logged != nil)
+                guard logged != nil else { return }
+                expandedContextualActionID = nil
+                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)) {
+                    hydrationConfirmationML = amountML
+                }
+                try? await Task.sleep(for: .seconds(1.35))
+                withAnimation(.easeOut(duration: 0.2)) {
+                    hydrationConfirmationML = nil
+                }
+            }
+        case .breathe:
+            contextualActions.complete(action)
+            expandedContextualActionID = nil
+            routeToMore(.breathe)
+        case .journal:
+            contextualActions.complete(action)
+            expandedContextualActionID = nil
+            routeToMore(.insights)
+        case .windDown, .recovery:
+            contextualActions.complete(action)
+            expandedContextualActionID = nil
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.sleep.rawValue
+            }
+        }
     }
 
     private func refreshAdaptiveHydrationContext() async {
@@ -1782,6 +1854,272 @@ private struct FloatingQuickAddButton: View {
         .accessibilityLabel("Quick actions")
         .accessibilityIdentifier("noop.quick-actions")
         .accessibilityHint("Opens Updates, workout, strength, meal, journal, hydration, HRV, breathing, intervals, and Live HR actions")
+    }
+}
+
+// MARK: - Contextual action rail
+
+private struct ContextualActionRail: View {
+    let actions: [ContextualAction]
+    let processingIDs: Set<String>
+    @Binding var expandedID: String?
+    let onPrimary: (ContextualAction) -> Void
+    let onDismiss: (ContextualAction) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            ForEach(actions) { action in
+                if expandedID == action.id {
+                    expanded(action)
+                        .transition(.scale(scale: 0.86, anchor: .trailing).combined(with: .opacity))
+                } else {
+                    collapsed(action)
+                        .transition(.scale(scale: 0.8, anchor: .trailing).combined(with: .opacity))
+                }
+            }
+        }
+        .animation(
+            reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
+            value: expandedID
+        )
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: actions.map(\.id))
+    }
+
+    private func collapsed(_ action: ContextualAction) -> some View {
+        Button {
+            expandedID = action.id
+        } label: {
+            actionGlyph(action, size: 18)
+                .frame(width: 48, height: 48)
+                .background {
+                    Circle()
+                        .fill(.clear)
+                        .navigationGlass(
+                            in: Circle(),
+                            tint: colorScheme == .dark
+                                ? .black.opacity(0.26)
+                                : .black.opacity(0.08)
+                        )
+                }
+                .overlay(
+                    Circle().strokeBorder(tint(action).opacity(0.42), lineWidth: 0.8)
+                )
+                .shadow(color: .black.opacity(0.16), radius: 8, x: 0, y: 4)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(action.title)
+        .accessibilityHint("Shows why this action is available")
+        .accessibilityIdentifier("noop.context-action.\(action.kind.rawValue)")
+    }
+
+    private func expanded(_ action: ContextualAction) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                actionGlyph(action, size: 17)
+                    .frame(width: 34, height: 34)
+                    .background(tint(action).opacity(0.13), in: Circle())
+                Text(action.title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.88)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button {
+                    expandedID = nil
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Collapse")
+                Button {
+                    expandedID = nil
+                    onDismiss(action)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+
+            if !action.detail.isEmpty {
+                Text(action.detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !action.evidence.isEmpty {
+                Text("WHY NOW")
+                    .font(StrandFont.overline)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(action.evidence.prefix(3).enumerated()), id: \.offset) { _, line in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Circle()
+                                .fill(tint(action))
+                                .frame(width: 5, height: 5)
+                            Text(line)
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
+            Button {
+                onPrimary(action)
+            } label: {
+                Label(primaryTitle(action), systemImage: primaryIcon(action))
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(colorScheme == .dark ? .black : .white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .background(tint(action), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(processingIDs.contains(action.id))
+            .opacity(processingIDs.contains(action.id) ? 0.58 : 1)
+            .accessibilityIdentifier("noop.context-action.primary.\(action.kind.rawValue)")
+        }
+        .padding(14)
+        .frame(width: 274, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.clear)
+                .navigationGlass(
+                    in: RoundedRectangle(cornerRadius: 8),
+                    tint: colorScheme == .dark
+                        ? .black.opacity(0.34)
+                        : .white.opacity(0.08)
+                )
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(tint(action).opacity(0.34), lineWidth: 0.8)
+        )
+        .shadow(color: .black.opacity(0.20), radius: 12, x: 0, y: 5)
+    }
+
+    @ViewBuilder
+    private func actionGlyph(_ action: ContextualAction, size: CGFloat) -> some View {
+        if action.kind == .hydration {
+            HydrationGlassGlyph(fill: 0.38, tint: tint(action))
+                .frame(width: size, height: size + 3)
+        } else {
+            Image(systemName: symbol(action.kind))
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(tint(action))
+        }
+    }
+
+    private func symbol(_ kind: ContextualActionKind) -> String {
+        switch kind {
+        case .hydration: return "drop.fill"
+        case .breathe: return "wind"
+        case .journal: return "square.and.pencil"
+        case .windDown: return "moon.stars.fill"
+        case .recovery: return "bed.double.fill"
+        }
+    }
+
+    private func tint(_ action: ContextualAction) -> Color {
+        switch action.kind {
+        case .hydration: return StrandPalette.metricCyan
+        case .breathe: return StrandPalette.restBright
+        case .journal: return StrandPalette.accent
+        case .windDown: return StrandPalette.metricPurple
+        case .recovery: return StrandPalette.chargeColor
+        }
+    }
+
+    private func primaryTitle(_ action: ContextualAction) -> String {
+        switch action.kind {
+        case .hydration: return String(localized: "Add \(action.amountML ?? 250) ml")
+        case .breathe: return String(localized: "Start breathing")
+        case .journal: return String(localized: "Open journal")
+        case .windDown, .recovery: return String(localized: "Open Sleep")
+        }
+    }
+
+    private func primaryIcon(_ action: ContextualAction) -> String {
+        switch action.kind {
+        case .hydration: return "plus"
+        case .breathe: return "play.fill"
+        case .journal: return "square.and.pencil"
+        case .windDown, .recovery: return "bed.double.fill"
+        }
+    }
+}
+
+private struct HydrationGlassGlyph: View {
+    let fill: CGFloat
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let inset = max(1, proxy.size.width * 0.12)
+            let level = max(0, min(1, fill))
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(tint.opacity(0.88))
+                    .frame(height: max(2, (proxy.size.height - inset * 2) * level))
+                    .padding(inset)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(tint, lineWidth: 1.6)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct HydrationLoggedConfirmation: View {
+    let amountML: Int
+    @State private var fill: CGFloat = 0.08
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HydrationGlassGlyph(fill: fill, tint: StrandPalette.metricCyan)
+                .frame(width: 24, height: 29)
+            Text("+\(amountML) ml")
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 52)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.clear)
+                .navigationGlass(
+                    in: RoundedRectangle(cornerRadius: 8),
+                    tint: .black.opacity(0.24)
+                )
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(StrandPalette.metricCyan.opacity(0.46), lineWidth: 0.8)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Logged \(amountML) millilitres of water")
+        .onAppear {
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.72)) {
+                fill = 0.92
+            }
+        }
     }
 }
 

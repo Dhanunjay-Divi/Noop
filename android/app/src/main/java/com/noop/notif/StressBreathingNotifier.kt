@@ -12,6 +12,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.noop.R
 import com.noop.ui.BiofeedbackPrefs
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 
@@ -172,6 +173,13 @@ object StressBreathingNotifier {
                 if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
                 return
             }
+            ContextualActionCenter.presentStress(
+                context = context,
+                fastRmssd = null,
+                baselineRmssd = null,
+                fingerprint = fingerprint,
+                observedAtMillis = observedAtMillis,
+            )
             saveState(context, decision.nextState)
         }.onFailure {
             NotificationLifecycleLedger.unknown(

@@ -1,6 +1,8 @@
 package com.noop.ui
 
+import com.noop.data.StrengthExerciseAnimationVariant
 import java.io.File
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -24,6 +26,15 @@ class StrengthTrainerUiContractTest {
             File(root, "src/main/res/$relative"),
             File(root, "app/src/main/res/$relative"),
             File(root, "android/app/src/main/res/$relative"),
+        ).firstOrNull(File::isFile)
+    }
+
+    private fun asset(relative: String): File? {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        return listOf(
+            File(root, "src/main/assets/$relative"),
+            File(root, "app/src/main/assets/$relative"),
+            File(root, "android/app/src/main/assets/$relative"),
         ).firstOrNull(File::isFile)
     }
 
@@ -108,23 +119,26 @@ class StrengthTrainerUiContractTest {
         assertTrue(motion.contains("StrengthNativeExerciseMedia("))
         assertFalse(motion.contains("StrengthMotionWebView("))
         assertTrue(
-            media!!.contains("STRENGTH_DEMO_MEDIA_HOST = \"https://static.exercisedb.dev/media\""),
+            media!!.contains("https://raw.githubusercontent.com/omercotkd/exercises-gifs/"),
         )
         assertTrue(media.contains("BuildConfig.STRENGTH_MEDIA_URL_TEMPLATE"))
+        assertTrue(media.contains("BuildConfig.STRENGTH_VIDEO_URL_TEMPLATE"))
         assertTrue(media.contains("BuildConfig.DEBUG && BuildConfig.ALLOW_DEMO_STRENGTH_MEDIA"))
         assertTrue(media.contains("STRENGTH_MAXIMUM_DOWNLOAD_BYTES"))
         assertTrue(media.contains("StrengthMediaDownloadCapInterceptor"))
         assertTrue(media.contains("StrengthMediaValidationDecoderFactory"))
         assertTrue(media.contains("STRENGTH_MINIMUM_PIXELS_PARAMETER"))
         assertTrue(media.contains("coil.compose.AsyncImage"))
-        assertTrue(media.contains("diskCacheKey(\"strength-exercise-v2-\$mediaId\")"))
+        assertTrue(media.contains("StrengthLoopingVideoTextureView"))
+        assertTrue(media.contains("StrengthVideoCache"))
+        assertTrue(media.contains("diskCacheKey("))
         assertTrue(media.contains("exercise-guidance.json"))
         assertTrue(media.contains("StrengthExerciseFormGuide"))
-        assertTrue(media.contains("delay(6_000)"))
+        assertTrue(media.contains("delay(12_000)"))
         assertTrue(media.contains("requestVersion += 1"))
         assertTrue(media.contains("BoxWithConstraints("))
-        assertTrue(media.contains("maxHeight - 12.dp"))
-        assertTrue(media.contains("maxWidth - (controlRailWidth * 2) - 16.dp"))
+        assertTrue(media.contains("minOf(maxHeight, maxWidth)"))
+        assertFalse(media.contains("controlRailWidth"))
         assertTrue(media.contains(".size(mediaSize)"))
         assertTrue(media.contains(".background(Color.White)"))
         assertTrue(media.contains("StrengthExerciseThumbnail("))
@@ -132,6 +146,49 @@ class StrengthTrainerUiContractTest {
         assertTrue(motion.contains("StrengthExerciseMediaPresentation.DETAIL"))
         assertFalse(media.contains("WebView"))
         assertFalse(motion.contains("pair.second,\n        exercise.primaryMuscle"))
+    }
+
+    @Test
+    fun exerciseMediaManifestCoversTheCompleteCatalog() {
+        val file = asset("strength-motion/exercise-media.json")
+        assumeTrue("Strength media manifest unavailable", file != null)
+        val json = JSONObject(file!!.readText())
+        val actual = json.keys().asSequence().toSet()
+        val expected = StrengthExerciseAnimationVariant.entries
+            .map(StrengthExerciseAnimationVariant::exerciseId)
+            .toSet()
+
+        assertEquals(expected, actual)
+        assertEquals(56, actual.size)
+        var gifCount = 0
+        var videoCount = 0
+        actual.forEach { exerciseId ->
+            val descriptor = json.getJSONObject(exerciseId)
+            if (descriptor.has("gif")) {
+                assertTrue(descriptor.getString("gif").matches(Regex("[0-9]{4}")))
+                gifCount += 1
+            } else {
+                assertTrue(descriptor.getString("unmappedGifReason").isNotBlank())
+            }
+            if (descriptor.has("video")) {
+                assertTrue(descriptor.getString("video").matches(Regex("[0-9]{4}")))
+                videoCount += 1
+            }
+        }
+        assertEquals(51, gifCount)
+        assertEquals(19, videoCount)
+        assertEquals("2330", json.getJSONObject("lat_pulldown").getString("gif"))
+        assertEquals("1430", json.getJSONObject("parallel_bar_dip").getString("gif"))
+        assertEquals("0489", json.getJSONObject("back_extension").getString("gif"))
+        assertFalse(json.getJSONObject("plank").has("gif"))
+        assertFalse(json.getJSONObject("band_pull_apart").has("gif"))
+        assertFalse(json.getJSONObject("barbell_hip_thrust").has("gif"))
+        assertEquals("0057", json.getJSONObject("barbell_hip_thrust").getString("video"))
+        assertEquals("0684", json.getJSONObject("treadmill_run").getString("gif"))
+        assertFalse(json.getJSONObject("rowing_ergometer").has("gif"))
+        assertFalse(json.getJSONObject("side_plank").has("gif"))
+        assertEquals("0054", json.getJSONObject("barbell_back_squat").getString("video"))
+        assertEquals("0077", json.getJSONObject("rowing_ergometer").getString("video"))
     }
 
     @Test
@@ -147,6 +204,7 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer!!.contains("StrengthProgramRequest("))
         assertTrue(trainer.contains("STRENGTH_PROFILE_EXPERIENCE"))
         assertTrue(trainer.contains("STRENGTH_PROFILE_STYLE"))
+        assertTrue(trainer.contains("STRENGTH_PROFILE_PHYSIQUE_GOAL"))
         assertTrue(trainer.contains("STRENGTH_PROFILE_SESSION_MINUTES"))
         assertTrue(trainer.contains("STRENGTH_PROFILE_DAY_COUNT"))
         assertTrue(trainer.contains("STRENGTH_PROFILE_WEEKDAYS"))
@@ -155,10 +213,17 @@ class StrengthTrainerUiContractTest {
         assertTrue(trainer.contains("val draft = StrengthSessionSnapshot(session, sets)"))
         assertTrue(trainer.contains("StrengthMuscleCoach("))
         assertTrue(trainer.contains("StrengthBodyMapView("))
+        assertTrue(trainer.contains("contentPadding = PaddingValues(horizontal = 4.dp"))
+        assertTrue(trainer.contains("maxLines = 2"))
         assertTrue(trainer.contains("startFocusSession("))
         assertTrue(trainer.contains("selectedFocusExerciseIds"))
         assertTrue(trainer.contains("var selectedFocusMuscles by rememberSaveable"))
         assertTrue(trainer.contains("selectedMuscles = selectedFocusMuscles"))
+        assertTrue(trainer.contains("physiqueGoal = physiqueGoal"))
+        assertTrue(trainer.contains("R.string.strength_training_emphasis"))
+        assertTrue(trainer.contains("R.string.strength_experience_level"))
+        assertTrue(trainer.contains("R.string.strength_workout_style"))
+        assertTrue(trainer.contains("R.string.strength_emphasis_disclaimer"))
         assertTrue(trainer.contains("if (muscle in selectedFocusMuscles)"))
         assertTrue(trainer.contains("for (candidates in rankedByMuscle)"))
         assertTrue(trainer.contains("val retained = selectedFocusExerciseIds.intersect(candidateIds)"))
@@ -168,6 +233,30 @@ class StrengthTrainerUiContractTest {
         assertTrue(media.contains("if (muscle in selectedMuscles)"))
         assertTrue(media.contains("detectTapGestures"))
         assertTrue(media.contains("strengthBodyMapHit("))
+    }
+
+    @Test
+    fun compactWorkoutAndGuideCopyStayVisible() {
+        val trainer = source("StrengthTrainerScreen.kt")
+        val actions = source("ContextualActionRail.kt")
+        assumeTrue(
+            "Strength compact-layout sources unavailable",
+            trainer != null && actions != null,
+        )
+
+        assertTrue(trainer!!.contains(".padding(top = 12.dp, bottom = 40.dp)"))
+        assertTrue(trainer.contains(".padding(top = 16.dp, bottom = 48.dp)"))
+        assertTrue(trainer.contains("style = NoopType.title2.copy(fontSize = 20.sp"))
+        assertTrue(trainer.contains("AutoSizeValue("))
+        val editor = trainer.substringAfter("private fun StrengthSessionEditor(")
+        val target = editor.indexOf("R.string.appwide_gym_up_next")
+        val media = editor.indexOf("StrengthExerciseMotionView(")
+        assertTrue(target >= 0)
+        assertTrue(media >= 0)
+        assertTrue(target < media)
+        assertTrue(actions!!.contains("maxLines = 3"))
+        assertFalse(actions.contains("overflow = TextOverflow.Ellipsis"))
+        assertTrue(actions.contains(".heightIn(min = 42.dp)"))
     }
 
     @Test
@@ -215,7 +304,7 @@ class StrengthTrainerUiContractTest {
         val values = files.mapValues { strengthStrings(it.value!!) }
         val base = values.getValue("values")
 
-        assertEquals(256, base.size)
+        assertEquals(281, base.size)
         val placeholder = Regex("""%\d+\$[dsf]""")
         for ((folder, localized) in values) {
             assertEquals("$folder Strength key parity", base.keys, localized.keys)

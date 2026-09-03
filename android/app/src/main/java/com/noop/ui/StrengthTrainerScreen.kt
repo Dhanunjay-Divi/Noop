@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -84,9 +85,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
 import com.noop.data.StrengthAdaptivePlanner
 import com.noop.data.StrengthDayRecommendationReason
@@ -95,6 +99,7 @@ import com.noop.data.StrengthExerciseHistoryPoint
 import com.noop.data.StrengthExercisePlan
 import com.noop.data.StrengthMuscleFocus
 import com.noop.data.StrengthMuscleStatus
+import com.noop.data.StrengthPhysiqueGoal
 import com.noop.data.StrengthProgressionReason
 import com.noop.data.StrengthProgressCalculator
 import com.noop.data.StrengthProgramRequest
@@ -145,6 +150,24 @@ private data class StrengthTodayExercisePlan(
     val workout: StrengthWorkoutPrescription,
 )
 
+private data class StrengthSessionSignals(
+    val liveHeartRate: Int?,
+    val effort: Double?,
+    val recovery: Double?,
+    val sleepMinutes: Double?,
+)
+
+internal fun strengthFreshHeartRate(
+    bpm: Int?,
+    receivedAtMillis: Long?,
+    nowMillis: Long,
+    maximumAgeMillis: Long = 15_000L,
+): Int? {
+    val received = receivedAtMillis ?: return null
+    val age = nowMillis - received
+    return bpm?.takeIf { age in -5_000L..maximumAgeMillis }
+}
+
 private enum class StrengthGymTab(@StringRes val labelRes: Int) {
     TODAY(R.string.appwide_gym_tab_today),
     PLAN(R.string.appwide_gym_tab_plan),
@@ -169,6 +192,7 @@ private data class StrengthRoutineExerciseDraft(
 
 private const val STRENGTH_PROFILE_EXPERIENCE = "strength.profile.experience"
 private const val STRENGTH_PROFILE_STYLE = "strength.profile.style"
+private const val STRENGTH_PROFILE_PHYSIQUE_GOAL = "strength.profile.physiqueGoal"
 private const val STRENGTH_PROFILE_SESSION_MINUTES = "strength.profile.sessionMinutes"
 private const val STRENGTH_PROFILE_DAY_COUNT = "strength.profile.dayCount"
 private const val STRENGTH_PROFILE_WEEKDAYS = "strength.profile.weekdays"
@@ -185,6 +209,32 @@ fun StrengthTrainerSheet(
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
     val saveError = stringResource(R.string.strength_save_error)
+    val bpm by vm.bpm.collectAsStateWithLifecycle()
+    val live by vm.live.collectAsStateWithLifecycle()
+    val today by vm.today.collectAsStateWithLifecycle()
+    var signalNowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val calendarToday = today?.takeIf { it.day == LocalDate.now().toString() }
+    val sessionSignals = StrengthSessionSignals(
+        liveHeartRate = strengthFreshHeartRate(
+            bpm = bpm,
+            receivedAtMillis = live.heartRateReceivedAtMillis,
+            nowMillis = signalNowMillis,
+        ),
+        effort = calendarToday?.strain,
+        recovery = calendarToday?.recovery,
+        sleepMinutes = calendarToday?.totalSleepMin,
+    )
+
+    DisposableEffect(vm) {
+        vm.requestRealtimeHr()
+        onDispose { vm.releaseRealtimeHr() }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000L)
+            signalNowMillis = System.currentTimeMillis()
+        }
+    }
 
     var exercises by remember { mutableStateOf<List<StrengthExerciseRow>>(emptyList()) }
     var routines by remember { mutableStateOf<List<StrengthRoutineSnapshot>>(emptyList()) }
@@ -345,11 +395,20 @@ fun StrengthTrainerSheet(
                     ) ?: StrengthTrainingStyle.BALANCED.name,
                 )
             }.getOrDefault(StrengthTrainingStyle.BALANCED)
+            val physiqueGoal = runCatching {
+                StrengthPhysiqueGoal.valueOf(
+                    prefs.getString(
+                        STRENGTH_PROFILE_PHYSIQUE_GOAL,
+                        StrengthPhysiqueGoal.BALANCED.name,
+                    ) ?: StrengthPhysiqueGoal.BALANCED.name,
+                )
+            }.getOrDefault(StrengthPhysiqueGoal.BALANCED)
             val minutes = prefs.getInt(STRENGTH_PROFILE_SESSION_MINUTES, 45)
             val templates = StrengthAdaptivePlanner.focusWorkout(
                 exercises = selectedExercises,
                 experience = experience,
                 style = style,
+                physiqueGoal = physiqueGoal,
                 sessionMinutes = minutes,
             )
             val now = Instant.now().epochSecond
@@ -465,6 +524,7 @@ fun StrengthTrainerSheet(
                         routines = routines,
                         sessions = sessions,
                         summary = summary,
+                        sessionSignals = sessionSignals,
                         massUnit = massUnit,
                         loading = loading,
                         starting = starting,
@@ -610,6 +670,7 @@ private fun StrengthDashboard(
     routines: List<StrengthRoutineSnapshot>,
     sessions: List<StrengthSessionSnapshot>,
     summary: StrengthSummary,
+    sessionSignals: StrengthSessionSignals,
     massUnit: MassUnit,
     loading: Boolean,
     starting: Boolean,
@@ -771,6 +832,8 @@ private fun StrengthDashboard(
                             },
                             onGuide = onGuide,
                         )
+
+                        StrengthSessionSignalsCard(sessionSignals)
 
                         StrengthMuscleCoach(
                             exercises = exercises,
@@ -1129,7 +1192,7 @@ private fun StrengthExerciseGuidePanel(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(top = 12.dp, bottom = 18.dp),
+                .padding(top = 12.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1137,8 +1200,7 @@ private fun StrengthExerciseGuidePanel(
                     strengthExerciseName(exercise),
                     style = NoopType.title2,
                     color = Palette.textPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 3,
                 )
                 Text(
                     stringResource(
@@ -1156,12 +1218,108 @@ private fun StrengthExerciseGuidePanel(
                 presentation = StrengthExerciseMediaPresentation.DETAIL,
                 modifier = Modifier.fillMaxWidth(),
             )
-            SectionHeader(
-                stringResource(R.string.strength_form_info),
-                overline = stringResource(R.string.strength_exercise_guide),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Overline(stringResource(R.string.strength_exercise_guide))
+                Text(
+                    text = stringResource(R.string.strength_form_info),
+                    style = NoopType.title2.copy(fontSize = 20.sp, lineHeight = 24.sp),
+                    color = Palette.textPrimary,
+                )
+            }
             StrengthExerciseTechnique(exercise = exercise)
         }
+    }
+}
+
+@Composable
+private fun StrengthSessionSignalsCard(signals: StrengthSessionSignals) {
+    val context = LocalContext.current
+    val effortScale = UnitPrefs.effortScale(context)
+    SectionHeader(
+        stringResource(R.string.strength_session_signals),
+        overline = stringResource(R.string.strength_measured_context),
+    )
+    NoopCard(tint = Palette.metricCyan) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                StrengthSignalCell(
+                    title = stringResource(R.string.strength_signal_heart_rate),
+                    value = signals.liveHeartRate?.toString()
+                        ?: stringResource(R.string.strength_signal_waiting),
+                    unit = if (signals.liveHeartRate == null) {
+                        stringResource(R.string.strength_signal_fresh_sensor)
+                    } else {
+                        stringResource(R.string.strength_signal_live_bpm)
+                    },
+                    tint = Palette.statusCritical,
+                    modifier = Modifier.weight(1f),
+                )
+                StrengthSignalCell(
+                    title = stringResource(R.string.strength_signal_effort),
+                    value = signals.effort?.let {
+                        UnitFormatter.effortDisplay(it, effortScale)
+                    } ?: stringResource(R.string.strength_signal_no_data),
+                    unit = stringResource(
+                        R.string.strength_signal_effort_scale,
+                        UnitFormatter.effortScaleMax(effortScale),
+                    ),
+                    tint = Palette.effortColor,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                StrengthSignalCell(
+                    title = stringResource(R.string.strength_signal_recovery),
+                    value = signals.recovery?.let {
+                        String.format(Locale.getDefault(), "%.0f%%", it)
+                    } ?: stringResource(R.string.strength_signal_no_data),
+                    unit = stringResource(R.string.strength_signal_today_context),
+                    tint = Palette.chargeColor,
+                    modifier = Modifier.weight(1f),
+                )
+                StrengthSignalCell(
+                    title = stringResource(R.string.strength_signal_sleep),
+                    value = signals.sleepMinutes?.let {
+                        String.format(Locale.getDefault(), "%.1f h", it / 60.0)
+                    } ?: stringResource(R.string.strength_signal_no_data),
+                    unit = stringResource(R.string.strength_signal_measured_sleep),
+                    tint = Palette.restColor,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                text = stringResource(R.string.strength_signal_honesty),
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StrengthSignalCell(
+    title: String,
+    value: String,
+    unit: String,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.heightIn(min = 67.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(title, style = NoopType.caption, color = Palette.textSecondary)
+        AutoSizeValue(
+            text = value,
+            style = NoopType.number(22f),
+            color = tint,
+            minScale = 0.72f,
+        )
+        Text(
+            text = unit,
+            style = NoopType.caption,
+            color = Palette.textTertiary,
+        )
     }
 }
 
@@ -1184,17 +1342,20 @@ private fun StrengthGymTabs(
                 onClick = { onSelect(tab) },
                 modifier = Modifier
                     .weight(1f)
+                    .heightIn(min = 46.dp)
                     .testTag("noop.strength.tab.${tab.name.lowercase()}")
                     .clip(RoundedCornerShape(6.dp))
                     .background(
                         if (selected == tab) Palette.surfaceOverlay else Color.Transparent,
                     ),
+                contentPadding = PaddingValues(horizontal = 3.dp, vertical = 2.dp),
             ) {
                 Text(
                     stringResource(tab.labelRes),
-                    style = NoopType.caption,
+                    style = NoopType.caption.copy(fontSize = 10.sp, lineHeight = 12.sp),
                     color = if (selected == tab) Palette.textPrimary else Palette.textSecondary,
-                    maxLines = 1,
+                    maxLines = 2,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
@@ -1903,12 +2064,21 @@ private fun StrengthFilterMenu(
     Box(modifier = modifier) {
         TextButton(
             onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 42.dp)
                 .clip(RoundedCornerShape(7.dp))
                 .background(Palette.surfaceInset),
         ) {
-            Text(label, style = NoopType.footnote, color = Palette.textPrimary, maxLines = 1)
+            Text(
+                text = label,
+                style = NoopType.caption.copy(fontSize = 10.sp, lineHeight = 11.sp),
+                color = Palette.textPrimary,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (value, display) ->
@@ -1988,6 +2158,18 @@ private fun StrengthProgramBuilder(
             }.getOrDefault(StrengthTrainingStyle.BALANCED),
         )
     }
+    var physiqueGoal by rememberSaveable {
+        mutableStateOf(
+            runCatching {
+                StrengthPhysiqueGoal.valueOf(
+                    profilePrefs.getString(
+                        STRENGTH_PROFILE_PHYSIQUE_GOAL,
+                        StrengthPhysiqueGoal.BALANCED.name,
+                    ) ?: StrengthPhysiqueGoal.BALANCED.name,
+                )
+            }.getOrDefault(StrengthPhysiqueGoal.BALANCED),
+        )
+    }
     var sessionMinutes by rememberSaveable {
         mutableIntStateOf(profilePrefs.getInt(STRENGTH_PROFILE_SESSION_MINUTES, 45))
     }
@@ -2000,6 +2182,7 @@ private fun StrengthProgramBuilder(
         selectedDays,
         experience,
         trainingStyle,
+        physiqueGoal,
         sessionMinutes,
         focusMuscles,
     ) {
@@ -2008,6 +2191,7 @@ private fun StrengthProgramBuilder(
                 weekdays = selectedDays.toList(),
                 experience = experience,
                 style = trainingStyle,
+                physiqueGoal = physiqueGoal,
                 sessionMinutes = sessionMinutes,
                 focusMuscles = focusMuscles.toList(),
             ),
@@ -2031,8 +2215,9 @@ private fun StrengthProgramBuilder(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     stringResource(R.string.strength_build_training_week),
-                    style = NoopType.title2,
+                    style = NoopType.title2.copy(fontSize = 20.sp, lineHeight = 24.sp),
                     color = Palette.textPrimary,
+                    maxLines = 2,
                 )
                 Text(
                     stringResource(R.string.strength_build_training_week_body),
@@ -2046,7 +2231,7 @@ private fun StrengthProgramBuilder(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 16.dp),
+                .padding(top = 16.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             SectionHeader(
@@ -2055,6 +2240,11 @@ private fun StrengthProgramBuilder(
             )
             NoopCard {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        stringResource(R.string.strength_experience_level),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
                     StrengthFilterMenu(
                         label = stringResource(
                             when (experience) {
@@ -2082,6 +2272,11 @@ private fun StrengthProgramBuilder(
                                 .apply()
                         },
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.strength_workout_style),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
                     )
                     StrengthFilterMenu(
                         label = stringResource(
@@ -2114,6 +2309,61 @@ private fun StrengthProgramBuilder(
                                 .apply()
                         },
                         modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Text(
+                        stringResource(R.string.strength_training_emphasis),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    StrengthFilterMenu(
+                        label = stringResource(
+                            when (physiqueGoal) {
+                                StrengthPhysiqueGoal.BALANCED ->
+                                    R.string.strength_emphasis_balanced
+                                StrengthPhysiqueGoal.BUILD_SIZE ->
+                                    R.string.strength_emphasis_build_size
+                                StrengthPhysiqueGoal.LEAN_CONDITIONED ->
+                                    R.string.strength_emphasis_lean_conditioned
+                                StrengthPhysiqueGoal.V_TAPER ->
+                                    R.string.strength_emphasis_v_taper
+                                StrengthPhysiqueGoal.UPPER_BODY ->
+                                    R.string.strength_emphasis_upper_body
+                                StrengthPhysiqueGoal.LOWER_BODY_GLUTES ->
+                                    R.string.strength_emphasis_lower_body_glutes
+                                StrengthPhysiqueGoal.ATHLETIC ->
+                                    R.string.strength_emphasis_athletic
+                            },
+                        ),
+                        options = listOf(
+                            StrengthPhysiqueGoal.BALANCED.name to
+                                stringResource(R.string.strength_emphasis_balanced),
+                            StrengthPhysiqueGoal.BUILD_SIZE.name to
+                                stringResource(R.string.strength_emphasis_build_size),
+                            StrengthPhysiqueGoal.LEAN_CONDITIONED.name to
+                                stringResource(R.string.strength_emphasis_lean_conditioned),
+                            StrengthPhysiqueGoal.V_TAPER.name to
+                                stringResource(R.string.strength_emphasis_v_taper),
+                            StrengthPhysiqueGoal.UPPER_BODY.name to
+                                stringResource(R.string.strength_emphasis_upper_body),
+                            StrengthPhysiqueGoal.LOWER_BODY_GLUTES.name to
+                                stringResource(R.string.strength_emphasis_lower_body_glutes),
+                            StrengthPhysiqueGoal.ATHLETIC.name to
+                                stringResource(R.string.strength_emphasis_athletic),
+                        ),
+                        selected = physiqueGoal.name,
+                        onSelected = { raw ->
+                            physiqueGoal = StrengthPhysiqueGoal.valueOf(raw)
+                            profilePrefs.edit()
+                                .putString(STRENGTH_PROFILE_PHYSIQUE_GOAL, physiqueGoal.name)
+                                .apply()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.strength_emphasis_disclaimer),
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
                     )
 
                     Text(
@@ -4281,7 +4531,7 @@ private fun StrengthSessionEditor(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(vertical = 16.dp),
+                .padding(top = 16.dp, bottom = 48.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             NoopCard(tint = Palette.effortColor) {
@@ -4350,6 +4600,7 @@ private fun StrengthSessionEditor(
             }
 
             currentBlock?.let { block ->
+                val nextSet = block.sets.firstOrNull { it.completedAt == null }
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
@@ -4378,6 +4629,84 @@ private fun StrengthSessionEditor(
                                 showsDot = false,
                             )
                         }
+                    }
+
+                    if (nextSet != null) {
+                        NoopCard(tint = Palette.effortColor) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(
+                                        stringResource(R.string.appwide_gym_up_next),
+                                        style = NoopType.caption,
+                                        color = Palette.effortColor,
+                                    )
+                                    Text(
+                                        strengthTargetLabel(
+                                            row = nextSet,
+                                            exercise = block.exercise,
+                                            massUnit = massUnit,
+                                        ),
+                                        style = NoopType.headline,
+                                        color = Palette.textPrimary,
+                                    )
+                                    Text(
+                                        strengthSetType(nextSet.setType),
+                                        style = NoopType.footnote,
+                                        color = Palette.textSecondary,
+                                    )
+                                }
+                                if (
+                                    nextSet.reps == null &&
+                                    (nextSet.durationS ?: 0) > 0
+                                ) {
+                                    IconButton(
+                                        enabled = workSetId == null &&
+                                            timedCountdownSetId == null &&
+                                            pacedSetId == null,
+                                        onClick = { startTimedSet(nextSet) },
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.PlayArrow,
+                                            contentDescription = stringResource(
+                                                R.string.strength_start_timed_set,
+                                                nextSet.durationS ?: 0,
+                                            ),
+                                            tint = Palette.effortColor,
+                                        )
+                                    }
+                                } else if ((nextSet.reps ?: 0) > 0) {
+                                    IconButton(
+                                        enabled = workSetId == null &&
+                                            timedCountdownSetId == null &&
+                                            pacedSetId == null,
+                                        onClick = {
+                                            startPacedSet(
+                                                nextSet,
+                                                nextSet.reps ?: 0,
+                                            )
+                                        },
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.FitnessCenter,
+                                            contentDescription = stringResource(
+                                                R.string.strength_coach_repetitions,
+                                                nextSet.reps ?: 0,
+                                            ),
+                                            tint = Palette.metricCyan,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            stringResource(R.string.strength_all_sets_complete),
+                            style = NoopType.headline,
+                            color = Palette.statusPositive,
+                        )
                     }
 
                     StrengthExerciseMotionView(
@@ -4751,88 +5080,6 @@ private fun StrengthSessionEditor(
                 )
             } else {
                 if (currentBlock != null) {
-                    val nextSet = currentBlock.sets.firstOrNull { it.completedAt == null }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (nextSet != null) {
-                            NoopCard(tint = Palette.effortColor) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        Text(
-                                            stringResource(R.string.appwide_gym_up_next),
-                                            style = NoopType.caption,
-                                            color = Palette.effortColor,
-                                        )
-                                        Text(
-                                            strengthTargetLabel(
-                                                row = nextSet,
-                                                exercise = currentBlock.exercise,
-                                                massUnit = massUnit,
-                                            ),
-                                            style = NoopType.headline,
-                                            color = Palette.textPrimary,
-                                        )
-                                        Text(
-                                            strengthSetType(nextSet.setType),
-                                            style = NoopType.footnote,
-                                            color = Palette.textSecondary,
-                                        )
-                                    }
-                                    if (
-                                        nextSet.reps == null &&
-                                        (nextSet.durationS ?: 0) > 0
-                                    ) {
-                                        IconButton(
-                                            enabled = workSetId == null &&
-                                                timedCountdownSetId == null &&
-                                                pacedSetId == null,
-                                            onClick = { startTimedSet(nextSet) },
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.PlayArrow,
-                                                contentDescription = stringResource(
-                                                    R.string.strength_start_timed_set,
-                                                    nextSet.durationS ?: 0,
-                                                ),
-                                                tint = Palette.effortColor,
-                                            )
-                                        }
-                                    } else if ((nextSet.reps ?: 0) > 0) {
-                                        IconButton(
-                                            enabled = workSetId == null &&
-                                                timedCountdownSetId == null &&
-                                                pacedSetId == null,
-                                            onClick = {
-                                                startPacedSet(
-                                                    nextSet,
-                                                    nextSet.reps ?: 0,
-                                                )
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Filled.FitnessCenter,
-                                                contentDescription = stringResource(
-                                                    R.string.strength_coach_repetitions,
-                                                    nextSet.reps ?: 0,
-                                                ),
-                                                tint = Palette.metricCyan,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Text(
-                                stringResource(R.string.strength_all_sets_complete),
-                                style = NoopType.headline,
-                                color = Palette.statusPositive,
-                            )
-                        }
-                    }
-
                     val block = currentBlock
                     StrengthExerciseCard(
                         block = block,

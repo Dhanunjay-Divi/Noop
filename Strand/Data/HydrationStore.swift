@@ -160,12 +160,30 @@ extension Repository {
     @discardableResult
     func logHydration(amountMl: Int, day: String? = nil) async -> Double {
         let dayKey = day ?? Repository.localDayKey(Date())
-        guard amountMl > 0, let store = await storeHandle() else { return await hydrationTotal(day: dayKey) }
+        guard amountMl > 0 else { return await hydrationTotal(day: dayKey) }
+        if let logged = await logHydrationConfirmed(amountMl: amountMl, day: dayKey) {
+            return logged
+        }
+        return await hydrationTotal(day: dayKey)
+    }
+
+    /// Confirmation-aware quick add for one-tap UI. Returns nil unless the canonical metric row was
+    /// durably written, so callers never animate success or consume an action after a failed store write.
+    @discardableResult
+    func logHydrationConfirmed(amountMl: Int, day: String? = nil) async -> Double? {
+        let dayKey = day ?? Repository.localDayKey(Date())
+        guard amountMl > 0, let store = await storeHandle() else { return nil }
         let current = await noopHydrationTotal(day: dayKey, store: store)
         let next = current + Double(amountMl)
-        _ = try? await store.upsertMetricSeries(
-            [MetricPoint(day: dayKey, key: HydrationStore.key, value: next)],
-            deviceId: HydrationStore.sourceId)
+        do {
+            let changed = try await store.upsertMetricSeries(
+                [MetricPoint(day: dayKey, key: HydrationStore.key, value: next)],
+                deviceId: HydrationStore.sourceId
+            )
+            guard changed > 0 else { return nil }
+        } catch {
+            return nil
+        }
         // #798 - also record the per-entry row so the detail can show, edit and delete this exact drink.
         let entries = HydrationEntries.adding(Self.hydrationEntries(day: dayKey), amountMl: amountMl)
         Self.writeHydrationEntries(entries, day: dayKey)

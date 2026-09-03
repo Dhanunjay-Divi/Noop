@@ -778,6 +778,9 @@ enum DemoScreens {
     /// The screen named by `--demo-screen <name>`, or nil if the arg is absent/unknown.
     static var requested: AnyView? {
         let args = CommandLine.arguments
+        if args.contains("--demo-strength-guide") {
+            return AnyView(StrengthTrainerView())
+        }
         guard let i = args.firstIndex(of: "--demo-screen"), i + 1 < args.count else { return nil }
         switch args[i + 1].lowercased() {
         case "today":    return AnyView(TodayView())

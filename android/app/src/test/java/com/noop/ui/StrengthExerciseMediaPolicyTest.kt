@@ -3,12 +3,42 @@ package com.noop.ui
 import java.io.IOException
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StrengthExerciseMediaPolicyTest {
+    @Test
+    fun mediaTemplatesAreExtensionAwareAndHttpsOnly() {
+        assertEquals(
+            "https://cdn.example.com/0054.mp4",
+            StrengthExerciseMediaPolicy.mediaUrl(
+                template = "https://cdn.example.com/{id}.{ext}",
+                mediaId = "0054",
+                extension = "mp4",
+            ),
+        )
+        assertEquals(
+            "https://cdn.example.com/media/0043.gif",
+            StrengthExerciseMediaPolicy.mediaUrl(
+                template = "https://cdn.example.com/media",
+                mediaId = "0043",
+                extension = "gif",
+            ),
+        )
+        assertEquals(
+            null,
+            StrengthExerciseMediaPolicy.mediaUrl(
+                template = "http://cdn.example.com/{id}.gif",
+                mediaId = "0043",
+                extension = "gif",
+            ),
+        )
+    }
+
     @Test
     fun licensedGifMustMeetBothNativeDimensions() {
         assertTrue(
@@ -69,6 +99,30 @@ class StrengthExerciseMediaPolicyTest {
         }
     }
 
+    @Test
+    fun playbackDelayNormalizationSlowsMotionAndCapsLongGifHolds() {
+        val source = gifWithDelays(100, 10, 40)
+        val normalized = StrengthExerciseMediaPolicy.normalizePlaybackDelays(source)
+
+        assertNotSame(source, normalized)
+        assertEquals(40, gifDelay(normalized, frame = 0))
+        assertEquals(13, gifDelay(normalized, frame = 1))
+        assertEquals(40, gifDelay(normalized, frame = 2))
+        assertEquals(100, gifDelay(source, frame = 0))
+    }
+
+    @Test
+    fun playbackDelayNormalizationSlowsSmoothDataAndLeavesMalformedDataUntouched() {
+        val smooth = gifWithDelays(10, 20)
+        val normalized = StrengthExerciseMediaPolicy.normalizePlaybackDelays(smooth)
+        assertEquals(13, gifDelay(normalized, frame = 0))
+        assertEquals(25, gifDelay(normalized, frame = 1))
+        val malformed = "GIF89a-not-a-complete-gif".encodeToByteArray()
+        assertTrue(
+            malformed === StrengthExerciseMediaPolicy.normalizePlaybackDelays(malformed),
+        )
+    }
+
     private fun gifHeader(width: Int, height: Int): ByteArray =
         "GIF89a".encodeToByteArray() + byteArrayOf(
             width.and(0xff).toByte(),
@@ -76,4 +130,31 @@ class StrengthExerciseMediaPolicyTest {
             height.and(0xff).toByte(),
             height.shr(8).and(0xff).toByte(),
         )
+
+    private fun gifWithDelays(vararg delays: Int): ByteArray {
+        var data = "GIF89a".encodeToByteArray() + byteArrayOf(
+            1, 0,
+            1, 0,
+            0, 0, 0,
+        )
+        delays.forEach { delay ->
+            data += byteArrayOf(
+                0x21,
+                0xf9.toByte(),
+                4,
+                0,
+                delay.and(0xff).toByte(),
+                delay.shr(8).and(0xff).toByte(),
+                0,
+                0,
+            )
+        }
+        return data + byteArrayOf(0x3b)
+    }
+
+    private fun gifDelay(data: ByteArray, frame: Int): Int {
+        val offset = 13 + (frame * 8) + 4
+        return data[offset].toInt().and(0xff) or
+            (data[offset + 1].toInt().and(0xff) shl 8)
+    }
 }

@@ -23,10 +23,21 @@ enum class StrengthTrainingStyle {
     CONDITIONING,
 }
 
+enum class StrengthPhysiqueGoal {
+    BALANCED,
+    BUILD_SIZE,
+    LEAN_CONDITIONED,
+    V_TAPER,
+    UPPER_BODY,
+    LOWER_BODY_GLUTES,
+    ATHLETIC,
+}
+
 data class StrengthProgramRequest(
     val weekdays: List<Int>,
     val experience: StrengthTrainingExperience = StrengthTrainingExperience.BEGINNER,
     val style: StrengthTrainingStyle = StrengthTrainingStyle.BALANCED,
+    val physiqueGoal: StrengthPhysiqueGoal = StrengthPhysiqueGoal.BALANCED,
     val sessionMinutes: Int = 45,
     val focusMuscles: List<String> = emptyList(),
 )
@@ -168,9 +179,13 @@ object StrengthAdaptivePlanner {
                 60 -> 5
                 else -> 6
             }
+            val goalAdjusted = exercisesPrioritizing(
+                request.physiqueGoal,
+                spec.second,
+            )
             val exercises = exercisesPrioritizing(
                 request.focusMuscles,
-                spec.second,
+                goalAdjusted,
                 routineIndex,
             ).take(limit).mapIndexed { index, exercise ->
                 customized(exercise, index, request)
@@ -183,12 +198,14 @@ object StrengthAdaptivePlanner {
         exercises: List<StrengthExerciseRow>,
         experience: StrengthTrainingExperience,
         style: StrengthTrainingStyle,
+        physiqueGoal: StrengthPhysiqueGoal = StrengthPhysiqueGoal.BALANCED,
         sessionMinutes: Int,
     ): List<StrengthProgramExercise> {
         val request = StrengthProgramRequest(
             weekdays = emptyList(),
             experience = experience,
             style = style,
+            physiqueGoal = physiqueGoal,
             sessionMinutes = sessionMinutes,
         )
         val limit = when (normalizedSessionMinutes(sessionMinutes)) {
@@ -197,8 +214,12 @@ object StrengthAdaptivePlanner {
             60 -> 5
             else -> 6
         }
-        return exercises.take(limit).mapIndexed { index, exercise ->
-            customized(starterExercise(exercise), index, request)
+        val prioritized = exercisesPrioritizing(
+            physiqueGoal,
+            exercises.map(::starterExercise),
+        )
+        return prioritized.take(limit).mapIndexed { index, exercise ->
+            customized(exercise, index, request)
         }
     }
 
@@ -316,6 +337,72 @@ object StrengthAdaptivePlanner {
     }
 
     private fun exercisesPrioritizing(
+        goal: StrengthPhysiqueGoal,
+        exercises: List<StrengthProgramExercise>,
+    ): List<StrengthProgramExercise> {
+        val priorities = when (goal) {
+            StrengthPhysiqueGoal.BALANCED -> return exercises
+            StrengthPhysiqueGoal.BUILD_SIZE -> PriorityProfile(
+                setOf("chest", "back", "shoulders", "glutes", "quadriceps", "hamstrings"),
+                listOf(
+                    "squat", "hinge", "horizontal_push", "vertical_push",
+                    "horizontal_pull", "vertical_pull",
+                ),
+            )
+            StrengthPhysiqueGoal.LEAN_CONDITIONED -> PriorityProfile(
+                emptySet(),
+                listOf("cardio", "carry", "lunge", "squat", "horizontal_pull"),
+            )
+            StrengthPhysiqueGoal.V_TAPER -> PriorityProfile(
+                setOf("back", "shoulders"),
+                listOf("vertical_pull", "horizontal_pull", "vertical_push"),
+            )
+            StrengthPhysiqueGoal.UPPER_BODY -> PriorityProfile(
+                setOf("chest", "back", "shoulders", "biceps", "triceps"),
+                listOf(
+                    "horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull",
+                ),
+            )
+            StrengthPhysiqueGoal.LOWER_BODY_GLUTES -> PriorityProfile(
+                setOf("glutes", "quadriceps", "hamstrings", "calves"),
+                listOf("squat", "hinge", "lunge"),
+            )
+            StrengthPhysiqueGoal.ATHLETIC -> PriorityProfile(
+                setOf("glutes", "quadriceps", "hamstrings", "back", "core"),
+                listOf(
+                    "carry", "lunge", "squat", "hinge", "horizontal_pull", "vertical_pull",
+                ),
+            )
+        }
+        val catalog = StrengthTrainingContract.BUILT_IN_EXERCISES.associateBy { it.id }
+        return exercises.withIndex().sortedWith(
+            compareByDescending<IndexedValue<StrengthProgramExercise>> { item ->
+                priorityScore(catalog[item.value.exerciseId], priorities)
+            }.thenBy { it.index },
+        ).map { it.value }
+    }
+
+    private data class PriorityProfile(
+        val muscles: Set<String>,
+        val movements: List<String>,
+    )
+
+    private fun priorityScore(
+        exercise: StrengthExerciseRow?,
+        priorities: PriorityProfile,
+    ): Int {
+        if (exercise == null) return 0
+        val muscleScore = if (exercise.primaryMuscle in priorities.muscles) 100 else 0
+        val movementIndex = priorities.movements.indexOf(exercise.movementPattern)
+        val movementScore = if (movementIndex >= 0) {
+            priorities.movements.size - movementIndex
+        } else {
+            0
+        }
+        return muscleScore + movementScore
+    }
+
+    private fun exercisesPrioritizing(
         requestedMuscles: List<String>,
         exercises: List<StrengthProgramExercise>,
         routineIndex: Int,
@@ -328,10 +415,16 @@ object StrengthAdaptivePlanner {
         if (muscles.isEmpty()) return exercises
         val catalog = StrengthTrainingContract.BUILT_IN_EXERCISES
         val existingIds = exercises.map { it.exerciseId }.toSet()
-        val alreadyFocused = catalog.any {
+        val focusedIds = catalog.filter {
             it.id in existingIds && it.primaryMuscle in muscles
+        }.map { it.id }.toSet()
+        if (focusedIds.isNotEmpty()) {
+            return exercises.withIndex().sortedWith(
+                compareByDescending<IndexedValue<StrengthProgramExercise>> {
+                    it.value.exerciseId in focusedIds
+                }.thenBy { it.index },
+            ).map { it.value }
         }
-        if (alreadyFocused) return exercises
         val candidates = catalog.filter {
             it.primaryMuscle in muscles &&
                 it.movementPattern != "cardio" &&

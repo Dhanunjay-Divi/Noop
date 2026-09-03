@@ -1546,6 +1546,12 @@ final class AppModel: ObservableObject {
             buzz(loops: UInt8(clamping: decision.buzzLoops))
         }
         stressNudgeCenter.present(fastRMSSD: decision.fastRMSSD, baselineRMSSD: decision.baselineRMSSD)
+        ContextualActionCenter.shared.presentStress(
+            fastRMSSD: decision.fastRMSSD,
+            baselineRMSSD: decision.baselineRMSSD,
+            fingerprint: String(decision.nextState.lastFireAt),
+            now: now
+        )
         if BiofeedbackPrefs.phoneNudge {
             ContextualInterventionCenter.post(
                 ContextualInterventionCandidate(

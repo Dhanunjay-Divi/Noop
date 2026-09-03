@@ -6,4 +6,5 @@
 #include "../Strand/Oura/OuraConfig.xcconfig"
 #include? "LaunchGateSecrets.xcconfig"
 NOOP_STRENGTH_MEDIA_URL_TEMPLATE =
+NOOP_STRENGTH_VIDEO_URL_TEMPLATE =
 #include? "StrengthMediaSecrets.xcconfig"

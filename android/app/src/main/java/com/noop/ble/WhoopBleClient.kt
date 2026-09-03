@@ -82,6 +82,7 @@ import com.noop.ui.NoopPrefs
 import com.noop.ui.NotifPrefs
 import com.noop.ui.ProfileStore
 import com.noop.ui.StressNudgeCenter
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.StressNudgeSessionRegistry
 import com.noop.ui.UnitPrefs
 import kotlinx.coroutines.CoroutineScope
@@ -3428,6 +3429,13 @@ class WhoopBleClient(
                             StressNudgeCenter.present(
                                 fastRMSSD = decision.fastRMSSD,
                                 baselineRMSSD = decision.baselineRMSSD,
+                            )
+                            ContextualActionCenter.presentStress(
+                                context = context,
+                                fastRmssd = decision.fastRMSSD,
+                                baselineRmssd = decision.baselineRMSSD,
+                                fingerprint = decision.nextState.lastFireAt.toString(),
+                                observedAtMillis = observedAtMillis,
                             )
                             if (BiofeedbackPrefs.phoneNudge(context)) {
                                 StressBreathingNotifier.onQualifiedOnset(

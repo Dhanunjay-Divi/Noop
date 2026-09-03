@@ -20,6 +20,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.noop.R
 import com.noop.data.WhoopRepository
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.JOURNAL_DEVICE_ID
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
@@ -293,6 +294,16 @@ class DailyReviewReminderWorker(appContext: Context, params: WorkerParameters) :
 /** Recomputes local wall-clock work after reboot, DST, travel, or manual clock changes. */
 class DailyReviewTimeChangeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
+        val supported = when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_DATE_CHANGED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            -> true
+            else -> false
+        }
+        if (!supported) return
         DailyReviewReminders.reconcile(context)
     }
 }
@@ -363,7 +374,7 @@ internal object DailyReviewReminderNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
-        NotificationLifecycleLedger.posted(
+        val posted = NotificationLifecycleLedger.posted(
             context,
             DailyReviewReminders.lifecycleId(kind),
             NotificationLifecycleCategory.REMINDER,
@@ -373,6 +384,27 @@ internal object DailyReviewReminderNotifier {
                 notification,
             )
         }
+        if (posted) {
+            val fingerprint = "${kind.name.lowercase()}:${java.time.LocalDate.now()}"
+            when (kind) {
+                DailyReviewKind.MORNING -> ContextualActionCenter.presentRecovery(
+                    context = context,
+                    title = title,
+                    detail = body,
+                    fingerprint = fingerprint,
+                    evidence = listOf("current-sleep"),
+                    observedAtMillis = System.currentTimeMillis(),
+                    maximumAgeMillis = 8L * 60L * 60L * 1_000L,
+                )
+                DailyReviewKind.EVENING -> ContextualActionCenter.presentJournal(
+                    context = context,
+                    fingerprint = fingerprint,
+                    title = title,
+                    detail = body,
+                )
+            }
+        }
+        posted
     }.getOrElse {
         NotificationLifecycleLedger.unknown(
             context,

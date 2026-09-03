@@ -15,6 +15,7 @@ import com.noop.notif.NotificationLifecycleId
 import com.noop.notif.NotificationLifecycleLedger
 import com.noop.notif.NotificationLifecycleState
 import com.noop.notif.NotificationPlatformIdentity
+import com.noop.ui.ContextualActionCenter
 import com.noop.ui.appLaunchIntent
 import java.util.Calendar
 import java.util.TimeZone
@@ -96,13 +97,21 @@ object WindDownScheduler {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .build()
-            NotificationLifecycleLedger.posted(
+            val posted = NotificationLifecycleLedger.posted(
                 context,
                 NotificationLifecycleId.WIND_DOWN,
                 NotificationLifecycleCategory.REMINDER,
             ) {
                 (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                     .notify(NotificationPlatformIdentity.NotificationId.WIND_DOWN, n)
+            }
+            if (posted) {
+                ContextualActionCenter.presentWindDown(
+                    context = context,
+                    fingerprint = java.time.LocalDate.now().toString(),
+                    title = context.getString(R.string.wind_down_notification_title),
+                    detail = context.getString(R.string.wind_down_notification_body),
+                )
             }
         }.onFailure {
             NotificationLifecycleLedger.unknown(

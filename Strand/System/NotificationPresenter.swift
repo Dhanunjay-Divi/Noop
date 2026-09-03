@@ -302,6 +302,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         LocalNotificationLifecycle.presented(notification.request)
+        Task { @MainActor in
+            ContextualActionCenter.shared.capture(notification.request)
+        }
         completionHandler([.banner, .sound, .list])
     }
 
@@ -315,6 +318,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         // A response is direct evidence that Notification Center surfaced this request to the user. It
         // does not retroactively make any claim about other scheduled notifications.
         LocalNotificationLifecycle.presented(response.notification.request)
+        Task { @MainActor in
+            ContextualActionCenter.shared.capture(response.notification.request)
+        }
         if let route = NotificationRouteBridge.route(
             from: response.notification.request.content.userInfo
         ) {

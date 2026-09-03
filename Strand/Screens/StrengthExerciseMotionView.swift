@@ -1,3 +1,4 @@
+import AVFoundation
 import ImageIO
 import StrandDesign
 import SwiftUI
@@ -67,11 +68,11 @@ struct StrengthExerciseMotionView: View {
     private var stageAspectRatio: CGFloat {
         switch (presentation, mediaMinimized) {
         case (.workout, true):
-            3.45
+            2.15
         case (.workout, false):
-            2.15
+            1
         case (.detail, _):
-            2.15
+            1
         }
     }
 
@@ -81,7 +82,7 @@ struct StrengthExerciseMotionView: View {
                 StrengthNativeExerciseMediaView(
                     exercise: exercise,
                     exerciseID: variant.rawValue,
-                    source: StrengthExerciseNativeAssets.mediaSource(
+                    sources: StrengthExerciseNativeAssets.mediaSources(
                         for: variant.rawValue
                     ),
                     reduceMotion: reduceMotion,
@@ -153,15 +154,36 @@ private struct StrengthExerciseFormGuide: Decodable {
     let safety: String
 }
 
+struct StrengthExerciseMediaDescriptor: Decodable, Equatable {
+    let gif: String?
+    let video: String?
+}
+
 struct StrengthExerciseMediaPolicy {
     static let minimumLicensedPixels = 360
+    static let minimumVideoPixels = 720
     static let maximumDownloadBytes = 16 * 1_024 * 1_024
+    static let minimumPlaybackFrameDelay: TimeInterval = 0.05
+    static let maximumPlaybackFrameDelay: TimeInterval = 0.4
+    static let gifFrameDurationScale = 1.25
 
     static func licensedURL(template: String, mediaID: String) -> URL? {
+        mediaURL(template: template, mediaID: mediaID, fileExtension: "gif")
+    }
+
+    static func mediaURL(
+        template: String,
+        mediaID: String,
+        fileExtension: String
+    ) -> URL? {
         let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               !trimmed.contains("$("),
               mediaID.range(
+                of: #"^[A-Za-z0-9]+$"#,
+                options: .regularExpression
+              ) != nil,
+              fileExtension.range(
                 of: #"^[A-Za-z0-9]+$"#,
                 options: .regularExpression
               ) != nil
@@ -171,10 +193,12 @@ struct StrengthExerciseMediaPolicy {
 
         let rendered: String
         if trimmed.contains("{id}") {
-            rendered = trimmed.replacingOccurrences(of: "{id}", with: mediaID)
+            rendered = trimmed
+                .replacingOccurrences(of: "{id}", with: mediaID)
+                .replacingOccurrences(of: "{ext}", with: fileExtension)
         } else {
             rendered = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                + "/\(mediaID).gif"
+                + "/\(mediaID).\(fileExtension)"
         }
         guard let url = URL(string: rendered),
               url.scheme?.lowercased() == "https",
@@ -188,65 +212,197 @@ struct StrengthExerciseMediaPolicy {
     static func accepts(width: Int, height: Int, minimumPixels: Int) -> Bool {
         width >= minimumPixels && height >= minimumPixels
     }
+
+    static func playbackFrameDelay(_ sourceDelay: TimeInterval) -> TimeInterval {
+        min(
+            maximumPlaybackFrameDelay,
+            max(minimumPlaybackFrameDelay, sourceDelay * gifFrameDurationScale)
+        )
+    }
 }
 
-private struct StrengthExerciseMediaSource: Equatable {
+private enum StrengthExerciseMediaKind: String, Sendable {
+    case video
+    case gif
+}
+
+private struct StrengthExerciseMediaSource: Equatable, Sendable {
     let url: URL
+    let kind: StrengthExerciseMediaKind
     let minimumPixels: Int
     let cacheKey: String
 }
 
 private enum StrengthExerciseNativeAssets {
-    static let mediaIDs: [String: String] = decode("exercise-media") ?? [:]
+    static let mediaDescriptors: [String: StrengthExerciseMediaDescriptor] =
+        decode("exercise-media") ?? [:]
     static let guides: [String: StrengthExerciseFormGuide] =
         decode("exercise-guidance") ?? [:]
 
-    static func mediaSource(for exerciseID: String) -> StrengthExerciseMediaSource? {
-        guard let mediaID = mediaIDs[exerciseID] else { return nil }
+    static func mediaSources(for exerciseID: String) -> [StrengthExerciseMediaSource] {
+        guard let descriptor = mediaDescriptors[exerciseID] else { return [] }
+        var sources: [StrengthExerciseMediaSource] = []
 
-        if let bundled = strengthMotionResourceURL(
+        if let videoID = descriptor.video {
+            #if DEBUG
+            appendDebugLocal(
+                mediaID: videoID,
+                kind: .video,
+                fileExtension: "mp4",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumVideoPixels,
+                to: &sources
+            )
+            #endif
+            appendBundled(
+                mediaID: videoID,
+                kind: .video,
+                fileExtension: "mp4",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumVideoPixels,
+                to: &sources
+            )
+            appendConfigured(
+                templateKey: "NOOPStrengthVideoURLTemplate",
+                mediaID: videoID,
+                kind: .video,
+                fileExtension: "mp4",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumVideoPixels,
+                to: &sources
+            )
+        }
+
+        if let gifID = descriptor.gif {
+            #if DEBUG
+            appendDebugLocal(
+                mediaID: gifID,
+                kind: .gif,
+                fileExtension: "gif",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumLicensedPixels,
+                to: &sources
+            )
+            #endif
+            appendBundled(
+                mediaID: gifID,
+                kind: .gif,
+                fileExtension: "gif",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumLicensedPixels,
+                to: &sources
+            )
+            appendConfigured(
+                templateKey: "NOOPStrengthMediaURLTemplate",
+                mediaID: gifID,
+                kind: .gif,
+                fileExtension: "gif",
+                minimumPixels: StrengthExerciseMediaPolicy.minimumLicensedPixels,
+                to: &sources
+            )
+
+            #if DEBUG
+            // This immutable public mirror is debug fallback material only. Its upstream README
+            // disclaims ownership of the media, so release builds require separately licensed media.
+            let demoSetting = ProcessInfo.processInfo.environment[
+                "NOOP_STRENGTH_DEMO_MEDIA"
+            ]?.lowercased()
+            if demoSetting != "0",
+               demoSetting != "false",
+               let demo = URL(
+                   string: "https://raw.githubusercontent.com/omercotkd/"
+                        + "exercises-gifs/ebf642cd90fdf73a6c73e7127e93b607b12c229e/"
+                        + "assets/\(gifID).gif"
+               ) {
+                sources.append(
+                    StrengthExerciseMediaSource(
+                        url: demo,
+                        kind: .gif,
+                        minimumPixels: 180,
+                        cacheKey: "demo-gif-\(gifID)"
+                    )
+                )
+            }
+            #endif
+        }
+
+        var seen = Set<URL>()
+        return sources.filter { seen.insert($0.url).inserted }
+    }
+
+    #if DEBUG
+    private static func appendDebugLocal(
+        mediaID: String,
+        kind: StrengthExerciseMediaKind,
+        fileExtension: String,
+        minimumPixels: Int,
+        to sources: inout [StrengthExerciseMediaSource]
+    ) {
+        let environment = ProcessInfo.processInfo.environment
+        guard let rawDirectory = environment["NOOP_STRENGTH_LOCAL_MEDIA_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawDirectory.isEmpty
+        else {
+            return
+        }
+        let url = URL(fileURLWithPath: rawDirectory, isDirectory: true)
+            .appendingPathComponent(mediaID)
+            .appendingPathExtension(fileExtension)
+        guard FileManager.default.isReadableFile(atPath: url.path) else { return }
+        sources.append(
+            StrengthExerciseMediaSource(
+                url: url,
+                kind: kind,
+                minimumPixels: minimumPixels,
+                cacheKey: "local-debug-\(kind.rawValue)-\(mediaID)"
+            )
+        )
+    }
+    #endif
+
+    private static func appendBundled(
+        mediaID: String,
+        kind: StrengthExerciseMediaKind,
+        fileExtension: String,
+        minimumPixels: Int,
+        to sources: inout [StrengthExerciseMediaSource]
+    ) {
+        guard let bundled = strengthMotionResourceURL(
             forResource: mediaID,
-            withExtension: "gif",
+            withExtension: fileExtension,
             subdirectory: "Media"
-        ) {
-            return StrengthExerciseMediaSource(
+        ) else {
+            return
+        }
+        sources.append(
+            StrengthExerciseMediaSource(
                 url: bundled,
-                minimumPixels: StrengthExerciseMediaPolicy.minimumLicensedPixels,
-                cacheKey: "bundle-\(mediaID)"
+                kind: kind,
+                minimumPixels: minimumPixels,
+                cacheKey: "bundle-\(kind.rawValue)-\(mediaID)"
             )
-        }
+        )
+    }
 
-        let configuredTemplate =
-            Bundle.main.object(
-                forInfoDictionaryKey: "NOOPStrengthMediaURLTemplate"
-            ) as? String ?? ""
-        if let configured = StrengthExerciseMediaPolicy.licensedURL(
-            template: configuredTemplate,
-            mediaID: mediaID
-        ) {
-            return StrengthExerciseMediaSource(
-                url: configured,
-                minimumPixels: StrengthExerciseMediaPolicy.minimumLicensedPixels,
-                cacheKey: "licensed-\(mediaID)"
+    private static func appendConfigured(
+        templateKey: String,
+        mediaID: String,
+        kind: StrengthExerciseMediaKind,
+        fileExtension: String,
+        minimumPixels: Int,
+        to sources: inout [StrengthExerciseMediaSource]
+    ) {
+        let template = Bundle.main.object(forInfoDictionaryKey: templateKey) as? String ?? ""
+        guard let url = StrengthExerciseMediaPolicy.mediaURL(
+            template: template,
+            mediaID: mediaID,
+            fileExtension: fileExtension
+        ) else {
+            return
+        }
+        sources.append(
+            StrengthExerciseMediaSource(
+                url: url,
+                kind: kind,
+                minimumPixels: minimumPixels,
+                cacheKey: "licensed-\(kind.rawValue)-\(mediaID)"
             )
-        }
-
-        #if DEBUG
-        // The public ExerciseDB endpoint currently serves only 180 px GIFs. It is useful for explicit
-        // simulator QA, but must never become the implicit production source.
-        if ProcessInfo.processInfo.environment["NOOP_STRENGTH_DEMO_MEDIA"] == "1",
-           let demo = URL(
-               string: "https://static.exercisedb.dev/media/\(mediaID).gif"
-           ) {
-            return StrengthExerciseMediaSource(
-                url: demo,
-                minimumPixels: 180,
-                cacheKey: "demo-\(mediaID)"
-            )
-        }
-        #endif
-
-        return nil
+        )
     }
 
     private static func decode<T: Decodable>(_ name: String) -> T? {
@@ -262,56 +418,162 @@ private enum StrengthExerciseNativeAssets {
 
 @MainActor
 private final class StrengthExerciseMediaLoader: ObservableObject {
+    enum LoadedMedia: Sendable {
+        case video(url: URL, cacheKey: String)
+        case gif(data: Data, cacheKey: String)
+    }
+
     enum Phase {
         case unavailable
         case loading
-        case loaded(Data)
+        case loaded(LoadedMedia)
         case failed
     }
 
     @Published private(set) var phase: Phase = .unavailable
 
-    func load(source: StrengthExerciseMediaSource?) async {
-        guard let source else {
+    func load(sources: [StrengthExerciseMediaSource]) async {
+        guard !sources.isEmpty else {
             phase = .unavailable
             return
         }
         phase = .loading
-        var request = URLRequest(
-            url: source.url,
-            cachePolicy: .returnCacheDataElseLoad,
-            timeoutInterval: 12
-        )
-        request.setValue("image/gif", forHTTPHeaderField: "Accept")
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard !Task.isCancelled,
-                  Self.responseIsSuccessful(response),
+        for source in sources {
+            guard !Task.isCancelled else { return }
+            if let loaded = await Self.load(source: source) {
+                guard !Task.isCancelled else { return }
+                phase = .loaded(loaded)
+                return
+            }
+        }
+        phase = .failed
+    }
+
+    nonisolated private static func load(
+        source: StrengthExerciseMediaSource
+    ) async -> LoadedMedia? {
+        switch source.kind {
+        case .video:
+            guard let localURL = await localVideoURL(for: source) else { return nil }
+            return .video(url: localURL, cacheKey: source.cacheKey)
+        case .gif:
+            guard let data = await downloadedData(for: source, accept: "image/gif"),
                   data.count > 32,
-                  data.count <= StrengthExerciseMediaPolicy.maximumDownloadBytes,
-                  let dimensions = Self.gifDimensions(data),
+                  let dimensions = gifDimensions(data),
                   StrengthExerciseMediaPolicy.accepts(
                       width: dimensions.width,
                       height: dimensions.height,
                       minimumPixels: source.minimumPixels
                   )
             else {
-                phase = .failed
-                return
+                return nil
             }
-            phase = .loaded(data)
-        } catch {
-            guard !Task.isCancelled else { return }
-            phase = .failed
+            return .gif(data: data, cacheKey: source.cacheKey)
         }
     }
 
-    private static func responseIsSuccessful(_ response: URLResponse) -> Bool {
+    nonisolated private static func localVideoURL(
+        for source: StrengthExerciseMediaSource
+    ) async -> URL? {
+        if source.url.isFileURL {
+            guard let byteCount = try? source.url.resourceValues(
+                forKeys: [.fileSizeKey]
+            ).fileSize,
+                  byteCount > 32,
+                  byteCount <= StrengthExerciseMediaPolicy.maximumDownloadBytes,
+                  await videoMeetsPolicy(
+                      url: source.url,
+                      minimumPixels: source.minimumPixels
+                  )
+            else {
+                return nil
+            }
+            return source.url
+        }
+
+        guard let directory = try? mediaCacheDirectory() else { return nil }
+        let destination = directory.appendingPathComponent(
+            source.cacheKey.replacingOccurrences(
+                of: #"[^A-Za-z0-9._-]"#,
+                with: "-",
+                options: .regularExpression
+            )
+        ).appendingPathExtension("mp4")
+        if let size = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > 32,
+           size <= StrengthExerciseMediaPolicy.maximumDownloadBytes,
+           await videoMeetsPolicy(
+               url: destination,
+               minimumPixels: source.minimumPixels
+           ) {
+            return destination
+        }
+        try? FileManager.default.removeItem(at: destination)
+        guard let data = await downloadedData(for: source, accept: "video/mp4") else {
+            return nil
+        }
+        do {
+            try data.write(to: destination, options: .atomic)
+            guard await videoMeetsPolicy(
+                url: destination,
+                minimumPixels: source.minimumPixels
+            ) else {
+                try? FileManager.default.removeItem(at: destination)
+                return nil
+            }
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            return nil
+        }
+    }
+
+    nonisolated private static func downloadedData(
+        for source: StrengthExerciseMediaSource,
+        accept: String
+    ) async -> Data? {
+        if source.url.isFileURL {
+            guard let data = try? Data(
+                contentsOf: source.url,
+                options: [.mappedIfSafe]
+            ), data.count <= StrengthExerciseMediaPolicy.maximumDownloadBytes
+            else {
+                return nil
+            }
+            return data
+        }
+
+        var request = URLRequest(
+            url: source.url,
+            cachePolicy: .returnCacheDataElseLoad,
+            timeoutInterval: 20
+        )
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard !Task.isCancelled,
+                  responseIsSuccessful(response),
+                  response.expectedContentLength <= 0
+                    || response.expectedContentLength
+                        <= Int64(StrengthExerciseMediaPolicy.maximumDownloadBytes),
+                  data.count <= StrengthExerciseMediaPolicy.maximumDownloadBytes
+            else {
+                return nil
+            }
+            return data
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated private static func responseIsSuccessful(_ response: URLResponse) -> Bool {
         guard let http = response as? HTTPURLResponse else { return true }
         return (200..<300).contains(http.statusCode)
     }
 
-    private static func gifDimensions(_ data: Data) -> (width: Int, height: Int)? {
+    nonisolated private static func gifDimensions(
+        _ data: Data
+    ) -> (width: Int, height: Int)? {
         guard data.starts(with: [0x47, 0x49, 0x46]),
               let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
@@ -323,18 +585,59 @@ private final class StrengthExerciseMediaLoader: ObservableObject {
         }
         return (width.intValue, height.intValue)
     }
+
+    nonisolated private static func mediaCacheDirectory() throws -> URL {
+        let base = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        )[0]
+        let directory = base.appendingPathComponent(
+            "NOOPStrengthMedia",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    nonisolated private static func videoMeetsPolicy(
+        url: URL,
+        minimumPixels: Int
+    ) async -> Bool {
+        let asset = AVURLAsset(url: url)
+        do {
+            guard let track = try await asset.loadTracks(
+                withMediaType: .video
+            ).first else {
+                return false
+            }
+            let naturalSize = try await track.load(.naturalSize)
+            let transform = try await track.load(.preferredTransform)
+            let transformed = naturalSize.applying(transform)
+            return StrengthExerciseMediaPolicy.accepts(
+                width: Int(abs(transformed.width)),
+                height: Int(abs(transformed.height)),
+                minimumPixels: minimumPixels
+            )
+        } catch {
+            return false
+        }
+    }
 }
 
 private struct StrengthNativeExerciseMediaView: View {
     let exercise: StrengthExerciseRow
     let exerciseID: String
-    let source: StrengthExerciseMediaSource?
+    let sources: [StrengthExerciseMediaSource]
     let reduceMotion: Bool
     let minimized: Bool
     let showsTechniqueButton: Bool
     let showsSizeButton: Bool
     let onToggleSize: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var loader = StrengthExerciseMediaLoader()
     @State private var paused = false
     @State private var retry = 0
@@ -345,19 +648,8 @@ private struct StrengthNativeExerciseMediaView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let controlRailWidth: CGFloat = showsSizeButton || showsTechniqueButton ? 46 : 40
-            let dimension = max(
-                0,
-                min(
-                    geometry.size.height - 12,
-                    geometry.size.width - (controlRailWidth * 2) - 16
-                )
-            )
-
+        GeometryReader { _ in
             ZStack {
-                StrandPalette.surfaceInset
-
                 ZStack {
                     Color.white
                     switch loader.phase {
@@ -367,93 +659,101 @@ private struct StrengthNativeExerciseMediaView: View {
                         ProgressView()
                             .tint(StrandPalette.effortColor)
                             .controlSize(.small)
-                    case let .loaded(data):
+                    case let .loaded(.gif(data, cacheKey)):
                         StrengthAnimatedGIFView(
                             data: data,
-                            cacheKey: exerciseID,
-                            paused: paused || reduceMotion
+                            cacheKey: cacheKey,
+                            paused: mediaIsPaused
                         )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard !reduceMotion else { return }
-                            paused.toggle()
-                        }
+                    case let .loaded(.video(url, cacheKey)):
+                        StrengthLoopingVideoView(
+                            url: url,
+                            cacheKey: cacheKey,
+                            paused: mediaIsPaused
+                        )
                     case .failed:
                         fallbackContent
                     }
                 }
-                .frame(width: dimension, height: dimension)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                        .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !reduceMotion, isLoaded else { return }
+                    paused.toggle()
                 }
 
-                HStack {
-                    VStack {
-                        Spacer()
-                        if showsSizeButton {
-                            mediaControl(
-                                systemName: minimized
-                                    ? "arrow.up.left.and.arrow.down.right"
-                                    : "arrow.down.right.and.arrow.up.left",
-                                label: minimized
-                                    ? "Expand exercise guide"
-                                    : "Minimize exercise guide",
-                                action: onToggleSize
-                            )
-                        }
-                    }
-                    .frame(width: controlRailWidth)
-
-                    Spacer(minLength: 0)
-
-                    VStack {
-                        if showsTechniqueButton {
-                            mediaControl(
-                                systemName: "info",
-                                label: "How to perform this exercise"
-                            ) {
-                                showingGuide = true
-                            }
-                        }
-                        Spacer()
-                        if case .failed = loader.phase {
-                            mediaControl(
-                                systemName: "arrow.clockwise",
-                                label: "Retry exercise guide"
-                            ) {
-                                retry += 1
-                            }
-                        }
-                        if case .loaded = loader.phase {
-                            mediaControl(
-                                systemName: paused || reduceMotion
-                                    ? "play.fill"
-                                    : "pause.fill",
-                                label: paused || reduceMotion
-                                    ? "Play exercise guide"
-                                    : "Pause exercise guide"
-                            ) {
-                                guard !reduceMotion else { return }
-                                paused.toggle()
-                            }
-                        }
-                    }
-                    .frame(width: controlRailWidth)
+                if showsSizeButton {
+                    mediaControl(
+                        systemName: minimized
+                            ? "arrow.up.left.and.arrow.down.right"
+                            : "arrow.down.right.and.arrow.up.left",
+                        label: minimized
+                            ? "Expand exercise guide"
+                            : "Minimize exercise guide",
+                        action: onToggleSize
+                    )
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
-                .padding(7)
+                if showsTechniqueButton {
+                    mediaControl(
+                        systemName: "info",
+                        label: "How to perform this exercise"
+                    ) {
+                        showingGuide = true
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+                if case .failed = loader.phase {
+                    mediaControl(
+                        systemName: "arrow.clockwise",
+                        label: "Retry exercise guide"
+                    ) {
+                        retry += 1
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                } else if isLoaded {
+                    mediaControl(
+                        systemName: mediaIsPaused ? "play.fill" : "pause.fill",
+                        label: mediaIsPaused
+                            ? "Play exercise guide"
+                            : "Pause exercise guide"
+                    ) {
+                        guard !reduceMotion else { return }
+                        paused.toggle()
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                }
             }
+            .background(Color.white)
         }
-        .task(id: "\(source?.cacheKey ?? "unavailable")-\(retry)") {
-            await loader.load(source: source)
+        .task(id: "\(sourceIdentity)-\(retry)") {
+            await loader.load(sources: sources)
         }
         .onChange(of: exerciseID) { _ in
             paused = reduceMotion
         }
         .sheet(isPresented: $showingGuide) {
             StrengthExerciseFormGuideView(exercise: exercise)
+        }
+    }
+
+    private var sourceIdentity: String {
+        sources.map(\.cacheKey).joined(separator: "|")
+    }
+
+    private var mediaIsPaused: Bool {
+        paused || reduceMotion || scenePhase != .active
+    }
+
+    private var isLoaded: Bool {
+        if case .loaded = loader.phase {
+            true
+        } else {
+            false
         }
     }
 
@@ -629,6 +929,150 @@ struct StrengthExerciseThumbnailView: View {
 }
 
 #if os(iOS)
+private final class StrengthLoopingPlayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    private var queuePlayer: AVQueuePlayer?
+    private var playerLooper: AVPlayerLooper?
+    private var loadedCacheKey: String?
+
+    private var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .white
+        playerLayer.backgroundColor = UIColor.white.cgColor
+        playerLayer.videoGravity = .resizeAspect
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func update(url: URL, cacheKey: String, paused: Bool) {
+        if loadedCacheKey != cacheKey {
+            stop()
+            loadedCacheKey = cacheKey
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            player.actionAtItemEnd = .none
+            player.automaticallyWaitsToMinimizeStalling = true
+            let item = AVPlayerItem(url: url)
+            queuePlayer = player
+            playerLooper = AVPlayerLooper(player: player, templateItem: item)
+            playerLayer.player = player
+            player.seek(to: .zero)
+        }
+        paused ? queuePlayer?.pause() : queuePlayer?.play()
+    }
+
+    func stop() {
+        queuePlayer?.pause()
+        playerLooper?.disableLooping()
+        playerLayer.player = nil
+        playerLooper = nil
+        queuePlayer = nil
+        loadedCacheKey = nil
+    }
+}
+
+private struct StrengthLoopingVideoView: UIViewRepresentable {
+    let url: URL
+    let cacheKey: String
+    let paused: Bool
+
+    func makeUIView(context: Context) -> StrengthLoopingPlayerView {
+        StrengthLoopingPlayerView()
+    }
+
+    func updateUIView(_ view: StrengthLoopingPlayerView, context: Context) {
+        view.update(url: url, cacheKey: cacheKey, paused: paused)
+    }
+
+    static func dismantleUIView(
+        _ view: StrengthLoopingPlayerView,
+        coordinator: ()
+    ) {
+        view.stop()
+    }
+}
+#elseif os(macOS)
+private final class StrengthLoopingPlayerView: NSView {
+    private let playerLayer = AVPlayerLayer()
+    private var queuePlayer: AVQueuePlayer?
+    private var playerLooper: AVPlayerLooper?
+    private var loadedCacheKey: String?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.cgColor
+        playerLayer.backgroundColor = NSColor.white.cgColor
+        playerLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+
+    func update(url: URL, cacheKey: String, paused: Bool) {
+        if loadedCacheKey != cacheKey {
+            stop()
+            loadedCacheKey = cacheKey
+            let player = AVQueuePlayer()
+            player.isMuted = true
+            player.actionAtItemEnd = .none
+            player.automaticallyWaitsToMinimizeStalling = true
+            let item = AVPlayerItem(url: url)
+            queuePlayer = player
+            playerLooper = AVPlayerLooper(player: player, templateItem: item)
+            playerLayer.player = player
+            player.seek(to: .zero)
+        }
+        paused ? queuePlayer?.pause() : queuePlayer?.play()
+    }
+
+    func stop() {
+        queuePlayer?.pause()
+        playerLooper?.disableLooping()
+        playerLayer.player = nil
+        playerLooper = nil
+        queuePlayer = nil
+        loadedCacheKey = nil
+    }
+}
+
+private struct StrengthLoopingVideoView: NSViewRepresentable {
+    let url: URL
+    let cacheKey: String
+    let paused: Bool
+
+    func makeNSView(context: Context) -> StrengthLoopingPlayerView {
+        StrengthLoopingPlayerView()
+    }
+
+    func updateNSView(_ view: StrengthLoopingPlayerView, context: Context) {
+        view.update(url: url, cacheKey: cacheKey, paused: paused)
+    }
+
+    static func dismantleNSView(
+        _ view: StrengthLoopingPlayerView,
+        coordinator: ()
+    ) {
+        view.stop()
+    }
+}
+#endif
+
+#if os(iOS)
 private final class StrengthGIFImageCache {
     static let shared = StrengthGIFImageCache()
     let images: NSCache<NSString, UIImage> = {
@@ -732,7 +1176,9 @@ private func decodedAnimatedImage(from data: Data) -> DecodedStrengthGIF? {
         timedFrames.append(
             (
                 UIImage(cgImage: image),
-                max(0.04, (unclamped ?? clamped)?.doubleValue ?? 0.1)
+                StrengthExerciseMediaPolicy.playbackFrameDelay(
+                    (unclamped ?? clamped)?.doubleValue ?? 0.1
+                )
             )
         )
     }

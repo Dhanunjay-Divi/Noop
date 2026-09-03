@@ -166,6 +166,15 @@ enum HydrationReminders {
         return String(localized: "Every \(effectiveIntervalMinutes) minutes today · \(reason)")
     }
 
+    static var contextualActionEvidence: [String] {
+        var evidence = [String(localized: "Scheduled hydration check-in")]
+        let reason = UserDefaults.standard.string(forKey: adaptiveReasonKey) ?? ""
+        if !reason.isEmpty {
+            evidence.append(reason)
+        }
+        return evidence
+    }
+
     /// Preserve an explicitly active legacy pair, but clear a dormant hidden wrist flag when the old
     /// master reminder was OFF. From this build onward each channel persists independently.
     static func migrateIndependentChannelsIfNeeded(defaults: UserDefaults = .standard) {

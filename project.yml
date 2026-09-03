@@ -347,8 +347,9 @@ targets:
         NOOPLaunchGateVerifierHex: $(NOOP_LAUNCH_GATE_VERIFIER_HEX)
         NOOPLaunchGateIterations: $(NOOP_LAUNCH_GATE_ITERATIONS)
         NOOPLaunchGateRequired: $(NOOP_LAUNCH_GATE_REQUIRED)
-        # Optional licensed 360 px+ ExerciseDB media hosted by NOOP. Empty builds fail closed to
-        # native form guidance; the public 180 px endpoint is available only through explicit debug QA.
+        # Optional licensed exercise media hosted by NOOP. MP4 is preferred and GIF is the fallback.
+        # Empty release builds fail closed to native form guidance.
+        NOOPStrengthVideoURLTemplate: $(NOOP_STRENGTH_VIDEO_URL_TEMPLATE)
         NOOPStrengthMediaURLTemplate: $(NOOP_STRENGTH_MEDIA_URL_TEMPLATE)
         # Oura public-client configuration (values come from configFiles above); read at runtime via
         # OuraCredentials.fromBundle. Absent/blank values cleanly disable the Connect-Oura lane.

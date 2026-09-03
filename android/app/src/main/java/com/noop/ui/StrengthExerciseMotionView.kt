@@ -52,8 +52,8 @@ fun StrengthExerciseMotionView(
         mutableStateOf(preferences.getBoolean(STRENGTH_MEDIA_COMPACT, true))
     }
     val mediaAspectRatio = when (presentation) {
-        StrengthExerciseMediaPresentation.WORKOUT -> if (minimized) 3.45f else 2.15f
-        StrengthExerciseMediaPresentation.DETAIL -> 2.15f
+        StrengthExerciseMediaPresentation.WORKOUT -> if (minimized) 2.15f else 1f
+        StrengthExerciseMediaPresentation.DETAIL -> 1f
     }
     val mediaModifier = modifier.aspectRatio(mediaAspectRatio)
 
