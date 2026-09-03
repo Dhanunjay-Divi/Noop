@@ -2151,7 +2151,7 @@
   "containers": [
     {
       "ecosystem": "oci",
-      "name": "python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254",
+      "name": "python:3.12-alpine3.23@sha256:167bc85084c9df34480efc26b4528fb68feaa8a79183b5658952137025b6f061",
       "usedBy": "server/Dockerfile"
     },
     {

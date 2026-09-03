@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254
+FROM python:3.12-alpine3.23@sha256:167bc85084c9df34480efc26b4528fb68feaa8a79183b5658952137025b6f061
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,8 +10,8 @@ WORKDIR /service
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes --requirement requirements.lock
 
-RUN groupadd --system --gid 10001 noop \
-    && useradd --system --uid 10001 --gid noop --home-dir /nonexistent noop
+RUN addgroup -g 10001 -S noop \
+    && adduser -u 10001 -S -D -H -G noop noop
 
 COPY app ./app
 COPY migrations ./migrations
