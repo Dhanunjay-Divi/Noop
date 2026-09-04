@@ -10,6 +10,9 @@ public final class FrameRouter {
     /// Called when the strap pushes an EVENT packet (WHOOP's strap-as-clock catch-up signal). The
     /// BLEManager wires this to a rate-limited requestSync(.strap). nil in pure/unit contexts.
     var onSyncTrigger: (() -> Void)?
+    /// Fresh, live WRIST_ON/OFF evidence for the connection watchdog. This fires even when `state.worn`
+    /// already has the same value, so a repeated event still refreshes the manager's explicit evidence.
+    var onWristEvidence: ((Bool) -> Void)?
     /// Which family's framing to decode with. Set per connection by BLEManager. WHOOP 5.0/MG frames
     /// use the CRC16/offset-8 envelope; the biometric field decode for puffin is still a stub, so
     /// WHOOP 5 custom frames currently surface only their envelope (live HR/battery come from the
@@ -230,8 +233,10 @@ public final class FrameRouter {
                 if ev.hasPrefix("DOUBLE_TAP") {
                     state.onDoubleTap?()
                 } else if ev.hasPrefix("WRIST_ON") {
+                    onWristEvidence?(true)
                     if !state.worn { state.worn = true; state.onWristChange?(true) }
                 } else if ev.hasPrefix("WRIST_OFF") {
+                    onWristEvidence?(false)
                     if state.worn { state.worn = false; state.onWristChange?(false) }
                 } else if ev.hasPrefix("STRAP_DRIVEN_ALARM_EXECUTED") {
                     // Fire observability (#401 close-out): Android has always logged this line
@@ -395,8 +400,10 @@ public final class FrameRouter {
         if ev.hasPrefix("DOUBLE_TAP") {
             state.onDoubleTap?()
         } else if ev.hasPrefix("WRIST_ON") {
+            onWristEvidence?(true)
             if !state.worn { state.worn = true; state.onWristChange?(true) }
         } else if ev.hasPrefix("WRIST_OFF") {
+            onWristEvidence?(false)
             if state.worn { state.worn = false; state.onWristChange?(false) }
         }
     }

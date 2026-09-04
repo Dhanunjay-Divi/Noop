@@ -243,8 +243,8 @@ data class LiveState(
     val deepPacketsThisSession: Int = 0,
     /** #580: TRUE when a connected WHOOP 5/MG is streaming live HR fine but its firmware hands over NO
      *  history offload (it acks SEND_HISTORICAL_DATA but emits zero type-0x2F frames). The home/Settings
-     *  surface then reads "connected, history sync experimental on 5.0" instead of a sync error, and the
-     *  120s liveness bounce backs off so a healthy link isn't disconnected/rescanned every ~2 min. Set
+     *  surface then reads "connected, history sync experimental on 5.0" instead of a sync error, and
+     *  repeated empty-history probes slow down. Biometric liveness is independent of this flag. Set
      *  once empty offloads are SUSTAINED; cleared on connect or once the strap banks real records. Twin of
      *  macOS LiveState.historySyncExperimental. */
     val historySyncExperimental: Boolean = false,
@@ -307,6 +307,39 @@ data class LiveState(
         rrRecent = emptyList(),
         streamingLiveHR = false,
     )   // #56: a dropped link is no longer streaming
+}
+
+/** Biometric-specific watchdog policy. Control traffic can prove GATT transport health, but only an
+ * accepted live HR sample resets this clock. Recovery always re-arms CCCDs once before reconnecting. */
+internal enum class BiometricLivenessAction {
+    NONE,
+    REARM_NOTIFICATIONS,
+    RECONNECT,
+}
+
+internal object BiometricLivenessPolicy {
+    const val QUIET_MS = 45_000L
+    const val WHOOP4_STALL_MS = 120_000L
+    const val WHOOP5_STALL_MS = 600_000L
+
+    fun stallMs(family: DeviceFamily): Long =
+        if (family == DeviceFamily.WHOOP5) WHOOP5_STALL_MS else WHOOP4_STALL_MS
+
+    fun action(
+        family: DeviceFamily,
+        millisSinceBiometric: Long,
+        notificationsRearmed: Boolean,
+        confirmedWristOff: Boolean,
+    ): BiometricLivenessAction {
+        val silence = millisSinceBiometric.coerceAtLeast(0L)
+        if (silence >= QUIET_MS && !notificationsRearmed) {
+            return BiometricLivenessAction.REARM_NOTIFICATIONS
+        }
+        if (silence >= stallMs(family) && !confirmedWristOff) {
+            return BiometricLivenessAction.RECONNECT
+        }
+        return BiometricLivenessAction.NONE
+    }
 }
 
 /**
@@ -1012,15 +1045,6 @@ class WhoopBleClient(
          *  race the clock writes on a slow stack while still populating the ring within a couple of seconds
          *  of connect. */
         private const val BATTERY_ON_CONNECT_DELAY_MS = 1_500L
-        /** No inbound data for this long ⇒ the link/stream stalled; bounce it to resume streaming. */
-        private const val KEEPALIVE_STALL_MS = 120_000L
-        /** #580: longer stall fuse for a known history-empty 5/MG. Live HR over 0x2A37 keeps the link alive
-         *  but can lull >120s (off-wrist / resting) while the empty offload leaves the data channel quiet,
-         *  so the tight 120s rule bounced a healthy link every ~2 min. 10 min stops the thrash. */
-        private const val KEEPALIVE_STALL_5MG_EMPTY_MS = 600_000L
-        /** Stream gone quiet this long (but not yet stall) ⇒ re-subscribe in case a CCCD silently dropped. */
-        private const val KEEPALIVE_QUIET_MS = 45_000L
-
         /** A CCCD write can transiently return BUSY if the stack slot hasn't freed yet; retry the same
          *  subscribe a few times (short backoff) before giving up, rather than dropping the stream. */
         private const val CCCD_RETRY_DELAY_MS = 60L
@@ -2488,8 +2512,8 @@ class WhoopBleClient(
      *  maintains anyway); Android has no such field, so this mirrors the emit while staying zero-cost off. */
     private var connLastFrameType: String? = null
     /** #580: tracks CONSECUTIVE empty 5/MG offloads so a 5/MG whose firmware serves no history (but streams
-     *  live HR fine) reads as "history sync experimental on 5.0" instead of a sync error, and the 120s
-     *  bounce loop backs off while live HR is flowing. Reset on connect / a banking offload. Twin of macOS. */
+     *  live HR fine) reads as "history sync experimental on 5.0" instead of a sync error, and repeated
+     *  empty-history probes slow down. Reset on connect / a banking offload. Twin of macOS. */
     private val whoop5EmptyOffload = Whoop5EmptyOffloadTracker()
     /** Genuine offload frames seen this session — zero at timeout means the strap never answered
      *  the history request at all (5/MG retry trigger, #78 fork). Main-looper only. */
@@ -2608,12 +2632,15 @@ class WhoopBleClient(
     /** What we last told the strap (armed = TOGGLE_REALTIME_HR 1). Lets [reconcileRealtime] send the
      *  toggle only on the false↔true edge instead of on every input change. */
     @Volatile private var realtimeArmed = false
-    /** Wall-clock of the last inbound notification — drives the keep-alive liveness watchdog. */
-    @Volatile private var lastDataAtMs = 0L
-    /** True once we've re-subscribed during the CURRENT quiet episode, so the keep-alive re-subscribes
-     *  at most once between data arrivals instead of flooding descriptor writes every 30s tick (#77).
-     *  Reset to false in [onInbound] when fresh data lands. */
-    @Volatile private var resubscribedSinceData = false
+    /** Transport and biometric activity are intentionally separate. Battery/DIS/command traffic cannot
+     * hide a dead HR stream, but its timestamp remains useful in reconnect diagnostics. */
+    @Volatile private var lastTransportAtMs = 0L
+    @Volatile private var lastBiometricAtMs = 0L
+    /** One forced CCCD re-arm per biometric-quiet episode. Accepted HR clears it. */
+    @Volatile private var biometricNotificationsRearmed = false
+    /** Explicit live WRIST_OFF evidence for this connection; never inferred from LiveState's default. */
+    @Volatile private var confirmedWristOff = false
+    @Volatile private var offWristStallLogged = false
 
     /**
      * Pending outbound writes. Android's GATT stack allows ONE in-flight write at a time:
@@ -4924,8 +4951,8 @@ class WhoopBleClient(
     // ====================================================================================
 
     private fun onInbound(uuid: UUID, bytes: ByteArray) {
-        lastDataAtMs = System.currentTimeMillis()   // feeds the keep-alive liveness watchdog
-        resubscribedSinceData = false               // data is flowing again — re-arm the one-shot resubscribe
+        // Transport diagnostics only. Battery, DIS and command traffic must not reset biometric health.
+        lastTransportAtMs = System.currentTimeMillis()
         when {
             uuid == HEART_RATE_CHAR -> parseStandardHr(bytes)       // 0x2A37
             // 0x2A19 = percent — 5/MG ONLY. On a WHOOP 4.0 this characteristic is a stub constant 100
@@ -5210,12 +5237,13 @@ class WhoopBleClient(
         }
 
         when (parsed.typeName) {
-            "REALTIME_DATA" -> {
+            "REALTIME_DATA", "REALTIME_RAW_DATA" -> {
                 val receivedAtMillis = System.currentTimeMillis()
                 var receivedRR = false
                 // Reject 0 / out-of-range spikes; only accept physiologically plausible HR.
                 (parsed.parsed["heart_rate"] as? Int)?.let { hr ->
                     if (hr in 30..220) {
+                        noteAcceptedBiometric(receivedAtMillis)
                         _state.update {
                             it.withHeartRate(hr, receivedAtMillis = receivedAtMillis)
                         }
@@ -5435,9 +5463,11 @@ class WhoopBleClient(
                                     // so a pair of identical DOUBLE_TAP strings still dispatches twice.
                                 }
                                 ev.startsWith("WRIST_ON") -> {
+                                    noteWristEvidence(worn = true, atMillis = System.currentTimeMillis())
                                     if (!_state.value.worn) _state.update { it.copy(worn = true) }
                                 }
                                 ev.startsWith("WRIST_OFF") -> {
+                                    noteWristEvidence(worn = false, atMillis = System.currentTimeMillis())
                                     if (_state.value.worn) _state.update { it.copy(worn = false) }
                                 }
                             }
@@ -5456,6 +5486,24 @@ class WhoopBleClient(
      *   byte 0 = flags. bit0 = HR is u16 (else u8). bit4 = R-R intervals present (each u16 LE, 1/1024 s).
      * The standard profile is the RELIABLE source for both HR and R-R.
      */
+    private fun noteAcceptedBiometric(atMillis: Long = System.currentTimeMillis()) {
+        lastBiometricAtMs = atMillis
+        biometricNotificationsRearmed = false
+        confirmedWristOff = false
+        offWristStallLogged = false
+    }
+
+    private fun noteWristEvidence(worn: Boolean, atMillis: Long = System.currentTimeMillis()) {
+        confirmedWristOff = !worn
+        offWristStallLogged = false
+        if (worn) {
+            // WRIST_ON can precede HR. Give the newly worn strap a full fuse instead of reconnecting
+            // immediately against an old off-wrist biometric timestamp.
+            lastBiometricAtMs = atMillis
+            biometricNotificationsRearmed = false
+        }
+    }
+
     private fun parseStandardHr(data: ByteArray) {
         if (data.isEmpty()) return
         val receivedAtMillis = System.currentTimeMillis()
@@ -5497,6 +5545,7 @@ class WhoopBleClient(
         }
         // HR: accept only physiologically plausible values; reject 0/garbage (off-wrist).
         if (hr in 30..220) {
+            noteAcceptedBiometric(receivedAtMillis)
             _state.update { it.withHeartRate(hr, receivedAtMillis = receivedAtMillis) }
             // EXPERIMENTAL WHOOP 5.0/MG: there is no confirmed-write bond for a 5/MG strap, so once
             // live HR actually streams over the standard profile we treat the link as established —
@@ -5505,8 +5554,8 @@ class WhoopBleClient(
                 // atomic update: LiveState is written from multiple threads (binder/main/IO).
                 _state.update { it.copy(bonded = true) }
                 log("WHOOP 5/MG: live HR streaming - marking the link established (experimental).")
-                // 5/MG has no WHOOP4 confirmed-write handshake, so the keep-alive (re-subscribe +
-                // 120s liveness bounce) is started here, on the bonded transition, instead of in
+                // 5/MG has no WHOOP4 confirmed-write handshake, so the biometric keep-alive starts
+                // here on the degraded bonded transition instead of in
                 // runConnectHandshake. Handler.postDelayed is thread-safe to call from this callback.
                 startKeepAlive()
             }
@@ -5596,7 +5645,10 @@ class WhoopBleClient(
     private fun startKeepAlive() {
         handler.removeCallbacks(keepAliveRunnable)
         keepAliveTick = 0
-        lastDataAtMs = System.currentTimeMillis()   // arm the watchdog from "now", not 1970
+        val now = System.currentTimeMillis()
+        lastTransportAtMs = now
+        lastBiometricAtMs = now       // initial grace while the first valid HR packet arrives
+        biometricNotificationsRearmed = false
         handler.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS)
     }
 
@@ -5606,82 +5658,101 @@ class WhoopBleClient(
 
     /**
      * Keep the live stream alive (port of `BLEManager.keepAliveFire`). The WHOOP firmware lets the
-     * realtime HR stream lapse if it isn't periodically re-armed, and a CCCD can silently drop — both
-     * leave HR frozen on a stale value while the GATT link still says "connected", which is exactly
-     * what people hit ("only a disconnect/reconnect un-sticks it"). Every 30s we:
-     *   1. bounce the link if NOTHING has arrived for >120s (the automatic disconnect+reconnect), or
-     *   2. re-subscribe if the stream just went quiet, re-arm realtime HR, and poll battery.
+     * realtime HR stream lapse if it isn't periodically re-armed, and a CCCD can silently drop. Battery
+     * traffic can continue in that state, so only accepted HR drives recovery. Every 30s we:
+     *   1. force one CCCD re-arm after 45s without biometric HR,
+     *   2. reconnect if HR remains absent for the family fuse (2m on 4.0, 10m on 5/MG), and
+     *   3. otherwise reconcile realtime intent and poll battery.
      */
     @SuppressLint("MissingPermission")
     private fun keepAliveFire() {
         val s = _state.value
         if (!s.connected || !s.bonded) return   // disconnected: stop the cadence (restarts on reconnect)
 
-        val silentMs = System.currentTimeMillis() - lastDataAtMs
+        val now = System.currentTimeMillis()
+        val biometricSilentMs = (now - lastBiometricAtMs).coerceAtLeast(0L)
+        val stallMs = BiometricLivenessPolicy.stallMs(connectedFamily)
         // Everything below is the LIVE-path keep-alive. During a historical offload the strap owns the
         // link and has its own 60s idle watchdog (backfillTimeoutRunnable), so we stay completely out
         // of the way — in particular we must NOT bounce, which would abandon the offload mid-session
         // and break the safe-trim cursor.
         if (!backfilling) {
-            // #580: a known history-empty 5/MG (firmware serves no offload) gets a far longer fuse. Live HR
-            // over the standard 0x2A37 profile keeps the link genuinely alive, but its packets can lull for
-            // >120s when the strap is off-wrist / resting, and an empty offload leaves the data channel
-            // quiet — so the old 120s rule disconnected/rescanned a perfectly healthy link every ~2 min (the
-            // thrash this fixes). A WHOOP 4 (real "not recording" path) keeps the tight 120s fuse.
-            val bounceFuse = if (connectedFamily == DeviceFamily.WHOOP5 && whoop5EmptyOffload.historyEmpty)
-                KEEPALIVE_STALL_5MG_EMPTY_MS else KEEPALIVE_STALL_MS
-            if (silentMs > bounceFuse) {
-                // Nothing for the fuse window — the live stream/link stalled. Bounce it: the auto-rescan on
-                // disconnect re-bonds and resumes streaming (the automatic version of the manual fix).
-                log("No data for ${silentMs / 1000}s - bouncing link to resume live stream")
-                intentionalDisconnect = false    // make sure the auto-reconnect fires
-                // disconnect() throwing on a dead binder (#314) would crash from the keep-alive timer;
-                // tear down directly so the bounce degrades to a clean disconnect.
-                try {
-                    gatt?.disconnect()           // → handleDisconnect → reset() (cancels this) → reconnect
-                } catch (t: Throwable) {
-                    log("keep-alive bounce: gatt.disconnect() threw ${t.javaClass.simpleName}; tearing down")
-                    teardownAfterGattFailure()
-                }
-            } else {
-                // Recover a silently-dropped subscription once the stream has gone quiet (any family) —
-                // but only ONCE per quiet episode. Re-subscribing all notify chars every 30s tick floods
-                // descriptor writes that collide with the command queue on a slow stack (#77); a single
-                // re-subscribe recovers a dropped CCCD, repeating it just adds congestion. Re-armed on data.
-                if (silentMs > KEEPALIVE_QUIET_MS && !resubscribedSinceData) {
-                    resubscribedSinceData = true
+            when (BiometricLivenessPolicy.action(
+                family = connectedFamily,
+                millisSinceBiometric = biometricSilentMs,
+                notificationsRearmed = biometricNotificationsRearmed,
+                confirmedWristOff = confirmedWristOff,
+            )) {
+                BiometricLivenessAction.REARM_NOTIFICATIONS -> {
+                    biometricNotificationsRearmed = true
+                    log("No biometric HR for ${biometricSilentMs / 1000}s - force re-arming live notifications once")
                     enableLiveNotifications()
+                    // Let descriptor writes settle before command/battery maintenance uses the GATT slot.
+                    handler.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS)
+                    return
                 }
-                // #927: continuous capture can be overnight-only, which makes the want TIME-dependent;
-                // nothing else re-evaluates it while the app just sits connected, so the keep-alive tick
-                // re-derives it. A window-close tick DISARMS (TOGGLE 0 rides the reconciler's true→false
-                // edge; Android never arms the R10/R11 flood, so the toggle is the whole stop). A
-                // window-open tick re-arms on the false→true edge. Runs for BOTH families: send() routes
-                // the 5/MG toggle with puffin framing. Mirrors the iOS keep-alive re-derivation.
-                val captureWantNow = screenWantsRealtime || continuousCaptureWantsNow()
-                if (wantsRealtime != captureWantNow && keepStreamForData && !screenWantsRealtime) {
-                    log(
-                        if (captureWantNow) "Continuous HRV: overnight window opened; arming the realtime stream (#927)"
-                        else "Continuous HRV: overnight window closed; realtime stream disarmed until tonight (#927)",
-                    )
+                BiometricLivenessAction.RECONNECT -> {
+                    val transportSilentMs = (now - lastTransportAtMs).coerceAtLeast(0L)
+                    log("No biometric HR for ${biometricSilentMs / 1000}s (last BLE traffic ${transportSilentMs / 1000}s ago) - reconnecting to restore collection")
+                    intentionalDisconnect = false    // make sure the auto-reconnect fires
+                    // disconnect() throwing on a dead binder (#314) would crash from the keep-alive timer;
+                    // tear down directly so the bounce degrades to a clean disconnect.
+                    val activeGatt = gatt
+                    if (activeGatt == null) {
+                        log("keep-alive reconnect: GATT handle missing; tearing down stale connected state")
+                        handleDisconnect(BluetoothGatt.GATT_FAILURE)
+                        return
+                    }
+                    try {
+                        activeGatt.disconnect()      // → handleDisconnect → reset() (cancels this) → reconnect
+                    } catch (t: Throwable) {
+                        log("keep-alive reconnect: gatt.disconnect() threw ${t.javaClass.simpleName}; tearing down")
+                        teardownAfterGattFailure()
+                    }
+                    return
                 }
-                reconcileRealtime()   // recomputes wantsRealtime from the fresh predicate; toggles only on an edge
-                // WHOOP 4.0 only: re-arm realtime HR so the firmware can't let it lapse (while the Live
-                // screen wants it), and poll battery (~60s) — which also keeps the link warm. A 5/MG
-                // strap rejects WHOOP4-framed commands, so we skip them and rely on re-subscribe + bounce.
-                // Advance the tick for both families so the ~60s battery cadence also fires on 5/MG (it
-                // previously incremented only inside the WHOOP 4 branch).
-                keepAliveTick += 1
-                if (connectedFamily == DeviceFamily.WHOOP4) {
-                    if (wantsRealtime) { realtimeArmed = true; send(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(1)) }
-                    if (keepAliveTick % 2 == 0) send(CommandNumber.GET_BATTERY_LEVEL)
-                } else if (connectedFamily == DeviceFamily.WHOOP5 && keepAliveTick % 2 == 0) {
-                    // 5/MG battery comes only from a 0x2A19 read and the strap sends no unsolicited battery
-                    // notification, so poll it here (about every 60s) rather than only while the Live screen
-                    // is open. The ring then stays current on any screen without a manual sync, and the read
-                    // keeps the link warm.
-                    refreshBattery()
+                BiometricLivenessAction.NONE -> {
+                    if (confirmedWristOff && biometricSilentMs >= stallMs && !offWristStallLogged) {
+                        offWristStallLogged = true
+                        log("Biometric HR quiet while WRIST_OFF is confirmed - keeping the healthy link without reconnect churn")
+                    }
                 }
+            }
+
+            // A 5/MG can expose standard HR before its encrypted CLIENT_HELLO path succeeds. Keep the
+            // liveness repair above active, but never issue protected commands or battery reads there.
+            if (!didBond) {
+                handler.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS)
+                return
+            }
+
+            // #927: continuous capture can be overnight-only, which makes the want TIME-dependent;
+            // nothing else re-evaluates it while the app just sits connected, so the keep-alive tick
+            // re-derives it. A window-close tick DISARMS (TOGGLE 0 rides the reconciler's true→false
+            // edge; Android never arms the R10/R11 flood, so the toggle is the whole stop). A
+            // window-open tick re-arms on the false→true edge. Runs for BOTH families: send() routes
+            // the 5/MG toggle with puffin framing. Mirrors the iOS keep-alive re-derivation.
+            val captureWantNow = screenWantsRealtime || continuousCaptureWantsNow()
+            if (wantsRealtime != captureWantNow && keepStreamForData && !screenWantsRealtime) {
+                log(
+                    if (captureWantNow) "Continuous HRV: overnight window opened; arming the realtime stream (#927)"
+                    else "Continuous HRV: overnight window closed; realtime stream disarmed until tonight (#927)",
+                )
+            }
+            reconcileRealtime()   // recomputes wantsRealtime from the fresh predicate; toggles only on an edge
+            // WHOOP 4.0 only: re-arm realtime HR so the firmware can't let it lapse (while the Live
+            // screen wants it), and poll battery (~60s). A 5/MG uses standard HR plus the biometric
+            // subscription-repair/reconnect policy above.
+            keepAliveTick += 1
+            if (connectedFamily == DeviceFamily.WHOOP4) {
+                if (wantsRealtime) { realtimeArmed = true; send(CommandNumber.TOGGLE_REALTIME_HR, byteArrayOf(1)) }
+                if (keepAliveTick % 2 == 0) send(CommandNumber.GET_BATTERY_LEVEL)
+            } else if (connectedFamily == DeviceFamily.WHOOP5 && keepAliveTick % 2 == 0) {
+                // 5/MG battery comes only from a 0x2A19 read and the strap sends no unsolicited battery
+                // notification, so poll it here (about every 60s) rather than only while the Live screen
+                // is open. The ring then stays current on any screen without a manual sync, and the read
+                // keeps the link warm without affecting biometric liveness.
+                refreshBattery()
             }
         }
 
@@ -5698,16 +5769,20 @@ class WhoopBleClient(
     @SuppressLint("MissingPermission")
     private fun enableLiveNotifications() {
         val g = gatt ?: return
-        when (connectedFamily) {
-            DeviceFamily.WHOOP4 -> g.getService(WHOOP4_SERVICE)?.let { svc ->
-                svc.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
-                svc.getCharacteristic(EVENT_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
-                svc.getCharacteristic(DATA_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+        if (didBond) {
+            when (connectedFamily) {
+                DeviceFamily.WHOOP4 -> g.getService(WHOOP4_SERVICE)?.let { svc ->
+                    svc.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                    svc.getCharacteristic(EVENT_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                    svc.getCharacteristic(DATA_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
+                }
+                DeviceFamily.WHOOP5 -> g.getService(WHOOP5_SERVICE)?.let { svc ->
+                    for (u in WHOOP5_NOTIFY_CHARS) svc.getCharacteristic(u)?.let { cccdQueue.add(it) }
+                }
             }
-            DeviceFamily.WHOOP5 -> { /* 5/MG live HR rides the standard profile, re-subscribed below */ }
+            g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)?.let { cccdQueue.add(it) }
         }
         g.getService(HEART_RATE_SERVICE)?.getCharacteristic(HEART_RATE_CHAR)?.let { cccdQueue.add(it) }
-        g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)?.let { cccdQueue.add(it) }
         drainCccdQueue(g)
     }
 
@@ -6123,6 +6198,7 @@ class WhoopBleClient(
                     handler.postDelayed({ requestSync(BackfillTrigger.CONNECT) }, INITIAL_BACKFILL_DELAY_MS)
                     startBackfillTimer()
                 }
+                startKeepAlive()
                 return
             }
             // Every notification is enabled — now it's safe to write the first command, one GATT
@@ -6651,7 +6727,7 @@ class WhoopBleClient(
         // the offload is just experimental on that firmware. "Banked" = this offload made ANY offload
         // progress (frames routed, rows persisted, or deep packets). On a 5/MG, route the timeout through
         // the empty-offload tracker so a sustained empty streak reads as "history experimental", not the
-        // WHOOP-4 "strap went quiet" error, and the bounce loop backs off (see keepalive). A WHOOP 4 keeps
+        // WHOOP-4 "strap went quiet" error, and repeated empty-history probes slow down. A WHOOP 4 keeps
         // the honest "went quiet" error.
         val isWhoop5 = connectedFamily == DeviceFamily.WHOOP5
         val bankedThisOffload = offloadFramesThisSession > 0 ||
@@ -6661,7 +6737,7 @@ class WhoopBleClient(
             val crossed = whoop5EmptyOffload.recordOffload(bankedRecords = bankedThisOffload)
             whoop5HistoryExperimental = whoop5EmptyOffload.historyEmpty
             if (crossed) {
-                log("Backfill: WHOOP 5/MG offload empty ${whoop5EmptyOffload.consecutiveEmpty}× - history sync is experimental on 5.0; surfacing 'connected, history experimental' (not a sync error) and backing off the bounce loop.")
+                log("Backfill: WHOOP 5/MG offload empty ${whoop5EmptyOffload.consecutiveEmpty}× - history sync is experimental on 5.0; surfacing 'connected, history experimental' (not a sync error) and slowing empty-history probes.")
             }
         } else if (reason == "HISTORY_COMPLETE" && isWhoop5 && bankedSensorRecords) {
             // A real HISTORY_COMPLETE with banked records proves the 5/MG offload IS working — recover.
@@ -7241,7 +7317,11 @@ class WhoopBleClient(
         handler.removeCallbacks(writeDeliveryTimeoutRunnable)
         handler.removeCallbacks(writePaceRunnable)
         handler.removeCallbacks(drainCccdRetryRunnable)
-        resubscribedSinceData = false
+        lastTransportAtMs = 0L
+        lastBiometricAtMs = 0L
+        biometricNotificationsRearmed = false
+        confirmedWristOff = false
+        offWristStallLogged = false
         cccdInFlight = false
         cccdRetries = 0
         sessionStarted = false
@@ -7704,13 +7784,13 @@ internal fun taggedStrapLogLine(redacted: String, domain: com.noop.testcentre.Te
  * frames. Live HR streams fine over the standard 0x2A37 profile, but the historical offload is empty, so
  * every session runs the 60s idle watchdog out to a "timeout" and surfaces the WHOOP-4 "strap went quiet"
  * sync error — even though nothing is wrong, the 5/MG history offload is simply experimental/unsupported
- * on that firmware. Worse, the empty offload leaves the link idle, so the 120s liveness watchdog can
- * bounce-disconnect/rescan every ~2 min in a thrash loop.
+ * on that firmware.
  *
  * This pure tracker counts CONSECUTIVE empty 5/MG offloads (a timeout with no offload frames and no rows
  * persisted). Once [quietThreshold] is reached it reports the strap as "history-empty" so the caller can
- * (a) surface an honest "history sync experimental on 5.0" state instead of a sync error, and (b) back off
- * the bounce loop. Any offload that DOES hand over real records clears the streak. Pure → JVM-unit-testable
+ * (a) surface an honest "history sync experimental on 5.0" state instead of a sync error, and (b) stretch
+ * repeated empty-history probes. Biometric liveness is independent of this history capability. Any
+ * offload that DOES hand over real records clears the streak. Pure → JVM-unit-testable
  * without a BLE stack. Twin of macOS `Whoop5EmptyOffloadTracker`.
  */
 internal class Whoop5EmptyOffloadTracker(
@@ -7722,7 +7802,7 @@ internal class Whoop5EmptyOffloadTracker(
         private set
 
     /** True once [quietThreshold] consecutive empty offloads have been seen — the link is up + live HR is
-     *  flowing but the 5/MG history offload is empty. Drives the honest flag AND the bounce backoff. */
+     *  flowing but the 5/MG history offload is empty. Drives the honest flag and slower probe cadence. */
     var historyEmpty = false
         private set
 

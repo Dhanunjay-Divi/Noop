@@ -14,6 +14,19 @@ import WhoopStore
 ///   • `dynamicLines(repo:)` — ASYNC, the full block (strap state + data spine + recomputed funnels for the
 ///     latest night). Used by the interactive "Save…/Share log" buttons, which hold `model.repo`.
 enum DebugDataDiagnostics {
+    /// Decode both the current `WhoopModel.rawValue` representation and the short values written by
+    /// older builds. Diagnostics must describe the connected transport from persisted evidence rather
+    /// than silently treating every unrecognized value as WHOOP 4.
+    static func persistedWhoopModel(from rawValue: String?) -> WhoopModel? {
+        switch rawValue {
+        case WhoopModel.whoop4.rawValue, "whoop4":
+            return .whoop4
+        case WhoopModel.whoop5mg.rawValue, "whoop5":
+            return .whoop5mg
+        default:
+            return nil
+        }
+    }
 
     /// Strap identity + timezone from persisted defaults (sync, offline-safe). Mirrors the prefs-backed
     /// portion of the Android strap-state block; keys match the iOS @AppStorage / persisted values.
@@ -22,12 +35,8 @@ enum DebugDataDiagnostics {
         lines.append(String(repeating: "─", count: 40))
         lines.append("Strap & data")
         let d = UserDefaults.standard
-        let model: String
-        switch d.string(forKey: "selectedWhoopModel") {
-        case "whoop5": model = "WHOOP 5.0 / MG"
-        case "whoop4": model = "WHOOP 4.0"
-        default:       model = "unknown (never paired)"
-        }
+        let model = persistedWhoopModel(from: d.string(forKey: "selectedWhoopModel"))?.rawValue
+            ?? "unknown (never paired)"
         lines.append("Model:       \(model)")
         lines.append("Firmware:    \(d.string(forKey: "noop.lastFirmware") ?? "unknown (connect to record)")")
         let syncSec = d.double(forKey: "lastSyncedAt")
@@ -138,7 +147,9 @@ enum DebugDataDiagnostics {
         }
         let det = SleepSession(start: cs.startTs, end: cs.endTs, efficiency: cs.efficiency ?? 0,
                                stages: [], restingHR: cs.restingHr, avgHRV: cs.avgHrv)
-        let family: DeviceFamily = (UserDefaults.standard.string(forKey: "selectedWhoopModel") == "whoop5") ? .whoop5 : .whoop4
+        let family = persistedWhoopModel(
+            from: UserDefaults.standard.string(forKey: "selectedWhoopModel")
+        )?.deviceFamily ?? .whoop4
         // Mirror the real per-device anchor (#404): learn it from the WHOLE recent window's raws — not just
         // this night — so a single sparse night (<100 in-band) can't misreport under the global fallback when
         // the window as a whole has enough in-band samples for analyzeDay to learn a device anchor.

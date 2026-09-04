@@ -1,12 +1,13 @@
 import XCTest
 @testable import Strand
+import WhoopProtocol
 
 /// Pins the #580 fix: a connected WHOOP 5/MG whose firmware acks SEND_HISTORICAL_DATA but emits ZERO
 /// type-0x2F offload frames. Live HR streams fine over 0x2A37, but every offload times out — and the old
-/// code surfaced the WHOOP-4 "strap went quiet" sync error and let the 120s liveness watchdog bounce the
-/// (healthy) link every ~2 min. Whoop5EmptyOffloadTracker counts CONSECUTIVE empty offloads so a sustained
-/// empty streak reads as "history sync experimental on 5.0" (not a sync error) and the bounce loop backs
-/// off; any offload that banks real records clears the streak. Pure value type → no CoreBluetooth seam.
+/// code surfaced the WHOOP-4 "strap went quiet" sync error. Whoop5EmptyOffloadTracker counts CONSECUTIVE
+/// empty offloads so a sustained empty streak reads as "history sync experimental on 5.0" (not a sync
+/// error) and repeated empty-history probes slow down; any offload that banks real records clears the
+/// streak. Pure value type → no CoreBluetooth seam.
 final class Whoop5EmptyOffloadTrackerTests: XCTestCase {
 
     // One empty offload must NOT flip to experimental — the first offload after connect can race the
@@ -29,7 +30,7 @@ final class Whoop5EmptyOffloadTrackerTests: XCTestCase {
     }
 
     // Once experimental, further empty offloads stay experimental but DON'T re-report the crossing (so the
-    // honest note + bounce backoff don't re-log on every 60s timeout).
+    // honest note + probe backoff don't re-log on every 60s timeout).
     func testStaysExperimentalWithoutRecrossing() {
         var t = Whoop5EmptyOffloadTracker()
         _ = t.recordOffload(bankedRecords: false)
@@ -81,5 +82,115 @@ final class Whoop5EmptyOffloadTrackerTests: XCTestCase {
         XCTAssertFalse(t.recordOffload(bankedRecords: false))
         XCTAssertFalse(t.recordOffload(bankedRecords: false))
         XCTAssertTrue(t.recordOffload(bankedRecords: false))
+    }
+}
+
+final class BiometricLivenessPolicyTests: XCTestCase {
+    func testOnlyPersistedCustomRealtimeAdvancesIOSLiveness() {
+        XCTAssertTrue(BiometricLivenessPolicy.customRealtimeAdvancesLiveness(for: .whoop4))
+        XCTAssertFalse(
+            BiometricLivenessPolicy.customRealtimeAdvancesLiveness(for: .whoop5),
+            "5/MG puffin HR must not hide a dead authoritative 0x2A37 persistence stream"
+        )
+    }
+
+    func testQuietStreamRearmsBeforeReconnect() {
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop4,
+                secondsSinceBiometric: 600,
+                notificationsRearmed: false,
+                confirmedWristOff: false
+            ),
+            .rearmNotifications
+        )
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop4,
+                secondsSinceBiometric: 600,
+                notificationsRearmed: true,
+                confirmedWristOff: false
+            ),
+            .reconnect
+        )
+    }
+
+    func testBatteryTrafficCannotMaskStaleBiometrics() {
+        let now: TimeInterval = 601
+        let lastBiometric: TimeInterval = 0
+        let lastTransportAfterBatteryRead: TimeInterval = 600
+        XCTAssertEqual(now - lastTransportAfterBatteryRead, 1, "BLE transport is demonstrably fresh")
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop5,
+                secondsSinceBiometric: now - lastBiometric,
+                notificationsRearmed: true,
+                confirmedWristOff: false
+            ),
+            .reconnect,
+            "fresh battery traffic must not reset the biometric fuse"
+        )
+    }
+
+    func testWhoop5UsesLongerFuseThanWhoop4() {
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop4,
+                secondsSinceBiometric: 121,
+                notificationsRearmed: true,
+                confirmedWristOff: false
+            ),
+            .reconnect
+        )
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop5,
+                secondsSinceBiometric: 121,
+                notificationsRearmed: true,
+                confirmedWristOff: false
+            ),
+            .none
+        )
+    }
+
+    func testConfirmedWristOffSuppressesReconnectButNotInitialRearm() {
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop5,
+                secondsSinceBiometric: 601,
+                notificationsRearmed: false,
+                confirmedWristOff: true
+            ),
+            .rearmNotifications
+        )
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop5,
+                secondsSinceBiometric: 601,
+                notificationsRearmed: true,
+                confirmedWristOff: true
+            ),
+            .none
+        )
+    }
+}
+
+final class DebugDataDiagnosticsModelTests: XCTestCase {
+    func testCurrentPersistedModelValuesResolveToTheCorrectFamily() {
+        XCTAssertEqual(
+            DebugDataDiagnostics.persistedWhoopModel(from: WhoopModel.whoop4.rawValue),
+            .whoop4
+        )
+        XCTAssertEqual(
+            DebugDataDiagnostics.persistedWhoopModel(from: WhoopModel.whoop5mg.rawValue),
+            .whoop5mg
+        )
+    }
+
+    func testLegacyPersistedModelValuesRemainDiagnosable() {
+        XCTAssertEqual(DebugDataDiagnostics.persistedWhoopModel(from: "whoop4"), .whoop4)
+        XCTAssertEqual(DebugDataDiagnostics.persistedWhoopModel(from: "whoop5"), .whoop5mg)
+        XCTAssertNil(DebugDataDiagnostics.persistedWhoopModel(from: nil))
+        XCTAssertNil(DebugDataDiagnostics.persistedWhoopModel(from: "unsupported"))
     }
 }

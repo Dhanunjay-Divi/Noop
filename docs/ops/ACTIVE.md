@@ -18,6 +18,19 @@ Last updated: **2026-09-04**
 
 ## Active work
 
+The newest transport round separates live biometric health from generic BLE
+traffic on Apple and Android. Battery, metadata, and command packets can no
+longer hide a stopped HR stream; each client first rewrites live notification
+subscriptions and then reconnects if accepted HR remains absent. Explicit
+off-wrist evidence suppresses reconnect churn, empty 5/MG history support no
+longer disables recovery, and the 5/MG live-HR-only path now runs the watchdog.
+Apple diagnostics also decode the persisted current family correctly. Focused
+Apple tests, 4,017 Android tests, Android lint/build/launch, and the clean iOS
+Release simulator graph pass. A physical phone and worn band were unavailable,
+so continuous locked-background collection and the band's reported empty
+history remain open. Evidence and the physical procedure are recorded in
+[Biometric collection liveness](rounds/2026-09-04-biometric-collection-liveness.md).
+
 The optional NOOP+ managed-storage source is implemented across iOS, Android,
 FastAPI/PostgreSQL, and guarded GCP IaC. It adds phone OTP, App Check,
 per-installation credentials, explicit versioned consent, immutable compressed
@@ -135,21 +148,23 @@ participant, and native-speaker gates remain separate.
 
 ## Next priorities after this round
 
-1. Accept Firebase terms, regenerate the zero-destroy identity plan, and deploy
+1. Install the current build on the physical iPhone without clearing data and
+   prove durable HR advances while worn, locked, relaunched, and upgraded.
+2. Accept Firebase terms, regenerate the zero-destroy identity plan, and deploy
    Identity Platform plus App Check to synthetic staging.
-2. Generate ignored mobile configuration, prove debug attestation, run managed
+3. Generate ignored mobile configuration, prove debug attestation, run managed
    Cloud SQL tests, build/scan a digest, migrate through `024`, and deploy the
    managed runtime IAM-only.
-3. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
+4. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
    erasure, load, and recovery before enabling public invocation.
-4. Prove complete managed-history export with live cloud-only/large-account
+5. Prove complete managed-history export with live cloud-only/large-account
    data, then add resumable continuation and documented import before public
    enrollment.
-5. Complete signed physical-device background, storage-pressure, battery,
+6. Complete signed physical-device background, storage-pressure, battery,
    upgrade, and multi-device validation.
-6. Consolidate ordinary wellness notifications through the shared day arbiter
+7. Consolidate ordinary wellness notifications through the shared day arbiter
    after this storage round closes.
-7. Complete privacy/legal, security, support-access, carrier, accuracy, store,
+8. Complete privacy/legal, security, support-access, carrier, accuracy, store,
    and native-speaker external gates.
-8. Keep automatic emergency inference unavailable until its separate
+9. Keep automatic emergency inference unavailable until its separate
    validation and regulatory program is complete.

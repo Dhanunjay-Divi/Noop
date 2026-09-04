@@ -235,14 +235,14 @@ struct EmptySyncTracker {
 /// offload frames. Live HR streams fine over the standard 0x2A37 profile, but the historical offload is
 /// empty, so every session runs the 60s idle watchdog out to a "timeout" and surfaces the WHOOP-4
 /// "strap went quiet" sync error - even though nothing is wrong, the 5/MG history offload is simply
-/// experimental/unsupported on that firmware. Worse, the empty offload leaves the link idle, so the
-/// 120s liveness watchdog can bounce-disconnect/rescan every ~2 min in a thrash loop.
+/// experimental/unsupported on that firmware.
 ///
 /// This pure tracker counts CONSECUTIVE empty 5/MG offloads (a timeout with no offload frames and no
 /// rows persisted). Once `quietThreshold` is reached it reports the strap as "history-empty" so the
 /// caller can (a) surface an honest "connected, history sync experimental on 5.0" state instead of a
-/// sync error, and (b) back off the bounce loop. Any offload that DOES hand over real records clears the
-/// streak — so a strap that later starts banking recovers immediately. Value type → unit-testable
+/// sync error, and (b) stretch repeated empty-history probes. Biometric liveness is independent of this
+/// history capability. Any offload that DOES hand over real records clears the streak, so a strap that
+/// later starts banking recovers immediately. Value type → unit-testable
 /// (Whoop5EmptyOffloadTrackerTests) without a CoreBluetooth seam. Mirrored on Android.
 struct Whoop5EmptyOffloadTracker {
     /// Consecutive empty 5/MG offloads before we treat the strap as history-empty (experimental). 2 (not
@@ -252,8 +252,8 @@ struct Whoop5EmptyOffloadTracker {
 
     private(set) var consecutiveEmpty = 0
     /// True once `quietThreshold` consecutive empty offloads have been seen — the link is up + live HR is
-    /// flowing but the 5/MG history offload is empty. Drives the honest home-state flag AND the bounce
-    /// backoff. Cleared the moment any offload banks real records.
+    /// flowing but the 5/MG history offload is empty. Drives the honest home-state flag and slower
+    /// empty-history probe cadence. Cleared the moment any offload banks real records.
     private(set) var historyEmpty = false
 
     init(quietThreshold: Int = 2) { self.quietThreshold = quietThreshold }
@@ -280,6 +280,48 @@ struct Whoop5EmptyOffloadTracker {
     mutating func reset() {
         consecutiveEmpty = 0
         historyEmpty = false
+    }
+}
+
+/// Recovery policy for a connected link whose control traffic still flows while biometric delivery has
+/// stopped. Battery/DIS/command packets deliberately do not enter this decision: only accepted live HR
+/// advances the biometric clock. Recovery is staged so a dropped CCCD gets one re-arm before reconnect.
+enum BiometricLivenessAction: Equatable {
+    case none
+    case rearmNotifications
+    case reconnect
+}
+
+struct BiometricLivenessPolicy {
+    static let quietSeconds: TimeInterval = 45
+    static let whoop4StallSeconds: TimeInterval = 120
+    static let whoop5StallSeconds: TimeInterval = 600
+
+    static func stallSeconds(for family: DeviceFamily) -> TimeInterval {
+        family == .whoop5 ? whoop5StallSeconds : whoop4StallSeconds
+    }
+
+    /// iOS persists custom realtime frames for WHOOP 4. WHOOP 5/MG intentionally uses standard 0x2A37
+    /// as its sole live HR/R-R persistence source to avoid duplicate rows, so puffin HR must not certify
+    /// collection health while that authoritative subscription is dead.
+    static func customRealtimeAdvancesLiveness(for family: DeviceFamily) -> Bool {
+        family == .whoop4
+    }
+
+    static func action(
+        family: DeviceFamily,
+        secondsSinceBiometric: TimeInterval,
+        notificationsRearmed: Bool,
+        confirmedWristOff: Bool
+    ) -> BiometricLivenessAction {
+        let silence = max(0, secondsSinceBiometric)
+        if silence >= quietSeconds, !notificationsRearmed {
+            return .rearmNotifications
+        }
+        if silence >= stallSeconds(for: family), !confirmedWristOff {
+            return .reconnect
+        }
+        return .none
     }
 }
 
@@ -596,8 +638,16 @@ public final class BLEManager: NSObject, ObservableObject {
     /// actually advertises. (PR#195)
     private var scanFallbackWorkItem: DispatchWorkItem?
     static let scanFallbackDelaySeconds: TimeInterval = 8
-    /// Last time ANY notification arrived — drives the liveness watchdog.
-    private var lastDataAt = Date()
+    /// Transport and biometric activity are intentionally separate. Battery, DIS and command traffic can
+    /// prove the GATT link is alive, but must not hide a dead HR subscription.
+    private var lastTransportAt = Date()
+    private var lastBiometricAt = Date()
+    /// One forced CCCD re-arm per biometric-quiet episode. Accepted HR clears it.
+    private var biometricNotificationsRearmed = false
+    /// Explicit live WRIST_OFF evidence for this connection. Defaults false and is cleared on reconnect,
+    /// WRIST_ON, or accepted HR, so the default `state.worn` value can never suppress recovery.
+    private var confirmedWristOff = false
+    private var offWristStallLogged = false
     /// True while a Live/Health screen is on-screen and wants the realtime stream. One of the two
     /// inputs to `wantsRealtime`. Driven only by an explicit foreground Live/workout/reading/session
     /// lease through `startRealtime()` / `stopRealtime()`; merely opening Live does not set it.
@@ -657,7 +707,7 @@ public final class BLEManager: NSObject, ObservableObject {
     private var emptySyncTracker = EmptySyncTracker()
     /// #580: tracks CONSECUTIVE empty 5/MG offloads so a 5/MG whose firmware serves no history offload (but
     /// streams live HR fine) reads as "history sync experimental on 5.0" instead of a sync error, and the
-    /// 120s bounce loop backs off while live HR is flowing. Reset on connect / a banking offload.
+    /// empty-history probe cadence stretches. Reset on connect / a banking offload.
     private var whoop5EmptyOffload = Whoop5EmptyOffloadTracker()
     /// When true, SKIP arming the R10/R11 raw realtime stream on connect — the radio couldn't sustain
     /// it (see MarginalRadioDetector). Live HR then comes only from the already-subscribed low-bandwidth
@@ -979,6 +1029,7 @@ public final class BLEManager: NSObject, ObservableObject {
         #endif
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
+        router.onWristEvidence = { [weak self] worn in self?.noteWristEvidence(worn: worn) }
         // #78 hole-4: a paused-for-bond-loop strap gets one bounded salvage attempt per app-foreground.
         installForegroundSalvageProbe()
     }
@@ -1148,6 +1199,7 @@ public final class BLEManager: NSObject, ObservableObject {
         #endif
         // Strap-as-clock: an incoming EVENT packet kicks a rate-limited catch-up sync.
         router.onSyncTrigger = { [weak self] in self?.requestSync(.strap) }
+        router.onWristEvidence = { [weak self] worn in self?.noteWristEvidence(worn: worn) }
         // #78 hole-4: a paused-for-bond-loop strap gets one bounded salvage attempt per app-foreground.
         installForegroundSalvageProbe()
     }
@@ -2227,7 +2279,7 @@ public final class BLEManager: NSObject, ObservableObject {
                     state.historySyncExperimental = true
                     state.lastSyncError = nil
                     if crossed {
-                        log("Backfill: WHOOP 5/MG offload empty \(whoop5EmptyOffload.consecutiveEmpty)× - history sync is experimental on 5.0; surfacing 'connected, history experimental' (not a sync error) and backing off the bounce loop.")
+                        log("Backfill: WHOOP 5/MG offload empty \(whoop5EmptyOffload.consecutiveEmpty)× - history sync is experimental on 5.0; surfacing 'connected, history experimental' (not a sync error) and slowing empty-history probes.")
                     }
                 } else {
                     // Either the first empty cycle (could be the strap waking flash — stay quiet, don't
@@ -3280,8 +3332,41 @@ public final class BLEManager: NSObject, ObservableObject {
         clearRebootState()   // clears the "Reconnecting…" pill → back to "Active · Live"
     }
 
+    private func noteAcceptedBiometric(at now: Date = Date()) {
+        lastBiometricAt = now
+        biometricNotificationsRearmed = false
+        confirmedWristOff = false
+        offWristStallLogged = false
+    }
+
+    private func noteAcceptedBiometric(
+        from parsed: ParsedFrame,
+        family: DeviceFamily,
+        at now: Date = Date()
+    ) {
+        guard BiometricLivenessPolicy.customRealtimeAdvancesLiveness(for: family),
+              parsed.ok, parsed.crcOK != false,
+              parsed.typeName == "REALTIME_DATA" || parsed.typeName == "REALTIME_RAW_DATA",
+              let hr = parsed.parsed["heart_rate"]?.intValue, (30...220).contains(hr) else { return }
+        noteAcceptedBiometric(at: now)
+    }
+
+    private func noteWristEvidence(worn: Bool) {
+        confirmedWristOff = !worn
+        offWristStallLogged = false
+        if worn {
+            // WRIST_ON may arrive before the first HR packet. Give the freshly worn strap a full fuse
+            // rather than reconnecting immediately against an old off-wrist biometric timestamp.
+            lastBiometricAt = Date()
+            biometricNotificationsRearmed = false
+        }
+    }
+
     private func startKeepAlive() {
-        keepAliveTimer?.cancel()
+        guard keepAliveTimer == nil else { return }
+        lastBiometricAt = Date()   // initial grace while the first post-bond HR packet arrives
+        biometricNotificationsRearmed = false
+        keepAliveTick = 0
         let s = BLEManager.keepAliveIntervalSeconds
         let t = DispatchSource.makeTimerSource(queue: .main)
         t.schedule(deadline: .now() + .seconds(s), repeating: .seconds(s))
@@ -3291,23 +3376,45 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     private func keepAliveFire() {
-        guard state.connected, didBond else { return }
-        enableLiveNotifications(reason: "keepalive")
-        // Liveness watchdog: if NOTHING has arrived for a while, the stream/link stalled.
-        // Bounce the connection — the auto-rescan on disconnect re-bonds and resumes streaming.
-        // #580: a known history-empty 5/MG (firmware serves no offload) gets a far longer fuse. The
-        // standard 0x2A37 HR profile keeps the link genuinely alive, but its packets can lull for >120s
-        // when the strap is off-wrist / resting, and an empty offload leaves the data channel quiet — so
-        // the old 120s rule disconnected/rescanned a perfectly healthy link every ~2 min (the thrash this
-        // fixes). A WHOOP 4 (real "not recording" path) keeps the tight 120s fuse unchanged.
-        let bounceFuse: TimeInterval =
-            (selectedModel.deviceFamily == .whoop5 && whoop5EmptyOffload.historyEmpty) ? 600 : 120
-        if Date().timeIntervalSince(lastDataAt) > bounceFuse {
-            log("No data for >\(Int(bounceFuse))s - bouncing link to resume streaming")
-            if let p = peripheral { central.cancelPeripheralConnection(p) }
-            return
+        // `state.bonded` also covers the 5/MG standard-HR degraded path. It needs subscription repair and
+        // reconnect recovery even though `didBond` is false; protected command/read maintenance remains
+        // gated on `didBond` below.
+        guard state.connected, state.bonded else { return }
+        let now = Date()
+        let biometricSilence = now.timeIntervalSince(lastBiometricAt)
+        let stall = BiometricLivenessPolicy.stallSeconds(for: selectedModel.deviceFamily)
+
+        // Historical offload owns the link and has its own timeout. Do not re-subscribe or reconnect in
+        // the middle of it; evaluate the accumulated silence as soon as the offload releases the link.
+        if !backfilling {
+            switch BiometricLivenessPolicy.action(
+                family: selectedModel.deviceFamily,
+                secondsSinceBiometric: biometricSilence,
+                notificationsRearmed: biometricNotificationsRearmed,
+                confirmedWristOff: confirmedWristOff
+            ) {
+            case .rearmNotifications:
+                biometricNotificationsRearmed = true
+                log("No biometric HR for \(Int(biometricSilence))s - force re-arming live notifications once")
+                forceRearmLiveNotifications(reason: "biometric watchdog")
+                return   // let the off→on CCCD writes settle before command/read maintenance
+            case .reconnect:
+                let transportSilence = max(0, now.timeIntervalSince(lastTransportAt))
+                log("No biometric HR for \(Int(biometricSilence))s (last BLE traffic \(Int(transportSilence))s ago) - reconnecting to restore collection")
+                if let p = peripheral { central.cancelPeripheralConnection(p) }
+                return
+            case .none:
+                if confirmedWristOff, biometricSilence >= stall, !offWristStallLogged {
+                    offWristStallLogged = true
+                    log("Biometric HR quiet while WRIST_OFF is confirmed - keeping the healthy link without reconnect churn")
+                }
+            }
         }
-        guard !backfilling else { return }            // never poke the strap mid-offload
+        guard !backfilling else { return }
+        guard didBond else { return }   // degraded 5/MG HR fallback cannot run encrypted maintenance
+        // Regular maintenance does not force active CCCDs off/on. It keeps newly-discovered channels
+        // subscribed and performs the throttled 5/MG battery/DIS reads.
+        enableLiveNotifications(reason: "keepalive")
         // #927: continuous capture can be overnight-only, which makes the want TIME-dependent; nothing
         // else re-evaluates it while the app just sits connected, so the keep-alive tick re-derives it.
         // A window-close tick DISARMS (stop the heavy R10/R11 burst, then the reconciler sends TOGGLE 0
@@ -3326,8 +3433,7 @@ public final class BLEManager: NSObject, ObservableObject {
         }
         reconcileRealtime()   // recomputes wantsRealtime from the fresh predicate; toggles only on an edge
         // The command pings below are WHOOP4-framed; a 5/MG link drops them at the send() guard, so
-        // skip them for 5/MG (it keeps the experimental strap log clean — re-subscribe + the 120s
-        // bounce above are what keep a 5/MG link healthy).
+        // skip them for 5/MG (subscription repair + the 10-minute biometric fuse keep that link healthy).
         guard selectedModel.deviceFamily == .whoop4 else { return }
         // Never re-arm the heavy R10/R11 burst once the marginal-radio fallback has tripped (#80) — that
         // would just re-trigger the drop the keep-alive is meant to prevent. 0x2A37 keeps the HR flowing.
@@ -3607,6 +3713,25 @@ public final class BLEManager: NSObject, ObservableObject {
         }
     }
 
+    /// Force one real off→on cycle for live-delivery CCCDs even when CoreBluetooth still reports them
+    /// active. This is intentionally separate from `enableLiveNotifications`: the degraded 5/MG standard-HR
+    /// path may use it without performing protected battery/DIS reads.
+    private func forceRearmLiveNotifications(reason: String) {
+        guard let p = peripheral, p.state == .connected else { return }
+        var chars = [heartRateCharacteristic].compactMap { $0 }
+        if didBond {
+            chars += [
+                cmdNotifyCharacteristic,
+                eventNotifyCharacteristic,
+                dataNotifyCharacteristic,
+                batteryCharacteristic,
+            ].compactMap { $0 } + whoop5NotifyCharacteristics
+        }
+        for c in chars {
+            requestNotify(c, on: p, reason: reason, forceRearm: true)
+        }
+    }
+
     /// Resolve + log the 5/MG hardware variant once a DIS string lands (#520). Both characteristics
     /// arrive as SEPARATE async callbacks, so this runs on each and re-resolves — the contradiction rule
     /// in `Whoop5Variant` needs both before it can disagree. Diagnostic only: nothing gates on it yet.
@@ -3674,7 +3799,12 @@ public final class BLEManager: NSObject, ObservableObject {
         }
     }
 
-    private func requestNotify(_ c: CBCharacteristic, on p: CBPeripheral, reason: String) {
+    private func requestNotify(
+        _ c: CBCharacteristic,
+        on p: CBPeripheral,
+        reason: String,
+        forceRearm: Bool = false
+    ) {
         guard c.properties.contains(.notify) || c.properties.contains(.indicate) else {
             log("Notify unavailable \(c.uuid) (\(reason))")
             return
@@ -3685,8 +3815,8 @@ public final class BLEManager: NSObject, ObservableObject {
             // (no state change). Force one real off→on cycle so delivery is re-established AND
             // `didUpdateNotificationStateFor` fires — the only path that latches `cmdNotifyConfirmedActive`
             // → `connectSettled` → the alarm re-arm. One-shot: `restoreNeedsResubscribe` clears at settle.
-            if restoreNeedsResubscribe {
-                log("Notify re-arming after restore \(c.uuid) (\(reason))")
+            if restoreNeedsResubscribe || forceRearm {
+                log("Notify force re-arming \(c.uuid) (\(reason))")
                 p.setNotifyValue(false, for: c)
                 p.setNotifyValue(true, for: c)
                 return
@@ -3928,10 +4058,11 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     /// Parse a standard BLE Heart Rate Measurement (0x2A37) via the pure StandardHeartRate parser.
-    private func parseStandardHR(_ data: [UInt8]) {
+    @discardableResult
+    private func parseStandardHR(_ data: [UInt8]) -> Bool {
         guard let m = StandardHeartRate.parse(data) else {
             log("HR notify parse failed: \(hex(data))")
-            return
+            return false
         }
         let now = Date()
         if lastStandardHRLogAt.map({ now.timeIntervalSince($0) >= 30 }) ?? true {
@@ -3947,9 +4078,14 @@ public final class BLEManager: NSObject, ObservableObject {
         // drive the value whenever it's physiologically plausible; reject 0/garbage (off-wrist).
         // AppModel medians these into a stable display value. Only publish the UI value on a real change,
         // but advance the packet sequence every time so clock-driven Live Session freshness stays honest.
-        if m.hr >= 30 && m.hr <= 220 { state.setHeartRate(m.hr, publishEvenIfUnchanged: false) }
+        let accepted = (30...220).contains(m.hr)
+        if accepted {
+            noteAcceptedBiometric(at: now)
+            state.setHeartRate(m.hr, publishEvenIfUnchanged: false)
+        }
         // Record it continuously — independent of the realtime stream or the open screen.
         collector?.ingestStandardHR(hr: m.hr, rr: m.rr, at: Int(Date().timeIntervalSince1970))
+        return accepted
     }
 }
 
@@ -4245,7 +4381,12 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         } else {
             state.reconnectGuide = nil
         }
-        lastDataAt = Date()
+        let connectedAt = Date()
+        lastTransportAt = connectedAt
+        lastBiometricAt = connectedAt
+        biometricNotificationsRearmed = false
+        confirmedWristOff = false
+        offWristStallLogged = false
         log("Connected - discovering services")
         // Connection test mode: report the connect latency + the uptime-start marker the readout reads.
         // Gated zero-cost: the .connection bool is read before any string is built, so this is a no-op
@@ -4366,6 +4507,9 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         state.clearBiometrics()       // and a stale HR / R-R must not outlive the link either
         state.liveFeedActive = false  // a drop while Live is open must not leave a stale "Stop live feed"
         didBond = false
+        biometricNotificationsRearmed = false
+        confirmedWristOff = false
+        offWristStallLogged = false
         whoop5ClientHelloWritePending = false
         whoop5RealtimeArmed = false
         // The strap forgets the realtime-HR toggle across a disconnect; the post-bond branch re-arms it
@@ -5139,18 +5283,22 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         }
         guard let data = characteristic.value else { return }
         let bytes = [UInt8](data)
-        lastDataAt = Date()   // feed the liveness watchdog on every notification
+        lastTransportAt = Date()   // transport diagnostics only; battery/metadata cannot prove HR health
 
         switch characteristic.uuid {
         case BLEManager.heartRateChar:
-            parseStandardHR(bytes)
+            let acceptedHR = parseStandardHR(bytes)
             // EXPERIMENTAL WHOOP 5.0/MG: there is no confirmed-write bond for a 5/MG strap, so once
             // live HR actually streams over the standard profile we treat the link as established —
             // otherwise the UI sits on "Connecting…" forever even though data is flowing (issue #8).
-            if selectedModel.deviceFamily == .whoop5, !state.bonded {
+            if acceptedHR, selectedModel.deviceFamily == .whoop5, !state.bonded {
                 state.bonded = true
                 BluetoothAvailabilityNotifications.setMonitoringExpected(true)
                 log("WHOOP 5/MG: live HR streaming - marking the link established (experimental).")
+                // The encrypted CLIENT_HELLO may still be unavailable, but the standard-HR path needs
+                // the same liveness repair/reconnect watchdog. Protected maintenance stays gated by
+                // `didBond` inside keepAliveFire.
+                startKeepAlive()
             }
         case BLEManager.batteryChar:
             // 0x2A19 = percent — 5/MG ONLY. The WHOOP 4.0's 0x2A19 is a stub constant 100 (real value =
@@ -5194,6 +5342,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                 // collector.family / the no-family clock parse all resolve to .whoop4 here; a DEBUG assert in
                 // the router + collector re-checks the invariant).
                 let parsed = parseFrame(frame, family: .whoop4)
+                noteAcceptedBiometric(from: parsed, family: .whoop4)
                 router.handle(parsed: parsed, frame: frame)       // live/UI path
                 // #592: the read-only extended-battery probe's COMMAND_RESPONSE — format + publish it for the
                 // Devices dialog (raw hex + payload triage + capture diff). Sibling of the #451 dump below.
@@ -5269,7 +5418,11 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                         router.dispatchLiveGestureIfFresh(frame: frame, now: strapClockNow)
                         continue
                     }
-                    router.handle(frame: frame)
+                    // Parse once so both liveness and the UI consume the exact same checksum-validated
+                    // frame. A plausible live HR advances biometric health; battery/metadata never do.
+                    let parsed = parseFrame(frame, family: .whoop5)
+                    noteAcceptedBiometric(from: parsed, family: .whoop5)
+                    router.handle(parsed: parsed, frame: frame)
                     // #592: a 5/MG extended-battery probe COMMAND_RESPONSE (puffin envelope: type @8, cmd
                     // @10). Format + publish it for the Devices dialog, exactly like the 4.0 path above.
                     if frame.count > 10, frame[8] == 0x24, frame[10] == WhoopCommand.getExtendedBatteryInfo.rawValue {
