@@ -1,5 +1,7 @@
 package com.noop.testcentre
 
+import com.noop.AppDiagnosticsRecorder
+
 /**
  * The mandatory review-before-share gate (spec sections 9 and 12), twin of
  * Strand/System/ReportReviewGate.swift. Nothing is shared until the user has seen the exact redacted
@@ -51,6 +53,10 @@ class ReportReviewGate(private val entries: List<Pair<String, ByteArray>>) {
          *  future producer port). The binary screenshot is caught by [isBinaryEntry]. */
         private val NOT_SHOWN_INLINE = setOf(
             "raw-capture.jsonl", "oura-raw.jsonl", "oura-ibihr.jsonl", "oura-activity.jsonl",
+            AppDiagnosticsRecorder.CURRENT_SESSION_ENTRY,
+            AppDiagnosticsRecorder.PREVIOUS_SESSION_ENTRY,
+            AppDiagnosticsRecorder.EXIT_HISTORY_ENTRY,
+            AppDiagnosticsRecorder.LAST_ANR_ENTRY,
         )
 
         /** 1 MiB — far above a normal report.txt / meta.json (those still show in full) yet well below the

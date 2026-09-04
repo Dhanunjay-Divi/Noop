@@ -424,6 +424,7 @@ fun AppRoot(
     // System Back can leave a top-level destination and reveal a different tab root. Keep the persistent
     // selection synchronized only for exact roots; a nested route deliberately retains its owning tab.
     LaunchedEffect(currentRoute) {
+        com.noop.AppDiagnosticsRecorder.setScreen(currentRoute)
         Destination.entries
             .firstOrNull { it.route == currentRoute && it in primaryTabDestinations }
             ?.let { selectedTabRoute = it.route }

@@ -6,15 +6,14 @@ import UIKit
 import AppKit
 #endif
 
-// DisplayScreenshot.swift - captures the current screen as PNG bytes for the Display & Performance test
-// mode's export bundle (spec section: screenshot into the bundle).
+// Captures the current screen as PNG bytes for the Display & Performance test bundle or for the
+// transient, explicitly approved app-report attachment.
 //
 // The PNG is BINARY image bytes, not a text line, so it is NOT run through redactPii (that is correct and
 // intentional - redaction scrubs text identifiers, not pixels). The screenshot IS covered by the mandatory
 // review-before-share gate: the report never ships until the user taps Share on the review sheet, and the
-// gate's note tells them a screenshot is attached. A capture only ever happens for the .display profile,
-// gated by the assembler behind TestCentre.active(.display) / includesScreenshot, so a non-display report
-// never grabs a shot.
+// gate names the attachment. Test Centre captures only for an enabled screenshot profile. The app-report
+// controller keeps its pre-sheet capture in memory, excludes it by default, and discards it on dismissal.
 
 enum DisplayScreenshot {
 

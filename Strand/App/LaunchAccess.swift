@@ -206,6 +206,12 @@ enum LaunchAccessStoreError: Error {
 /// This-device-only persistence for the successful gate version. No access code, derived verifier,
 /// health record, or account identifier is written here.
 struct KeychainLaunchAccessReceiptStore: LaunchAccessReceiptStoring {
+    /// The receipt contains only the accepted gate version, never the access code or verifier. CoreBluetooth
+    /// can relaunch NOOP while the phone is locked, so this must match the health store's after-first-unlock
+    /// availability or the launch gate would prevent state restoration after an OS termination.
+    static let receiptAccessibility =
+        kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
+
     private let service: String
     private let account = "launch-gate-unlock"
 
@@ -224,14 +230,30 @@ struct KeychainLaunchAccessReceiptStore: LaunchAccessReceiptStoring {
     func read() throws -> LaunchAccessReceipt? {
         var lookup = query
         lookup[kSecReturnData as String] = kCFBooleanTrue
+        lookup[kSecReturnAttributes as String] = kCFBooleanTrue
         lookup[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw LaunchAccessStoreError.readFailed(status) }
-        guard let data = item as? Data,
+        guard let attributes = item as? [String: Any],
+              let data = attributes[kSecValueData as String] as? Data,
               let receipt = try? JSONDecoder().decode(LaunchAccessReceipt.self, from: data),
               receipt.isSupported else { throw LaunchAccessStoreError.invalidReceipt }
+
+        // Builds before this migration wrote `WhenUnlockedThisDeviceOnly`. Upgrade the existing item as
+        // soon as it is readable so future CoreBluetooth relaunches can verify the same receipt while
+        // locked. A failed migration remains fail-closed instead of silently claiming background safety.
+        let currentAccessibility = attributes[kSecAttrAccessible as String] as? String
+        if currentAccessibility != Self.receiptAccessibility {
+            let migrationStatus = SecItemUpdate(
+                query as CFDictionary,
+                [kSecAttrAccessible as String: Self.receiptAccessibility] as CFDictionary
+            )
+            guard migrationStatus == errSecSuccess else {
+                throw LaunchAccessStoreError.writeFailed(migrationStatus)
+            }
+        }
         return receipt
     }
 
@@ -242,7 +264,7 @@ struct KeychainLaunchAccessReceiptStore: LaunchAccessReceiptStoring {
         }
         var attributes = query
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        attributes[kSecAttrAccessible as String] = Self.receiptAccessibility
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
         if addStatus == errSecSuccess { return }
         guard addStatus == errSecDuplicateItem else {
@@ -250,7 +272,10 @@ struct KeychainLaunchAccessReceiptStore: LaunchAccessReceiptStoring {
         }
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
+            [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: Self.receiptAccessibility,
+            ] as CFDictionary
         )
         guard updateStatus == errSecSuccess else {
             throw LaunchAccessStoreError.writeFailed(updateStatus)

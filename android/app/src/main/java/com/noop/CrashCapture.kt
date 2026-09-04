@@ -21,6 +21,13 @@ object CrashCapture {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             // The handler itself must never throw, or we replace one crash with another.
             runCatching {
+                AppDiagnosticsRecorder.recordCritical(
+                    "process.uncaught_exception",
+                    fields = mapOf(
+                        "thread" to thread.name,
+                        "exception" to throwable.javaClass.name,
+                    ),
+                )
                 val sw = StringWriter()
                 throwable.printStackTrace(PrintWriter(sw))
                 val text = buildString {
@@ -28,7 +35,9 @@ object CrashCapture {
                     appendLine("thread: ${thread.name}")
                     appendLine(sw.toString())
                 }
-                File(appContext.filesDir, FILE).writeText(text)
+                // Keep the top of the trace, where the exception and application frames live. A recursive
+                // failure or pathological suppressed chain must not consume unbounded phone storage.
+                File(appContext.filesDir, FILE).writeText(text.take(MAX_BYTES))
             }
             previous?.uncaughtException(thread, throwable)
         }
@@ -40,4 +49,6 @@ object CrashCapture {
         if (!f.exists()) return null
         return runCatching { f.readText() }.getOrNull()?.ifBlank { null }
     }
+
+    private const val MAX_BYTES = 512 * 1024
 }

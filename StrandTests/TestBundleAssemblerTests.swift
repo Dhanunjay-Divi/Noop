@@ -28,6 +28,69 @@ final class TestBundleAssemblerTests: XCTestCase {
         XCTAssertEqual(TestBundleAssembler.redactionVersion, "v2")
     }
 
+    func testPersistedHRFrontierLineReportsDurableAge() {
+        XCTAssertEqual(
+            TestBundleAssembler.persistedHRFrontierLine(
+                latestUnix: 1_000,
+                now: 1_045
+            ),
+            "latestPersistedHrUnix=1000 ageSeconds=45"
+        )
+        XCTAssertNil(TestBundleAssembler.persistedHRFrontierLine(
+            latestUnix: nil,
+            now: 1_045
+        ))
+    }
+
+    func testUserNoteIsBoundedAndRedactedWithControlBytesRemoved() throws {
+        let serial = "4C1594026"
+        let note = "  Scrolling WHOOP \(serial)\u{0} froze\n"
+            + String(repeating: "x", count: TestBundleAssembler.maxUserNoteCharacters + 100)
+        let entry = try XCTUnwrap(TestBundleAssembler.userNoteEntry(note))
+        XCTAssertEqual(entry.name, "user-note.txt")
+
+        let scrubbed = TestBundleAssembler.redactEntries([entry])[0]
+        let text = try XCTUnwrap(String(data: scrubbed.data, encoding: .utf8))
+        XCTAssertTrue(text.contains("User-provided context"))
+        XCTAssertTrue(text.contains("Band <serial>"))
+        XCTAssertFalse(text.contains(serial))
+        XCTAssertFalse(text.unicodeScalars.contains { $0.value == 0 })
+        XCTAssertLessThanOrEqual(
+            text.count,
+            TestBundleAssembler.maxUserNoteCharacters + 100,
+            "the small fixed heading is the only content above the user-note limit"
+        )
+        XCTAssertNil(TestBundleAssembler.userNoteEntry(" \n\t "))
+    }
+
+    func testUserNoteByteLimitHandlesPathologicalSingleGrapheme() {
+        let note = "a" + String(repeating: "\u{0301}", count: 10_000)
+        let bounded = TestBundleAssembler.boundedUserNoteInput(note)
+
+        XCTAssertFalse(bounded.isEmpty)
+        XCTAssertLessThanOrEqual(
+            bounded.utf8.count,
+            TestBundleAssembler.maxUserNoteUTF8Bytes
+        )
+    }
+
+    func testAppReportScreenshotFailsClosedUnlessValidAndBounded() {
+        let signature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let valid = signature + Data([0x00, 0x01])
+        XCTAssertEqual(
+            TestBundleAssembler.appReportScreenshotEntry(valid)?.data,
+            valid
+        )
+        XCTAssertNil(TestBundleAssembler.appReportScreenshotEntry(Data("not a png".utf8)))
+        XCTAssertNil(TestBundleAssembler.appReportScreenshotEntry(
+            signature + Data(
+                repeating: 0,
+                count: TestBundleAssembler.maxAppReportScreenshotBytes
+            )
+        ))
+        XCTAssertNil(TestBundleAssembler.appReportScreenshotEntry(nil))
+    }
+
     func testCapTruncatesRawCaptureTailAndFlags() {
         // report.txt + meta.json are small; raw-capture blows the cap. We keep the most-recent tail.
         let small = FileExport.BundleEntry(name: "report.txt", data: Data("small".utf8))

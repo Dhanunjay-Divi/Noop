@@ -152,4 +152,30 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         XCTAssertTrue(meta.captureCheck.isEmpty)
         XCTAssertNil(meta.profileStartedAt)
     }
+
+    @MainActor
+    func testAppHangBundleIncludesOnlyExplicitReviewedContext() throws {
+        let screenshot = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01])
+        let entries = TestBundleAssembler.assemble(
+            profile: .master,
+            live: LiveState(),
+            purpose: .appHang,
+            runtimeDiagnostics: [],
+            userNote: "Health froze near WHOOP 4C1594026",
+            appReportScreenshotPNG: screenshot
+        )
+
+        let note = try XCTUnwrap(entries.first { $0.name == "user-note.txt" })
+        let noteText = try XCTUnwrap(String(data: note.data, encoding: .utf8))
+        XCTAssertTrue(noteText.contains("Health froze"))
+        XCTAssertFalse(noteText.contains("4C1594026"))
+        XCTAssertEqual(
+            entries.first { $0.name == DisplayScreenshot.bundleName }?.data,
+            screenshot
+        )
+
+        let preview = ReportReviewGate(entries: entries).previewText
+        XCTAssertTrue(preview.contains("Health froze"))
+        XCTAssertTrue(preview.contains(DisplayScreenshot.bundleName))
+    }
 }

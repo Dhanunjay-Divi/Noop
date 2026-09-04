@@ -18,7 +18,12 @@ class TestBundleMetaTest {
         profileStartedAt = "2026-06-26T07:12:00Z",
         questionnaire = mapOf("naps" to "no"),
         build = TestBundleMeta.Build(channel = "GitHub", signed = true),
-        storage = TestBundleMeta.Storage(dbBytes = 1024, rows = mapOf("sleep_sessions" to 12), rawCaptureBytes = 2048),
+        storage = TestBundleMeta.Storage(
+            dbBytes = 1024,
+            rows = mapOf("sleep_sessions" to 12),
+            rawCaptureBytes = 2048,
+            latestHrUnix = 1_782_534_700L,
+        ),
         redaction = "v2",
         truncated = false,
         captureCheck = TestBundleMeta.CaptureCheck(
@@ -39,6 +44,7 @@ class TestBundleMetaTest {
         assertTrue(json.contains("\"channel\""))
         assertTrue(json.contains("\"db_bytes\""))
         assertTrue(json.contains("\"raw_capture_bytes\""))
+        assertTrue(json.contains("\"latest_hr_unix\" : 1782534700"))
     }
 
     @Test fun redactionAndSchemaStamps() {

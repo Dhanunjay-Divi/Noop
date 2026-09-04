@@ -73,6 +73,12 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Start before Room, BLE, WorkManager, or Firebase can initialize. If startup later hangs or
+        // crashes, the unmatched operation/lifecycle edge is already durable for the next report.
+        AppDiagnosticsRecorder.start(this)
+        // Install immediately after the bounded recorder so a failure in the initialization below keeps
+        // its stack trace as well as the unmatched launch breadcrumb.
+        CrashCapture.install(this)
         resolveActiveDeviceId()
         // Canonicalize the stress-check-in choices against this build's evidence capability before
         // BLE/background readers observe them. The live path still fails closed per event.
@@ -89,9 +95,23 @@ class NoopApplication : Application() {
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
         deferProcessMaintenance()
-        // Record any uncaught crash to a file so it rides along in the shareable strap log — a
-        // device-specific crash (e.g. Insights #224/#267) is otherwise lost to an unreachable logcat.
-        CrashCapture.install(this)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        AppDiagnosticsRecorder.record(
+            "system.trim_memory",
+            fields = mapOf("level" to level.toString()),
+            includeResourceSnapshot = true,
+        )
+        super.onTrimMemory(level)
+    }
+
+    override fun onLowMemory() {
+        AppDiagnosticsRecorder.record(
+            "system.low_memory",
+            includeResourceSnapshot = true,
+        )
+        super.onLowMemory()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

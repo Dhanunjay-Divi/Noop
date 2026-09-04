@@ -510,99 +510,162 @@ class ManagedCloudService private constructor(context: Context) {
     private suspend fun performSync(mode: SyncMode): ManagedCloudSyncSummary =
         syncMutex.withLock {
             withContext(Dispatchers.IO) {
-                val config = configuration ?: throw ManagedCloudException.Unavailable
-                val user = currentUser()
-                val scopeHash = accountScopeHash(user)
-                if (!preferences.isEnrolled(scopeHash, config.storage.policyVersion) ||
-                    preferences.erasureJobId != null
-                ) {
-                    throw ManagedCloudException.ConsentRequired
-                }
-                preferences.lastAttemptMs = System.currentTimeMillis()
-                setStatus(
-                    when (mode) {
-                        SyncMode.MANUAL ->
-                            text(R.string.managed_cloud_status_syncing)
-                        SyncMode.AUTOMATIC ->
-                            text(R.string.managed_cloud_status_updating_background)
-                        SyncMode.EXPORT_PREPARATION ->
-                            text(R.string.managed_cloud_status_finishing_backup)
-                    },
+                val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                    "managed_sync",
+                    fields = mapOf("mode" to mode.name.lowercase()),
                 )
-                val summary = ManagedAuthenticationRetry.run(
-                    authorization = { forceRefresh ->
-                        if (forceRefresh) {
-                            Log.i(
-                                TAG,
-                                "Managed sync token rejected; retrying once with forced refresh",
-                            )
-                        }
-                        authorization(forceRefresh)
-                    },
-                    operation = { authorization ->
-                        performSyncPass(
-                            mode = mode,
-                            scopeHash = scopeHash,
-                            authorization = authorization,
-                        )
-                    },
-                )
-                val now = System.currentTimeMillis()
-                preferences.lastSuccessMs = now
-                replaceState { it.copy(lastSuccessMs = now) }
-                if (summary.hasMore) {
-                    setStatus(text(R.string.managed_cloud_status_continuing))
-                } else if (summary.uploadedChunks == 0 &&
-                    summary.uploadedDocuments == 0 &&
-                    summary.appliedChanges == 0 &&
-                    summary.prunedRows == 0
-                ) {
-                    setStatus(text(R.string.managed_cloud_status_up_to_date))
-                } else {
-                    val changes = buildList {
-                        if (summary.uploadedChunks > 0) {
-                            add(
-                                quantity(
-                                    R.plurals.managed_cloud_sync_chunks,
-                                    summary.uploadedChunks,
-                                ),
-                            )
-                        }
-                        if (summary.uploadedDocuments > 0) {
-                            add(
-                                quantity(
-                                    R.plurals.managed_cloud_sync_documents,
-                                    summary.uploadedDocuments,
-                                ),
-                            )
-                        }
-                        if (summary.appliedChanges > 0) {
-                            add(
-                                quantity(
-                                    R.plurals.managed_cloud_sync_restored_changes,
-                                    summary.appliedChanges,
-                                ),
-                            )
-                        }
-                        if (summary.prunedRows > 0) {
-                            add(
-                                quantity(
-                                    R.plurals.managed_cloud_sync_freed_rows,
-                                    summary.prunedRows,
-                                ),
-                            )
-                        }
+                try {
+                    val config = configuration ?: throw ManagedCloudException.Unavailable
+                    val user = currentUser()
+                    val scopeHash = accountScopeHash(user)
+                    if (!preferences.isEnrolled(scopeHash, config.storage.policyVersion) ||
+                        preferences.erasureJobId != null
+                    ) {
+                        throw ManagedCloudException.ConsentRequired
                     }
+                    preferences.lastAttemptMs = System.currentTimeMillis()
                     setStatus(
-                        text(
-                            R.string.managed_cloud_status_updated,
-                            localizedList(changes),
-                        ),
+                        when (mode) {
+                            SyncMode.MANUAL ->
+                                text(R.string.managed_cloud_status_syncing)
+                            SyncMode.AUTOMATIC ->
+                                text(R.string.managed_cloud_status_updating_background)
+                            SyncMode.EXPORT_PREPARATION ->
+                                text(R.string.managed_cloud_status_finishing_backup)
+                        },
                     )
+                    val summary = ManagedAuthenticationRetry.run(
+                        authorization = { forceRefresh ->
+                            if (forceRefresh) {
+                                Log.i(
+                                    TAG,
+                                    "Managed sync token rejected; retrying once with forced refresh",
+                                )
+                                com.noop.AppDiagnosticsRecorder.record(
+                                    "managed_sync.auth_refresh",
+                                    fields = mapOf(
+                                        "reason" to "server_rejected_cached_token",
+                                    ),
+                                )
+                            }
+                            authorization(forceRefresh)
+                        },
+                        operation = { authorization ->
+                            performSyncPass(
+                                mode = mode,
+                                scopeHash = scopeHash,
+                                authorization = authorization,
+                            )
+                        },
+                    )
+                    val now = System.currentTimeMillis()
+                    preferences.lastSuccessMs = now
+                    replaceState { it.copy(lastSuccessMs = now) }
+                    if (summary.hasMore) {
+                        setStatus(text(R.string.managed_cloud_status_continuing))
+                    } else if (summary.uploadedChunks == 0 &&
+                        summary.uploadedDocuments == 0 &&
+                        summary.appliedChanges == 0 &&
+                        summary.prunedRows == 0
+                    ) {
+                        setStatus(text(R.string.managed_cloud_status_up_to_date))
+                    } else {
+                        val changes = buildList {
+                            if (summary.uploadedChunks > 0) {
+                                add(
+                                    quantity(
+                                        R.plurals.managed_cloud_sync_chunks,
+                                        summary.uploadedChunks,
+                                    ),
+                                )
+                            }
+                            if (summary.uploadedDocuments > 0) {
+                                add(
+                                    quantity(
+                                        R.plurals.managed_cloud_sync_documents,
+                                        summary.uploadedDocuments,
+                                    ),
+                                )
+                            }
+                            if (summary.appliedChanges > 0) {
+                                add(
+                                    quantity(
+                                        R.plurals.managed_cloud_sync_restored_changes,
+                                        summary.appliedChanges,
+                                    ),
+                                )
+                            }
+                            if (summary.prunedRows > 0) {
+                                add(
+                                    quantity(
+                                        R.plurals.managed_cloud_sync_freed_rows,
+                                        summary.prunedRows,
+                                    ),
+                                )
+                            }
+                        }
+                        setStatus(
+                            text(
+                                R.string.managed_cloud_status_updated,
+                                localizedList(changes),
+                            ),
+                        )
+                    }
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "completed",
+                        fields = mapOf(
+                            "uploaded_chunks" to summary.uploadedChunks.toString(),
+                            "uploaded_documents" to summary.uploadedDocuments.toString(),
+                            "applied_changes" to summary.appliedChanges.toString(),
+                            "pruned_rows" to summary.prunedRows.toString(),
+                            "continuation_pending" to summary.hasMore.toString(),
+                        ),
+                        includeResourceSnapshot = true,
+                    )
+                    summary
+                } catch (error: Throwable) {
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "failed",
+                        fields = mapOf(
+                            "failure_kind" to diagnosticSyncFailureKind(error),
+                        ),
+                        includeResourceSnapshot = true,
+                    )
+                    throw error
                 }
-                summary
             }
         }
+
+    private fun diagnosticSyncFailureKind(error: Throwable): String = when (error) {
+        is kotlinx.coroutines.CancellationException -> "canceled"
+        is ManagedCloudException.InvalidPhone,
+        is ManagedCloudException.InvalidCode,
+        is ManagedCloudException.CodeRequired,
+        -> "identity_input"
+        is ManagedCloudException.NotSignedIn -> "not_signed_in"
+        is ManagedCloudException.ConsentRequired -> "consent_required"
+        is ManagedCloudException.Unavailable,
+        is ManagedCloudException.FirebaseProjectConflict,
+        -> "configuration"
+        is ManagedCloudException.ExportPreparationIncomplete -> "continuation_incomplete"
+        is ManagedStorageException.Network -> "network_transport"
+        is ManagedStorageException.InvalidResponse -> "invalid_response"
+        is ManagedStorageException.Authentication -> "authentication"
+        is ManagedStorageException.PolicyChanged -> "policy_changed"
+        is ManagedStorageException.CursorExpired -> "cursor_expired"
+        is ManagedStorageException.NotFound -> "not_found"
+        is ManagedStorageException.QuotaExceeded -> "quota_exceeded"
+        is ManagedStorageException.Conflict -> "sync_conflict"
+        is ManagedStorageException.Server -> when (error.statusCode) {
+            408, 504 -> "server_timeout"
+            429 -> "rate_limited"
+            else -> "server_unavailable"
+        }
+        is ManagedStorageException.DigestMismatch -> "integrity_mismatch"
+        else -> "unexpected"
+    }
 
     private suspend fun performSyncPass(
         mode: SyncMode,

@@ -264,6 +264,16 @@ struct StrandiOSApp: App {
                     guard acceptedTermsVersion == Terms.currentVersion else { return }
                     resumeOperationalWorkAfterUnlock()
                 }
+                // An in-place upgrade can still have the legacy `WhenUnlocked` launch receipt. If
+                // CoreBluetooth first relaunches this build while the phone is locked, the initial read
+                // correctly fails closed; retry at the system's protected-data edge so the receipt migrates
+                // and the remembered BLE runtime resumes without requiring a manual "Try again" tap.
+                .onReceive(NotificationCenter.default.publisher(
+                    for: UIApplication.protectedDataDidBecomeAvailableNotification
+                )) { _ in
+                    guard !launchAccess.isUnlocked else { return }
+                    launchAccess.reload()
+                }
                 .environmentObject(model.ble)   // #334: Today pull-to-sync reads BLEManager (no HR churn)
                 .environmentObject(model.live)
                 .environmentObject(model.repo)
@@ -509,7 +519,8 @@ struct StrandiOSApp: App {
                 ) {
                     ShakeDiagnosticReportSheet(
                         controller: diagnosticReport,
-                        live: model.live
+                        live: model.live,
+                        repo: model.repo
                     )
                 }
         }

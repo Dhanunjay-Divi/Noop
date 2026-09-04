@@ -19,8 +19,76 @@ import java.nio.charset.StandardCharsets
  * over every entry here, the single scrub point, and stamp meta.redaction = "v2".
  */
 object TestBundleAssembler {
+    enum class Purpose {
+        TEST_CENTRE,
+        APP_HANG,
+    }
+
+    internal data class PurposeMetadata(
+        val source: List<String>,
+        val testProfile: String,
+        val questionnaire: Map<String, String>,
+    )
+
+    /** Keep app reports independent from Test Centre state, especially its unrelated free-text answers. */
+    internal fun purposeMetadata(
+        purpose: Purpose,
+        profile: TestDomain,
+        questionnaire: Map<String, String>,
+    ): PurposeMetadata = if (purpose == Purpose.APP_HANG) {
+        PurposeMetadata(
+            source = listOf("App runtime diagnostics", "Live Bluetooth"),
+            testProfile = "app-hang",
+            questionnaire = emptyMap(),
+        )
+    } else {
+        PurposeMetadata(
+            source = listOf("Live Bluetooth"),
+            testProfile = profile.id,
+            questionnaire = questionnaire,
+        )
+    }
 
     const val REDACTION_VERSION = "v2"
+    const val MAX_USER_NOTE_CHARACTERS = 1_000
+    const val MAX_APP_REPORT_SCREENSHOT_BYTES = 8 * 1024 * 1024
+    private val PNG_SIGNATURE =
+        byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
+    /** Durable collection proof. A connected label or transport packet is not enough; this indexed
+     * frontier must advance. Kept byte-aligned with the Swift report line. */
+    fun persistedHrFrontierLine(
+        latestHrUnix: Long?,
+        nowUnix: Long = System.currentTimeMillis() / 1_000L,
+    ): String? = latestHrUnix?.let {
+        "latestPersistedHrUnix=$it ageSeconds=${maxOf(0L, nowUnix - it)}"
+    }
+
+    /** Optional reporter context stays bounded, reviewable, and outside the always-on recorder. */
+    fun userNoteEntry(note: String?): Pair<String, ByteArray>? {
+        val cleaned = note
+            ?.filter { character ->
+                character == '\n' || character == '\t' || character.code >= 0x20
+            }
+            ?.trim()
+            ?.take(MAX_USER_NOTE_CHARACTERS)
+            .orEmpty()
+        if (cleaned.isEmpty()) return null
+        return "user-note.txt" to
+            "User-provided context (optional)\n\n$cleaned\n".toByteArray()
+    }
+
+    /** Validate an explicitly approved pre-report screen snapshot before it crosses the bundle boundary. */
+    fun appReportScreenshotEntry(png: ByteArray?): Pair<String, ByteArray>? {
+        if (png == null ||
+            png.size < PNG_SIGNATURE.size ||
+            png.size > MAX_APP_REPORT_SCREENSHOT_BYTES
+        ) {
+            return null
+        }
+        if (PNG_SIGNATURE.indices.any { png[it] != PNG_SIGNATURE[it] }) return null
+        return DisplayScreenshot.BUNDLE_NAME to png
+    }
 
     /** Output of the standalone diagnostics-only privacy boundary. Normal user health-data export does
      * not use this type and keeps its existing purpose-built consent/export behavior. */
@@ -162,19 +230,30 @@ object TestBundleAssembler {
         logText: String,
         storage: TestBundleMeta.Storage? = null,
         strapModel: String? = null,
+        purpose: Purpose = Purpose.TEST_CENTRE,
+        runtimeDiagnostics: List<Pair<String, ByteArray>> = emptyList(),
+        userNote: String? = null,
+        appReportScreenshotPng: ByteArray? = null,
     ): List<Pair<String, ByteArray>> {
         val tc = TestCentre.from(context)
         // The set of currently-active domains drives the report-completeness guard. MASTER turns every
         // domain on (TestCentre.active resolves that), so a master report checks every mapped trace.
-        val activeDomains = ReportCompleteness.killerTokens.keys
-            .filter { tc.active(it) }
-            .toSet()
+        val activeDomains = if (purpose == Purpose.APP_HANG) {
+            emptySet()
+        } else {
+            ReportCompleteness.killerTokens.keys
+                .filter { tc.active(it) }
+                .toSet()
+        }
 
         // 1. report.txt: header (app + Android diagnostics) + the strap-log body, the same shape the
         //    strap-log share writes. Already scrubbed by the log() sink; the redactEntries pass re-scrubs.
         val header = buildString {
             appendLine("Noop Band log")
-            appendLine("App:     ${BuildConfig.VERSION_NAME} (${BuildConfig.TIER})")
+            appendLine(
+                "App:     ${BuildConfig.VERSION_NAME} " +
+                    "(build ${BuildConfig.VERSION_CODE}; ${BuildConfig.TIER})",
+            )
             for (line in AndroidDiagnostics.summaryLines(context)) appendLine(line)
             appendLine("-".repeat(40))
         }
@@ -184,11 +263,17 @@ object TestBundleAssembler {
         // CAPTURE-completeness: append the "Capture check" section so report.txt itself states, per active
         // domain, whether its killer trace landed. Computed over the header+body that will ship (the guard
         // reads exactly what the maintainer reads). Byte-identical section to the Swift twin.
-        val reportBody = header + "\n" + body
+        val collectionLine = persistedHrFrontierLine(storage?.latestHrUnix)
+        val reportBody = header + "\n" + body +
+            (collectionLine?.let { "\n[collection] $it" } ?: "")
         val captureCheck = ReportCompleteness.captureCheckSection(reportBody, activeDomains)
         val reportText = reportBody + "\n" + captureCheck
         val entries = ArrayList<Pair<String, ByteArray>>()
         entries.add("report.txt" to reportText.toByteArray())
+        if (purpose == Purpose.APP_HANG) {
+            userNoteEntry(userNote)?.let(entries::add)
+            entries.addAll(runtimeDiagnostics)
+        }
 
         // last-crash.txt: only if a crash was captured (degrade gracefully, never fabricate).
         var crashWasCaptured = false
@@ -202,12 +287,16 @@ object TestBundleAssembler {
         //     scrubs text identifiers, not pixels). The screenshot is still covered by the mandatory
         //     review-before-share gate, which names the attachment. A capture only happens for the gated
         //     profile, so a non-display report never grabs a shot. Mirrors the Swift assembler.
-        val wantsShot = profile == TestDomain.DISPLAY ||
+        val wantsTestCentreShot = profile == TestDomain.DISPLAY ||
             (TestModeRegistry.mode(profile)?.includesScreenshot == true)
-        val shot: Pair<String, ByteArray>? = if (wantsShot) {
-            DisplayScreenshot.capturePNG(context)?.let { png -> DisplayScreenshot.BUNDLE_NAME to png }
-        } else {
-            null
+        val shot: Pair<String, ByteArray>? = when {
+            purpose == Purpose.APP_HANG ->
+                appReportScreenshotEntry(appReportScreenshotPng)
+            wantsTestCentreShot ->
+                DisplayScreenshot.capturePNG(context)?.let { png ->
+                    DisplayScreenshot.BUNDLE_NAME to png
+                }
+            else -> null
         }
 
         // 2. Redact every gathered TEXT file, then cap. The screenshot is included in the cap input (NOT the
@@ -223,20 +312,23 @@ object TestBundleAssembler {
         //    hardcoded zeros here, so every meta.json read "db_bytes: 0" even on a multi-GB library and
         //    maintainers triaged blind); a null probe falls back to the zeroed block - zeros mean
         //    "unreadable", we still never fabricate. The Android build is unsigned-flavour, channel "GitHub".
-        val started = tc.startedAt(profile)?.let {
+        val started = if (purpose == Purpose.APP_HANG) null else tc.startedAt(profile)?.let {
             java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
                 .format(java.util.Date(it * 1000L))
         }
+        val purposeMetadata = purposeMetadata(purpose, profile, tc.answers(profile))
         val meta = TestBundleMeta(
             schema = 1,
             appVersion = BuildConfig.VERSION_NAME,
             platform = "Android",
             osVersion = Build.VERSION.RELEASE ?: "?",
             strapModel = strapModel,
-            source = listOf("Live Bluetooth"),
-            testProfile = profile.id,
+            source = purposeMetadata.source,
+            testProfile = purposeMetadata.testProfile,
             profileStartedAt = started,
-            questionnaire = tc.answers(profile),
+            // Test Centre answers can contain unrelated free text. A normal app report carries only the
+            // optional context the user just reviewed in user-note.txt.
+            questionnaire = purposeMetadata.questionnaire,
             build = TestBundleMeta.Build(channel = "GitHub", signed = false),
             storage = storage ?: TestBundleMeta.Storage(dbBytes = 0, rows = emptyMap(), rawCaptureBytes = 0),
             redaction = REDACTION_VERSION,
@@ -264,7 +356,7 @@ object TestBundleAssembler {
         //    self-reference.
         val robustness = BundleRobustness.verify(
             entries = out,
-            expectScreenshot = wantsShot,
+            expectScreenshot = shot != null,
             crashWasCaptured = crashWasCaptured,
         )
         val reportIdx = out.indexOfFirst { it.first == "report.txt" }

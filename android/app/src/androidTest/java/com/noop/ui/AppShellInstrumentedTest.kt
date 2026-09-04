@@ -4,12 +4,18 @@ import android.Manifest
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.Settings
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -136,6 +142,45 @@ class AppShellInstrumentedTest {
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodesWithTag(metricTag).fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    @Test
+    fun appReportKeepsContextOptionalAndReviewsExactDefaultAttachments() {
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            AppDiagnosticReportRequestBridge.request()
+        }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag("noop.app-report.user-note")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+
+        repeat(2) {
+            compose.onNodeWithTag("noop.app-report.scroll")
+                .performTouchInput { swipeUp(durationMillis = 400) }
+        }
+        compose.onNodeWithTag("noop.app-report.include-screenshot").assertIsDisplayed()
+        compose.onNodeWithTag("noop.app-report.user-note")
+            .performTextInput("Health scrolling paused after I opened a metric")
+        compose.onNodeWithTag("noop.app-report.include-screenshot")
+            .performScrollTo()
+            .assertIsOff()
+        compose.onNodeWithText("Build report")
+            .performScrollTo()
+            .performClick()
+
+        compose.waitUntil(timeoutMillis = 20_000) {
+            compose.onAllNodesWithText("Report ready")
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        compose.onNodeWithText("user-note.txt").performScrollTo().fetchSemanticsNode()
+        compose.onNodeWithText("app-session-current.jsonl").performScrollTo().fetchSemanticsNode()
+        compose.onNodeWithText("meta.json").performScrollTo().fetchSemanticsNode()
+        assertTrue(
+            "A screen snapshot must not attach unless the user explicitly opts in",
+            compose.onAllNodesWithText("screenshot.png").fetchSemanticsNodes().isEmpty(),
+        )
     }
 
     private fun selectAndAssert(tag: String) {

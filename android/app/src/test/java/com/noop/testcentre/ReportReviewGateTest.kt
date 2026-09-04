@@ -1,5 +1,6 @@
 package com.noop.testcentre
 
+import com.noop.AppDiagnosticsRecorder
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -75,5 +76,21 @@ class ReportReviewGateTest {
         assertTrue(preview.contains("report line"))
         assertTrue(preview.contains("{\"v\":1}"))
         assertFalse(preview.contains("attached (not shown above)"))
+    }
+
+    @Test
+    fun runtimeDiagnosticsAreNamedWithoutLayingOutTheirBodies() {
+        val marker = "runtime-body-must-not-be-rendered"
+        val entries = listOf(
+            AppDiagnosticsRecorder.CURRENT_SESSION_ENTRY,
+            AppDiagnosticsRecorder.PREVIOUS_SESSION_ENTRY,
+            AppDiagnosticsRecorder.EXIT_HISTORY_ENTRY,
+            AppDiagnosticsRecorder.LAST_ANR_ENTRY,
+        ).map { name -> name to marker.toByteArray() }
+
+        val preview = ReportReviewGate(entries).previewText
+
+        assertFalse(preview.contains(marker))
+        entries.forEach { (name, _) -> assertTrue(preview.contains(name)) }
     }
 }

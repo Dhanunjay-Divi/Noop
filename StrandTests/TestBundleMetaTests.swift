@@ -33,7 +33,12 @@ final class TestBundleMetaTests: XCTestCase {
                 protectedDataAvailable: true,
                 backgroundRefresh: "Available"
             ),
-            storage: .init(dbBytes: 1024, rows: ["sleep_sessions": 12], rawCaptureBytes: 2048),
+            storage: .init(
+                dbBytes: 1024,
+                rows: ["sleep_sessions": 12],
+                rawCaptureBytes: 2048,
+                latestHrUnix: 1_782_534_700
+            ),
             redaction: "v2",
             truncated: false)
     }
@@ -60,6 +65,7 @@ final class TestBundleMetaTests: XCTestCase {
         XCTAssertTrue(json.contains("\"signed\" : false"))
         XCTAssertTrue(json.contains("\"db_bytes\" : 1024"))
         XCTAssertTrue(json.contains("\"raw_capture_bytes\" : 2048"))
+        XCTAssertTrue(json.contains("\"latest_hr_unix\" : 1782534700"))
         XCTAssertTrue(json.contains("\"healthkit_entitled\" : true"))
         XCTAssertTrue(json.contains("\"healthkit_background_delivery_entitled\" : false"))
         XCTAssertTrue(json.contains("\"app_group_container_available\" : true"))

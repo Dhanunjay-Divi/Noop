@@ -75,7 +75,7 @@ final class NOOPiOSUITests: XCTestCase {
         let app = launchApp(extraArguments: ["--demo-app-report"])
 
         XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["Capture the freeze"].exists)
+        XCTAssertTrue(app.staticTexts["Capture what happened"].exists)
         XCTAssertTrue(
             app.staticTexts.matching(
                 NSPredicate(
@@ -85,6 +85,10 @@ final class NOOPiOSUITests: XCTestCase {
             ).firstMatch.exists
         )
         XCTAssertTrue(app.buttons["Build report"].exists)
+        XCTAssertTrue(app.textFields["noop.app-report.user-note"].exists)
+        let screenToggle = app.switches["noop.app-report.include-screenshot"]
+        XCTAssertTrue(screenToggle.exists)
+        XCTAssertEqual(screenToggle.value as? String, "0", "screen evidence must default to excluded")
         keepScreenshot(app, name: "app-report-consent")
 
         app.buttons["Build report"].tap()

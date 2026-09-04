@@ -1442,8 +1442,10 @@ abstract class WhoopDatabase : RoomDatabase() {
 
         private fun String.sqlLiteral(): String = replace("'", "''")
 
-        private fun build(appContext: Context): WhoopDatabase =
-            Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
+        private fun build(appContext: Context): WhoopDatabase {
+            val openTrace = com.noop.AppDiagnosticsRecorder.beginOperation("database.open")
+            return try {
+                Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // #1014: replace ONLY the corruption handling of the default open-helper. The
                 // platform default silently DELETES a corrupt database file (non-resendable strap
                 // history gone without a trace); this factory logs + preserves the file instead.
@@ -1472,6 +1474,14 @@ abstract class WhoopDatabase : RoomDatabase() {
                 // row on create too (same idempotent INSERT OR IGNORE as the migration) so a first-ever
                 // install still lists its WHOOP. iOS/GRDB re-runs migrations on a fresh DB, so it never hit this.
                 .addCallback(object : RoomDatabase.Callback() {
+                    override fun onOpen(db: SupportSQLiteDatabase) {
+                        com.noop.AppDiagnosticsRecorder.endOperation(
+                            openTrace,
+                            outcome = "opened",
+                            includeResourceSnapshot = true,
+                        )
+                    }
+
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         val now = System.currentTimeMillis() / 1000
                         db.execSQL(
@@ -1487,5 +1497,15 @@ abstract class WhoopDatabase : RoomDatabase() {
                     }
                 })
                 .build()
+            } catch (error: Throwable) {
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    openTrace,
+                    outcome = "build_failed",
+                    fields = mapOf("failure_kind" to error.javaClass.simpleName),
+                    includeResourceSnapshot = true,
+                )
+                throw error
+            }
+        }
     }
 }

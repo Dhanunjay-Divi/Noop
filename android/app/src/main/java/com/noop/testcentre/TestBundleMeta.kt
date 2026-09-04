@@ -25,7 +25,12 @@ data class TestBundleMeta(
     val captureCheck: CaptureCheck,
 ) {
     data class Build(val channel: String, val signed: Boolean)
-    data class Storage(val dbBytes: Int, val rows: Map<String, Int>, val rawCaptureBytes: Int)
+    data class Storage(
+        val dbBytes: Int,
+        val rows: Map<String, Int>,
+        val rawCaptureBytes: Int,
+        val latestHrUnix: Long? = null,
+    )
 
     /** The report-completeness tie (twin of the Swift CaptureCheck): per-domain killer-trace presence
      *  ({domainId -> "present"|"MISSING"}) plus the overall `complete` flag, so a maintainer can tell at
@@ -37,6 +42,12 @@ data class TestBundleMeta(
      *  alphabetical order ourselves, matching the Swift JSONEncoder .sortedKeys output the parity test
      *  asserts. Only JSONObject.quote (a pure static escaper) is used, so this is backend-independent. */
     fun encoded(): String {
+        val storageObject = mutableMapOf<String, Any?>(
+            "db_bytes" to storage.dbBytes,
+            "raw_capture_bytes" to storage.rawCaptureBytes,
+            "rows" to storage.rows,
+        )
+        storage.latestHrUnix?.let { storageObject["latest_hr_unix"] = it }
         val root = mapOf<String, Any?>(
             "app_version" to appVersion,
             "build" to mapOf("channel" to build.channel, "signed" to build.signed),
@@ -50,10 +61,7 @@ data class TestBundleMeta(
             "redaction" to redaction,
             "schema" to schema,
             "source" to source,
-            "storage" to mapOf(
-                "db_bytes" to storage.dbBytes,
-                "raw_capture_bytes" to storage.rawCaptureBytes,
-                "rows" to storage.rows),
+            "storage" to storageObject,
             "strap_model" to strapModel,
             "test_profile" to testProfile,
             "truncated" to truncated)

@@ -86,10 +86,26 @@ struct TestBundleMeta: Codable {
 
     /// db_bytes plus per-table row counts plus the raw-capture footprint (#590 asked us to surface this).
     struct Storage: Codable {
-        let dbBytes: Int; let rows: [String: Int]; let rawCaptureBytes: Int
+        let dbBytes: Int
+        let rows: [String: Int]
+        let rawCaptureBytes: Int
+        /// Latest measured or PPG-derived HR timestamp across the active/canonical source union. Optional
+        /// for backward compatibility and for reports assembled before the store is available.
+        let latestHrUnix: Int?
+
+        init(dbBytes: Int, rows: [String: Int], rawCaptureBytes: Int,
+             latestHrUnix: Int? = nil) {
+            self.dbBytes = dbBytes
+            self.rows = rows
+            self.rawCaptureBytes = rawCaptureBytes
+            self.latestHrUnix = latestHrUnix
+        }
+
         enum CodingKeys: String, CodingKey {
             case rows
-            case dbBytes = "db_bytes", rawCaptureBytes = "raw_capture_bytes"
+            case dbBytes = "db_bytes"
+            case rawCaptureBytes = "raw_capture_bytes"
+            case latestHrUnix = "latest_hr_unix"
         }
     }
 

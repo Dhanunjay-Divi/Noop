@@ -2464,6 +2464,15 @@ class WhoopRepository private constructor(
     suspend fun insertHr(rows: List<HrSample>) = dao.insertHr(rows)
 
     suspend fun latestHrSampleTs(deviceId: String): Long? = dao.latestHrSampleTs(deviceId)
+
+    /** Latest durable HR/PPG frontier across the active strap and canonical imported source. Each source
+     * uses the indexed MAX query above, so a diagnostic report does not load history or count a large
+     * table while investigating UI pressure. Mirrors the Swift Repository frontier probe. */
+    suspend fun latestHrSampleTsUnion(activeDeviceId: String): Long? =
+        importedSourceIds(activeDeviceId)
+            .mapNotNull { dao.latestHrSampleTs(it) }
+            .maxOrNull()
+
     suspend fun latestHr(deviceId: String): HrSample? = dao.latestHr(deviceId)
     suspend fun latestBattery(deviceId: String): BatterySample? = dao.latestBattery(deviceId)
 

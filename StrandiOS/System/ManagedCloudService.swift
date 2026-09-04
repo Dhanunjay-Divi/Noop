@@ -497,6 +497,14 @@ final class ManagedCloudService: ObservableObject {
         case manual
         case automatic
         case exportPreparation
+
+        var diagnosticName: String {
+            switch self {
+            case .manual: return "manual"
+            case .automatic: return "automatic"
+            case .exportPreparation: return "export_preparation"
+            }
+        }
     }
 
     private func sync(repo: Repository, mode: SyncMode) async throws -> SyncSummary {
@@ -525,60 +533,140 @@ final class ManagedCloudService: ObservableObject {
         case .exportPreparation:
             setStatus(String(localized: "Finishing current phone backup before export…"))
         }
-        AppDiagnosticsRecorder.shared.record("managed_sync.begin")
-
-        let scopeHash = try accountScopeHash()
-        let summary = try await ManagedAuthenticationRetry.run(
-            authorization: { [self] forceRefresh in
-                if forceRefresh {
-                    AppDiagnosticsRecorder.shared.record(
-                        "managed_sync.auth_refresh",
-                        fields: ["reason": "server_rejected_cached_token"]
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_sync",
+            fields: ["mode": mode.diagnosticName]
+        )
+        do {
+            let scopeHash = try accountScopeHash()
+            let summary = try await ManagedAuthenticationRetry.run(
+                authorization: { [self] forceRefresh in
+                    if forceRefresh {
+                        AppDiagnosticsRecorder.shared.record(
+                            "managed_sync.auth_refresh",
+                            fields: ["reason": "server_rejected_cached_token"]
+                        )
+                    }
+                    return try await authorization(forceRefresh: forceRefresh)
+                },
+                operation: { [self] authorization in
+                    try await syncPass(
+                        repo: repo,
+                        store: store,
+                        mode: mode,
+                        scopeHash: scopeHash,
+                        authorization: authorization
                     )
                 }
-                return try await authorization(forceRefresh: forceRefresh)
-            },
-            operation: { [self] authorization in
-                try await syncPass(
-                    repo: repo,
-                    store: store,
-                    mode: mode,
-                    scopeHash: scopeHash,
-                    authorization: authorization
-                )
-            }
-        )
+            )
 
-        let now = Date()
-        defaults.set(now.timeIntervalSince1970, forKey: Key.lastSuccess)
-        defaults.set(summary.hasMore, forKey: Key.continuationPending)
-        lastSuccessAt = now
-        if summary.hasMore {
-            setStatus(String(localized: "NOOP+ backup is continuing in the background."))
-        } else if summary.uploadedChunks == 0
-            && summary.uploadedDocuments == 0
-            && summary.appliedChanges == 0
-            && summary.prunedRows == 0 {
-            setStatus(String(localized: "NOOP+ is up to date."))
-        } else {
-            let changes = Self.localizedSyncChanges(summary)
-            setStatus(String(localized: "NOOP+ updated \(changes)."))
+            let now = Date()
+            defaults.set(now.timeIntervalSince1970, forKey: Key.lastSuccess)
+            defaults.set(summary.hasMore, forKey: Key.continuationPending)
+            lastSuccessAt = now
+            if summary.hasMore {
+                setStatus(String(localized: "NOOP+ backup is continuing in the background."))
+            } else if summary.uploadedChunks == 0
+                && summary.uploadedDocuments == 0
+                && summary.appliedChanges == 0
+                && summary.prunedRows == 0 {
+                setStatus(String(localized: "NOOP+ is up to date."))
+            } else {
+                let changes = Self.localizedSyncChanges(summary)
+                setStatus(String(localized: "NOOP+ updated \(changes)."))
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "mode": mode.diagnosticName,
+                    "uploaded_chunks": String(summary.uploadedChunks),
+                    "uploaded_documents": String(summary.uploadedDocuments),
+                    "applied_changes": String(summary.appliedChanges),
+                    "pruned_rows": String(summary.prunedRows),
+                    "continuation_pending": summary.hasMore ? "true" : "false",
+                ],
+                includeResourceSnapshot: true
+            )
+            if summary.appliedChanges > 0 {
+                await repo.refresh()
+            }
+            return summary
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "mode": mode.diagnosticName,
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ],
+                includeResourceSnapshot: true
+            )
+            throw error
         }
-        AppDiagnosticsRecorder.shared.record(
-            "managed_sync.end",
-            fields: [
-                "outcome": "completed",
-                "uploaded_chunks": String(summary.uploadedChunks),
-                "uploaded_documents": String(summary.uploadedDocuments),
-                "applied_changes": String(summary.appliedChanges),
-                "pruned_rows": String(summary.prunedRows),
-                "continuation_pending": summary.hasMore ? "true" : "false",
-            ]
-        )
-        if summary.appliedChanges > 0 {
-            await repo.refresh()
+    }
+
+    /// Stable, privacy-safe failure category for the shake report. Associated response text, account
+    /// scope, installation ids, phone details, request payloads and authorization values never enter it.
+    private static func diagnosticSyncFailureKind(_ error: Error) -> String {
+        if error is CancellationError { return "canceled" }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "network_offline"
+            case .timedOut:
+                return "network_timeout"
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "network_unreachable"
+            default:
+                return "network_transport"
+            }
         }
-        return summary
+        if let storage = error as? ManagedStorageError {
+            switch storage {
+            case .invalidConfiguration:
+                return "configuration"
+            case .invalidAuthorization, .authentication:
+                return "authentication"
+            case .invalidResponse, .decoding:
+                return "invalid_response"
+            case .encoding:
+                return "local_encoding"
+            case .transport:
+                return "network_transport"
+            case .notFound:
+                return "not_found"
+            case .policyChanged:
+                return "policy_changed"
+            case .cursorExpired:
+                return "cursor_expired"
+            case .quotaExceeded:
+                return "quota_exceeded"
+            case .conflict:
+                return "conflict"
+            case .server(let status):
+                return status >= 500 ? "server_5xx" : "server_rejected"
+            case .digestMismatch:
+                return "integrity"
+            }
+        }
+        if let cloud = error as? ManagedCloudError {
+            switch cloud {
+            case .notSignedIn:
+                return "authentication"
+            case .consentRequired:
+                return "consent"
+            case .storeUnavailable:
+                return "local_store"
+            case .firebaseProjectConflict:
+                return "configuration"
+            case .exportPreparationIncomplete:
+                return "continuation_required"
+            case .invalidPhone, .invalidCode:
+                return "input"
+            }
+        }
+        return "other"
     }
 
     private func syncPass(

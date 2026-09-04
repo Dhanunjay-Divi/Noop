@@ -14,7 +14,8 @@ enum TestBundleAssembler {
     ///
     /// A Test Centre capture may deliberately include a screenshot or an enabled research stream. A
     /// shake-created app-hang report is narrower: app/runtime diagnostics plus the redacted strap log,
-    /// with no screenshot, raw frame capture, Oura sidecar, or health database.
+    /// an optional bounded user note, and an optional explicitly approved screen snapshot. It never
+    /// includes raw frame capture, an Oura sidecar, or the health database.
     enum Purpose {
         case testCentre
         case appHang
@@ -29,6 +30,17 @@ enum TestBundleAssembler {
 
     /// The redaction stamp written into meta.json so a maintainer knows the whole-bundle scrub ran.
     static let redactionVersion = "v2"
+
+    /// Free-form context is useful only while it stays reviewable. The UI applies this limit while typing,
+    /// and the assembler enforces it again so a future caller cannot bypass the privacy/size boundary.
+    static let maxUserNoteCharacters = 1_000
+    static let maxUserNoteUTF8Bytes = 8 * 1024
+
+    /// A shake-time screenshot can contain health values, so it is accepted only when the caller passes it
+    /// after explicit user opt-in. Eight MiB leaves ample room for the bounded runtime diagnostics under the
+    /// 20 MiB bundle cap; an unexpectedly huge or malformed image fails closed instead of being shared.
+    static let maxAppReportScreenshotBytes = 8 * 1024 * 1024
+    private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
     /// The bundle files that may be trimmed to fit the cap (newest-tail kept). The strap-log tail and
     /// meta.json are already bounded, so only these raw research streams can blow the budget: the WHOOP
@@ -137,6 +149,51 @@ enum TestBundleAssembler {
         return Data(out.prefix(budget))
     }
 
+    /// Bound bytes before counting extended grapheme clusters. A single Swift `Character` can contain an
+    /// abnormal number of combining scalars, so a character-only limit is not a memory or bundle-size cap.
+    static func boundedUserNoteInput(_ value: String) -> String {
+        let prefix = value.utf8.prefix(maxUserNoteUTF8Bytes + 1)
+        let byteBounded: String
+        if prefix.count <= maxUserNoteUTF8Bytes {
+            byteBounded = value
+        } else {
+            var data = Data(prefix.prefix(maxUserNoteUTF8Bytes))
+            while !data.isEmpty, String(data: data, encoding: .utf8) == nil {
+                data.removeLast()
+            }
+            byteBounded = String(data: data, encoding: .utf8) ?? ""
+        }
+        return String(byteBounded.prefix(maxUserNoteCharacters))
+    }
+
+    /// Convert optional user-entered context into one small, reviewable text attachment. Control
+    /// characters other than newline/tab are removed, surrounding whitespace is dropped, and the hard
+    /// character/byte limits are applied here even when the UI already enforced them. The caller still
+    /// routes the resulting entry through `redactEntries` with every other text attachment.
+    static func userNoteEntry(_ note: String?) -> FileExport.BundleEntry? {
+        guard let note else { return nil }
+        let boundedInput = boundedUserNoteInput(note)
+        let filteredScalars = boundedInput.unicodeScalars.filter { scalar in
+            !CharacterSet.controlCharacters.contains(scalar)
+                || scalar.value == 10
+                || scalar.value == 9
+        }
+        let cleaned = String(String.UnicodeScalarView(filteredScalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let body = "User-provided context (optional)\n\n\(cleaned)\n"
+        return FileExport.BundleEntry(name: "user-note.txt", data: Data(body.utf8))
+    }
+
+    /// Validate an explicitly approved shake-time snapshot before it crosses the bundle boundary.
+    static func appReportScreenshotEntry(_ png: Data?) -> FileExport.BundleEntry? {
+        guard let png,
+              png.count >= pngSignature.count,
+              png.count <= maxAppReportScreenshotBytes,
+              png.prefix(pngSignature.count) == pngSignature else { return nil }
+        return FileExport.BundleEntry(name: DisplayScreenshot.bundleName, data: png)
+    }
+
     /// Hard cap the bundle at `capBytes` (20 MB default, under GitHub's 25 MB; spec section 5.4). The
     /// strap-log tail and meta.json are already bounded, so only the `trimmableNames` research streams can
     /// exceed. We reserve the whole size of every non-trimmable file, then split the remaining budget across
@@ -231,7 +288,9 @@ enum TestBundleAssembler {
                          storage: TestBundleMeta.Storage? = nil,
                          strapModel: String? = nil,
                          purpose: Purpose = .testCentre,
-                         runtimeDiagnostics: [FileExport.BundleEntry]? = nil) -> [FileExport.BundleEntry] {
+                         runtimeDiagnostics: [FileExport.BundleEntry]? = nil,
+                         userNote: String? = nil,
+                         appReportScreenshotPNG: Data? = nil) -> [FileExport.BundleEntry] {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         #if os(iOS)
@@ -247,7 +306,12 @@ enum TestBundleAssembler {
         //    mode. Built from the strap-range snapshot BLEManager banked (LiveState.strapRange). Appended to
         //    the report body BEFORE the completeness scan so its `dayOwner`-sibling token is part of the text
         //    the guard reads. No-op when no range was ever seen this session (no strap reply yet).
-        let baseReport = live.exportableLogText()
+        var baseReport = live.exportableLogText()
+        if let collectionLine = persistedHRFrontierLine(
+            latestUnix: storage?.latestHrUnix
+        ) {
+            baseReport += "\n[collection] \(collectionLine)"
+        }
         let universalLine = universalClockDriftLine(range: live.strapRange)
         let reportText = universalLine.map { baseReport + "\n[universal] " + $0 } ?? baseReport
 
@@ -263,14 +327,26 @@ enum TestBundleAssembler {
         //     is still covered by the mandatory review-before-share gate (nothing ships until the user taps
         //     Share), which the gate's note calls out. A capture only happens for the gated profile, so a
         //     non-display report never grabs a shot.
-        let wantsShot = purpose == .testCentre
+        let wantsTestCentreShot = purpose == .testCentre
             && (profile == .display
                 || (TestModeRegistry.mode(profile)?.includesScreenshot ?? false))
-        let shot: FileExport.BundleEntry? = wantsShot
-            ? DisplayScreenshot.capturePNG().map { FileExport.BundleEntry(name: DisplayScreenshot.bundleName, data: $0) }
-            : nil
+        let shot: FileExport.BundleEntry?
+        if purpose == .appHang {
+            // The controller passes nil unless the user explicitly enabled the screen attachment.
+            shot = appReportScreenshotEntry(appReportScreenshotPNG)
+        } else if wantsTestCentreShot {
+            shot = DisplayScreenshot.capturePNG().map {
+                FileExport.BundleEntry(name: DisplayScreenshot.bundleName, data: $0)
+            }
+        } else {
+            shot = nil
+        }
 
-        // 1c. raw-capture.jsonl: the on-device raw frame capture (when enabled in Settings -> Experimental),
+        // 1c. Optional shake-report context. It is never written into the always-on recorder: it exists
+        // only in this user-reviewed bundle and goes through the same whole-bundle redaction below.
+        let note = purpose == .appHang ? userNoteEntry(userNote) : nil
+
+        // 1d. raw-capture.jsonl: the on-device raw frame capture (when enabled in Settings -> Experimental),
         //     read from disk by URL. It is TEXT (JSON lines) where embedded console strings can carry a
         //     serial, so it IS run through the redactEntries pass below (the #1 reason the whole-bundle scrub
         //     exists, 5.3). Attached only when the file exists; a non-capturing install ships no raw entry.
@@ -278,14 +354,14 @@ enum TestBundleAssembler {
             ? live.puffinCaptureURL.flatMap { fileEntry(at: $0, name: "raw-capture.jsonl") }
             : nil
 
-        // 1d. last-crash.txt: the most recent crash report, when one is present on disk. It is TEXT, so it
+        // 1e. last-crash.txt: the most recent crash report, when one is present on disk. It is TEXT, so it
         //     ALSO rides the redactEntries pass. There is no crash producer wired yet, so this is normally
         //     absent; the lookup is a no-op then. Pluggable via `crashLogURL` so a future crash handler need
         //     only drop a file at the known path for it to start attaching, fully redacted, automatically.
         let crash: FileExport.BundleEntry? = crashLogURL()
             .flatMap { fileEntry(at: $0, name: "last-crash.txt") }
 
-        // 1e. Oura ring diagnostics: the Tier-B JSONL sidecars (raw notifications / IBI-HR / activity MET)
+        // 1f. Oura ring diagnostics: the Tier-B JSONL sidecars (raw notifications / IBI-HR / activity MET)
         //     the ring writes to <App Support>/OpenWhoop/Diagnostics whenever it connects. Attached WHEN
         //     PRESENT — exactly like raw-capture.jsonl, NOT behind a test domain: they cut across Sleep /
         //     HRV / Connection / Sources, and file presence is the honest gate (no ring used → no files →
@@ -295,7 +371,7 @@ enum TestBundleAssembler {
         //     touches names. Trimmed to the cap alongside raw-capture via `trimmableNames`.
         let ouraDiagnostics = purpose == .testCentre ? ouraDiagnosticEntries() : []
 
-        // 1f. Bounded app-runtime diagnostics: current/previous lifecycle and responsiveness breadcrumbs
+        // 1g. Bounded app-runtime diagnostics: current/previous lifecycle and responsiveness breadcrumbs
         //     plus Apple's delayed MetricKit crash/hang payloads when available. These files never contain
         //     the health database or raw biometric history. They attach to every report because a storage,
         //     sync or rendering defect can present as an app freeze; the recorder itself stays under a
@@ -309,6 +385,7 @@ enum TestBundleAssembler {
         //    the raw-capture tail rather than breaching the cap. Only raw-capture is trimmed; report.txt and
         //    last-crash are bounded and the PNG is kept whole.
         let textEntries = [reportEntry]
+            + (note.map { [$0] } ?? [])
             + (rawCapture.map { [$0] } ?? [])
             + (crash.map { [$0] } ?? [])
             + ouraDiagnostics
@@ -394,6 +471,16 @@ enum TestBundleAssembler {
         guard let range, range.newestUnix > 0 else { return nil }
         return UniversalTrace.clockDriftLine(newestUnix: range.newestUnix, wallNowUnix: now,
                                              oldestUnix: range.oldestUnix, firmwareLayout: range.firmwareLayout)
+    }
+
+    /// Compact proof used by every report that could read the indexed store frontier. A connected label,
+    /// battery value, or transport packet is not collection proof; advancement of this durable timestamp is.
+    static func persistedHRFrontierLine(
+        latestUnix: Int?,
+        now: Int = Int(Date().timeIntervalSince1970)
+    ) -> String? {
+        guard let latestUnix else { return nil }
+        return "latestPersistedHrUnix=\(latestUnix) ageSeconds=\(max(0, now - latestUnix))"
     }
 
     /// The set of domains ACTIVE during this capture, plus `.universal` whenever any mode was on (the

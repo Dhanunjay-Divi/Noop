@@ -4,12 +4,18 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +44,7 @@ import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -45,9 +52,13 @@ import kotlinx.coroutines.launch
  * needs, then renders the Compose tree under [NoopTheme]. The design system is
  * dark-only, so we draw edge-to-edge over the near-black [Palette.surfaceBase].
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), SensorEventListener {
 
     private var demoRoute by mutableStateOf<String?>(null)
+    private lateinit var appReport: AppDiagnosticReportController
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private val shakeDetector = PhysicalShakeDetector()
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -57,6 +68,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.noop.AppDiagnosticsRecorder.record(
+            "activity.created",
+            fields = mapOf(
+                "restored_state" to (savedInstanceState != null).toString(),
+            ),
+            includeResourceSnapshot = true,
+        )
+        appReport = AppDiagnosticReportController(this)
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
         // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
         // trusted route now; AppRoot consumes it once its navigation host mounts.
@@ -103,21 +124,58 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NoopTheme {
-                NoopRoot(demoRoute = demoRoute)
+                Box(Modifier.fillMaxSize()) {
+                    NoopRoot(demoRoute = demoRoute)
+                    AppDiagnosticReportSheet(appReport)
+                }
             }
         }
+        lifecycleScope.launch {
+            AppDiagnosticReportRequestBridge.requests.collect {
+                appReport.requestManually()
+            }
+        }
+        requestDemoReportIfNeeded()
         deferLaunchMaintenance()
     }
 
     override fun onStart() {
         super.onStart()
+        com.noop.AppDiagnosticsRecorder.setApplicationActive(true)
+        com.noop.AppDiagnosticsRecorder.attachWindow(window)
+        com.noop.AppDiagnosticsRecorder.record("activity.started")
         StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
         ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext)
     }
 
+    override fun onResume() {
+        super.onResume()
+        accelerometer?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        com.noop.AppDiagnosticsRecorder.record("activity.resumed")
+    }
+
+    override fun onPause() {
+        sensorManager.unregisterListener(this)
+        com.noop.AppDiagnosticsRecorder.record("activity.paused")
+        super.onPause()
+    }
+
     override fun onStop() {
         StaleSyncReminderScheduler.onAppBackgrounded(applicationContext)
+        com.noop.AppDiagnosticsRecorder.detachWindow()
+        com.noop.AppDiagnosticsRecorder.setApplicationActive(false)
+        com.noop.AppDiagnosticsRecorder.record(
+            "activity.stopped",
+            includeResourceSnapshot = true,
+        )
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        com.noop.AppDiagnosticsRecorder.record("activity.destroyed")
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -127,6 +185,31 @@ class MainActivity : ComponentActivity() {
         // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
         // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
         NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        requestDemoReportIfNeeded()
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type != Sensor.TYPE_ACCELEROMETER || event.values.size < 3) return
+        if (
+            shakeDetector.sample(
+                event.values[0],
+                event.values[1],
+                event.values[2],
+                SystemClock.elapsedRealtime(),
+            )
+        ) {
+            appReport.requestFromShake()
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private fun requestDemoReportIfNeeded() {
+        if (!BuildConfig.DEBUG || demoRoute != DEMO_APP_REPORT_ROUTE) return
+        lifecycleScope.launch {
+            delay(700L)
+            appReport.requestDemo()
+        }
     }
 
     /** Request the BLE permissions appropriate to the running OS version. */
@@ -182,6 +265,7 @@ class MainActivity : ComponentActivity() {
 }
 
 internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
+internal const val DEMO_APP_REPORT_ROUTE = "app-report"
 
 internal fun appLaunchIntent(context: Context): Intent =
     context.packageManager.getLaunchIntentForPackage(context.packageName)

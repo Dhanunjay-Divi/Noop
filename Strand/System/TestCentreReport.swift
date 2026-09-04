@@ -71,7 +71,11 @@ final class TestCentreReport: ObservableObject {
     ///   when the frame recorder is on - the full raw-capture footprint (#590).
     /// Returns nil when nothing was readable (store unopenable AND no file), so the caller's zeroed
     /// fallback stays an honest "unreadable", never a fabricated figure.
-    static func storageProbe(repo: Repository?, live: LiveState) async -> TestBundleMeta.Storage? {
+    static func storageProbe(
+        repo: Repository?,
+        live: LiveState,
+        includeRowCounts: Bool = true
+    ) async -> TestBundleMeta.Storage? {
         let fm = FileManager.default
         var dbBytes = 0
         if let path = try? StorePaths.defaultDatabasePath() {
@@ -81,19 +85,27 @@ final class TestCentreReport: ObservableObject {
         }
         var rows: [String: Int] = [:]
         var rawBytes = 0
+        let latestHrUnix = await repo?.latestPersistedHRSampleTs()
         if let store = await repo?.storeHandle() {
-            if let c = try? await store.storageStats_rowCountsForTest() {
-                rows = ["hr": c.hr, "rr": c.rr, "events": c.events, "battery": c.battery,
-                        "spo2": c.spo2, "skinTemp": c.skinTemp, "resp": c.resp, "gravity": c.gravity]
+            if includeRowCounts {
+                if let c = try? await store.storageStats_rowCountsForTest() {
+                    rows = ["hr": c.hr, "rr": c.rr, "events": c.events, "battery": c.battery,
+                            "spo2": c.spo2, "skinTemp": c.skinTemp, "resp": c.resp, "gravity": c.gravity]
+                }
+                if let steps = try? await store.stepCountForTest() { rows["steps"] = steps }
+                rawBytes = (try? await store.storageStats().rawBytes) ?? 0
             }
-            if let steps = try? await store.stepCountForTest() { rows["steps"] = steps }
-            rawBytes = (try? await store.storageStats().rawBytes) ?? 0
         }
         if let url = live.puffinCaptureURL {
             rawBytes += (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
         }
-        guard dbBytes > 0 || !rows.isEmpty || rawBytes > 0 else { return nil }
-        return TestBundleMeta.Storage(dbBytes: dbBytes, rows: rows, rawCaptureBytes: rawBytes)
+        guard dbBytes > 0 || !rows.isEmpty || rawBytes > 0 || latestHrUnix != nil else { return nil }
+        return TestBundleMeta.Storage(
+            dbBytes: dbBytes,
+            rows: rows,
+            rawCaptureBytes: rawBytes,
+            latestHrUnix: latestHrUnix
+        )
     }
 
     /// The user read the report and confirmed: clear the gate and run the shipped share + deep-link flow.

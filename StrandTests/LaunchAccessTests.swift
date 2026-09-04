@@ -178,6 +178,17 @@ final class LaunchAccessTests: XCTestCase {
         XCTAssertNil(store.receipt)
     }
 
+    func testReceiptRemainsDeviceOnlyButSupportsLockedBackgroundRestoration() {
+        XCTAssertEqual(
+            KeychainLaunchAccessReceiptStore.receiptAccessibility,
+            kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
+        )
+        XCTAssertNotEqual(
+            KeychainLaunchAccessReceiptStore.receiptAccessibility,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
+        )
+    }
+
     private func configurationInfo(version: String) -> [String: Any] {
         [
             LaunchAccessConfiguration.versionInfoKey: version,

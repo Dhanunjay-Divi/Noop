@@ -25,6 +25,74 @@ class TestBundleAssemblerTest {
         assertEquals("v2", TestBundleAssembler.REDACTION_VERSION)
     }
 
+    @Test fun persistedHrFrontierReportsDurableAge() {
+        assertEquals(
+            "latestPersistedHrUnix=1000 ageSeconds=45",
+            TestBundleAssembler.persistedHrFrontierLine(
+                latestHrUnix = 1_000L,
+                nowUnix = 1_045L,
+            ),
+        )
+        assertEquals(
+            null,
+            TestBundleAssembler.persistedHrFrontierLine(
+                latestHrUnix = null,
+                nowUnix = 1_045L,
+            ),
+        )
+    }
+
+    @Test fun userNoteIsBoundedAndControlBytesAreRemovedBeforeRedaction() {
+        val serial = "4C1594026"
+        val note = "  Scrolling WHOOP $serial\u0000 froze\n" +
+            "x".repeat(TestBundleAssembler.MAX_USER_NOTE_CHARACTERS + 100)
+        val entry = requireNotNull(TestBundleAssembler.userNoteEntry(note))
+        assertEquals("user-note.txt", entry.first)
+
+        val text = String(TestBundleAssembler.redactEntries(listOf(entry)).single().second)
+        assertTrue(text.contains("User-provided context"))
+        assertTrue(text.contains("Band <serial>"))
+        assertTrue(!text.contains(serial))
+        assertTrue(!text.contains('\u0000'))
+        assertTrue(text.length <= TestBundleAssembler.MAX_USER_NOTE_CHARACTERS + 100)
+        assertEquals(null, TestBundleAssembler.userNoteEntry(" \n\t "))
+    }
+
+    @Test fun appReportScreenshotFailsClosedUnlessPngIsValidAndBounded() {
+        val signature =
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        val valid = signature + byteArrayOf(0, 1)
+        assertTrue(
+            TestBundleAssembler.appReportScreenshotEntry(valid)?.second.contentEquals(valid) == true,
+        )
+        assertEquals(
+            null,
+            TestBundleAssembler.appReportScreenshotEntry("not a png".toByteArray()),
+        )
+        assertEquals(
+            null,
+            TestBundleAssembler.appReportScreenshotEntry(
+                signature + ByteArray(TestBundleAssembler.MAX_APP_REPORT_SCREENSHOT_BYTES),
+            ),
+        )
+        assertEquals(null, TestBundleAssembler.appReportScreenshotEntry(null))
+    }
+
+    @Test fun appReportMetadataExcludesUnrelatedTestCentreAnswers() {
+        val metadata = TestBundleAssembler.purposeMetadata(
+            purpose = TestBundleAssembler.Purpose.APP_HANG,
+            profile = TestDomain.MASTER,
+            questionnaire = mapOf("private_test_answer" to "must not ship"),
+        )
+
+        assertEquals(
+            listOf("App runtime diagnostics", "Live Bluetooth"),
+            metadata.source,
+        )
+        assertEquals("app-hang", metadata.testProfile)
+        assertTrue(metadata.questionnaire.isEmpty())
+    }
+
     @Test fun capTruncatesRawCaptureTailAndFlags() {
         val small = "report.txt" to "small".toByteArray()
         val oversized = "x".repeat(40 * 1024 * 1024).toByteArray()  // 40 MB raw-capture

@@ -1014,8 +1014,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (chargeUpgradePending ||
                     activeZoneUpgradePending ||
                     analyzeFp != NoopPrefs.analyzeWatermark(appContext)
-                ) runCatching {
-                    IntelligenceEngine.analyzeRecent(
+                ) {
+                    val analysisDiagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                        "analysis.recent",
+                        fields = mapOf(
+                            "charge_upgrade" to chargeUpgradePending.toString(),
+                            "active_zone_upgrade" to activeZoneUpgradePending.toString(),
+                        ),
+                    )
+                    runCatching {
+                        IntelligenceEngine.analyzeRecent(
                         repo = repository,
                         profileProvider = ::currentProfile,
                         maxDays = if (chargeUpgradePending) {
@@ -1117,42 +1125,60 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             else null,
                         // #141: nightly HRV over deep-sleep windows only when the user picked WHOOP-style.
                         deepHrvWindow = UnitPrefs.hrvWindow(appContext) == HrvWindow.DEEP_SLEEP,
-                    )
-                    // analyzeRecent now hops to Dispatchers.Default; a scope cancellation surfaces as a
-                    // CancellationException that runCatching would otherwise swallow, breaking the loop's
-                    // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
-                }.onSuccess {
-                    NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp)
-                    if (chargeUpgradePending) {
-                        prefs.edit()
-                            .putString(
-                                ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
-                                ChargeFormulaUpgradeGate.CURRENT_REVISION,
-                            )
-                            .apply()
+                        )
+                        // analyzeRecent now hops to Dispatchers.Default; a scope cancellation surfaces as a
+                        // CancellationException that runCatching would otherwise swallow, breaking the loop's
+                        // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
+                    }.onSuccess {
+                        com.noop.AppDiagnosticsRecorder.endOperation(
+                            analysisDiagnostic,
+                            outcome = "completed",
+                            includeResourceSnapshot = true,
+                        )
+                        NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp)
+                        if (chargeUpgradePending) {
+                            prefs.edit()
+                                .putString(
+                                    ChargeFormulaUpgradeGate.COMPLETED_REVISION_KEY,
+                                    ChargeFormulaUpgradeGate.CURRENT_REVISION,
+                                )
+                                .apply()
+                        }
+                        if (activeZoneUpgradePending) {
+                            prefs.edit()
+                                .putString(
+                                    ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY,
+                                    ActiveZoneUpgradeGate.CURRENT_REVISION,
+                                )
+                                .apply()
+                        }
+                        // Foreground/periodic reanalysis parity with the background post-sync hook. Reuse the
+                        // Today card's suggestion-only scan; the notifier never asks permission or saves.
+                        AutoWorkoutCandidateNotifier.afterReanalysis(
+                            context = appContext,
+                            repository = repository,
+                            activeDeviceId = deviceId,
+                            traceSink =
+                                if (com.noop.testcentre.TestCentre.from(appContext)
+                                        .active(com.noop.testcentre.TestDomain.WORKOUTS))
+                                    { line -> ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
+                                else null,
+                        )
+                    }.onFailure {
+                        com.noop.AppDiagnosticsRecorder.endOperation(
+                            analysisDiagnostic,
+                            outcome =
+                                if (it is kotlin.coroutines.cancellation.CancellationException) {
+                                    "canceled"
+                                } else {
+                                    "failed"
+                                },
+                            fields = mapOf("failure_kind" to it.javaClass.simpleName),
+                            includeResourceSnapshot = true,
+                        )
+                        if (it is kotlin.coroutines.cancellation.CancellationException) throw it
                     }
-                    if (activeZoneUpgradePending) {
-                        prefs.edit()
-                            .putString(
-                                ActiveZoneUpgradeGate.COMPLETED_REVISION_KEY,
-                                ActiveZoneUpgradeGate.CURRENT_REVISION,
-                            )
-                            .apply()
-                    }
-                    // Foreground/periodic reanalysis parity with the background post-sync hook. Reuse the
-                    // Today card's suggestion-only scan; the notifier never asks permission or saves.
-                    AutoWorkoutCandidateNotifier.afterReanalysis(
-                        context = appContext,
-                        repository = repository,
-                        activeDeviceId = deviceId,
-                        traceSink =
-                            if (com.noop.testcentre.TestCentre.from(appContext)
-                                    .active(com.noop.testcentre.TestDomain.WORKOUTS))
-                                { line -> ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
-                            else null,
-                    )
                 }
-                    .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
                 // Opt-in writeback: push the freshly computed nights into Health Connect so other
                 // apps see them. Idempotent (clientRecordId per metric+day), so re-running every
                 // cycle just upserts. Never let an HC hiccup (perm revoked mid-flight, provider

@@ -332,6 +332,10 @@ enum RemoteSyncService {
         defer { running = false }
         RemoteSyncPreferences.lastAttemptMs = Int(Date().timeIntervalSince1970 * 1_000)
         RemoteSyncPreferences.lastStatus = "Syncing…"
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "self_hosted_sync",
+            fields: ["request": fullReplay ? "full_replay" : "incremental"]
+        )
 
         do {
             let client = RemoteSyncClient(
@@ -570,6 +574,17 @@ enum RemoteSyncService {
                     ? "Uploaded \(totalRows) raw rows; more history will continue next time."
                     : "Up to date - uploaded \(totalRows) pending raw rows."
             ) + storageSuffix
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "uploaded_rows": String(totalRows),
+                    "uploaded_batches": String(totalBatches),
+                    "continuation_pending": hasMore ? "true" : "false",
+                    "pruned_rows": String(prunedRows),
+                ],
+                includeResourceSnapshot: true
+            )
             return RemoteSyncRunResult(
                 uploadedRawRows: totalRows,
                 uploadedBatches: totalBatches,
@@ -580,8 +595,63 @@ enum RemoteSyncService {
         } catch {
             // Client errors intentionally never include the Bearer token.
             RemoteSyncPreferences.lastStatus = "Sync failed: \(error.localizedDescription)"
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": diagnosticFailureKind(error),
+                ],
+                includeResourceSnapshot: true
+            )
             throw error
         }
+    }
+
+    /// Stable, payload-free failure classification for app reports. Never include the endpoint, token,
+    /// namespace/device ids, response body, or associated free-form server message.
+    private static func diagnosticFailureKind(_ error: Error) -> String {
+        if error is CancellationError { return "canceled" }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "network_offline"
+            case .timedOut:
+                return "network_timeout"
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return "network_unreachable"
+            default:
+                return "network_transport"
+            }
+        }
+        if let remote = error as? RemoteSyncError {
+            switch remote {
+            case .insecureURL, .invalidURLComponents, .missingAPIKey, .invalidTimeout:
+                return "configuration"
+            case .invalidResponse, .decoding:
+                return "invalid_response"
+            case .server(let status, _):
+                return status >= 500 ? "server_5xx" : "server_rejected"
+            case .encoding:
+                return "local_encoding"
+            case .batchMismatch:
+                return "batch_mismatch"
+            case .unexpectedAcknowledgementStatus:
+                return "ack_rejected"
+            case .invalidDerivedWindow:
+                return "replay_state"
+            }
+        }
+        if let settings = error as? RemoteSyncSettingsError {
+            switch settings {
+            case .invalidURL, .embeddedCredentials, .notConfigured:
+                return "configuration"
+            case .keychainWrite:
+                return "secure_storage"
+            case .storeUnavailable:
+                return "local_store"
+            }
+        }
+        return "other"
     }
 
     private static var platform: String {

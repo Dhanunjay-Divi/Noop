@@ -81,6 +81,12 @@ object RemoteSyncService {
             val nowMs = System.currentTimeMillis()
             RemoteSyncPrefs.setLastAttemptMs(nowMs)
             RemoteSyncPrefs.setLastStatus("Syncing…")
+            val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                "self_hosted_sync",
+                fields = mapOf(
+                    "request" to if (fullReplay) "full_replay" else "incremental",
+                ),
+            )
 
             try {
                 val database = WhoopDatabase.get(context.applicationContext)
@@ -201,15 +207,36 @@ object RemoteSyncService {
                     ""
                 }
                 RemoteSyncPrefs.recordSuccess(System.currentTimeMillis(), totalRows, status)
-                RemoteSyncRunResult(
+                val result = RemoteSyncRunResult(
                     uploadedRawRows = totalRows,
                     uploadedBatches = totalBatches,
                     hasMoreRawRows = hasMoreRaw,
                     hasMoreDerivedRows = hasMoreDerived,
                     lastAck = lastAck,
                 )
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "completed",
+                    fields = mapOf(
+                        "uploaded_rows" to totalRows.toString(),
+                        "uploaded_batches" to totalBatches.toString(),
+                        "continuation_pending" to
+                            (hasMoreRaw || hasMoreDerived).toString(),
+                        "pruned_rows" to prunedRows.toString(),
+                    ),
+                    includeResourceSnapshot = true,
+                )
+                result
             } catch (error: Throwable) {
                 RemoteSyncPrefs.setLastStatus("Sync failed: ${safeError(error)}")
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "failed",
+                    fields = mapOf(
+                        "failure_kind" to diagnosticFailureKind(error),
+                    ),
+                    includeResourceSnapshot = true,
+                )
                 throw error
             }
         }
@@ -218,6 +245,22 @@ object RemoteSyncService {
     private fun safeError(error: Throwable): String = when (error) {
         is RemoteSyncException -> error.message ?: "The sync request failed."
         else -> "An unexpected sync failure occurred."
+    }
+
+    private fun diagnosticFailureKind(error: Throwable): String = when (error) {
+        is kotlinx.coroutines.CancellationException -> "canceled"
+        is RemoteSyncConfigurationException -> "configuration"
+        is RemoteSyncException.Network -> "network_transport"
+        is RemoteSyncException.Server -> when (error.statusCode) {
+            401, 403 -> "authentication"
+            408, 504 -> "server_timeout"
+            429 -> "rate_limited"
+            in 500..599 -> "server_unavailable"
+            else -> "server_rejected"
+        }
+        is RemoteSyncException.InvalidResponse -> "invalid_response"
+        is RemoteSyncException.BatchMismatch -> "batch_mismatch"
+        else -> "unexpected"
     }
 }
 

@@ -248,6 +248,7 @@ private suspend fun buildPending(
         if (f.exists()) dbBytes += f.length()
     }
     val rows = vm.repo.storageRowCounts()
+    val latestHrUnix = vm.repo.latestHrSampleTsUnion(vm.activeStrapId)
     var rawBytes = 0L
     for (name in listOf(
         com.noop.ble.WhoopBleClient.WHOOP5_CAPTURE_FILE,
@@ -256,11 +257,12 @@ private suspend fun buildPending(
         val f = java.io.File(context.filesDir, name)
         if (f.exists()) rawBytes += f.length()
     }
-    val storage = if (dbBytes > 0L || rows.isNotEmpty() || rawBytes > 0L) {
+    val storage = if (dbBytes > 0L || rows.isNotEmpty() || rawBytes > 0L || latestHrUnix != null) {
         com.noop.testcentre.TestBundleMeta.Storage(
             dbBytes = dbBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
             rows = rows,
             rawCaptureBytes = rawBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            latestHrUnix = latestHrUnix,
         )
     } else {
         null
@@ -338,6 +340,13 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
         blurb = "Your strap log, a Recovery recalibration, and the device environment. Nothing leaves the phone unless you share it.",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            NoopButton(
+                text = "Report an app problem",
+                leadingIcon = Icons.Filled.BugReport,
+                kind = NoopButtonKind.Primary,
+                fullWidth = true,
+                onClick = { AppDiagnosticReportRequestBridge.request() },
+            )
             // Strap log, the same exportLogText share the Settings Diagnostics button uses.
             NoopButton(
                 text = uiString(R.string.l10n_test_centre_screen_share_strap_log_for_bug_reports_b9802500),

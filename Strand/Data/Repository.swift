@@ -920,6 +920,14 @@ final class Repository: ObservableObject {
         return latest
     }
 
+    /// Latest durable biometric frontier across the active strap and canonical imported source. This is
+    /// intentionally an indexed MAX query, not a row count or history load, so diagnostics can prove whether
+    /// collection is advancing even when a large local library is the reason the user is reporting a hang.
+    func latestPersistedHRSampleTs() async -> Int? {
+        guard let store = await ensureStore() else { return nil }
+        return await unionLatestHRSampleTs(store: store)
+    }
+
     /// Today's row, by the device's LOGICAL local day , NOT just the newest stored row, which after a
     /// historical import was months-old data shown as today's hero (issue #23). The logical day rolls at
     /// 04:00 local (see `logicalDayKey`), so between midnight and 4am we keep resolving the prior logical

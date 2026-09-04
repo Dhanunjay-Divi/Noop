@@ -21,8 +21,11 @@ final class ShakeDiagnosticReportController: ObservableObject {
     @Published private(set) var phase: Phase = .explanation
     @Published private(set) var entries: [FileExport.BundleEntry] = []
     @Published private(set) var statusMessage: String?
+    @Published private(set) var userNote = ""
+    @Published var includeScreenshot = false
 
-    private var lastShakeUptime: TimeInterval = 0
+    private var lastShakeUptime: TimeInterval?
+    private var capturedScreenPNG: Data?
     #if DEBUG
     private var didRequestDemo = false
     #endif
@@ -43,6 +46,14 @@ final class ShakeDiagnosticReportController: ObservableObject {
         }
     }
 
+    var hasCapturedScreen: Bool {
+        capturedScreenPNG != nil
+    }
+
+    var includesScreenAttachment: Bool {
+        entries.contains { $0.name == DisplayScreenshot.bundleName }
+    }
+
     /// A bounded review excerpt. App-session and MetricKit streams are named but intentionally not laid
     /// out as one giant SwiftUI Text (that can itself freeze CoreText on a large diagnostic payload).
     var reviewPreview: String {
@@ -57,14 +68,34 @@ final class ShakeDiagnosticReportController: ObservableObject {
 
     func requestFromShake() {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastShakeUptime >= 2, !isPresented else { return }
+        guard !isPresented,
+              lastShakeUptime.map({ now - $0 >= 2 }) ?? true else { return }
         lastShakeUptime = now
-        phase = .explanation
-        entries = []
-        statusMessage = nil
+
+        // Persist the trigger before asking UIKit to render the visible hierarchy. If the render path is
+        // itself slow or broken, the session still proves exactly when the user reported the problem and
+        // records the process resources at that edge.
         AppDiagnosticsRecorder.shared.record(
             "report.shake_detected",
             includeResourceSnapshot: true
+        )
+
+        // Capture the frame before presenting this sheet, otherwise the report UI itself would obscure the
+        // screen the user is trying to explain. The bytes stay transient in memory, default to excluded,
+        // and are discarded on dismissal unless the user explicitly turns the attachment on and shares.
+        capturedScreenPNG = TestBundleAssembler.appReportScreenshotEntry(
+            DisplayScreenshot.capturePNG()
+        )?.data
+        phase = .explanation
+        entries = []
+        statusMessage = nil
+        userNote = ""
+        includeScreenshot = false
+        AppDiagnosticsRecorder.shared.record(
+            "report.screen_snapshot_captured",
+            fields: [
+                "available": capturedScreenPNG == nil ? "false" : "true",
+            ]
         )
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         isPresented = true
@@ -84,20 +115,35 @@ final class ShakeDiagnosticReportController: ObservableObject {
     }
     #endif
 
-    func build(live: LiveState) {
+    func updateUserNote(_ value: String) {
+        userNote = TestBundleAssembler.boundedUserNoteInput(value)
+    }
+
+    func build(live: LiveState, repo: Repository) {
         guard phase == .explanation || phase == .failed else { return }
         phase = .building
         statusMessage = nil
+        let note = userNote
+        let screenshot = includeScreenshot ? capturedScreenPNG : nil
         AppDiagnosticsRecorder.shared.record(
             "report.build_requested",
+            fields: [
+                "user_context_provided":
+                    note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "false" : "true",
+                "screen_snapshot_included": screenshot == nil ? "false" : "true",
+            ],
             includeResourceSnapshot: true
         )
 
         Task { @MainActor [weak self, weak live] in
             guard let self, let live else { return }
-            // File-size-only storage evidence is deliberate here. Full table COUNTs can compete with a
-            // large database at exactly the moment the user is reporting a freeze.
-            let storage = await TestCentreReport.storageProbe(repo: nil, live: live)
+            // File size plus one indexed HR-frontier query is deliberate here. Full table COUNTs can
+            // compete with a large database at exactly the moment the user is reporting a freeze.
+            let storage = await TestCentreReport.storageProbe(
+                repo: repo,
+                live: live,
+                includeRowCounts: false
+            )
             let runtimeDiagnostics = await AppDiagnosticsRecorder.shared.diagnosticEntriesAsync()
             let model = UserDefaults.standard.string(forKey: "selectedWhoopModel")
             let assembled = TestBundleAssembler.assemble(
@@ -106,7 +152,9 @@ final class ShakeDiagnosticReportController: ObservableObject {
                 storage: storage,
                 strapModel: model,
                 purpose: .appHang,
-                runtimeDiagnostics: runtimeDiagnostics
+                runtimeDiagnostics: runtimeDiagnostics,
+                userNote: note,
+                appReportScreenshotPNG: screenshot
             )
             guard !assembled.isEmpty else {
                 self.phase = .failed
@@ -120,6 +168,14 @@ final class ShakeDiagnosticReportController: ObservableObject {
                 fields: ["file_count": String(assembled.count)]
             )
         }
+    }
+
+    func removeScreenAttachment() {
+        guard phase == .review, includesScreenAttachment else { return }
+        entries.removeAll { $0.name == DisplayScreenshot.bundleName }
+        includeScreenshot = false
+        statusMessage = "Screen snapshot removed from this report."
+        AppDiagnosticsRecorder.shared.record("report.screen_snapshot_removed")
     }
 
     func share() {
@@ -162,6 +218,9 @@ final class ShakeDiagnosticReportController: ObservableObject {
         phase = .explanation
         entries = []
         statusMessage = nil
+        userNote = ""
+        includeScreenshot = false
+        capturedScreenPNG = nil
     }
 }
 
@@ -241,6 +300,7 @@ struct DeviceShakeDetector: UIViewControllerRepresentable {
 struct ShakeDiagnosticReportSheet: View {
     @ObservedObject var controller: ShakeDiagnosticReportController
     let live: LiveState
+    let repo: Repository
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -288,7 +348,7 @@ struct ShakeDiagnosticReportSheet: View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
             reportHeader(
                 symbol: "waveform.path.ecg.rectangle",
-                title: "Capture the freeze",
+                title: "Capture what happened",
                 detail: "NOOP will package the evidence already on this iPhone. Nothing is uploaded automatically."
             )
 
@@ -307,6 +367,12 @@ struct ShakeDiagnosticReportSheet: View {
                     )
                     Divider().overlay(StrandPalette.hairline)
                     evidenceRow(
+                        symbol: "cylinder",
+                        title: "Data pipeline",
+                        detail: "Database open and refresh timing, saved heart-rate freshness, and bounded sync outcomes"
+                    )
+                    Divider().overlay(StrandPalette.hairline)
+                    evidenceRow(
                         symbol: "waveform.path.ecg",
                         title: "Band status",
                         detail: "The existing redacted connection and sync log"
@@ -320,8 +386,71 @@ struct ShakeDiagnosticReportSheet: View {
                 }
             }
 
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text("What felt buggy? (optional)")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text("Briefly say what you tapped, what you expected, and what happened. Avoid names or contact details.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField(
+                        "Example: scrolling Health paused after I opened a metric",
+                        text: Binding(
+                            get: { controller.userNote },
+                            set: { controller.updateUserNote($0) }
+                        ),
+                        axis: .vertical
+                    )
+                    .lineLimit(3...6)
+                    .font(StrandFont.body)
+                    .padding(12)
+                    .background(
+                        StrandPalette.surfaceBase,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+                    }
+                    .accessibilityIdentifier("noop.app-report.user-note")
+
+                    Text("\(controller.userNote.count)/\(TestBundleAssembler.maxUserNoteCharacters)")
+                        .font(StrandFont.mono)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+
+            NoopCard {
+                Toggle(
+                    isOn: Binding(
+                        get: { controller.includeScreenshot },
+                        set: { controller.includeScreenshot = $0 }
+                    )
+                ) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Include screen snapshot")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(
+                            controller.hasCapturedScreen
+                                ? "Shows the screen from just before this report opened. It may contain health values."
+                                : "A screen snapshot was not available for this report."
+                        )
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(StrandPalette.statusPositive)
+                .disabled(!controller.hasCapturedScreen)
+                .accessibilityIdentifier("noop.app-report.include-screenshot")
+            }
+
             Label {
-                Text("Not included: your health database, raw sensor history, screenshots, account credentials or API keys.")
+                Text("Never included: your health database, raw sensor history, account credentials or API keys. The temporary screen snapshot is discarded when you close this report.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -337,7 +466,7 @@ struct ShakeDiagnosticReportSheet: View {
                     kind: .primary,
                     fullWidth: true
                 ) {
-                    controller.build(live: live)
+                    controller.build(live: live, repo: repo)
                 }
                 NoopButton(
                     "Cancel",
@@ -360,7 +489,7 @@ struct ShakeDiagnosticReportSheet: View {
             Text("Preparing a private ZIP")
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Reading bounded logs and file-size metadata. Your health database stays on this iPhone.")
+            Text("Reading bounded logs, file size and the latest saved heart-rate timestamp. Your health database stays on this iPhone.")
                 .font(StrandFont.body)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .multilineTextAlignment(.center)
@@ -435,6 +564,17 @@ struct ShakeDiagnosticReportSheet: View {
                 controller.share()
             }
             .disabled(controller.phase == .sharing)
+
+            if controller.includesScreenAttachment {
+                NoopButton(
+                    "Remove screen snapshot",
+                    systemImage: "photo.badge.minus",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {
+                    controller.removeScreenAttachment()
+                }
+            }
         }
     }
 
@@ -451,7 +591,7 @@ struct ShakeDiagnosticReportSheet: View {
                 kind: .primary,
                 fullWidth: true
             ) {
-                controller.build(live: live)
+                controller.build(live: live, repo: repo)
             }
             NoopButton(
                 "Close",
@@ -511,6 +651,7 @@ struct ShakeDiagnosticReportSheet: View {
         if name.hasSuffix(".json") || name.hasSuffix(".jsonl") {
             return "curlybraces"
         }
+        if name.hasSuffix(".png") { return "photo" }
         if name.hasSuffix(".txt") { return "doc.text" }
         return "doc"
     }
