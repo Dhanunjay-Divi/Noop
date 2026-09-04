@@ -53,6 +53,7 @@ import androidx.lifecycle.lifecycleScope
 import com.noop.AppDiagnosticsRecorder
 import com.noop.BuildConfig
 import com.noop.NoopApplication
+import com.noop.R
 import com.noop.ble.WhoopModel
 import com.noop.data.WhoopDatabase
 import com.noop.testcentre.DisplayScreenshot
@@ -138,7 +139,7 @@ internal class AppDiagnosticReportController(
             if (full.length <= limit) return full
             val half = limit / 2
             return full.take(half) +
-                "\n\n[Preview shortened. The complete bounded files are listed above.]\n\n" +
+                "\n\n[${activity.getString(R.string.app_report_preview_shortened)}]\n\n" +
                 full.takeLast(half)
         }
 
@@ -270,7 +271,7 @@ internal class AppDiagnosticReportController(
 
             if (assembled.isEmpty()) {
                 phase = Phase.FAILED
-                statusMessage = "NOOP could not prepare the report. Reopen the app and try again."
+                statusMessage = activity.getString(R.string.app_report_error_prepare)
                 return@launch
             }
             entries = assembled
@@ -286,7 +287,7 @@ internal class AppDiagnosticReportController(
         if (phase != Phase.REVIEW || !includesScreenAttachment) return
         entries = entries.filterNot { it.first == DisplayScreenshot.BUNDLE_NAME }
         includeScreenshot = false
-        statusMessage = "Screen snapshot removed from this report."
+        statusMessage = activity.getString(R.string.app_report_status_snapshot_removed)
         AppDiagnosticsRecorder.record("report.screen_snapshot_removed")
     }
 
@@ -308,9 +309,9 @@ internal class AppDiagnosticReportController(
             val result = LogExport.exportBundle(activity, reportEntries, name)
             phase = if (result == null) Phase.FAILED else Phase.REVIEW
             statusMessage = if (result == null) {
-                "The ZIP could not be created. No report was shared."
+                activity.getString(R.string.app_report_error_share)
             } else {
-                "Share sheet opened for $name"
+                activity.getString(R.string.app_report_status_share_opened, name)
             }
         }
     }
@@ -399,9 +400,13 @@ private fun ReportSheetTitle(controller: AppDiagnosticReportController) {
             modifier = Modifier.size(28.dp),
         )
         Column(Modifier.weight(1f)) {
-            Text("App report", style = NoopType.title2, color = Palette.textPrimary)
             Text(
-                "Private evidence from this phone",
+                uiString(R.string.app_report_title),
+                style = NoopType.title2,
+                color = Palette.textPrimary,
+            )
+            Text(
+                uiString(R.string.app_report_subtitle),
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
             )
@@ -410,7 +415,10 @@ private fun ReportSheetTitle(controller: AppDiagnosticReportController) {
             onClick = controller::close,
             enabled = !controller.preventsDismissal,
         ) {
-            Icon(Icons.Filled.Close, contentDescription = "Close app report")
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = uiString(R.string.app_report_close_content_description),
+            )
         }
     }
 }
@@ -419,40 +427,40 @@ private fun ReportSheetTitle(controller: AppDiagnosticReportController) {
 private fun ReportExplanation(controller: AppDiagnosticReportController) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
-            title = "Capture what happened",
-            detail = "NOOP will package evidence already on this phone. Nothing uploads automatically.",
+            title = uiString(R.string.app_report_capture_title),
+            detail = uiString(R.string.app_report_capture_detail),
         )
 
         NoopCard {
             Column {
                 EvidenceRow(
                     Icons.Filled.Speed,
-                    "Performance",
-                    "Frame hitches, main-thread stalls, memory pressure, storage and thermal state",
+                    uiString(R.string.app_report_evidence_performance_title),
+                    uiString(R.string.app_report_evidence_performance_detail),
                 )
                 HorizontalDivider(color = Palette.hairline)
                 EvidenceRow(
                     Icons.Filled.Layers,
-                    "Recent path",
-                    "App lifecycle and fixed screen names from this and the previous launch",
+                    uiString(R.string.app_report_evidence_recent_path_title),
+                    uiString(R.string.app_report_evidence_recent_path_detail),
                 )
                 HorizontalDivider(color = Palette.hairline)
                 EvidenceRow(
                     Icons.Filled.Storage,
-                    "Data pipeline",
-                    "Database open timing, saved heart-rate freshness and bounded sync outcomes",
+                    uiString(R.string.app_report_evidence_data_pipeline_title),
+                    uiString(R.string.app_report_evidence_data_pipeline_detail),
                 )
                 HorizontalDivider(color = Palette.hairline)
                 EvidenceRow(
                     Icons.Filled.Bluetooth,
-                    "Band status",
-                    "The existing redacted connection and history-sync log",
+                    uiString(R.string.app_report_evidence_band_status_title),
+                    uiString(R.string.app_report_evidence_band_status_detail),
                 )
                 HorizontalDivider(color = Palette.hairline)
                 EvidenceRow(
                     Icons.Filled.PhoneAndroid,
-                    "Android diagnostics",
-                    "Recent OS exit reason and ANR trace, when Android provides one",
+                    uiString(R.string.app_report_evidence_android_title),
+                    uiString(R.string.app_report_evidence_android_detail),
                 )
             }
         }
@@ -460,12 +468,12 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
         NoopCard {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "What felt buggy? (optional)",
+                    uiString(R.string.app_report_user_note_title),
                     style = NoopType.headline,
                     color = Palette.textPrimary,
                 )
                 Text(
-                    "Say what you tapped, what you expected, and what happened. Avoid names or contact details.",
+                    uiString(R.string.app_report_user_note_detail),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -478,7 +486,7 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
                     minLines = 3,
                     maxLines = 6,
                     placeholder = {
-                        Text("Example: Health paused after I opened a metric")
+                        Text(uiString(R.string.app_report_user_note_placeholder))
                     },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Palette.surfaceRaised,
@@ -488,7 +496,11 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
                     ),
                 )
                 Text(
-                    "${controller.userNote.length}/${TestBundleAssembler.MAX_USER_NOTE_CHARACTERS}",
+                    uiString(
+                        R.string.app_report_character_count,
+                        controller.userNote.length,
+                        TestBundleAssembler.MAX_USER_NOTE_CHARACTERS,
+                    ),
                     style = NoopType.mono,
                     color = Palette.textTertiary,
                     modifier = Modifier.align(Alignment.End),
@@ -509,15 +521,15 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "Include screen snapshot",
+                        uiString(R.string.app_report_include_snapshot),
                         style = NoopType.headline,
                         color = Palette.textPrimary,
                     )
                     Text(
                         if (controller.screenshotAvailable) {
-                            "Shows the screen before this report opened. It may contain health values."
+                            uiString(R.string.app_report_snapshot_available_detail)
                         } else {
-                            "A screen snapshot is not available yet."
+                            uiString(R.string.app_report_snapshot_unavailable_detail)
                         },
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
@@ -536,20 +548,19 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
         }
 
         Text(
-            "Never included: your health database, raw sensor history, account credentials or API keys. " +
-                "The temporary screen snapshot is discarded when this report closes.",
+            uiString(R.string.app_report_privacy_detail),
             style = NoopType.footnote,
             color = Palette.textSecondary,
         )
 
         NoopButton(
-            text = "Build report",
+            text = uiString(R.string.app_report_build),
             leadingIcon = Icons.Filled.Description,
             fullWidth = true,
             onClick = controller::build,
         )
         NoopButton(
-            text = "Cancel",
+            text = uiString(R.string.app_report_cancel),
             leadingIcon = Icons.Filled.Close,
             kind = NoopButtonKind.Secondary,
             fullWidth = true,
@@ -568,10 +579,9 @@ private fun ReportBuilding() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         CircularProgressIndicator(color = Palette.accent)
-        Text("Preparing a private ZIP", style = NoopType.title2)
+        Text(uiString(R.string.app_report_preparing_title), style = NoopType.title2)
         Text(
-            "Reading bounded logs, file size and the latest saved heart-rate timestamp. " +
-                "Your health database stays on this phone.",
+            uiString(R.string.app_report_preparing_detail),
             style = NoopType.body,
             color = Palette.textSecondary,
         )
@@ -582,8 +592,8 @@ private fun ReportBuilding() {
 private fun ReportReview(controller: AppDiagnosticReportController) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
-            "Report ready",
-            "Review the attachment list, then choose where to send or save the ZIP.",
+            uiString(R.string.app_report_ready_title),
+            uiString(R.string.app_report_ready_detail),
         )
         NoopCard {
             Column {
@@ -627,7 +637,7 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
 
         if (controller.reviewPreview.isNotBlank()) {
             Text(
-                "REDACTED PREVIEW",
+                uiString(R.string.app_report_redacted_preview),
                 style = NoopType.overline,
                 color = Palette.textSecondary,
             )
@@ -654,9 +664,9 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
 
         NoopButton(
             text = if (controller.phase == AppDiagnosticReportController.Phase.SHARING) {
-                "Preparing ZIP"
+                uiString(R.string.app_report_preparing_zip)
             } else {
-                "Share ZIP"
+                uiString(R.string.app_report_share_zip)
             },
             leadingIcon = Icons.Filled.Upload,
             fullWidth = true,
@@ -665,7 +675,7 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
         )
         if (controller.includesScreenAttachment) {
             NoopButton(
-                text = "Remove screen snapshot",
+                text = uiString(R.string.app_report_remove_snapshot),
                 leadingIcon = Icons.Filled.Delete,
                 kind = NoopButtonKind.Secondary,
                 fullWidth = true,
@@ -679,17 +689,17 @@ private fun ReportReview(controller: AppDiagnosticReportController) {
 private fun ReportFailure(controller: AppDiagnosticReportController) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ReportHeader(
-            "Report not ready",
-            controller.statusMessage ?: "NOOP could not prepare the ZIP.",
+            uiString(R.string.app_report_not_ready_title),
+            controller.statusMessage ?: uiString(R.string.app_report_prepare_zip_fallback),
         )
         NoopButton(
-            text = "Try again",
+            text = uiString(R.string.app_report_try_again),
             leadingIcon = Icons.Filled.BugReport,
             fullWidth = true,
             onClick = controller::build,
         )
         NoopButton(
-            text = "Close",
+            text = uiString(R.string.app_report_close),
             leadingIcon = Icons.Filled.Close,
             kind = NoopButtonKind.Secondary,
             fullWidth = true,

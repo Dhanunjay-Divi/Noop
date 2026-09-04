@@ -54,6 +54,10 @@ final class ShakeDiagnosticReportController: ObservableObject {
         entries.contains { $0.name == DisplayScreenshot.bundleName }
     }
 
+    var userNoteCountLabel: String {
+        "\(userNote.count)/\(TestBundleAssembler.maxUserNoteCharacters)"
+    }
+
     /// A bounded review excerpt. App-session and MetricKit streams are named but intentionally not laid
     /// out as one giant SwiftUI Text (that can itself freeze CoreText on a large diagnostic payload).
     var reviewPreview: String {
@@ -416,7 +420,7 @@ struct ShakeDiagnosticReportSheet: View {
                     }
                     .accessibilityIdentifier("noop.app-report.user-note")
 
-                    Text("\(controller.userNote.count)/\(TestBundleAssembler.maxUserNoteCharacters)")
+                    Text(verbatim: controller.userNoteCountLabel)
                         .font(StrandFont.mono)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .trailing)

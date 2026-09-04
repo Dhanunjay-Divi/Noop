@@ -384,12 +384,18 @@ enum TestBundleAssembler {
         //    capEntries budgets raw-capture as capBytes - (everything else), so a large/retina PNG shrinks
         //    the raw-capture tail rather than breaching the cap. Only raw-capture is trimmed; report.txt and
         //    last-crash are bounded and the PNG is kept whole.
-        let textEntries = [reportEntry]
-            + (note.map { [$0] } ?? [])
-            + (rawCapture.map { [$0] } ?? [])
-            + (crash.map { [$0] } ?? [])
-            + ouraDiagnostics
-            + appDiagnostics
+        var textEntries = [reportEntry]
+        if let note {
+            textEntries.append(note)
+        }
+        if let rawCapture {
+            textEntries.append(rawCapture)
+        }
+        if let crash {
+            textEntries.append(crash)
+        }
+        textEntries.append(contentsOf: ouraDiagnostics)
+        textEntries.append(contentsOf: appDiagnostics)
         let redacted = redactEntries(textEntries)
         let (capped, truncated) = capEntries(redacted + (shot.map { [$0] } ?? []))
         var entries = capped

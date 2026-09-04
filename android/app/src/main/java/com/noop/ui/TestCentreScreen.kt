@@ -341,7 +341,7 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             NoopButton(
-                text = "Report an app problem",
+                text = uiString(R.string.app_report_open_button),
                 leadingIcon = Icons.Filled.BugReport,
                 kind = NoopButtonKind.Primary,
                 fullWidth = true,
