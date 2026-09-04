@@ -14,7 +14,7 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP4,
                 millisSinceBiometric = 600_000L,
                 notificationsRearmed = false,
-                confirmedWristOff = false,
+                millisSinceWristOff = null,
             ),
         )
         assertEquals(
@@ -23,7 +23,7 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP4,
                 millisSinceBiometric = 600_000L,
                 notificationsRearmed = true,
-                confirmedWristOff = false,
+                millisSinceWristOff = null,
             ),
         )
     }
@@ -40,7 +40,7 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP5,
                 millisSinceBiometric = now - lastBiometric,
                 notificationsRearmed = true,
-                confirmedWristOff = false,
+                millisSinceWristOff = null,
             ),
         )
     }
@@ -53,7 +53,7 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP4,
                 millisSinceBiometric = 121_000L,
                 notificationsRearmed = true,
-                confirmedWristOff = false,
+                millisSinceWristOff = null,
             ),
         )
         assertEquals(
@@ -62,20 +62,20 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP5,
                 millisSinceBiometric = 121_000L,
                 notificationsRearmed = true,
-                confirmedWristOff = false,
+                millisSinceWristOff = null,
             ),
         )
     }
 
     @Test
-    fun confirmedWristOffSuppressesReconnectButNotInitialRearm() {
+    fun freshWristOffSuppressesReconnectButNotInitialRearm() {
         assertEquals(
             BiometricLivenessAction.REARM_NOTIFICATIONS,
             BiometricLivenessPolicy.action(
                 family = DeviceFamily.WHOOP5,
                 millisSinceBiometric = 601_000L,
                 notificationsRearmed = false,
-                confirmedWristOff = true,
+                millisSinceWristOff = 60_000L,
             ),
         )
         assertEquals(
@@ -84,7 +84,20 @@ class BiometricLivenessPolicyTest {
                 family = DeviceFamily.WHOOP5,
                 millisSinceBiometric = 601_000L,
                 notificationsRearmed = true,
-                confirmedWristOff = true,
+                millisSinceWristOff = 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun staleWristOffCannotSuppressReconnectIndefinitely() {
+        assertEquals(
+            BiometricLivenessAction.RECONNECT,
+            BiometricLivenessPolicy.action(
+                family = DeviceFamily.WHOOP5,
+                millisSinceBiometric = 601_000L,
+                notificationsRearmed = true,
+                millisSinceWristOff = BiometricLivenessPolicy.WRIST_OFF_FRESH_MS + 1L,
             ),
         )
     }

@@ -296,9 +296,15 @@ struct BiometricLivenessPolicy {
     static let quietSeconds: TimeInterval = 45
     static let whoop4StallSeconds: TimeInterval = 120
     static let whoop5StallSeconds: TimeInterval = 600
+    static let wristOffFreshSeconds: TimeInterval = 15 * 60
 
     static func stallSeconds(for family: DeviceFamily) -> TimeInterval {
         family == .whoop5 ? whoop5StallSeconds : whoop4StallSeconds
+    }
+
+    static func hasFreshWristOffEvidence(secondsSinceWristOff: TimeInterval?) -> Bool {
+        guard let secondsSinceWristOff else { return false }
+        return max(0, secondsSinceWristOff) <= wristOffFreshSeconds
     }
 
     /// iOS persists custom realtime frames for WHOOP 4. WHOOP 5/MG intentionally uses standard 0x2A37
@@ -312,13 +318,14 @@ struct BiometricLivenessPolicy {
         family: DeviceFamily,
         secondsSinceBiometric: TimeInterval,
         notificationsRearmed: Bool,
-        confirmedWristOff: Bool
+        secondsSinceWristOff: TimeInterval?
     ) -> BiometricLivenessAction {
         let silence = max(0, secondsSinceBiometric)
         if silence >= quietSeconds, !notificationsRearmed {
             return .rearmNotifications
         }
-        if silence >= stallSeconds(for: family), !confirmedWristOff {
+        if silence >= stallSeconds(for: family),
+           !hasFreshWristOffEvidence(secondsSinceWristOff: secondsSinceWristOff) {
             return .reconnect
         }
         return .none
@@ -644,9 +651,10 @@ public final class BLEManager: NSObject, ObservableObject {
     private var lastBiometricAt = Date()
     /// One forced CCCD re-arm per biometric-quiet episode. Accepted HR clears it.
     private var biometricNotificationsRearmed = false
-    /// Explicit live WRIST_OFF evidence for this connection. Defaults false and is cleared on reconnect,
-    /// WRIST_ON, or accepted HR, so the default `state.worn` value can never suppress recovery.
-    private var confirmedWristOff = false
+    /// Time of explicit live WRIST_OFF evidence for this connection. It is cleared on reconnect, WRIST_ON,
+    /// or accepted HR and expires in policy, so neither a default nor a missed WRIST_ON can suppress
+    /// recovery indefinitely.
+    private var confirmedWristOffAt: Date?
     private var offWristStallLogged = false
     /// True while a Live/Health screen is on-screen and wants the realtime stream. One of the two
     /// inputs to `wantsRealtime`. Driven only by an explicit foreground Live/workout/reading/session
@@ -3335,7 +3343,7 @@ public final class BLEManager: NSObject, ObservableObject {
     private func noteAcceptedBiometric(at now: Date = Date()) {
         lastBiometricAt = now
         biometricNotificationsRearmed = false
-        confirmedWristOff = false
+        confirmedWristOffAt = nil
         offWristStallLogged = false
     }
 
@@ -3352,7 +3360,7 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     private func noteWristEvidence(worn: Bool) {
-        confirmedWristOff = !worn
+        confirmedWristOffAt = worn ? nil : Date()
         offWristStallLogged = false
         if worn {
             // WRIST_ON may arrive before the first HR packet. Give the freshly worn strap a full fuse
@@ -3383,6 +3391,7 @@ public final class BLEManager: NSObject, ObservableObject {
         let now = Date()
         let biometricSilence = now.timeIntervalSince(lastBiometricAt)
         let stall = BiometricLivenessPolicy.stallSeconds(for: selectedModel.deviceFamily)
+        let wristOffAge = confirmedWristOffAt.map { max(0, now.timeIntervalSince($0)) }
 
         // Historical offload owns the link and has its own timeout. Do not re-subscribe or reconnect in
         // the middle of it; evaluate the accumulated silence as soon as the offload releases the link.
@@ -3391,7 +3400,7 @@ public final class BLEManager: NSObject, ObservableObject {
                 family: selectedModel.deviceFamily,
                 secondsSinceBiometric: biometricSilence,
                 notificationsRearmed: biometricNotificationsRearmed,
-                confirmedWristOff: confirmedWristOff
+                secondsSinceWristOff: wristOffAge
             ) {
             case .rearmNotifications:
                 biometricNotificationsRearmed = true
@@ -3404,9 +3413,11 @@ public final class BLEManager: NSObject, ObservableObject {
                 if let p = peripheral { central.cancelPeripheralConnection(p) }
                 return
             case .none:
-                if confirmedWristOff, biometricSilence >= stall, !offWristStallLogged {
+                if BiometricLivenessPolicy.hasFreshWristOffEvidence(
+                    secondsSinceWristOff: wristOffAge
+                ), biometricSilence >= stall, !offWristStallLogged {
                     offWristStallLogged = true
-                    log("Biometric HR quiet while WRIST_OFF is confirmed - keeping the healthy link without reconnect churn")
+                    log("Biometric HR quiet while recent WRIST_OFF is confirmed - deferring reconnect")
                 }
             }
         }
@@ -4385,7 +4396,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         lastTransportAt = connectedAt
         lastBiometricAt = connectedAt
         biometricNotificationsRearmed = false
-        confirmedWristOff = false
+        confirmedWristOffAt = nil
         offWristStallLogged = false
         log("Connected - discovering services")
         // Connection test mode: report the connect latency + the uptime-start marker the readout reads.
@@ -4508,7 +4519,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         state.liveFeedActive = false  // a drop while Live is open must not leave a stale "Stop live feed"
         didBond = false
         biometricNotificationsRearmed = false
-        confirmedWristOff = false
+        confirmedWristOffAt = nil
         offWristStallLogged = false
         whoop5ClientHelloWritePending = false
         whoop5RealtimeArmed = false

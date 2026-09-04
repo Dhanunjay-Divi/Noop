@@ -21,12 +21,16 @@ Last updated: **2026-09-04**
 The newest transport round separates live biometric health from generic BLE
 traffic on Apple and Android. Battery, metadata, and command packets can no
 longer hide a stopped HR stream; each client first rewrites live notification
-subscriptions and then reconnects if accepted HR remains absent. Explicit
-off-wrist evidence suppresses reconnect churn, empty 5/MG history support no
-longer disables recovery, and the 5/MG live-HR-only path now runs the watchdog.
-Apple diagnostics also decode the persisted current family correctly. Focused
-Apple tests, 4,017 Android tests, Android lint/build/launch, and the clean iOS
-Release simulator graph pass. A physical phone and worn band were unavailable,
+subscriptions and then reconnects if accepted HR remains absent. Fresh explicit
+off-wrist evidence suppresses reconnect churn for at most 15 minutes, so a
+missed wrist-on event cannot disable recovery indefinitely. Empty 5/MG history
+support no longer disables recovery, and the 5/MG live-HR-only path now runs the
+watchdog. Apple diagnostics also decode the persisted current family correctly.
+The 15 focused Apple checks, the 1,600-test Apple app suite, 4,018 Android
+tests, 39 Android production-shell instrumentation tests, Android
+lint/build/launch, and the clean iOS Release simulator graph pass. The hosted
+managed-device dependency-verification gap is pinned with the independently
+verified JUnit module checksum. A physical phone and worn band were unavailable,
 so continuous locked-background collection and the band's reported empty
 history remain open. Evidence and the physical procedure are recorded in
 [Biometric collection liveness](rounds/2026-09-04-biometric-collection-liveness.md).

@@ -63,7 +63,8 @@ family.
   - if accepted HR still does not resume, reconnect the link;
   - use a two-minute 4.0 stall fuse and a ten-minute 5/MG fuse;
   - suppress repeated reconnects only when a fresh `WRIST_OFF` event explicitly
-    proves the band is off-body.
+    proves the band is off-body, and expire that evidence after 15 minutes so a
+    missed `WRIST_ON` cannot disable recovery indefinitely.
 - Start the watchdog when 5/MG standard HR establishes the degraded
   live-HR-only link, while keeping encrypted command and battery maintenance
   gated on a genuine bond.
@@ -74,6 +75,10 @@ family.
   link was reconnected, including transport-silence context.
 - Corrected Apple diagnostic model decoding for both current display-string
   values and legacy short values.
+- Pinned the Maven Central SHA-256 for the JUnit 5.9.2 Gradle module used only
+  when the hosted managed-device runner resolves Unified Test Platform. The
+  independently downloaded artifact matched the local Gradle cache byte for
+  byte.
 - Preserved the existing stale-family scan recovery: both clients rotate to the
   other supported family after eight seconds and persist the family actually
   discovered.
@@ -92,9 +97,11 @@ family.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Focused Apple liveness, empty-history, and diagnostic tests | 14/14 passed | Recovery ordering, family fuses, off-wrist behavior, battery/control separation policy, and model decoding are pinned | CoreBluetooth behavior on a physical phone |
-| Android Full unit suite | 4,017 tests passed, seven intentional skips, zero failures | The mirrored liveness policy and existing Android contracts remain green | OEM background execution or physical BLE |
+| Focused Apple liveness, empty-history, and diagnostic tests | 15/15 passed | Recovery ordering, family fuses, bounded off-wrist behavior, battery/control separation policy, and model decoding are pinned | CoreBluetooth behavior on a physical phone |
+| Apple app-target unit suite | 1,600 tests executed, one intentional external-fixture skip, zero failures | The bounded wrist-off policy compiles and the existing macOS app contracts remain green | iOS background execution or physical BLE |
+| Android Full unit suite | 4,018 tests passed, seven intentional skips, zero failures | The mirrored liveness policy and existing Android contracts remain green | OEM background execution or physical BLE |
 | Android Full lint | Passed | Changed Kotlin and tests satisfy the current static gate | Runtime radio behavior |
+| Android Full managed-device production-shell suite | 39/39 passed on API 35 | The exact hosted instrumentation task resolves verified dependencies, installs, and exercises the production shell | Physical band behavior |
 | Clean Android Full Debug build | Passed; exact APK installed | The complete installable app compiles and packages with the change | Signed Play release behavior |
 | Android emulator cold-launch smoke | Passed; process remained alive with no fatal exception | The rebuilt APK installs and starts | Band pairing, notifications, reconnect, or data persistence |
 | Focused Apple app-target compile/test | Passed | Changed Swift sources and tests compile in the app graph | iOS background behavior |
@@ -165,6 +172,9 @@ closed:
 - The longer 5/MG fuse limits reconnect churn on an off-body or partially
   bonded band, so recovery from an otherwise silent stream can take up to ten
   minutes while the process is executing.
+- Fresh off-wrist evidence can defer that reconnect for at most 15 minutes.
+  This trades one bounded recovery delay for lower off-body radio churn; stale
+  evidence is never allowed to suppress recovery indefinitely.
 
 ## Next round
 

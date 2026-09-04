@@ -321,21 +321,25 @@ internal object BiometricLivenessPolicy {
     const val QUIET_MS = 45_000L
     const val WHOOP4_STALL_MS = 120_000L
     const val WHOOP5_STALL_MS = 600_000L
+    const val WRIST_OFF_FRESH_MS = 15 * 60_000L
 
     fun stallMs(family: DeviceFamily): Long =
         if (family == DeviceFamily.WHOOP5) WHOOP5_STALL_MS else WHOOP4_STALL_MS
+
+    fun hasFreshWristOffEvidence(millisSinceWristOff: Long?): Boolean =
+        millisSinceWristOff?.coerceAtLeast(0L)?.let { it <= WRIST_OFF_FRESH_MS } == true
 
     fun action(
         family: DeviceFamily,
         millisSinceBiometric: Long,
         notificationsRearmed: Boolean,
-        confirmedWristOff: Boolean,
+        millisSinceWristOff: Long?,
     ): BiometricLivenessAction {
         val silence = millisSinceBiometric.coerceAtLeast(0L)
         if (silence >= QUIET_MS && !notificationsRearmed) {
             return BiometricLivenessAction.REARM_NOTIFICATIONS
         }
-        if (silence >= stallMs(family) && !confirmedWristOff) {
+        if (silence >= stallMs(family) && !hasFreshWristOffEvidence(millisSinceWristOff)) {
             return BiometricLivenessAction.RECONNECT
         }
         return BiometricLivenessAction.NONE
@@ -2638,8 +2642,8 @@ class WhoopBleClient(
     @Volatile private var lastBiometricAtMs = 0L
     /** One forced CCCD re-arm per biometric-quiet episode. Accepted HR clears it. */
     @Volatile private var biometricNotificationsRearmed = false
-    /** Explicit live WRIST_OFF evidence for this connection; never inferred from LiveState's default. */
-    @Volatile private var confirmedWristOff = false
+    /** Explicit live WRIST_OFF time for this connection; never inferred from LiveState's default. */
+    @Volatile private var confirmedWristOffAtMs = 0L
     @Volatile private var offWristStallLogged = false
 
     /**
@@ -5489,12 +5493,12 @@ class WhoopBleClient(
     private fun noteAcceptedBiometric(atMillis: Long = System.currentTimeMillis()) {
         lastBiometricAtMs = atMillis
         biometricNotificationsRearmed = false
-        confirmedWristOff = false
+        confirmedWristOffAtMs = 0L
         offWristStallLogged = false
     }
 
     private fun noteWristEvidence(worn: Boolean, atMillis: Long = System.currentTimeMillis()) {
-        confirmedWristOff = !worn
+        confirmedWristOffAtMs = if (worn) 0L else atMillis
         offWristStallLogged = false
         if (worn) {
             // WRIST_ON can precede HR. Give the newly worn strap a full fuse instead of reconnecting
@@ -5672,6 +5676,8 @@ class WhoopBleClient(
         val now = System.currentTimeMillis()
         val biometricSilentMs = (now - lastBiometricAtMs).coerceAtLeast(0L)
         val stallMs = BiometricLivenessPolicy.stallMs(connectedFamily)
+        val wristOffAgeMs = confirmedWristOffAtMs.takeIf { it > 0L }
+            ?.let { (now - it).coerceAtLeast(0L) }
         // Everything below is the LIVE-path keep-alive. During a historical offload the strap owns the
         // link and has its own 60s idle watchdog (backfillTimeoutRunnable), so we stay completely out
         // of the way — in particular we must NOT bounce, which would abandon the offload mid-session
@@ -5681,7 +5687,7 @@ class WhoopBleClient(
                 family = connectedFamily,
                 millisSinceBiometric = biometricSilentMs,
                 notificationsRearmed = biometricNotificationsRearmed,
-                confirmedWristOff = confirmedWristOff,
+                millisSinceWristOff = wristOffAgeMs,
             )) {
                 BiometricLivenessAction.REARM_NOTIFICATIONS -> {
                     biometricNotificationsRearmed = true
@@ -5712,9 +5718,12 @@ class WhoopBleClient(
                     return
                 }
                 BiometricLivenessAction.NONE -> {
-                    if (confirmedWristOff && biometricSilentMs >= stallMs && !offWristStallLogged) {
+                    if (BiometricLivenessPolicy.hasFreshWristOffEvidence(wristOffAgeMs) &&
+                        biometricSilentMs >= stallMs &&
+                        !offWristStallLogged
+                    ) {
                         offWristStallLogged = true
-                        log("Biometric HR quiet while WRIST_OFF is confirmed - keeping the healthy link without reconnect churn")
+                        log("Biometric HR quiet while recent WRIST_OFF is confirmed - deferring reconnect")
                     }
                 }
             }
@@ -7320,7 +7329,7 @@ class WhoopBleClient(
         lastTransportAtMs = 0L
         lastBiometricAtMs = 0L
         biometricNotificationsRearmed = false
-        confirmedWristOff = false
+        confirmedWristOffAtMs = 0L
         offWristStallLogged = false
         cccdInFlight = false
         cccdRetries = 0

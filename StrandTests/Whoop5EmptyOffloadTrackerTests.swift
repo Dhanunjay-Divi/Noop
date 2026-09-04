@@ -100,7 +100,7 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop4,
                 secondsSinceBiometric: 600,
                 notificationsRearmed: false,
-                confirmedWristOff: false
+                secondsSinceWristOff: nil
             ),
             .rearmNotifications
         )
@@ -109,7 +109,7 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop4,
                 secondsSinceBiometric: 600,
                 notificationsRearmed: true,
-                confirmedWristOff: false
+                secondsSinceWristOff: nil
             ),
             .reconnect
         )
@@ -125,7 +125,7 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop5,
                 secondsSinceBiometric: now - lastBiometric,
                 notificationsRearmed: true,
-                confirmedWristOff: false
+                secondsSinceWristOff: nil
             ),
             .reconnect,
             "fresh battery traffic must not reset the biometric fuse"
@@ -138,7 +138,7 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop4,
                 secondsSinceBiometric: 121,
                 notificationsRearmed: true,
-                confirmedWristOff: false
+                secondsSinceWristOff: nil
             ),
             .reconnect
         )
@@ -147,19 +147,19 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop5,
                 secondsSinceBiometric: 121,
                 notificationsRearmed: true,
-                confirmedWristOff: false
+                secondsSinceWristOff: nil
             ),
             .none
         )
     }
 
-    func testConfirmedWristOffSuppressesReconnectButNotInitialRearm() {
+    func testFreshWristOffSuppressesReconnectButNotInitialRearm() {
         XCTAssertEqual(
             BiometricLivenessPolicy.action(
                 family: .whoop5,
                 secondsSinceBiometric: 601,
                 notificationsRearmed: false,
-                confirmedWristOff: true
+                secondsSinceWristOff: 60
             ),
             .rearmNotifications
         )
@@ -168,9 +168,21 @@ final class BiometricLivenessPolicyTests: XCTestCase {
                 family: .whoop5,
                 secondsSinceBiometric: 601,
                 notificationsRearmed: true,
-                confirmedWristOff: true
+                secondsSinceWristOff: 60
             ),
             .none
+        )
+    }
+
+    func testStaleWristOffCannotSuppressReconnectIndefinitely() {
+        XCTAssertEqual(
+            BiometricLivenessPolicy.action(
+                family: .whoop5,
+                secondsSinceBiometric: 601,
+                notificationsRearmed: true,
+                secondsSinceWristOff: BiometricLivenessPolicy.wristOffFreshSeconds + 1
+            ),
+            .reconnect
         )
     }
 }
