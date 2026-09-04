@@ -354,7 +354,7 @@ struct SafetyCenterView: View {
                         .foregroundStyle(StrandPalette.textSecondary)
                 }
             }
-            .tint(StrandPalette.statusCritical)
+            .toggleStyle(.noopSwitch)
 
             if sosGestureEnabled {
                 Picker("safety.sos.gesture.repeats", selection: sosGestureEventsBinding) {
@@ -955,6 +955,7 @@ struct SafetyCenterView: View {
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
                     }
+                    .toggleStyle(.noopSwitch)
 
                     if includeLocation {
                         locationControl

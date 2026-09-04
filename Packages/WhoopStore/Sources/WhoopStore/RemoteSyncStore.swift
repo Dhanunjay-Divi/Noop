@@ -396,33 +396,168 @@ extension WhoopStore {
     ) async throws -> RemoteSyncPruneResult {
         let limit = max(100, min(limitPerStream, 5_000))
         let tables = [
-            "hrSample", "rrInterval", "event", "battery", "spo2Sample",
-            "skinTempSample", "respSample", "stepSample", "gravitySample",
-            "sleepStateSample", "ppgHrSample", "ppgWaveformSample",
+            ("hrSample", "essential_timeseries"),
+            ("rrInterval", "essential_timeseries"),
+            ("event", "essential_timeseries"),
+            ("battery", "essential_timeseries"),
+            ("spo2Sample", "raw_ppg"),
+            ("skinTempSample", "raw_auxiliary"),
+            ("respSample", "raw_auxiliary"),
+            ("stepSample", "essential_timeseries"),
+            ("gravitySample", "raw_motion"),
+            ("sleepStateSample", "raw_auxiliary"),
+            ("ppgHrSample", "essential_timeseries"),
+            ("ppgWaveformSample", "raw_ppg"),
         ]
         return try syncWrite { db in
             var deleted = 0
-            for table in tables {
-                try db.execute(sql: """
-                    DELETE FROM \(table)
-                    WHERE rowid IN (
-                        SELECT rowid FROM \(table)
-                        WHERE deviceId = ? AND synced = 1 AND ts < ?
-                        ORDER BY ts ASC
-                        LIMIT ?
+            let hasManagedSnapshots = try Bool.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM managedSyncSource AS source
+                        JOIN managedWindowUpload AS upload
+                          ON upload.sourceId = source.sourceId
+                        WHERE source.localSourceId = ?
+                          AND source.sourceKind != 'managed_restore'
+                          AND upload.phase = 'available'
+                          AND upload.validatedAtMs IS NOT NULL
                     )
-                    """, arguments: [deviceId, cutoff, limit])
-                deleted += db.changesCount
+                    """,
+                arguments: [deviceId]
+            ) ?? false
+            if hasManagedSnapshots {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO managedPruneGuard (guardId) VALUES (1)"
+                )
+                try db.execute(sql: """
+                    CREATE TEMP TABLE IF NOT EXISTS managedRemotePruneCandidate (
+                        rowID INTEGER PRIMARY KEY,
+                        eventTs INTEGER NOT NULL
+                    )
+                    """)
+            }
+            let prunedAtMs = Int64(
+                (Date().timeIntervalSince1970 * 1_000).rounded(.down)
+            )
+            for (table, dataClass) in tables {
+                if hasManagedSnapshots {
+                    try db.execute(
+                        sql: """
+                            DELETE FROM managedRemotePruneCandidate
+                            """
+                    )
+                    try db.execute(
+                        sql: """
+                            INSERT INTO managedRemotePruneCandidate (rowID, eventTs)
+                            SELECT candidate.rowid, candidate.ts
+                            FROM \(table) AS candidate
+                            WHERE candidate.deviceId = ?
+                              AND candidate.synced = 1
+                              AND candidate.ts < ?
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM managedSyncSource AS source
+                                  JOIN managedWindowUpload AS coverage
+                                    ON coverage.sourceId = source.sourceId
+                                  WHERE source.localSourceId = candidate.deviceId
+                                    AND source.sourceKind != 'managed_restore'
+                                    AND coverage.dataClass = ?
+                                    AND coverage.phase = 'available'
+                                    AND coverage.validatedAtMs IS NOT NULL
+                                    AND candidate.ts * 1000
+                                        BETWEEN coverage.windowStartMs
+                                            AND coverage.windowEndMs
+                              )
+                            ORDER BY candidate.ts ASC, candidate.rowid ASC
+                            LIMIT ?
+                            """,
+                        arguments: [deviceId, cutoff, dataClass, limit]
+                    )
+                    try db.execute(
+                        sql: """
+                            UPDATE managedWindowUpload
+                            SET localPrunedAtMs = ?, updatedAtMs = ?
+                            WHERE sourceId IN (
+                                SELECT sourceId FROM managedSyncSource
+                                WHERE localSourceId = ?
+                                  AND sourceKind != 'managed_restore'
+                            )
+                              AND dataClass = ?
+                              AND phase = 'available'
+                              AND validatedAtMs IS NOT NULL
+                              AND localPrunedAtMs IS NULL
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM managedRemotePruneCandidate AS candidate
+                                  WHERE candidate.eventTs * 1000
+                                      BETWEEN managedWindowUpload.windowStartMs
+                                          AND managedWindowUpload.windowEndMs
+                              )
+                            """,
+                        arguments: [prunedAtMs, prunedAtMs, deviceId, dataClass]
+                    )
+                    try db.execute(sql: """
+                        DELETE FROM \(table)
+                        WHERE rowid IN (
+                            SELECT rowID FROM managedRemotePruneCandidate
+                        )
+                        """)
+                    deleted += db.changesCount
+                } else {
+                    try db.execute(sql: """
+                        DELETE FROM \(table)
+                        WHERE rowid IN (
+                            SELECT rowid FROM \(table)
+                            WHERE deviceId = ? AND synced = 1 AND ts < ?
+                            ORDER BY ts ASC
+                            LIMIT ?
+                        )
+                        """, arguments: [deviceId, cutoff, limit])
+                    deleted += db.changesCount
+                }
+            }
+            if hasManagedSnapshots {
+                try db.execute(sql: "DELETE FROM managedRemotePruneCandidate")
+                try db.execute(sql: "DELETE FROM managedPruneGuard WHERE guardId = 1")
             }
             var hasMore = false
-            for table in tables where !hasMore {
-                hasMore = try Bool.fetchOne(db, sql: """
-                    SELECT EXISTS(
-                        SELECT 1 FROM \(table)
-                        WHERE deviceId = ? AND synced = 1 AND ts < ?
-                        LIMIT 1
-                    )
-                    """, arguments: [deviceId, cutoff]) ?? false
+            for (table, dataClass) in tables where !hasMore {
+                if hasManagedSnapshots {
+                    hasMore = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM \(table) AS candidate
+                            WHERE candidate.deviceId = ?
+                              AND candidate.synced = 1
+                              AND candidate.ts < ?
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM managedSyncSource AS source
+                                  JOIN managedWindowUpload AS coverage
+                                    ON coverage.sourceId = source.sourceId
+                                  WHERE source.localSourceId = candidate.deviceId
+                                    AND source.sourceKind != 'managed_restore'
+                                    AND coverage.dataClass = ?
+                                    AND coverage.phase = 'available'
+                                    AND coverage.validatedAtMs IS NOT NULL
+                                    AND candidate.ts * 1000
+                                        BETWEEN coverage.windowStartMs
+                                            AND coverage.windowEndMs
+                              )
+                            LIMIT 1
+                        )
+                        """, arguments: [deviceId, cutoff, dataClass]) ?? false
+                } else {
+                    hasMore = try Bool.fetchOne(db, sql: """
+                        SELECT EXISTS(
+                            SELECT 1 FROM \(table)
+                            WHERE deviceId = ? AND synced = 1 AND ts < ?
+                            LIMIT 1
+                        )
+                        """, arguments: [deviceId, cutoff]) ?? false
+                }
             }
             return RemoteSyncPruneResult(
                 deletedRows: deleted,

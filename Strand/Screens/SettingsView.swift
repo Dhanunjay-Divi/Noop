@@ -1056,8 +1056,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Holds liquid gauges, active metric illustrations, live-status pulses, and the tilt response still. Low Power Mode and the system Reduce Motion setting already do this automatically.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1071,8 +1070,8 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
+                .accessibilityIdentifier("noop.settings.dimensional-background")
                 Text("Shows the sculpted obsidian surface behind NOOP. Turn it off for a plain monochrome canvas.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1087,9 +1086,9 @@ struct SettingsView: View {
                         // Greyed when the dimensional backdrop is off.
                         .foregroundStyle(showDayCycleBackground ? StrandPalette.textPrimary : StrandPalette.textTertiary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .disabled(!showDayCycleBackground)
+                .accessibilityIdentifier("noop.settings.background-behind-cards")
                 Text("Extends the obsidian surface behind the whole screen, so lowering Card transparency lets it show through every card. Needs Dimensional background on.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1211,8 +1210,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .onChangeCompat(of: continuousHrvEnabled) { on in model.ble.setKeepRealtimeForData(on) }
                 Text("Keeps the detailed beat-to-beat heart-rate stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery because Noop Band streams heart rate continuously while connected.")
                     .font(StrandFont.caption)
@@ -1228,8 +1226,7 @@ struct SettingsView: View {
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textPrimary)
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.accent)
+                    .toggleStyle(.noopSwitch)
                     .onChangeCompat(of: continuousHrvOvernightOnly) { _ in
                         model.ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
                     }
@@ -1299,8 +1296,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .onChangeCompat(of: powerSavingEnabled) { _ in model.applyPowerSaving() }
                 Text("Slows background band sync (every 45 min instead of 15) while Noop Band's battery is low. No data is lost because the band keeps banking readings and syncs them in larger, less frequent pulls.")
                     .font(StrandFont.caption)
@@ -1332,8 +1328,7 @@ struct SettingsView: View {
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textPrimary)
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.accent)
+                    .toggleStyle(.noopSwitch)
                     .onChangeCompat(of: pauseHrvDisabled) { _ in model.applyPowerSaving() }
                     Text("While Noop Band's battery is low, stop the always-on background HRV stream, the biggest continuous drain on the band. A Live screen still shows heart rate, and capture re-arms automatically once the band is charged.")
                         .font(StrandFont.caption)
@@ -1494,8 +1489,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .accessibilityHint("Adds a water-log card to your dashboard")
 
                 Text("Adds a simple fluid log with a daily goal that adjusts to your effort. Tap to add a sip, cup or bottle and watch a progress ring fill. On \(Platform.deviceNounPhrase) only. Nothing is synced.")
@@ -1594,8 +1588,7 @@ struct SettingsView: View {
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .disabled(PuffinExperiment.resolvedAutoWorkoutMode() == .off)
                 .accessibilityHint("Allow only strongly corroborated recent activity suggestions on the Lock Screen")
 
@@ -1611,8 +1604,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .accessibilityHint("Show a Today card reminding you to log your journal")
 
                 Text("Show a Today card reminding you to log your journal")
@@ -1627,8 +1619,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .accessibilityHint("Stops the screen dimming while a workout is recording")
 
                 Text("Holds the screen awake while you're recording a workout, so your live heart rate stays visible without the device dimming. Only applies during a recording. The screen sleeps normally the rest of the time. Leaving it on does use a bit more battery, and means your unlocked screen stays visible for the whole workout, so flip it off if that's a concern.")
@@ -1669,8 +1660,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Replaces the Today tab with the prototype redesign. Turn it off any time to return to the classic dashboard. Reads the same live data from Noop Band.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1695,8 +1685,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Silence-first Noop Band coaching during workouts.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1721,8 +1710,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("A transparent cardiorespiratory recipe for estimating deep and REM, now used by default. It changes how already-detected nights are split into stages. Sleep detection is unchanged, but Rest and Recovery may change because stage estimates feed those scores. Turn it off to fall back to V1. Takes effect on the next nights staged.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1736,8 +1724,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Reviews each scored wake block for real evidence of getting up (walking cadence, a change in body position) instead of just a heart-rate rise. A wake block with no locomotion and a stable posture - a hot night, a brief turn-over - is folded back into light sleep; a real get-up is left alone. It checks how much motion detail Noop Band actually recorded and stays off when a night is too sparse to trust. Off by default; takes effect on the next nights staged.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1784,8 +1771,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("On compatible Noop Band hardware, NOOP sends an advanced real-time stream request after the handshake and logs the response for protocol validation.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1799,8 +1785,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Compatible Noop Band firmware may require feature flags before it emits high-rate heart rate, motion, and history. This reversible control writes that experimental enable sequence to the band. It may do nothing on your firmware and is available from iPhone or Android only.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1846,8 +1831,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 .onChangeCompat(of: broadcastHrEnabled) { on in model.ble.setBroadcastHr(on) }
                 Text("Makes compatible Noop Band hardware advertise heart rate as a standard Bluetooth sensor for Garmin, Zwift, or gym equipment. The reversible setting applies on the next connection and is available from iPhone only.")
                     .font(StrandFont.caption)
@@ -1878,8 +1862,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 // Turning the switch off also tells the strap to stop, so a stream can't be left running
                 // by a user who simply flips the toggle back. `ecgStopCapture` is deliberately reachable
                 // with the opt-in already off (see BLEManager.ecgStopOverride). When the strap isn't a
@@ -1911,8 +1894,7 @@ struct SettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 Text("Saves every raw 5/MG frame (with a timestamp and the live heart rate) to a JSON file you can share to help map the biometric layout. This only records frames the strap already sent (it never writes to your strap), so it is safe to leave on. Export the file and attach it to a protocol-mapping issue.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -2771,8 +2753,7 @@ struct LiveActivityPreferenceRow: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
-            .toggleStyle(.switch)
-            .tint(StrandPalette.accent)
+            .toggleStyle(.noopSwitch)
             .accessibilityHint("Shows live heart rate on the Lock Screen and, on supported iPhones, in the Dynamic Island.")
 
             Text(compact
@@ -2788,16 +2769,14 @@ struct LiveActivityPreferenceRow: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
 
                 Toggle(isOn: $showEffort) {
                     Label("Effort indicator", systemImage: "flame.fill")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
 
                 Text("Each score is independent. Turn either off to hide only that indicator; Live HR and the other indicator keep working.")
                     .font(StrandFont.caption)

@@ -10,6 +10,15 @@ import StrandAnalytics
 /// over every entry's text here, the single scrub point, and stamp meta.redaction = "v2" so a maintainer
 /// can trust the scrub. Redaction stays the only scrub point; we just guarantee it covers the whole bundle.
 enum TestBundleAssembler {
+    /// Controls optional evidence that is appropriate for the report being built.
+    ///
+    /// A Test Centre capture may deliberately include a screenshot or an enabled research stream. A
+    /// shake-created app-hang report is narrower: app/runtime diagnostics plus the redacted strap log,
+    /// with no screenshot, raw frame capture, Oura sidecar, or health database.
+    enum Purpose {
+        case testCentre
+        case appHang
+    }
 
     /// Result of the diagnostics-only privacy boundary used by every standalone log/raw/support export.
     /// These exports are intentionally separate from the user's normal health-data backup/CSV flows.
@@ -220,7 +229,9 @@ enum TestBundleAssembler {
     @MainActor
     static func assemble(profile: TestDomain, live: LiveState,
                          storage: TestBundleMeta.Storage? = nil,
-                         strapModel: String? = nil) -> [FileExport.BundleEntry] {
+                         strapModel: String? = nil,
+                         purpose: Purpose = .testCentre,
+                         runtimeDiagnostics: [FileExport.BundleEntry]? = nil) -> [FileExport.BundleEntry] {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         #if os(iOS)
@@ -252,8 +263,9 @@ enum TestBundleAssembler {
         //     is still covered by the mandatory review-before-share gate (nothing ships until the user taps
         //     Share), which the gate's note calls out. A capture only happens for the gated profile, so a
         //     non-display report never grabs a shot.
-        let wantsShot = profile == .display
-            || (TestModeRegistry.mode(profile)?.includesScreenshot ?? false)
+        let wantsShot = purpose == .testCentre
+            && (profile == .display
+                || (TestModeRegistry.mode(profile)?.includesScreenshot ?? false))
         let shot: FileExport.BundleEntry? = wantsShot
             ? DisplayScreenshot.capturePNG().map { FileExport.BundleEntry(name: DisplayScreenshot.bundleName, data: $0) }
             : nil
@@ -262,8 +274,9 @@ enum TestBundleAssembler {
         //     read from disk by URL. It is TEXT (JSON lines) where embedded console strings can carry a
         //     serial, so it IS run through the redactEntries pass below (the #1 reason the whole-bundle scrub
         //     exists, 5.3). Attached only when the file exists; a non-capturing install ships no raw entry.
-        let rawCapture: FileExport.BundleEntry? = live.puffinCaptureURL
-            .flatMap { fileEntry(at: $0, name: "raw-capture.jsonl") }
+        let rawCapture: FileExport.BundleEntry? = purpose == .testCentre
+            ? live.puffinCaptureURL.flatMap { fileEntry(at: $0, name: "raw-capture.jsonl") }
+            : nil
 
         // 1d. last-crash.txt: the most recent crash report, when one is present on disk. It is TEXT, so it
         //     ALSO rides the redactEntries pass. There is no crash producer wired yet, so this is normally
@@ -280,14 +293,26 @@ enum TestBundleAssembler {
         //     (JSON lines) whose only PII is the ring UUID inside each line, which the redactEntries pass
         //     below masks to <device>; the ENTRY name is normalized (id dropped) since redaction never
         //     touches names. Trimmed to the cap alongside raw-capture via `trimmableNames`.
-        let ouraDiagnostics = ouraDiagnosticEntries()
+        let ouraDiagnostics = purpose == .testCentre ? ouraDiagnosticEntries() : []
+
+        // 1f. Bounded app-runtime diagnostics: current/previous lifecycle and responsiveness breadcrumbs
+        //     plus Apple's delayed MetricKit crash/hang payloads when available. These files never contain
+        //     the health database or raw biometric history. They attach to every report because a storage,
+        //     sync or rendering defect can present as an app freeze; the recorder itself stays under a
+        //     strict cap and the text passes through the same whole-bundle redaction below.
+        let appDiagnostics = runtimeDiagnostics
+            ?? AppDiagnosticsRecorder.shared.diagnosticEntries()
 
         // 2. Redact the TEXT files (report.txt, raw-capture.jsonl, last-crash.txt, oura-*.jsonl), then cap. The screenshot
         //    is included in the cap input (NOT the redact input) so its bytes COUNT against the 20 MB cap:
         //    capEntries budgets raw-capture as capBytes - (everything else), so a large/retina PNG shrinks
         //    the raw-capture tail rather than breaching the cap. Only raw-capture is trimmed; report.txt and
         //    last-crash are bounded and the PNG is kept whole.
-        let textEntries = [reportEntry] + (rawCapture.map { [$0] } ?? []) + (crash.map { [$0] } ?? []) + ouraDiagnostics
+        let textEntries = [reportEntry]
+            + (rawCapture.map { [$0] } ?? [])
+            + (crash.map { [$0] } ?? [])
+            + ouraDiagnostics
+            + appDiagnostics
         let redacted = redactEntries(textEntries)
         let (capped, truncated) = capEntries(redacted + (shot.map { [$0] } ?? []))
         var entries = capped
@@ -301,7 +326,7 @@ enum TestBundleAssembler {
         //     and the shipped text can never diverge.
         let redactedReport = capped.first { $0.name == "report.txt" }
             .flatMap { String(data: $0.data, encoding: .utf8) } ?? reportText
-        let active = activeDomains()
+        let active = purpose == .testCentre ? activeDomains() : []
         let checks = CaptureCompleteness.evaluate(activeDomains: active, reportText: redactedReport)
         let section = CaptureCompleteness.reportSection(checks)
         if !section.isEmpty {
@@ -321,7 +346,9 @@ enum TestBundleAssembler {
         //    "db_bytes: 0" even on a multi-GB library and maintainers triaged blind); a nil probe falls
         //    back to the zeroed block - zeros mean "unreadable", we still never fabricate. The
         //    capture_check field carries the same OK/INCOMPLETE verdicts as the report section.
-        let started = TestCentre.startedAt(profile).map { ISO8601DateFormatter().string(from: $0) }
+        let started = purpose == .testCentre
+            ? TestCentre.startedAt(profile).map { ISO8601DateFormatter().string(from: $0) }
+            : nil
         let ended = ISO8601DateFormatter().string(from: Date())
         let selectedModel = strapModel.flatMap(WhoopModel.init(rawValue:))
         let meta = TestBundleMeta(
@@ -335,12 +362,14 @@ enum TestBundleAssembler {
             strapFirmware: live.strapFirmware,
             deviceFamily: selectedModel?.deviceFamily.rawValue,
             deviceVariant: live.whoop5Variant,
-            source: ["Live Bluetooth"],
-            testProfile: profile.id,
+            source: purpose == .appHang
+                ? ["App runtime diagnostics", "Live Bluetooth"]
+                : ["Live Bluetooth"],
+            testProfile: purpose == .appHang ? "app-hang" : profile.id,
             profileStartedAt: started,
             captureStartedAt: started,
             captureEndedAt: ended,
-            questionnaire: TestCentre.answers(profile),
+            questionnaire: purpose == .appHang ? [:] : TestCentre.answers(profile),
             build: buildProvenance(),
             capabilities: capabilitySnapshot(),
             storage: storage ?? TestBundleMeta.Storage(dbBytes: 0, rows: [:], rawCaptureBytes: 0),

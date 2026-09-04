@@ -19,8 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -185,19 +183,12 @@ fun CaffeineLogCard() {
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = cutoffEnabled,
                         onCheckedChange = {
                             cutoffEnabled = it
                             NoopPrefs.setCaffeineCutoffEnabled(context, it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_caffeine_log_late_caffeine_nudge_6b2ff690) },
                     )
                 }

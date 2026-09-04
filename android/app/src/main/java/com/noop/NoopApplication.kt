@@ -21,6 +21,8 @@ import com.noop.ui.AppearancePrefs
 import com.noop.widget.WidgetSnapshotStore
 import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
+import com.noop.managed.ManagedCloudScheduler
+import com.noop.managed.ManagedCloudService
 import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.social.FriendsSyncScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -115,6 +117,9 @@ class NoopApplication : Application() {
     /** Process-wide device registry over the same Room DB — the single source of the active device id. */
     val deviceRegistry: DeviceRegistry by lazy { DeviceRegistry(WhoopDatabase.get(this)) }
 
+    /** Optional managed backup owner. It stays dormant when this build has no NOOP+ configuration. */
+    val managedCloud: ManagedCloudService by lazy { ManagedCloudService.get(this) }
+
     /**
      * Publish a registry selection immediately after a user-driven device switch. The Room transaction
      * remains the source of truth; this projection removes the old process-lifetime stale value and lets
@@ -183,6 +188,11 @@ class NoopApplication : Application() {
             // Friends remains credential-gated and network constrained. Remote preferences were initialized
             // synchronously above, before this task can inspect them.
             runCatching { FriendsSyncScheduler.reconcile(this@NoopApplication) }
+            // NOOP+ remains configuration-, identity-, consent-, and network-gated. Bootstrap restores
+            // local auth state only; WorkManager performs any due transfer outside app startup.
+            runCatching { managedCloud.bootstrap() }
+            runCatching { ManagedCloudScheduler.reconcile(this@NoopApplication) }
+            runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
         }
     }
 

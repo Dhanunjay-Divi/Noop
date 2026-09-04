@@ -46,9 +46,17 @@
 				<string>noop</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(NOOP_MANAGED_ENCODED_APP_ID)</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>FirebaseAppCheckTokenAutoRefreshEnabled</key>
+	<true/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
@@ -63,6 +71,20 @@
 	<string>$(NOOP_LAUNCH_GATE_VERIFIER_HEX)</string>
 	<key>NOOPLaunchGateVersion</key>
 	<string>$(NOOP_LAUNCH_GATE_VERSION)</string>
+	<key>NOOPManagedAPIKey</key>
+	<string>$(NOOP_MANAGED_API_KEY)</string>
+	<key>NOOPManagedAPIURL</key>
+	<string>$(NOOP_MANAGED_API_URL)</string>
+	<key>NOOPManagedGCMSenderID</key>
+	<string>$(NOOP_MANAGED_GCM_SENDER_ID)</string>
+	<key>NOOPManagedGoogleAppID</key>
+	<string>$(NOOP_MANAGED_GOOGLE_APP_ID)</string>
+	<key>NOOPManagedPolicySHA256</key>
+	<string>$(NOOP_MANAGED_POLICY_SHA256)</string>
+	<key>NOOPManagedPolicyVersion</key>
+	<string>$(NOOP_MANAGED_POLICY_VERSION)</string>
+	<key>NOOPManagedProjectID</key>
+	<string>$(NOOP_MANAGED_PROJECT_ID)</string>
 	<key>NOOPStrengthMediaURLTemplate</key>
 	<string>$(NOOP_STRENGTH_MEDIA_URL_TEMPLATE)</string>
 	<key>NOOPStrengthVideoURLTemplate</key>
@@ -73,11 +95,11 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.</string>
+	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads selected data only if you explicitly enable NOOP+ managed backup or your own self-hosted server.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>NOOP uses the camera only while you explicitly scan a food barcode. Images and video are processed on-device and are not stored.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>NOOP reads your Apple Health data to compute your metrics locally on this device. Nothing leaves the device unless you turn it on yourself: derived records go to your own self-hosted server only if you enable it, and a short text summary of your metrics goes to the AI provider you choose only after you add your own API key and allow it.</string>
+	<string>NOOP reads your Apple Health data to compute metrics locally. Nothing leaves unless you explicitly enable it: selected records can go to NOOP+ managed backup or your own self-hosted server, and Coach sends a short text summary only to the AI provider you choose after you add your own key and allow it.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>NOOP writes the metrics it computes from your band back into Apple Health, along with workouts and sleep sessions, on-device and only when you allow it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
@@ -89,7 +111,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server.</string>
+	<string>NOOP reads your iPhone's step count for activity summaries. It uploads selected records only if you explicitly enable NOOP+ managed backup or your own self-hosted server.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft.</string>
 	<key>NSSupportsLiveActivities</key>

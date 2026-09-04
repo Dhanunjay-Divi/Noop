@@ -116,7 +116,7 @@ struct CaffeineLogCard: View {
                 }
                 Spacer(minLength: 8)
                 Toggle("", isOn: cutoffEnabledBinding)
-                    .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                    .labelsHidden().toggleStyle(.noopSwitch)
                     .accessibilityLabel("Warn me about caffeine close to bedtime")
             }
             if cutoffEnabled {
@@ -146,8 +146,7 @@ struct CaffeineLogCard: View {
                     Spacer(minLength: 8)
                     Toggle("", isOn: cutoffNotificationBinding)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.accent)
+                        .toggleStyle(.noopSwitch)
                         .accessibilityLabel("Caffeine cutoff notification")
                 }
             }

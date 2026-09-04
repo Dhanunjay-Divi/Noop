@@ -56,4 +56,28 @@ final class ReportReviewGateTests: XCTestCase {
         // The whole preview stays tiny regardless of the 2 MB stream.
         XCTAssertLessThan(preview.count, 10_000)
     }
+
+    func testAppPerformanceStreamsAreNamedButNeverLaidOutInline() {
+        let entries = [
+            FileExport.BundleEntry(
+                name: "report.txt",
+                data: Data("visible report".utf8)
+            ),
+            FileExport.BundleEntry(
+                name: AppDiagnosticsRecorder.currentSessionEntryName,
+                data: Data("main_thread.stall_detected private-detail".utf8)
+            ),
+            FileExport.BundleEntry(
+                name: AppDiagnosticsRecorder.metricKitEntryName,
+                data: Data("large Apple call stack".utf8)
+            ),
+        ]
+
+        let preview = ReportReviewGate(entries: entries).previewText
+        XCTAssertTrue(preview.contains("visible report"))
+        XCTAssertTrue(preview.contains(AppDiagnosticsRecorder.currentSessionEntryName))
+        XCTAssertTrue(preview.contains(AppDiagnosticsRecorder.metricKitEntryName))
+        XCTAssertFalse(preview.contains("private-detail"))
+        XCTAssertFalse(preview.contains("large Apple call stack"))
+    }
 }

@@ -117,7 +117,11 @@ class RawImuMigrationTest {
                     inserted = args[0] as List<RawImuSampleEntity>
                     listOf(1L)
                 }
-                "pruneRawImu" -> { prunedDevice = args[0] as String; prunedKeep = args[1] as Int; Unit }
+                "pruneRawImuManagedAware" -> {
+                    prunedDevice = args[0] as String
+                    prunedKeep = args[1] as Int
+                    Unit
+                }
                 else -> throw UnsupportedOperationException("raw-imu insert must not call ${method.name}")
             }
         } as WhoopDao

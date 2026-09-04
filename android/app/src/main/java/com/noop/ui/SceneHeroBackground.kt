@@ -78,7 +78,7 @@ fun Modifier.sceneHeroBackground(
     maxAlpha: Float = 0.42f,
     fadeEndFraction: Float = 0.72f,
     scrim: Boolean = true,
-): Modifier = this.then(SceneHeroBackgroundModifier(drawable, maxAlpha, fadeEndFraction, scrim))
+): Modifier = SceneHeroBackgroundModifier(drawable, maxAlpha, fadeEndFraction, scrim)
 
 /** Composable form for callers that prefer a child layer over a modifier — fills the parent. */
 @Composable

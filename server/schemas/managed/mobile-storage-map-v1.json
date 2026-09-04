@@ -1,0 +1,302 @@
+{
+  "schema_version": 1,
+  "sqlite_tables": {
+    "appleDaily": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/daily_metrics"
+    },
+    "battery": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/battery"
+    },
+    "bodyMeasurement": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/body_measurement"
+    },
+    "coachMemory": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "coach_memory"
+    },
+    "coachMessage": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "coach_history"
+    },
+    "cursors": {
+      "classification": "local_operational",
+      "platforms": ["ios"],
+      "target": null
+    },
+    "dailyMetric": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/daily_metrics"
+    },
+    "dayOwnership": {
+      "classification": "managed_document",
+      "content_mode": "server_readable",
+      "platforms": ["android", "ios"],
+      "target": "day_ownership"
+    },
+    "device": {
+      "classification": "managed_document",
+      "content_mode": "server_readable",
+      "platforms": ["android", "ios"],
+      "target": "device_registry"
+    },
+    "dismissedSleep": {
+      "classification": "managed_document",
+      "content_mode": "server_readable",
+      "platforms": ["android"],
+      "target": "dismissal"
+    },
+    "dismissedWorkout": {
+      "classification": "managed_document",
+      "content_mode": "server_readable",
+      "platforms": ["android"],
+      "target": "dismissal"
+    },
+    "event": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/device_events"
+    },
+    "gravitySample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_motion/gravity"
+    },
+    "healthConnectSyncState": {
+      "classification": "local_operational",
+      "platforms": ["android"],
+      "target": null
+    },
+    "healthKitSyncState": {
+      "classification": "local_operational",
+      "platforms": ["ios"],
+      "target": null
+    },
+    "hrSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/heart_rate"
+    },
+    "journal": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "journal"
+    },
+    "labMarker": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "lab_marker"
+    },
+    "liveSession": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/live_session"
+    },
+    "managedAppliedChange": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedChangeCursor": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedDocumentApplyGuard": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedDocumentDirty": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedDocumentState": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedDirtyWindow": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedPruneGuard": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedSnapshotRestore": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedSyncCheckpoint": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedSyncSource": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "managedWindowUpload": {
+      "classification": "local_operational",
+      "platforms": ["android", "ios"],
+      "target": null
+    },
+    "metricSeries": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/metric_series"
+    },
+    "nutritionCatalogItem": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "filter": "saved_user_items_only",
+      "platforms": ["android", "ios"],
+      "target": "nutrition_catalog"
+    },
+    "nutritionEntry": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "nutrition"
+    },
+    "ouraRaw": {
+      "classification": "opaque_backup_only",
+      "platforms": ["ios"],
+      "target": "encrypted_backup"
+    },
+    "pairedDevice": {
+      "classification": "managed_document",
+      "content_mode": "server_readable",
+      "platforms": ["android", "ios"],
+      "target": "device_registry"
+    },
+    "ppgHrSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/derived_heart_rate"
+    },
+    "ppgWaveformSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_ppg/ppg_waveform"
+    },
+    "rawBatch": {
+      "classification": "opaque_backup_only",
+      "platforms": ["ios"],
+      "target": "encrypted_backup"
+    },
+    "rawImuSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_motion/raw_imu"
+    },
+    "respSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_auxiliary/respiration_adc"
+    },
+    "rrInterval": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/rr_intervals"
+    },
+    "skinTempSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_auxiliary/skin_temperature_adc"
+    },
+    "sleepSession": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/sleep_summary"
+    },
+    "sleepStateSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_auxiliary/sleep_state"
+    },
+    "spo2Sample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "raw_ppg/spo2_optical_adc"
+    },
+    "stepSample": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "essential_timeseries/step_counter"
+    },
+    "strengthExercise": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "filter": "custom_or_user_modified_only",
+      "platforms": ["android", "ios"],
+      "target": "strength_plan"
+    },
+    "strengthRoutine": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "strength_plan"
+    },
+    "strengthRoutineExercise": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "strength_plan"
+    },
+    "strengthSession": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "strength_log"
+    },
+    "strengthSet": {
+      "classification": "managed_document",
+      "content_mode": "client_encrypted",
+      "platforms": ["android", "ios"],
+      "target": "strength_log"
+    },
+    "workout": {
+      "classification": "chunk_stream",
+      "platforms": ["android", "ios"],
+      "target": "derived_summaries/workout_summary"
+    }
+  },
+  "preference_domains": {
+    "automation": "automation",
+    "caffeine_log": "caffeine",
+    "cycle_tracking": "cycle",
+    "hydration_log": "hydration",
+    "journal_catalog": "preferences",
+    "medication": "medication",
+    "mood": "mood",
+    "notification_settings": "notification_settings",
+    "profile": "profile",
+    "workout_plan": "workout_plan"
+  },
+  "never_upload": [
+    "ai_provider_credentials",
+    "backup_passphrases",
+    "ble_pairing_secrets",
+    "identity_refresh_tokens_outside_platform_secure_storage",
+    "remote_sync_api_keys"
+  ]
+}

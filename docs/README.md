@@ -7,7 +7,7 @@ points rather than listing every file, because an exhaustive list goes stale the
 
 | If you want to | Read |
 |---|---|
-| Understand the system | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`DATA_MODEL.md`](DATA_MODEL.md) |
+| Understand the system | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md), [`DATA_MODEL.md`](DATA_MODEL.md) |
 | Build and run it | [`BUILD.md`](BUILD.md), [`ANDROID.md`](ANDROID.md), [`CROSS_PLATFORM.md`](CROSS_PLATFORM.md) |
 | Know what ships | [`FEATURES.md`](FEATURES.md), [`FEATURE_PARITY.md`](FEATURE_PARITY.md) |
 | Know why a number is what it is | [`ANALYTICS.md`](ANALYTICS.md), [`validation/`](validation/) |

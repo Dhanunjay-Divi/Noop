@@ -34,7 +34,7 @@ class SleepRrEvidenceMigrationInstrumentedTest {
                 "INSERT INTO `sleepSession` " +
                     "(`deviceId`, `startTs`, `endTs`, `efficiency`, `stagesJSON`, `userEdited`) " +
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                arrayOf(
+                arrayOf<Any?>(
                     "my-band-noop",
                     1_800_000_000L,
                     1_800_028_800L,

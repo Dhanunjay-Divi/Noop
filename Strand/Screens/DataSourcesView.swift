@@ -832,8 +832,7 @@ struct DataSourcesView: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
             }
-            .toggleStyle(.switch)
-            .tint(DomainTheme.effort.color)
+            .toggleStyle(.noopSwitch)
             .accessibilityLabel("Broadcast heart rate as a Bluetooth sensor")
             .onChangeCompat(of: broadcastHrEnabled) { on in
                 if on { hrBroadcaster.start() } else { hrBroadcaster.stop() }

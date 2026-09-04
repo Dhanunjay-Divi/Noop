@@ -20,3 +20,15 @@ runtime_image = null
 # Enable only after the migration job succeeds. The service has internal
 # ingress, IAM authentication, a /readyz startup probe, and no public invoker.
 enable_private_api = false
+
+# After Firebase identity, App Check, migrations, and the managed test suite
+# pass, deploy the managed API/processor/lifecycle with Cloud Run IAM still
+# required. Public mobile invocation is a separate final gate.
+enable_managed_identity             = false
+enable_managed_app_check            = false
+managed_auth_app_check_enforcement  = "UNENFORCED"
+# Put only Firebase synthetic test credentials here in the ignored local
+# staging.auto.tfvars. Never use or commit a real person's phone number.
+managed_test_phone_numbers          = {}
+enable_managed_runtime              = false
+enable_public_managed_api           = false

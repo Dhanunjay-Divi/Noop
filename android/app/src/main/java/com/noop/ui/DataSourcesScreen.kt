@@ -35,8 +35,6 @@ import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -518,20 +516,13 @@ fun DataSourcesScreen(vm: AppViewModel) {
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = hcAutoSync,
                         onCheckedChange = { on ->
                             vm.setHcAutoSync(on)
                             // Ensure data + optional background permission, then import immediately.
                             if (on) startHealthConnect(requestBackground = true)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_data_sources_screen_auto_sync_health_connect_periodically_6f3f4d92)
                         },
@@ -589,20 +580,13 @@ fun DataSourcesScreen(vm: AppViewModel) {
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = hcWriteback,
                         onCheckedChange = { on ->
                             vm.setHcWriteback(on)
                             // Ensure write permissions (and an immediate first write) when turning on.
                             if (on) startWriteback()
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_data_sources_screen_share_computed_metrics_back_to_health_c11f5d70)
                         },
@@ -836,20 +820,13 @@ fun DataSourcesScreen(vm: AppViewModel) {
                         color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     checked = hrBroadcast,
                     onCheckedChange = { on ->
                         // Turning ON requests BLUETOOTH_ADVERTISE first (the VM flips on once granted);
                         // turning OFF stops the peripheral immediately.
                         if (on) requestAdvertise() else vm.setHrBroadcast(false)
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Palette.surfaceBase,
-                        checkedTrackColor = Palette.accent,
-                        uncheckedThumbColor = Palette.textSecondary,
-                        uncheckedTrackColor = Palette.surfaceInset,
-                        uncheckedBorderColor = Palette.hairline,
-                    ),
                     modifier = Modifier.semantics {
                         contentDescription = uiString(R.string.l10n_data_sources_screen_broadcast_heart_rate_as_a_bluetooth_6a44fdb4)
                     },

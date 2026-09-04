@@ -1,0 +1,7 @@
+{
+  "$id": "noop-schema://managed/opaque-backup-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Client-encrypted NOOP backup bytes. The server validates only the immutable object contract and ciphertext digest.",
+  "title": "NOOP managed opaque backup v1",
+  "type": "string"
+}

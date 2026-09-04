@@ -20,6 +20,9 @@ struct ReportReviewGate {
     /// trying to lay them out.
     static let notShownInline: Set<String> = [
         "screenshot.png", "raw-capture.jsonl", "oura-raw.jsonl", "oura-ibihr.jsonl", "oura-activity.jsonl",
+        AppDiagnosticsRecorder.currentSessionEntryName,
+        AppDiagnosticsRecorder.previousSessionEntryName,
+        AppDiagnosticsRecorder.metricKitEntryName,
     ]
 
     /// Belt-and-braces size guard: ANY entry larger than this is named, never inlined, even one NOT in

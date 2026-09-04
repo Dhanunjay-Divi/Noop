@@ -64,6 +64,15 @@ public extension View {
     }
 }
 
+// MARK: - Switch
+
+public extension ToggleStyle where Self == SwitchToggleStyle {
+    /// The app-wide ON/OFF treatment. Selection controls retain their own styles.
+    static var noopSwitch: SwitchToggleStyle {
+        SwitchToggleStyle(tint: StrandPalette.statusPositive)
+    }
+}
+
 // MARK: - iOS sheet presentation idiom
 
 #if os(iOS)

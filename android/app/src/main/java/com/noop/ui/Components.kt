@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SyncProblem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -109,6 +111,43 @@ import kotlin.math.sin
 //
 // Every screen composes ONLY these. Fixed dimensions + one spacing scale guarantee
 // the uniform, instrument-grade look from the reference.
+
+// MARK: - Switch
+
+/**
+ * The app-wide binary ON/OFF control. Selection controls remain separate; an enabled ON switch is
+ * always semantic green, while disabled and OFF states retain enough contrast in every appearance.
+ */
+@Composable
+fun NoopToggleSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    thumbContent: (@Composable (() -> Unit))? = null,
+    enabled: Boolean = true,
+) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        thumbContent = thumbContent,
+        enabled = enabled,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = Palette.surfaceBase,
+            checkedTrackColor = Palette.statusPositive,
+            checkedBorderColor = Color.Transparent,
+            uncheckedThumbColor = Palette.textSecondary,
+            uncheckedTrackColor = Palette.surfaceInset,
+            uncheckedBorderColor = Palette.hairline,
+            disabledCheckedThumbColor = Palette.surfaceBase.copy(alpha = 0.72f),
+            disabledCheckedTrackColor = Palette.statusPositive.copy(alpha = 0.48f),
+            disabledCheckedBorderColor = Color.Transparent,
+            disabledUncheckedThumbColor = Palette.textSecondary.copy(alpha = 0.48f),
+            disabledUncheckedTrackColor = Palette.surfaceInset.copy(alpha = 0.48f),
+            disabledUncheckedBorderColor = Palette.hairline.copy(alpha = 0.48f),
+        ),
+    )
+}
 
 // MARK: - Quiet data surface + NoopCard
 //

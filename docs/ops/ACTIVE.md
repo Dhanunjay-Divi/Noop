@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-03**
+Last updated: **2026-09-04**
 
 ## Repository
 
@@ -18,17 +18,45 @@ Last updated: **2026-09-03**
 
 ## Active work
 
-The optional NOOP+ GCP staging foundation is deployed in Mumbai with no mobile
-client connection and no real health data. OpenTofu manages protected state,
-budget alerts, KMS/CMEK storage, Pub/Sub, least-purpose identities, empty
-analytics, PostgreSQL 16, migration, and an internal-only scale-to-zero API.
-The final digest-pinned Alpine runtime passed repeat on-demand scans with zero
-findings, two migration executions, live private-runtime verification, and a
-zero-drift plan. Core NOOP remains local-first and account-free. Identity,
-immutable chunk processing, restore, isolation, load, privacy/legal, and
-physical-device upload gates remain open. The implementation and evidence are
-recorded in
-[GCP synthetic staging foundation](rounds/2026-09-03-gcp-staging-foundation.md).
+The optional NOOP+ managed-storage source is implemented across iOS, Android,
+FastAPI/PostgreSQL, and guarded GCP IaC. It adds phone OTP, App Check,
+per-installation credentials, explicit versioned consent, immutable compressed
+chunk upload, processor validation, snapshot plus incremental restore, quotas,
+device revocation, erasure, and an optional 90-day detailed local window.
+Core NOOP remains account-free; metrics, workouts, coaching, journal,
+automations, and local export are not plan entitlements. The final local
+checkpoint passed the complete server suite against PostgreSQL 14, Android
+Demo/Full unit and lint matrices, the managed-device matrix, and the 89-target
+iOS simulator graph including Watch/widgets. The full macOS Strand test action
+also exited successfully, and StrandAnalytics passed 1,451 tests with seven
+intentional skips and no failures. Ruff, dependency, localization, claims,
+private-data, legal-inventory, OpenTofu, and repository-tool gates also pass.
+Apple and Android provide a snapshot-bound, manifest-backed complete
+managed-history ZIP export that verifies object digests, byte/object totals,
+and final archive structure. Evidence is recorded in
+[NOOP+ managed storage](rounds/2026-09-03-noop-plus-managed-storage.md).
+
+The complete-history export uses the restore snapshot/list/download APIs and
+therefore includes history retained only in managed storage. It is deliberately
+separate from the server `/exports` control plane, which accepts and verifies a
+client-produced encrypted archive. Live large-account interruption/expiry
+evidence, resumable continuation, and a documented importer remain
+public-launch gates.
+
+The Mumbai foundation remains synthetic-only with no connected mobile client
+and no real health data. The final identity plan on 2026-09-04 contained seven
+adds, zero changes, and zero destroys. Apply again stopped before Firebase
+resource creation. Cloud Audit Logs confirm the project Owner was granted
+`firebase.projects.update`; Google rejected the request because
+`Firebase Tos Not Accepted`. The account holder must accept the terms at
+`https://console.firebase.google.com/`, after which the plan must be regenerated.
+The managed runtime and public invoker remain disabled.
+
+The customer-day and scale contract is now explicit in
+[`../PLATFORM_ARCHITECTURE.md`](../PLATFORM_ARCHITECTURE.md): immediate guidance
+stays local, ordinary wellness prompts converge on one evidence-gated
+cross-domain arbiter, outcome learning cannot weaken hard gates, and backend
+growth uses bounded regional cells rather than one global database.
 
 The latest round improves stress and daily-guidance notification reliability.
 Android now evaluates qualified stress evidence from fresh live R-R and
@@ -93,20 +121,32 @@ participant, and native-speaker gates remain separate.
   private, evidence-gated, and honest about best-effort OS delivery.
 - Core NOOP remains fully local and account-free; NOOP+ managed sync requires
   explicit enrollment and must never silently upload existing history.
+- NOOP+ can restrict managed storage, restore, and multi-device history only;
+  core product capability is not a storage-tier entitlement.
+- Optional local storage reduction keeps 90 days of detailed data and prunes
+  only an exact server-validated clean window.
+- Ordinary customer-day prompts must converge on one explainable local arbiter;
+  safety and fresh workout caution remain separate lanes.
 - No real health data enters the GCP staging project until identity, processor,
   isolation, restore, privacy/legal, and physical-device gates pass.
 
 ## Next priorities after this round
 
-1. Threat-model and select NOOP+ identity, recovery, deletion, and operator
-   access.
-2. Implement immutable chunk upload, processor idempotency, aggregate
-   provenance, export, and erasure using synthetic data.
-3. Prove restore, isolation, reconnect burst, soak, 10,000-user load, and
-   failover behavior before production sizing.
-4. Provision store signing and release records.
-5. Complete carrier procurement and the controlled paging matrix.
-6. Complete representative physical-device and in-place upgrade validation.
-7. Complete held-out accuracy studies and native-speaker review.
+1. Accept Firebase terms, regenerate the zero-destroy identity plan, and deploy
+   Identity Platform plus App Check to synthetic staging.
+2. Generate ignored mobile configuration, prove debug attestation, run managed
+   Cloud SQL tests, build/scan a digest, migrate through `024`, and deploy the
+   managed runtime IAM-only.
+3. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
+   erasure, load, and recovery before enabling public invocation.
+4. Prove complete managed-history export with live cloud-only/large-account
+   data, then add resumable continuation and documented import before public
+   enrollment.
+5. Complete signed physical-device background, storage-pressure, battery,
+   upgrade, and multi-device validation.
+6. Consolidate ordinary wellness notifications through the shared day arbiter
+   after this storage round closes.
+7. Complete privacy/legal, security, support-access, carrier, accuracy, store,
+   and native-speaker external gates.
 8. Keep automatic emergency inference unavailable until its separate
    validation and regulatory program is complete.

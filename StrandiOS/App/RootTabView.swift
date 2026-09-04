@@ -305,6 +305,15 @@ struct RootTabView: View {
         // top-marker position below. Keeping the gesture simultaneous preserves charts, day swipes and
         // interactive Back, while the offset stream continues through inertial deceleration.
         .simultaneousGesture(scrollInteractionGesture)
+        .onChange(of: contentGestureActive) { _, active in
+            if active {
+                AppScrollHitchMonitor.shared.begin(
+                    context: Self.diagnosticTabName(selectedTab)
+                )
+            } else if !scrollMotionActive {
+                AppScrollHitchMonitor.shared.end(reason: "gesture_ended")
+            }
+        }
         .onPreferenceChange(FloatingTabBarHeightPreferenceKey.self) { height in
             // Preserve the LARGEST real measurement. Compacting the visual bar must not reduce the
             // content reservation (which would shift scroll position and could hide the final card).
@@ -321,7 +330,11 @@ struct RootTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
             keyboardVisible = false
         }
-        .onChange(of: selectedTab) { _, _ in
+        .onChange(of: selectedTab) { _, newTab in
+            AppDiagnosticsRecorder.shared.record(
+                "ui.tab_changed",
+                fields: ["tab": Self.diagnosticTabName(newTab)]
+            )
             // A new destination starts with the fully labelled wayfinding state. It may compact again
             // as soon as the user resumes scrolling down that page.
             demoCompactPinned = false
@@ -330,6 +343,10 @@ struct RootTabView: View {
             resetTabBarScrollTracking()
         }
         .onAppear {
+            AppDiagnosticsRecorder.shared.record(
+                "ui.tab_visible",
+                fields: ["tab": Self.diagnosticTabName(selectedTab)]
+            )
             #if DEBUG
             contextualActions.applyDemoActionsIfRequested()
             #endif
@@ -346,6 +363,9 @@ struct RootTabView: View {
                 consumePendingNotificationRoute()
                 consumeRequestedDestination(router.requestedDestination)
             }
+        }
+        .onDisappear {
+            AppScrollHitchMonitor.shared.end(reason: "root_hidden")
         }
         .onReceive(NotificationCenter.default.publisher(for: NotificationRouteBridge.routeRequested)) { _ in
             consumePendingNotificationRoute()
@@ -371,6 +391,7 @@ struct RootTabView: View {
                 await FolderBackup.catchUpIfDue(checkpoint: { await backupRepo.checkpointForBackup() })
             }
             await RemoteSyncService.catchUpIfDue(repo: repo)
+            await ManagedCloudService.shared.catchUpIfDue(repo: repo)
             let safetyPaging = SafetyPagingService()
             await safetyPaging.refresh()
         }
@@ -378,9 +399,13 @@ struct RootTabView: View {
             WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             Task { await refreshAdaptiveHydrationContext() }
             Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
+            Task { await ManagedCloudService.shared.catchUpIfDue(repo: repo) }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active else {
+                AppScrollHitchMonitor.shared.end(reason: "scene_inactive")
+                return
+            }
             Task { await contextualActions.importDeliveredNotifications() }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
@@ -412,10 +437,28 @@ struct RootTabView: View {
                 router.strengthRequested = false
             }
         }
+        .onChange(of: quickAction) { _, action in
+            guard let action else { return }
+            AppDiagnosticsRecorder.shared.record(
+                "ui.quick_action_opened",
+                fields: ["action": action.diagnosticName]
+            )
+        }
     }
 
     private var visibleTabBarHeight: CGFloat {
         keyboardVisible ? 0 : measuredTabBarHeight
+    }
+
+    private static func diagnosticTabName(_ rawValue: Int) -> String {
+        switch IPhonePrimaryTab(rawValue: rawValue) {
+        case .today: return "today"
+        case .trends: return "trends"
+        case .activity: return "workouts"
+        case .sleep: return "sleep"
+        case .more: return "more"
+        case nil: return "unknown"
+        }
     }
 
     private func performContextualAction(_ action: ContextualAction) {
@@ -529,6 +572,9 @@ struct RootTabView: View {
     /// that keeps the animation pause cheap precisely while the user is asking the ScrollView to do work.
     private func markScrollMotionActive() {
         let tracker = tabBarScrollTracker
+        AppScrollHitchMonitor.shared.begin(
+            context: Self.diagnosticTabName(selectedTab)
+        )
         tracker.lastMovementUptime = ProcessInfo.processInfo.systemUptime
         if !scrollMotionActive { scrollMotionActive = true }
         guard tracker.idleTask == nil else { return }
@@ -541,6 +587,7 @@ struct RootTabView: View {
                     continue
                 }
                 scrollMotionActive = false
+                AppScrollHitchMonitor.shared.end(reason: "idle")
                 tracker.idleTask = nil
                 return
             }
@@ -548,6 +595,7 @@ struct RootTabView: View {
     }
 
     private func resetTabBarScrollTracking() {
+        AppScrollHitchMonitor.shared.end(reason: "navigation")
         tabBarScrollTracker.reset()
         scrollMotionActive = false
     }
@@ -662,6 +710,10 @@ struct RootTabView: View {
     /// to that live stack so Back returns to the origin. Requests from another primary tab deliberately
     /// start a fresh More stack. This preserves both the persistent bar and normal back-button semantics.
     private func openMore(_ destination: MoreDestination) {
+        AppDiagnosticsRecorder.shared.record(
+            "ui.more_opened",
+            fields: ["destination": destination.diagnosticName]
+        )
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
             if selectedTab == IPhonePrimaryTab.more.rawValue {
                 tabPaths[IPhonePrimaryTab.more.rawValue].append(destination)
@@ -865,6 +917,12 @@ struct RootTabView: View {
                     StrandPalette.surfaceBase.ignoresSafeArea()
                     route.destination
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .onAppear {
+                            AppDiagnosticsRecorder.shared.record(
+                                "ui.more_visible",
+                                fields: ["destination": route.diagnosticName]
+                            )
+                        }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .navigationBarTitleDisplayMode(.inline)
@@ -1202,6 +1260,9 @@ private enum MoreDestination: Hashable {
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case safety, alarms, automations, widgets, testCentre, siriShortcuts, settings
 
+    /// Fixed enum case only; never includes a user's content or an object identifier.
+    var diagnosticName: String { String(describing: self) }
+
     @MainActor @ViewBuilder var destination: some View {
         switch self {
         case .calendar:        CalendarMonthView()
@@ -1391,6 +1452,9 @@ private struct MoreRow: View {
 private enum QuickAction: Int, Identifiable {
     case menu, workout, strength, nutrition, journal, hydration, hrv, breathe, intervals, live
     var id: Int { rawValue }
+
+    /// Fixed enum case only; safe for the bounded app-session breadcrumb.
+    var diagnosticName: String { String(describing: self) }
 }
 
 /// Compact 3x3 action launcher, matching the reference's separate floating-plus interaction.

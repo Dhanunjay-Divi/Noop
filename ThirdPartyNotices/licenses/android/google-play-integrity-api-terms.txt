@@ -1,0 +1,32 @@
+Play Integrity API Terms of Service
+
+Source: https://developer.android.com/google/play/integrity/terms#tos
+Last modified by Google: May 20, 2024
+Reviewed for this inventory: September 4, 2026
+
+1. By using the Play Integrity API, you agree to these terms in addition to the
+Google APIs Terms of Service ("API ToS"). The Play Integrity API is provided to
+protect app security and to mitigate abuse, fraud, and unauthorized access.
+
+2. By using the Play Integrity API, your app or SDK will have access to certain
+features and be granted quota limits based on the eligibility criteria
+described in the Play Integrity API documentation. Eligibility criteria are
+subject to change.
+
+2.1. Google Play reserves the right to remove feature access and reduce quota
+if your app or SDK does not meet, or stops meeting, the eligibility criteria.
+
+2.2. The approval of additional features or increased quota is non-transferable
+and will only apply to the specified app or SDK.
+
+3. You may not use the Play Integrity API to fingerprint or track individual
+users or devices.
+
+4. Google may make changes to these terms at any time with notice and the
+opportunity to decline further use of the Play Integrity API. Google will post
+notice of modifications to the terms at
+https://developer.android.com/google/play/integrity/terms#tos. Changes will not
+be retroactive.
+
+The Google APIs Terms of Service incorporated above are available at:
+https://developers.google.com/terms

@@ -9,6 +9,9 @@ import StrandDesign
 struct BackupSyncView: View {
     @EnvironmentObject var model: AppModel
 
+    #if os(iOS)
+    @StateObject private var managedCloud = ManagedCloudService.shared
+    #endif
     @State private var auto = FolderBackup.autoEnabled
     @State private var folderLabel = FolderBackup.folderLabel()
     @State private var lastMs = FolderBackup.lastBackupMs
@@ -39,9 +42,17 @@ struct BackupSyncView: View {
     var body: some View {
         ScreenScaffold(
             title: "Backup & Sync",
-            subtitle: "Save full automatic backups to a folder you choose. They are not passphrase-encrypted, so use storage you trust."
+            subtitle: "Protect your history with optional managed storage, your own server, or a folder you choose. Local NOOP works without an account."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                #if os(iOS)
+                if managedCloud.isAvailable {
+                    ManagedCloudBackupCard(
+                        service: managedCloud,
+                        repo: model.repo
+                    )
+                }
+                #endif
                 serverCard
                 folderCard
                 autoCard
@@ -143,8 +154,7 @@ struct BackupSyncView: View {
                     Spacer(minLength: 0)
                     Toggle("Automatic upload", isOn: $serverAuto)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.accent)
+                        .toggleStyle(.noopSwitch)
                         .disabled(
                             serverBusy || RemoteSyncPreferences.endpoint.isEmpty
                                 || !RemoteSyncKeyStore.hasKey
@@ -174,8 +184,7 @@ struct BackupSyncView: View {
                     Spacer(minLength: 0)
                     Toggle("Reduce phone storage after backup", isOn: $optimizeServerStorage)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.accent)
+                        .toggleStyle(.noopSwitch)
                         .disabled(
                             serverBusy || RemoteSyncPreferences.endpoint.isEmpty
                                 || !RemoteSyncKeyStore.hasKey
@@ -282,7 +291,7 @@ struct BackupSyncView: View {
                     }
                     Spacer(minLength: 0)
                     Toggle("Daily auto-backup", isOn: $auto)
-                        .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                        .labelsHidden().toggleStyle(.noopSwitch)
                         .disabled(folderLabel == nil)
                         .onChangeCompat(of: auto) { on in FolderBackup.autoEnabled = on }
                 }

@@ -466,7 +466,7 @@ private fun CoachChat(vm: CoachViewModel) {
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 }
-                androidx.compose.material3.Switch(
+                NoopToggleSwitch(
                     checked = consent,
                     onCheckedChange = { vm.setConsent(context, it) },
                 )
@@ -651,7 +651,7 @@ private fun CoachCheckInCard(
                         color = Palette.textTertiary,
                     )
                 }
-                androidx.compose.material3.Switch(
+                NoopToggleSwitch(
                     checked = enabled,
                     onCheckedChange = onEnabledChange,
                     modifier = Modifier.semantics {
@@ -958,7 +958,7 @@ private fun CoachMemoryPanel(
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        androidx.compose.material3.Switch(
+                        NoopToggleSwitch(
                             checked = memory.enabled,
                             onCheckedChange = { vm.setMemoryEnabled(memory.id, it) },
                             modifier = Modifier.semantics {

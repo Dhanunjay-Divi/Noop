@@ -324,7 +324,7 @@ private struct BreathingContent: View {
             }
             Spacer(minLength: 8)
             Toggle("", isOn: $audioCues)
-                .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                .labelsHidden().toggleStyle(.noopSwitch)
                 .accessibilityLabel("Audio cues")
         }
     }

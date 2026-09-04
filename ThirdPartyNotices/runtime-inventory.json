@@ -8,6 +8,104 @@
   "components": [
     {
       "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "abseil-cpp-binary",
+      "revision": "bbe8b69694d7873315fd3a4ad41efe043e1c07c5",
+      "source": "https://github.com/google/abseil-cpp-binary",
+      "version": "1.2024072200.0"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "app-check",
+      "revision": "3e33dd27dd4c69bd81c7c81fe61d8ccf58846902",
+      "source": "https://github.com/google/app-check",
+      "version": "11.3.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "firebase-ios-sdk",
+      "revision": "346daa9f46316aa372b35b317e18224acc2e9063",
+      "source": "https://github.com/firebase/firebase-ios-sdk",
+      "version": "12.18.0"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "google-ads-on-device-conversion-ios-sdk",
+      "revision": "dc39082d8881109d35b94b1c122164c0e8d08a55",
+      "source": "https://github.com/googleads/google-ads-on-device-conversion-ios-sdk",
+      "version": "3.6.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "googleappmeasurement",
+      "revision": "f04760d460296cc0fa430935a7be212e5bd67fc5",
+      "source": "https://github.com/google/GoogleAppMeasurement",
+      "version": "12.18.0"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "googledatatransport",
+      "revision": "ba3358d3c3dbae8ef230b58a46b97ad65e84e974",
+      "source": "https://github.com/google/GoogleDataTransport",
+      "version": "10.1.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0 AND MIT",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/googleutilities.txt",
+          "sha256": "ad6d036b9a78f0e1700d68039c06058033fea063172ce2dc68e382a24b4d1928"
+        }
+      ],
+      "name": "googleutilities",
+      "revision": "92c8f6dc3ac375d6febdfcb3db68bc3d10633db3",
+      "source": "https://github.com/google/GoogleUtilities",
+      "version": "8.1.3"
+    },
+    {
+      "ecosystem": "swiftpm",
       "license": "MIT",
       "licenseFiles": [
         {
@@ -22,6 +120,76 @@
     },
     {
       "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "grpc-binary",
+      "revision": "75b31c842f664a0f46a2e590a570e370249fd8f6",
+      "source": "https://github.com/google/grpc-binary",
+      "version": "1.69.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "gtm-session-fetcher",
+      "revision": "724a52eea6329b7e12d3ad8300d76ca9f3895fcc",
+      "source": "https://github.com/google/gtm-session-fetcher",
+      "version": "5.3.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "interop-ios-for-google-sdks",
+      "revision": "040d087ac2267d2ddd4cca36c757d1c6a05fdbfe",
+      "source": "https://github.com/google/interop-ios-for-google-sdks",
+      "version": "101.0.0"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/leveldb.txt",
+          "sha256": "ccc19f1da0798ed666609b65a5b44dd8b3abe6fc08b9c0592eb76e82e174db19"
+        }
+      ],
+      "name": "leveldb",
+      "revision": "a0bc79961d7be727d258d33d5a6b2f1023270ba1",
+      "source": "https://github.com/firebase/leveldb",
+      "version": "1.22.5"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Zlib",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/nanopb.txt",
+          "sha256": "5b54fa0e87e2822f9f786b3e7824ab2347c5282057e5e4ab20681aba0e8aaed9"
+        }
+      ],
+      "name": "nanopb",
+      "revision": "3851d94a41890dea16dc3db34caf60e585cb4163",
+      "source": "https://github.com/firebase/nanopb",
+      "version": "2.30910.1"
+    },
+    {
+      "ecosystem": "swiftpm",
       "license": "MIT",
       "licenseFiles": [
         {
@@ -33,6 +201,20 @@
       "revision": "2849f5323265386e200484b0d0f896e73c3411b9",
       "source": "https://github.com/gonzalezreal/NetworkImage",
       "version": "6.0.1"
+    },
+    {
+      "ecosystem": "swiftpm",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/apple/google-apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "promises",
+      "revision": "f4a19a3c313dc2616c70bb49d29a799fb16be837",
+      "source": "https://github.com/google/promises",
+      "version": "2.4.1"
     },
     {
       "ecosystem": "swiftpm",
@@ -125,8 +307,8 @@
         }
       ],
       "name": "androidx.annotation:annotation",
-      "source": "https://search.maven.org/artifact/androidx.annotation/annotation/1.8.0/jar",
-      "version": "1.8.0"
+      "source": "https://search.maven.org/artifact/androidx.annotation/annotation/1.8.1/jar",
+      "version": "1.8.1"
     },
     {
       "ecosystem": "maven",
@@ -138,8 +320,8 @@
         }
       ],
       "name": "androidx.annotation:annotation-experimental",
-      "source": "https://search.maven.org/artifact/androidx.annotation/annotation-experimental/1.4.0/jar",
-      "version": "1.4.0"
+      "source": "https://search.maven.org/artifact/androidx.annotation/annotation-experimental/1.4.1/jar",
+      "version": "1.4.1"
     },
     {
       "ecosystem": "maven",
@@ -151,8 +333,8 @@
         }
       ],
       "name": "androidx.annotation:annotation-jvm",
-      "source": "https://search.maven.org/artifact/androidx.annotation/annotation-jvm/1.8.0/jar",
-      "version": "1.8.0"
+      "source": "https://search.maven.org/artifact/androidx.annotation/annotation-jvm/1.8.1/jar",
+      "version": "1.8.1"
     },
     {
       "ecosystem": "maven",
@@ -215,9 +397,22 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
-      "name": "androidx.collection:collection",
-      "source": "https://search.maven.org/artifact/androidx.collection/collection/1.4.0/jar",
+      "name": "androidx.browser:browser",
+      "source": "https://search.maven.org/artifact/androidx.browser/browser/1.4.0/jar",
       "version": "1.4.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.collection:collection",
+      "source": "https://search.maven.org/artifact/androidx.collection/collection/1.4.4/jar",
+      "version": "1.4.4"
     },
     {
       "ecosystem": "maven",
@@ -229,8 +424,8 @@
         }
       ],
       "name": "androidx.collection:collection-jvm",
-      "source": "https://search.maven.org/artifact/androidx.collection/collection-jvm/1.4.0/jar",
-      "version": "1.4.0"
+      "source": "https://search.maven.org/artifact/androidx.collection/collection-jvm/1.4.4/jar",
+      "version": "1.4.4"
     },
     {
       "ecosystem": "maven",
@@ -242,8 +437,8 @@
         }
       ],
       "name": "androidx.collection:collection-ktx",
-      "source": "https://search.maven.org/artifact/androidx.collection/collection-ktx/1.4.0/jar",
-      "version": "1.4.0"
+      "source": "https://search.maven.org/artifact/androidx.collection/collection-ktx/1.4.4/jar",
+      "version": "1.4.4"
     },
     {
       "ecosystem": "maven",
@@ -255,8 +450,8 @@
         }
       ],
       "name": "androidx.compose:compose-bom",
-      "source": "https://search.maven.org/artifact/androidx.compose/compose-bom/2024.06.00/jar",
-      "version": "2024.06.00"
+      "source": "https://search.maven.org/artifact/androidx.compose/compose-bom/2025.01.01/jar",
+      "version": "2025.01.01"
     },
     {
       "ecosystem": "maven",
@@ -268,8 +463,8 @@
         }
       ],
       "name": "androidx.compose.animation:animation",
-      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -281,8 +476,8 @@
         }
       ],
       "name": "androidx.compose.animation:animation-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -294,8 +489,8 @@
         }
       ],
       "name": "androidx.compose.animation:animation-core",
-      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-core/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-core/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -307,8 +502,8 @@
         }
       ],
       "name": "androidx.compose.animation:animation-core-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-core-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.animation/animation-core-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -320,8 +515,8 @@
         }
       ],
       "name": "androidx.compose.foundation:foundation",
-      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -333,8 +528,8 @@
         }
       ],
       "name": "androidx.compose.foundation:foundation-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -346,8 +541,8 @@
         }
       ],
       "name": "androidx.compose.foundation:foundation-layout",
-      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-layout/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-layout/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -359,8 +554,8 @@
         }
       ],
       "name": "androidx.compose.foundation:foundation-layout-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-layout-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.foundation/foundation-layout-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -372,8 +567,8 @@
         }
       ],
       "name": "androidx.compose.material:material-icons-core",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-core/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-core/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -385,8 +580,8 @@
         }
       ],
       "name": "androidx.compose.material:material-icons-core-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-core-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-core-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -398,8 +593,8 @@
         }
       ],
       "name": "androidx.compose.material:material-icons-extended",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-extended/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-extended/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -411,8 +606,8 @@
         }
       ],
       "name": "androidx.compose.material:material-icons-extended-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-extended-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-icons-extended-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -424,8 +619,8 @@
         }
       ],
       "name": "androidx.compose.material:material-ripple",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-ripple/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-ripple/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -437,8 +632,8 @@
         }
       ],
       "name": "androidx.compose.material:material-ripple-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.material/material-ripple-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.material/material-ripple-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -450,8 +645,8 @@
         }
       ],
       "name": "androidx.compose.material3:material3",
-      "source": "https://search.maven.org/artifact/androidx.compose.material3/material3/1.2.1/jar",
-      "version": "1.2.1"
+      "source": "https://search.maven.org/artifact/androidx.compose.material3/material3/1.3.1/jar",
+      "version": "1.3.1"
     },
     {
       "ecosystem": "maven",
@@ -463,8 +658,8 @@
         }
       ],
       "name": "androidx.compose.material3:material3-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.material3/material3-android/1.2.1/jar",
-      "version": "1.2.1"
+      "source": "https://search.maven.org/artifact/androidx.compose.material3/material3-android/1.3.1/jar",
+      "version": "1.3.1"
     },
     {
       "ecosystem": "maven",
@@ -476,8 +671,8 @@
         }
       ],
       "name": "androidx.compose.runtime:runtime",
-      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -489,8 +684,8 @@
         }
       ],
       "name": "androidx.compose.runtime:runtime-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -502,8 +697,8 @@
         }
       ],
       "name": "androidx.compose.runtime:runtime-saveable",
-      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-saveable/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-saveable/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -515,8 +710,8 @@
         }
       ],
       "name": "androidx.compose.runtime:runtime-saveable-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-saveable-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.runtime/runtime-saveable-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -528,8 +723,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -541,8 +736,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -554,8 +749,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-geometry",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-geometry/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-geometry/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -567,8 +762,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-geometry-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-geometry-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-geometry-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -580,8 +775,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-graphics",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-graphics/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-graphics/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -593,8 +788,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-graphics-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-graphics-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-graphics-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -606,8 +801,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-text",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-text/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-text/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -619,8 +814,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-text-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-text-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-text-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -632,8 +827,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-tooling-preview",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-tooling-preview/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-tooling-preview/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -645,8 +840,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-tooling-preview-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-tooling-preview-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-tooling-preview-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -658,8 +853,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-unit",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-unit/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-unit/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -671,8 +866,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-unit-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-unit-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-unit-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -684,8 +879,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-util",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-util/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-util/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -697,8 +892,8 @@
         }
       ],
       "name": "androidx.compose.ui:ui-util-android",
-      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-util-android/1.6.8/jar",
-      "version": "1.6.8"
+      "source": "https://search.maven.org/artifact/androidx.compose.ui/ui-util-android/1.7.7/jar",
+      "version": "1.7.7"
     },
     {
       "ecosystem": "maven",
@@ -764,6 +959,45 @@
       "name": "androidx.core:core-remoteviews",
       "source": "https://search.maven.org/artifact/androidx.core/core-remoteviews/1.1.0/jar",
       "version": "1.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.credentials:credentials",
+      "source": "https://search.maven.org/artifact/androidx.credentials/credentials/1.2.0-rc01/jar",
+      "version": "1.2.0-rc01"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.credentials:credentials-play-services-auth",
+      "source": "https://search.maven.org/artifact/androidx.credentials/credentials-play-services-auth/1.2.0-rc01/jar",
+      "version": "1.2.0-rc01"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.customview:customview",
+      "source": "https://search.maven.org/artifact/androidx.customview/customview/1.0.0/jar",
+      "version": "1.0.0"
     },
     {
       "ecosystem": "maven",
@@ -865,6 +1099,19 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
+      "name": "androidx.fragment:fragment",
+      "source": "https://search.maven.org/artifact/androidx.fragment/fragment/1.8.6/jar",
+      "version": "1.8.6"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
       "name": "androidx.glance:glance",
       "source": "https://search.maven.org/artifact/androidx.glance/glance/1.1.1/jar",
       "version": "1.1.1"
@@ -917,6 +1164,19 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
+      "name": "androidx.graphics:graphics-path",
+      "source": "https://search.maven.org/artifact/androidx.graphics/graphics-path/1.0.1/jar",
+      "version": "1.0.1"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
       "name": "androidx.health.connect:connect-client",
       "source": "https://search.maven.org/artifact/androidx.health.connect/connect-client/1.1.0-alpha07/jar",
       "version": "1.1.0-alpha07"
@@ -944,8 +1204,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-common",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -957,8 +1217,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-common-java8",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common-java8/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common-java8/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -970,8 +1230,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-common-jvm",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common-jvm/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-common-jvm/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -983,8 +1243,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-livedata",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -996,8 +1256,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-livedata-core",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata-core/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata-core/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1009,8 +1269,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-livedata-core-ktx",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata-core-ktx/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-livedata-core-ktx/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1022,8 +1282,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-process",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-process/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-process/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1035,8 +1295,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1048,8 +1308,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime-android",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-android/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-android/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1061,8 +1321,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime-compose",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-compose/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-compose/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1074,8 +1334,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime-compose-android",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-compose-android/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-compose-android/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1087,8 +1347,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime-ktx",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-ktx/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-ktx/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1100,8 +1360,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-runtime-ktx-android",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-ktx-android/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-runtime-ktx-android/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1113,8 +1373,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-service",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-service/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-service/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1126,8 +1386,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1139,8 +1399,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel-android",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-android/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-android/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1152,8 +1412,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel-compose",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-compose/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-compose/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1165,8 +1425,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel-compose-android",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-compose-android/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-compose-android/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1178,8 +1438,8 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel-ktx",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-ktx/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-ktx/2.8.3/jar",
+      "version": "2.8.3"
     },
     {
       "ecosystem": "maven",
@@ -1191,8 +1451,34 @@
         }
       ],
       "name": "androidx.lifecycle:lifecycle-viewmodel-savedstate",
-      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-savedstate/2.8.2/jar",
-      "version": "2.8.2"
+      "source": "https://search.maven.org/artifact/androidx.lifecycle/lifecycle-viewmodel-savedstate/2.8.3/jar",
+      "version": "2.8.3"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.loader:loader",
+      "source": "https://search.maven.org/artifact/androidx.loader/loader/1.0.0/jar",
+      "version": "1.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "androidx.localbroadcastmanager:localbroadcastmanager",
+      "source": "https://search.maven.org/artifact/androidx.localbroadcastmanager/localbroadcastmanager/1.0.0/jar",
+      "version": "1.0.0"
     },
     {
       "ecosystem": "maven",
@@ -1450,6 +1736,19 @@
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
         }
       ],
+      "name": "androidx.viewpager:viewpager",
+      "source": "https://search.maven.org/artifact/androidx.viewpager/viewpager/1.0.0/jar",
+      "version": "1.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
       "name": "androidx.work:work-runtime",
       "source": "https://search.maven.org/artifact/androidx.work/work-runtime/2.9.0/jar",
       "version": "2.9.0"
@@ -1492,6 +1791,149 @@
       "name": "com.google.accompanist:accompanist-drawablepainter",
       "source": "https://search.maven.org/artifact/com.google.accompanist/accompanist-drawablepainter/0.32.0/jar",
       "version": "0.32.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-auth",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-auth/20.7.0/jar",
+      "version": "20.7.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-auth-api-phone",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-auth-api-phone/18.0.2/jar",
+      "version": "18.0.2"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-auth-base",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-auth-base/18.0.4/jar",
+      "version": "18.0.4"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-base",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-base/18.1.0/jar",
+      "version": "18.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-basement",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-basement/18.4.0/jar",
+      "version": "18.4.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-fido",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-fido/20.1.0/jar",
+      "version": "20.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.gms:play-services-tasks",
+      "source": "https://search.maven.org/artifact/com.google.android.gms/play-services-tasks/18.2.0/jar",
+      "version": "18.2.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.libraries.identity.googleid:googleid",
+      "source": "https://search.maven.org/artifact/com.google.android.libraries.identity.googleid/googleid/1.1.0/jar",
+      "version": "1.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Play-Core-SDK-Terms",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-play-core-sdk-terms.txt",
+          "sha256": "9945a18d9d341ae2bdc76597853ec0f71596a3635c09195971f1e8ac8f22688d"
+        }
+      ],
+      "name": "com.google.android.play:core-common",
+      "source": "https://search.maven.org/artifact/com.google.android.play/core-common/2.0.3/jar",
+      "version": "2.0.3"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Play-Integrity-API-Terms",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-play-integrity-api-terms.txt",
+          "sha256": "aa32e0bc480e494b69f839c06b8461144ebc7eb756b798022031441ff5e74e34"
+        }
+      ],
+      "name": "com.google.android.play:integrity",
+      "source": "https://search.maven.org/artifact/com.google.android.play/integrity/1.3.0/jar",
+      "version": "1.3.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.android.recaptcha:recaptcha",
+      "source": "https://search.maven.org/artifact/com.google.android.recaptcha/recaptcha/18.6.1/jar",
+      "version": "18.6.1"
     },
     {
       "ecosystem": "maven",
@@ -1542,8 +1984,138 @@
         }
       ],
       "name": "com.google.errorprone:error_prone_annotations",
-      "source": "https://search.maven.org/artifact/com.google.errorprone/error_prone_annotations/2.11.0/jar",
-      "version": "2.11.0"
+      "source": "https://search.maven.org/artifact/com.google.errorprone/error_prone_annotations/2.26.0/jar",
+      "version": "2.26.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-annotations",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-annotations/16.2.0/jar",
+      "version": "16.2.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-appcheck",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-appcheck/18.0.0/jar",
+      "version": "18.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-appcheck-interop",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-appcheck-interop/17.1.0/jar",
+      "version": "17.1.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-appcheck-playintegrity",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-appcheck-playintegrity/18.0.0/jar",
+      "version": "18.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.firebase:firebase-auth",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-auth/23.2.1/jar",
+      "version": "23.2.1"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "LicenseRef-Google-Android-SDK",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/google-android-sdk-license.txt",
+          "sha256": "75dd1a2a13cc6612aec23c18437626e6b8790a9f9056ba373a46342ff7ecc0d9"
+        }
+      ],
+      "name": "com.google.firebase:firebase-auth-interop",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-auth-interop/20.0.0/jar",
+      "version": "20.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-bom",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-bom/33.16.0/jar",
+      "version": "33.16.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-common",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-common/21.0.0/jar",
+      "version": "21.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-common-ktx",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-common-ktx/21.0.0/jar",
+      "version": "21.0.0"
+    },
+    {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "com.google.firebase:firebase-components",
+      "source": "https://search.maven.org/artifact/com.google.firebase/firebase-components/18.0.0/jar",
+      "version": "18.0.0"
     },
     {
       "ecosystem": "maven",
@@ -1746,6 +2318,19 @@
     },
     {
       "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "javax.inject:javax.inject",
+      "source": "https://search.maven.org/artifact/javax.inject/javax.inject/1/jar",
+      "version": "1"
+    },
+    {
+      "ecosystem": "maven",
       "license": "MIT",
       "licenseFiles": [
         {
@@ -1780,8 +2365,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib/2.0.0/jar",
-      "version": "2.0.0"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib/2.1.0/jar",
+      "version": "2.1.0"
     },
     {
       "ecosystem": "maven",
@@ -1793,8 +2378,8 @@
         }
       ],
       "name": "org.jetbrains.kotlin:kotlin-stdlib-common",
-      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/2.0.0/jar",
-      "version": "2.0.0"
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/2.1.0/jar",
+      "version": "2.1.0"
     },
     {
       "ecosystem": "maven",
@@ -1888,6 +2473,19 @@
       "version": "1.8.1"
     },
     {
+      "ecosystem": "maven",
+      "license": "Apache-2.0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/android/Apache-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ],
+      "name": "org.jetbrains.kotlinx:kotlinx-coroutines-play-services",
+      "source": "https://search.maven.org/artifact/org.jetbrains.kotlinx/kotlinx-coroutines-play-services/1.8.1/jar",
+      "version": "1.8.1"
+    },
+    {
       "ecosystem": "pypi",
       "license": "MIT",
       "licenseFiles": [
@@ -1941,6 +2539,19 @@
     },
     {
       "ecosystem": "pypi",
+      "license": "MIT-0",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/python/cffi-2.1.1.txt",
+          "sha256": "fd95b3ac9ff9cf0b30f35f0f874c3aff8a0eba15f75ce753b85e812f4b6f302a"
+        }
+      ],
+      "name": "cffi",
+      "source": "https://github.com/python-cffi/cffi",
+      "version": "2.1.1"
+    },
+    {
+      "ecosystem": "pypi",
       "license": "BSD-3-Clause",
       "licenseFiles": [
         {
@@ -1951,6 +2562,19 @@
       "name": "click",
       "source": "https://github.com/pallets/click",
       "version": "8.4.2"
+    },
+    {
+      "ecosystem": "pypi",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/python/cryptography-50.0.1.txt",
+          "sha256": "19b7c48b768d9d6baff4db0b57b8fcf0747f81aac5d655b967fe2df052f555d7"
+        }
+      ],
+      "name": "cryptography",
+      "source": "https://github.com/pyca/cryptography",
+      "version": "50.0.1"
     },
     {
       "ecosystem": "pypi",
@@ -2006,6 +2630,19 @@
     },
     {
       "ecosystem": "pypi",
+      "license": "BSD-3-Clause",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/python/pycparser-3.0.txt",
+          "sha256": "1f0782c9578c941c55fe2c44be591f6e7e72d1b759b9dd429847f7e3f55f5dd4"
+        }
+      ],
+      "name": "pycparser",
+      "source": "https://github.com/eliben/pycparser",
+      "version": "3.0"
+    },
+    {
+      "ecosystem": "pypi",
       "license": "MIT",
       "licenseFiles": [
         {
@@ -2029,6 +2666,19 @@
       "name": "pydantic-core",
       "source": "https://github.com/pydantic/pydantic-core",
       "version": "2.33.2"
+    },
+    {
+      "ecosystem": "pypi",
+      "license": "MIT",
+      "licenseFiles": [
+        {
+          "path": "ThirdPartyNotices/licenses/python/pyjwt-2.13.0.txt",
+          "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5"
+        }
+      ],
+      "name": "pyjwt",
+      "source": "https://github.com/jpadilla/pyjwt",
+      "version": "2.13.0"
     },
     {
       "ecosystem": "pypi",

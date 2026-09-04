@@ -67,8 +67,28 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     )
 
     assert 'ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"' in runtime
-    assert "allUsers" not in runtime
     assert "allAuthenticatedUsers" not in runtime
+    assert runtime.count('member   = "allUsers"') == 1
+    managed_api_binding = runtime.split(
+        'resource "google_cloud_run_v2_service_iam_member" "managed_api_public"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_service" "managed_processor"',
+        maxsplit=1,
+    )[0]
+    assert 'member   = "allUsers"' in managed_api_binding
+    managed_processor = runtime.split(
+        'resource "google_cloud_run_v2_service" "managed_processor"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_service_iam_member" '
+        '"managed_processor_event_invoker"',
+        maxsplit=1,
+    )[0]
+    assert 'ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"' in (
+        managed_processor
+    )
+    assert "allUsers" not in managed_processor
     assert 'command = ["python"]' in runtime
     assert 'args    = ["-m", "app.migrate"]' in runtime
     migration = runtime.split(
@@ -87,6 +107,144 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     assert "max_instance_count = 2" in runtime
     assert "var.runtime_image != null" in variables
     assert "@sha256:" in variables
+    assert 'variable "enable_managed_runtime"' in variables
+    assert "var.enable_managed_runtime" in runtime
+    assert "var.enable_managed_runtime" in variables
+    assert "var.enable_public_managed_api" in runtime
+
+
+def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
+    identity = (REPOSITORY_ROOT / "infra" / "gcp" / "identity.tf").read_text(
+        encoding="utf-8"
+    )
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert identity.count('resource "google_apikeys_key"') == 3
+    assert "ios_key_restrictions" in identity
+    assert "allowed_bundle_ids = [var.managed_apple_bundle_id]" in identity
+    assert "android_key_restrictions" in identity
+    assert "package_name     = var.managed_android_package_name" in identity
+    assert (
+        'sha1_fingerprint = lower(replace(allowed_applications.value, ":", ""))'
+        in identity
+    )
+    assert identity.count('"identitytoolkit.googleapis.com",') == 2
+    assert 'service = "identitytoolkit.googleapis.com"' in identity
+    assert identity.count('"firebaseappcheck.googleapis.com",') == 2
+    assert identity.count('"firebaseinstallations.googleapis.com",') == 2
+    assert identity.count('"securetoken.googleapis.com",') == 2
+    assert "google_firebase_app_check_app_attest_config" in identity
+    assert "google_firebase_app_check_play_integrity_config" in identity
+    assert 'service_id       = "identitytoolkit.googleapis.com"' in identity
+    assert "enforcement_mode = var.managed_auth_app_check_enforcement" in identity
+    assert 'default     = "com.noopapp.noop"' in variables
+    assert 'default     = "com.noop.whoop.staging"' in variables
+    assert 'var.managed_auth_app_check_enforcement == "ENFORCED"' in variables
+    assert 'name  = "NOOP_MANAGED_PROJECT_ID"' in runtime
+    assert "value = var.project_id" in runtime
+    assert 'name  = "NOOP_MANAGED_PROJECT_NUMBER"' in runtime
+    assert "value = data.google_project.current.number" in runtime
+    assert 'name  = "NOOP_MANAGED_APPLE_APP_ID"' in runtime
+    assert "value = google_firebase_apple_app.staging[0].app_id" in runtime
+    assert 'name  = "NOOP_MANAGED_ANDROID_APP_ID"' in runtime
+    assert "value = google_firebase_android_app.staging[0].app_id" in runtime
+
+
+def test_gcp_managed_processor_accepts_only_authenticated_pubsub_push() -> None:
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    foundation = (REPOSITORY_ROOT / "infra" / "gcp" / "foundation.tf").read_text(
+        encoding="utf-8"
+    )
+
+    processor = runtime.split(
+        'resource "google_cloud_run_v2_service" "managed_processor"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_service_iam_member" '
+        '"managed_processor_event_invoker"',
+        maxsplit=1,
+    )[0]
+    invoker = runtime.split(
+        'resource "google_cloud_run_v2_service_iam_member" '
+        '"managed_processor_event_invoker"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_cloud_run_v2_job" "managed_lifecycle"',
+        maxsplit=1,
+    )[0]
+
+    assert 'ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"' in processor
+    assert "allUsers" not in processor
+    assert 'role     = "roles/run.invoker"' in invoker
+    assert (
+        'member   = "serviceAccount:${google_service_account.'
+        'managed_event_invoker.email}"'
+    ) in invoker
+    assert (
+        'push_endpoint = "${google_cloud_run_v2_service.'
+        'managed_processor[0].uri}/v1/events/storage-finalized"'
+    ) in foundation
+    assert (
+        "service_account_email = google_service_account.managed_event_invoker.email"
+    ) in foundation
+    assert (
+        "audience              = google_cloud_run_v2_service.managed_processor[0].uri"
+        in (foundation)
+    )
+
+
+def test_gcp_lifecycle_identity_can_only_delete_firebase_users() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+
+    role = iam.split(
+        'resource "google_project_iam_custom_role" "managed_identity_deleter"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_project_iam_member" "managed_lifecycle_identity_deleter"',
+        maxsplit=1,
+    )[0]
+    assert 'permissions = ["firebaseauth.users.delete"]' in role
+    assert "firebaseauth.users.get" not in role
+    assert "roles/firebaseauth.admin" not in iam
+    assert 'name  = "NOOP_MANAGED_PROJECT_ID"' in runtime
+    assert "google_project_iam_member.managed_lifecycle_identity_deleter" in (runtime)
+
+
+def test_gcp_managed_runtime_cannot_list_health_objects() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+
+    reader = iam.split(
+        'resource "google_project_iam_custom_role" "managed_object_reader"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_storage_bucket_iam_member" "managed_api_raw_reader"',
+        maxsplit=1,
+    )[0]
+    lifecycle = iam.split(
+        'resource "google_project_iam_custom_role" "managed_object_deleter"',
+        maxsplit=1,
+    )[1].split(
+        'resource "google_storage_bucket_iam_member" "managed_lifecycle_raw_deleter"',
+        maxsplit=1,
+    )[0]
+
+    assert 'permissions = ["storage.objects.get"]' in reader
+    assert '"storage.objects.get"' in lifecycle
+    assert '"storage.objects.delete"' in lifecycle
+    assert "storage.objects.list" not in reader
+    assert "storage.objects.list" not in lifecycle
+    assert "roles/storage.objectViewer" not in iam
+    assert iam.count("google_project_iam_custom_role.managed_object_reader.id") == 2
 
 
 def test_gcp_database_has_staging_recovery_and_encryption_guards() -> None:
@@ -121,6 +279,15 @@ def test_gcp_secrets_stay_out_of_opentofu_state() -> None:
     assert "secrets.token_hex(32)" in database_helper
     assert "password" not in database_helper.split("parser.add_argument", maxsplit=1)[1]
     assert "--data-file=-" in configure_script
+
+
+def test_gcp_provider_charges_user_adc_quota_to_the_managed_project() -> None:
+    providers = (REPOSITORY_ROOT / "infra" / "gcp" / "versions.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert providers.count("billing_project       = var.project_id") == 2
+    assert providers.count("user_project_override = true") == 2
 
 
 def test_gcp_custom_builder_uses_the_regional_short_retention_log_bucket() -> None:

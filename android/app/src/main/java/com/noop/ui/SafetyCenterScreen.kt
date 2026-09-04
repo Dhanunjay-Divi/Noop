@@ -38,7 +38,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1064,7 +1063,7 @@ fun SafetyCenterScreen() {
                         )
                     }
                     Spacer(Modifier.width(Metrics.space12))
-                    Switch(
+                    NoopToggleSwitch(
                         checked = sosGestureEnabled,
                         onCheckedChange = null,
                     )
@@ -1245,7 +1244,7 @@ fun SafetyCenterScreen() {
                         )
                     }
                     Spacer(Modifier.width(Metrics.space12))
-                    Switch(checked = includeLocation, onCheckedChange = null)
+                    NoopToggleSwitch(checked = includeLocation, onCheckedChange = null)
                 }
 
                 if (includeLocation) {

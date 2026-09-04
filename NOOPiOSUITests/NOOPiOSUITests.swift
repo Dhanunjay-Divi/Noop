@@ -71,6 +71,93 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Live HR"].exists)
     }
 
+    func testAppReportRequiresConsentAndBuildsPrivateAttachmentReview() {
+        let app = launchApp(extraArguments: ["--demo-app-report"])
+
+        XCTAssertTrue(app.navigationBars["App report"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Capture the freeze"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(
+                    format: "label CONTAINS[c] %@",
+                    "Nothing is uploaded automatically"
+                )
+            ).firstMatch.exists
+        )
+        XCTAssertTrue(app.buttons["Build report"].exists)
+        keepScreenshot(app, name: "app-report-consent")
+
+        app.buttons["Build report"].tap()
+        XCTAssertTrue(app.staticTexts["Report ready"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["app-session-current.jsonl"].exists)
+        XCTAssertTrue(app.staticTexts["meta.json"].exists)
+        XCTAssertFalse(app.staticTexts["raw-capture.jsonl"].exists)
+        XCTAssertFalse(app.staticTexts["screenshot.png"].exists)
+        XCTAssertTrue(app.buttons["Share ZIP"].exists)
+        keepScreenshot(app, name: "app-report-review")
+
+        app.buttons["Share ZIP"].tap()
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label BEGINSWITH %@", "Share sheet opened for noop-app-report")
+            ).firstMatch.waitForExistence(timeout: 10)
+        )
+    }
+
+    func testSettingsSwitchesRenderSemanticGreenAcrossStates() {
+        let app = launchDemoScreen("settings")
+        let scroll = app.scrollViews.firstMatch
+        let dimensional = app.switches["noop.settings.dimensional-background"]
+        let behindCards = app.switches["noop.settings.background-behind-cards"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 20))
+
+        for _ in 0..<18 where !dimensional.isHittable {
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+            start.press(
+                forDuration: 0.03,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0
+            )
+        }
+        XCTAssertTrue(dimensional.isHittable)
+
+        if !switchIsOn(dimensional) {
+            dimensional.tap()
+            XCTAssertTrue(waitForSwitch(dimensional, on: true))
+        }
+        let enabledOn = dimensional.screenshot()
+        let enabledGreenPixels = semanticGreenPixelCount(in: enabledOn.image)
+        XCTAssertGreaterThan(enabledGreenPixels, 200)
+
+        for _ in 0..<5 where !behindCards.isHittable {
+            scroll.swipeUp(velocity: .slow)
+        }
+        XCTAssertTrue(behindCards.isHittable)
+        if !switchIsOn(behindCards) {
+            behindCards.tap()
+            XCTAssertTrue(waitForSwitch(behindCards, on: true))
+        }
+        XCTAssertGreaterThan(semanticGreenPixelCount(in: behindCards.screenshot().image), 200)
+
+        behindCards.tap()
+        XCTAssertTrue(waitForSwitch(behindCards, on: false))
+        let offGreenPixels = semanticGreenPixelCount(in: behindCards.screenshot().image)
+        XCTAssertLessThan(offGreenPixels, enabledGreenPixels / 8)
+
+        behindCards.tap()
+        XCTAssertTrue(waitForSwitch(behindCards, on: true))
+        dimensional.tap()
+        XCTAssertTrue(waitForSwitch(dimensional, on: false))
+        XCTAssertTrue(waitForElementDisabled(behindCards))
+        XCTAssertGreaterThan(semanticGreenPixelCount(in: behindCards.screenshot().image), 80)
+        keepScreenshot(app, name: "settings-switch-green-states")
+
+        dimensional.tap()
+        XCTAssertTrue(waitForSwitch(dimensional, on: true))
+    }
+
     func testStrengthBodyMapKeepsFrontAndBackRegionsSelectedTogether() {
         let app = launchDemoScreen("strength")
         let tabs = app.segmentedControls["noop.strength.tabs"]
@@ -535,6 +622,10 @@ final class NOOPiOSUITests: XCTestCase {
         let clearWeight = app.buttons["noop.profile.weight.clear"]
         XCTAssertTrue(clearWeight.waitForExistence(timeout: 3))
         clearWeight.tap()
+        XCTAssertTrue(
+            textFieldIsEmpty(weight, placeholder: "Weight"),
+            "Clearing weight must not restore the previously validated value."
+        )
         weight.typeText("82.5")
         XCTAssertEqual(weight.value as? String, "82.5")
 
@@ -546,6 +637,10 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(clearHeight.waitForExistence(timeout: 3))
         XCTAssertTrue(clearHeight.isHittable)
         clearHeight.tap()
+        XCTAssertTrue(
+            textFieldIsEmpty(height, placeholder: "Height"),
+            "Clearing height must not restore the previously validated value."
+        )
         height.typeText("183")
         XCTAssertEqual(height.value as? String, "183")
         keepScreenshot(app, name: "onboarding-editable-measurements")
@@ -962,5 +1057,78 @@ final class NOOPiOSUITests: XCTestCase {
             }
         }
         return counts
+    }
+
+    private func switchIsOn(_ element: XCUIElement) -> Bool {
+        (element.value as? String) == "1"
+    }
+
+    private func textFieldIsEmpty(_ element: XCUIElement, placeholder: String) -> Bool {
+        guard let value = element.value as? String else { return false }
+        // XCUIElement exposes the placeholder as the value when a text field has no text.
+        return value.isEmpty || value == placeholder
+    }
+
+    private func waitForSwitch(
+        _ element: XCUIElement,
+        on: Bool,
+        timeout: TimeInterval = 3
+    ) -> Bool {
+        waitUntil(timeout: timeout) {
+            self.switchIsOn(element) == on
+        }
+    }
+
+    private func waitForElementDisabled(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 3
+    ) -> Bool {
+        waitUntil(timeout: timeout) {
+            !element.isEnabled
+        }
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval,
+        condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if condition() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return condition()
+    }
+
+    private func semanticGreenPixelCount(in image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 0 }
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerRow = width * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * height)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            return 0
+        }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var count = 0
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            let red = Int(pixels[offset])
+            let green = Int(pixels[offset + 1])
+            let blue = Int(pixels[offset + 2])
+            if green >= 45, green > red + 20, green > blue + 10 {
+                count += 1
+            }
+        }
+        return count
     }
 }

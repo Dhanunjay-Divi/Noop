@@ -291,10 +291,14 @@ internal fun HydrationLoggedConfirmation(
     val fill by animateFloatAsState(
         targetValue = targetFill,
         animationSpec = tween(durationMillis = 720),
-        label = "hydration glass fill",
+        label = "hydration_glass_fill",
     )
     LaunchedEffect(amountMl) { targetFill = 0.92f }
     val shape = RoundedCornerShape(8.dp)
+    val confirmationDescription = stringResource(
+        R.string.context_action_logged_water_accessibility,
+        amountMl,
+    )
     Row(
         modifier = modifier
             .height(52.dp)
@@ -302,7 +306,7 @@ internal fun HydrationLoggedConfirmation(
             .border(0.8.dp, Palette.metricCyan.copy(alpha = 0.42f), shape)
             .padding(horizontal = 14.dp)
             .semantics {
-                contentDescription = "Logged $amountMl millilitres of water"
+                contentDescription = confirmationDescription
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

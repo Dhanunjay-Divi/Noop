@@ -437,7 +437,11 @@ class WhoopRepository private constructor(
             // v26 PPG-derived HR (#156). Idempotent by (deviceId, ts); counted into InsertCounts.hr so the
             // backfill "persisted N" summary reflects HR recovered from the optical waveform too.
             val ppgHrIds = if (streams.ppgHr.isEmpty()) emptyList() else
-                dao.insertPpgHr(streams.ppgHr.map { PpgHrSample(deviceId, it.ts, it.bpm, it.conf) })
+                dao.insertPpgHr(
+                    streams.ppgHr.map {
+                        PpgHrSample(deviceId, it.ts, it.bpm.toDouble(), it.conf)
+                    },
+                )
             // RAW v26 optical PPG waveform (#156 follow-up) - the samples ppgHr above is derived FROM.
             // Included in InsertCounts so PPG-only nights advance persistence diagnostics. Idempotent by
             // (deviceId, ts), IGNORE-on-conflict keeps the FIRST-seen waveform for a second (mirrors every
@@ -1110,7 +1114,11 @@ class WhoopRepository private constructor(
     suspend fun insertRawImu(deviceId: String, rows: List<RawImuSampleEntity>) {
         if (rows.isEmpty()) return
         dao.insertRawImu(rows)
-        dao.pruneRawImu(deviceId, RAW_IMU_RETENTION_ROWS)
+        dao.pruneRawImuManagedAware(
+            deviceId,
+            RAW_IMU_RETENTION_ROWS,
+            System.currentTimeMillis(),
+        )
     }
 
     /** #423: raw 5/MG IMU buffers in [from, to] as the decoded i16 columns [ax…az,gx…gz] (100/axis). */
@@ -1198,7 +1206,7 @@ class WhoopRepository private constructor(
             // #961: recompute Effort from the SAME samples the graph/zones use. Read the raw window ONLY when
             // this row actually needs a strain (keeps the common no-fill path a single aggregate query), and
             // let StrainScorer return null on a still-too-thin window (never a fabricated number).
-            val filledStrain = if (needsStrainFill && strainMaxHR != null) {
+            val filledStrain = if (needsStrainFill) {
                 val samples = hrSamplesFor(hrIds, row.startTs, row.endTs, 8000)
                 com.noop.analytics.StrainScorer.strain(samples, maxHR = strainMaxHR, sex = strainSex)
             } else null

@@ -1,0 +1,5590 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from uuid import UUID, uuid4
+
+from app.managed_identity import ManagedIdentityClaims
+from app.managed_models import (
+    ManagedChunkReservation,
+    ManagedClientKeyRegistration,
+    ManagedDocumentMutation,
+    ManagedEnrollment,
+    ManagedExportRequest,
+    ManagedRestoreRequest,
+    ManagedSourceRegistration,
+)
+from app.managed_object_store import ManagedObjectMetadata
+
+
+class ManagedStorageError(Exception):
+    """Base class for managed-storage contract failures."""
+
+
+class ManagedNotFoundError(ManagedStorageError):
+    pass
+
+
+class ManagedForbiddenError(ManagedStorageError):
+    pass
+
+
+class ManagedConflictError(ManagedStorageError):
+    pass
+
+
+class ManagedQuotaExceededError(ManagedStorageError):
+    def __init__(self, *, maximum_bytes: int | None, used_bytes: int) -> None:
+        super().__init__("managed storage quota would be exceeded")
+        self.maximum_bytes = maximum_bytes
+        self.used_bytes = used_bytes
+
+
+class ManagedConfigurationError(ManagedStorageError):
+    pass
+
+
+class ManagedProcessingBusyError(ManagedStorageError):
+    pass
+
+
+class ManagedCursorExpiredError(ManagedStorageError):
+    def __init__(self, *, minimum_sequence: int) -> None:
+        super().__init__("managed sync cursor is older than retained history")
+        self.minimum_sequence = minimum_sequence
+
+
+def _decoded_json(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedPrincipal:
+    account_id: UUID
+    identity_id: UUID
+    subject_hash: str
+    account_status: str
+    auth_valid_after: datetime
+
+
+class PostgresManagedRepository:
+    """Tenant-scoped NOOP+ storage control plane on the primary database pool."""
+
+    def __init__(
+        self,
+        primary_repository: Any,
+        *,
+        home_region: str,
+        residency_policy_version: str,
+        default_plan_code: str,
+        default_plan_revision: int,
+        consent_policy_kind: str,
+        entitlement_mode: str = "closed",
+        replay_secret: str = "",
+    ) -> None:
+        if entitlement_mode not in {"closed", "open_beta", "paid"}:
+            raise ValueError("invalid managed entitlement mode")
+        self.primary_repository = primary_repository
+        self.home_region = home_region
+        self.residency_policy_version = residency_policy_version
+        self.default_plan_code = default_plan_code
+        self.default_plan_revision = default_plan_revision
+        self.consent_policy_kind = consent_policy_kind
+        self.entitlement_mode = entitlement_mode
+        self.replay_secret = replay_secret
+
+    def _pool(self) -> Any:
+        return self.primary_repository._require_pool()
+
+    async def coordination_now(self) -> datetime:
+        return await self._pool().fetchval("SELECT clock_timestamp()")
+
+    def _tenant_replay_hash(self, account_id: UUID) -> str:
+        if len(self.replay_secret.encode("utf-8")) < 32:
+            raise ManagedConfigurationError("managed replay secret is not configured")
+        return hmac.new(
+            self.replay_secret.encode("utf-8"),
+            f"account:{account_id}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def _resource_replay_hash(self, resource_kind: str, resource_id: UUID) -> str:
+        if len(self.replay_secret.encode("utf-8")) < 32:
+            raise ManagedConfigurationError("managed replay secret is not configured")
+        return hmac.new(
+            self.replay_secret.encode("utf-8"),
+            f"{resource_kind}:{resource_id}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    async def _append_chunk_change(
+        self,
+        connection: Any,
+        *,
+        chunk: Any,
+        operation: str,
+        now: datetime,
+    ) -> int:
+        generation = chunk["object_generation"]
+        content_sha256 = str(chunk["expected_sha256"]).strip()
+        idempotency_hash = hashlib.sha256(
+            (
+                f"change:chunk:{chunk['account_id']}:{chunk['chunk_id']}:"
+                f"{operation}:{generation}:{content_sha256}"
+            ).encode("utf-8")
+        ).hexdigest()
+        sequence = await connection.fetchval(
+            """
+            SELECT noop_managed_append_change(
+                $1,
+                $2::char(64),
+                'chunk',
+                $3,
+                $4,
+                $5,
+                $6::char(64),
+                $7,
+                $8,
+                $9,
+                $10::jsonb,
+                $11,
+                $11::timestamptz + interval '400 days'
+            )
+            """,
+            chunk["account_id"],
+            idempotency_hash,
+            chunk["chunk_id"],
+            generation,
+            operation,
+            content_sha256,
+            chunk["data_class"],
+            chunk["event_start"],
+            chunk["event_end"],
+            json.dumps(
+                {
+                    "object_generation": generation,
+                    "state": str(chunk["state"]),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            now,
+        )
+        return int(sequence)
+
+    async def _supersede_exact_chunk_window(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        replacement_chunk_id: UUID,
+        now: datetime,
+    ) -> None:
+        replacement = await connection.fetchrow(
+            """
+            SELECT authoritative_snapshot,
+                   pg_advisory_xact_lock(
+                       hashtextextended(
+                           concat_ws(
+                               ':',
+                               'noop-managed-window',
+                               account_id::text,
+                               source_id::text,
+                               data_class,
+                               extract(epoch FROM event_start)::text,
+                               extract(epoch FROM event_end)::text
+                           ),
+                           0
+                       )
+                   ) AS window_lock
+            FROM managed_chunks
+            WHERE account_id = $1 AND chunk_id = $2
+            """,
+            account_id,
+            replacement_chunk_id,
+        )
+        if replacement is None:
+            raise ManagedNotFoundError("managed replacement chunk was not found")
+        if not replacement["authoritative_snapshot"]:
+            return
+        await connection.execute(
+            """
+            UPDATE managed_chunks prior
+            SET superseded_by_chunk_id = replacement.chunk_id,
+                superseded_at = $3
+            FROM managed_chunks replacement
+            WHERE replacement.account_id = $1
+              AND replacement.chunk_id = $2
+              AND replacement.authoritative_snapshot
+              AND prior.account_id = replacement.account_id
+              AND prior.source_id = replacement.source_id
+              AND prior.data_class = replacement.data_class
+              AND prior.event_start = replacement.event_start
+              AND prior.event_end = replacement.event_end
+              AND prior.chunk_id <> replacement.chunk_id
+              AND prior.state = 'available'
+              AND prior.superseded_by_chunk_id IS NULL
+            """,
+            account_id,
+            replacement_chunk_id,
+            now,
+        )
+
+    async def acquire_worker_lease(
+        self,
+        *,
+        lease_name: str,
+        owner_id: UUID,
+        now: datetime,
+        lease_seconds: int,
+    ) -> bool:
+        if not 60 <= lease_seconds <= 3_600:
+            raise ValueError("lease_seconds must be between 60 and 3600")
+        row = await self._pool().fetchrow(
+            """
+            INSERT INTO managed_worker_leases (
+                lease_name,
+                owner_id,
+                acquired_at,
+                heartbeat_at,
+                expires_at
+            ) VALUES (
+                $1,
+                $2,
+                $3::timestamptz,
+                $3::timestamptz,
+                $3::timestamptz
+                    + make_interval(secs => $4::integer)
+            )
+            ON CONFLICT (lease_name) DO UPDATE
+            SET owner_id = EXCLUDED.owner_id,
+                acquired_at = EXCLUDED.acquired_at,
+                heartbeat_at = EXCLUDED.heartbeat_at,
+                expires_at = EXCLUDED.expires_at
+            WHERE managed_worker_leases.expires_at <= EXCLUDED.acquired_at
+            RETURNING owner_id
+            """,
+            lease_name,
+            owner_id,
+            now,
+            lease_seconds,
+        )
+        return row is not None and row["owner_id"] == owner_id
+
+    async def release_worker_lease(
+        self,
+        *,
+        lease_name: str,
+        owner_id: UUID,
+    ) -> None:
+        await self._pool().execute(
+            """
+            DELETE FROM managed_worker_leases
+            WHERE lease_name = $1 AND owner_id = $2
+            """,
+            lease_name,
+            owner_id,
+        )
+
+    async def configuration_ready(
+        self,
+        *,
+        policy_version: str,
+        policy_sha256: str,
+    ) -> bool:
+        row = await self._pool().fetchrow(
+            """
+            SELECT EXISTS (
+                       SELECT 1
+                       FROM managed_policy_documents
+                       WHERE policy_kind = $1
+                         AND policy_version = $2
+                         AND document_sha256 = $3
+                         AND effective_at <= clock_timestamp()
+                         AND (
+                             retired_at IS NULL
+                             OR retired_at > clock_timestamp()
+                         )
+                   ) AS policy_ready,
+                   EXISTS (
+                       SELECT 1
+                       FROM managed_storage_plans plan
+                       WHERE plan.plan_code = $4
+                         AND plan.revision = $5
+                         AND plan.status = 'active'
+                         AND plan.effective_at <= clock_timestamp()
+                         AND (
+                             plan.retired_at IS NULL
+                             OR plan.retired_at > clock_timestamp()
+                         )
+                         AND EXISTS (
+                             SELECT 1
+                             FROM managed_plan_data_rules rule
+                             WHERE rule.plan_code = plan.plan_code
+                               AND rule.plan_revision = plan.revision
+                         )
+                   ) AS plan_ready
+            """,
+            self.consent_policy_kind,
+            policy_version,
+            policy_sha256,
+            self.default_plan_code,
+            self.default_plan_revision,
+        )
+        return bool(row is not None and row["policy_ready"] and row["plan_ready"])
+
+    async def principal_for_identity(
+        self,
+        claims: ManagedIdentityClaims,
+    ) -> ManagedPrincipal:
+        row = await self._pool().fetchrow(
+            """
+            SELECT identity.identity_id,
+                   identity.account_id,
+                   identity.subject_hash,
+                   identity.status AS identity_status,
+                   account.status AS account_status,
+                   account.auth_valid_after
+            FROM managed_external_identities identity
+            JOIN managed_accounts account USING (account_id)
+            WHERE identity.issuer = $1
+              AND identity.provider_tenant = $2
+              AND identity.subject_hash = $3
+            """,
+            claims.issuer,
+            claims.provider_tenant,
+            claims.subject_hash,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed account is not enrolled")
+        if (
+            row["identity_status"] != "active"
+            or row["account_status"] not in {"active", "suspended", "erasure_pending"}
+            or claims.auth_time < row["auth_valid_after"]
+        ):
+            raise ManagedForbiddenError("managed account authorization was revoked")
+        await self._pool().execute(
+            """
+            UPDATE managed_external_identities
+            SET last_seen_at = GREATEST(last_seen_at, $2)
+            WHERE identity_id = $1
+            """,
+            row["identity_id"],
+            claims.issued_at,
+        )
+        return ManagedPrincipal(
+            account_id=row["account_id"],
+            identity_id=row["identity_id"],
+            subject_hash=str(row["subject_hash"]).strip(),
+            account_status=str(row["account_status"]),
+            auth_valid_after=row["auth_valid_after"],
+        )
+
+    async def enroll(
+        self,
+        *,
+        claims: ManagedIdentityClaims,
+        enrollment: ManagedEnrollment,
+    ) -> dict[str, Any]:
+        pool = self._pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    (
+                        "noop-managed-identity:"
+                        f"{claims.issuer}:{claims.provider_tenant}:"
+                        f"{claims.subject_hash}"
+                    ),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                policy = await connection.fetchrow(
+                    """
+                    SELECT document_sha256, effective_at, retired_at
+                    FROM managed_policy_documents
+                    WHERE policy_kind = $1 AND policy_version = $2
+                    """,
+                    self.consent_policy_kind,
+                    enrollment.policy_version,
+                )
+                if (
+                    policy is None
+                    or str(policy["document_sha256"]).strip()
+                    != enrollment.policy_sha256
+                    or policy["effective_at"] > now
+                    or (
+                        policy["retired_at"] is not None and policy["retired_at"] <= now
+                    )
+                ):
+                    raise ManagedConfigurationError(
+                        "managed consent policy is not active"
+                    )
+                identity = await connection.fetchrow(
+                    """
+                    SELECT identity.identity_id,
+                           identity.account_id,
+                           identity.status AS identity_status,
+                           account.status AS account_status,
+                           account.auth_valid_after,
+                           subscription.subscription_id,
+                           subscription.plan_code,
+                           subscription.plan_revision
+                    FROM managed_external_identities identity
+                    JOIN managed_accounts account USING (account_id)
+                    LEFT JOIN managed_subscriptions subscription
+                      ON subscription.account_id = account.account_id
+                     AND subscription.status
+                         IN ('trial', 'active', 'grace', 'paused')
+                    WHERE identity.issuer = $1
+                      AND identity.provider_tenant = $2
+                      AND identity.subject_hash = $3
+                    FOR UPDATE OF identity, account
+                    """,
+                    claims.issuer,
+                    claims.provider_tenant,
+                    claims.subject_hash,
+                )
+                created = identity is None
+                if self.entitlement_mode == "closed":
+                    raise ManagedForbiddenError("managed storage enrollment is closed")
+                if identity is None and self.entitlement_mode != "open_beta":
+                    raise ManagedForbiddenError(
+                        "managed storage requires a provisioned paid entitlement"
+                    )
+                selected_plan_code = self.default_plan_code
+                selected_plan_revision = self.default_plan_revision
+                if identity is not None:
+                    if (
+                        identity["identity_status"] != "active"
+                        or identity["account_status"] != "active"
+                        or claims.auth_time < identity["auth_valid_after"]
+                    ):
+                        raise ManagedForbiddenError(
+                            "managed account cannot be enrolled"
+                        )
+                    if identity["subscription_id"] is None:
+                        raise ManagedConfigurationError(
+                            "managed account has no current storage subscription"
+                        )
+                    selected_plan_code = str(identity["plan_code"])
+                    selected_plan_revision = int(identity["plan_revision"])
+                plan = await connection.fetchrow(
+                    """
+                    SELECT max_installations
+                    FROM managed_storage_plans
+                    WHERE plan_code = $1
+                      AND revision = $2
+                      AND effective_at IS NOT NULL
+                      AND effective_at <= $3
+                      AND (
+                          (
+                              status = 'active'
+                              AND (retired_at IS NULL OR retired_at > $3)
+                          )
+                          OR ($4::boolean AND status = 'retired')
+                      )
+                    """,
+                    selected_plan_code,
+                    selected_plan_revision,
+                    now,
+                    identity is not None,
+                )
+                rules = await connection.fetch(
+                    """
+                    SELECT data_class,
+                           cloud_retention_days,
+                           summary_retention_days,
+                           recommended_local_raw_days,
+                           storage_class,
+                           server_processing_allowed,
+                           maximum_daily_bytes
+                    FROM managed_plan_data_rules
+                    WHERE plan_code = $1
+                      AND plan_revision = $2
+                      AND data_class = ANY($3::text[])
+                    ORDER BY data_class
+                    """,
+                    selected_plan_code,
+                    selected_plan_revision,
+                    enrollment.data_classes,
+                )
+                if plan is None or {str(row["data_class"]) for row in rules} != set(
+                    enrollment.data_classes
+                ):
+                    plan_scope = "account" if identity is not None else "default"
+                    raise ManagedConfigurationError(
+                        f"managed {plan_scope} plan does not cover every "
+                        "consented data class"
+                    )
+                if identity is None:
+                    account_id = uuid4()
+                    identity_id = uuid4()
+                    subscription_id = uuid4()
+                    storage_namespace = uuid4()
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_accounts (
+                            account_id,
+                            storage_namespace,
+                            home_region,
+                            residency_policy_version,
+                            auth_valid_after,
+                            created_at,
+                            updated_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+                        """,
+                        account_id,
+                        storage_namespace,
+                        self.home_region,
+                        self.residency_policy_version,
+                        claims.auth_time,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_external_identities (
+                            identity_id,
+                            account_id,
+                            issuer,
+                            provider_tenant,
+                            subject_hash,
+                            verified_at,
+                            last_seen_at,
+                            created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7)
+                        """,
+                        identity_id,
+                        account_id,
+                        claims.issuer,
+                        claims.provider_tenant,
+                        claims.subject_hash,
+                        claims.issued_at,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_subscriptions (
+                            subscription_id,
+                            account_id,
+                            plan_code,
+                            plan_revision,
+                            status,
+                            billing_provider,
+                            period_started_at,
+                            created_at,
+                            updated_at
+                        ) VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            'active',
+                            'manual',
+                            $5,
+                            $5,
+                            $5
+                        )
+                        """,
+                        subscription_id,
+                        account_id,
+                        selected_plan_code,
+                        selected_plan_revision,
+                        now,
+                    )
+                else:
+                    account_id = identity["account_id"]
+                    identity_id = identity["identity_id"]
+                    subscription_id = identity["subscription_id"]
+                    await connection.execute(
+                        """
+                        UPDATE managed_external_identities
+                        SET last_seen_at = GREATEST(last_seen_at, $2)
+                        WHERE identity_id = $1
+                        """,
+                        identity_id,
+                        claims.issued_at,
+                    )
+
+                await self._enroll_installation(
+                    connection,
+                    account_id=account_id,
+                    enrollment=enrollment,
+                    maximum_installations=int(plan["max_installations"]),
+                    now=now,
+                )
+                await self._record_consent(
+                    connection,
+                    account_id=account_id,
+                    enrollment=enrollment,
+                    now=now,
+                )
+                for rule in rules:
+                    await self._ensure_retention_snapshot(
+                        connection,
+                        account_id=account_id,
+                        subscription_id=subscription_id,
+                        plan_code=selected_plan_code,
+                        plan_revision=selected_plan_revision,
+                        rule=dict(rule),
+                        now=now,
+                    )
+                overview = await self._overview(
+                    connection,
+                    account_id=account_id,
+                )
+        overview["created"] = created
+        overview["identity_id"] = identity_id
+        return overview
+
+    async def _enroll_installation(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        enrollment: ManagedEnrollment,
+        maximum_installations: int,
+        now: datetime,
+    ) -> None:
+        installation_token_hash = hashlib.sha256(
+            enrollment.installation_token.get_secret_value().encode("ascii")
+        ).hexdigest()
+        existing_owner = await connection.fetchrow(
+            """
+            SELECT account_id,
+                   platform,
+                   device_key_fingerprint,
+                   status,
+                   credential.token_hash,
+                   credential.revoked_at AS credential_revoked_at
+            FROM managed_account_installations installation
+            JOIN installation_credentials credential
+              USING (installation_id)
+            WHERE installation.installation_id = $1
+            FOR UPDATE OF installation, credential
+            """,
+            enrollment.installation_id,
+        )
+        if existing_owner is not None:
+            if existing_owner["account_id"] != account_id:
+                raise ManagedConflictError(
+                    "installation is already enrolled to another account"
+                )
+            stored_fingerprint = existing_owner["device_key_fingerprint"]
+            if (
+                stored_fingerprint is not None
+                and enrollment.device_key_fingerprint is not None
+                and str(stored_fingerprint).strip() != enrollment.device_key_fingerprint
+            ):
+                raise ManagedConflictError(
+                    "installation device key does not match enrollment"
+                )
+            if (
+                existing_owner["status"] == "revoked"
+                or existing_owner["credential_revoked_at"] is not None
+            ):
+                raise ManagedForbiddenError("installation was revoked")
+            if not hmac.compare_digest(
+                str(existing_owner["token_hash"]).strip(),
+                installation_token_hash,
+            ):
+                raise ManagedForbiddenError(
+                    "installation credential does not match enrollment"
+                )
+            await connection.execute(
+                """
+                UPDATE managed_account_installations
+                SET last_seen_at = $3,
+                    device_key_fingerprint = COALESCE(
+                        device_key_fingerprint,
+                        $2
+                    )
+                WHERE account_id = $1 AND installation_id = $4
+                """,
+                account_id,
+                enrollment.device_key_fingerprint,
+                now,
+                enrollment.installation_id,
+            )
+            return
+        installation_count = await connection.fetchval(
+            """
+            SELECT count(*)
+            FROM managed_account_installations
+            WHERE account_id = $1 AND status <> 'revoked'
+            """,
+            account_id,
+        )
+        if int(installation_count) >= maximum_installations:
+            raise ManagedQuotaExceededError(
+                maximum_bytes=None,
+                used_bytes=int(installation_count),
+            )
+        try:
+            await connection.execute(
+                """
+                INSERT INTO installation_credentials (
+                    installation_id,
+                    enrollment_id,
+                    token_hash,
+                    created_at,
+                    updated_at
+                ) VALUES ($1, $2, $3, $4, $4)
+                """,
+                enrollment.installation_id,
+                enrollment.enrollment_request_id,
+                installation_token_hash,
+                now,
+            )
+            await connection.execute(
+                """
+                INSERT INTO managed_account_installations (
+                    account_id,
+                    installation_id,
+                    platform,
+                    device_key_fingerprint,
+                    token_valid_after,
+                    registered_at,
+                    last_seen_at
+                ) VALUES ($1, $2, $3, $4, $5, $5, $5)
+                """,
+                account_id,
+                enrollment.installation_id,
+                enrollment.platform,
+                enrollment.device_key_fingerprint,
+                now,
+            )
+        except Exception as error:
+            if getattr(error, "sqlstate", None) == "23505":
+                raise ManagedConflictError(
+                    "installation is already enrolled"
+                ) from error
+            raise
+
+    async def _record_consent(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        enrollment: ManagedEnrollment,
+        now: datetime,
+    ) -> None:
+        existing = await connection.fetchrow(
+            """
+            SELECT policy_kind,
+                   policy_version,
+                   decision,
+                   data_classes,
+                   installation_id
+            FROM managed_consent_events
+            WHERE account_id = $1 AND request_id = $2
+            """,
+            account_id,
+            enrollment.enrollment_request_id,
+        )
+        if existing is not None:
+            if (
+                existing["policy_kind"] != self.consent_policy_kind
+                or existing["policy_version"] != enrollment.policy_version
+                or existing["decision"] != "granted"
+                or list(existing["data_classes"]) != enrollment.data_classes
+                or existing["installation_id"] != enrollment.installation_id
+            ):
+                raise ManagedConflictError(
+                    "enrollment request id was reused with different consent"
+                )
+            return
+        await connection.execute(
+            """
+            INSERT INTO managed_consent_events (
+                consent_event_id,
+                account_id,
+                policy_kind,
+                policy_version,
+                decision,
+                data_classes,
+                installation_id,
+                request_id,
+                occurred_at,
+                recorded_at
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                'granted',
+                $5,
+                $6,
+                $7,
+                $8,
+                $8
+            )
+            """,
+            uuid4(),
+            account_id,
+            self.consent_policy_kind,
+            enrollment.policy_version,
+            enrollment.data_classes,
+            enrollment.installation_id,
+            enrollment.enrollment_request_id,
+            now,
+        )
+
+    async def _ensure_retention_snapshot(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        subscription_id: UUID,
+        plan_code: str,
+        plan_revision: int,
+        rule: dict[str, Any],
+        now: datetime,
+    ) -> UUID:
+        existing = await connection.fetchval(
+            """
+            SELECT retention_snapshot_id
+            FROM managed_retention_policy_snapshots
+            WHERE account_id = $1
+              AND subscription_id = $2
+              AND data_class = $3
+            ORDER BY effective_at DESC
+            LIMIT 1
+            """,
+            account_id,
+            subscription_id,
+            rule["data_class"],
+        )
+        policy = {
+            "plan_code": plan_code,
+            "plan_revision": plan_revision,
+            "data_class": rule["data_class"],
+            "cloud_retention_days": rule["cloud_retention_days"],
+            "summary_retention_days": rule["summary_retention_days"],
+            "local_raw_days": rule["recommended_local_raw_days"],
+            "storage_class": rule["storage_class"],
+        }
+        policy_hash = hashlib.sha256(
+            json.dumps(
+                policy,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if existing is not None:
+            stored_hash = await connection.fetchval(
+                """
+                SELECT policy_sha256
+                FROM managed_retention_policy_snapshots
+                WHERE retention_snapshot_id = $1
+                """,
+                existing,
+            )
+            if str(stored_hash).strip() == policy_hash:
+                return existing
+        snapshot_id = uuid4()
+        await connection.execute(
+            """
+            INSERT INTO managed_retention_policy_snapshots (
+                retention_snapshot_id,
+                account_id,
+                subscription_id,
+                plan_code,
+                plan_revision,
+                data_class,
+                cloud_retention_days,
+                summary_retention_days,
+                local_raw_days,
+                storage_class,
+                policy_sha256,
+                effective_at,
+                created_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
+            )
+            """,
+            snapshot_id,
+            account_id,
+            subscription_id,
+            plan_code,
+            plan_revision,
+            rule["data_class"],
+            rule["cloud_retention_days"],
+            rule["summary_retention_days"],
+            rule["recommended_local_raw_days"],
+            rule["storage_class"],
+            policy_hash,
+            now,
+        )
+        return snapshot_id
+
+    async def ensure_installation(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        installation_token_hash: str,
+    ) -> dict[str, Any]:
+        if re.fullmatch(r"[0-9a-f]{64}", installation_token_hash) is None:
+            raise ManagedForbiddenError("managed installation credential was rejected")
+        row = await self._pool().fetchrow(
+            """
+            UPDATE managed_account_installations installation
+            SET last_seen_at = GREATEST(last_seen_at, clock_timestamp())
+            FROM installation_credentials credential
+            WHERE installation.account_id = $1
+              AND installation.installation_id = $2
+              AND installation.status IN ('active', 'limited')
+              AND credential.installation_id = installation.installation_id
+              AND credential.token_hash = $3
+              AND credential.revoked_at IS NULL
+              AND credential.updated_at >= installation.token_valid_after
+            RETURNING installation.installation_id,
+                      installation.platform,
+                      installation.status,
+                      installation.attestation_state,
+                      installation.registered_at,
+                      installation.last_seen_at
+            """,
+            principal.account_id,
+            installation_id,
+            installation_token_hash,
+        )
+        if row is None:
+            raise ManagedForbiddenError("managed installation credential was rejected")
+        return dict(row)
+
+    async def list_installations(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        rows = await self._pool().fetch(
+            """
+            SELECT installation_id,
+                   platform,
+                   status,
+                   attestation_state,
+                   registered_at,
+                   last_seen_at,
+                   revoked_at
+            FROM managed_account_installations
+            WHERE account_id = $1
+            ORDER BY
+                CASE status WHEN 'active' THEN 0 WHEN 'limited' THEN 1 ELSE 2 END,
+                last_seen_at DESC,
+                installation_id
+            """,
+            principal.account_id,
+        )
+        return [dict(row) for row in rows]
+
+    async def revoke_installation(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        requesting_installation_id: str,
+        installation_id: str,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        if requesting_installation_id == installation_id:
+            raise ManagedConflictError("the current installation cannot revoke itself")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                requester = await connection.fetchrow(
+                    """
+                    SELECT status
+                    FROM managed_account_installations
+                    WHERE account_id = $1 AND installation_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    requesting_installation_id,
+                )
+                if requester is None or requester["status"] not in {
+                    "active",
+                    "limited",
+                }:
+                    raise ManagedForbiddenError(
+                        "requesting managed installation is not active"
+                    )
+                target = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_account_installations
+                    WHERE account_id = $1 AND installation_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    installation_id,
+                )
+                if target is None:
+                    raise ManagedNotFoundError("managed installation was not found")
+                duplicate = target["status"] == "revoked"
+                if not duplicate:
+                    now = await connection.fetchval("SELECT clock_timestamp()")
+                    target = await connection.fetchrow(
+                        """
+                        UPDATE managed_account_installations
+                        SET status = 'revoked',
+                            revoked_at = $3,
+                            token_valid_after = $3
+                        WHERE account_id = $1 AND installation_id = $2
+                        RETURNING *
+                        """,
+                        principal.account_id,
+                        installation_id,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        UPDATE installation_credentials
+                        SET revoked_at = COALESCE(revoked_at, $2),
+                            updated_at = GREATEST(updated_at, $2),
+                            token_version = token_version + 1
+                        WHERE installation_id = $1
+                        """,
+                        installation_id,
+                        now,
+                    )
+        public = {
+            key: target[key]
+            for key in (
+                "installation_id",
+                "platform",
+                "status",
+                "attestation_state",
+                "registered_at",
+                "last_seen_at",
+                "revoked_at",
+            )
+        }
+        public["duplicate"] = duplicate
+        return public
+
+    async def overview(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            return await self._overview(
+                connection,
+                account_id=principal.account_id,
+            )
+
+    async def _overview(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+    ) -> dict[str, Any]:
+        account = await connection.fetchrow(
+            """
+            SELECT account.account_id,
+                   account.status,
+                   account.home_region,
+                   account.created_at,
+                   subscription.plan_code,
+                   subscription.plan_revision,
+                   subscription.status AS subscription_status,
+                   plan.display_tier,
+                   plan.max_total_bytes,
+                   plan.max_chunk_bytes,
+                   plan.max_uncompressed_chunk_bytes,
+                   plan.max_inflight_bytes,
+                   plan.max_installations
+            FROM managed_accounts account
+            JOIN managed_subscriptions subscription
+              ON subscription.account_id = account.account_id
+             AND subscription.status IN ('trial', 'active', 'grace', 'paused')
+            JOIN managed_storage_plans plan
+              ON plan.plan_code = subscription.plan_code
+             AND plan.revision = subscription.plan_revision
+            WHERE account.account_id = $1
+            """,
+            account_id,
+        )
+        if account is None:
+            raise ManagedConfigurationError(
+                "managed account has no current storage plan"
+            )
+        rules = await connection.fetch(
+            """
+            SELECT rule.data_class,
+                   snapshot.cloud_retention_days,
+                   snapshot.summary_retention_days,
+                   snapshot.local_raw_days,
+                   snapshot.storage_class,
+                   rule.server_processing_allowed,
+                   rule.maximum_daily_bytes,
+                   COALESCE(usage.committed_bytes, 0) AS committed_bytes,
+                   COALESCE(usage.reserved_bytes, 0) AS reserved_bytes,
+                   COALESCE(usage.object_count, 0) AS object_count
+            FROM managed_plan_data_rules rule
+            JOIN managed_retention_policy_snapshots snapshot
+              ON snapshot.account_id = $1
+             AND snapshot.plan_code = rule.plan_code
+             AND snapshot.plan_revision = rule.plan_revision
+             AND snapshot.data_class = rule.data_class
+            LEFT JOIN managed_storage_usage usage
+              ON usage.account_id = $1
+             AND usage.data_class = rule.data_class
+            WHERE rule.plan_code = $2
+              AND rule.plan_revision = $3
+              AND snapshot.effective_at = (
+                  SELECT max(newer.effective_at)
+                  FROM managed_retention_policy_snapshots newer
+                  WHERE newer.account_id = snapshot.account_id
+                    AND newer.data_class = snapshot.data_class
+              )
+            ORDER BY rule.data_class
+            """,
+            account_id,
+            account["plan_code"],
+            account["plan_revision"],
+        )
+        installations = await connection.fetchval(
+            """
+            SELECT count(*)
+            FROM managed_account_installations
+            WHERE account_id = $1 AND status <> 'revoked'
+            """,
+            account_id,
+        )
+        public_account = dict(account)
+        public_account["account_id"] = str(public_account["account_id"])
+        return {
+            "account": public_account,
+            "storage": {
+                "installations": int(installations),
+                "rules": [dict(row) for row in rules],
+            },
+            "entitlements": {
+                "managed_storage": True,
+                "feature_restrictions": [],
+            },
+        }
+
+    async def register_source(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        registration: ManagedSourceRegistration,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        now = await self.coordination_now()
+        try:
+            row = await self._pool().fetchrow(
+                """
+                INSERT INTO managed_sources (
+                    account_id,
+                    source_id,
+                    installation_id,
+                    source_kind,
+                    platform,
+                    logical_source_hash,
+                    first_seen_at,
+                    last_seen_at
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7, $7
+                FROM managed_account_installations installation
+                WHERE installation.account_id = $1
+                  AND installation.installation_id = $3
+                  AND installation.status IN ('active', 'limited')
+                ON CONFLICT (account_id, source_id) DO UPDATE
+                SET last_seen_at = EXCLUDED.last_seen_at
+                WHERE managed_sources.installation_id = EXCLUDED.installation_id
+                  AND managed_sources.source_kind = EXCLUDED.source_kind
+                  AND managed_sources.platform = EXCLUDED.platform
+                  AND managed_sources.logical_source_hash
+                      = EXCLUDED.logical_source_hash
+                RETURNING account_id, source_id, installation_id,
+                          source_kind, platform, status,
+                          first_seen_at, last_seen_at
+                """,
+                principal.account_id,
+                registration.source_id,
+                installation_id,
+                registration.source_kind,
+                registration.platform,
+                registration.logical_source_hash,
+                now,
+            )
+        except Exception as error:
+            if getattr(error, "sqlstate", None) == "23505":
+                raise ManagedConflictError(
+                    "managed source identifier is already registered"
+                ) from error
+            raise
+        if row is None:
+            raise ManagedConflictError(
+                "managed source registration conflicts with existing state"
+            )
+        result = dict(row)
+        result["account_id"] = str(result["account_id"])
+        result["source_id"] = str(result["source_id"])
+        return result
+
+    async def register_client_key(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        registration: ManagedClientKeyRegistration,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        public_key: bytes | None = None
+        if registration.public_key_base64 is not None:
+            try:
+                public_key = base64.b64decode(
+                    registration.public_key_base64,
+                    validate=True,
+                )
+            except ValueError:
+                raise ManagedConflictError("client key is not valid base64") from None
+        now = await self.coordination_now()
+        try:
+            row = await self._pool().fetchrow(
+                """
+                INSERT INTO managed_client_keys (
+                    account_id,
+                    client_key_id,
+                    installation_id,
+                    purpose,
+                    algorithm,
+                    public_key,
+                    key_fingerprint,
+                    recovery_method,
+                    hardware_backed,
+                    created_at
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+                FROM managed_account_installations installation
+                WHERE installation.account_id = $1
+                  AND installation.installation_id = $3
+                  AND installation.status IN ('active', 'limited')
+                ON CONFLICT (account_id, client_key_id) DO UPDATE
+                SET client_key_id = managed_client_keys.client_key_id
+                WHERE managed_client_keys.installation_id
+                          = EXCLUDED.installation_id
+                  AND managed_client_keys.purpose = EXCLUDED.purpose
+                  AND managed_client_keys.algorithm = EXCLUDED.algorithm
+                  AND managed_client_keys.public_key
+                      IS NOT DISTINCT FROM EXCLUDED.public_key
+                  AND managed_client_keys.key_fingerprint
+                      = EXCLUDED.key_fingerprint
+                  AND managed_client_keys.recovery_method
+                      = EXCLUDED.recovery_method
+                RETURNING client_key_id, purpose, algorithm,
+                          key_fingerprint, recovery_method,
+                          hardware_backed, created_at, revoked_at
+                """,
+                principal.account_id,
+                registration.client_key_id,
+                installation_id,
+                registration.purpose,
+                registration.algorithm,
+                public_key,
+                registration.key_fingerprint,
+                registration.recovery_method,
+                registration.hardware_backed,
+                now,
+            )
+        except Exception as error:
+            if getattr(error, "sqlstate", None) in {"23505", "23514"}:
+                raise ManagedConflictError(
+                    "managed client key conflicts with existing state"
+                ) from error
+            raise
+        if row is None:
+            raise ManagedConflictError(
+                "managed client key conflicts with existing state"
+            )
+        result = dict(row)
+        result["client_key_id"] = str(result["client_key_id"])
+        return result
+
+    async def reserve_chunk(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        reservation: ManagedChunkReservation,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        pool = self._pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-account-quota:{principal.account_id}",
+                )
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-chunk:{principal.account_id}:{reservation.chunk_id}",
+                )
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_chunks
+                    WHERE account_id = $1
+                      AND (
+                          chunk_id = $2
+                          OR idempotency_key = $3
+                      )
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    reservation.chunk_id,
+                    reservation.request_id,
+                )
+                if existing is not None:
+                    self._assert_matching_chunk(
+                        dict(existing),
+                        installation_id=installation_id,
+                        reservation=reservation,
+                    )
+                    return self._public_chunk(dict(existing), duplicate=True)
+
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                replayed = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM managed_replay_tombstones
+                        WHERE tenant_replay_hash = $1
+                          AND resource_kind = 'chunk'
+                          AND resource_id_hash = $2
+                          AND expires_at > $3
+                    )
+                    """,
+                    self._tenant_replay_hash(principal.account_id),
+                    self._resource_replay_hash("chunk", reservation.chunk_id),
+                    now,
+                )
+                if replayed:
+                    raise ManagedConflictError(
+                        "managed chunk was previously deleted and cannot be replayed"
+                    )
+                contract = await connection.fetchrow(
+                    """
+                    SELECT account.storage_namespace,
+                           plan.max_total_bytes,
+                           plan.max_inflight_bytes,
+                           plan.max_chunk_bytes,
+                           plan.max_uncompressed_chunk_bytes,
+                           rule.maximum_daily_bytes,
+                           rule.server_processing_allowed,
+                           snapshot.retention_snapshot_id,
+                           snapshot.cloud_retention_days,
+                           chunk_schema.maximum_event_span_seconds,
+                           chunk_schema.maximum_streams
+                    FROM managed_accounts account
+                    JOIN managed_account_installations installation
+                      ON installation.account_id = account.account_id
+                     AND installation.installation_id = $2
+                     AND installation.status IN ('active', 'limited')
+                    JOIN managed_subscriptions subscription
+                      ON subscription.account_id = account.account_id
+                     AND subscription.status IN ('trial', 'active', 'grace')
+                    JOIN managed_storage_plans plan
+                      ON plan.plan_code = subscription.plan_code
+                     AND plan.revision = subscription.plan_revision
+                    JOIN managed_plan_data_rules rule
+                      ON rule.plan_code = plan.plan_code
+                     AND rule.plan_revision = plan.revision
+                     AND rule.data_class = $3
+                    JOIN managed_chunk_schemas chunk_schema
+                      ON chunk_schema.data_class = rule.data_class
+                     AND chunk_schema.schema_version = $4
+                     AND chunk_schema.status = 'active'
+                     AND chunk_schema.content_mode = $5
+                     AND chunk_schema.content_type = $6
+                     AND $7 = ANY(chunk_schema.allowed_compressions)
+                     AND chunk_schema.effective_at <= clock_timestamp()
+                     AND (
+                         chunk_schema.retired_at IS NULL
+                         OR chunk_schema.retired_at > clock_timestamp()
+                     )
+                    JOIN managed_retention_policy_snapshots snapshot
+                      ON snapshot.account_id = account.account_id
+                     AND snapshot.subscription_id = subscription.subscription_id
+                     AND snapshot.data_class = rule.data_class
+                    WHERE account.account_id = $1
+                      AND account.status = 'active'
+                      AND snapshot.effective_at = (
+                          SELECT max(newer.effective_at)
+                          FROM managed_retention_policy_snapshots newer
+                          WHERE newer.account_id = snapshot.account_id
+                            AND newer.data_class = snapshot.data_class
+                      )
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    reservation.data_class,
+                    reservation.schema_version,
+                    reservation.content_mode,
+                    reservation.content_type,
+                    reservation.compression,
+                )
+                if contract is None:
+                    raise ManagedForbiddenError(
+                        "managed data class or payload schema is not enabled "
+                        "for this account"
+                    )
+                if (
+                    reservation.content_mode == "server_readable"
+                    and not contract["server_processing_allowed"]
+                ):
+                    raise ManagedForbiddenError(
+                        "server processing is not enabled for this data class"
+                    )
+                event_span_seconds = (
+                    reservation.event_end - reservation.event_start
+                ).total_seconds()
+                if event_span_seconds > int(contract["maximum_event_span_seconds"]):
+                    raise ManagedConflictError(
+                        "chunk event window exceeds its schema contract"
+                    )
+                if len(reservation.streams) > int(contract["maximum_streams"]):
+                    raise ManagedConflictError(
+                        "chunk stream count exceeds its schema contract"
+                    )
+                if reservation.content_mode == "client_encrypted" and (
+                    reservation.streams
+                    or reservation.compression != "none"
+                    or reservation.expected_uncompressed_bytes
+                    != reservation.expected_compressed_bytes
+                ):
+                    raise ManagedConflictError(
+                        "encrypted backup must be opaque, uncompressed, and stream-free"
+                    )
+                registered_streams = await connection.fetch(
+                    """
+                    SELECT mapping.stream_key,
+                           mapping.stream_schema_revision,
+                           mapping.required
+                    FROM managed_chunk_schema_streams mapping
+                    JOIN managed_stream_schemas stream_schema
+                      ON stream_schema.data_class = mapping.data_class
+                     AND stream_schema.stream_key = mapping.stream_key
+                     AND stream_schema.schema_revision
+                         = mapping.stream_schema_revision
+                     AND stream_schema.status = 'active'
+                     AND stream_schema.effective_at <= clock_timestamp()
+                     AND (
+                         stream_schema.retired_at IS NULL
+                         OR stream_schema.retired_at > clock_timestamp()
+                     )
+                    WHERE mapping.data_class = $1
+                      AND mapping.chunk_schema_version = $2
+                    """,
+                    reservation.data_class,
+                    reservation.schema_version,
+                )
+                allowed_streams = {
+                    (
+                        str(row["stream_key"]),
+                        int(row["stream_schema_revision"]),
+                    )
+                    for row in registered_streams
+                }
+                supplied_streams = {
+                    (stream.stream_key, stream.schema_revision)
+                    for stream in reservation.streams
+                }
+                required_streams = {
+                    (
+                        str(row["stream_key"]),
+                        int(row["stream_schema_revision"]),
+                    )
+                    for row in registered_streams
+                    if row["required"]
+                }
+                if not supplied_streams.issubset(
+                    allowed_streams
+                ) or not required_streams.issubset(supplied_streams):
+                    raise ManagedConflictError(
+                        "chunk streams do not match the active schema contract"
+                    )
+                authoritative_snapshot = (
+                    reservation.content_mode == "server_readable"
+                    and bool(allowed_streams)
+                    and supplied_streams == allowed_streams
+                )
+                if reservation.expected_compressed_bytes > int(
+                    contract["max_chunk_bytes"]
+                ):
+                    raise ManagedQuotaExceededError(
+                        maximum_bytes=int(contract["max_chunk_bytes"]),
+                        used_bytes=reservation.expected_compressed_bytes,
+                    )
+                if reservation.expected_uncompressed_bytes > int(
+                    contract["max_uncompressed_chunk_bytes"]
+                ):
+                    raise ManagedQuotaExceededError(
+                        maximum_bytes=int(contract["max_uncompressed_chunk_bytes"]),
+                        used_bytes=reservation.expected_uncompressed_bytes,
+                    )
+                if reservation.event_end > now + timedelta(days=1):
+                    raise ManagedConflictError(
+                        "chunk event window is too far in the future"
+                    )
+                source_exists = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM managed_sources
+                        WHERE account_id = $1
+                          AND source_id = $2
+                          AND installation_id = $3
+                          AND status = 'active'
+                    )
+                    """,
+                    principal.account_id,
+                    reservation.source_id,
+                    installation_id,
+                )
+                if not source_exists:
+                    raise ManagedNotFoundError("managed source was not found")
+                if reservation.client_key_id is not None:
+                    key_exists = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_client_keys
+                            WHERE account_id = $1
+                              AND client_key_id = $2
+                              AND revoked_at IS NULL
+                        )
+                        """,
+                        principal.account_id,
+                        reservation.client_key_id,
+                    )
+                    if not key_exists:
+                        raise ManagedNotFoundError("managed client key was not found")
+
+                usage = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_storage_usage (
+                        account_id,
+                        data_class
+                    ) VALUES ($1, $2)
+                    ON CONFLICT (account_id, data_class) DO UPDATE
+                    SET data_class = managed_storage_usage.data_class
+                    RETURNING committed_bytes,
+                              reserved_bytes,
+                              object_count,
+                              revision
+                    """,
+                    principal.account_id,
+                    reservation.data_class,
+                )
+                maximum = contract["max_total_bytes"]
+                override = await connection.fetchrow(
+                    """
+                    SELECT maximum_bytes, maximum_daily_bytes
+                    FROM managed_quota_overrides
+                    WHERE account_id = $1
+                      AND data_class = $2
+                      AND effective_at <= $3
+                      AND (expires_at IS NULL OR expires_at > $3)
+                      AND revoked_at IS NULL
+                    ORDER BY effective_at DESC
+                    LIMIT 1
+                    """,
+                    principal.account_id,
+                    reservation.data_class,
+                    now,
+                )
+                if override is not None:
+                    maximum = override["maximum_bytes"]
+                usage_rows = await connection.fetch(
+                    """
+                    SELECT data_class, committed_bytes, reserved_bytes
+                    FROM managed_storage_usage
+                    WHERE account_id = $1
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                )
+                total_committed = sum(int(row["committed_bytes"]) for row in usage_rows)
+                total_reserved = sum(int(row["reserved_bytes"]) for row in usage_rows)
+                projected_total = (
+                    total_committed
+                    + total_reserved
+                    + reservation.expected_compressed_bytes
+                )
+                plan_maximum = contract["max_total_bytes"]
+                if plan_maximum is not None and projected_total > int(plan_maximum):
+                    raise ManagedQuotaExceededError(
+                        maximum_bytes=int(plan_maximum),
+                        used_bytes=projected_total,
+                    )
+                projected_class = (
+                    int(usage["committed_bytes"])
+                    + int(usage["reserved_bytes"])
+                    + reservation.expected_compressed_bytes
+                )
+                if override is not None and projected_class > int(maximum):
+                    raise ManagedQuotaExceededError(
+                        maximum_bytes=int(maximum),
+                        used_bytes=projected_class,
+                    )
+                inflight = total_reserved
+                if inflight + reservation.expected_compressed_bytes > int(
+                    contract["max_inflight_bytes"]
+                ):
+                    raise ManagedQuotaExceededError(
+                        maximum_bytes=int(contract["max_inflight_bytes"]),
+                        used_bytes=(inflight + reservation.expected_compressed_bytes),
+                    )
+                daily_limit = (
+                    override["maximum_daily_bytes"]
+                    if override is not None
+                    and override["maximum_daily_bytes"] is not None
+                    else contract["maximum_daily_bytes"]
+                )
+                utc_day = reservation.event_start.astimezone(UTC).date()
+                daily_usage = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_daily_ingest_usage (
+                        account_id,
+                        data_class,
+                        utc_day
+                    ) VALUES ($1, $2, $3)
+                    ON CONFLICT (account_id, data_class, utc_day) DO UPDATE
+                    SET data_class = managed_daily_ingest_usage.data_class
+                    RETURNING accepted_bytes, accepted_objects
+                    """,
+                    principal.account_id,
+                    reservation.data_class,
+                    utc_day,
+                )
+                if daily_limit is not None:
+                    projected_daily = (
+                        int(daily_usage["accepted_bytes"])
+                        + reservation.expected_compressed_bytes
+                    )
+                    if projected_daily > int(daily_limit):
+                        raise ManagedQuotaExceededError(
+                            maximum_bytes=int(daily_limit),
+                            used_bytes=projected_daily,
+                        )
+                retention_days = contract["cloud_retention_days"]
+                expires_at = (
+                    reservation.event_end + timedelta(days=int(retention_days))
+                    if retention_days is not None
+                    else None
+                )
+                if expires_at is not None and expires_at <= now:
+                    raise ManagedConflictError(
+                        "chunk event window is outside managed retention"
+                    )
+                try:
+                    chunk = await connection.fetchrow(
+                        """
+                        INSERT INTO managed_chunks (
+                            chunk_id,
+                            account_id,
+                            storage_namespace,
+                            source_id,
+                            installation_id,
+                            retention_snapshot_id,
+                            client_key_id,
+                            data_class,
+                            schema_version,
+                            idempotency_key,
+                            content_mode,
+                            authoritative_snapshot,
+                            event_start,
+                            event_end,
+                            compression,
+                            content_type,
+                            expected_sha256,
+                            expected_compressed_bytes,
+                            expected_uncompressed_bytes,
+                            expires_at,
+                            reserved_at
+                        ) VALUES (
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                            $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                            $21
+                        )
+                        RETURNING *
+                        """,
+                        reservation.chunk_id,
+                        principal.account_id,
+                        contract["storage_namespace"],
+                        reservation.source_id,
+                        installation_id,
+                        contract["retention_snapshot_id"],
+                        reservation.client_key_id,
+                        reservation.data_class,
+                        reservation.schema_version,
+                        reservation.request_id,
+                        reservation.content_mode,
+                        authoritative_snapshot,
+                        reservation.event_start,
+                        reservation.event_end,
+                        reservation.compression,
+                        reservation.content_type,
+                        reservation.expected_sha256,
+                        reservation.expected_compressed_bytes,
+                        reservation.expected_uncompressed_bytes,
+                        expires_at,
+                        now,
+                    )
+                except Exception as error:
+                    if getattr(error, "sqlstate", None) == "23505":
+                        raise ManagedConflictError(
+                            "managed chunk identity is already reserved"
+                        ) from error
+                    raise
+                for stream in reservation.streams:
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_chunk_streams (
+                            account_id,
+                            chunk_id,
+                            stream_key,
+                            sample_count,
+                            first_event_at,
+                            last_event_at,
+                            encoded_bytes,
+                            schema_revision
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        """,
+                        principal.account_id,
+                        reservation.chunk_id,
+                        stream.stream_key,
+                        stream.sample_count,
+                        stream.first_event_at,
+                        stream.last_event_at,
+                        stream.encoded_bytes,
+                        stream.schema_revision,
+                    )
+                ledger_hash = hashlib.sha256(
+                    (f"reserve:{principal.account_id}:{reservation.request_id}").encode(
+                        "utf-8"
+                    )
+                ).hexdigest()
+                await connection.execute(
+                    """
+                    INSERT INTO managed_storage_usage_ledger (
+                        usage_event_id,
+                        account_id,
+                        data_class,
+                        chunk_id,
+                        idempotency_hash,
+                        reason,
+                        reserved_bytes_delta,
+                        occurred_at,
+                        purge_after
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, 'reserve', $6,
+                        $7::timestamptz,
+                        $7::timestamptz + interval '400 days'
+                    )
+                    """,
+                    uuid4(),
+                    principal.account_id,
+                    reservation.data_class,
+                    reservation.chunk_id,
+                    ledger_hash,
+                    reservation.expected_compressed_bytes,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_daily_ingest_usage
+                    SET accepted_bytes = accepted_bytes + $4,
+                        accepted_objects = accepted_objects + 1,
+                        revision = revision + 1,
+                        updated_at = $5
+                    WHERE account_id = $1
+                      AND data_class = $2
+                      AND utc_day = $3
+                    """,
+                    principal.account_id,
+                    reservation.data_class,
+                    utc_day,
+                    reservation.expected_compressed_bytes,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_storage_usage
+                    SET reserved_bytes = reserved_bytes + $3,
+                        revision = revision + 1,
+                        updated_at = $4
+                    WHERE account_id = $1 AND data_class = $2
+                    """,
+                    principal.account_id,
+                    reservation.data_class,
+                    reservation.expected_compressed_bytes,
+                    now,
+                )
+                return self._public_chunk(dict(chunk), duplicate=False)
+
+    @staticmethod
+    def _assert_matching_chunk(
+        row: dict[str, Any],
+        *,
+        installation_id: str,
+        reservation: ManagedChunkReservation,
+    ) -> None:
+        expected = {
+            "chunk_id": reservation.chunk_id,
+            "source_id": reservation.source_id,
+            "installation_id": installation_id,
+            "data_class": reservation.data_class,
+            "schema_version": reservation.schema_version,
+            "idempotency_key": reservation.request_id,
+            "client_key_id": reservation.client_key_id,
+            "content_mode": reservation.content_mode,
+            "event_start": reservation.event_start,
+            "event_end": reservation.event_end,
+            "compression": reservation.compression,
+            "content_type": reservation.content_type,
+            "expected_sha256": reservation.expected_sha256,
+            "expected_compressed_bytes": (reservation.expected_compressed_bytes),
+            "expected_uncompressed_bytes": (reservation.expected_uncompressed_bytes),
+        }
+        for key, value in expected.items():
+            stored = row.get(key)
+            if hasattr(stored, "strip") and key == "expected_sha256":
+                stored = stored.strip()
+            if stored != value:
+                raise ManagedConflictError(
+                    "managed chunk retry changed the reserved content contract"
+                )
+
+    async def record_upload_grant(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        chunk_id: UUID,
+        capability_hash: str,
+        expires_at: datetime,
+    ) -> UUID:
+        self._require_active(principal)
+        grant_id = uuid4()
+        request_id = uuid4()
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                chunk = await connection.fetchrow(
+                    """
+                    SELECT expected_sha256, expected_compressed_bytes
+                    FROM managed_chunks
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND installation_id = $3
+                      AND state IN ('reserved', 'uploading')
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                    installation_id,
+                )
+                if chunk is None:
+                    raise ManagedConflictError(
+                        "managed chunk is not eligible for upload"
+                    )
+                await connection.execute(
+                    """
+                    UPDATE managed_upload_grants
+                    SET status = 'expired'
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND status = 'issued'
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_upload_grants (
+                        upload_grant_id,
+                        account_id,
+                        chunk_id,
+                        installation_id,
+                        request_id,
+                        capability_hash,
+                        expected_sha256,
+                        expected_bytes,
+                        issued_at,
+                        expires_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    """,
+                    grant_id,
+                    principal.account_id,
+                    chunk_id,
+                    installation_id,
+                    request_id,
+                    capability_hash,
+                    str(chunk["expected_sha256"]).strip(),
+                    chunk["expected_compressed_bytes"],
+                    now,
+                    expires_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'uploading'
+                    WHERE account_id = $1 AND chunk_id = $2
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                )
+        return grant_id
+
+    async def chunk_for_upload_completion(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        chunk_id: UUID,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        row = await self._pool().fetchrow(
+            """
+            SELECT *
+            FROM managed_chunks
+            WHERE account_id = $1
+              AND chunk_id = $2
+              AND installation_id = $3
+            """,
+            principal.account_id,
+            chunk_id,
+            installation_id,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed chunk was not found")
+        return dict(row)
+
+    async def complete_chunk_upload(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        chunk_id: UUID,
+        metadata: ManagedObjectMetadata,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                chunk = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_chunks
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND installation_id = $3
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                    installation_id,
+                )
+                if chunk is None:
+                    raise ManagedNotFoundError("managed chunk was not found")
+                if chunk["state"] in {"delete_pending", "deleted"}:
+                    raise ManagedConflictError(
+                        "managed chunk cannot complete from its current state"
+                    )
+                expected_hash = str(chunk["expected_sha256"]).strip()
+                if (
+                    metadata.object_key != chunk["object_key"]
+                    or metadata.size != chunk["expected_compressed_bytes"]
+                    or metadata.content_type != chunk["content_type"]
+                    or metadata.metadata.get("noop-sha256") != expected_hash
+                ):
+                    raise ManagedConflictError(
+                        "uploaded object does not match the chunk reservation"
+                    )
+                if chunk["state"] not in {"reserved", "uploading"}:
+                    if (
+                        chunk["object_generation"] != metadata.generation
+                        or chunk["object_metageneration"] != metadata.metageneration
+                        or chunk["object_crc32c"] != metadata.crc32c
+                    ):
+                        raise ManagedConflictError(
+                            "managed chunk object generation changed"
+                        )
+                    return self._public_chunk(dict(chunk), duplicate=True)
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                updated = await connection.fetchrow(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'uploaded',
+                        object_generation = $4,
+                        object_metageneration = $5,
+                        object_crc32c = $6,
+                        actual_compressed_bytes = $7,
+                        uploaded_at = $8
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND installation_id = $3
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                    installation_id,
+                    metadata.generation,
+                    metadata.metageneration,
+                    metadata.crc32c,
+                    metadata.size,
+                    now,
+                )
+                ledger_hash = hashlib.sha256(
+                    (
+                        f"commit:{principal.account_id}:{chunk_id}:"
+                        f"{metadata.generation}"
+                    ).encode("utf-8")
+                ).hexdigest()
+                await connection.execute(
+                    """
+                    INSERT INTO managed_storage_usage_ledger (
+                        usage_event_id,
+                        account_id,
+                        data_class,
+                        chunk_id,
+                        idempotency_hash,
+                        reason,
+                        committed_bytes_delta,
+                        reserved_bytes_delta,
+                        object_count_delta,
+                        occurred_at,
+                        purge_after
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, 'commit_upload',
+                        $6, -($7::bigint), 1, $8::timestamptz,
+                        $8::timestamptz + interval '400 days'
+                    )
+                    """,
+                    uuid4(),
+                    principal.account_id,
+                    chunk["data_class"],
+                    chunk_id,
+                    ledger_hash,
+                    metadata.size,
+                    chunk["expected_compressed_bytes"],
+                    now,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_daily_ingest_usage (
+                        account_id,
+                        data_class,
+                        utc_day,
+                        accepted_bytes,
+                        committed_bytes,
+                        accepted_objects,
+                        committed_objects,
+                        updated_at
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5,
+                        1,
+                        1,
+                        $6
+                    )
+                    ON CONFLICT (account_id, data_class, utc_day) DO UPDATE
+                    SET committed_bytes =
+                            managed_daily_ingest_usage.committed_bytes
+                            + EXCLUDED.committed_bytes,
+                        committed_objects =
+                            managed_daily_ingest_usage.committed_objects + 1,
+                        revision =
+                            managed_daily_ingest_usage.revision + 1,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    principal.account_id,
+                    chunk["data_class"],
+                    chunk["event_start"].astimezone(UTC).date(),
+                    chunk["expected_compressed_bytes"],
+                    metadata.size,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_storage_usage
+                    SET committed_bytes = committed_bytes + $3,
+                        reserved_bytes = reserved_bytes - $4,
+                        object_count = object_count + 1,
+                        revision = revision + 1,
+                        updated_at = $5
+                    WHERE account_id = $1 AND data_class = $2
+                    """,
+                    principal.account_id,
+                    chunk["data_class"],
+                    metadata.size,
+                    chunk["expected_compressed_bytes"],
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_upload_grants
+                    SET status = 'consumed', consumed_at = $3
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND status = 'issued'
+                    """,
+                    principal.account_id,
+                    chunk_id,
+                    now,
+                )
+        return self._public_chunk(dict(updated), duplicate=False)
+
+    async def complete_chunk_upload_for_object(
+        self,
+        *,
+        metadata: ManagedObjectMetadata,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT chunk.account_id,
+                   chunk.chunk_id,
+                   chunk.installation_id,
+                   account.status,
+                   account.auth_valid_after
+            FROM managed_chunks chunk
+            JOIN managed_accounts account USING (account_id)
+            WHERE chunk.object_key = $1
+            """,
+            metadata.object_key,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed chunk was not found")
+        principal = ManagedPrincipal(
+            account_id=row["account_id"],
+            identity_id=UUID(int=0),
+            subject_hash="0" * 64,
+            account_status=str(row["status"]),
+            auth_valid_after=row["auth_valid_after"],
+        )
+        return await self.complete_chunk_upload(
+            principal=principal,
+            installation_id=str(row["installation_id"]),
+            chunk_id=row["chunk_id"],
+            metadata=metadata,
+        )
+
+    async def processing_reconciliation_candidates(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+        minimum_age_seconds: int = 120,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 200:
+            raise ValueError("batch_size must be between 1 and 200")
+        if not 30 <= minimum_age_seconds <= 86_400:
+            raise ValueError("minimum_age_seconds must be between 30 and 86400")
+        rows = await self._pool().fetch(
+            """
+            SELECT chunk.account_id,
+                   chunk.chunk_id,
+                   chunk.object_key,
+                   chunk.object_generation,
+                   chunk.state,
+                   chunk.uploaded_at
+            FROM managed_chunks chunk
+            WHERE chunk.state IN ('uploaded', 'validating')
+              AND chunk.object_generation IS NOT NULL
+              AND chunk.uploaded_at
+                    <= $1::timestamptz
+                       - make_interval(secs => $2::integer)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM managed_processing_attempts attempt
+                  WHERE attempt.account_id = chunk.account_id
+                    AND attempt.chunk_id = chunk.chunk_id
+                    AND (
+                        (
+                            attempt.status = 'leased'
+                            AND attempt.lease_expires_at > $1
+                        )
+                        OR (
+                            attempt.status = 'retryable_error'
+                            AND attempt.next_attempt_at > $1
+                        )
+                    )
+              )
+            ORDER BY chunk.uploaded_at, chunk.chunk_id
+            LIMIT $3
+            """,
+            now,
+            minimum_age_seconds,
+            batch_size,
+        )
+        return [dict(row) for row in rows]
+
+    async def lease_chunk_processing(
+        self,
+        *,
+        object_key: str,
+        processor_revision: str,
+        queue_event_hash: str,
+        lease_token_hash: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> dict[str, Any] | None:
+        if not 10 <= lease_seconds <= 3_600:
+            raise ValueError("lease_seconds must be between 10 and 3600")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                chunk = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_chunks
+                    WHERE object_key = $1
+                    FOR UPDATE
+                    """,
+                    object_key,
+                )
+                if chunk is None:
+                    raise ManagedNotFoundError("managed chunk was not found")
+                if chunk["state"] in {
+                    "available",
+                    "delete_pending",
+                    "deleted",
+                }:
+                    return None
+                if chunk["state"] not in {
+                    "uploaded",
+                    "validating",
+                    "quarantined",
+                }:
+                    raise ManagedConflictError(
+                        "managed chunk is not ready for processing"
+                    )
+                latest = await connection.fetchrow(
+                    """
+                    SELECT processing_attempt_id,
+                           status,
+                           attempt_number,
+                           lease_expires_at,
+                           next_attempt_at
+                    FROM managed_processing_attempts
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND processor_revision = $3
+                    ORDER BY attempt_number DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    chunk["account_id"],
+                    chunk["chunk_id"],
+                    processor_revision,
+                )
+                if (
+                    latest is not None
+                    and latest["status"] == "leased"
+                    and latest["lease_expires_at"] > now
+                ):
+                    raise ManagedProcessingBusyError(
+                        "managed chunk already has an active processing lease"
+                    )
+                if (
+                    latest is not None
+                    and latest["status"] == "retryable_error"
+                    and latest["next_attempt_at"] is not None
+                    and latest["next_attempt_at"] > now
+                ):
+                    raise ManagedProcessingBusyError(
+                        "managed chunk processing retry is not due"
+                    )
+                if latest is not None and latest["status"] in {
+                    "succeeded",
+                    "terminal_error",
+                }:
+                    return None
+                if latest is not None and latest["status"] == "leased":
+                    await connection.execute(
+                        """
+                        UPDATE managed_processing_attempts
+                        SET status = 'retryable_error',
+                            finished_at = $2,
+                            next_attempt_at = $2,
+                            error_code = 'lease_expired',
+                            error_detail_sha256 = $3
+                        WHERE processing_attempt_id = $1
+                        """,
+                        latest["processing_attempt_id"],
+                        now,
+                        hashlib.sha256(
+                            b"processing lease expired before completion"
+                        ).hexdigest(),
+                    )
+                attempt_number = (
+                    int(latest["attempt_number"]) + 1 if latest is not None else 1
+                )
+                attempt_id = uuid4()
+                await connection.execute(
+                    """
+                    INSERT INTO managed_processing_attempts (
+                        processing_attempt_id,
+                        account_id,
+                        chunk_id,
+                        processor_revision,
+                        queue_event_hash,
+                        lease_token_hash,
+                        status,
+                        attempt_number,
+                        started_at,
+                        lease_expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, 'leased', $7,
+                        $8::timestamptz,
+                        $8::timestamptz
+                            + make_interval(secs => $9::integer)
+                    )
+                    """,
+                    attempt_id,
+                    chunk["account_id"],
+                    chunk["chunk_id"],
+                    processor_revision,
+                    queue_event_hash,
+                    lease_token_hash,
+                    attempt_number,
+                    now,
+                    lease_seconds,
+                )
+                if chunk["state"] != "validating":
+                    await connection.execute(
+                        """
+                        UPDATE managed_chunks
+                        SET state = 'validating'
+                        WHERE account_id = $1 AND chunk_id = $2
+                        """,
+                        chunk["account_id"],
+                        chunk["chunk_id"],
+                    )
+                streams = await connection.fetch(
+                    """
+                    SELECT chunk_stream.stream_key,
+                           chunk_stream.sample_count,
+                           chunk_stream.first_event_at,
+                           chunk_stream.last_event_at,
+                           chunk_stream.encoded_bytes,
+                           chunk_stream.schema_revision,
+                           stream_schema.value_schema
+                    FROM managed_chunk_streams chunk_stream
+                    JOIN managed_stream_schemas stream_schema
+                      ON stream_schema.data_class = $3
+                     AND stream_schema.stream_key
+                         = chunk_stream.stream_key
+                     AND stream_schema.schema_revision
+                         = chunk_stream.schema_revision
+                    WHERE chunk_stream.account_id = $1
+                      AND chunk_stream.chunk_id = $2
+                    ORDER BY chunk_stream.stream_key
+                    """,
+                    chunk["account_id"],
+                    chunk["chunk_id"],
+                    chunk["data_class"],
+                )
+        result = dict(chunk)
+        result["processing_attempt_id"] = attempt_id
+        result["processing_attempt_number"] = attempt_number
+        result["streams"] = [dict(stream) for stream in streams]
+        return result
+
+    async def finish_chunk_processing(
+        self,
+        *,
+        processing_attempt_id: UUID,
+        lease_token_hash: str,
+        now: datetime,
+        succeeded: bool,
+        retryable: bool = False,
+        error_code: str | None = None,
+        error_detail_sha256: str | None = None,
+        verified_sha256: str | None = None,
+        decompressed_bytes: int | None = None,
+        decoded_samples: int | None = None,
+    ) -> None:
+        if not succeeded and (error_code is None or error_detail_sha256 is None):
+            raise ValueError("failed processing requires error details")
+        if succeeded and verified_sha256 is None:
+            raise ValueError("successful processing requires a verified digest")
+        if succeeded and (error_code is not None or error_detail_sha256 is not None):
+            raise ValueError("successful processing cannot include error details")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                attempt = await connection.fetchrow(
+                    """
+                    SELECT attempt.account_id,
+                           attempt.chunk_id,
+                           attempt.status,
+                           chunk.content_mode,
+                           chunk.state AS chunk_state,
+                           chunk.data_class,
+                           chunk.event_start,
+                           chunk.event_end,
+                           chunk.object_generation,
+                           chunk.expected_sha256,
+                           chunk.expected_uncompressed_bytes,
+                           chunk.verified_sha256
+                    FROM managed_processing_attempts attempt
+                    JOIN managed_chunks chunk
+                      ON chunk.account_id = attempt.account_id
+                     AND chunk.chunk_id = attempt.chunk_id
+                    WHERE attempt.processing_attempt_id = $1
+                      AND attempt.lease_token_hash = $2
+                    FOR UPDATE
+                    """,
+                    processing_attempt_id,
+                    lease_token_hash,
+                )
+                if attempt is None:
+                    raise ManagedNotFoundError("managed processing lease was not found")
+                if attempt["status"] != "leased":
+                    raise ManagedConflictError(
+                        "managed processing lease is already finished"
+                    )
+                processing_status = (
+                    "succeeded"
+                    if succeeded
+                    else ("retryable_error" if retryable else "terminal_error")
+                )
+                if succeeded:
+                    expected_hash = str(attempt["expected_sha256"]).strip()
+                    if verified_sha256 != expected_hash:
+                        raise ManagedConflictError(
+                            "managed processor digest does not match reservation"
+                        )
+                    if attempt["content_mode"] == "server_readable":
+                        if (
+                            decompressed_bytes != attempt["expected_uncompressed_bytes"]
+                            or decoded_samples is None
+                        ):
+                            raise ManagedConflictError(
+                                "managed processor output does not match "
+                                "the readable chunk contract"
+                            )
+                    elif decompressed_bytes is not None or decoded_samples is not None:
+                        raise ManagedConflictError(
+                            "encrypted chunk cannot publish decoded output"
+                        )
+                    if attempt["chunk_state"] == "available":
+                        if str(attempt["verified_sha256"]).strip() != verified_sha256:
+                            raise ManagedConflictError(
+                                "managed chunk was validated with another digest"
+                            )
+                    else:
+                        await self._supersede_exact_chunk_window(
+                            connection,
+                            account_id=attempt["account_id"],
+                            replacement_chunk_id=attempt["chunk_id"],
+                            now=now,
+                        )
+                        updated = await connection.execute(
+                            """
+                            UPDATE managed_chunks
+                            SET state = 'available',
+                                verified_sha256 = $3,
+                                actual_uncompressed_bytes = CASE
+                                    WHEN content_mode = 'server_readable'
+                                    THEN $4
+                                    ELSE actual_uncompressed_bytes
+                                END,
+                                sample_count = CASE
+                                    WHEN content_mode = 'server_readable'
+                                    THEN $5
+                                    ELSE sample_count
+                                END,
+                                validated_at = $6,
+                                available_at = $6
+                            WHERE account_id = $1
+                              AND chunk_id = $2
+                              AND state IN ('uploaded', 'validating')
+                            """,
+                            attempt["account_id"],
+                            attempt["chunk_id"],
+                            verified_sha256,
+                            decompressed_bytes,
+                            decoded_samples,
+                            now,
+                        )
+                        if updated != "UPDATE 1":
+                            raise ManagedConflictError(
+                                "managed chunk cannot complete validation "
+                                "from its current state"
+                            )
+                    available_chunk = await connection.fetchrow(
+                        """
+                        SELECT *
+                        FROM managed_chunks
+                        WHERE account_id = $1 AND chunk_id = $2
+                        """,
+                        attempt["account_id"],
+                        attempt["chunk_id"],
+                    )
+                    await self._append_chunk_change(
+                        connection,
+                        chunk=available_chunk,
+                        operation="available",
+                        now=now,
+                    )
+                await connection.execute(
+                    """
+                    UPDATE managed_processing_attempts
+                    SET status = $3,
+                        finished_at = $4,
+                        next_attempt_at = CASE
+                            WHEN $3 = 'retryable_error'
+                            THEN $4::timestamptz + interval '30 seconds'
+                            ELSE NULL
+                        END,
+                        error_code = $5,
+                        error_detail_sha256 = $6,
+                        decompressed_bytes = $7,
+                        decoded_samples = $8
+                    WHERE processing_attempt_id = $1
+                      AND lease_token_hash = $2
+                    """,
+                    processing_attempt_id,
+                    lease_token_hash,
+                    processing_status,
+                    now,
+                    error_code,
+                    error_detail_sha256,
+                    decompressed_bytes,
+                    decoded_samples,
+                )
+                if not succeeded and not retryable:
+                    await connection.execute(
+                        """
+                        UPDATE managed_chunks
+                        SET state = 'quarantined'
+                        WHERE account_id = $1
+                          AND chunk_id = $2
+                          AND state = 'validating'
+                        """,
+                        attempt["account_id"],
+                        attempt["chunk_id"],
+                    )
+
+    async def available_chunk(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        chunk_id: UUID,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT *
+            FROM managed_chunks
+            WHERE account_id = $1
+              AND chunk_id = $2
+              AND state = 'available'
+            """,
+            principal.account_id,
+            chunk_id,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed chunk was not found")
+        return dict(row)
+
+    async def list_available_chunks(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        start: datetime | None,
+        end: datetime | None,
+        data_class: str | None,
+        after_event_start: datetime | None,
+        after_chunk_id: UUID | None,
+        limit: int,
+        snapshot_at: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if (after_event_start is None) != (after_chunk_id is None):
+            raise ManagedConflictError("both chunk cursor fields are required")
+        rows = await self._pool().fetch(
+            """
+            SELECT *
+            FROM managed_chunks
+            WHERE account_id = $1
+              AND state = 'available'
+              AND (
+                  (
+                      $7::timestamptz IS NULL
+                      AND superseded_by_chunk_id IS NULL
+                  )
+                  OR (
+                      $7::timestamptz IS NOT NULL
+                      AND available_at <= $7
+                      AND (
+                          superseded_at IS NULL
+                          OR superseded_at > $7
+                      )
+                  )
+              )
+              AND ($2::timestamptz IS NULL OR event_end >= $2)
+              AND ($3::timestamptz IS NULL OR event_start < $3)
+              AND ($4::text IS NULL OR data_class = $4)
+              AND (
+                  $5::timestamptz IS NULL
+                  OR (event_start, chunk_id) > ($5, $6)
+              )
+            ORDER BY event_start, chunk_id
+            LIMIT $8
+            """,
+            principal.account_id,
+            start,
+            end,
+            data_class,
+            after_event_start,
+            after_chunk_id,
+            snapshot_at,
+            limit,
+        )
+        return [self._public_chunk(dict(row), duplicate=False) for row in rows]
+
+    async def list_changes(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        after_sequence: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        if after_sequence < 0:
+            raise ValueError("after_sequence cannot be negative")
+        if not 1 <= limit <= 500:
+            raise ValueError("limit must be between 1 and 500")
+        sequence = await self._pool().fetchrow(
+            """
+            SELECT last_sequence, minimum_retained_sequence
+            FROM managed_account_change_sequences
+            WHERE account_id = $1
+            """,
+            principal.account_id,
+        )
+        high_watermark = int(sequence["last_sequence"]) if sequence else 0
+        minimum_sequence = int(sequence["minimum_retained_sequence"]) if sequence else 1
+        if after_sequence < minimum_sequence - 1:
+            raise ManagedCursorExpiredError(
+                minimum_sequence=minimum_sequence,
+            )
+        rows = await self._pool().fetch(
+            """
+            SELECT change.change_sequence,
+                   change.change_event_id,
+                   change.resource_kind,
+                   change.resource_id,
+                   change.resource_revision,
+                   change.operation,
+                   change.content_sha256,
+                   change.data_class,
+                   change.event_start,
+                   change.event_end,
+                   change.metadata,
+                   change.occurred_at,
+                   chunk.source_id AS chunk_source_id,
+                   chunk.schema_version AS chunk_schema_version,
+                   chunk.content_mode AS chunk_content_mode,
+                   chunk.state AS chunk_state,
+                   chunk.compression AS chunk_compression,
+                   chunk.content_type AS chunk_content_type,
+                   chunk.expected_compressed_bytes
+                       AS chunk_expected_compressed_bytes,
+                   chunk.expected_uncompressed_bytes
+                       AS chunk_expected_uncompressed_bytes,
+                   chunk.object_generation AS chunk_object_generation,
+                   chunk.expires_at AS chunk_expires_at,
+                   document.document_kind,
+                   document.content_mode AS document_content_mode,
+                   document.client_key_id AS document_client_key_id,
+                   document.updated_at AS document_updated_at,
+                   document.deleted_at AS document_deleted_at
+            FROM managed_change_events change
+            LEFT JOIN managed_chunks chunk
+              ON change.resource_kind = 'chunk'
+             AND chunk.account_id = change.account_id
+             AND chunk.chunk_id = change.resource_id
+            LEFT JOIN managed_documents document
+              ON change.resource_kind = 'document'
+             AND document.account_id = change.account_id
+             AND document.document_id = change.resource_id
+             AND document.document_revision = change.resource_revision
+            WHERE change.account_id = $1
+              AND change.change_sequence > $2
+              AND change.change_sequence <= $3
+            ORDER BY change.change_sequence
+            LIMIT $4
+            """,
+            principal.account_id,
+            after_sequence,
+            high_watermark,
+            limit + 1,
+        )
+        has_more = len(rows) > limit
+        selected = rows[:limit]
+        changes: list[dict[str, Any]] = []
+        for row in selected:
+            change = {
+                "sequence": int(row["change_sequence"]),
+                "change_event_id": str(row["change_event_id"]),
+                "resource_kind": str(row["resource_kind"]),
+                "resource_id": str(row["resource_id"]),
+                "resource_revision": row["resource_revision"],
+                "operation": str(row["operation"]),
+                "content_sha256": (
+                    str(row["content_sha256"]).strip()
+                    if row["content_sha256"] is not None
+                    else None
+                ),
+                "data_class": row["data_class"],
+                "event_start": row["event_start"],
+                "event_end": row["event_end"],
+                "metadata": _decoded_json(row["metadata"]),
+                "occurred_at": row["occurred_at"],
+            }
+            if row["resource_kind"] == "chunk":
+                change["chunk"] = {
+                    "chunk_id": str(row["resource_id"]),
+                    "source_id": (
+                        str(row["chunk_source_id"])
+                        if row["chunk_source_id"] is not None
+                        else None
+                    ),
+                    "schema_version": row["chunk_schema_version"],
+                    "content_mode": row["chunk_content_mode"],
+                    "state": row["chunk_state"],
+                    "compression": row["chunk_compression"],
+                    "content_type": row["chunk_content_type"],
+                    "expected_compressed_bytes": (
+                        row["chunk_expected_compressed_bytes"]
+                    ),
+                    "expected_uncompressed_bytes": (
+                        row["chunk_expected_uncompressed_bytes"]
+                    ),
+                    "object_generation": row["chunk_object_generation"],
+                    "expires_at": row["chunk_expires_at"],
+                }
+            elif row["resource_kind"] == "document":
+                change["document"] = {
+                    "document_kind": row["document_kind"],
+                    "document_id": str(row["resource_id"]),
+                    "revision": row["resource_revision"],
+                    "content_mode": row["document_content_mode"],
+                    "client_key_id": (
+                        str(row["document_client_key_id"])
+                        if row["document_client_key_id"] is not None
+                        else None
+                    ),
+                    "updated_at": row["document_updated_at"],
+                    "deleted_at": row["document_deleted_at"],
+                }
+            changes.append(change)
+        return {
+            "changes": changes,
+            "minimum_sequence": minimum_sequence,
+            "high_watermark": high_watermark,
+            "next_sequence": (changes[-1]["sequence"] if changes else after_sequence),
+            "has_more": has_more,
+        }
+
+    async def record_access_grant(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        chunk_id: UUID,
+        request_id: UUID,
+        capability_hash: str,
+        purpose: str,
+        expires_at: datetime,
+    ) -> UUID:
+        self._require_active(principal)
+        grant_id = uuid4()
+        try:
+            status = await self._pool().execute(
+                """
+                INSERT INTO managed_object_access_grants (
+                    access_grant_id,
+                    account_id,
+                    installation_id,
+                    chunk_id,
+                    request_id,
+                    capability_hash,
+                    purpose,
+                    expires_at
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8
+                FROM managed_chunks chunk
+                JOIN managed_account_installations installation
+                  ON installation.account_id = chunk.account_id
+                 AND installation.installation_id = $3
+                 AND installation.status IN ('active', 'limited')
+                WHERE chunk.account_id = $2
+                  AND chunk.chunk_id = $4
+                  AND chunk.state = 'available'
+                """,
+                grant_id,
+                principal.account_id,
+                installation_id,
+                chunk_id,
+                request_id,
+                capability_hash,
+                purpose,
+                expires_at,
+            )
+        except Exception as error:
+            if getattr(error, "sqlstate", None) == "23505":
+                raise ManagedConflictError(
+                    "managed object access request was already used"
+                ) from error
+            raise
+        if status != "INSERT 0 1":
+            raise ManagedNotFoundError("managed chunk was not found")
+        return grant_id
+
+    async def mark_chunk_validated(
+        self,
+        *,
+        account_id: UUID,
+        chunk_id: UUID,
+        verified_sha256: str,
+        uncompressed_bytes: int,
+        sample_count: int,
+        now: datetime,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await self._supersede_exact_chunk_window(
+                    connection,
+                    account_id=account_id,
+                    replacement_chunk_id=chunk_id,
+                    now=now,
+                )
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'available',
+                        verified_sha256 = $3,
+                        actual_uncompressed_bytes = $4,
+                        sample_count = $5,
+                        validated_at = $6,
+                        available_at = $6
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND state IN ('uploaded', 'validating')
+                      AND expected_sha256 = $3
+                      AND expected_uncompressed_bytes = $4
+                    RETURNING *
+                    """,
+                    account_id,
+                    chunk_id,
+                    verified_sha256,
+                    uncompressed_bytes,
+                    sample_count,
+                    now,
+                )
+                if row is None:
+                    raise ManagedConflictError(
+                        "managed chunk validation does not match its reservation"
+                    )
+                await self._append_chunk_change(
+                    connection,
+                    chunk=row,
+                    operation="available",
+                    now=now,
+                )
+        return self._public_chunk(dict(row), duplicate=False)
+
+    async def mark_encrypted_chunk_available(
+        self,
+        *,
+        account_id: UUID,
+        chunk_id: UUID,
+        verified_sha256: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await self._supersede_exact_chunk_window(
+                    connection,
+                    account_id=account_id,
+                    replacement_chunk_id=chunk_id,
+                    now=now,
+                )
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'available',
+                        verified_sha256 = $3,
+                        validated_at = $4,
+                        available_at = $4
+                    WHERE account_id = $1
+                      AND chunk_id = $2
+                      AND content_mode = 'client_encrypted'
+                      AND state IN ('uploaded', 'validating')
+                      AND expected_sha256 = $3
+                    RETURNING *
+                    """,
+                    account_id,
+                    chunk_id,
+                    verified_sha256,
+                    now,
+                )
+                if row is None:
+                    raise ManagedConflictError(
+                        "encrypted chunk validation does not match its reservation"
+                    )
+                await self._append_chunk_change(
+                    connection,
+                    chunk=row,
+                    operation="available",
+                    now=now,
+                )
+        return self._public_chunk(dict(row), duplicate=False)
+
+    async def release_expired_reservations(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        released: list[dict[str, Any]] = []
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    """
+                    SELECT account_id,
+                           chunk_id,
+                           data_class,
+                           object_key,
+                           object_generation,
+                           expected_compressed_bytes
+                    FROM managed_chunks
+                    WHERE state IN ('reserved', 'uploading')
+                      AND reservation_expires_at <= $1
+                    ORDER BY reservation_expires_at, chunk_id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT $2
+                    """,
+                    now,
+                    batch_size,
+                )
+                for row in rows:
+                    await connection.execute(
+                        """
+                        UPDATE managed_chunks
+                        SET state = 'delete_pending',
+                            delete_requested_at = $3
+                        WHERE account_id = $1 AND chunk_id = $2
+                        """,
+                        row["account_id"],
+                        row["chunk_id"],
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        UPDATE managed_upload_grants
+                        SET status = 'expired'
+                        WHERE account_id = $1
+                          AND chunk_id = $2
+                          AND status = 'issued'
+                        """,
+                        row["account_id"],
+                        row["chunk_id"],
+                    )
+                    ledger_hash = hashlib.sha256(
+                        (f"release:{row['account_id']}:{row['chunk_id']}").encode(
+                            "utf-8"
+                        )
+                    ).hexdigest()
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_storage_usage_ledger (
+                            usage_event_id,
+                            account_id,
+                            data_class,
+                            chunk_id,
+                            idempotency_hash,
+                            reason,
+                            reserved_bytes_delta,
+                            occurred_at,
+                            purge_after
+                        ) VALUES (
+                            $1, $2, $3, $4, $5,
+                            'release_reservation',
+                            -($6::bigint),
+                            $7::timestamptz,
+                            $7::timestamptz + interval '400 days'
+                        )
+                        """,
+                        uuid4(),
+                        row["account_id"],
+                        row["data_class"],
+                        row["chunk_id"],
+                        ledger_hash,
+                        row["expected_compressed_bytes"],
+                        now,
+                    )
+                    status = await connection.execute(
+                        """
+                        UPDATE managed_storage_usage
+                        SET reserved_bytes = reserved_bytes - $3,
+                            revision = revision + 1,
+                            updated_at = $4
+                        WHERE account_id = $1
+                          AND data_class = $2
+                          AND reserved_bytes >= $3
+                        """,
+                        row["account_id"],
+                        row["data_class"],
+                        row["expected_compressed_bytes"],
+                        now,
+                    )
+                    if status != "UPDATE 1":
+                        raise ManagedConflictError(
+                            "managed reservation usage is inconsistent"
+                        )
+                    released.append(dict(row))
+        return released
+
+    async def claim_retention_deletions(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        claimed: list[dict[str, Any]] = []
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                accounts = await connection.fetch(
+                    """
+                    SELECT account_id, min(expires_at) AS earliest_expiry
+                    FROM managed_chunks
+                    WHERE state IN (
+                        'uploaded',
+                        'validating',
+                        'available',
+                        'quarantined'
+                    )
+                      AND expires_at IS NOT NULL
+                      AND expires_at <= $1
+                    GROUP BY account_id
+                    ORDER BY earliest_expiry, account_id
+                    LIMIT $2
+                    """,
+                    now,
+                    batch_size,
+                )
+                for account in accounts:
+                    if len(claimed) >= batch_size:
+                        break
+                    account_id = account["account_id"]
+                    # Restore creation uses the same account lock. Whichever
+                    # transaction wins establishes one coherent truth: either
+                    # the chunks enter the snapshot, or retention marks them
+                    # unavailable before the snapshot is counted.
+                    await connection.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                        f"noop-managed-change:{account_id}",
+                    )
+                    active_restore = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_restore_jobs
+                            WHERE account_id = $1
+                              AND status = 'running'
+                              AND expires_at > $2
+                        )
+                        """,
+                        account_id,
+                        now,
+                    )
+                    if active_restore:
+                        continue
+                    rows = await connection.fetch(
+                        """
+                        SELECT account_id,
+                               chunk_id,
+                               data_class,
+                               object_key,
+                               object_generation,
+                               actual_compressed_bytes
+                        FROM managed_chunks
+                        WHERE account_id = $1
+                          AND state IN (
+                              'uploaded',
+                              'validating',
+                              'available',
+                              'quarantined'
+                          )
+                          AND expires_at IS NOT NULL
+                          AND expires_at <= $2
+                        ORDER BY expires_at, chunk_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $3
+                        """,
+                        account_id,
+                        now,
+                        batch_size - len(claimed),
+                    )
+                    for row in rows:
+                        await connection.execute(
+                            """
+                            UPDATE managed_chunks
+                            SET state = 'delete_pending',
+                                delete_requested_at = $3
+                            WHERE account_id = $1 AND chunk_id = $2
+                            """,
+                            row["account_id"],
+                            row["chunk_id"],
+                            now,
+                        )
+                        claimed.append(dict(row))
+        return claimed
+
+    async def pending_chunk_deletions(
+        self,
+        *,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        rows = await self._pool().fetch(
+            """
+            SELECT account_id,
+                   chunk_id,
+                   data_class,
+                   object_key,
+                   object_generation,
+                   actual_compressed_bytes,
+                   delete_requested_at
+            FROM managed_chunks
+            WHERE state = 'delete_pending'
+            ORDER BY delete_requested_at, chunk_id
+            LIMIT $1
+            """,
+            batch_size,
+        )
+        return [dict(row) for row in rows]
+
+    async def claim_erasure_deletions(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        claimed: list[dict[str, Any]] = []
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                jobs = await connection.fetch(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE status IN ('queued', 'cooling_off', 'running')
+                      AND not_before <= $1
+                    ORDER BY requested_at, erasure_job_id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 10
+                    """,
+                    now,
+                )
+                remaining = batch_size
+                for job in jobs:
+                    await connection.execute(
+                        """
+                        UPDATE managed_erasure_jobs
+                        SET status = 'running',
+                            started_at = COALESCE(started_at, $2)
+                        WHERE erasure_job_id = $1
+                        """,
+                        job["erasure_job_id"],
+                        now,
+                    )
+                    if job["scope"] not in {
+                        "raw_chunks",
+                        "all_managed_data",
+                        "account",
+                    }:
+                        continue
+                    if job["objects_selected"] is None:
+                        totals = await connection.fetchrow(
+                            """
+                            SELECT count(*) AS objects,
+                                   COALESCE(
+                                       sum(
+                                           COALESCE(
+                                               actual_compressed_bytes,
+                                               expected_compressed_bytes
+                                           )
+                                       ),
+                                       0
+                                   ) AS bytes
+                            FROM managed_chunks
+                            WHERE account_id = $1
+                              AND state <> 'deleted'
+                            """,
+                            job["account_id"],
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_erasure_jobs
+                            SET objects_selected = $2,
+                                bytes_selected = $3
+                            WHERE erasure_job_id = $1
+                            """,
+                            job["erasure_job_id"],
+                            int(totals["objects"]),
+                            int(totals["bytes"]),
+                        )
+                    if remaining <= 0:
+                        break
+                    chunks = await connection.fetch(
+                        """
+                        SELECT *
+                        FROM managed_chunks
+                        WHERE account_id = $1
+                          AND state NOT IN ('delete_pending', 'deleted')
+                        ORDER BY event_start, chunk_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                        """,
+                        job["account_id"],
+                        remaining,
+                    )
+                    for chunk in chunks:
+                        if chunk["state"] in {"reserved", "uploading"}:
+                            ledger_hash = hashlib.sha256(
+                                (
+                                    f"erasure-release:{job['erasure_job_id']}:"
+                                    f"{chunk['chunk_id']}"
+                                ).encode("utf-8")
+                            ).hexdigest()
+                            ledger = await connection.fetchrow(
+                                """
+                                INSERT INTO managed_storage_usage_ledger (
+                                    usage_event_id,
+                                    account_id,
+                                    data_class,
+                                    chunk_id,
+                                    idempotency_hash,
+                                    reason,
+                                    reserved_bytes_delta,
+                                    occurred_at,
+                                    purge_after
+                                ) VALUES (
+                                    $1, $2, $3, $4, $5,
+                                    'release_reservation',
+                                    -($6::bigint),
+                                    $7,
+                                    $7::timestamptz + interval '400 days'
+                                )
+                                ON CONFLICT (
+                                    account_id,
+                                    idempotency_hash
+                                ) DO NOTHING
+                                RETURNING usage_event_id
+                                """,
+                                uuid4(),
+                                chunk["account_id"],
+                                chunk["data_class"],
+                                chunk["chunk_id"],
+                                ledger_hash,
+                                chunk["expected_compressed_bytes"],
+                                now,
+                            )
+                            if ledger is not None:
+                                status = await connection.execute(
+                                    """
+                                    UPDATE managed_storage_usage
+                                    SET reserved_bytes =
+                                            reserved_bytes - $3,
+                                        revision = revision + 1,
+                                        updated_at = $4
+                                    WHERE account_id = $1
+                                      AND data_class = $2
+                                      AND reserved_bytes >= $3
+                                    """,
+                                    chunk["account_id"],
+                                    chunk["data_class"],
+                                    chunk["expected_compressed_bytes"],
+                                    now,
+                                )
+                                if status != "UPDATE 1":
+                                    raise ManagedConflictError(
+                                        "managed erasure reservation usage "
+                                        "is inconsistent"
+                                    )
+                        await connection.execute(
+                            """
+                            UPDATE managed_chunks
+                            SET state = 'delete_pending',
+                                delete_requested_at = $3
+                            WHERE account_id = $1 AND chunk_id = $2
+                            """,
+                            chunk["account_id"],
+                            chunk["chunk_id"],
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_upload_grants
+                            SET status = 'revoked',
+                                revoked_at = $3
+                            WHERE account_id = $1
+                              AND chunk_id = $2
+                              AND status = 'issued'
+                            """,
+                            chunk["account_id"],
+                            chunk["chunk_id"],
+                            now,
+                        )
+                        claimed.append(
+                            {
+                                "erasure_job_id": job["erasure_job_id"],
+                                "account_id": chunk["account_id"],
+                                "chunk_id": chunk["chunk_id"],
+                            }
+                        )
+                    remaining -= len(chunks)
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_erasure_targets (
+                            erasure_job_id,
+                            target_kind,
+                            target_partition,
+                            status,
+                            selected_count,
+                            attempts,
+                            updated_at
+                        ) VALUES (
+                            $1,
+                            'object_storage',
+                            'managed_chunks',
+                            'running',
+                            $2,
+                            1,
+                            $3
+                        )
+                        ON CONFLICT (
+                            erasure_job_id,
+                            target_kind,
+                            target_partition
+                        ) DO UPDATE
+                        SET status = 'running',
+                            selected_count = COALESCE(
+                                managed_erasure_targets.selected_count,
+                                EXCLUDED.selected_count
+                            ),
+                            attempts =
+                                managed_erasure_targets.attempts + 1,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        job["erasure_job_id"],
+                        job["objects_selected"],
+                        now,
+                    )
+        return claimed
+
+    async def finalize_erasure_jobs(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+
+        def affected(status: str) -> int:
+            try:
+                return int(status.rsplit(" ", maxsplit=1)[-1])
+            except ValueError:
+                return 0
+
+        completed: list[dict[str, Any]] = []
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                jobs = await connection.fetch(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE status IN ('running', 'verifying')
+                    ORDER BY requested_at, erasure_job_id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT $1
+                    """,
+                    min(batch_size, 50),
+                )
+                for job in jobs:
+                    account_id = job["account_id"]
+                    scope = str(job["scope"])
+                    if scope == "account":
+                        identity_target_exists = await connection.fetchval(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM managed_erasure_targets
+                                WHERE erasure_job_id = $1
+                                  AND target_kind = 'identity'
+                                  AND target_partition = 'firebase_auth'
+                                  AND status IN ('pending', 'running')
+                            )
+                            """,
+                            job["erasure_job_id"],
+                        )
+                        if identity_target_exists:
+                            continue
+                    includes_raw = scope in {
+                        "raw_chunks",
+                        "all_managed_data",
+                        "account",
+                    }
+                    if includes_raw:
+                        pending = await connection.fetchval(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM managed_chunks
+                                WHERE account_id = $1
+                                  AND state <> 'deleted'
+                            )
+                            """,
+                            account_id,
+                        )
+                        if pending:
+                            continue
+                    if scope in {"all_managed_data", "account"}:
+                        pending_exports = await connection.fetchval(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM managed_export_jobs
+                                WHERE account_id = $1
+                                  AND status = 'completed'
+                                  AND output_generation IS NOT NULL
+                            )
+                            """,
+                            account_id,
+                        )
+                        if pending_exports:
+                            continue
+                    await connection.execute(
+                        """
+                        UPDATE managed_erasure_jobs
+                        SET status = 'verifying'
+                        WHERE erasure_job_id = $1
+                        """,
+                        job["erasure_job_id"],
+                    )
+                    database_rows = 0
+                    if scope in {
+                        "derived_data",
+                        "all_managed_data",
+                        "account",
+                    }:
+                        for statement in (
+                            "DELETE FROM managed_daily_aggregates "
+                            "WHERE account_id = $1",
+                            "DELETE FROM managed_sleep_summaries WHERE account_id = $1",
+                            "DELETE FROM managed_workout_summaries "
+                            "WHERE account_id = $1",
+                            "DELETE FROM managed_aggregate_inputs "
+                            "WHERE account_id = $1",
+                            "DELETE FROM managed_aggregate_provenance "
+                            "WHERE account_id = $1",
+                        ):
+                            database_rows += affected(
+                                await connection.execute(
+                                    statement,
+                                    account_id,
+                                )
+                            )
+                    if scope in {"all_managed_data", "account"}:
+                        for statement in (
+                            "DELETE FROM managed_document_heads WHERE account_id = $1",
+                            "DELETE FROM managed_documents WHERE account_id = $1",
+                            "DELETE FROM managed_sync_checkpoints "
+                            "WHERE account_id = $1",
+                            "DELETE FROM managed_object_access_grants "
+                            "WHERE account_id = $1",
+                            "DELETE FROM managed_upload_grants WHERE account_id = $1",
+                            "DELETE FROM managed_restore_jobs WHERE account_id = $1",
+                            "DELETE FROM managed_export_jobs WHERE account_id = $1",
+                        ):
+                            database_rows += affected(
+                                await connection.execute(
+                                    statement,
+                                    account_id,
+                                )
+                            )
+                    if scope == "account":
+                        database_rows += affected(
+                            await connection.execute(
+                                """
+                                DELETE FROM managed_audit_events
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                            )
+                        )
+                        database_rows += affected(
+                            await connection.execute(
+                                """
+                                DELETE FROM managed_support_access_grants
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                            )
+                        )
+                        database_rows += affected(
+                            await connection.execute(
+                                """
+                                DELETE FROM managed_consent_events
+                                WHERE account_id = $1
+                                """,
+                                account_id,
+                            )
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_erasure_jobs
+                            SET requested_by_identity_id = NULL
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_external_identities
+                            SET status = 'revoked',
+                                revoked_at = COALESCE(revoked_at, $2)
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_account_installations
+                            SET status = 'revoked',
+                                revoked_at = COALESCE(revoked_at, $2),
+                                token_valid_after = $2
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_subscriptions
+                            SET status = 'expired',
+                                provider_customer_hash = NULL,
+                                provider_subscription_hash = NULL,
+                                updated_at = $2
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_accounts
+                            SET status = 'erased',
+                                erased_at = $2,
+                                auth_valid_after = $2,
+                                updated_at = $2
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                    elif scope == "all_managed_data":
+                        await connection.execute(
+                            """
+                            UPDATE managed_accounts
+                            SET status = 'active',
+                                erasure_requested_at = NULL,
+                                updated_at = $2
+                            WHERE account_id = $1
+                              AND status = 'erasure_pending'
+                            """,
+                            account_id,
+                            now,
+                        )
+                    objects_deleted = (
+                        int(job["objects_selected"] or 0) if includes_raw else 0
+                    )
+                    bytes_deleted = (
+                        int(job["bytes_selected"] or 0) if includes_raw else 0
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_erasure_targets (
+                            erasure_job_id,
+                            target_kind,
+                            target_partition,
+                            status,
+                            selected_count,
+                            deleted_count,
+                            attempts,
+                            updated_at,
+                            completed_at
+                        ) VALUES (
+                            $1,
+                            'database',
+                            'managed_account',
+                            'completed',
+                            $2,
+                            $2,
+                            1,
+                            $3,
+                            $3
+                        )
+                        ON CONFLICT (
+                            erasure_job_id,
+                            target_kind,
+                            target_partition
+                        ) DO UPDATE
+                        SET status = 'completed',
+                            selected_count = EXCLUDED.selected_count,
+                            deleted_count = EXCLUDED.deleted_count,
+                            updated_at = EXCLUDED.updated_at,
+                            completed_at = EXCLUDED.completed_at
+                        """,
+                        job["erasure_job_id"],
+                        database_rows,
+                        now,
+                    )
+                    if includes_raw:
+                        await connection.execute(
+                            """
+                            UPDATE managed_erasure_targets
+                            SET status = 'completed',
+                                deleted_count = COALESCE(selected_count, 0),
+                                updated_at = $2,
+                                completed_at = $2
+                            WHERE erasure_job_id = $1
+                              AND target_kind = 'object_storage'
+                              AND target_partition = 'managed_chunks'
+                            """,
+                            job["erasure_job_id"],
+                            now,
+                        )
+                    if scope == "account":
+                        if job["identity_deletion_ticket"] is None:
+                            raise ManagedConfigurationError(
+                                "account erasure is missing its identity deletion ticket"
+                            )
+                        await connection.execute(
+                            """
+                            UPDATE managed_erasure_jobs
+                            SET objects_deleted = $2,
+                                bytes_deleted = $3,
+                                database_rows_deleted =
+                                    database_rows_deleted + $4
+                            WHERE erasure_job_id = $1
+                            """,
+                            job["erasure_job_id"],
+                            objects_deleted,
+                            bytes_deleted,
+                            database_rows,
+                        )
+                        await connection.execute(
+                            """
+                            INSERT INTO managed_erasure_targets (
+                                erasure_job_id,
+                                target_kind,
+                                target_partition,
+                                status,
+                                selected_count,
+                                deleted_count,
+                                attempts,
+                                updated_at
+                            ) VALUES (
+                                $1,
+                                'identity',
+                                'firebase_auth',
+                                'pending',
+                                1,
+                                0,
+                                0,
+                                $2
+                            )
+                            ON CONFLICT (
+                                erasure_job_id,
+                                target_kind,
+                                target_partition
+                            ) DO NOTHING
+                            """,
+                            job["erasure_job_id"],
+                            now,
+                        )
+                        continue
+                    finished = await connection.fetchrow(
+                        """
+                        UPDATE managed_erasure_jobs
+                        SET status = 'completed',
+                            objects_deleted = $2,
+                            bytes_deleted = $3,
+                            database_rows_deleted =
+                                database_rows_deleted + $4,
+                            completed_at = $5
+                        WHERE erasure_job_id = $1
+                        RETURNING *
+                        """,
+                        job["erasure_job_id"],
+                        objects_deleted,
+                        bytes_deleted,
+                        database_rows,
+                        now,
+                    )
+                    completed.append(dict(finished))
+        return completed
+
+    async def pending_identity_deletions(
+        self,
+        *,
+        batch_size: int,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    """
+                    SELECT job.erasure_job_id,
+                           job.account_id,
+                           job.request_id,
+                           job.identity_deletion_ticket
+                    FROM managed_erasure_jobs job
+                    JOIN managed_erasure_targets target
+                      ON target.erasure_job_id = job.erasure_job_id
+                     AND target.target_kind = 'identity'
+                     AND target.target_partition = 'firebase_auth'
+                    WHERE job.scope = 'account'
+                      AND job.status = 'verifying'
+                      AND job.identity_deletion_ticket IS NOT NULL
+                      AND target.status IN ('pending', 'running')
+                    ORDER BY job.requested_at, job.erasure_job_id
+                    FOR UPDATE OF job, target SKIP LOCKED
+                    LIMIT $1
+                    """,
+                    batch_size,
+                )
+                for row in rows:
+                    await connection.execute(
+                        """
+                        UPDATE managed_erasure_targets
+                        SET status = 'running',
+                            attempts = attempts + 1,
+                            updated_at = $2
+                        WHERE erasure_job_id = $1
+                          AND target_kind = 'identity'
+                          AND target_partition = 'firebase_auth'
+                        """,
+                        row["erasure_job_id"],
+                        now,
+                    )
+        return [dict(row) for row in rows]
+
+    async def mark_identity_deletion_succeeded(
+        self,
+        *,
+        account_id: UUID,
+        erasure_job_id: UUID,
+        now: datetime,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                job = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE account_id = $1 AND erasure_job_id = $2
+                    FOR UPDATE
+                    """,
+                    account_id,
+                    erasure_job_id,
+                )
+                if job is None:
+                    raise ManagedNotFoundError("managed erasure was not found")
+                if job["status"] == "completed":
+                    return dict(job)
+                if job["scope"] != "account" or job["status"] != "verifying":
+                    raise ManagedConflictError(
+                        "managed identity deletion is not pending"
+                    )
+                target_status = await connection.execute(
+                    """
+                    UPDATE managed_erasure_targets
+                    SET status = 'completed',
+                        deleted_count = 1,
+                        updated_at = $2,
+                        completed_at = $2
+                    WHERE erasure_job_id = $1
+                      AND target_kind = 'identity'
+                      AND target_partition = 'firebase_auth'
+                      AND status IN ('pending', 'running')
+                    """,
+                    erasure_job_id,
+                    now,
+                )
+                if target_status != "UPDATE 1":
+                    raise ManagedConflictError(
+                        "managed identity deletion target is not pending"
+                    )
+                identity_delete_status = await connection.execute(
+                    """
+                    DELETE FROM managed_external_identities
+                    WHERE account_id = $1
+                    """,
+                    account_id,
+                )
+                try:
+                    deleted_identity_rows = int(
+                        identity_delete_status.rsplit(" ", maxsplit=1)[-1]
+                    )
+                except ValueError:
+                    deleted_identity_rows = 0
+                finished = await connection.fetchrow(
+                    """
+                    UPDATE managed_erasure_jobs
+                    SET status = 'completed',
+                        identity_deletion_ticket = NULL,
+                        error_code = NULL,
+                        error_detail_sha256 = NULL,
+                        database_rows_deleted =
+                            database_rows_deleted + $3,
+                        completed_at = $4
+                    WHERE account_id = $1 AND erasure_job_id = $2
+                    RETURNING *
+                    """,
+                    account_id,
+                    erasure_job_id,
+                    deleted_identity_rows,
+                    now,
+                )
+        return dict(finished)
+
+    async def mark_identity_deletion_failed(
+        self,
+        *,
+        account_id: UUID,
+        erasure_job_id: UUID,
+        error_detail_sha256: str,
+        now: datetime,
+    ) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", error_detail_sha256):
+            raise ValueError("identity deletion error digest is invalid")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    UPDATE managed_erasure_targets
+                    SET status = 'pending',
+                        updated_at = $3
+                    WHERE erasure_job_id = $2
+                      AND target_kind = 'identity'
+                      AND target_partition = 'firebase_auth'
+                      AND status = 'running'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM managed_erasure_jobs job
+                          WHERE job.account_id = $1
+                            AND job.erasure_job_id = $2
+                            AND job.status = 'verifying'
+                      )
+                    """,
+                    account_id,
+                    erasure_job_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_erasure_jobs
+                    SET error_code = 'identity_provider_unavailable',
+                        error_detail_sha256 = $3
+                    WHERE account_id = $1
+                      AND erasure_job_id = $2
+                      AND status = 'verifying'
+                    """,
+                    account_id,
+                    erasure_job_id,
+                    error_detail_sha256,
+                )
+
+    async def mark_chunk_deleted(
+        self,
+        *,
+        account_id: UUID,
+        chunk_id: UUID,
+        now: datetime,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_chunks
+                    WHERE account_id = $1 AND chunk_id = $2
+                    FOR UPDATE
+                    """,
+                    account_id,
+                    chunk_id,
+                )
+                if row is None:
+                    raise ManagedNotFoundError("managed chunk was not found")
+                if row["state"] == "deleted":
+                    return self._public_chunk(dict(row), duplicate=True)
+                if row["state"] != "delete_pending":
+                    raise ManagedConflictError("managed chunk is not pending deletion")
+                committed = int(row["actual_compressed_bytes"] or 0)
+                if committed > 0:
+                    ledger_hash = hashlib.sha256(
+                        (
+                            f"delete:{account_id}:{chunk_id}:{row['object_generation']}"
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_storage_usage_ledger (
+                            usage_event_id,
+                            account_id,
+                            data_class,
+                            chunk_id,
+                            idempotency_hash,
+                            reason,
+                            committed_bytes_delta,
+                            object_count_delta,
+                            occurred_at,
+                            purge_after
+                        ) VALUES (
+                            $1, $2, $3, $4, $5,
+                            'delete_object',
+                            -($6::bigint),
+                            -1,
+                            $7::timestamptz,
+                            $7::timestamptz + interval '400 days'
+                        )
+                        """,
+                        uuid4(),
+                        account_id,
+                        row["data_class"],
+                        chunk_id,
+                        ledger_hash,
+                        committed,
+                        now,
+                    )
+                    status = await connection.execute(
+                        """
+                        UPDATE managed_storage_usage
+                        SET committed_bytes = committed_bytes - $3,
+                            object_count = object_count - 1,
+                            revision = revision + 1,
+                            updated_at = $4
+                        WHERE account_id = $1
+                          AND data_class = $2
+                          AND committed_bytes >= $3
+                          AND object_count >= 1
+                        """,
+                        account_id,
+                        row["data_class"],
+                        committed,
+                        now,
+                    )
+                    if status != "UPDATE 1":
+                        raise ManagedConflictError(
+                            "managed committed usage is inconsistent"
+                        )
+                deleted = await connection.fetchrow(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'deleted',
+                        deleted_at = $3
+                    WHERE account_id = $1 AND chunk_id = $2
+                    RETURNING *
+                    """,
+                    account_id,
+                    chunk_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_replay_tombstones (
+                        replay_tombstone_id,
+                        tenant_replay_hash,
+                        resource_kind,
+                        resource_id_hash,
+                        content_sha256,
+                        deletion_reason,
+                        deleted_at,
+                        expires_at
+                    ) VALUES (
+                        $1, $2, 'chunk', $3, $4, $5, $6,
+                        $6::timestamptz + interval '800 days'
+                    )
+                    ON CONFLICT (
+                        tenant_replay_hash,
+                        resource_kind,
+                        resource_id_hash
+                    ) DO UPDATE
+                    SET content_sha256 = EXCLUDED.content_sha256,
+                        deletion_reason = EXCLUDED.deletion_reason,
+                        deleted_at = LEAST(
+                            managed_replay_tombstones.deleted_at,
+                            EXCLUDED.deleted_at
+                        ),
+                        expires_at = GREATEST(
+                            managed_replay_tombstones.expires_at,
+                            EXCLUDED.expires_at
+                        )
+                    """,
+                    uuid4(),
+                    self._tenant_replay_hash(account_id),
+                    self._resource_replay_hash("chunk", chunk_id),
+                    str(row["expected_sha256"]).strip(),
+                    (
+                        "retention"
+                        if row["expires_at"] is not None and row["expires_at"] <= now
+                        else "user_delete"
+                    ),
+                    now,
+                )
+                await self._append_chunk_change(
+                    connection,
+                    chunk=deleted,
+                    operation="deleted",
+                    now=now,
+                )
+        return self._public_chunk(dict(deleted), duplicate=False)
+
+    async def put_document(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        mutation: ManagedDocumentMutation,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        revision = mutation.base_revision + 1
+        idempotency_hash = hashlib.sha256(
+            (f"change:document:{principal.account_id}:{mutation.request_id}").encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        payload_json = mutation.payload_json
+        payload_ciphertext: bytes | None = None
+        if mutation.deleted:
+            digest = hashlib.sha256(
+                (
+                    f"deleted:{mutation.document_kind}:"
+                    f"{mutation.document_id}:{revision}"
+                ).encode("utf-8")
+            ).hexdigest()
+        elif mutation.content_mode == "server_readable":
+            try:
+                canonical = json.dumps(
+                    payload_json,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError):
+                raise ManagedConflictError(
+                    "managed document JSON is not canonicalizable"
+                ) from None
+            if len(canonical) > 1_000_000:
+                raise ManagedConflictError("managed document payload is too large")
+            digest = hashlib.sha256(canonical).hexdigest()
+        else:
+            try:
+                payload_ciphertext = base64.b64decode(
+                    mutation.payload_ciphertext_base64 or "",
+                    validate=True,
+                )
+            except (ValueError, TypeError):
+                raise ManagedConflictError(
+                    "managed document ciphertext is not valid base64"
+                ) from None
+            if not 17 <= len(payload_ciphertext) <= 1_048_576:
+                raise ManagedConflictError(
+                    "managed document ciphertext size is invalid"
+                )
+            digest = hashlib.sha256(payload_ciphertext).hexdigest()
+        if mutation.content_sha256 is not None and mutation.content_sha256 != digest:
+            raise ManagedConflictError(
+                "managed document digest does not match its payload"
+            )
+
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    (
+                        f"noop-managed-document:{principal.account_id}:"
+                        f"{mutation.document_kind}:{mutation.document_id}"
+                    ),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if mutation.updated_at > now + timedelta(days=1):
+                    raise ManagedConflictError(
+                        "managed document timestamp is too far in the future"
+                    )
+                prior_request = await connection.fetchrow(
+                    """
+                    SELECT resource_id,
+                           resource_revision,
+                           operation,
+                           content_sha256
+                    FROM managed_change_events
+                    WHERE account_id = $1
+                      AND idempotency_hash = $2
+                    """,
+                    principal.account_id,
+                    idempotency_hash,
+                )
+                expected_operation = "tombstone" if mutation.deleted else "upsert"
+                if prior_request is not None and (
+                    prior_request["resource_id"] != mutation.document_id
+                    or int(prior_request["resource_revision"]) != revision
+                    or prior_request["operation"] != expected_operation
+                    or str(prior_request["content_sha256"]).strip() != digest
+                ):
+                    raise ManagedConflictError("managed document request id was reused")
+                installation_exists = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM managed_account_installations
+                        WHERE account_id = $1
+                          AND installation_id = $2
+                          AND status IN ('active', 'limited')
+                    )
+                    """,
+                    principal.account_id,
+                    installation_id,
+                )
+                if not installation_exists:
+                    raise ManagedNotFoundError("managed installation was not found")
+                if mutation.client_key_id is not None:
+                    key_exists = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_client_keys
+                            WHERE account_id = $1
+                              AND client_key_id = $2
+                              AND revoked_at IS NULL
+                        )
+                        """,
+                        principal.account_id,
+                        mutation.client_key_id,
+                    )
+                    if not key_exists:
+                        raise ManagedNotFoundError("managed client key was not found")
+
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_documents
+                    WHERE account_id = $1
+                      AND document_kind = $2
+                      AND document_id = $3
+                      AND document_revision = $4
+                    """,
+                    principal.account_id,
+                    mutation.document_kind,
+                    mutation.document_id,
+                    revision,
+                )
+                if existing is not None:
+                    if (
+                        str(existing["content_sha256"]).strip() != digest
+                        or existing["content_mode"] != mutation.content_mode
+                        or existing["client_key_id"] != mutation.client_key_id
+                        or (existing["deleted_at"] is not None) != mutation.deleted
+                    ):
+                        raise ManagedConflictError(
+                            "managed document revision already has different content"
+                        )
+                    return self._public_document(
+                        dict(existing),
+                        duplicate=True,
+                    )
+
+                head = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_document_heads
+                    WHERE account_id = $1
+                      AND document_kind = $2
+                      AND document_id = $3
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    mutation.document_kind,
+                    mutation.document_id,
+                )
+                current_revision = (
+                    int(head["current_revision"]) if head is not None else 0
+                )
+                if current_revision != mutation.base_revision:
+                    raise ManagedConflictError(
+                        "managed document changed on another device"
+                    )
+                stored_updated_at = max(
+                    mutation.updated_at,
+                    head["updated_at"] if head is not None else mutation.updated_at,
+                )
+                deleted_at = now if mutation.deleted else None
+                document = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_documents (
+                        account_id,
+                        document_kind,
+                        document_id,
+                        document_revision,
+                        origin_installation_id,
+                        content_mode,
+                        client_key_id,
+                        content_sha256,
+                        payload_json,
+                        payload_ciphertext,
+                        updated_at,
+                        deleted_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $9::jsonb, $10, $11, $12
+                    )
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    mutation.document_kind,
+                    mutation.document_id,
+                    revision,
+                    installation_id,
+                    mutation.content_mode,
+                    mutation.client_key_id,
+                    digest,
+                    (
+                        json.dumps(
+                            payload_json,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=False,
+                            allow_nan=False,
+                        )
+                        if payload_json is not None
+                        else None
+                    ),
+                    payload_ciphertext,
+                    stored_updated_at,
+                    deleted_at,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_document_heads (
+                        account_id,
+                        document_kind,
+                        document_id,
+                        current_revision,
+                        content_sha256,
+                        origin_installation_id,
+                        updated_at,
+                        deleted_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8
+                    )
+                    ON CONFLICT (
+                        account_id,
+                        document_kind,
+                        document_id
+                    ) DO UPDATE
+                    SET current_revision = EXCLUDED.current_revision,
+                        content_sha256 = EXCLUDED.content_sha256,
+                        origin_installation_id =
+                            EXCLUDED.origin_installation_id,
+                        updated_at = EXCLUDED.updated_at,
+                        deleted_at = EXCLUDED.deleted_at
+                    """,
+                    principal.account_id,
+                    mutation.document_kind,
+                    mutation.document_id,
+                    revision,
+                    digest,
+                    installation_id,
+                    stored_updated_at,
+                    deleted_at,
+                )
+                await connection.fetchval(
+                    """
+                    SELECT noop_managed_append_change(
+                        $1,
+                        $2::char(64),
+                        'document',
+                        $3,
+                        $4,
+                        $5,
+                        $6::char(64),
+                        'user_documents',
+                        NULL,
+                        NULL,
+                        $7::jsonb,
+                        $8,
+                        $8::timestamptz + interval '400 days'
+                    )
+                    """,
+                    principal.account_id,
+                    idempotency_hash,
+                    mutation.document_id,
+                    revision,
+                    "tombstone" if mutation.deleted else "upsert",
+                    digest,
+                    json.dumps(
+                        {
+                            "document_kind": mutation.document_kind,
+                            "origin_installation_id": installation_id,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    now,
+                )
+        return self._public_document(dict(document), duplicate=False)
+
+    async def get_document(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        document_kind: str,
+        document_id: UUID,
+        revision: int | None = None,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT document.*
+            FROM managed_documents document
+            LEFT JOIN managed_document_heads head
+              ON head.account_id = document.account_id
+             AND head.document_kind = document.document_kind
+             AND head.document_id = document.document_id
+            WHERE document.account_id = $1
+              AND document.document_kind = $2
+              AND document.document_id = $3
+              AND document.document_revision = COALESCE(
+                    $4,
+                    head.current_revision
+                  )
+            """,
+            principal.account_id,
+            document_kind,
+            document_id,
+            revision,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed document was not found")
+        return self._public_document(dict(row), duplicate=False)
+
+    async def list_documents(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        document_kind: str | None,
+        include_deleted: bool,
+        after_updated_at: datetime | None,
+        after_document_kind: str | None,
+        after_document_id: UUID | None,
+        snapshot_at: datetime | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        cursor_values = (
+            after_updated_at,
+            after_document_kind,
+            after_document_id,
+        )
+        if any(value is None for value in cursor_values) and any(
+            value is not None for value in cursor_values
+        ):
+            raise ManagedConflictError(
+                "all managed document cursor fields are required"
+            )
+        if snapshot_at is None:
+            rows = await self._pool().fetch(
+                """
+                SELECT document.*
+                FROM managed_document_heads head
+                JOIN managed_documents document
+                  ON document.account_id = head.account_id
+                 AND document.document_kind = head.document_kind
+                 AND document.document_id = head.document_id
+                 AND document.document_revision = head.current_revision
+                WHERE head.account_id = $1
+                  AND ($2::text IS NULL OR head.document_kind = $2)
+                  AND ($3::boolean OR head.deleted_at IS NULL)
+                  AND (
+                      $4::timestamptz IS NULL
+                      OR (
+                          head.updated_at,
+                          head.document_kind,
+                          head.document_id
+                      ) > ($4, $5, $6)
+                  )
+                ORDER BY head.updated_at,
+                         head.document_kind,
+                         head.document_id
+                LIMIT $7
+                """,
+                principal.account_id,
+                document_kind,
+                include_deleted,
+                after_updated_at,
+                after_document_kind,
+                after_document_id,
+                limit,
+            )
+        else:
+            rows = await self._pool().fetch(
+                """
+                WITH snapshot AS (
+                    SELECT DISTINCT ON (
+                        document_kind,
+                        document_id
+                    ) *
+                    FROM managed_documents
+                    WHERE account_id = $1
+                      AND updated_at <= $2
+                    ORDER BY document_kind,
+                             document_id,
+                             document_revision DESC
+                )
+                SELECT *
+                FROM snapshot
+                WHERE ($3::text IS NULL OR document_kind = $3)
+                  AND ($4::boolean OR deleted_at IS NULL)
+                  AND (
+                      $5::timestamptz IS NULL
+                      OR (
+                          updated_at,
+                          document_kind,
+                          document_id
+                      ) > ($5, $6, $7)
+                  )
+                ORDER BY updated_at, document_kind, document_id
+                LIMIT $8
+                """,
+                principal.account_id,
+                snapshot_at,
+                document_kind,
+                include_deleted,
+                after_updated_at,
+                after_document_kind,
+                after_document_id,
+                limit,
+            )
+        return [self._public_document(dict(row), duplicate=False) for row in rows]
+
+    async def create_restore(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        request: ManagedRestoreRequest,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                # Serialize the restore anchor with change publication. A writer that
+                # commits after this point receives a sequence above change_sequence,
+                # so it is either in this snapshot or in the following change feed.
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-change:{principal.account_id}",
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                snapshot_at = request.snapshot_at or now
+                if snapshot_at > now:
+                    raise ManagedConflictError(
+                        "restore snapshot cannot be in the future"
+                    )
+                change_sequence = await connection.fetchval(
+                    """
+                    SELECT last_sequence
+                    FROM managed_account_change_sequences
+                    WHERE account_id = $1
+                    """,
+                    principal.account_id,
+                )
+                change_sequence = int(change_sequence or 0)
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_restore_jobs
+                    WHERE account_id = $1 AND request_id = $2
+                    """,
+                    principal.account_id,
+                    request.request_id,
+                )
+                filters = {
+                    "data_classes": request.data_classes,
+                    "document_kinds": request.document_kinds,
+                    "include_documents": request.include_documents,
+                    "start": (
+                        request.start.isoformat() if request.start is not None else None
+                    ),
+                    "end": (
+                        request.end.isoformat() if request.end is not None else None
+                    ),
+                }
+                if existing is not None:
+                    if (
+                        request.snapshot_at is not None
+                        and existing["snapshot_at"] != request.snapshot_at
+                    ) or _decoded_json(existing["filters"]) != filters:
+                        raise ManagedConflictError("restore request id was reused")
+                    return self._public_restore(dict(existing), duplicate=True)
+                installation_exists = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM managed_account_installations
+                        WHERE account_id = $1
+                          AND installation_id = $2
+                          AND status IN ('active', 'limited')
+                    )
+                    """,
+                    principal.account_id,
+                    installation_id,
+                )
+                if not installation_exists:
+                    raise ManagedNotFoundError("managed installation was not found")
+                chunk_totals = await connection.fetchrow(
+                    """
+                    SELECT count(*) AS objects,
+                           COALESCE(sum(actual_compressed_bytes), 0) AS bytes
+                    FROM managed_chunks
+                    WHERE account_id = $1
+                      AND state = 'available'
+                      AND available_at <= $2
+                      AND (
+                          superseded_at IS NULL
+                          OR superseded_at > $2
+                      )
+                      AND (
+                          cardinality($3::text[]) = 0
+                          OR data_class = ANY($3)
+                      )
+                      AND ($4::timestamptz IS NULL OR event_end >= $4)
+                      AND ($5::timestamptz IS NULL OR event_start < $5)
+                    """,
+                    principal.account_id,
+                    snapshot_at,
+                    request.data_classes,
+                    request.start,
+                    request.end,
+                )
+                document_total = 0
+                if request.include_documents:
+                    document_total = await connection.fetchval(
+                        """
+                        SELECT count(*)
+                        FROM (
+                            SELECT DISTINCT ON (
+                                document_kind,
+                                document_id
+                            ) document_kind, document_id, deleted_at
+                            FROM managed_documents
+                            WHERE account_id = $1
+                              AND updated_at <= $2
+                              AND (
+                                  cardinality($3::text[]) = 0
+                                  OR document_kind = ANY($3)
+                              )
+                            ORDER BY document_kind,
+                                     document_id,
+                                     document_revision DESC
+                        ) snapshot
+                        WHERE snapshot.deleted_at IS NULL
+                        """,
+                        principal.account_id,
+                        snapshot_at,
+                        request.document_kinds,
+                    )
+                selected_objects = int(chunk_totals["objects"]) + int(document_total)
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_restore_jobs (
+                        restore_job_id,
+                        account_id,
+                        installation_id,
+                        request_id,
+                        status,
+                        snapshot_at,
+                        filters,
+                        selected_objects,
+                        selected_bytes,
+                        change_sequence,
+                        created_at,
+                        started_at,
+                        expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, 'running', $5, $6::jsonb,
+                        $7, $8, $9, $10, $10,
+                        $10::timestamptz + interval '24 hours'
+                    )
+                    RETURNING *
+                    """,
+                    uuid4(),
+                    principal.account_id,
+                    installation_id,
+                    request.request_id,
+                    snapshot_at,
+                    json.dumps(
+                        filters,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    selected_objects,
+                    int(chunk_totals["bytes"]),
+                    change_sequence,
+                    now,
+                )
+        return self._public_restore(dict(row), duplicate=False)
+
+    async def create_export(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        request: ManagedExportRequest,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        try:
+            canonical_scope = json.dumps(
+                request.scope,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError):
+            raise ManagedConflictError(
+                "managed export scope is not canonicalizable"
+            ) from None
+        if len(canonical_scope.encode("utf-8")) > 65_536:
+            raise ManagedConflictError("managed export scope is too large")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_export_jobs
+                    WHERE account_id = $1 AND request_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    request.request_id,
+                )
+                if existing is not None:
+                    if (
+                        existing["format"] != request.format
+                        or existing["client_key_id"] != request.client_key_id
+                        or _decoded_json(existing["scope"]) != request.scope
+                        or str(existing["expected_sha256"]).strip()
+                        != request.expected_sha256
+                        or int(existing["expected_bytes"]) != request.expected_bytes
+                        or existing["content_type"] != request.content_type
+                    ):
+                        raise ManagedConflictError(
+                            "managed export request id was reused"
+                        )
+                    return self._public_export(
+                        dict(existing),
+                        duplicate=True,
+                    )
+                contract = await connection.fetchrow(
+                    """
+                    SELECT account.storage_namespace
+                    FROM managed_accounts account
+                    JOIN managed_account_installations installation
+                      ON installation.account_id = account.account_id
+                     AND installation.installation_id = $2
+                     AND installation.status IN ('active', 'limited')
+                    JOIN managed_client_keys client_key
+                      ON client_key.account_id = account.account_id
+                     AND client_key.client_key_id = $3
+                     AND client_key.revoked_at IS NULL
+                    WHERE account.account_id = $1
+                      AND account.status = 'active'
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    request.client_key_id,
+                )
+                if contract is None:
+                    raise ManagedNotFoundError(
+                        "managed export installation or key was not found"
+                    )
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_export_jobs (
+                        export_job_id,
+                        account_id,
+                        storage_namespace,
+                        installation_id,
+                        request_id,
+                        status,
+                        format,
+                        content_mode,
+                        client_key_id,
+                        scope,
+                        expected_sha256,
+                        expected_bytes,
+                        content_type,
+                        created_at,
+                        started_at,
+                        expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, 'running', $6,
+                        'client_encrypted', $7, $8::jsonb,
+                        $9, $10, $11, $12, $12,
+                        $12::timestamptz + interval '24 hours'
+                    )
+                    RETURNING *
+                    """,
+                    uuid4(),
+                    principal.account_id,
+                    contract["storage_namespace"],
+                    installation_id,
+                    request.request_id,
+                    request.format,
+                    request.client_key_id,
+                    canonical_scope,
+                    request.expected_sha256,
+                    request.expected_bytes,
+                    request.content_type,
+                    now,
+                )
+        return self._public_export(dict(row), duplicate=False)
+
+    async def complete_export(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        export_job_id: UUID,
+        metadata: ManagedObjectMetadata,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_export_jobs
+                    WHERE account_id = $1
+                      AND installation_id = $2
+                      AND export_job_id = $3
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    export_job_id,
+                )
+                if row is None:
+                    raise ManagedNotFoundError("managed export was not found")
+                if row["status"] == "completed":
+                    if row["output_generation"] != metadata.generation:
+                        raise ManagedConflictError("managed export generation changed")
+                    return self._public_export(dict(row), duplicate=True)
+                supplied_sha = metadata.metadata.get("noop-sha256", "")
+                expected_sha = str(row["expected_sha256"]).strip()
+                if (
+                    row["status"] != "running"
+                    or row["expires_at"]
+                    <= await connection.fetchval("SELECT clock_timestamp()")
+                    or metadata.object_key != row["output_object_key"]
+                    or metadata.size != int(row["expected_bytes"])
+                    or metadata.content_type != row["content_type"]
+                    or supplied_sha != expected_sha
+                ):
+                    raise ManagedConflictError(
+                        "managed export object does not match its contract"
+                    )
+                completed = await connection.fetchrow(
+                    """
+                    UPDATE managed_export_jobs
+                    SET status = 'completed',
+                        output_generation = $4,
+                        output_sha256 = expected_sha256,
+                        output_bytes = expected_bytes,
+                        completed_at = $5
+                    WHERE account_id = $1
+                      AND installation_id = $2
+                      AND export_job_id = $3
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    export_job_id,
+                    metadata.generation,
+                    await connection.fetchval("SELECT clock_timestamp()"),
+                )
+        return self._public_export(dict(completed), duplicate=False)
+
+    async def get_export(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        export_job_id: UUID,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT *
+            FROM managed_export_jobs
+            WHERE account_id = $1
+              AND installation_id = $2
+              AND export_job_id = $3
+            """,
+            principal.account_id,
+            installation_id,
+            export_job_id,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed export was not found")
+        return self._public_export(dict(row), duplicate=False)
+
+    async def pending_export_deletions(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> list[dict[str, Any]]:
+        rows = await self._pool().fetch(
+            """
+            SELECT export.export_job_id,
+                   export.account_id,
+                   export.output_object_key,
+                   export.output_generation
+            FROM managed_export_jobs export
+            JOIN managed_accounts account USING (account_id)
+            WHERE export.output_generation IS NOT NULL
+              AND export.status = 'completed'
+              AND (
+                  export.expires_at <= $1
+                  OR account.status IN ('erasure_pending', 'erased')
+              )
+            ORDER BY export.expires_at, export.export_job_id
+            LIMIT $2
+            """,
+            now,
+            batch_size,
+        )
+        return [dict(row) for row in rows]
+
+    async def mark_export_deleted(
+        self,
+        *,
+        account_id: UUID,
+        export_job_id: UUID,
+        now: datetime,
+    ) -> None:
+        status = await self._pool().execute(
+            """
+            UPDATE managed_export_jobs
+            SET status = 'expired',
+                completed_at = GREATEST(completed_at, $3)
+            WHERE account_id = $1
+              AND export_job_id = $2
+              AND status = 'completed'
+            """,
+            account_id,
+            export_job_id,
+            now,
+        )
+        if status not in {"UPDATE 0", "UPDATE 1"}:
+            raise ManagedConflictError("managed export deletion state is inconsistent")
+
+    async def complete_restore(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        restore_job_id: UUID,
+        delivered_objects: int,
+        delivered_bytes: int,
+    ) -> dict[str, Any]:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_restore_jobs
+                    WHERE account_id = $1
+                      AND installation_id = $2
+                      AND restore_job_id = $3
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    restore_job_id,
+                )
+                if row is None:
+                    raise ManagedNotFoundError("managed restore was not found")
+                if (
+                    int(row["selected_objects"]) != delivered_objects
+                    or int(row["selected_bytes"]) < delivered_bytes
+                ):
+                    raise ManagedConflictError(
+                        "restore completion does not match the active restore"
+                    )
+                if row["status"] == "completed":
+                    if (
+                        int(row["delivered_objects"]) != delivered_objects
+                        or int(row["delivered_bytes"]) != delivered_bytes
+                    ):
+                        raise ManagedConflictError(
+                            "completed restore receipt does not match"
+                        )
+                    return self._public_restore(dict(row), duplicate=True)
+                if row["status"] != "running" or row[
+                    "expires_at"
+                ] <= await connection.fetchval("SELECT clock_timestamp()"):
+                    raise ManagedConflictError(
+                        "restore completion does not match the active restore"
+                    )
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_restore_jobs
+                    SET status = 'completed',
+                        delivered_objects = $4,
+                        delivered_bytes = $5,
+                        completed_at = clock_timestamp()
+                    WHERE account_id = $1
+                      AND installation_id = $2
+                      AND restore_job_id = $3
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    installation_id,
+                    restore_job_id,
+                    delivered_objects,
+                    delivered_bytes,
+                )
+        return self._public_restore(dict(row), duplicate=False)
+
+    async def get_restore(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        restore_job_id: UUID,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT *
+            FROM managed_restore_jobs
+            WHERE account_id = $1
+              AND installation_id = $2
+              AND restore_job_id = $3
+            """,
+            principal.account_id,
+            installation_id,
+            restore_job_id,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed restore was not found")
+        return self._public_restore(dict(row), duplicate=False)
+
+    async def purge_expired_control_rows(
+        self,
+        *,
+        now: datetime,
+        batch_size: int,
+    ) -> dict[str, int]:
+        """Purge bounded control history without invalidating live cursors.
+
+        Change events are removed only from each account's contiguous expired
+        prefix. The retained cursor floor advances in the same transaction, so
+        a client can never resume in a silently missing portion of the feed.
+        """
+
+        if not 1 <= batch_size <= 1_000:
+            raise ValueError("batch_size must be between 1 and 1000")
+        counts: dict[str, int] = {}
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                expired_jobs = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT restore_job_id
+                        FROM managed_restore_jobs
+                        WHERE expires_at <= $1
+                          AND status <> 'expired'
+                        ORDER BY expires_at, restore_job_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_restore_jobs job
+                    SET status = 'expired',
+                        started_at = COALESCE(job.started_at, job.created_at),
+                        completed_at = GREATEST(
+                            COALESCE(job.started_at, job.created_at),
+                            $1::timestamptz
+                        )
+                    FROM candidates
+                    WHERE job.restore_job_id = candidates.restore_job_id
+                    RETURNING job.restore_job_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["restore_jobs_expired"] = len(expired_jobs)
+
+                expired_exports = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT export_job_id
+                        FROM managed_export_jobs
+                        WHERE expires_at <= $1
+                          AND status <> 'expired'
+                          AND output_generation IS NULL
+                        ORDER BY expires_at, export_job_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_export_jobs job
+                    SET status = 'expired',
+                        started_at = COALESCE(job.started_at, job.created_at),
+                        completed_at = GREATEST(
+                            COALESCE(job.started_at, job.created_at),
+                            $1::timestamptz
+                        )
+                    FROM candidates
+                    WHERE job.export_job_id = candidates.export_job_id
+                    RETURNING job.export_job_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["export_jobs_expired"] = len(expired_exports)
+
+                for key, statement in (
+                    (
+                        "access_grants",
+                        """
+                        DELETE FROM managed_object_access_grants
+                        WHERE access_grant_id IN (
+                            SELECT access_grant_id
+                            FROM managed_object_access_grants
+                            WHERE expires_at <= $1
+                            ORDER BY expires_at, access_grant_id
+                            LIMIT $2
+                        )
+                        RETURNING access_grant_id
+                        """,
+                    ),
+                    (
+                        "upload_grants",
+                        """
+                        DELETE FROM managed_upload_grants
+                        WHERE upload_grant_id IN (
+                            SELECT upload_grant_id
+                            FROM managed_upload_grants
+                            WHERE expires_at <= $1 - interval '7 days'
+                            ORDER BY expires_at, upload_grant_id
+                            LIMIT $2
+                        )
+                        RETURNING upload_grant_id
+                        """,
+                    ),
+                    (
+                        "processing_attempts",
+                        """
+                        DELETE FROM managed_processing_attempts
+                        WHERE processing_attempt_id IN (
+                            SELECT processing_attempt_id
+                            FROM managed_processing_attempts
+                            WHERE finished_at <= $1 - interval '30 days'
+                            ORDER BY finished_at, processing_attempt_id
+                            LIMIT $2
+                        )
+                        RETURNING processing_attempt_id
+                        """,
+                    ),
+                    (
+                        "usage_ledger",
+                        """
+                        DELETE FROM managed_storage_usage_ledger
+                        WHERE usage_event_id IN (
+                            SELECT usage_event_id
+                            FROM managed_storage_usage_ledger
+                            WHERE purge_after <= $1
+                            ORDER BY purge_after, usage_event_id
+                            LIMIT $2
+                        )
+                        RETURNING usage_event_id
+                        """,
+                    ),
+                    (
+                        "audit_events",
+                        """
+                        DELETE FROM managed_audit_events
+                        WHERE audit_event_id IN (
+                            SELECT audit_event_id
+                            FROM managed_audit_events
+                            WHERE purge_after <= $1
+                            ORDER BY purge_after, audit_event_id
+                            LIMIT $2
+                        )
+                        RETURNING audit_event_id
+                        """,
+                    ),
+                    (
+                        "replay_tombstones",
+                        """
+                        DELETE FROM managed_replay_tombstones
+                        WHERE replay_tombstone_id IN (
+                            SELECT replay_tombstone_id
+                            FROM managed_replay_tombstones
+                            WHERE expires_at <= $1
+                            ORDER BY expires_at, replay_tombstone_id
+                            LIMIT $2
+                        )
+                        RETURNING replay_tombstone_id
+                        """,
+                    ),
+                    (
+                        "daily_ingest_usage",
+                        """
+                        DELETE FROM managed_daily_ingest_usage
+                        WHERE (account_id, data_class, utc_day) IN (
+                            SELECT account_id, data_class, utc_day
+                            FROM managed_daily_ingest_usage
+                            WHERE utc_day < ($1::date - 400)
+                            ORDER BY utc_day, account_id, data_class
+                            LIMIT $2
+                        )
+                        RETURNING account_id
+                        """,
+                    ),
+                ):
+                    rows = await connection.fetch(statement, now, batch_size)
+                    counts[key] = len(rows)
+
+                removed_changes = await connection.fetch(
+                    """
+                    WITH boundaries AS (
+                        SELECT account_id,
+                               COALESCE(
+                                   min(change_sequence)
+                                       FILTER (WHERE purge_after > $1),
+                                   max(change_sequence) + 1
+                               ) AS first_retained
+                        FROM managed_change_events
+                        GROUP BY account_id
+                    ),
+                    candidates AS (
+                        SELECT event.account_id, event.change_sequence
+                        FROM managed_change_events event
+                        JOIN boundaries USING (account_id)
+                        WHERE event.purge_after <= $1
+                          AND event.change_sequence
+                              < boundaries.first_retained
+                        ORDER BY event.account_id, event.change_sequence
+                        LIMIT $2
+                    ),
+                    removed AS (
+                        DELETE FROM managed_change_events event
+                        USING candidates
+                        WHERE event.account_id = candidates.account_id
+                          AND event.change_sequence
+                              = candidates.change_sequence
+                        RETURNING event.account_id, event.change_sequence
+                    )
+                    SELECT account_id,
+                           max(change_sequence) AS maximum_sequence,
+                           count(*) AS removed_count
+                    FROM removed
+                    GROUP BY account_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["change_events"] = sum(
+                    int(row["removed_count"]) for row in removed_changes
+                )
+                for row in removed_changes:
+                    await connection.execute(
+                        """
+                        UPDATE managed_account_change_sequences
+                        SET minimum_retained_sequence = GREATEST(
+                                minimum_retained_sequence,
+                                $2::bigint + 1
+                            ),
+                            updated_at = $3
+                        WHERE account_id = $1
+                        """,
+                        row["account_id"],
+                        row["maximum_sequence"],
+                        now,
+                    )
+
+                deleted_chunks = await connection.fetch(
+                    """
+                    DELETE FROM managed_chunks chunk
+                    WHERE chunk.chunk_id IN (
+                        SELECT candidate.chunk_id
+                        FROM managed_chunks candidate
+                        WHERE candidate.state = 'deleted'
+                          AND candidate.deleted_at
+                              <= $1 - interval '400 days'
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_storage_usage_ledger ledger
+                              WHERE ledger.account_id = candidate.account_id
+                                AND ledger.chunk_id = candidate.chunk_id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_aggregate_inputs aggregate_input
+                              WHERE aggregate_input.account_id
+                                      = candidate.account_id
+                                AND aggregate_input.chunk_id
+                                      = candidate.chunk_id
+                          )
+                        ORDER BY candidate.deleted_at, candidate.chunk_id
+                        LIMIT $2
+                    )
+                    RETURNING chunk.chunk_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["chunk_manifests"] = len(deleted_chunks)
+        return counts
+
+    async def request_erasure(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request_id: UUID,
+        scope: str,
+        confirmation_sha256: str,
+        identity_deletion_ticket: bytes | None,
+        cooling_off: timedelta,
+    ) -> dict[str, Any]:
+        if (scope == "account") != (identity_deletion_ticket is not None):
+            raise ManagedConfigurationError(
+                "account erasure requires one identity deletion ticket"
+            )
+        if (
+            identity_deletion_ticket is not None
+            and not 29 <= len(identity_deletion_ticket) <= 1_024
+        ):
+            raise ManagedConfigurationError("identity deletion ticket is invalid")
+        now = await self.coordination_now()
+        tenant_replay_hash = self._tenant_replay_hash(principal.account_id)
+        job_id = uuid4()
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE account_id = $1 AND request_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    request_id,
+                )
+                if existing is not None:
+                    if (
+                        existing["scope"] != scope
+                        or str(existing["confirmation_sha256"]).strip()
+                        != confirmation_sha256
+                    ):
+                        raise ManagedConflictError("erasure request id was reused")
+                    return self._public_erasure(
+                        dict(existing),
+                        duplicate=True,
+                    )
+                not_before = now + cooling_off
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_erasure_jobs (
+                        erasure_job_id,
+                        account_id,
+                        request_id,
+                        requested_by_identity_id,
+                        scope,
+                        status,
+                        tenant_replay_hash,
+                        confirmation_sha256,
+                        identity_deletion_ticket,
+                        requested_at,
+                        not_before,
+                        verification_expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, 'cooling_off',
+                        $6, $7, $8, $9::timestamptz, $10,
+                        $9::timestamptz + interval '400 days'
+                    )
+                    RETURNING *
+                    """,
+                    job_id,
+                    principal.account_id,
+                    request_id,
+                    principal.identity_id,
+                    scope,
+                    tenant_replay_hash,
+                    confirmation_sha256,
+                    identity_deletion_ticket,
+                    now,
+                    not_before,
+                )
+                if scope in {"all_managed_data", "account"}:
+                    await connection.execute(
+                        """
+                        UPDATE managed_accounts
+                        SET status = 'erasure_pending',
+                            erasure_requested_at = $2,
+                            updated_at = $2
+                        WHERE account_id = $1
+                        """,
+                        principal.account_id,
+                        now,
+                    )
+        return self._public_erasure(dict(row), duplicate=False)
+
+    async def get_erasure(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        erasure_job_id: UUID,
+    ) -> dict[str, Any]:
+        row = await self._pool().fetchrow(
+            """
+            SELECT *
+            FROM managed_erasure_jobs
+            WHERE account_id = $1 AND erasure_job_id = $2
+            """,
+            principal.account_id,
+            erasure_job_id,
+        )
+        if row is None:
+            raise ManagedNotFoundError("managed erasure was not found")
+        return self._public_erasure(dict(row), duplicate=False)
+
+    async def cancel_erasure(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        erasure_job_id: UUID,
+    ) -> dict[str, Any]:
+        now = await self.coordination_now()
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_erasure_jobs
+                    SET status = 'canceled',
+                        identity_deletion_ticket = NULL,
+                        started_at = COALESCE(started_at, not_before),
+                        completed_at = GREATEST(not_before, $3)
+                    WHERE account_id = $1
+                      AND erasure_job_id = $2
+                      AND status = 'cooling_off'
+                      AND not_before > $3
+                    RETURNING *
+                    """,
+                    principal.account_id,
+                    erasure_job_id,
+                    now,
+                )
+                if row is None:
+                    raise ManagedConflictError(
+                        "managed erasure can no longer be canceled"
+                    )
+                await connection.execute(
+                    """
+                    UPDATE managed_accounts
+                    SET status = 'active',
+                        erasure_requested_at = NULL,
+                        updated_at = $2
+                    WHERE account_id = $1
+                      AND status = 'erasure_pending'
+                    """,
+                    principal.account_id,
+                    now,
+                )
+        return self._public_erasure(dict(row), duplicate=False)
+
+    @staticmethod
+    def _public_document(
+        row: dict[str, Any],
+        *,
+        duplicate: bool,
+    ) -> dict[str, Any]:
+        ciphertext = row.get("payload_ciphertext")
+        return {
+            "document_kind": row["document_kind"],
+            "document_id": str(row["document_id"]),
+            "revision": int(row["document_revision"]),
+            "origin_installation_id": row["origin_installation_id"],
+            "content_mode": row["content_mode"],
+            "client_key_id": (
+                str(row["client_key_id"])
+                if row.get("client_key_id") is not None
+                else None
+            ),
+            "content_sha256": str(row["content_sha256"]).strip(),
+            "payload_json": _decoded_json(row.get("payload_json")),
+            "payload_ciphertext_base64": (
+                base64.b64encode(bytes(ciphertext)).decode("ascii")
+                if ciphertext is not None
+                else None
+            ),
+            "updated_at": row["updated_at"],
+            "deleted_at": row.get("deleted_at"),
+            "duplicate": duplicate,
+        }
+
+    @staticmethod
+    def _public_restore(
+        row: dict[str, Any],
+        *,
+        duplicate: bool,
+    ) -> dict[str, Any]:
+        return {
+            "restore_job_id": str(row["restore_job_id"]),
+            "status": row["status"],
+            "snapshot_at": row["snapshot_at"],
+            "change_sequence": int(row["change_sequence"]),
+            "filters": _decoded_json(row["filters"]),
+            "selected_objects": row["selected_objects"],
+            "selected_bytes": row["selected_bytes"],
+            "delivered_objects": row["delivered_objects"],
+            "delivered_bytes": row["delivered_bytes"],
+            "created_at": row["created_at"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "expires_at": row["expires_at"],
+            "duplicate": duplicate,
+        }
+
+    @staticmethod
+    def _public_export(
+        row: dict[str, Any],
+        *,
+        duplicate: bool,
+    ) -> dict[str, Any]:
+        return {
+            "export_job_id": str(row["export_job_id"]),
+            "status": row["status"],
+            "format": row["format"],
+            "content_mode": row["content_mode"],
+            "client_key_id": (
+                str(row["client_key_id"]) if row["client_key_id"] is not None else None
+            ),
+            "scope": _decoded_json(row["scope"]),
+            "object_key": row["output_object_key"],
+            "expected_sha256": (
+                str(row["expected_sha256"]).strip()
+                if row.get("expected_sha256") is not None
+                else None
+            ),
+            "expected_bytes": row.get("expected_bytes"),
+            "content_type": row.get("content_type"),
+            "output_generation": row["output_generation"],
+            "output_sha256": (
+                str(row["output_sha256"]).strip()
+                if row["output_sha256"] is not None
+                else None
+            ),
+            "output_bytes": row["output_bytes"],
+            "created_at": row["created_at"],
+            "completed_at": row["completed_at"],
+            "expires_at": row["expires_at"],
+            "duplicate": duplicate,
+        }
+
+    @staticmethod
+    def _public_erasure(
+        row: dict[str, Any],
+        *,
+        duplicate: bool,
+    ) -> dict[str, Any]:
+        return {
+            "erasure_job_id": str(row["erasure_job_id"]),
+            "scope": row["scope"],
+            "status": row["status"],
+            "objects_selected": row["objects_selected"],
+            "objects_deleted": row["objects_deleted"],
+            "bytes_selected": row["bytes_selected"],
+            "bytes_deleted": row["bytes_deleted"],
+            "database_rows_deleted": row["database_rows_deleted"],
+            "requested_at": row["requested_at"],
+            "not_before": row["not_before"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "verification_expires_at": row["verification_expires_at"],
+            "duplicate": duplicate,
+        }
+
+    @staticmethod
+    def _public_chunk(
+        row: dict[str, Any],
+        *,
+        duplicate: bool,
+    ) -> dict[str, Any]:
+        return {
+            "chunk_id": str(row["chunk_id"]),
+            "source_id": str(row["source_id"]),
+            "data_class": row["data_class"],
+            "schema_version": row["schema_version"],
+            "content_mode": row["content_mode"],
+            "authoritative_snapshot": row["authoritative_snapshot"],
+            "state": row["state"],
+            "event_start": row["event_start"],
+            "event_end": row["event_end"],
+            "compression": row["compression"],
+            "content_type": row["content_type"],
+            "expected_sha256": str(row["expected_sha256"]).strip(),
+            "expected_compressed_bytes": row["expected_compressed_bytes"],
+            "expected_uncompressed_bytes": row["expected_uncompressed_bytes"],
+            "object_key": row["object_key"],
+            "object_generation": row["object_generation"],
+            "expires_at": row["expires_at"],
+            "reserved_at": row["reserved_at"],
+            "uploaded_at": row["uploaded_at"],
+            "available_at": row["available_at"],
+            "duplicate": duplicate,
+        }
+
+    @staticmethod
+    def _require_active(principal: ManagedPrincipal) -> None:
+        if principal.account_status != "active":
+            raise ManagedForbiddenError("managed account is not active")

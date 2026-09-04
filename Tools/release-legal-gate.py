@@ -31,9 +31,7 @@ SERVER_LICENSE_PATHS = [
     ROOT / "server" / "backup" / "LICENSE",
 ]
 RIGHTS_STATUS_PATH = ROOT / "docs" / "provenance" / "rights-status.json"
-OWNER_DECLARATION_PATH = (
-    ROOT / "docs" / "provenance" / "OWNER-RIGHTS-DECLARATION.md"
-)
+OWNER_DECLARATION_PATH = ROOT / "docs" / "provenance" / "OWNER-RIGHTS-DECLARATION.md"
 CANONICAL_REPOSITORY = "https://github.com/Dhanunjay-Divi/Noop"
 PROJECT_LICENSE_MARKERS = (
     "PolyForm Noncommercial License 1.0.0",
@@ -56,15 +54,80 @@ TERMS_VERSION_SOURCES = {
 }
 
 APPLE = {
+    "abseil-cpp-binary": (
+        "Apache-2.0",
+        "https://github.com/google/abseil-cpp-binary",
+        "apple/google-apache-2.0.txt",
+    ),
+    "app-check": (
+        "Apache-2.0",
+        "https://github.com/google/app-check",
+        "apple/google-apache-2.0.txt",
+    ),
+    "firebase-ios-sdk": (
+        "Apache-2.0",
+        "https://github.com/firebase/firebase-ios-sdk",
+        "apple/google-apache-2.0.txt",
+    ),
+    "google-ads-on-device-conversion-ios-sdk": (
+        "Apache-2.0",
+        "https://github.com/googleads/google-ads-on-device-conversion-ios-sdk",
+        "apple/google-apache-2.0.txt",
+    ),
+    "googleappmeasurement": (
+        "Apache-2.0",
+        "https://github.com/google/GoogleAppMeasurement",
+        "apple/google-apache-2.0.txt",
+    ),
+    "googledatatransport": (
+        "Apache-2.0",
+        "https://github.com/google/GoogleDataTransport",
+        "apple/google-apache-2.0.txt",
+    ),
+    "googleutilities": (
+        "Apache-2.0 AND MIT",
+        "https://github.com/google/GoogleUtilities",
+        "apple/googleutilities.txt",
+    ),
     "grdb.swift": (
         "MIT",
         "https://github.com/groue/GRDB.swift",
         "apple/grdb.swift.txt",
     ),
+    "grpc-binary": (
+        "Apache-2.0",
+        "https://github.com/google/grpc-binary",
+        "apple/google-apache-2.0.txt",
+    ),
+    "gtm-session-fetcher": (
+        "Apache-2.0",
+        "https://github.com/google/gtm-session-fetcher",
+        "apple/google-apache-2.0.txt",
+    ),
+    "interop-ios-for-google-sdks": (
+        "Apache-2.0",
+        "https://github.com/google/interop-ios-for-google-sdks",
+        "apple/google-apache-2.0.txt",
+    ),
+    "leveldb": (
+        "BSD-3-Clause",
+        "https://github.com/firebase/leveldb",
+        "apple/leveldb.txt",
+    ),
+    "nanopb": (
+        "Zlib",
+        "https://github.com/firebase/nanopb",
+        "apple/nanopb.txt",
+    ),
     "networkimage": (
         "MIT",
         "https://github.com/gonzalezreal/NetworkImage",
         "apple/networkimage.txt",
+    ),
+    "promises": (
+        "Apache-2.0",
+        "https://github.com/google/promises",
+        "apple/google-apache-2.0.txt",
     ),
     "swift-cmark": (
         "BSD-3-Clause AND bundled-component-terms",
@@ -88,13 +151,17 @@ PYTHON = {
     "annotated-types": ("MIT", "https://github.com/annotated-types/annotated-types"),
     "anyio": ("MIT", "https://github.com/agronholm/anyio"),
     "asyncpg": ("Apache-2.0", "https://github.com/MagicStack/asyncpg"),
+    "cffi": ("MIT-0", "https://github.com/python-cffi/cffi"),
     "click": ("BSD-3-Clause", "https://github.com/pallets/click"),
+    "cryptography": ("BSD-3-Clause", "https://github.com/pyca/cryptography"),
     "fastapi": ("MIT", "https://github.com/fastapi/fastapi"),
     "h11": ("MIT", "https://github.com/python-hyper/h11"),
     "httptools": ("MIT", "https://github.com/MagicStack/httptools"),
     "idna": ("BSD-3-Clause", "https://github.com/kjd/idna"),
     "pydantic": ("MIT", "https://github.com/pydantic/pydantic"),
     "pydantic-core": ("MIT", "https://github.com/pydantic/pydantic-core"),
+    "pycparser": ("BSD-3-Clause", "https://github.com/eliben/pycparser"),
+    "pyjwt": ("MIT", "https://github.com/jpadilla/pyjwt"),
     "python-dotenv": ("BSD-3-Clause", "https://github.com/theskumar/python-dotenv"),
     "pyyaml": ("MIT", "https://github.com/yaml/pyyaml"),
     "starlette": ("BSD-3-Clause", "https://github.com/Kludex/starlette"),
@@ -131,6 +198,36 @@ ANDROID_APACHE_COORDINATES = {
     "io.coil-kt:coil-compose-base",
     "io.coil-kt:coil-gif",
     "io.coil-kt:coil-svg",
+    "javax.inject:javax.inject",
+}
+ANDROID_FIREBASE_APACHE_COORDINATES = {
+    "com.google.firebase:firebase-annotations",
+    "com.google.firebase:firebase-appcheck",
+    "com.google.firebase:firebase-appcheck-interop",
+    "com.google.firebase:firebase-appcheck-playintegrity",
+    "com.google.firebase:firebase-bom",
+    "com.google.firebase:firebase-common",
+    "com.google.firebase:firebase-common-ktx",
+    "com.google.firebase:firebase-components",
+}
+ANDROID_GOOGLE_SDK_COORDINATES = {
+    "com.google.android.gms:play-services-auth",
+    "com.google.android.gms:play-services-auth-api-phone",
+    "com.google.android.gms:play-services-auth-base",
+    "com.google.android.gms:play-services-base",
+    "com.google.android.gms:play-services-basement",
+    "com.google.android.gms:play-services-fido",
+    "com.google.android.gms:play-services-tasks",
+    "com.google.android.libraries.identity.googleid:googleid",
+    "com.google.android.recaptcha:recaptcha",
+    "com.google.firebase:firebase-auth",
+    "com.google.firebase:firebase-auth-interop",
+}
+ANDROID_PLAY_CORE_COORDINATES = {
+    "com.google.android.play:core-common",
+}
+ANDROID_PLAY_INTEGRITY_COORDINATES = {
+    "com.google.android.play:integrity",
 }
 
 
@@ -217,9 +314,19 @@ def android_components() -> list[dict[str, object]]:
         elif (
             coordinate in ANDROID_APACHE_COORDINATES
             or coordinate.startswith(ANDROID_APACHE_PREFIXES)
+            or coordinate in ANDROID_FIREBASE_APACHE_COORDINATES
         ):
             license_id = "Apache-2.0"
             files.append(license_file("android/Apache-2.0.txt"))
+        elif coordinate in ANDROID_GOOGLE_SDK_COORDINATES:
+            license_id = "LicenseRef-Google-Android-SDK"
+            files.append(license_file("android/google-android-sdk-license.txt"))
+        elif coordinate in ANDROID_PLAY_CORE_COORDINATES:
+            license_id = "LicenseRef-Google-Play-Core-SDK-Terms"
+            files.append(license_file("android/google-play-core-sdk-terms.txt"))
+        elif coordinate in ANDROID_PLAY_INTEGRITY_COORDINATES:
+            license_id = "LicenseRef-Google-Play-Integrity-API-Terms"
+            files.append(license_file("android/google-play-integrity-api-terms.txt"))
         else:
             raise GateError(f"unreviewed Maven license: {coordinate}:{version}")
         if coordinate == "com.squareup.okhttp3:okhttp":
@@ -491,12 +598,13 @@ def checked_data() -> dict[str, object]:
     project_license = project_license_path.read_bytes()
     project_license_text = project_license.decode("utf-8")
     absent_license_markers = [
-        marker for marker in PROJECT_LICENSE_MARKERS if marker not in project_license_text
+        marker
+        for marker in PROJECT_LICENSE_MARKERS
+        if marker not in project_license_text
     ]
     if absent_license_markers:
         raise GateError(
-            "NOOP project license is incomplete: "
-            + ", ".join(absent_license_markers)
+            "NOOP project license is incomplete: " + ", ".join(absent_license_markers)
         )
     for path in SERVER_LICENSE_PATHS:
         if not path.is_file() or path.read_bytes() != project_license:

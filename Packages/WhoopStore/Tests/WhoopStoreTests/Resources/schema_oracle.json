@@ -1,6 +1,6 @@
 {
   "_readme": "SHARED Room<->GRDB SCHEMA ORACLE (#775). Two byte-identical copies: Packages/WhoopStore/Tests/WhoopStoreTests/Resources/schema_oracle.json and android/app/src/test/resources/schema_oracle.json. SchemaOracleTests.swift compares GRDB's PRAGMA table_info/index_list against it; SchemaOracleTest.kt compares Room's exported schema JSON against it. `columns` is the iOS/GRDB shape in GRDB column order (macOS is the reference implementation); every way Android differs is spelled out in an `android` / `iosAbsent` / `androidColumnOrder` override naming a key in `divergenceReasons`. Adding a column, reordering one, or changing a type/nullability on one platform only fails both suites until it is either fixed or written down here.",
-  "roomVersion": 39,
+  "roomVersion": 45,
   "grdbMigrations": [
     "v1",
     "v2",
@@ -50,14 +50,20 @@
     "v46-strength-gym-planning",
     "v47-remote-sync-indexes-on-demand",
     "v48-sleep-state-sync-outbox",
-    "v49-ppg-sync-outbox"
+    "v49-ppg-sync-outbox",
+    "v50-managed-sync-state",
+    "v51-managed-window-upload-state",
+    "v52-managed-dirty-windows",
+    "v53-managed-snapshot-restore-checkpoint",
+    "v54-managed-document-sync"
   ],
   "divergenceReasons": {
     "battery-alter-append-order": "REAL COLUMN-ORDER DRIFT (CLAUDE.md: 'column order in a Room CREATE TABLE must match the entity field order'). GRDB appended `synced` (v5) then `charging` (v6) with ALTER TABLE, which can only append; the Room entity declares `charging` before `synced`. Same columns, same types, different positions — so any positional copy (INSERT INTO battery SELECT * FROM …) swaps them. Fixing it means reordering the Room entity's fields, which changes Room's identity hash and therefore needs a version bump plus a no-op migration.",
     "grdb-boolean-affinity": "GRDB's .boolean column type is declared BOOLEAN, which SQLite gives NUMERIC affinity; Room maps Kotlin Boolean to INTEGER. For the 0/1 values both sides write, NUMERIC and INTEGER affinity store bit-identical INTEGERs, so a .noopbak round-trips. Closing it means a GRDB table rebuild.",
+    "managed-upload-alter-append-order": "GRDB v52 appended snapshot validation and local-pruning state to the v51 managedWindowUpload table, so SQLite places those fields after updatedAtMs. Room v43 creates the final table directly and declares updatedAtMs last. All reads, writes, exports, and restores name columns explicitly; closing this harmless order drift requires coordinated schema-version bumps and table rebuilds.",
     "paired-device-alter-append-order": "REAL COLUMN-ORDER DRIFT, same shape as battery. GRDB's v16-paired-device-peripheral appended `peripheralId` at the end; the Room entity declares it fifth, between `nickname` and `sourceKind`.",
-    "ppg-hr-bpm-integer-on-android": "REAL TYPE DRIFT with a data consequence: ppgHrSample.bpm is REAL on iOS and INTEGER on Android. The value is an autocorrelation-derived HR estimate, which is fractional by construction, so Android stores a truncated bpm for the same input. The Kotlin PpgHrSample field is `Int`; the Swift row is `Double`. Same class of 'each suite asserts its own platform's answer' bug the decoder oracle (#869) was extended to catch, one layer further down.",
     "room-omits-sql-default": "GRDB declares these columns NOT NULL DEFAULT 0; Room emits NOT NULL with no SQL DEFAULT, because a Kotlin constructor default never reaches the schema (only @ColumnInfo(defaultValue=) does). Both sides are NOT NULL and both always name the column on insert, so no row differs; an INSERT that omitted the column would fail on Android and get 0 on iOS. Closing it means adding @ColumnInfo(defaultValue = \"0\") plus a Room version bump, since the generated CREATE TABLE — and therefore Room's identity hash — changes.",
+    "sqlite-integer-pk-nullable": "SQLite reports a GRDB INTEGER PRIMARY KEY rowid alias as nullable through PRAGMA table_info even though a stored row always receives a non-null integer key. Room emits INTEGER NOT NULL. Both reject a persisted null key.",
     "sqlite-text-pk-nullable": "GRDB writes `id TEXT PRIMARY KEY`; SQLite's legacy quirk leaves a non-INTEGER PRIMARY KEY column NULLable, so PRAGMA reports notnull=0. Room writes `id TEXT NOT NULL, PRIMARY KEY(id)`. Every writer on both platforms supplies a non-null id, so no stored row differs. Closing it means a GRDB table rebuild.",
     "workout-route-polyline-android-only": "REAL COLUMN DRIFT — literally the case #775 was filed about: `workout.routePolyline` (encoded GPS route) was added by Room MIGRATION_3_4 and has no GRDB twin. A .noopbak exported from Android carries a column iOS's `workout` table cannot receive.",
     "sleep-gravity-sparse-grdb-only": "REAL COLUMN DRIFT: iOS v38 persists AnalyticsEngine's nullable gravitySparse coverage verdict so classic SleepView can present the same Rest limitation the engine scored. Android has no twin yet; its Liquid surface consumes readiness context through a different path. Closing this requires a Room version bump, nullable sleepSession column, and producer/consumer plumbing."
@@ -197,8 +203,7 @@
       "indices": []
     },
     "bodyMeasurement": {
-      "platform": "ios_only",
-      "reason": "iOS directly collects standards-compliant Bluetooth SIG Weight Scale Service measurements. Android can ingest equivalent weight through Health Connect but does not yet have a direct 0x181D collector or Room table.",
+      "platform": "both",
       "columns": [
         {
           "name": "deviceId",
@@ -240,7 +245,11 @@
           "name": "userId",
           "affinity": "INTEGER",
           "notNull": true,
-          "default": "-1"
+          "default": "-1",
+          "android": {
+            "default": null
+          },
+          "divergence": "room-omits-sql-default"
         },
         {
           "name": "unit",
@@ -1126,6 +1135,684 @@
       ],
       "indices": []
     },
+    "managedAppliedChange": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "sequence",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "resourceKind",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "resourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "contentSHA256",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "appliedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash",
+        "sequence"
+      ],
+      "indices": []
+    },
+    "managedChangeCursor": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "sequence",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash"
+      ],
+      "indices": []
+    },
+    "managedDocumentApplyGuard": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "guardId",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "android": {
+            "notNull": true
+          },
+          "divergence": "sqlite-integer-pk-nullable"
+        }
+      ],
+      "primaryKey": [
+        "guardId"
+      ],
+      "indices": []
+    },
+    "managedDocumentDirty": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "tableName",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "localKey",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "documentKind",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "generation",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "operation",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "payloadJSON",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "tableName",
+        "localKey"
+      ],
+      "indices": [
+        {
+          "name": "idx_managedDocumentDirty_order",
+          "unique": false,
+          "columns": [
+            "updatedAtMs",
+            "tableName",
+            "localKey"
+          ]
+        }
+      ]
+    },
+    "managedDocumentState": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "tableName",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "localKey",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "documentKind",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "documentId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "keyJSON",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "acknowledgedGeneration",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "remoteRevision",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "remoteContentSHA256",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash",
+        "tableName",
+        "localKey"
+      ],
+      "indices": [
+        {
+          "name": "idx_managedDocumentState_document",
+          "unique": true,
+          "columns": [
+            "accountScopeHash",
+            "documentKind",
+            "documentId"
+          ]
+        }
+      ]
+    },
+    "managedDirtyWindow": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "localSourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "dataClass",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "windowStartMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "windowEndMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "generation",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "claimedGeneration",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "localSourceId",
+        "dataClass",
+        "windowStartMs"
+      ],
+      "indices": [
+        {
+          "name": "idx_managedDirtyWindow_pending",
+          "unique": false,
+          "columns": [
+            "localSourceId",
+            "dataClass",
+            "windowEndMs",
+            "windowStartMs"
+          ]
+        }
+      ]
+    },
+    "managedPruneGuard": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "guardId",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "android": {
+            "notNull": true
+          },
+          "divergence": "sqlite-integer-pk-nullable"
+        }
+      ],
+      "primaryKey": [
+        "guardId"
+      ],
+      "indices": []
+    },
+    "managedSnapshotRestore": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "requestId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "dataClassesJSON",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "restoreJobId",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "snapshotAt",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "changeSequence",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "selectedObjects",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "selectedBytes",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "dataClassIndex",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "afterEventStart",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "afterChunkId",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "deliveredObjects",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "deliveredBytes",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "afterDocumentUpdatedAt",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "afterDocumentKind",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "afterDocumentId",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "documentsComplete",
+          "affinity": "NUMERIC",
+          "notNull": true,
+          "default": "0",
+          "android": {
+            "affinity": "INTEGER"
+          },
+          "divergence": "grdb-boolean-affinity"
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash"
+      ],
+      "indices": []
+    },
+    "managedSyncCheckpoint": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "sourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "dataClass",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "nextWindowStartMs",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "repairWindowStartMs",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash",
+        "sourceId",
+        "dataClass"
+      ],
+      "indices": []
+    },
+    "managedSyncSource": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "sourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "localSourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "sourceKind",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "platform",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "logicalSourceHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "createdAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "sourceId"
+      ],
+      "indices": []
+    },
+    "managedWindowUpload": {
+      "platform": "both",
+      "columns": [
+        {
+          "name": "accountScopeHash",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "sourceId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "dataClass",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "windowStartMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "windowEndMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "chunkId",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "rowCount",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "phase",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "objectGeneration",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "objectMetageneration",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "objectCRC32C",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "updatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "snapshotGeneration",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": "0"
+        },
+        {
+          "name": "validatedAtMs",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "localPrunedAtMs",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "accountScopeHash",
+        "sourceId",
+        "dataClass",
+        "windowStartMs"
+      ],
+      "androidColumnOrder": [
+        "accountScopeHash",
+        "sourceId",
+        "dataClass",
+        "windowStartMs",
+        "windowEndMs",
+        "chunkId",
+        "rowCount",
+        "phase",
+        "objectGeneration",
+        "objectMetageneration",
+        "objectCRC32C",
+        "snapshotGeneration",
+        "validatedAtMs",
+        "localPrunedAtMs",
+        "updatedAtMs"
+      ],
+      "androidColumnOrderDivergence": "managed-upload-alter-append-order",
+      "indices": [
+        {
+          "name": "idx_managedWindowUpload_chunk",
+          "unique": false,
+          "columns": [
+            "accountScopeHash",
+            "chunkId"
+          ]
+        },
+        {
+          "name": "idx_managedWindowUpload_prune",
+          "unique": false,
+          "columns": [
+            "accountScopeHash",
+            "sourceId",
+            "dataClass",
+            "phase",
+            "localPrunedAtMs",
+            "windowEndMs"
+          ]
+        }
+      ]
+    },
     "metricSeries": {
       "platform": "both",
       "columns": [
@@ -1582,11 +2269,7 @@
           "name": "bpm",
           "affinity": "REAL",
           "notNull": true,
-          "default": null,
-          "android": {
-            "affinity": "INTEGER"
-          },
-          "divergence": "ppg-hr-bpm-integer-on-android"
+          "default": null
         },
         {
           "name": "conf",

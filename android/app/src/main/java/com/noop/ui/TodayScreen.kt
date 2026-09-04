@@ -96,11 +96,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -141,7 +140,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1416,20 +1414,13 @@ fun TodayScreen(
         )
     }
     val canPullToSync = todayPullToSyncEnabled(liveSnap.connected, liveSnap.bonded, liveSnap.backfilling)
-    // material3 1.2.1's rememberPullToRefreshState CAPTURES the `enabled` lambda ONCE (rememberSaveable,
-    // no rememberUpdatedState), so `{ canPullToSync }` would freeze the plain Boolean from the FIRST
-    // composition — and Today usually first composes before the strap has (re)connected, leaving the
-    // gesture permanently disabled for the session. Read the stable `liveSnap` State live inside the lambda
-    // instead, so each gesture check sees the current connected/bonded/backfilling. (syncNow is triple-gated
-    // anyway; this just makes the gesture actually enable once the strap is ready.)
-    val pullToSyncState = rememberPullToRefreshState(
-        enabled = { todayPullToSyncEnabled(liveSnap.connected, liveSnap.bonded, liveSnap.backfilling) },
-    )
-    LaunchedEffect(pullToSyncState.isRefreshing, canPullToSync) {
-        if (pullToSyncState.isRefreshing) {
+    val pullToSyncState = rememberPullToRefreshState()
+    var pullToSyncRefreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(pullToSyncRefreshing, canPullToSync) {
+        if (pullToSyncRefreshing) {
             if (canPullToSync) viewModel.syncNow()
             // Historical offloads can run for a while; the existing sync chip/note owns ongoing progress.
-            pullToSyncState.endRefresh()
+            pullToSyncRefreshing = false
         }
     }
     // A new logical day may not have its own row yet while Today still shows carried Recovery,
@@ -1475,7 +1466,12 @@ fun TodayScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(pullToSyncState.nestedScrollConnection),
+            .pullToRefresh(
+                isRefreshing = pullToSyncRefreshing,
+                state = pullToSyncState,
+                enabled = canPullToSync,
+                onRefresh = { pullToSyncRefreshing = true },
+            ),
     ) {
     LazyScreenScaffold(
         modifier = daySwipeModifier,
@@ -2025,13 +2021,14 @@ fun TodayScreen(
             )
         }
     }
-        // Material3's PullToRefreshContainer draws its indicator circle even at rest (progress 0, not
+        // Material3's pull indicator draws its circle even at rest (progress 0, not
         // refreshing), so an idle Today showed a permanent grey dot at the top (#582). Compose it only
-        // while a pull is in progress or a sync is running — the pull GESTURE flows through the Box's
-        // nestedScroll above, not this container, so gating the visual can't disable pull-to-sync.
-        if (pullToSyncState.progress > 0f || pullToSyncState.isRefreshing) {
-            PullToRefreshContainer(
+        // while a pull is in progress or its short handoff is running. The gesture is owned by the Box's
+        // modifier above, so gating this visual cannot disable pull-to-sync.
+        if (pullToSyncState.distanceFraction > 0f || pullToSyncRefreshing) {
+            PullToRefreshDefaults.Indicator(
                 state = pullToSyncState,
+                isRefreshing = pullToSyncRefreshing,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
@@ -2435,13 +2432,9 @@ private fun DailyPlanTargetSection(
                                                 color = Palette.textTertiary,
                                             )
                                         }
-                                        Switch(
+                                        NoopToggleSwitch(
                                             checked = notificationEnabled,
                                             onCheckedChange = null,
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = Color.White,
-                                                checkedTrackColor = Palette.accent,
-                                            ),
                                         )
                                     }
                                     if (notificationPermissionDenied) {
@@ -5873,16 +5866,9 @@ private fun DashboardCardsEditorDialog(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Switch(
+                            NoopToggleSwitch(
                                 checked = item.enabled,
                                 onCheckedChange = { items[index] = item.copy(enabled = it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Palette.surfaceBase,
-                                    checkedTrackColor = Palette.statusPositive,
-                                    uncheckedThumbColor = Palette.textSecondary,
-                                    uncheckedTrackColor = Palette.surfaceInset,
-                                    uncheckedBorderColor = Palette.hairline,
-                                ),
                                 modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_card_title_7844540d, item.card.title) },
                             )
                             Spacer(Modifier.width(12.dp))
@@ -8732,16 +8718,9 @@ private fun KeyMetricsEditorDialog(
                             color = Palette.textSecondary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = detailed,
                         onCheckedChange = { detailed = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.statusPositive,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_detailed_tiles_0801721b) },
                     )
                 }
@@ -8774,24 +8753,12 @@ private fun KeyMetricsEditorDialog(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Switch(
+                            NoopToggleSwitch(
                                 checked = item.enabled,
                                 onCheckedChange = { enabled ->
                                     items[index] = item.copy(enabled = enabled)
                                 },
                                 enabled = toggleEnabled,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Palette.surfaceBase,
-                                    checkedTrackColor = Palette.statusPositive,
-                                    uncheckedThumbColor = Palette.textSecondary,
-                                    uncheckedTrackColor = Palette.surfaceInset,
-                                    uncheckedBorderColor = Palette.hairline,
-                                    disabledCheckedThumbColor = Palette.surfaceBase,
-                                    disabledCheckedTrackColor = Palette.statusPositive,
-                                    disabledUncheckedThumbColor = Palette.textSecondary,
-                                    disabledUncheckedTrackColor = Palette.surfaceInset,
-                                    disabledUncheckedBorderColor = Palette.hairline,
-                                ),
                                 modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_metric_title_81803daf, metricTitle) },
                             )
                             Spacer(Modifier.width(12.dp))

@@ -19,6 +19,7 @@ connection_name="$(
 )"
 database_secret="noop-staging-database-url"
 admin_secret="noop-staging-bootstrap-admin-token"
+managed_replay_secret="noop-staging-managed-replay-secret"
 database_user="noop_runtime"
 
 if [[ -z "${instance}" || -z "${connection_name}" ]]; then
@@ -49,6 +50,14 @@ if ! has_enabled_version "${admin_secret}"; then
     --project="${project_id}" \
     --data-file=-
   unset admin_token
+fi
+
+if ! has_enabled_version "${managed_replay_secret}"; then
+  replay_secret="$(openssl rand -hex 32)"
+  printf '%s' "${replay_secret}" | gcloud secrets versions add "${managed_replay_secret}" \
+    --project="${project_id}" \
+    --data-file=-
+  unset replay_secret
 fi
 
 printf 'Runtime secret versions are configured; no secret value was printed.\n'

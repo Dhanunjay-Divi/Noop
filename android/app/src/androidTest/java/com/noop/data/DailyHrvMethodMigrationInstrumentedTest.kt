@@ -32,7 +32,7 @@ class DailyHrvMethodMigrationInstrumentedTest {
         migrationHelper.createDatabase(DATABASE_NAME, 35).use { database ->
             database.execSQL(
                 "INSERT INTO `dailyMetric` (`deviceId`, `day`, `avgHrv`) VALUES (?, ?, ?)",
-                arrayOf("apple-health", "2026-08-25", 61.0),
+                arrayOf<Any?>("apple-health", "2026-08-25", 61.0),
             )
         }
 

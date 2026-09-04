@@ -85,9 +85,11 @@ secrets.*
 # Generated interactively; contains the distribution-specific launch verifier and salt.
 Config/LaunchGateSecrets.xcconfig
 Config/StrengthMediaSecrets.xcconfig
+Config/ManagedCloudSecrets.xcconfig
 android/local.properties
 android/keystore.properties
 android/noop-release.jks
+android/managed-cloud.properties
 
 # ── Personal data — NEVER publish (real WHOOP/Apple Health exports) ──
 Fixtures/

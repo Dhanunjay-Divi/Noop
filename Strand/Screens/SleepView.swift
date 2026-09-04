@@ -3878,8 +3878,7 @@ private struct SleepPlannerShortcutCard: View {
             Spacer(minLength: NoopMetrics.space2)
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(tint)
+                .toggleStyle(.noopSwitch)
                 .accessibilityLabel(title)
         }
         .frame(minHeight: 44)

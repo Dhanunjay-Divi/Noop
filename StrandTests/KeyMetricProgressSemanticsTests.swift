@@ -35,7 +35,7 @@ final class KeyMetricProgressSemanticsTests: XCTestCase {
         XCTAssertTrue(keyMetrics.contains(
             #".accessibilityIdentifier("noop.key-metric.toggle.\(item.metric.rawValue)")"#
         ))
-        XCTAssertTrue(dashboard.contains(".tint(StrandPalette.statusPositive)"))
+        XCTAssertTrue(dashboard.contains(".toggleStyle(.noopSwitch)"))
         XCTAssertTrue(dashboard.contains(
             "enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary"
         ))

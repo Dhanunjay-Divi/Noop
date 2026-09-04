@@ -1008,7 +1008,7 @@ private struct NutritionEntryEditor: View {
                                     : "nutrition.editor.save_food_library",
                                 isOn: $saveToLibrary
                             )
-                            .tint(StrandPalette.accent)
+                            .toggleStyle(.noopSwitch)
                         }
                     }
 

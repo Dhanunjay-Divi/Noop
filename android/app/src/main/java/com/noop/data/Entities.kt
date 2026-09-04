@@ -64,7 +64,7 @@ data class HrSample(
 data class PpgHrSample(
     val deviceId: String,
     val ts: Long,
-    val bpm: Int,
+    val bpm: Double,
     val conf: Double,
     val synced: Int = 0,
 )
@@ -142,6 +142,29 @@ data class BatterySample(
     val mv: Int? = null,
     val charging: Boolean? = null,
     val synced: Int = 0,
+)
+
+/** Standards-based body measurement restored from NOOP+ or collected by a supported scale. */
+@Entity(
+    tableName = "bodyMeasurement",
+    primaryKeys = ["deviceId", "measuredAt", "userId"],
+    indices = [
+        Index(
+            name = "idx_bodyMeasurement_device_measuredAt",
+            value = ["deviceId", "measuredAt"],
+        ),
+    ],
+)
+data class BodyMeasurementRow(
+    val deviceId: String,
+    val measuredAt: Long,
+    val receivedAt: Long,
+    val weightKg: Double,
+    val bmi: Double? = null,
+    val heightCm: Double? = null,
+    val userId: Int = -1,
+    val unit: String,
+    val source: String,
 )
 
 /** SpO2 raw-ADC sample (type-47). Swift `spo2Sample` (v3). PK (deviceId, ts). */

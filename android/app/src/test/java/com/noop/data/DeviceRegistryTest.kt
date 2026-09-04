@@ -100,6 +100,9 @@ class DeviceRegistryTest {
         override suspend fun deleteRawImuFor(deviceId: String) { deletedTables += "rawImuSample" to deviceId }
         override suspend fun deleteEventsFor(deviceId: String) { deletedTables += "event" to deviceId }
         override suspend fun deleteBatteryFor(deviceId: String) { deletedTables += "battery" to deviceId }
+        override suspend fun deleteBodyMeasurementsFor(deviceId: String) {
+            deletedTables += "bodyMeasurement" to deviceId
+        }
         override suspend fun deleteDailyMetricsFor(deviceId: String) { deletedTables += "dailyMetric" to deviceId }
         override suspend fun deleteSleepSessionsFor(deviceId: String) { deletedTables += "sleepSession" to deviceId }
         override suspend fun deleteJournalFor(deviceId: String) { deletedTables += "journal" to deviceId }
@@ -248,7 +251,8 @@ class DeviceRegistryTest {
         // were missing, leaving raw sleep-state, lab markers, live sessions and dismissed markers behind.
         val expectedTables = setOf(
             "hrSample", "rrInterval", "spo2Sample", "skinTempSample", "respSample", "gravitySample",
-            "stepSample", "ppgHrSample", "ppgWaveformSample", "rawImuSample", "event", "battery", "dailyMetric", "sleepSession",
+            "stepSample", "ppgHrSample", "ppgWaveformSample", "rawImuSample", "event", "battery",
+            "bodyMeasurement", "dailyMetric", "sleepSession",
             "journal", "workout", "appleDaily", "metricSeries", "dayOwnership",
             "sleepStateSample", "labMarker", "nutritionEntry", "liveSession",
             "dismissedWorkout", "dismissedSleep",

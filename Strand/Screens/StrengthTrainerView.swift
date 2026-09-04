@@ -2196,7 +2196,7 @@ private struct StrengthProgramBuilder: View {
                     "Replace current weekday assignments",
                     isOn: $replaceSchedule
                 )
-                .tint(StrandPalette.effortColor)
+                .toggleStyle(.noopSwitch)
 
                 NoopButton(
                     "Create \(dayCount)-day plan",
@@ -2665,7 +2665,7 @@ private struct StrengthSessionEditor: View {
                     .font(StrandFont.headline)
                     .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .tint(StrandPalette.metricCyan)
+                .toggleStyle(.noopSwitch)
                 if voiceCoaching {
                     Picker("Rep tempo", selection: $repTempoSeconds) {
                         Text("3 sec").tag(3)
@@ -4401,6 +4401,7 @@ private struct StrengthRoutineEditor: View {
                     }
                     Toggle("appwide.gym.reps_per_side", isOn: item.plan.repsPerSide)
                         .font(StrandFont.subhead)
+                        .toggleStyle(.noopSwitch)
                 }
 
                 HStack(spacing: NoopMetrics.space3) {

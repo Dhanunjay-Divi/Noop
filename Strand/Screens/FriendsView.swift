@@ -911,7 +911,7 @@ private struct FriendSharingSheet: View {
         Toggle(isOn: isOn) {
             Label(title, systemImage: icon)
         }
-        .tint(StrandPalette.accent)
+        .toggleStyle(.noopSwitch)
     }
 
     private func readOnly(_ title: String, _ visible: Bool) -> some View {

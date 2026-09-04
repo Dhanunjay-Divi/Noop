@@ -95,6 +95,8 @@ interface DeviceRegistryDao {
     @Query("DELETE FROM rawImuSample WHERE deviceId = :deviceId") suspend fun deleteRawImuFor(deviceId: String)   // #423
     @Query("DELETE FROM event WHERE deviceId = :deviceId") suspend fun deleteEventsFor(deviceId: String)
     @Query("DELETE FROM battery WHERE deviceId = :deviceId") suspend fun deleteBatteryFor(deviceId: String)
+    @Query("DELETE FROM bodyMeasurement WHERE deviceId = :deviceId")
+    suspend fun deleteBodyMeasurementsFor(deviceId: String)
     @Query("DELETE FROM dailyMetric WHERE deviceId = :deviceId") suspend fun deleteDailyMetricsFor(deviceId: String)
     @Query("DELETE FROM sleepSession WHERE deviceId = :deviceId") suspend fun deleteSleepSessionsFor(deviceId: String)
     @Query("DELETE FROM journal WHERE deviceId = :deviceId") suspend fun deleteJournalFor(deviceId: String)

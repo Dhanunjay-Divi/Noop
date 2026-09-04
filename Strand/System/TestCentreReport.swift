@@ -49,12 +49,14 @@ final class TestCentreReport: ObservableObject {
     func start(mode: TestMode, live: LiveState, repo: Repository? = nil) {
         Task { @MainActor [weak self] in
             let storage = await TestCentreReport.storageProbe(repo: repo, live: live)
+            let runtimeDiagnostics = await AppDiagnosticsRecorder.shared.diagnosticEntriesAsync()
             // #1002: the connected model. BLEManager persists the DETECTED family to this key on every
             // connect, so it reflects the strap that actually linked - nil before any strap ever did.
             // Read, never guessed.
             let model = UserDefaults.standard.string(forKey: "selectedWhoopModel")
             let entries = TestBundleAssembler.assemble(profile: mode.domain, live: live,
-                                                       storage: storage, strapModel: model)
+                                                       storage: storage, strapModel: model,
+                                                       runtimeDiagnostics: runtimeDiagnostics)
             self?.pending = Pending(profile: mode.domain, title: mode.title,
                                     gate: ReportReviewGate(entries: entries),
                                     modeInactive: mode.domain != .master && !TestCentre.active(mode.domain))

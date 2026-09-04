@@ -83,6 +83,7 @@ class SourceCoordinatorAdoptionTest {
         override suspend fun deleteRawImuFor(deviceId: String) {}
         override suspend fun deleteEventsFor(deviceId: String) {}
         override suspend fun deleteBatteryFor(deviceId: String) {}
+        override suspend fun deleteBodyMeasurementsFor(deviceId: String) {}
         override suspend fun deleteDailyMetricsFor(deviceId: String) {}
         override suspend fun deleteSleepSessionsFor(deviceId: String) {}
         override suspend fun deleteJournalFor(deviceId: String) {}

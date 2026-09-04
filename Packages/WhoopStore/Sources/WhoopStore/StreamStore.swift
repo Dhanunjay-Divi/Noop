@@ -158,6 +158,88 @@ extension WhoopStore {
             // Pack the raw i16 columns to the LE BLOB HERE (packImuColumns is module-internal), so the
             // caller passes plain [Int16] and never needs the packer. Mirrors how `insert` packs ppgWaveform.
             for r in rows { try ins.execute(arguments: [deviceId, r.ts, WhoopStore.packImuColumns(r.cols)]) }
+            let threshold = try Int64.fetchOne(
+                db,
+                sql: """
+                    SELECT MIN(ts) FROM (
+                        SELECT ts FROM rawImuSample
+                        WHERE deviceId = ?
+                        ORDER BY ts DESC LIMIT ?
+                    )
+                    """,
+                arguments: [deviceId, retentionRows]
+            )
+            if let threshold,
+               try Bool.fetchOne(
+                   db,
+                   sql: """
+                       SELECT EXISTS(
+                           SELECT 1
+                           FROM managedSyncSource AS source
+                           JOIN managedWindowUpload AS upload
+                             ON upload.sourceId = source.sourceId
+                           WHERE source.localSourceId = ?
+                             AND source.sourceKind != 'managed_restore'
+                             AND upload.dataClass = 'raw_motion'
+                             AND upload.phase = 'available'
+                             AND upload.validatedAtMs IS NOT NULL
+                             AND upload.windowStartMs < ?
+                       )
+                       """,
+                   arguments: [deviceId, threshold * 1_000]
+               ) == true {
+                try db.execute(
+                    sql: "INSERT OR IGNORE INTO managedPruneGuard (guardId) VALUES (1)"
+                )
+                try db.execute(
+                    sql: """
+                        DELETE FROM rawImuSample
+                        WHERE deviceId = ? AND ts < ?
+                          AND EXISTS (
+                              SELECT 1
+                              FROM managedSyncSource AS source
+                              JOIN managedWindowUpload AS upload
+                                ON upload.sourceId = source.sourceId
+                              WHERE source.localSourceId = rawImuSample.deviceId
+                                AND source.sourceKind != 'managed_restore'
+                                AND upload.dataClass = 'raw_motion'
+                                AND upload.phase = 'available'
+                                AND upload.validatedAtMs IS NOT NULL
+                                AND rawImuSample.ts * 1000
+                                    BETWEEN upload.windowStartMs AND upload.windowEndMs
+                          )
+                        """,
+                    arguments: [deviceId, threshold]
+                )
+                if db.changesCount > 0 {
+                    let prunedAtMs = Int64(
+                        (Date().timeIntervalSince1970 * 1_000).rounded(.down)
+                    )
+                    try db.execute(
+                        sql: """
+                            UPDATE managedWindowUpload
+                            SET localPrunedAtMs = COALESCE(localPrunedAtMs, ?),
+                                updatedAtMs = ?
+                            WHERE sourceId IN (
+                                SELECT sourceId FROM managedSyncSource
+                                WHERE localSourceId = ?
+                                  AND sourceKind != 'managed_restore'
+                            )
+                              AND dataClass = 'raw_motion'
+                              AND phase = 'available'
+                              AND validatedAtMs IS NOT NULL
+                              AND windowStartMs < ?
+                            """,
+                        arguments: [
+                            prunedAtMs, prunedAtMs, deviceId, threshold * 1_000,
+                        ]
+                    )
+                }
+                try db.execute(sql: "DELETE FROM managedPruneGuard WHERE guardId = 1")
+            }
+            // Any rows not covered by a validated managed snapshot still obey the hard local cap.
+            // Their trigger remains active so NOOP+ never mistakes the retention loss for a
+            // server-validated local prune.
             try db.execute(sql: """
                 DELETE FROM rawImuSample WHERE deviceId = ? AND ts < (
                     SELECT MIN(ts) FROM (SELECT ts FROM rawImuSample WHERE deviceId = ? ORDER BY ts DESC LIMIT ?))

@@ -1,0 +1,87 @@
+{
+  "$id": "noop-schema://managed/stream-value-contract-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "clinical_measurement": {
+      "type": "boolean"
+    },
+    "columns": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "enum": {
+            "items": {
+              "type": [
+                "boolean",
+                "integer",
+                "number",
+                "string"
+              ]
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "max_length": {
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "boolean",
+              "integer",
+              "number",
+              "string"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array"
+    },
+    "encoding": {
+      "const": "tabular_v1"
+    },
+    "semantic": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_]{0,127}$",
+      "type": "string"
+    },
+    "timestamp_column": {
+      "const": "event_at_ms"
+    }
+  },
+  "required": [
+    "encoding",
+    "timestamp_column",
+    "semantic",
+    "clinical_measurement",
+    "columns"
+  ],
+  "title": "NOOP managed stream value contract v1",
+  "type": "object"
+}

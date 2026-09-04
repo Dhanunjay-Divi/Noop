@@ -1,0 +1,86 @@
+{
+  "$id": "noop-schema://managed/chunk-json-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chunk_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "data_class": {
+      "pattern": "^[a-z][a-z0-9_]{1,63}$",
+      "type": "string"
+    },
+    "event_end_ms": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "event_start_ms": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "maximum": 10000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "source_id": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "streams": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "rows": {
+            "items": {
+              "maxItems": 128,
+              "minItems": 1,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "schema_revision": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stream_key": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stream_key",
+          "schema_revision",
+          "columns",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "maxItems": 128,
+      "type": "array"
+    }
+  },
+  "required": [
+    "chunk_id",
+    "source_id",
+    "data_class",
+    "schema_version",
+    "event_start_ms",
+    "event_end_ms",
+    "streams"
+  ],
+  "title": "NOOP managed JSON chunk v1",
+  "type": "object"
+}

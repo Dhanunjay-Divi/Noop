@@ -1718,8 +1718,7 @@ struct LiquidTodayView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.accent)
+                    .toggleStyle(.noopSwitch)
                 }
             }
             }

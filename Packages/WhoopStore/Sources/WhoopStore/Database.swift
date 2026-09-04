@@ -1017,6 +1017,165 @@ extension WhoopStore {
                 t.add(column: "synced", .integer).notNull().defaults(to: 0)
             }
         }
+        // v50: compact, account-scoped state for optional NOOP+ managed storage. These tables contain
+        // only identities/cursors/checkpoints, never a second copy of sensor rows. Fixed-time windows
+        // are re-read from their primary tables when uploading, and the bounded applied-change ledger
+        // makes restore replay safe across process death.
+        migrator.registerMigration("v50-managed-sync-state") { db in
+            try db.create(table: "managedSyncSource") { t in
+                t.column("sourceId", .text).notNull()
+                t.column("localSourceId", .text).notNull()
+                t.column("sourceKind", .text).notNull()
+                t.column("platform", .text).notNull()
+                t.column("logicalSourceHash", .text).notNull()
+                t.column("createdAtMs", .integer).notNull()
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey(["sourceId"])
+            }
+            try db.create(table: "managedSyncCheckpoint") { t in
+                t.column("sourceId", .text).notNull()
+                t.column("dataClass", .text).notNull()
+                t.column("nextWindowStartMs", .integer)
+                t.column("repairWindowStartMs", .integer)
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey(["sourceId", "dataClass"])
+            }
+            try db.create(table: "managedChangeCursor") { t in
+                t.column("accountScopeHash", .text).notNull()
+                t.column("sequence", .integer).notNull()
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey(["accountScopeHash"])
+            }
+            try db.create(table: "managedAppliedChange") { t in
+                t.column("accountScopeHash", .text).notNull()
+                t.column("sequence", .integer).notNull()
+                t.column("resourceKind", .text).notNull()
+                t.column("resourceId", .text).notNull()
+                t.column("contentSHA256", .text)
+                t.column("appliedAtMs", .integer).notNull()
+                t.primaryKey(["accountScopeHash", "sequence"])
+            }
+        }
+        // v51: upload progress must be account-scoped, and a Cloud Storage receipt must survive process
+        // death between PUT and completion. The old accountless checkpoint is operational state only, so
+        // reset it instead of guessing which account owned it.
+        migrator.registerMigration("v51-managed-window-upload-state") { db in
+            try db.create(table: "managedSyncCheckpointV51") { t in
+                t.column("accountScopeHash", .text).notNull()
+                t.column("sourceId", .text).notNull()
+                t.column("dataClass", .text).notNull()
+                t.column("nextWindowStartMs", .integer)
+                t.column("repairWindowStartMs", .integer)
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey(["accountScopeHash", "sourceId", "dataClass"])
+            }
+            try db.drop(table: "managedSyncCheckpoint")
+            try db.rename(table: "managedSyncCheckpointV51", to: "managedSyncCheckpoint")
+            try db.create(table: "managedWindowUpload") { t in
+                t.column("accountScopeHash", .text).notNull()
+                t.column("sourceId", .text).notNull()
+                t.column("dataClass", .text).notNull()
+                t.column("windowStartMs", .integer).notNull()
+                t.column("windowEndMs", .integer).notNull()
+                t.column("chunkId", .text).notNull()
+                t.column("rowCount", .integer).notNull()
+                t.column("phase", .text).notNull()
+                t.column("objectGeneration", .integer)
+                t.column("objectMetageneration", .integer)
+                t.column("objectCRC32C", .text)
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey([
+                    "accountScopeHash", "sourceId", "dataClass", "windowStartMs",
+                ])
+            }
+        }
+        // v52: local mutations are tracked by fixed upload window, including backfills older than the
+        // periodic repair horizon. Upload completion is no longer treated as validation: only an exact
+        // `chunk/available` change-feed item can make a snapshot eligible for optional local pruning.
+        migrator.registerMigration("v52-managed-dirty-windows") { db in
+            try db.alter(table: "managedWindowUpload") { t in
+                t.add(column: "snapshotGeneration", .integer)
+                    .notNull()
+                    .defaults(to: 0)
+                t.add(column: "validatedAtMs", .integer)
+                t.add(column: "localPrunedAtMs", .integer)
+            }
+            try db.execute(sql: """
+                UPDATE managedWindowUpload
+                SET phase = 'awaiting_validation'
+                WHERE phase = 'completed'
+                """)
+            try db.create(
+                index: "idx_managedWindowUpload_chunk",
+                on: "managedWindowUpload",
+                columns: ["accountScopeHash", "chunkId"],
+                unique: false
+            )
+            try db.create(
+                index: "idx_managedWindowUpload_prune",
+                on: "managedWindowUpload",
+                columns: [
+                    "accountScopeHash", "sourceId", "dataClass", "phase",
+                    "localPrunedAtMs", "windowEndMs",
+                ],
+                unique: false
+            )
+            try db.create(table: "managedDirtyWindow") { t in
+                t.column("localSourceId", .text).notNull()
+                t.column("dataClass", .text).notNull()
+                t.column("windowStartMs", .integer).notNull()
+                t.column("windowEndMs", .integer).notNull()
+                t.column("generation", .integer).notNull()
+                t.column("claimedGeneration", .integer)
+                t.column("updatedAtMs", .integer).notNull()
+                t.primaryKey(["localSourceId", "dataClass", "windowStartMs"])
+            }
+            try db.create(
+                index: "idx_managedDirtyWindow_pending",
+                on: "managedDirtyWindow",
+                columns: ["localSourceId", "dataClass", "windowEndMs", "windowStartMs"],
+                unique: false
+            )
+            // This one-row transactional guard suppresses dirty triggers only while a validated local
+            // snapshot is being removed. It is intentionally not used as a persisted setting.
+            try db.create(table: "managedPruneGuard") { t in
+                t.column("guardId", .integer).primaryKey()
+            }
+            try installManagedDirtyWindowTriggers(db)
+        }
+        // v53: compact, durable progress for an expired change-feed cursor's bounded snapshot
+        // restore. This lets a large account resume after process death without restarting.
+        migrator.registerMigration("v53-managed-snapshot-restore-checkpoint") { db in
+            try db.create(table: "managedSnapshotRestore") { t in
+                t.column("accountScopeHash", .text).notNull().primaryKey()
+                t.column("requestId", .text).notNull()
+                t.column("dataClassesJSON", .text).notNull()
+                t.column("restoreJobId", .text)
+                t.column("snapshotAt", .text)
+                t.column("changeSequence", .integer)
+                t.column("selectedObjects", .integer)
+                t.column("selectedBytes", .integer)
+                t.column("dataClassIndex", .integer).notNull()
+                t.column("afterEventStart", .text)
+                t.column("afterChunkId", .text)
+                t.column("deliveredObjects", .integer).notNull()
+                t.column("deliveredBytes", .integer).notNull()
+                t.column("updatedAtMs", .integer).notNull()
+            }
+        }
+        // v54: durable, account-scoped revisions for user-authored managed documents. Table triggers
+        // retain deletes and avoid full scans; a guard prevents a remote restore from echoing back out.
+        migrator.registerMigration("v54-managed-document-sync") { db in
+            try installManagedDocumentSync(db)
+            try db.alter(table: "managedSnapshotRestore") { t in
+                t.add(column: "afterDocumentUpdatedAt", .text)
+                t.add(column: "afterDocumentKind", .text)
+                t.add(column: "afterDocumentId", .text)
+                t.add(column: "documentsComplete", .boolean)
+                    .notNull()
+                    .defaults(to: false)
+            }
+        }
         return migrator
     }
 
@@ -1042,5 +1201,201 @@ extension WhoopStore {
                 arguments: [marker]
             )
         }
+    }
+}
+
+private extension WhoopStore {
+    struct ManagedDirtyTriggerSpec {
+        let table: String
+        let timestampColumn: String
+        let dataClass: String
+        let windowMilliseconds: Int64
+        let timestampIsDay: Bool
+    }
+
+    static let managedDirtyTriggerSpecs: [ManagedDirtyTriggerSpec] = {
+        let hour: Int64 = 60 * 60 * 1_000
+        let day: Int64 = 24 * hour
+        return [
+            .init(
+                table: "hrSample", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "rrInterval", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "event", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "battery", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "stepSample", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "ppgHrSample", timestampColumn: "ts",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "bodyMeasurement", timestampColumn: "measuredAt",
+                dataClass: "essential_timeseries", windowMilliseconds: 6 * hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "skinTempSample", timestampColumn: "ts",
+                dataClass: "raw_auxiliary", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "respSample", timestampColumn: "ts",
+                dataClass: "raw_auxiliary", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "sleepStateSample", timestampColumn: "ts",
+                dataClass: "raw_auxiliary", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "spo2Sample", timestampColumn: "ts",
+                dataClass: "raw_ppg", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "ppgWaveformSample", timestampColumn: "ts",
+                dataClass: "raw_ppg", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "gravitySample", timestampColumn: "ts",
+                dataClass: "raw_motion", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "rawImuSample", timestampColumn: "ts",
+                dataClass: "raw_motion", windowMilliseconds: hour,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "dailyMetric", timestampColumn: "day",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: true
+            ),
+            .init(
+                table: "appleDaily", timestampColumn: "day",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: true
+            ),
+            .init(
+                table: "metricSeries", timestampColumn: "day",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: true
+            ),
+            .init(
+                table: "sleepSession", timestampColumn: "startTs",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "workout", timestampColumn: "startTs",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: false
+            ),
+            .init(
+                table: "liveSession", timestampColumn: "startTs",
+                dataClass: "derived_summaries", windowMilliseconds: 7 * day,
+                timestampIsDay: false
+            ),
+        ]
+    }()
+
+    static func installManagedDirtyWindowTriggers(_ db: Database) throws {
+        for spec in managedDirtyTriggerSpecs {
+            let columns = try Row.fetchAll(
+                db,
+                sql: "PRAGMA table_info(\"\(spec.table)\")"
+            ).compactMap { row -> String? in
+                row["name"]
+            }.filter { $0 != "synced" }
+            guard !columns.isEmpty else { continue }
+            let updateColumns = columns.map { "\"\($0)\"" }.joined(separator: ", ")
+            let prefix = "managed_dirty_\(spec.table)"
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_insert"
+                AFTER INSERT ON "\(spec.table)"
+                BEGIN
+                    \(managedDirtyMarkSQL(spec: spec, row: "NEW"));
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_delete"
+                AFTER DELETE ON "\(spec.table)"
+                BEGIN
+                    \(managedDirtyMarkSQL(spec: spec, row: "OLD"));
+                END
+                """)
+            try db.execute(sql: """
+                CREATE TRIGGER "\(prefix)_update"
+                AFTER UPDATE OF \(updateColumns) ON "\(spec.table)"
+                BEGIN
+                    \(managedDirtyMarkSQL(spec: spec, row: "OLD"));
+                    \(managedDirtyMarkSQL(spec: spec, row: "NEW"));
+                END
+                """)
+        }
+    }
+
+    static func managedDirtyMarkSQL(
+        spec: ManagedDirtyTriggerSpec,
+        row: String
+    ) -> String {
+        let eventMilliseconds: String
+        if spec.timestampIsDay {
+            eventMilliseconds =
+                "(CAST(strftime('%s', \(row).\"\(spec.timestampColumn)\" || " +
+                "'T00:00:00Z') AS INTEGER) * 1000)"
+        } else {
+            eventMilliseconds = "(\(row).\"\(spec.timestampColumn)\" * 1000)"
+        }
+        let start =
+            "((\(eventMilliseconds) / \(spec.windowMilliseconds)) * " +
+            "\(spec.windowMilliseconds))"
+        return """
+            INSERT INTO managedDirtyWindow (
+                localSourceId, dataClass, windowStartMs, windowEndMs,
+                generation, claimedGeneration, updatedAtMs
+            )
+            SELECT \(row)."deviceId", '\(spec.dataClass)', \(start),
+                   \(start) + \(spec.windowMilliseconds), 1, NULL,
+                   CAST(strftime('%s', 'now') AS INTEGER) * 1000
+            WHERE NOT EXISTS (SELECT 1 FROM managedPruneGuard WHERE guardId = 1)
+              AND NOT EXISTS (
+                  SELECT 1 FROM pairedDevice
+                  WHERE id = \(row)."deviceId" AND sourceKind = 'cloudImport'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM managedSyncSource
+                  WHERE localSourceId = \(row)."deviceId"
+                    AND sourceKind = 'managed_restore'
+              )
+            ON CONFLICT(localSourceId, dataClass, windowStartMs)
+            DO UPDATE SET
+                generation = managedDirtyWindow.generation + 1,
+                claimedGeneration = managedDirtyWindow.claimedGeneration,
+                updatedAtMs = excluded.updatedAtMs
+            WHERE managedDirtyWindow.claimedGeneration =
+                  managedDirtyWindow.generation
+            """
     }
 }

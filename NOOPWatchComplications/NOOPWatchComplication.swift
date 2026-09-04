@@ -491,11 +491,21 @@ struct NOOPChargeComplication: Widget {
         }
         .configurationDisplayName("NOOP Recovery")
         .description("Your Recovery on the watch face, with Effort and Sleep Score in the rectangular card.")
+        #if os(watchOS)
         .supportedFamilies([
             .accessoryCircular,
             .accessoryCorner,
             .accessoryInline,
             .accessoryRectangular
         ])
+        #else
+        // Xcode also type-checks embedded WidgetKit extensions against the parent iOS simulator SDK.
+        // accessoryCorner is watch-only; the actual watch target keeps the complete family list above.
+        .supportedFamilies([
+            .accessoryCircular,
+            .accessoryInline,
+            .accessoryRectangular
+        ])
+        #endif
     }
 }

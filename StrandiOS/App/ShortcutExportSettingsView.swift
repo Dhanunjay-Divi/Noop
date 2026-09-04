@@ -32,8 +32,7 @@ struct ShortcutExportSettingsView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
+                .toggleStyle(.noopSwitch)
                 // The file keeps its historical four-column shape, but only heart-rate samples are
                 // populated. The two reserved metric columns stay blank so old Shortcuts keep parsing.
                 Label("Heart rate", systemImage: "checkmark.circle.fill")

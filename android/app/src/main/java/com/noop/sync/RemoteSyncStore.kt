@@ -1,6 +1,8 @@
 package com.noop.sync
 
 import androidx.room.withTransaction
+import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.noop.data.AppleDaily
 import com.noop.data.BatterySample
 import com.noop.data.DailyMetric
@@ -196,7 +198,27 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
     ): RemotePruneResult {
         val limit = limitPerStream.coerceIn(100, 5_000)
         return database.withTransaction {
-            val deleted =
+            val db = database.openHelper.writableDatabase
+            val hasManagedSnapshots = db.query(
+                SimpleSQLiteQuery(
+                    """
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM managedSyncSource AS source
+                            JOIN managedWindowUpload AS upload
+                              ON upload.sourceId = source.sourceId
+                            WHERE source.localSourceId = ?
+                              AND source.sourceKind != 'managed_restore'
+                              AND upload.phase = 'available'
+                              AND upload.validatedAtMs IS NOT NULL
+                        )
+                    """.trimIndent(),
+                    arrayOf(deviceId),
+                ),
+            ).use { cursor -> cursor.moveToFirst() && cursor.getInt(0) == 1 }
+            val deleted = if (hasManagedSnapshots) {
+                pruneManagedBackedRows(db, deviceId, cutoff, limit)
+            } else {
                 dao.pruneRemoteHr(deviceId, cutoff, limit) +
                     dao.pruneRemoteRr(deviceId, cutoff, limit) +
                     dao.pruneRemoteEvents(deviceId, cutoff, limit) +
@@ -209,10 +231,171 @@ class RoomRemoteSyncDataStore(private val database: WhoopDatabase) : RemoteSyncD
                     dao.pruneRemoteSleepState(deviceId, cutoff, limit) +
                     dao.pruneRemotePpgHr(deviceId, cutoff, limit) +
                     dao.pruneRemotePpgWaveform(deviceId, cutoff, limit)
+            }
             RemotePruneResult(
                 deletedRows = deleted,
-                hasMoreEligibleRows = dao.hasPrunableRemoteRows(deviceId, cutoff),
+                hasMoreEligibleRows = if (hasManagedSnapshots) {
+                    hasManagedPrunableRows(db, deviceId, cutoff)
+                } else {
+                    dao.hasPrunableRemoteRows(deviceId, cutoff)
+                },
             )
         }
     }
+
+    private fun pruneManagedBackedRows(
+        db: SupportSQLiteDatabase,
+        deviceId: String,
+        cutoff: Long,
+        limit: Int,
+    ): Int {
+        val specs = listOf(
+            "hrSample" to "essential_timeseries",
+            "rrInterval" to "essential_timeseries",
+            "event" to "essential_timeseries",
+            "battery" to "essential_timeseries",
+            "spo2Sample" to "raw_ppg",
+            "skinTempSample" to "raw_auxiliary",
+            "respSample" to "raw_auxiliary",
+            "stepSample" to "essential_timeseries",
+            "gravitySample" to "raw_motion",
+            "sleepStateSample" to "raw_auxiliary",
+            "ppgHrSample" to "essential_timeseries",
+            "ppgWaveformSample" to "raw_ppg",
+        )
+        val prunedAtMs = System.currentTimeMillis()
+        var deleted = 0
+        db.execSQL("INSERT OR IGNORE INTO managedPruneGuard (guardId) VALUES (1)")
+        db.execSQL(
+            """
+                CREATE TEMP TABLE IF NOT EXISTS managedRemotePruneCandidate (
+                    rowID INTEGER PRIMARY KEY,
+                    eventTs INTEGER NOT NULL
+                )
+            """.trimIndent(),
+        )
+        try {
+            specs.forEach { (table, dataClass) ->
+                db.execSQL("DELETE FROM managedRemotePruneCandidate")
+                db.execSQL(
+                    """
+                        INSERT INTO managedRemotePruneCandidate (rowID, eventTs)
+                        SELECT candidate.rowid, candidate.ts
+                        FROM $table AS candidate
+                        WHERE candidate.deviceId = ?
+                          AND candidate.synced = 1
+                          AND candidate.ts < ?
+                          AND EXISTS (
+                              SELECT 1
+                              FROM managedSyncSource AS source
+                              JOIN managedWindowUpload AS coverage
+                                ON coverage.sourceId = source.sourceId
+                              WHERE source.localSourceId = candidate.deviceId
+                                AND source.sourceKind != 'managed_restore'
+                                AND coverage.dataClass = ?
+                                AND coverage.phase = 'available'
+                                AND coverage.validatedAtMs IS NOT NULL
+                                AND candidate.ts * 1000
+                                    BETWEEN coverage.windowStartMs AND coverage.windowEndMs
+                          )
+                        ORDER BY candidate.ts, candidate.rowid
+                        LIMIT ?
+                    """.trimIndent(),
+                    arrayOf<Any?>(deviceId, cutoff, dataClass, limit),
+                )
+                db.execSQL(
+                    """
+                        UPDATE managedWindowUpload
+                        SET localPrunedAtMs = ?, updatedAtMs = ?
+                        WHERE sourceId IN (
+                            SELECT sourceId FROM managedSyncSource
+                            WHERE localSourceId = ?
+                              AND sourceKind != 'managed_restore'
+                        )
+                          AND dataClass = ?
+                          AND phase = 'available'
+                          AND validatedAtMs IS NOT NULL
+                          AND localPrunedAtMs IS NULL
+                          AND EXISTS (
+                              SELECT 1
+                              FROM managedRemotePruneCandidate AS candidate
+                              WHERE candidate.eventTs * 1000
+                                  BETWEEN managedWindowUpload.windowStartMs
+                                      AND managedWindowUpload.windowEndMs
+                          )
+                    """.trimIndent(),
+                    arrayOf<Any?>(prunedAtMs, prunedAtMs, deviceId, dataClass),
+                )
+                db.execSQL(
+                    """
+                        DELETE FROM $table
+                        WHERE rowid IN (
+                            SELECT rowID FROM managedRemotePruneCandidate
+                        )
+                    """.trimIndent(),
+                )
+                deleted = Math.addExact(deleted, changes(db))
+            }
+        } finally {
+            db.execSQL("DELETE FROM managedRemotePruneCandidate")
+            db.execSQL("DELETE FROM managedPruneGuard WHERE guardId = 1")
+        }
+        return deleted
+    }
+
+    private fun hasManagedPrunableRows(
+        db: SupportSQLiteDatabase,
+        deviceId: String,
+        cutoff: Long,
+    ): Boolean {
+        val specs = listOf(
+            "hrSample" to "essential_timeseries",
+            "rrInterval" to "essential_timeseries",
+            "event" to "essential_timeseries",
+            "battery" to "essential_timeseries",
+            "spo2Sample" to "raw_ppg",
+            "skinTempSample" to "raw_auxiliary",
+            "respSample" to "raw_auxiliary",
+            "stepSample" to "essential_timeseries",
+            "gravitySample" to "raw_motion",
+            "sleepStateSample" to "raw_auxiliary",
+            "ppgHrSample" to "essential_timeseries",
+            "ppgWaveformSample" to "raw_ppg",
+        )
+        return specs.any { (table, dataClass) ->
+            db.query(
+                SimpleSQLiteQuery(
+                    """
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM $table AS candidate
+                            WHERE candidate.deviceId = ?
+                              AND candidate.synced = 1
+                              AND candidate.ts < ?
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM managedSyncSource AS source
+                                  JOIN managedWindowUpload AS coverage
+                                    ON coverage.sourceId = source.sourceId
+                                  WHERE source.localSourceId = candidate.deviceId
+                                    AND source.sourceKind != 'managed_restore'
+                                    AND coverage.dataClass = ?
+                                    AND coverage.phase = 'available'
+                                    AND coverage.validatedAtMs IS NOT NULL
+                                    AND candidate.ts * 1000
+                                        BETWEEN coverage.windowStartMs
+                                            AND coverage.windowEndMs
+                              )
+                        )
+                    """.trimIndent(),
+                    arrayOf<Any?>(deviceId, cutoff, dataClass),
+                ),
+            ).use { cursor -> cursor.moveToFirst() && cursor.getInt(0) == 1 }
+        }
+    }
+
+    private fun changes(db: SupportSQLiteDatabase): Int =
+        db.query("SELECT changes()").use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
 }

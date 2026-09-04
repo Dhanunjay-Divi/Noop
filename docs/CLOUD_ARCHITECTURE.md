@@ -1,7 +1,14 @@
 # NOOP cloud architecture
 
-**Status:** synthetic staging foundation; mobile clients disconnected
+**Status:** managed-storage source locally verified; mobile clients disconnected
 **Primary staging region:** Google Cloud Mumbai (`asia-south1`)
+
+The identity apply is currently blocked before Firebase project registration:
+the authenticated project Owner has `firebase.projects.update`, but Google
+returns `Firebase Tos Not Accepted`. The account holder must accept the Firebase
+terms in the Firebase console before regenerating and applying the identity
+plan. The managed API has no public invoker, no mobile configuration has been
+generated, and no real health data is permitted in staging.
 
 ## Product boundary
 
@@ -34,18 +41,17 @@ OpenTofu in `infra/gcp/` manages:
 - an optional deletion-protected PostgreSQL 16 Cloud SQL instance;
 - a one-shot Cloud Run migration job and an internal-ingress private API.
 
-The private API uses a digest-pinned image, IAM, Secret Manager, the Cloud SQL
-connector, scale-to-zero, and `/readyz` as its startup gate. It has no public
-invoker. The Safety worker is disabled. No real health data belongs in this
-environment.
+The existing private API uses a digest-pinned image, IAM, Secret Manager, the
+Cloud SQL connector, scale-to-zero, and `/readyz` as its startup gate. It has no
+public invoker. The Safety worker is disabled. Managed API, processor, lifecycle,
+scheduler, phone identity, and App Check definitions now exist, but the managed
+workloads remain disabled and the Firebase resources above are not deployed. No
+real health data belongs in this environment.
 
 ## Target data plane
 
-The current server accepts row-oriented v1 sync. That is useful for self-hosting
-and contract tests, but it must not become the high-frequency managed ingestion
-format for a large subscriber base.
-
-The managed path should use:
+The current server still accepts row-oriented v1 sync for self-hosting. The
+separate managed implementation now uses:
 
 1. The phone writes measurements locally first and computes all user-facing
    metrics locally.
@@ -65,6 +71,15 @@ The managed path should use:
 7. BigQuery receives nothing until a separate purpose, minimization, consent,
    retention, and deletion review approves a derived dataset.
 
+The Swift, Kotlin, FastAPI, PostgreSQL, Cloud Storage, processor, restore,
+export, erasure, and lifecycle code for this path is implemented and locally
+tested. Native Apple and Android clients can use the restore snapshot as a
+consistent export anchor, page every retained managed data class and current
+personal record, verify object digests plus snapshot totals, and write a
+manifest-backed ZIP that includes cloud-only history. This path is distinct
+from `/exports`, which stores a client-produced encrypted archive. Neither path
+is a production claim until the live synthetic and physical gates pass.
+
 Raw backup and server-readable sync are different products. A true private
 backup should use client-side encryption with a user-recoverable key, making its
 objects opaque to NOOP. Server-side trends, Friends, and coaching require a
@@ -72,10 +87,18 @@ separately disclosed server-readable subset. Do not describe one as the other.
 
 ## Identity and authorization
 
-The staging APIs for Identity Platform are enabled, but no provider is selected.
-Public rollout remains blocked until enrollment proof, account recovery,
-lost-device handling, reauthentication, support access, revocation, and erasure
-are designed together.
+Phone OTP is the selected managed identity provider, restricted to reviewed SMS
+regions. App Attest on iOS and Play Integrity on Android are the selected App
+Check providers. The apps initialize Firebase only when every ignored
+environment value is present. A verified phone session still uploads nothing
+until the user accepts the versioned managed-storage policy.
+
+The source implements reauthentication for account erasure, per-installation
+credentials, device revocation, a 24-hour deletion cooling-off/cancel path, and
+account-scoped restore. Public rollout remains blocked until Firebase terms are
+accepted, the resources are deployed, signed-device attestation is proven, and
+enrollment abuse, recovery, lost-device, support-access, and erasure operations
+pass review.
 
 Identity Provider authentication is only the first boundary. Every database row,
 object manifest, signed upload capability, export, and delete operation must
@@ -84,9 +107,14 @@ attestation may reduce abuse but cannot replace authorization.
 
 ## Retention and deletion
 
-Retention must be explicit by data class and tier. A viable product policy can
-offer a bounded local window and longer NOOP+ history, but local deletion cannot
-be introduced merely to force payment. Before such a policy ships it needs:
+Retention is explicit by data class and tier. The optional
+**Reduce phone storage after backup** setting keeps 90 days of detailed sensor
+history locally. It prunes only an exact server-validated, clean, supersession-
+aware window and retains summaries, user-authored records, dirty windows, and
+unvalidated data. It is off by default.
+
+Local deletion cannot be introduced merely to force payment. Before this policy
+ships it still needs:
 
 - an in-app disclosure before enablement;
 - export before expiry;
@@ -100,7 +128,9 @@ staging cleanup control, not the final subscriber retention policy.
 
 ## Scaling path
 
-Use measured thresholds rather than starting with Kubernetes:
+Use measured thresholds rather than starting with Kubernetes. The complete
+regional-cell and customer-day design is in
+[`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md).
 
 1. **Synthetic staging:** shared-core single-zone Cloud SQL, Cloud Run
    scale-to-zero, no mobile clients.
@@ -123,16 +153,19 @@ eliminate, provider migration work.
 
 ## Launch gates
 
-Mobile connection remains blocked until all of these pass:
+Mobile connection to a public managed endpoint remains blocked until all of
+these pass:
 
 - public identity, recovery, consent, and support-access review;
-- immutable chunk upload and processor implementation;
+- deployed immutable chunk upload and processor validation;
 - tenant-isolation and cross-tenant adversarial tests;
 - synthetic upload, duplicate, reconnect-burst, export, erasure, and retention
   tests;
+- large-account export cancellation, snapshot-expiry, token-refresh, and
+  archive-import tests;
 - Cloud SQL restore, point-in-time recovery, zone-failure, and secret-rotation
   drills;
-- cost/load tests using measured device cadence and chunk sizes;
+- cost/load tests using measured device cadence and compressed chunk sizes;
 - privacy/legal review for India and every launch market;
 - physical iOS and Android background/foreground catch-up tests.
 

@@ -354,6 +354,80 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun pruneRawImu(deviceId: String, keep: Int)
 
+    @Query(
+        "SELECT MIN(ts) FROM (SELECT ts FROM rawImuSample WHERE deviceId = :deviceId " +
+            "ORDER BY ts DESC LIMIT :keep)"
+    )
+    suspend fun rawImuRetentionThreshold(deviceId: String, keep: Int): Long?
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM managedSyncSource AS source " +
+            "JOIN managedWindowUpload AS upload ON upload.sourceId = source.sourceId " +
+            "WHERE source.localSourceId = :deviceId AND source.sourceKind != 'managed_restore' " +
+            "AND upload.dataClass = 'raw_motion' AND upload.phase = 'available' " +
+            "AND upload.validatedAtMs IS NOT NULL AND upload.windowStartMs < :thresholdMs)"
+    )
+    suspend fun hasValidatedRawMotionBefore(deviceId: String, thresholdMs: Long): Boolean
+
+    @Query("INSERT OR IGNORE INTO managedPruneGuard (guardId) VALUES (1)")
+    suspend fun beginManagedPruneGuard(): Long
+
+    @Query("DELETE FROM managedPruneGuard WHERE guardId = 1")
+    suspend fun endManagedPruneGuard(): Int
+
+    @Query(
+        "DELETE FROM rawImuSample WHERE deviceId = :deviceId AND ts < :threshold " +
+            "AND EXISTS(SELECT 1 FROM managedSyncSource AS source " +
+            "JOIN managedWindowUpload AS upload ON upload.sourceId = source.sourceId " +
+            "WHERE source.localSourceId = rawImuSample.deviceId " +
+            "AND source.sourceKind != 'managed_restore' " +
+            "AND upload.dataClass = 'raw_motion' AND upload.phase = 'available' " +
+            "AND upload.validatedAtMs IS NOT NULL " +
+            "AND rawImuSample.ts * 1000 BETWEEN upload.windowStartMs AND upload.windowEndMs)"
+    )
+    suspend fun pruneValidatedRawImu(deviceId: String, threshold: Long): Int
+
+    @Query(
+        "UPDATE managedWindowUpload SET localPrunedAtMs = COALESCE(localPrunedAtMs, :prunedAtMs), " +
+            "updatedAtMs = :prunedAtMs WHERE sourceId IN (" +
+            "SELECT sourceId FROM managedSyncSource WHERE localSourceId = :deviceId " +
+            "AND sourceKind != 'managed_restore') AND dataClass = 'raw_motion' " +
+            "AND phase = 'available' AND validatedAtMs IS NOT NULL " +
+            "AND windowStartMs < :thresholdMs"
+    )
+    suspend fun markRawMotionLocallyPruned(
+        deviceId: String,
+        thresholdMs: Long,
+        prunedAtMs: Long,
+    ): Int
+
+    @Transaction
+    suspend fun pruneRawImuManagedAware(
+        deviceId: String,
+        keep: Int,
+        prunedAtMs: Long,
+    ) {
+        val threshold = rawImuRetentionThreshold(deviceId, keep)
+        if (threshold != null &&
+            hasValidatedRawMotionBefore(deviceId, Math.multiplyExact(threshold, 1_000L))
+        ) {
+            beginManagedPruneGuard()
+            try {
+                if (pruneValidatedRawImu(deviceId, threshold) > 0) {
+                    markRawMotionLocallyPruned(
+                        deviceId,
+                        Math.multiplyExact(threshold, 1_000L),
+                        prunedAtMs,
+                    )
+                }
+            } finally {
+                endManagedPruneGuard()
+            }
+        }
+        // Uncovered rows still obey the hard cap and retain active dirty triggers.
+        pruneRawImu(deviceId, keep)
+    }
+
     /** RAW 5/MG IMU buffers in [from, to] (ascending), packed i16 BLOB. (#423) */
     @Query(
         "SELECT * FROM rawImuSample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
@@ -968,6 +1042,18 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun rrIntervals(deviceId: String, from: Long, to: Long, limit: Int): List<RrInterval>
 
+    /** Unfiltered persisted R-R rows for lossless managed backup, including suspect/diagnostic channels. */
+    @Query(
+        "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "ORDER BY ts ASC, ord ASC, rrMs ASC, seq ASC LIMIT :limit"
+    )
+    suspend fun managedRrIntervals(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        limit: Int,
+    ): List<RrInterval>
+
     @Query(
         "SELECT * FROM event WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
             "ORDER BY ts ASC, kind ASC LIMIT :limit"
@@ -979,6 +1065,18 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY ts ASC LIMIT :limit"
     )
     suspend fun batterySamples(deviceId: String, from: Long, to: Long, limit: Int): List<BatterySample>
+
+    @Query(
+        "SELECT * FROM bodyMeasurement WHERE deviceId = :deviceId " +
+            "AND measuredAt >= :from AND measuredAt <= :to " +
+            "ORDER BY measuredAt ASC, userId ASC LIMIT :limit"
+    )
+    suspend fun bodyMeasurements(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        limit: Int,
+    ): List<BodyMeasurementRow>
 
     @Query(
         "SELECT * FROM spo2Sample WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
@@ -1173,6 +1271,16 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun metricSeries(
         deviceId: String,
         key: String,
+        from: String,
+        to: String,
+    ): List<MetricSeriesRow>
+
+    @Query(
+        "SELECT * FROM metricSeries WHERE deviceId = :deviceId " +
+            "AND day >= :from AND day <= :to ORDER BY day ASC, `key` ASC"
+    )
+    suspend fun managedMetricSeries(
+        deviceId: String,
         from: String,
         to: String,
     ): List<MetricSeriesRow>
@@ -1756,6 +1864,17 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY day ASC"
     )
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily>
+
+    @Query(
+        "SELECT * FROM liveSession WHERE deviceId = :deviceId " +
+            "AND startTs >= :from AND startTs <= :to ORDER BY startTs ASC LIMIT :limit"
+    )
+    suspend fun managedLiveSessions(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        limit: Int,
+    ): List<LiveSessionRow>
 
     /** Scalar COUNT twin of [appleDaily], for badges that were materializing the rows for `.size`. */
     @Query("SELECT COUNT(*) FROM appleDaily WHERE deviceId = :deviceId AND day >= :from AND day <= :to")

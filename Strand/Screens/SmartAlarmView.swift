@@ -338,7 +338,7 @@ struct SmartAlarmView: View {
                     }
                     Spacer()
                     Toggle("", isOn: $behavior.smartAlarmEnabled)
-                        .labelsHidden().toggleStyle(.switch).tint(StrandPalette.chargeColor)
+                        .labelsHidden().toggleStyle(.noopSwitch)
                         .accessibilityLabel("Wake me with a band vibration")
                 }
                 .frame(minHeight: 42)
@@ -364,8 +364,7 @@ struct SmartAlarmView: View {
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.chargeColor)
+                    .toggleStyle(.noopSwitch)
                     if alarmDoubleTapEnabled {
                         Stepper(value: $alarmTapWindowMinutes, in: 5...30, step: 5) {
                             HStack {
@@ -520,7 +519,7 @@ struct SmartAlarmView: View {
                     }
                     Spacer()
                     Toggle("", isOn: $windDownOn)
-                        .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                        .labelsHidden().toggleStyle(.noopSwitch)
                         .accessibilityLabel("Remind me to wind down")
                         .onChangeCompat(of: windDownOn) { on in
                             WindDownNudge.setEnabled(on) { outcome in
@@ -669,7 +668,7 @@ struct SmartAlarmView: View {
             }
             Spacer()
             Toggle("", isOn: $perDayOn)
-                .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                .labelsHidden().toggleStyle(.noopSwitch)
                 .accessibilityLabel("Different wake time per day")
                 .accessibilityIdentifier("noop.sleep-planner.per-day")
                 .onChangeCompat(of: perDayOn) { on in

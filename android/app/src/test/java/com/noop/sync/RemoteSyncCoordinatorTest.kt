@@ -49,7 +49,7 @@ class RemoteSyncCoordinatorTest {
                     SleepStateSampleEntity("my-whoop", 1_700_000_002, 2),
                 ),
                 ppgHr = listOf(
-                    PpgHrSample("my-whoop", 1_700_000_003, 63, 0.87),
+                    PpgHrSample("my-whoop", 1_700_000_003, 63.0, 0.87),
                 ),
                 ppgWaveform = listOf(
                     PpgWaveformSampleEntity(
@@ -94,7 +94,7 @@ class RemoteSyncCoordinatorTest {
                     SleepStateSampleEntity("my-whoop", 1_700_000_002, 2),
                 ),
                 ppgHr = listOf(
-                    PpgHrSample("my-whoop", 1_700_000_003, 63, 0.87),
+                    PpgHrSample("my-whoop", 1_700_000_003, 63.0, 0.87),
                 ),
                 ppgWaveform = listOf(
                     PpgWaveformSampleEntity(

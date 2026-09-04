@@ -24,8 +24,6 @@ import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -840,16 +838,9 @@ private fun ToggleRowLocal(label: String, help: String, checked: Boolean, onChan
             Text(help, style = NoopType.footnote, color = Palette.textTertiary)
         }
         Spacer(Modifier.width(16.dp))
-        Switch(
+        NoopToggleSwitch(
             checked = checked,
             onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Palette.surfaceBase,
-                checkedTrackColor = Palette.accent,
-                uncheckedThumbColor = Palette.textSecondary,
-                uncheckedTrackColor = Palette.surfaceInset,
-                uncheckedBorderColor = Palette.hairline,
-            ),
         )
     }
 }

@@ -17,6 +17,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LICENSE_DIR = ROOT / "ThirdPartyNotices" / "licenses" / "python"
+REQUIREMENT_EXTRAS = {
+    "pyjwt": "crypto",
+    "uvicorn": "standard",
+}
 
 
 def components() -> list[tuple[str, str]]:
@@ -54,7 +58,8 @@ def render() -> str:
             raise SystemExit(
                 f"PyPI returned no non-yanked hashes for {name}=={version}"
             )
-        requirement_name = f"{name}[standard]" if name == "uvicorn" else name
+        extra = REQUIREMENT_EXTRAS.get(name)
+        requirement_name = f"{name}[{extra}]" if extra else name
         lines.append(f"{requirement_name}=={version} \\")
         for index, digest in enumerate(hashes):
             continuation = " \\" if index < len(hashes) - 1 else ""

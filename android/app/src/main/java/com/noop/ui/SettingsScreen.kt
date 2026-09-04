@@ -71,8 +71,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -1565,19 +1563,12 @@ fun SettingsScreen(
                         color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     checked = showDayCycleBackground,
                     onCheckedChange = {
                         showDayCycleBackground = it
                         NoopPrefs.setShowDayCycleBackground(context, it)
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Palette.surfaceBase,
-                        checkedTrackColor = Palette.accent,
-                        uncheckedThumbColor = Palette.textSecondary,
-                        uncheckedTrackColor = Palette.surfaceInset,
-                        uncheckedBorderColor = Palette.hairline,
-                    ),
                 )
             }
 
@@ -1601,20 +1592,13 @@ fun SettingsScreen(
                         color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     enabled = showDayCycleBackground,
                     checked = skyBehindCards && showDayCycleBackground,
                     onCheckedChange = {
                         skyBehindCards = it
                         NoopPrefs.setSkyBehindCards(context, it)
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Palette.surfaceBase,
-                        checkedTrackColor = Palette.accent,
-                        uncheckedThumbColor = Palette.textSecondary,
-                        uncheckedTrackColor = Palette.surfaceInset,
-                        uncheckedBorderColor = Palette.hairline,
-                    ),
                 )
             }
 
@@ -1801,19 +1785,12 @@ fun SettingsScreen(
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = backgroundConnection,
                         onCheckedChange = {
                             backgroundConnection = it
                             vm.setBackgroundConnection(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                     )
                 }
 
@@ -1838,19 +1815,12 @@ fun SettingsScreen(
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = fastHistorySync,
                         onCheckedChange = {
                             fastHistorySync = it
                             vm.setFastHistorySync(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                     )
                 }
 
@@ -1877,19 +1847,12 @@ fun SettingsScreen(
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = fastLinkPhy,
                         onCheckedChange = {
                             fastLinkPhy = it
                             vm.setFastLinkPhy(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                     )
                 }
 
@@ -1967,7 +1930,7 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        Switch(
+                        NoopToggleSwitch(
                             checked = batteryExempt,
                             // A system grant can't be toggled OFF from here (that's a system action): a tap
                             // only ever REQUESTS it, and when already exempt the switch is inert (no re-prompt).
@@ -1985,13 +1948,6 @@ fun SettingsScreen(
                                     }
                                 }
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Palette.surfaceBase,
-                                checkedTrackColor = Palette.accent,
-                                uncheckedThumbColor = Palette.textSecondary,
-                                uncheckedTrackColor = Palette.surfaceInset,
-                                uncheckedBorderColor = Palette.hairline,
-                            ),
                         )
                     }
                 }
@@ -2017,19 +1973,12 @@ fun SettingsScreen(
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = continuousHrv,
                         onCheckedChange = {
                             continuousHrv = it
                             vm.setContinuousHrv(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                     )
                 }
 
@@ -2056,19 +2005,12 @@ fun SettingsScreen(
                                 color = Palette.textTertiary,
                             )
                         }
-                        Switch(
+                        NoopToggleSwitch(
                             checked = continuousHrvOvernight,
                             onCheckedChange = {
                                 continuousHrvOvernight = it
                                 vm.setContinuousHrvOvernight(it)
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Palette.surfaceBase,
-                                checkedTrackColor = Palette.accent,
-                                uncheckedThumbColor = Palette.textSecondary,
-                                uncheckedTrackColor = Palette.surfaceInset,
-                                uncheckedBorderColor = Palette.hairline,
-                            ),
                         )
                     }
                 }
@@ -2156,19 +2098,12 @@ fun SettingsScreen(
                         color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     checked = powerSaving,
                     onCheckedChange = {
                         powerSaving = it
                         vm.setPowerSaving(it)
                     },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Palette.surfaceBase,
-                        checkedTrackColor = Palette.accent,
-                        uncheckedThumbColor = Palette.textSecondary,
-                        uncheckedTrackColor = Palette.surfaceInset,
-                        uncheckedBorderColor = Palette.hairline,
-                    ),
                 )
             }
             if (powerSaving) {
@@ -2211,19 +2146,12 @@ fun SettingsScreen(
                             color = Palette.textTertiary,
                         )
                     }
-                    Switch(
+                    NoopToggleSwitch(
                         checked = pauseHrvOnPowerSave,
                         onCheckedChange = {
                             pauseHrvOnPowerSave = it
                             vm.setPauseHrvOnPowerSave(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                     )
                 }
             }
@@ -2259,19 +2187,12 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = puffinExperiments,
                         onCheckedChange = {
                             puffinExperiments = it
                             puffinExperiment.isEnabled = it
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = "Try advanced band protocol probes"
                         },
@@ -2295,20 +2216,13 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = broadcastHr,
                         onCheckedChange = {
                             broadcastHr = it
                             puffinExperiment.broadcastHr = it
                             vm.ble.setBroadcastHr(it)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_settings_screen_broadcast_heart_rate_d1af1c79)
                         },
@@ -2332,19 +2246,12 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = deepData,
                         onCheckedChange = {
                             deepData = it
                             puffinExperiment.isDeepDataEnabled = it
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = "Unlock advanced band data"
                         },
@@ -2405,19 +2312,12 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = puffinCapture,
                         onCheckedChange = {
                             puffinCapture = it
                             puffinExperiment.isCaptureEnabled = it
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_settings_screen_record_5_mg_raw_capture_9354fe89)
                         },
@@ -2493,19 +2393,12 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = experimentalSleepV2,
                         onCheckedChange = {
                             experimentalSleepV2 = it
                             puffinExperiment.experimentalSleepV2 = it
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_settings_screen_sleep_staging_v2_3a007e4a)
                         },
@@ -2532,19 +2425,12 @@ fun SettingsScreen(
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
-                    Switch(
+                    NoopToggleSwitch(
                         checked = motionAwareWake,
                         onCheckedChange = {
                             motionAwareWake = it
                             puffinExperiment.motionAwareWake = it
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
-                            uncheckedThumbColor = Palette.textSecondary,
-                            uncheckedTrackColor = Palette.surfaceInset,
-                            uncheckedBorderColor = Palette.hairline,
-                        ),
                         modifier = Modifier.semantics {
                             contentDescription = uiString(R.string.l10n_settings_screen_motion_aware_wake_refinement_67a91e47)
                         },
@@ -3782,16 +3668,9 @@ private fun ToggleRow(
             Text(title, style = NoopType.subhead, color = Palette.textPrimary)
             Text(detail, style = NoopType.footnote, color = Palette.textTertiary)
         }
-        Switch(
+        NoopToggleSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Palette.surfaceBase,
-                checkedTrackColor = Palette.accent,
-                uncheckedThumbColor = Palette.textSecondary,
-                uncheckedTrackColor = Palette.surfaceInset,
-                uncheckedBorderColor = Palette.hairline,
-            ),
         )
     }
 }

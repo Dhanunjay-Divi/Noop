@@ -73,7 +73,7 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 49)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 54)
         let tableNames = try await store.tableNames()
         XCTAssertTrue(tableNames.contains("healthKitSyncState"))
         XCTAssertTrue(tableNames.contains("nutritionEntry"))

@@ -622,6 +622,13 @@ final class AppModel: ObservableObject {
     /// ProfileStore/Repository construction would violate the restore transaction's cold-start contract.
     func startOperationalWorkAfterLaunchAccess() {
         guard !operationalWorkStarted else { return }
+        let trace = AppDiagnosticsRecorder.shared.beginOperation("runtime.start_operational_work")
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                trace,
+                includeResourceSnapshot: true
+            )
+        }
         operationalWorkStarted = true
 
         AppModel.shared = self   // publish for App Intents only after the launch gate is open
@@ -675,10 +682,18 @@ final class AppModel: ObservableObject {
             // The screenshot fixture has no confirmed onboarding profile; its synthetic scores carry an
             // explicit v2 marker from the seeder and must not be mistaken for released v1 user data.
             if !AppleDemoSeeder.requested {
+                let trace = AppDiagnosticsRecorder.shared.beginOperation(
+                    "analysis.vitality_reconcile"
+                )
                 _ = await self.intelligence.recomputeVitalityOnly()
+                AppDiagnosticsRecorder.shared.endOperation(trace)
             }
             #else
+            let trace = AppDiagnosticsRecorder.shared.beginOperation(
+                "analysis.vitality_reconcile"
+            )
             _ = await self.intelligence.recomputeVitalityOnly()
+            AppDiagnosticsRecorder.shared.endOperation(trace)
             #endif
             await self.wireSourceCoordinator()                 // dormant unless a generic strap is active
             #if DEBUG
@@ -705,17 +720,29 @@ final class AppModel: ObservableObject {
             // (far-past / bogus-2027 / FUTURE) from an older build, then rescore the real days. Runs
             // BEFORE the Effort rescore + analyzeRecent loop so both operate on a cleaned DB. Persisted
             // flag → no-op on every subsequent launch; idempotent on a clean DB.
+            var operation = AppDiagnosticsRecorder.shared.beginOperation(
+                "analysis.timestamp_heal"
+            )
             await self.intelligence.runTimestampHealIfNeeded()
+            AppDiagnosticsRecorder.shared.endOperation(operation)
             // One-shot on-upgrade Effort rescore (#313): recompute strain from source across the FULL
             // history once, so any deep-history rows an older build left on the 0–21 axis regenerate on
             // the 0–100 axis. Guarded by a persisted flag, so this is a no-op on every subsequent launch.
+            operation = AppDiagnosticsRecorder.shared.beginOperation(
+                "analysis.effort_rescore"
+            )
             await self.intelligence.runEffortRescoreIfNeeded()
+            AppDiagnosticsRecorder.shared.endOperation(operation)
             while !Task.isCancelled {
                 // #547 RE-POLLUTION: a sync since the last tick may have armed a re-heal (its ingest gate
                 // dropped bad-clock records). `runTimestampHealIfNeeded` honours the pending flag even after
                 // the one-shot done flag is set, purges any pollution, and rescores the affected days , so a
                 // wandering-clock strap can't keep re-polluting. A no-op when nothing's pending.
+                operation = AppDiagnosticsRecorder.shared.beginOperation(
+                    "analysis.timestamp_heal_backstop"
+                )
                 await self.intelligence.runTimestampHealIfNeeded()
+                AppDiagnosticsRecorder.shared.endOperation(operation)
                 // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh. A formula-only app
                 // upgrade does not move the raw-input fingerprint, though, so its explicit revision marker
                 // overrides that skip exactly once. Use the full history before labeling any local/remote row
@@ -728,11 +755,23 @@ final class AppModel: ObservableObject {
                     forKey: ActiveZoneUpgradeGate.completedRevisionKey)
                 let activeZoneUpgradePending = ActiveZoneUpgradeGate.needsRescore(
                     completedRevision: completedActiveZoneRevision)
+                operation = AppDiagnosticsRecorder.shared.beginOperation(
+                    "analysis.recent",
+                    fields: [
+                        "charge_upgrade": chargeUpgradePending ? "true" : "false",
+                        "active_zone_upgrade": activeZoneUpgradePending ? "true" : "false",
+                    ]
+                )
                 let receipt = await self.intelligence.analyzeRecent(
                     maxDays: chargeUpgradePending
                         ? ChargeFormulaUpgradeGate.historyDays
                         : ActiveZoneUpgradeGate.historyDays,
                     force: chargeUpgradePending || activeZoneUpgradePending)
+                AppDiagnosticsRecorder.shared.endOperation(
+                    operation,
+                    outcome: receipt == nil ? "skipped_or_busy" : "completed",
+                    includeResourceSnapshot: true
+                )
                 if let revision = ChargeFormulaUpgradeGate.revisionToPersist(
                     passCompleted: receipt != nil,
                     wasRequired: chargeUpgradePending) {
@@ -749,7 +788,11 @@ final class AppModel: ObservableObject {
                 }
                 // v5: recompute the skin-temp suite snapshots (cycle phase + body clock) from the
                 // freshly-scored history so the Health hub cards read a ready result.
+                operation = AppDiagnosticsRecorder.shared.beginOperation(
+                    "analysis.v5_signals"
+                )
                 await self.refreshV5Signals()
+                AppDiagnosticsRecorder.shared.endOperation(operation)
                 try? await Task.sleep(nanoseconds: Self.analysisBackstopNanoseconds)
             }
         }

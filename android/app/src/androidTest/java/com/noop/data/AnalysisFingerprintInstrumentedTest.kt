@@ -32,7 +32,7 @@ class AnalysisFingerprintInstrumentedTest {
     fun aggregateTracksEveryScoringInputAndExcludesHousekeeping() = runBlocking {
         val source = "noop-band"
         dao.insertHr(listOf(HrSample(source, 101, 61)))
-        dao.insertPpgHr(listOf(PpgHrSample(source, 102, 62, 0.9)))
+        dao.insertPpgHr(listOf(PpgHrSample(source, 102, 62.0, 0.9)))
         dao.insertRr(listOf(RrInterval(source, 103, 980)))
         dao.insertGravity(listOf(GravitySample(source, 104, 0.0, 0.0, 1.0)))
         dao.insertResp(listOf(RespSample(source, 105, 42)))

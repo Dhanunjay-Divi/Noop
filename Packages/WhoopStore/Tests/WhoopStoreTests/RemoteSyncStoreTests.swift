@@ -97,6 +97,102 @@ final class RemoteSyncStoreTests: XCTestCase {
         XCTAssertTrue(replay.ppgWaveform.isEmpty)
     }
 
+    func testSelfHostedRetentionMarksValidatedManagedWindowAsLocallyPruned() async throws {
+        let store = try await WhoopStore.inMemory()
+        let deviceID = "strap-managed-retention"
+        let sourceID = "11111111-1111-5111-8111-111111111111"
+        let scope = String(repeating: "b", count: 64)
+        try await store.upsertDevice(id: deviceID, mac: nil, name: nil)
+        try await store.upsertManagedSyncSource(
+            ManagedSyncSourceState(
+                sourceID: sourceID,
+                localSourceID: deviceID,
+                sourceKind: "live_ble",
+                platform: "ios",
+                logicalSourceHash: String(repeating: "a", count: 64),
+                createdAtMs: 1,
+                updatedAtMs: 1
+            )
+        )
+        _ = try await store.insert(
+            Streams(hr: [
+                HRSample(ts: 100, bpm: 60),
+                HRSample(ts: 50_000, bpm: 65),
+            ]),
+            deviceId: deviceID
+        )
+        let pending = try await store.pendingRemoteSyncStreams(deviceId: deviceID)
+        try await store.markRemoteSyncStreamsSynced(pending, deviceId: deviceID)
+        let dirty = try await store.claimManagedDirtyWindow(
+            localSourceID: deviceID,
+            dataClass: "essential_timeseries",
+            windowStartMs: 0,
+            windowEndMs: 21_600_000,
+            updatedAtMs: 2
+        )
+        try await store.saveManagedWindowUpload(
+            ManagedWindowUploadState(
+                accountScopeHash: scope,
+                sourceID: sourceID,
+                dataClass: "essential_timeseries",
+                windowStartMs: 0,
+                windowEndMs: 21_599_999,
+                chunkID: "22222222-2222-5222-8222-222222222222",
+                rowCount: 1,
+                phase: "available",
+                objectGeneration: nil,
+                objectMetageneration: nil,
+                objectCRC32C: nil,
+                updatedAtMs: 3,
+                snapshotGeneration: dirty.generation,
+                validatedAtMs: 3
+            )
+        )
+        try await store.saveManagedWindowUpload(
+            ManagedWindowUploadState(
+                accountScopeHash: scope,
+                sourceID: sourceID,
+                dataClass: "essential_timeseries",
+                windowStartMs: 21_600_000,
+                windowEndMs: 43_199_999,
+                chunkID: "33333333-3333-5333-8333-333333333333",
+                rowCount: 0,
+                phase: "available",
+                objectGeneration: nil,
+                objectMetageneration: nil,
+                objectCRC32C: nil,
+                updatedAtMs: 3,
+                snapshotGeneration: 1,
+                validatedAtMs: 3
+            )
+        )
+
+        let result = try await store.pruneAcknowledgedRemoteRows(
+            deviceId: deviceID,
+            olderThan: 60_000
+        )
+        let upload = try await store.managedWindowUpload(
+            accountScopeHash: scope,
+            sourceID: sourceID,
+            dataClass: "essential_timeseries",
+            windowStartMs: 0
+        )
+        let unaffectedUpload = try await store.managedWindowUpload(
+            accountScopeHash: scope,
+            sourceID: sourceID,
+            dataClass: "essential_timeseries",
+            windowStartMs: 21_600_000
+        )
+        let dirtyCount = try await store.registryWriter.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM managedDirtyWindow") ?? 0
+        }
+        XCTAssertEqual(result.deletedRows, 1)
+        XCTAssertFalse(result.hasMoreEligibleRows)
+        XCTAssertNotNil(upload?.localPrunedAtMs)
+        XCTAssertNil(unaffectedUpload?.localPrunedAtMs)
+        XCTAssertEqual(dirtyCount, 1)
+    }
+
     func testResetMakesAcknowledgedRowsPendingForNewDestination() async throws {
         let store = try await WhoopStore.inMemory()
         let deviceId = "strap-remote"

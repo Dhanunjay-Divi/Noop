@@ -113,7 +113,7 @@ class EfficiencyHealMigrationInstrumentedTest {
         database.execSQL(
             "INSERT INTO `dailyMetric` " +
                 "(`deviceId`, `day`, `disturbances`, `skinTempDevC`) VALUES (?, ?, ?, ?)",
-            arrayOf("my-whoop", day, disturbances, skinTemp),
+            arrayOf<Any?>("my-whoop", day, disturbances, skinTemp),
         )
     }
 

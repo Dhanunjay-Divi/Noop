@@ -19,8 +19,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -311,10 +309,9 @@ private fun TestModeRow(
                     color = Palette.textSecondary,
                 )
             }
-            Switch(
+            NoopToggleSwitch(
                 checked = on,
                 onCheckedChange = { on = it; onToggle(it) },
-                colors = settingsSwitchColors(),
             )
         }
         Text(mode.blurb, style = NoopType.footnote, color = Palette.textTertiary)
@@ -383,10 +380,9 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
                         color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     checked = debugLogging,
                     onCheckedChange = { debugLogging = it; vm.setDebugLogging(it) },
-                    colors = settingsSwitchColors(),
                 )
             }
         }
@@ -449,14 +445,13 @@ private fun ExportCard(vm: AppViewModel, onReport: () -> Unit) {
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 }
-                Switch(
+                NoopToggleSwitch(
                     checked = enabled,
                     onCheckedChange = {
                         enabled = it
                         settings.enabled = it
                         DebugExportScheduler.reschedule(context)
                     },
-                    colors = settingsSwitchColors(),
                 )
             }
             if (enabled) {
@@ -587,10 +582,9 @@ private fun ToggleRowTC(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(title, style = NoopType.subhead, color = Palette.textPrimary, modifier = Modifier.weight(1f))
-            Switch(
+            NoopToggleSwitch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
-                colors = settingsSwitchColors(),
             )
         }
         Text(description, style = NoopType.footnote, color = Palette.textTertiary)
@@ -676,12 +670,3 @@ private fun SettingsSectionTC(
         }
     }
 }
-
-@Composable
-private fun settingsSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor = Palette.surfaceBase,
-    checkedTrackColor = Palette.accent,
-    uncheckedThumbColor = Palette.textSecondary,
-    uncheckedTrackColor = Palette.surfaceInset,
-    uncheckedBorderColor = Palette.hairline,
-)

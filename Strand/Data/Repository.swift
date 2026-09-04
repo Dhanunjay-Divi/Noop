@@ -1112,7 +1112,16 @@ final class Repository: ObservableObject {
         // fresh connection and re-run quarantineIncompatibleDatabase (a thundering herd of DB opens on a
         // large library at the worst moment). Cache the in-flight open Task so concurrent callers join it.
         if let storeOpenTask { return await storeOpenTask.value }
-        let task = Task { [deviceId] () -> WhoopStore? in
+        let openTrace = AppDiagnosticsRecorder.shared.beginOperation("database.open")
+        let task = Task { [deviceId, openTrace] () -> WhoopStore? in
+            var outcome = "failed"
+            defer {
+                AppDiagnosticsRecorder.shared.endOperation(
+                    openTrace,
+                    outcome: outcome,
+                    includeResourceSnapshot: true
+                )
+            }
             // Don't swallow the open failure with `try?` (#222): an import-time open failure (e.g. the iOS
             // data-protected store while the device is locked) was previously invisible, surfacing only as
             // a generic "Couldn't open the local store." Log the real error so the cause is diagnosable.
@@ -1120,6 +1129,7 @@ final class Repository: ObservableObject {
             do {
                 path = try StorePaths.defaultDatabasePath()
             } catch {
+                outcome = "path_failed"
                 NSLog("WhoopStore: ensureStore FAILED resolving DB path: \(error)")
                 return nil
             }
@@ -1127,11 +1137,13 @@ final class Repository: ObservableObject {
             do {
                 s = try await WhoopStore(path: path)
             } catch {
+                outcome = "open_failed"
                 let ns = error as NSError
                 NSLog("WhoopStore: ensureStore FAILED opening store: \(ns.domain) code=\(ns.code): \(ns.localizedDescription)")
                 return nil
             }
             try? await s.upsertDevice(id: deviceId, mac: nil, name: "Noop Band")
+            outcome = "opened"
             return s
         }
         storeOpenTask = task
@@ -1283,7 +1295,22 @@ final class Repository: ObservableObject {
     #endif
 
     func refresh(days nDays: Int = 4000) async {
+        let refreshTrace = AppDiagnosticsRecorder.shared.beginOperation(
+            "repository.refresh",
+            fields: ["requested_days": String(nDays)]
+        )
+        var diagnosticOutcome = "store_unavailable"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                refreshTrace,
+                outcome: diagnosticOutcome,
+                fields: diagnosticFields,
+                includeResourceSnapshot: true
+            )
+        }
         guard let store = await ensureStore() else { return }
+        diagnosticOutcome = "reading"
         refreshGen &+= 1
         let myGen = refreshGen
         let now = Date()
@@ -1300,6 +1327,16 @@ final class Repository: ObservableObject {
             store: store, ids: computedReadIds, from: fromDay, to: toDay)
         let apple = (try? await store.dailyMetrics(deviceId: Self.appleHealthSource, from: fromDay, to: toDay)) ?? []
         let activityFile = (try? await store.dailyMetrics(deviceId: Self.activityFileSource, from: fromDay, to: toDay)) ?? []
+        AppDiagnosticsRecorder.shared.record(
+            "repository.refresh.checkpoint",
+            fields: [
+                "stage": "daily_loaded",
+                "imported_rows": String(imported.count),
+                "computed_rows": String(computedDailyBySource.values.reduce(0) { $0 + $1.count }),
+                "apple_rows": String(apple.count),
+                "activity_rows": String(activityFile.count),
+            ]
+        )
         let importedSleepBySource = await sleepSessionsBySource(
             store: store, ids: importedReadIds, from: lo, to: hi)
         let computedSleepBySource = await sleepSessionsBySource(
@@ -1310,6 +1347,14 @@ final class Repository: ObservableObject {
             importedSourceOrder.flatMap { importedSleepBySource[$0] ?? [] })
         let compSleep = Self.dedupBlocks(
             computedSourceOrder.flatMap { computedSleepBySource[$0] ?? [] })
+        AppDiagnosticsRecorder.shared.record(
+            "repository.refresh.checkpoint",
+            fields: [
+                "stage": "sleep_loaded",
+                "imported_sessions": String(impSleep.count),
+                "computed_sessions": String(compSleep.count),
+            ]
+        )
 
         // Export-verbatim sleep figures (long-format metricSeries rows from WhoopImporter).
         // SleepView prefers these per day over its APPROXIMATE recomputations.
@@ -1317,6 +1362,13 @@ final class Repository: ObservableObject {
         let cons = await unionMetricSeries(store: store, key: "sleep_consistency", from: fromDay, to: toDay)
         let need = await unionMetricSeries(store: store, key: "sleep_need_min", from: fromDay, to: toDay)
         let debt = await unionMetricSeries(store: store, key: "sleep_debt_min", from: fromDay, to: toDay)
+        AppDiagnosticsRecorder.shared.record(
+            "repository.refresh.checkpoint",
+            fields: [
+                "stage": "sleep_metrics_loaded",
+                "series_rows": String(perf.count + cons.count + need.count + debt.count),
+            ]
+        )
 
         // Merge + sort OFF the main actor (FIX 3): the figures build, the two O(n log n) daily/sleep merges,
         // the source-row sort, and the freshness counts are all pure over the rows just read, so they run in
@@ -1367,10 +1419,21 @@ final class Repository: ObservableObject {
                 freshness: Self.computeFreshness(imported: imported, computed: computed, apple: apple,
                                                  importedSleeps: impSleep, computedSleeps: compSleep))
         }.value
+        AppDiagnosticsRecorder.shared.record(
+            "repository.refresh.checkpoint",
+            fields: [
+                "stage": "merge_completed",
+                "days": String(merged.days.count),
+                "sleeps": String(merged.sleeps.count),
+            ]
+        )
 
         // Generation guard (#review): if a newer refresh() started while this one merged off-actor, drop
         // this now-stale result so it can't clobber the newer caches or re-fire loadAll out of order.
-        guard myGen == refreshGen else { return }
+        guard myGen == refreshGen else {
+            diagnosticOutcome = "superseded"
+            return
+        }
 
         // DIFF before publishing (FIX 3): if this refresh produced byte-identical caches AND we've already
         // loaded once, skip the re-publish and the `refreshSeq` bump entirely , assigning an equal value to
@@ -1383,7 +1446,14 @@ final class Repository: ObservableObject {
             && merged.importedSleep == importedSleep
             && merged.vitalRows == vitalRows
             && merged.freshness == freshness
-        guard !unchanged else { return }
+        guard !unchanged else {
+            diagnosticOutcome = "unchanged"
+            diagnosticFields = [
+                "days": String(merged.days.count),
+                "sleeps": String(merged.sleeps.count),
+            ]
+            return
+        }
 
         // One consistent publish per refresh: assign every cache, flip `loaded`, then bump `refreshSeq` so
         // the intraday-updating views reload exactly once for this real change.
@@ -1395,6 +1465,12 @@ final class Repository: ObservableObject {
         self.freshness = merged.freshness
         self.loaded = true
         self.refreshSeq += 1
+        diagnosticOutcome = "published"
+        diagnosticFields = [
+            "days": String(merged.days.count),
+            "sleeps": String(merged.sleeps.count),
+            "vital_rows": String(merged.vitalRows.count),
+        ]
     }
 
     /// Per-source coverage counts for the Freshness Pipeline card. Pure over the rows already read.

@@ -53,9 +53,9 @@ Android Studio writes this for you automatically when you open the project.
 These are fixed in the build files; keep them in lockstep if you upgrade:
 
 - **Android Gradle Plugin** 8.13.2 · **Gradle** 8.14.5 (wrapper)
-- **Kotlin** 1.9.24 · **KSP** 1.9.24-1.0.20 (KSP must always match the Kotlin version)
-- **Compose Compiler** extension 1.5.14 (matched to Kotlin 1.9.24)
-- **Compose BOM** 2024.06.00 · **Material3** (from the BOM)
+- **Kotlin** 2.1.0 · **KSP** 2.1.0-1.0.29 (KSP must always match the Kotlin version)
+- **Compose Compiler plugin** 2.1.0 (matched to Kotlin 2.1.0)
+- **Compose BOM** 2025.01.01 · **Material3** (from the BOM)
 - **Room** 2.6.1 · **coroutines** 1.8.1
 - **minSdk** 26 · **compile/targetSdk** 36 · **Build Tools** 36.0.0 · **JDK target** 17
 

@@ -40,6 +40,37 @@ def test_non_api_process_can_validate_without_global_administrator_token() -> No
     )
 
 
+def test_managed_storage_requires_project_bound_app_check_ids() -> None:
+    project_number = "123456789012"
+    settings = Settings(
+        api_token="a" * 32,
+        database_url="postgresql://noop:test@db/noop",
+        managed_storage_enabled=True,
+        managed_project_id="noop-test-project",
+        managed_project_number=project_number,
+        managed_identity_api_key="identity-api-key",
+        managed_apple_app_id=f"1:{project_number}:ios:0123456789abcdef",
+        managed_android_app_id=(f"1:{project_number}:android:fedcba9876543210"),
+        managed_raw_bucket="noop-private-bucket",
+        managed_signer_email="noop-api@example.iam.gserviceaccount.com",
+        managed_replay_secret="managed-replay-secret-at-least-32-bytes",
+        managed_consent_policy_version="staging-v1",
+        managed_consent_policy_sha256="a" * 64,
+    )
+
+    settings.validate_for_startup(needs_database=True)
+
+    with pytest.raises(RuntimeError, match="APPLE_APP_ID"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "managed_apple_app_id"
+            },
+            managed_apple_app_id=(f"1:{project_number}:android:0123456789abcdef"),
+        ).validate_for_startup(needs_database=True)
+
+
 def test_delivery_lease_must_outlast_provider_timeout_with_poll_margin() -> None:
     settings = Settings(
         api_token="a" * 32,

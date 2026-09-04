@@ -225,8 +225,7 @@ struct HydrationView: View {
                     Spacer(minLength: NoopMetrics.space2)
                     Toggle("", isOn: phoneReminderToggle)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.metricCyan)
+                        .toggleStyle(.noopSwitch)
                         .accessibilityLabel("Phone water reminders")
                         .accessibilityIdentifier("noop.hydration.reminders")
                 }
@@ -243,8 +242,7 @@ struct HydrationView: View {
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.metricCyan)
+                    .toggleStyle(.noopSwitch)
 
                     if adaptiveReminders {
                         Text(HydrationReminders.adaptiveSummary)
@@ -282,8 +280,7 @@ struct HydrationView: View {
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.metricCyan)
+                .toggleStyle(.noopSwitch)
 
                 if strapReminder {
                     Divider().overlay(StrandPalette.hairline)
@@ -297,8 +294,7 @@ struct HydrationView: View {
                                 .foregroundStyle(StrandPalette.textTertiary)
                         }
                     }
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.metricCyan)
+                    .toggleStyle(.noopSwitch)
 
                     if doubleTapConfirm {
                         Stepper(value: doubleTapAmountBinding, in: 50...1_000, step: 50) {
@@ -317,8 +313,7 @@ struct HydrationView: View {
                                     .foregroundStyle(StrandPalette.textTertiary)
                             }
                         }
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.metricCyan)
+                        .toggleStyle(.noopSwitch)
                         .disabled(!reminderEnabled)
                     }
                 }

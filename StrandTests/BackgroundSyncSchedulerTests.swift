@@ -27,6 +27,25 @@ final class BackgroundSyncSchedulerTests: XCTestCase {
         ))
     }
 
+    func testCompletedMaintenanceDoesNotRequireOptionalBandWork() {
+        XCTAssertTrue(BackgroundSyncPolicy.completedMaintenance(
+            optionalBandWorkCompleted: true,
+            cancelled: false
+        ))
+        XCTAssertTrue(BackgroundSyncPolicy.completedMaintenance(
+            optionalBandWorkCompleted: false,
+            cancelled: false
+        ))
+        XCTAssertFalse(BackgroundSyncPolicy.completedMaintenance(
+            optionalBandWorkCompleted: true,
+            cancelled: true
+        ))
+        XCTAssertFalse(BackgroundSyncPolicy.completedMaintenance(
+            optionalBandWorkCompleted: false,
+            cancelled: true
+        ))
+    }
+
     func testStaleSyncReminderRequiresPairingAndExistingAuthorization() {
         XCTAssertTrue(BandSyncStaleReminderPolicy.shouldSchedule(
             hasPairedBand: true,

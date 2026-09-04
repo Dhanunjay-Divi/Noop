@@ -5,11 +5,13 @@ directly to the strap over Bluetooth Low Energy, stores everything on-device in 
 recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, no account —
 the app interoperates with **your own device and your own data**. It can also import data you already
 own: WHOOP CSV exports and Apple Health exports. An explicit opt-in can replicate
-the supported v1 subset to a user-operated server. A future NOOP+ managed-sync
-destination follows the same local-first rule: it is separate consent, never
-required for collection or scoring, and is not connected to either mobile app
-while its identity, deletion, restore, and isolation gates remain open. See
-[`CLOUD_ARCHITECTURE.md`](CLOUD_ARCHITECTURE.md).
+the supported v1 subset to a user-operated server. NOOP+ managed-sync source is
+also implemented under the same local-first rule: it uses separate identity and
+consent and is never required for collection or scoring. Default builds have no
+managed endpoint configuration, and public deployment remains blocked while
+identity, deletion, restore, isolation, and physical-device gates are open. See
+[`CLOUD_ARCHITECTURE.md`](CLOUD_ARCHITECTURE.md) and
+[`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md).
 
 > **Not affiliated with WHOOP.** NOOP is an independent, interoperability project built on
 > community reverse-engineering of the strap's Bluetooth protocol. It is **not a medical device**
@@ -105,7 +107,7 @@ Packages/                       Cross-platform Swift packages (iOS 16+/17+ / mac
 ├── StrandAnalytics/            HRV/recovery/strain/sleep/correlation math
 ├── StrandImport/               WHOOP CSV + Apple Health importers
 ├── StrandDesign/               SwiftUI design system (palette, components, charts)
-└── NoopRemoteSync/             Native client for the optional self-hosted API
+└── NoopRemoteSync/             Optional self-hosted and NOOP+ managed clients
 
 Tools/Backfill/                 CLI offload/replay tool
 ```

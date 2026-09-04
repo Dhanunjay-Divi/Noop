@@ -8,3 +8,22 @@
 NOOP_STRENGTH_MEDIA_URL_TEMPLATE =
 NOOP_STRENGTH_VIDEO_URL_TEMPLATE =
 #include? "StrengthMediaSecrets.xcconfig"
+
+// NOOP+ is compiled in but remains unavailable unless the ignored staging
+// configuration supplies every value. These identifiers are not user secrets,
+// but keeping environment-specific values out of source prevents a community
+// build from accidentally targeting NOOP's managed service.
+NOOP_MANAGED_PROJECT_ID =
+NOOP_MANAGED_API_KEY =
+NOOP_MANAGED_GOOGLE_APP_ID =
+NOOP_MANAGED_GCM_SENDER_ID =
+NOOP_MANAGED_ENCODED_APP_ID = noop-managed-disabled
+NOOP_MANAGED_API_URL =
+NOOP_MANAGED_POLICY_VERSION =
+NOOP_MANAGED_POLICY_SHA256 =
+#include? "ManagedCloudSecrets.xcconfig"
+
+// Xcode resolves the entitlement value from the active configuration. Release
+// overrides this to production in project.yml; local and simulator builds stay
+// on Apple's development App Attest environment.
+NOOP_APP_ATTEST_ENVIRONMENT = development

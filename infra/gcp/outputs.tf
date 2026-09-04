@@ -34,8 +34,13 @@ output "raw_upload_topic" {
 }
 
 output "raw_processor_subscription" {
-  description = "Pull subscription reserved for the future processor."
+  description = "Storage-finalize processor subscription."
   value       = google_pubsub_subscription.raw_processor.id
+}
+
+output "raw_processor_dead_letter_subscription" {
+  description = "Retained storage-finalize events that exhausted delivery."
+  value       = google_pubsub_subscription.raw_processor_dead_letter.id
 }
 
 output "service_accounts" {
@@ -43,9 +48,62 @@ output "service_accounts" {
   value = {
     api       = google_service_account.api.email
     builder   = google_service_account.builder.email
+    managed   = google_service_account.managed_api.email
     processor = google_service_account.processor.email
     migration = google_service_account.migration.email
+    lifecycle = google_service_account.managed_lifecycle.email
+    scheduler = google_service_account.managed_scheduler.email
+    event     = google_service_account.managed_event_invoker.email
   }
+}
+
+output "managed_identity" {
+  description = "Synthetic Firebase app identifiers, or null while managed identity is disabled."
+  value = var.enable_managed_identity ? {
+    project_number        = data.google_project.current.number
+    android_app_id        = google_firebase_android_app.staging[0].app_id
+    android_package       = var.managed_android_package_name
+    android_api_key_uid   = google_apikeys_key.managed_android[0].uid
+    apple_app_id          = google_firebase_apple_app.staging[0].app_id
+    apple_bundle_id       = var.managed_apple_bundle_id
+    apple_api_key_uid     = google_apikeys_key.managed_apple[0].uid
+    lookup_api_key_uid    = google_apikeys_key.managed_identity_lookup[0].uid
+    sms_regions           = var.managed_sms_regions
+    app_check_registered  = var.enable_managed_app_check
+    auth_app_check_policy = var.managed_auth_app_check_enforcement
+  } : null
+}
+
+output "public_managed_api" {
+  description = "Firebase-authenticated synthetic NOOP+ endpoint, or null while disabled."
+  value = var.enable_public_managed_api ? {
+    name = google_cloud_run_v2_service.managed_api[0].name
+    uri  = google_cloud_run_v2_service.managed_api[0].uri
+  } : null
+}
+
+output "managed_api" {
+  description = "IAM-only or public managed API endpoint when the managed runtime is enabled."
+  value = var.enable_managed_runtime ? {
+    name   = google_cloud_run_v2_service.managed_api[0].name
+    uri    = google_cloud_run_v2_service.managed_api[0].uri
+    public = var.enable_public_managed_api
+  } : null
+}
+
+output "managed_lifecycle_job" {
+  description = "Scheduled NOOP+ lifecycle job name when enabled."
+  value = var.enable_managed_runtime ? (
+    google_cloud_run_v2_job.managed_lifecycle[0].name
+  ) : null
+}
+
+output "managed_processor" {
+  description = "IAM-protected managed object processor when enabled."
+  value = var.enable_managed_runtime ? {
+    name = google_cloud_run_v2_service.managed_processor[0].name
+    uri  = google_cloud_run_v2_service.managed_processor[0].uri
+  } : null
 }
 
 output "bigquery_dataset" {

@@ -102,6 +102,22 @@ enum FileExport {
         #endif
     }
 
+    #if os(iOS)
+    /// Share a sensitive file staged in the app's temporary directory, then remove it whether the
+    /// user saves, shares, or cancels. Callers retain no readable cloud-history archive after the
+    /// system activity sheet closes.
+    @MainActor
+    static func shareTemporaryFile(at src: URL) {
+        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        let candidate = src.standardizedFileURL.path
+        guard candidate.hasPrefix(temporary + "/"),
+              FileManager.default.fileExists(atPath: candidate) else {
+            return
+        }
+        present(activityItems: [src], cleanup: [src])
+    }
+    #endif
+
     /// Export an existing diagnostic file and log together. Both inputs pass through the same fail-closed
     /// redaction + total-size cap, and the resulting file list/preview must be explicitly confirmed before
     /// the zip is staged for sharing. If the source is absent, the bounded log still ships on its own.

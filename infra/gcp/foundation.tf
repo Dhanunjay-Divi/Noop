@@ -117,6 +117,33 @@ resource "google_pubsub_topic" "raw_uploads" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_pubsub_topic" "raw_uploads_dead_letter" {
+  project                    = var.project_id
+  name                       = "${local.prefix}-raw-uploads-dead-letter"
+  message_retention_duration = "604800s"
+  labels                     = local.labels
+
+  message_storage_policy {
+    allowed_persistence_regions = [var.region]
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_pubsub_subscription" "raw_processor_dead_letter" {
+  project                    = var.project_id
+  name                       = "${local.prefix}-raw-processor-dead-letter"
+  topic                      = google_pubsub_topic.raw_uploads_dead_letter.id
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s"
+  retain_acked_messages      = false
+  labels                     = local.labels
+
+  expiration_policy {
+    ttl = ""
+  }
+}
+
 resource "google_pubsub_topic_iam_member" "gcs_raw_publisher" {
   project = var.project_id
   topic   = google_pubsub_topic.raw_uploads.name
@@ -151,6 +178,29 @@ resource "google_pubsub_subscription" "raw_processor" {
     minimum_backoff = "10s"
     maximum_backoff = "600s"
   }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.raw_uploads_dead_letter.id
+    max_delivery_attempts = 20
+  }
+
+  dynamic "push_config" {
+    for_each = var.enable_managed_runtime ? [true] : []
+
+    content {
+      push_endpoint = "${google_cloud_run_v2_service.managed_processor[0].uri}/v1/events/storage-finalized"
+
+      oidc_token {
+        service_account_email = google_service_account.managed_event_invoker.email
+        audience              = google_cloud_run_v2_service.managed_processor[0].uri
+      }
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_v2_service_iam_member.managed_processor_event_invoker,
+    google_service_account_iam_member.pubsub_event_token_creator,
+  ]
 }
 
 resource "google_bigquery_dataset" "analytics" {

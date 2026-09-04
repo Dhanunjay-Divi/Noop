@@ -28,6 +28,9 @@ struct StrandiOSApp: App {
     /// Shared cross-screen navigation hook (e.g. Live → Devices). The iOS shell (`RootTabView`)
     /// observes it and presents the Devices manager.
     @StateObject private var router = NavRouter()
+    /// Global iPhone shake-to-report flow. It stays inert behind launch/Terms gates and exports only after
+    /// the user reviews and confirms the bounded local diagnostics.
+    @StateObject private var diagnosticReport = ShakeDiagnosticReportController()
     @State private var liveActivity = LiveActivityController()
     @Environment(\.scenePhase) private var scenePhase
     /// Appearance preference (OLED Black by default; Settings and More write the same persisted value).
@@ -47,6 +50,8 @@ struct StrandiOSApp: App {
     @AppStorage(UnitPrefs.liveActivityEffortKey) private var liveActivityShowsEffort = true
 
     init() {
+        AppDiagnosticsRecorder.shared.start()
+        let launchTrace = AppDiagnosticsRecorder.shared.beginOperation("ios.launch.bootstrap")
         _ = Self._quietMotionTierDefault
         // 9.2 data-truth migration: clear a legacy Shortcuts file that may contain WHOOP @57 motion
         // ticks in the Apple Health Steps column. Do this synchronously before constructing stores,
@@ -67,6 +72,10 @@ struct StrandiOSApp: App {
         // process keeps Bluetooth, analysis and diagnostic export inert until the verified unlock edge.
         let access = LaunchAccessController()
         _launchAccess = StateObject(wrappedValue: access)
+        AppDiagnosticsRecorder.shared.record(
+            "launch.access_resolved",
+            fields: ["unlocked": access.isUnlocked ? "true" : "false"]
+        )
         #if DEBUG
         let demoFixtureRequested = CommandLine.arguments.contains("--demo-seed")
         #else
@@ -107,7 +116,15 @@ struct StrandiOSApp: App {
         // is open, so a user testing the wind-down reminder with NOOP foregrounded sees nothing. Register
         // before the first scene so any early-fired notification is presented.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
+        let modelTrace = AppDiagnosticsRecorder.shared.beginOperation(
+            "ios.launch.app_model",
+            fields: ["operational": operationallyAllowed ? "true" : "false"]
+        )
         let model = AppModel(startOperationalWork: operationallyAllowed)
+        AppDiagnosticsRecorder.shared.endOperation(
+            modelTrace,
+            includeResourceSnapshot: true
+        )
         _model = StateObject(wrappedValue: model)
         let bridge = HealthKitBridge(
             repo: model.repo,
@@ -175,13 +192,27 @@ struct StrandiOSApp: App {
             }
             guard !Task.isCancelled else { return false }
 
+            let managedCloudCaughtUp =
+                await ManagedCloudService.shared.catchUpIfDue(repo: model.repo)
+            guard !Task.isCancelled else { return false }
+
             await FriendsService.catchUpIfDue(repo: model.repo)
             guard !Task.isCancelled else { return false }
             _ = await SafetySOSRuntime.shared.refreshActiveIncidentStatusIfNeeded()
             guard !Task.isCancelled else { return false }
             await WidgetSnapshot.publish(from: model)
-            return strapSyncCompleted && !Task.isCancelled
+            // A disconnected band makes the optional history request a no-op, not a failed background
+            // wake. Reaching this point means Health, cloud, Friends, safety, and widget maintenance all
+            // completed their bounded attempts; only cancellation should request the shorter retry.
+            return managedCloudCaughtUp && BackgroundSyncPolicy.completedMaintenance(
+                optionalBandWorkCompleted: strapSyncCompleted,
+                cancelled: Task.isCancelled
+            )
         }
+        AppDiagnosticsRecorder.shared.endOperation(
+            launchTrace,
+            includeResourceSnapshot: true
+        )
     }
 
     var body: some Scene {
@@ -190,19 +221,34 @@ struct StrandiOSApp: App {
                 .environmentObject(launchAccess)
                 .environmentObject(model)
                 .onAppear {
-                    model.setRealtimeForeground(
-                        launchAccess.isUnlocked
-                            && acceptedTermsVersion == Terms.currentVersion
-                            && scenePhase == .active
+                    let operational = launchAccess.isUnlocked
+                        && acceptedTermsVersion == Terms.currentVersion
+                    model.setRealtimeForeground(operational && scenePhase == .active)
+                    AppDiagnosticsRecorder.shared.setApplicationActive(scenePhase == .active)
+                    AppDiagnosticsRecorder.shared.record(
+                        "ui.root_appeared",
+                        fields: ["operational": operational ? "true" : "false"],
+                        includeResourceSnapshot: true
                     )
+                    #if DEBUG
+                    diagnosticReport.requestDemoIfNeeded()
+                    #endif
                 }
                 .onChange(of: acceptedTermsVersion) { _, version in
                     let allowed = launchAccess.isUnlocked && version == Terms.currentVersion
+                    AppDiagnosticsRecorder.shared.record(
+                        "launch.terms_changed",
+                        fields: ["operational": allowed ? "true" : "false"]
+                    )
                     model.setRealtimeForeground(allowed && scenePhase == .active)
                     if allowed { resumeOperationalWorkAfterUnlock() }
                 }
                 .onChange(of: launchAccess.state) { _, state in
                     let unlocked = state == .unlocked
+                    AppDiagnosticsRecorder.shared.record(
+                        "launch.access_changed",
+                        fields: ["unlocked": unlocked ? "true" : "false"]
+                    )
                     Self.reconcileLaunchSurfaceAuthorization(allowed: unlocked)
                     model.setRealtimeForeground(
                         unlocked
@@ -231,6 +277,7 @@ struct StrandiOSApp: App {
                 // v5 L3: the shared stress check-in nudge surface, so the Breathe screen's passive
                 // card observes the SAME instance the central detector (AppModel.evaluateStress) posts to.
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
+                .toggleStyle(.noopSwitch)
                 .noopAppearance(appearanceRaw)
                 .onChange(of: appearanceRaw, initial: true) { _, rawValue in
                     // The widget extension is a separate process, so mirror the complete preference to
@@ -440,6 +487,31 @@ struct StrandiOSApp: App {
                           acceptedTermsVersion == Terms.currentVersion else { return }
                     Task { await watch.pushStrengthLatest(from: model) }
                 }
+                .background {
+                    DeviceShakeDetector {
+                        let operationallyAllowed = launchAccess.isUnlocked
+                            && acceptedTermsVersion == Terms.currentVersion
+                            && scenePhase == .active
+                        #if DEBUG
+                        let seededSimulatorAllowed = CommandLine.arguments.contains("--demo-seed")
+                            && scenePhase == .active
+                        guard operationallyAllowed || seededSimulatorAllowed else { return }
+                        #else
+                        guard operationallyAllowed else { return }
+                        #endif
+                        diagnosticReport.requestFromShake()
+                    }
+                    .frame(width: 0, height: 0)
+                }
+                .sheet(
+                    isPresented: $diagnosticReport.isPresented,
+                    onDismiss: { diagnosticReport.didDismiss() }
+                ) {
+                    ShakeDiagnosticReportSheet(
+                        controller: diagnosticReport,
+                        live: model.live
+                    )
+                }
         }
         // HealthKit authorization is intentionally NOT requested on launch. The system permission
         // dialog without prior in-app rationale violates Apple HIG / App Review guidance — the user
@@ -451,6 +523,11 @@ struct StrandiOSApp: App {
         // HealthKitBridge.sync guards on `auth == .authorized`, so the scenePhase trigger stays a
         // safe no-op until the user opts in.
         .onChange(of: scenePhase) { _, phase in
+            AppDiagnosticsRecorder.shared.setApplicationActive(phase == .active)
+            AppDiagnosticsRecorder.shared.record(
+                "scene.phase",
+                fields: ["phase": Self.diagnosticScenePhaseName(phase)]
+            )
             // Dense Live/workout/session streaming is foreground-only. Logical leases survive so the
             // same visible opted-in session resumes on return; connection/history sync and the separate
             // Continuous HRV background preference are intentionally unaffected.
@@ -486,6 +563,7 @@ struct StrandiOSApp: App {
                     await watch.pushLatest(from: model)
                 }
                 Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+                Task { await ManagedCloudService.shared.catchUpIfDue(repo: model.repo) }
             } else if phase == .background {
                 // Ask iOS for a short, finite grace window to commit the last buffered live samples and
                 // enforce transient retention. This is not a claim of continuous execution: CoreBluetooth
@@ -508,6 +586,15 @@ struct StrandiOSApp: App {
                 // no-op until the user turns on Shortcuts Export.
                 Task { await ShortcutHealthExport.writeIfEnabled(repo: model.repo) }
             }
+        }
+    }
+
+    private static func diagnosticScenePhaseName(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active: return "active"
+        case .inactive: return "inactive"
+        case .background: return "background"
+        @unknown default: return "unknown"
         }
     }
 

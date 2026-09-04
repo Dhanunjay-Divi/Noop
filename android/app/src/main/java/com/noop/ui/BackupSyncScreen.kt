@@ -30,8 +30,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -185,8 +183,10 @@ fun BackupSyncScreen() {
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_backup_sync_screen_backup_sync_81758ffa),
-        subtitle = "Keep local snapshots, or opt in to sending your data to a server you control.",
+        subtitle = "Keep local snapshots, use optional NOOP+ continuity, or connect a server you control.",
     ) {
+        item { ManagedCloudBackupCard() }
+
         // Optional self-hosted decoded-data upload. Distinct from immutable .noopbak snapshots below.
         item {
             NoopCard(
@@ -255,7 +255,7 @@ fun BackupSyncScreen() {
                             )
                         }
                         Spacer(Modifier.width(16.dp))
-                        Switch(
+                        NoopToggleSwitch(
                             checked = serverAuto,
                             enabled = !serverBusy,
                             onCheckedChange = { enabled ->
@@ -264,13 +264,6 @@ fun BackupSyncScreen() {
                                     RemoteSyncService.setAutomatic(context, enabled)
                                 }
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Palette.surfaceBase,
-                                checkedTrackColor = Palette.accent,
-                                uncheckedThumbColor = Palette.textSecondary,
-                                uncheckedTrackColor = Palette.surfaceInset,
-                                uncheckedBorderColor = Palette.hairline,
-                            ),
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -290,20 +283,13 @@ fun BackupSyncScreen() {
                             )
                         }
                         Spacer(Modifier.width(16.dp))
-                        Switch(
+                        NoopToggleSwitch(
                             checked = serverOptimizeStorage,
                             enabled = !serverBusy && RemoteSyncPrefs.isConfigured(),
                             onCheckedChange = { enabled ->
                                 serverOptimizeStorage = enabled
                                 RemoteSyncPrefs.setOptimizeStorage(enabled)
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Palette.surfaceBase,
-                                checkedTrackColor = Palette.accent,
-                                uncheckedThumbColor = Palette.textSecondary,
-                                uncheckedTrackColor = Palette.surfaceInset,
-                                uncheckedBorderColor = Palette.hairline,
-                            ),
                         )
                     }
                     NoopButton(
@@ -592,7 +578,7 @@ fun BackupSyncScreen() {
                             )
                         }
                         Spacer(Modifier.width(16.dp))
-                        Switch(
+                        NoopToggleSwitch(
                             checked = auto,
                             enabled = treeUri != null && backupSecretConfigured && !busy,
                             onCheckedChange = {
@@ -600,13 +586,6 @@ fun BackupSyncScreen() {
                                 BackupSyncPrefs.setAutoEnabled(context, it)
                                 runCatching { BackupSync.reschedule(context) }
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Palette.surfaceBase,
-                                checkedTrackColor = Palette.accent,
-                                uncheckedThumbColor = Palette.textSecondary,
-                                uncheckedTrackColor = Palette.surfaceInset,
-                                uncheckedBorderColor = Palette.hairline,
-                            ),
                         )
                     }
                     // Retention: how many dated snapshots to keep. Wired to the existing setKeepCount; the
@@ -1057,7 +1036,7 @@ private val RESTORE_MIME_TYPES = arrayOf(
 )
 
 @Composable
-private fun remoteSyncFieldColors() = OutlinedTextFieldDefaults.colors(
+internal fun remoteSyncFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = Palette.textPrimary,
     unfocusedTextColor = Palette.textPrimary,
     focusedBorderColor = Palette.accent,

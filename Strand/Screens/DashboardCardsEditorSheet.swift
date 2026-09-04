@@ -122,8 +122,7 @@ struct DashboardCardsEditorSheet: View {
                     .tracking(0)
                     .foregroundStyle(enabled ? StrandPalette.textPrimary : StrandPalette.textTertiary)
             }
-            .toggleStyle(.switch)
-            .tint(StrandPalette.statusPositive)
+            .toggleStyle(.noopSwitch)
             .accessibilityLabel("Show \(card.title)")
         }
     }

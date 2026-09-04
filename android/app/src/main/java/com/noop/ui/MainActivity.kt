@@ -30,6 +30,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectSyncScheduler
+import com.noop.managed.ManagedCloudScheduler
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.StaleSyncReminderScheduler
@@ -111,6 +112,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
+        ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext)
     }
 
     override fun onStop() {
@@ -162,6 +164,8 @@ class MainActivity : ComponentActivity() {
             // Optional self-hosted delivery remains default-off and network constrained.
             runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
             runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
+            runCatching { ManagedCloudScheduler.reconcile(applicationContext) }
+            runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext) }
 
             // Health Connect and hydration automation remain independently opt-in.
             runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }

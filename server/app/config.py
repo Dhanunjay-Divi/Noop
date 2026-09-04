@@ -87,6 +87,28 @@ class Settings:
     rate_limit_max_keys: int = 10_000
     forwarded_allow_ips: str = "127.0.0.1"
     dashboard_enabled: bool = True
+    managed_storage_enabled: bool = False
+    managed_entitlement_mode: str = "closed"
+    managed_project_id: str | None = None
+    managed_project_number: str | None = None
+    managed_identity_api_key: str | None = None
+    managed_apple_app_id: str | None = None
+    managed_android_app_id: str | None = None
+    managed_raw_bucket: str | None = None
+    managed_signer_email: str | None = None
+    managed_replay_secret: str | None = None
+    managed_home_region: str = "asia-south1"
+    managed_residency_policy_version: str = "staging-v1"
+    managed_default_plan_code: str = "noop_plus_staging"
+    managed_default_plan_revision: int = 1
+    managed_consent_policy_kind: str = "managed_storage"
+    managed_consent_policy_version: str | None = None
+    managed_consent_policy_sha256: str | None = None
+    managed_upload_ttl_seconds: int = 15 * 60
+    managed_download_ttl_seconds: int = 10 * 60
+    managed_identity_cache_seconds: int = 5 * 60
+    managed_identity_cache_entries: int = 10_000
+    managed_app_check_cache_seconds: int = 6 * 60 * 60
     public_base_url: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
@@ -171,6 +193,69 @@ class Settings:
                 "127.0.0.1",
             ).strip(),
             dashboard_enabled=_boolean("NOOP_DASHBOARD_ENABLED", True),
+            managed_storage_enabled=_boolean(
+                "NOOP_MANAGED_STORAGE_ENABLED",
+                False,
+            ),
+            managed_entitlement_mode=_choice(
+                "NOOP_MANAGED_ENTITLEMENT_MODE",
+                "closed",
+                frozenset({"closed", "open_beta", "paid"}),
+            ),
+            managed_project_id=os.getenv("NOOP_MANAGED_PROJECT_ID"),
+            managed_project_number=os.getenv("NOOP_MANAGED_PROJECT_NUMBER"),
+            managed_identity_api_key=os.getenv("NOOP_MANAGED_IDENTITY_API_KEY"),
+            managed_apple_app_id=os.getenv("NOOP_MANAGED_APPLE_APP_ID"),
+            managed_android_app_id=os.getenv("NOOP_MANAGED_ANDROID_APP_ID"),
+            managed_raw_bucket=os.getenv("NOOP_MANAGED_RAW_BUCKET"),
+            managed_signer_email=os.getenv("NOOP_MANAGED_SIGNER_EMAIL"),
+            managed_replay_secret=os.getenv("NOOP_MANAGED_REPLAY_SECRET"),
+            managed_home_region=os.getenv(
+                "NOOP_MANAGED_HOME_REGION",
+                "asia-south1",
+            ).strip(),
+            managed_residency_policy_version=os.getenv(
+                "NOOP_MANAGED_RESIDENCY_POLICY_VERSION",
+                "staging-v1",
+            ).strip(),
+            managed_default_plan_code=os.getenv(
+                "NOOP_MANAGED_DEFAULT_PLAN_CODE",
+                "noop_plus_staging",
+            ).strip(),
+            managed_default_plan_revision=_positive_int(
+                "NOOP_MANAGED_DEFAULT_PLAN_REVISION",
+                1,
+            ),
+            managed_consent_policy_kind=os.getenv(
+                "NOOP_MANAGED_CONSENT_POLICY_KIND",
+                "managed_storage",
+            ).strip(),
+            managed_consent_policy_version=os.getenv(
+                "NOOP_MANAGED_CONSENT_POLICY_VERSION"
+            ),
+            managed_consent_policy_sha256=os.getenv(
+                "NOOP_MANAGED_CONSENT_POLICY_SHA256"
+            ),
+            managed_upload_ttl_seconds=_positive_int(
+                "NOOP_MANAGED_UPLOAD_TTL_SECONDS",
+                15 * 60,
+            ),
+            managed_download_ttl_seconds=_positive_int(
+                "NOOP_MANAGED_DOWNLOAD_TTL_SECONDS",
+                10 * 60,
+            ),
+            managed_identity_cache_seconds=_positive_int(
+                "NOOP_MANAGED_IDENTITY_CACHE_SECONDS",
+                5 * 60,
+            ),
+            managed_identity_cache_entries=_positive_int(
+                "NOOP_MANAGED_IDENTITY_CACHE_ENTRIES",
+                10_000,
+            ),
+            managed_app_check_cache_seconds=_positive_int(
+                "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS",
+                6 * 60 * 60,
+            ),
             public_base_url=os.getenv("NOOP_PUBLIC_BASE_URL"),
             twilio_account_sid=os.getenv("NOOP_TWILIO_ACCOUNT_SID"),
             twilio_auth_token=os.getenv("NOOP_TWILIO_AUTH_TOKEN"),
@@ -271,6 +356,138 @@ class Settings:
             raise RuntimeError("NOOP_DATABASE_ENGINE must be postgresql or timescaledb")
         if self.auth_mode not in {"single_owner", "shared"}:
             raise RuntimeError("NOOP_AUTH_MODE must be single_owner or shared")
+        if self.managed_entitlement_mode not in {"closed", "open_beta", "paid"}:
+            raise RuntimeError(
+                "NOOP_MANAGED_ENTITLEMENT_MODE must be closed, open_beta, or paid"
+            )
+        if self.managed_storage_enabled:
+            required_managed = {
+                "NOOP_MANAGED_PROJECT_ID": self.managed_project_id,
+                "NOOP_MANAGED_PROJECT_NUMBER": self.managed_project_number,
+                "NOOP_MANAGED_IDENTITY_API_KEY": self.managed_identity_api_key,
+                "NOOP_MANAGED_APPLE_APP_ID": self.managed_apple_app_id,
+                "NOOP_MANAGED_ANDROID_APP_ID": self.managed_android_app_id,
+                "NOOP_MANAGED_RAW_BUCKET": self.managed_raw_bucket,
+                "NOOP_MANAGED_SIGNER_EMAIL": self.managed_signer_email,
+                "NOOP_MANAGED_REPLAY_SECRET": self.managed_replay_secret,
+                "NOOP_MANAGED_CONSENT_POLICY_VERSION": (
+                    self.managed_consent_policy_version
+                ),
+                "NOOP_MANAGED_CONSENT_POLICY_SHA256": (
+                    self.managed_consent_policy_sha256
+                ),
+            }
+            missing_managed = [
+                name for name, value in required_managed.items() if not value
+            ]
+            if missing_managed:
+                raise RuntimeError(
+                    "managed storage requires: " + ", ".join(missing_managed)
+                )
+            if not re.fullmatch(
+                r"[a-z][a-z0-9-]{4,28}[a-z0-9]",
+                self.managed_project_id or "",
+            ):
+                raise RuntimeError("NOOP_MANAGED_PROJECT_ID must be a valid project ID")
+            if not re.fullmatch(
+                r"[1-9][0-9]{5,19}",
+                self.managed_project_number or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_PROJECT_NUMBER must be a valid project number"
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9_-]{8,256}",
+                self.managed_identity_api_key or "",
+            ):
+                raise RuntimeError("NOOP_MANAGED_IDENTITY_API_KEY is invalid")
+            expected_app_prefix = f"1:{self.managed_project_number}:"
+            for name, app_id, platform in (
+                (
+                    "NOOP_MANAGED_APPLE_APP_ID",
+                    self.managed_apple_app_id,
+                    "ios",
+                ),
+                (
+                    "NOOP_MANAGED_ANDROID_APP_ID",
+                    self.managed_android_app_id,
+                    "android",
+                ),
+            ):
+                if not re.fullmatch(
+                    rf"{re.escape(expected_app_prefix)}{platform}:[0-9a-f]{{8,64}}",
+                    app_id or "",
+                ):
+                    raise RuntimeError(
+                        f"{name} must belong to the configured project and platform"
+                    )
+            if not re.fullmatch(
+                r"[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]",
+                self.managed_raw_bucket or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_RAW_BUCKET must be a valid bucket name"
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+",
+                self.managed_signer_email or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_SIGNER_EMAIL must be a service-account email"
+                )
+            if len((self.managed_replay_secret or "").encode("utf-8")) < 32:
+                raise RuntimeError(
+                    "NOOP_MANAGED_REPLAY_SECRET must be at least 32 bytes"
+                )
+            if not re.fullmatch(
+                r"[a-z][a-z0-9-]{1,31}",
+                self.managed_home_region,
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_HOME_REGION must be a region identifier"
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                self.managed_residency_policy_version,
+            ):
+                raise RuntimeError("NOOP_MANAGED_RESIDENCY_POLICY_VERSION is invalid")
+            for name, value in (
+                (
+                    "NOOP_MANAGED_DEFAULT_PLAN_CODE",
+                    self.managed_default_plan_code,
+                ),
+                (
+                    "NOOP_MANAGED_CONSENT_POLICY_KIND",
+                    self.managed_consent_policy_kind,
+                ),
+            ):
+                if not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", value):
+                    raise RuntimeError(f"{name} has an invalid identifier")
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",
+                self.managed_consent_policy_version or "",
+            ):
+                raise RuntimeError("NOOP_MANAGED_CONSENT_POLICY_VERSION is invalid")
+            if not re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.managed_consent_policy_sha256 or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_CONSENT_POLICY_SHA256 must be a lowercase "
+                    "SHA-256 digest"
+                )
+            if not 60 <= self.managed_upload_ttl_seconds <= 3600:
+                raise RuntimeError(
+                    "NOOP_MANAGED_UPLOAD_TTL_SECONDS must be between 60 and 3600"
+                )
+            if not 60 <= self.managed_download_ttl_seconds <= 3600:
+                raise RuntimeError(
+                    "NOOP_MANAGED_DOWNLOAD_TTL_SECONDS must be between 60 and 3600"
+                )
+            if not 300 <= self.managed_app_check_cache_seconds <= 21_600:
+                raise RuntimeError(
+                    "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS must be between 300 and 21600"
+                )
         if self.pool_min_size > self.pool_max_size:
             raise RuntimeError(
                 "NOOP_DB_POOL_MIN_SIZE cannot exceed NOOP_DB_POOL_MAX_SIZE"

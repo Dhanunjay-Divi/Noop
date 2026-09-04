@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 39
+const val NOOP_DATABASE_SCHEMA_VERSION = 45
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -31,6 +31,7 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 39
         RrInterval::class,
         EventRow::class,
         BatterySample::class,
+        BodyMeasurementRow::class,
         Spo2Sample::class,
         SkinTempSample::class,
         StepSample::class,
@@ -62,6 +63,17 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 39
         StrengthSetRow::class,
         CoachMessageRow::class,
         CoachMemoryRow::class,
+        ManagedSyncSourceEntity::class,
+        ManagedSyncCheckpointEntity::class,
+        ManagedWindowUploadEntity::class,
+        ManagedDirtyWindowEntity::class,
+        ManagedPruneGuardEntity::class,
+        ManagedChangeCursorEntity::class,
+        ManagedAppliedChangeEntity::class,
+        ManagedDocumentDirtyEntity::class,
+        ManagedDocumentStateEntity::class,
+        ManagedDocumentApplyGuardEntity::class,
+        ManagedSnapshotRestoreEntity::class,
     ],
     version = NOOP_DATABASE_SCHEMA_VERSION,
     // Build-time artifact only; this does not change runtime database behavior.
@@ -69,6 +81,7 @@ const val NOOP_DATABASE_SCHEMA_VERSION = 39
 )
 abstract class WhoopDatabase : RoomDatabase() {
     abstract fun whoopDao(): WhoopDao
+    abstract fun managedSyncDao(): ManagedSyncDao
 
     companion object {
         const val DB_NAME = "noop_whoop.db"
@@ -942,6 +955,479 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        internal val MANAGED_SYNC_STATE_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `managedSyncSource` (" +
+                "`sourceId` TEXT NOT NULL, `localSourceId` TEXT NOT NULL, " +
+                "`sourceKind` TEXT NOT NULL, `platform` TEXT NOT NULL, " +
+                "`logicalSourceHash` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, " +
+                "`updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`sourceId`))",
+            "CREATE TABLE IF NOT EXISTS `managedSyncCheckpoint` (" +
+                "`sourceId` TEXT NOT NULL, `dataClass` TEXT NOT NULL, " +
+                "`nextWindowStartMs` INTEGER, `repairWindowStartMs` INTEGER, " +
+                "`updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`sourceId`, `dataClass`))",
+            "CREATE TABLE IF NOT EXISTS `managedChangeCursor` (" +
+                "`accountScopeHash` TEXT NOT NULL, `sequence` INTEGER NOT NULL, " +
+                "`updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`accountScopeHash`))",
+            "CREATE TABLE IF NOT EXISTS `managedAppliedChange` (" +
+                "`accountScopeHash` TEXT NOT NULL, `sequence` INTEGER NOT NULL, " +
+                "`resourceKind` TEXT NOT NULL, `resourceId` TEXT NOT NULL, " +
+                "`contentSHA256` TEXT, `appliedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountScopeHash`, `sequence`))",
+        )
+
+        internal val MIGRATION_39_40 = object : Migration(39, 40) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in MANAGED_SYNC_STATE_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        internal val BODY_MEASUREMENT_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE `ppgHrSample_v41` (" +
+                "`deviceId` TEXT NOT NULL, `ts` INTEGER NOT NULL, `bpm` REAL NOT NULL, " +
+                "`conf` REAL NOT NULL, `synced` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`deviceId`, `ts`))",
+            "INSERT INTO `ppgHrSample_v41` (`deviceId`, `ts`, `bpm`, `conf`, `synced`) " +
+                "SELECT `deviceId`, `ts`, CAST(`bpm` AS REAL), `conf`, `synced` FROM `ppgHrSample`",
+            "DROP TABLE `ppgHrSample`",
+            "ALTER TABLE `ppgHrSample_v41` RENAME TO `ppgHrSample`",
+            "CREATE TABLE IF NOT EXISTS `bodyMeasurement` (" +
+                "`deviceId` TEXT NOT NULL, `measuredAt` INTEGER NOT NULL, " +
+                "`receivedAt` INTEGER NOT NULL, `weightKg` REAL NOT NULL, " +
+                "`bmi` REAL, `heightCm` REAL, `userId` INTEGER NOT NULL, " +
+                "`unit` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+                "PRIMARY KEY(`deviceId`, `measuredAt`, `userId`))",
+            "CREATE INDEX IF NOT EXISTS `idx_bodyMeasurement_device_measuredAt` " +
+                "ON `bodyMeasurement` (`deviceId`, `measuredAt`)",
+        )
+
+        internal val MIGRATION_40_41 = object : Migration(40, 41) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in BODY_MEASUREMENT_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        internal val MANAGED_WINDOW_UPLOAD_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE `managedSyncCheckpoint_v42` (" +
+                "`accountScopeHash` TEXT NOT NULL, `sourceId` TEXT NOT NULL, " +
+                "`dataClass` TEXT NOT NULL, `nextWindowStartMs` INTEGER, " +
+                "`repairWindowStartMs` INTEGER, `updatedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountScopeHash`, `sourceId`, `dataClass`))",
+            "DROP TABLE `managedSyncCheckpoint`",
+            "ALTER TABLE `managedSyncCheckpoint_v42` RENAME TO `managedSyncCheckpoint`",
+            "CREATE TABLE IF NOT EXISTS `managedWindowUpload` (" +
+                "`accountScopeHash` TEXT NOT NULL, `sourceId` TEXT NOT NULL, " +
+                "`dataClass` TEXT NOT NULL, `windowStartMs` INTEGER NOT NULL, " +
+                "`windowEndMs` INTEGER NOT NULL, `chunkId` TEXT NOT NULL, " +
+                "`rowCount` INTEGER NOT NULL, `phase` TEXT NOT NULL, " +
+                "`objectGeneration` INTEGER, `objectMetageneration` INTEGER, " +
+                "`objectCRC32C` TEXT, `updatedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountScopeHash`, `sourceId`, `dataClass`, `windowStartMs`))",
+        )
+
+        internal val MIGRATION_41_42 = object : Migration(41, 42) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in MANAGED_WINDOW_UPLOAD_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        internal val MANAGED_DIRTY_WINDOW_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `managedWindowUpload` ADD COLUMN " +
+                "`snapshotGeneration` INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE `managedWindowUpload` ADD COLUMN `validatedAtMs` INTEGER",
+            "ALTER TABLE `managedWindowUpload` ADD COLUMN `localPrunedAtMs` INTEGER",
+            "UPDATE `managedWindowUpload` SET `phase` = 'awaiting_validation' " +
+                "WHERE `phase` = 'completed'",
+            "CREATE INDEX IF NOT EXISTS `idx_managedWindowUpload_chunk` ON " +
+                "`managedWindowUpload` (`accountScopeHash`, `chunkId`)",
+            "CREATE INDEX IF NOT EXISTS `idx_managedWindowUpload_prune` ON " +
+                "`managedWindowUpload` (`accountScopeHash`, `sourceId`, `dataClass`, " +
+                "`phase`, `localPrunedAtMs`, `windowEndMs`)",
+            "CREATE TABLE IF NOT EXISTS `managedDirtyWindow` (" +
+                "`localSourceId` TEXT NOT NULL, `dataClass` TEXT NOT NULL, " +
+                "`windowStartMs` INTEGER NOT NULL, `windowEndMs` INTEGER NOT NULL, " +
+                "`generation` INTEGER NOT NULL, `claimedGeneration` INTEGER, " +
+                "`updatedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`localSourceId`, `dataClass`, `windowStartMs`))",
+            "CREATE INDEX IF NOT EXISTS `idx_managedDirtyWindow_pending` ON " +
+                "`managedDirtyWindow` (`localSourceId`, `dataClass`, `windowEndMs`, " +
+                "`windowStartMs`)",
+            "CREATE TABLE IF NOT EXISTS `managedPruneGuard` (" +
+                "`guardId` INTEGER NOT NULL, PRIMARY KEY(`guardId`))",
+        )
+
+        internal val MIGRATION_42_43 = object : Migration(42, 43) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in MANAGED_DIRTY_WINDOW_MIGRATION_SQL) db.execSQL(statement)
+                installManagedDirtyWindowTriggers(db)
+            }
+        }
+
+        internal val MANAGED_SNAPSHOT_RESTORE_MIGRATION_SQL =
+            "CREATE TABLE IF NOT EXISTS `managedSnapshotRestore` (" +
+                "`accountScopeHash` TEXT NOT NULL, `requestId` TEXT NOT NULL, " +
+                "`dataClassesJSON` TEXT NOT NULL, `restoreJobId` TEXT, " +
+                "`snapshotAt` TEXT, `changeSequence` INTEGER, " +
+                "`selectedObjects` INTEGER, `selectedBytes` INTEGER, " +
+                "`dataClassIndex` INTEGER NOT NULL, `afterEventStart` TEXT, " +
+                "`afterChunkId` TEXT, `deliveredObjects` INTEGER NOT NULL, " +
+                "`deliveredBytes` INTEGER NOT NULL, `updatedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountScopeHash`))"
+
+        internal val MIGRATION_43_44 = object : Migration(43, 44) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(MANAGED_SNAPSHOT_RESTORE_MIGRATION_SQL)
+            }
+        }
+
+        internal val MANAGED_DOCUMENT_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `managedDocumentDirty` (" +
+                "`tableName` TEXT NOT NULL, `localKey` TEXT NOT NULL, " +
+                "`documentKind` TEXT NOT NULL, `generation` INTEGER NOT NULL, " +
+                "`operation` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, " +
+                "`payloadJSON` TEXT, PRIMARY KEY(`tableName`, `localKey`))",
+            "CREATE INDEX IF NOT EXISTS `idx_managedDocumentDirty_order` ON " +
+                "`managedDocumentDirty` (`updatedAtMs`, `tableName`, `localKey`)",
+            "CREATE TABLE IF NOT EXISTS `managedDocumentState` (" +
+                "`accountScopeHash` TEXT NOT NULL, `tableName` TEXT NOT NULL, " +
+                "`localKey` TEXT NOT NULL, `documentKind` TEXT NOT NULL, " +
+                "`documentId` TEXT NOT NULL, `keyJSON` TEXT NOT NULL, " +
+                "`acknowledgedGeneration` INTEGER NOT NULL, " +
+                "`remoteRevision` INTEGER NOT NULL, " +
+                "`remoteContentSHA256` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`accountScopeHash`, `tableName`, `localKey`))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS `idx_managedDocumentState_document` ON " +
+                "`managedDocumentState` (`accountScopeHash`, `documentKind`, `documentId`)",
+            "CREATE TABLE IF NOT EXISTS `managedDocumentApplyGuard` (" +
+                "`guardId` INTEGER NOT NULL, PRIMARY KEY(`guardId`))",
+            "ALTER TABLE `managedSnapshotRestore` ADD COLUMN `afterDocumentUpdatedAt` TEXT",
+            "ALTER TABLE `managedSnapshotRestore` ADD COLUMN `afterDocumentKind` TEXT",
+            "ALTER TABLE `managedSnapshotRestore` ADD COLUMN `afterDocumentId` TEXT",
+            "ALTER TABLE `managedSnapshotRestore` ADD COLUMN " +
+                "`documentsComplete` INTEGER NOT NULL DEFAULT 0",
+        )
+
+        internal val MIGRATION_44_45 = object : Migration(44, 45) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in MANAGED_DOCUMENT_MIGRATION_SQL) db.execSQL(statement)
+                installManagedDocumentTriggers(db, seedExisting = true)
+            }
+        }
+
+        private data class ManagedDocumentTriggerSpec(
+            val table: String,
+            val documentKind: String,
+            val keyColumns: List<String>,
+            val eligibility: (String) -> String = { "1" },
+        ) {
+            fun localKey(row: String): String = keyColumns.joinToString(" || ':' || ") {
+                "hex(CAST($row.`$it` AS BLOB))"
+            }
+        }
+
+        private val MANAGED_DOCUMENT_TRIGGER_SPECS = listOf(
+            ManagedDocumentTriggerSpec(
+                "journal",
+                "journal",
+                listOf("deviceId", "day", "question"),
+            ),
+            ManagedDocumentTriggerSpec("labMarker", "lab_marker", listOf("id")),
+            ManagedDocumentTriggerSpec("nutritionEntry", "nutrition", listOf("id")),
+            ManagedDocumentTriggerSpec(
+                "nutritionCatalogItem",
+                "nutrition_catalog",
+                listOf("id"),
+                eligibility = { "$it.`isSaved` != 0" },
+            ),
+            ManagedDocumentTriggerSpec(
+                "strengthExercise",
+                "strength_plan",
+                listOf("id"),
+                eligibility = {
+                    "($it.`isCustom` != 0 OR $it.`createdAt` != 1 OR $it.`updatedAt` != 1)"
+                },
+            ),
+            ManagedDocumentTriggerSpec("strengthRoutine", "strength_plan", listOf("id")),
+            ManagedDocumentTriggerSpec(
+                "strengthRoutineExercise",
+                "strength_plan",
+                listOf("id"),
+            ),
+            ManagedDocumentTriggerSpec("strengthSession", "strength_log", listOf("id")),
+            ManagedDocumentTriggerSpec("strengthSet", "strength_log", listOf("id")),
+            ManagedDocumentTriggerSpec("coachMessage", "coach_history", listOf("id")),
+            ManagedDocumentTriggerSpec("coachMemory", "coach_memory", listOf("id")),
+            ManagedDocumentTriggerSpec("dayOwnership", "day_ownership", listOf("day")),
+        )
+
+        internal fun installManagedDocumentTriggers(
+            db: SupportSQLiteDatabase,
+            seedExisting: Boolean = false,
+        ) {
+            val now = "CAST(strftime('%s', 'now') AS INTEGER) * 1000"
+            val guardAbsent =
+                "NOT EXISTS (SELECT 1 FROM managedDocumentApplyGuard WHERE guardId = 1)"
+            for (spec in MANAGED_DOCUMENT_TRIGGER_SPECS) {
+                val table = spec.table
+                val newKey = spec.localKey("NEW")
+                val oldKey = spec.localKey("OLD")
+                val newEligible = spec.eligibility("NEW")
+                val oldEligible = spec.eligibility("OLD")
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_insert`
+                        AFTER INSERT ON `$table`
+                        BEGIN
+                            ${managedDocumentDirtySQL(
+                                spec,
+                                newKey,
+                                "upsert",
+                                "$guardAbsent AND ($newEligible)",
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_delete`
+                        AFTER DELETE ON `$table`
+                        BEGIN
+                            ${managedDocumentDirtySQL(
+                                spec,
+                                oldKey,
+                                "delete",
+                                "$guardAbsent AND ($oldEligible)",
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `managed_document_${table}_update`
+                        AFTER UPDATE ON `$table`
+                        BEGIN
+                            ${managedDocumentDirtySQL(
+                                spec,
+                                oldKey,
+                                "delete",
+                                "$guardAbsent AND ($oldEligible) AND " +
+                                    "(NOT ($newEligible) OR $oldKey != $newKey)",
+                                now,
+                            )};
+                            ${managedDocumentDirtySQL(
+                                spec,
+                                newKey,
+                                "upsert",
+                                "$guardAbsent AND ($newEligible)",
+                                now,
+                            )};
+                        END
+                    """.trimIndent(),
+                )
+                if (seedExisting) {
+                    db.execSQL(
+                        """
+                            INSERT INTO managedDocumentDirty (
+                                tableName, localKey, documentKind, generation,
+                                operation, updatedAtMs, payloadJSON
+                            )
+                            SELECT ?, ${spec.localKey("seed")}, ?, 1,
+                                   'upsert', $now, NULL
+                            FROM `$table` AS seed
+                            WHERE ${spec.eligibility("seed")}
+                            ON CONFLICT(tableName, localKey) DO NOTHING
+                        """.trimIndent(),
+                        arrayOf<Any?>(table, spec.documentKind),
+                    )
+                }
+            }
+        }
+
+        private fun managedDocumentDirtySQL(
+            spec: ManagedDocumentTriggerSpec,
+            localKey: String,
+            operation: String,
+            condition: String,
+            now: String,
+        ): String =
+            """
+                INSERT INTO managedDocumentDirty (
+                    tableName, localKey, documentKind, generation,
+                    operation, updatedAtMs, payloadJSON
+                )
+                SELECT '${spec.table}', $localKey, '${spec.documentKind}', 1,
+                       '$operation', $now, NULL
+                WHERE $condition
+                ON CONFLICT(tableName, localKey) DO UPDATE SET
+                    documentKind = excluded.documentKind,
+                    generation = managedDocumentDirty.generation + 1,
+                    operation = excluded.operation,
+                    updatedAtMs = excluded.updatedAtMs,
+                    payloadJSON = NULL
+            """.trimIndent()
+
+        private data class ManagedDirtyTriggerSpec(
+            val table: String,
+            val timestampColumn: String,
+            val dataClass: String,
+            val windowMilliseconds: Long,
+            val timestampIsDay: Boolean = false,
+        )
+
+        private val MANAGED_DIRTY_TRIGGER_SPECS: List<ManagedDirtyTriggerSpec> = run {
+            val hour = 60 * 60 * 1_000L
+            val day = 24 * hour
+            listOf(
+                ManagedDirtyTriggerSpec("hrSample", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec("rrInterval", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec("event", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec("battery", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec("stepSample", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec("ppgHrSample", "ts", "essential_timeseries", 6 * hour),
+                ManagedDirtyTriggerSpec(
+                    "bodyMeasurement",
+                    "measuredAt",
+                    "essential_timeseries",
+                    6 * hour,
+                ),
+                ManagedDirtyTriggerSpec("skinTempSample", "ts", "raw_auxiliary", hour),
+                ManagedDirtyTriggerSpec("respSample", "ts", "raw_auxiliary", hour),
+                ManagedDirtyTriggerSpec("sleepStateSample", "ts", "raw_auxiliary", hour),
+                ManagedDirtyTriggerSpec("spo2Sample", "ts", "raw_ppg", hour),
+                ManagedDirtyTriggerSpec("ppgWaveformSample", "ts", "raw_ppg", hour),
+                ManagedDirtyTriggerSpec("gravitySample", "ts", "raw_motion", hour),
+                ManagedDirtyTriggerSpec("rawImuSample", "ts", "raw_motion", hour),
+                ManagedDirtyTriggerSpec(
+                    "dailyMetric",
+                    "day",
+                    "derived_summaries",
+                    7 * day,
+                    true,
+                ),
+                ManagedDirtyTriggerSpec(
+                    "appleDaily",
+                    "day",
+                    "derived_summaries",
+                    7 * day,
+                    true,
+                ),
+                ManagedDirtyTriggerSpec(
+                    "metricSeries",
+                    "day",
+                    "derived_summaries",
+                    7 * day,
+                    true,
+                ),
+                ManagedDirtyTriggerSpec(
+                    "sleepSession",
+                    "startTs",
+                    "derived_summaries",
+                    7 * day,
+                ),
+                ManagedDirtyTriggerSpec(
+                    "workout",
+                    "startTs",
+                    "derived_summaries",
+                    7 * day,
+                ),
+                ManagedDirtyTriggerSpec(
+                    "liveSession",
+                    "startTs",
+                    "derived_summaries",
+                    7 * day,
+                ),
+            )
+        }
+
+        internal fun installManagedDirtyWindowTriggers(db: SupportSQLiteDatabase) {
+            for (spec in MANAGED_DIRTY_TRIGGER_SPECS) {
+                val columns = db.query("PRAGMA table_info(`${spec.table}`)").use { cursor ->
+                    buildList {
+                        val nameIndex = cursor.getColumnIndexOrThrow("name")
+                        while (cursor.moveToNext()) {
+                            cursor.getString(nameIndex)
+                                .takeUnless { it == "synced" }
+                                ?.let(::add)
+                        }
+                    }
+                }
+                if (columns.isEmpty()) continue
+                val updateColumns = columns.joinToString(", ") { "`$it`" }
+                val prefix = "managed_dirty_${spec.table}"
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_insert`
+                        AFTER INSERT ON `${spec.table}`
+                        BEGIN
+                            ${managedDirtyMarkSql(spec, "NEW")};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_delete`
+                        AFTER DELETE ON `${spec.table}`
+                        BEGIN
+                            ${managedDirtyMarkSql(spec, "OLD")};
+                        END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                        CREATE TRIGGER IF NOT EXISTS `${prefix}_update`
+                        AFTER UPDATE OF $updateColumns ON `${spec.table}`
+                        BEGIN
+                            ${managedDirtyMarkSql(spec, "OLD")};
+                            ${managedDirtyMarkSql(spec, "NEW")};
+                        END
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        private fun managedDirtyMarkSql(
+            spec: ManagedDirtyTriggerSpec,
+            row: String,
+        ): String {
+            val eventMilliseconds = if (spec.timestampIsDay) {
+                "(CAST(strftime('%s', $row.`${spec.timestampColumn}` || " +
+                    "'T00:00:00Z') AS INTEGER) * 1000)"
+            } else {
+                "($row.`${spec.timestampColumn}` * 1000)"
+            }
+            val start = "(($eventMilliseconds / ${spec.windowMilliseconds}) * " +
+                "${spec.windowMilliseconds})"
+            return """
+                INSERT INTO managedDirtyWindow (
+                    localSourceId, dataClass, windowStartMs, windowEndMs,
+                    generation, claimedGeneration, updatedAtMs
+                )
+                SELECT $row.`deviceId`, '${spec.dataClass}', $start,
+                       $start + ${spec.windowMilliseconds}, 1, NULL,
+                       CAST(strftime('%s', 'now') AS INTEGER) * 1000
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM managedPruneGuard WHERE guardId = 1
+                )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pairedDevice
+                      WHERE id = $row.`deviceId` AND sourceKind = 'cloudImport'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM managedSyncSource
+                      WHERE localSourceId = $row.`deviceId`
+                        AND sourceKind = 'managed_restore'
+                  )
+                ON CONFLICT(localSourceId, dataClass, windowStartMs)
+                DO UPDATE SET
+                    generation = managedDirtyWindow.generation + 1,
+                    claimedGeneration = managedDirtyWindow.claimedGeneration,
+                    updatedAtMs = excluded.updatedAtMs
+                WHERE managedDirtyWindow.claimedGeneration =
+                      managedDirtyWindow.generation
+            """.trimIndent()
+        }
+
         internal fun strengthBuiltInInsertSQL(): List<String> =
             StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
                 "INSERT OR IGNORE INTO `strengthExercise` " +
@@ -976,7 +1462,9 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
                     MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
                     MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
-                    MIGRATION_37_38, MIGRATION_38_39,
+                    MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40,
+                    MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
+                    MIGRATION_44_45,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,
@@ -994,6 +1482,8 @@ abstract class WhoopDatabase : RoomDatabase() {
                                 "'${WhoopLiveCapabilities.encoded("WHOOP")}', 'active', $now, $now)",
                         )
                         for (statement in strengthBuiltInInsertSQL()) db.execSQL(statement)
+                        installManagedDirtyWindowTriggers(db)
+                        installManagedDocumentTriggers(db)
                     }
                 })
                 .build()

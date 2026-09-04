@@ -38,6 +38,22 @@ from pydantic import ValidationError
 
 from app import __version__
 from app.config import Settings
+from app.managed_api import managed_router
+from app.managed_app_check import (
+    FirebaseAppCheckTokenVerifier,
+    ManagedAppCheckVerifying,
+)
+from app.managed_identity import (
+    IdentityToolkitTokenVerifier,
+    ManagedTokenVerifying,
+)
+from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
+from app.managed_object_store import (
+    GCSV4ObjectStore,
+    IAMBlobSigner,
+    ManagedObjectStoring,
+)
+from app.managed_repository import PostgresManagedRepository
 from app.models import (
     FriendInviteCreate,
     FriendInviteJoin,
@@ -933,6 +949,13 @@ def create_app(
     safety_repository: SafetyRepository | None = None,
     installation_repository: InstallationRepository | None = None,
     paging_provider: PagingProvider | None = None,
+    managed_repository: PostgresManagedRepository | None = None,
+    managed_app_check_verifier: ManagedAppCheckVerifying | None = None,
+    managed_token_verifier: ManagedTokenVerifying | None = None,
+    managed_object_store: ManagedObjectStoring | None = None,
+    managed_identity_deletion_ticket_codec: (
+        ManagedIdentityDeletionTicketCodec | None
+    ) = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     runtime_repository: Repository
@@ -967,6 +990,65 @@ def create_app(
         )
     else:
         runtime_installation_repository = MemoryInstallationRepository()
+
+    runtime_managed_repository = managed_repository
+    runtime_managed_app_check_verifier = managed_app_check_verifier
+    runtime_managed_token_verifier = managed_token_verifier
+    runtime_managed_object_store = managed_object_store
+    runtime_managed_identity_deletion_ticket_codec = (
+        managed_identity_deletion_ticket_codec
+    )
+    if runtime_settings.managed_storage_enabled:
+        if runtime_managed_repository is None:
+            if not isinstance(runtime_repository, PostgresRepository):
+                raise RuntimeError(
+                    "managed storage requires PostgreSQL or an injected "
+                    "managed repository"
+                )
+            runtime_managed_repository = PostgresManagedRepository(
+                runtime_repository,
+                home_region=runtime_settings.managed_home_region,
+                residency_policy_version=(
+                    runtime_settings.managed_residency_policy_version
+                ),
+                default_plan_code=runtime_settings.managed_default_plan_code,
+                default_plan_revision=(runtime_settings.managed_default_plan_revision),
+                consent_policy_kind=(runtime_settings.managed_consent_policy_kind),
+                entitlement_mode=runtime_settings.managed_entitlement_mode,
+                replay_secret=runtime_settings.managed_replay_secret or "",
+            )
+        if runtime_managed_token_verifier is None:
+            runtime_managed_token_verifier = IdentityToolkitTokenVerifier(
+                project_id=runtime_settings.managed_project_id or "",
+                api_key=runtime_settings.managed_identity_api_key or "",
+                cache_seconds=runtime_settings.managed_identity_cache_seconds,
+                cache_entries=runtime_settings.managed_identity_cache_entries,
+            )
+        if runtime_managed_app_check_verifier is None:
+            runtime_managed_app_check_verifier = FirebaseAppCheckTokenVerifier(
+                project_number=runtime_settings.managed_project_number or "",
+                allowed_app_ids=frozenset(
+                    {
+                        runtime_settings.managed_apple_app_id or "",
+                        runtime_settings.managed_android_app_id or "",
+                    }
+                ),
+                jwks_cache_seconds=(runtime_settings.managed_app_check_cache_seconds),
+            )
+        if runtime_managed_object_store is None:
+            signer = IAMBlobSigner(
+                runtime_settings.managed_signer_email or "",
+            )
+            runtime_managed_object_store = GCSV4ObjectStore(
+                bucket=runtime_settings.managed_raw_bucket or "",
+                signer=signer,
+            )
+        if runtime_managed_identity_deletion_ticket_codec is None:
+            runtime_managed_identity_deletion_ticket_codec = (
+                ManagedIdentityDeletionTicketCodec(
+                    runtime_settings.managed_replay_secret or ""
+                )
+            )
 
     runtime_twilio_callback_url: str | None = None
     if paging_provider is not None:
@@ -1086,6 +1168,13 @@ def create_app(
     app.state.paging_provider = runtime_paging_provider
     app.state.safety_worker = runtime_safety_worker
     app.state.provider_callback_rate_limiter = runtime_provider_callback_limiter
+    app.state.managed_repository = runtime_managed_repository
+    app.state.managed_app_check_verifier = runtime_managed_app_check_verifier
+    app.state.managed_token_verifier = runtime_managed_token_verifier
+    app.state.managed_object_store = runtime_managed_object_store
+    app.state.managed_identity_deletion_ticket_codec = (
+        runtime_managed_identity_deletion_ticket_codec
+    )
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -3562,6 +3651,26 @@ def create_app(
     app.include_router(router)
     app.include_router(social_router)
     app.include_router(safety_router)
+    if (
+        runtime_settings.managed_storage_enabled
+        and runtime_managed_repository is not None
+        and runtime_managed_app_check_verifier is not None
+        and runtime_managed_token_verifier is not None
+        and runtime_managed_object_store is not None
+        and runtime_managed_identity_deletion_ticket_codec is not None
+    ):
+        app.include_router(
+            managed_router(
+                settings=runtime_settings,
+                repository=runtime_managed_repository,
+                app_check_verifier=runtime_managed_app_check_verifier,
+                token_verifier=runtime_managed_token_verifier,
+                object_store=runtime_managed_object_store,
+                identity_deletion_ticket_codec=(
+                    runtime_managed_identity_deletion_ticket_codec
+                ),
+            )
+        )
 
     static_root = Path(__file__).resolve().parent / "static"
     if runtime_settings.dashboard_enabled:

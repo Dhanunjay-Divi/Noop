@@ -765,6 +765,7 @@ private struct ProfileStep: View {
     @State private var heightCmDraft = ""
     @State private var heightFeetDraft = ""
     @State private var heightInchesDraft = ""
+    @State private var clearTransitionField: InputField?
 
     private let sexes: [(String, String)] = [
         ("male", String(localized: "Male")), ("female", String(localized: "Female")),
@@ -839,16 +840,27 @@ private struct ProfileStep: View {
                 }
             }
             .onChangeCompat(of: focusedField) { field in
-                guard field == nil else {
-                    isEditing = true
-                    revealMeasurements(using: scrollProxy)
+                guard let field else {
+                    if let clearedField = clearTransitionField {
+                        DispatchQueue.main.async {
+                            guard focusedField == nil,
+                                  clearTransitionField == clearedField else { return }
+                            focusedField = clearedField
+                        }
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        guard focusedField == nil, clearTransitionField == nil else { return }
+                        isEditing = false
+                        normalizeMeasurementDrafts()
+                    }
                     return
                 }
-                DispatchQueue.main.async {
-                    guard focusedField == nil else { return }
-                    isEditing = false
-                    normalizeMeasurementDrafts()
+                if let clearedField = clearTransitionField, field != clearedField {
+                    clearTransitionField = nil
                 }
+                isEditing = true
+                revealMeasurements(using: scrollProxy)
             }
             #if os(iOS)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
@@ -949,6 +961,9 @@ private struct ProfileStep: View {
             get: { weightDraft },
             set: { draft in
                 weightDraft = draft
+                if !draft.isEmpty, clearTransitionField == .weight {
+                    clearTransitionField = nil
+                }
                 guard let entered = decimalValue(draft),
                       (massUnit == .pounds ? 66.0...551.0 : 30.0...250.0).contains(entered) else { return }
                 displayedWeight.wrappedValue = entered
@@ -961,6 +976,9 @@ private struct ProfileStep: View {
             get: { heightCmDraft },
             set: { draft in
                 heightCmDraft = draft
+                if !draft.isEmpty, clearTransitionField == .heightCm {
+                    clearTransitionField = nil
+                }
                 guard let entered = decimalValue(draft), (120.0...230.0).contains(entered) else { return }
                 displayedHeightCm.wrappedValue = entered
             }
@@ -1065,6 +1083,7 @@ private struct ProfileStep: View {
     }
 
     private func finishEditing() {
+        clearTransitionField = nil
         normalizeMeasurementDrafts()
         focusedField = nil
         isEditing = false
@@ -1073,6 +1092,26 @@ private struct ProfileStep: View {
     private func focus(_ field: InputField) {
         isEditing = true
         focusedField = field
+    }
+
+    private func clearDraft(_ field: InputField) {
+        isEditing = true
+        clearTransitionField = field
+        switch field {
+        case .weight:
+            weightDraft = ""
+        case .heightCm:
+            heightCmDraft = ""
+        case .heightFeet:
+            heightFeetDraft = ""
+        case .heightInches:
+            heightInchesDraft = ""
+        }
+        focusedField = nil
+        DispatchQueue.main.async {
+            guard clearTransitionField == field else { return }
+            focusedField = field
+        }
     }
 
     private func revealMeasurements(using proxy: ScrollViewProxy) {
@@ -1104,17 +1143,15 @@ private struct ProfileStep: View {
                         .simultaneousGesture(TapGesture().onEnded { focus(.weight) })
                         .accessibilityLabel("Weight value")
                         .accessibilityIdentifier("noop.profile.weight")
-                    Button {
-                        focus(.weight)
-                        weightDraft = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(StrandPalette.textTertiary)
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .contentShape(Rectangle())
+                        .onTapGesture { clearDraft(.weight) }
+                        .accessibilityElement()
+                        .accessibilityAddTraits(.isButton)
                     .opacity(weightDraft.isEmpty ? 0 : 1)
-                    .disabled(weightDraft.isEmpty)
+                    .allowsHitTesting(!weightDraft.isEmpty)
                     .accessibilityHidden(weightDraft.isEmpty)
                     .accessibilityLabel("Clear weight")
                     .accessibilityIdentifier("noop.profile.weight.clear")
@@ -1157,17 +1194,15 @@ private struct ProfileStep: View {
                             .simultaneousGesture(TapGesture().onEnded { focus(.heightCm) })
                             .accessibilityLabel("Height value")
                             .accessibilityIdentifier("noop.profile.height.cm")
-                        Button {
-                            focus(.heightCm)
-                            heightCmDraft = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(StrandPalette.textTertiary)
-                        }
-                        .buttonStyle(.plain)
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .contentShape(Rectangle())
+                            .onTapGesture { clearDraft(.heightCm) }
+                            .accessibilityElement()
+                            .accessibilityAddTraits(.isButton)
                         .opacity(heightCmDraft.isEmpty ? 0 : 1)
-                        .disabled(heightCmDraft.isEmpty)
+                        .allowsHitTesting(!heightCmDraft.isEmpty)
                         .accessibilityHidden(heightCmDraft.isEmpty)
                         .accessibilityLabel("Clear height")
                         .accessibilityIdentifier("noop.profile.height.clear")
@@ -1507,8 +1542,7 @@ private struct NotificationsStep: View {
                             Spacer()
                             Toggle("", isOn: $dailyReviewOptIn)
                                 .labelsHidden()
-                                .toggleStyle(.switch)
-                                .tint(StrandPalette.accent)
+                                .toggleStyle(.noopSwitch)
                                 .accessibilityLabel("Daily review reminders")
                         }
 

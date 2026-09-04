@@ -26,7 +26,7 @@ class RemoteSyncOutboxMigrationTest {
     fun migrationVersionPairIs37To38() {
         assertEquals(37, WhoopDatabase.MIGRATION_37_38.startVersion)
         assertEquals(38, WhoopDatabase.MIGRATION_37_38.endVersion)
-        assertEquals(39, NOOP_DATABASE_SCHEMA_VERSION)
+        assertEquals(45, NOOP_DATABASE_SCHEMA_VERSION)
     }
 
     @Test

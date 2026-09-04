@@ -32,6 +32,9 @@ MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
 POSTGRESQL_MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations-postgresql"
 DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
 DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "timescaledb")
+ASYNC_COMPLETION_TIMEOUT_SECONDS = float(
+    os.getenv("NOOP_TEST_ASYNC_COMPLETION_TIMEOUT_SECONDS", "5")
+)
 
 
 def _repository(
@@ -218,6 +221,142 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     assert "share_duration_hours" in escalation
 
 
+def test_managed_storage_migration_covers_control_and_data_planes() -> None:
+    managed = (MIGRATIONS / "014_managed_storage_control_plane.sql").read_text(
+        encoding="utf-8"
+    )
+    managed += (MIGRATIONS / "016_managed_storage_scale_contract.sql").read_text(
+        encoding="utf-8"
+    )
+    required_tables = {
+        "managed_accounts",
+        "managed_external_identities",
+        "managed_account_installations",
+        "managed_policy_documents",
+        "managed_consent_events",
+        "managed_storage_plans",
+        "managed_plan_data_rules",
+        "managed_subscriptions",
+        "managed_quota_overrides",
+        "managed_retention_policy_snapshots",
+        "managed_storage_usage",
+        "managed_storage_usage_ledger",
+        "managed_sources",
+        "managed_client_keys",
+        "managed_chunks",
+        "managed_chunk_streams",
+        "managed_chunk_key_envelopes",
+        "managed_upload_grants",
+        "managed_processing_attempts",
+        "managed_aggregate_provenance",
+        "managed_aggregate_inputs",
+        "managed_daily_aggregates",
+        "managed_sleep_summaries",
+        "managed_workout_summaries",
+        "managed_documents",
+        "managed_sync_checkpoints",
+        "managed_object_access_grants",
+        "managed_restore_jobs",
+        "managed_export_jobs",
+        "managed_erasure_jobs",
+        "managed_erasure_targets",
+        "managed_replay_tombstones",
+        "managed_support_access_grants",
+        "managed_audit_events",
+        "managed_chunk_schemas",
+        "managed_stream_schemas",
+        "managed_chunk_schema_streams",
+        "managed_daily_ingest_usage",
+        "managed_account_change_sequences",
+        "managed_change_events",
+        "managed_document_heads",
+    }
+    for table in required_tables:
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in managed
+
+    assert "subject_hash char(64) NOT NULL" in managed
+    assert "phone_number" not in managed
+    assert "email_address" not in managed
+    assert "'v1/' || storage_namespace::text || '/' || chunk_id::text" in managed
+    assert "managed_chunk_content_mode" in managed
+    assert "managed_chunk_key_mode" in managed
+    assert "managed_chunk_preserve_identity" in managed
+    assert "managed_usage_ledger_chunk_fk" in managed
+    assert "operator_subject_hash char(64) NOT NULL" in managed
+    assert "encrypted_data_key bytea NOT NULL" in managed
+    assert "plaintext" not in managed.casefold()
+
+    seed = (MIGRATIONS / "015_managed_storage_synthetic_seed.sql").read_text(
+        encoding="utf-8"
+    )
+    policy = (
+        Path(__file__).resolve().parents[1]
+        / "policies"
+        / "managed-storage-synthetic-v1.md"
+    ).read_bytes()
+    assert hashlib.sha256(policy).hexdigest() in seed
+    assert "'noop_plus_staging'" in seed
+    assert '"feature_restrictions": []' in seed
+    assert "'raw_ppg'" in seed
+    assert "'raw_motion'" in seed
+
+    scale = (MIGRATIONS / "016_managed_storage_scale_contract.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE TABLE IF NOT EXISTS managed_chunk_schemas" in scale
+    assert "CREATE TABLE IF NOT EXISTS managed_daily_ingest_usage" in scale
+    assert "CREATE TABLE IF NOT EXISTS managed_change_events" in scale
+    assert "CREATE TABLE IF NOT EXISTS managed_document_heads" in scale
+    assert "noop_managed_append_change" in scale
+    assert "high-rate samples remain" in scale.casefold()
+
+    supersession = (MIGRATIONS / "021_managed_chunk_supersession.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "authoritative_snapshot boolean NOT NULL DEFAULT false" in supersession
+    assert "managed_chunk_authoritative_mode" in supersession
+    assert "superseded_by_chunk_id" in supersession
+    assert "managed_chunks_current_window_idx" in supersession
+
+    mobile_contract = (MIGRATIONS / "022_managed_mobile_stream_contract.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "DELETE FROM managed_chunk_schema_streams" in mobile_contract
+    assert "UPDATE managed_stream_schemas" in mobile_contract
+    for retired_stream in {
+        "accelerometer",
+        "gyroscope",
+        "ppg_ambient",
+        "ppg_green",
+        "ppg_infrared",
+        "ppg_red",
+        "respiratory_rate",
+        "skin_temperature",
+        "spo2",
+        "steps",
+        "wear_state",
+    }:
+        assert f"'{retired_stream}'" in mobile_contract
+
+    restore_anchor = (MIGRATIONS / "023_managed_restore_cursor_anchor.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "ADD COLUMN change_sequence bigint NOT NULL DEFAULT 0" in restore_anchor
+    assert "CHECK (change_sequence >= 0)" in restore_anchor
+
+    schema_seed = (MIGRATIONS / "017_managed_storage_schema_seed.sql").read_text(
+        encoding="utf-8"
+    )
+    schema_root = Path(__file__).resolve().parents[1] / "schemas" / "managed"
+    for schema_name in (
+        "chunk-json-v1.schema.json",
+        "opaque-backup-v1.schema.json",
+        "stream-value-contract-v1.schema.json",
+    ):
+        digest = hashlib.sha256((schema_root / schema_name).read_bytes()).hexdigest()
+        assert digest in schema_seed
+
+
 @pytest.mark.skipif(
     not DATABASE_URL,
     reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
@@ -284,6 +423,348 @@ async def test_postgres_installation_tenancy_rotation_and_isolation() -> None:
                 await installations.delete_installation(installation_id)
             except Exception:
                 pass
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_managed_storage_manifest_is_opaque_immutable_and_tenant_scoped() -> None:
+    repository = _repository(pool_min_size=1, pool_max_size=2)
+    now = datetime.now(UTC)
+    first_account = uuid4()
+    second_account = uuid4()
+    first_namespace = uuid4()
+    second_namespace = uuid4()
+    first_installation = str(uuid4())
+    second_installation = str(uuid4())
+    first_source = uuid4()
+    second_source = uuid4()
+    first_subscription = uuid4()
+    second_subscription = uuid4()
+    retention = uuid4()
+    chunk = uuid4()
+
+    await repository.startup()
+    try:
+        async with repository._pool.acquire() as connection:
+            transaction = connection.transaction()
+            await transaction.start()
+            try:
+                for installation_id in (first_installation, second_installation):
+                    await connection.execute(
+                        """
+                        INSERT INTO installation_credentials (
+                            installation_id,
+                            enrollment_id,
+                            token_hash,
+                            created_at,
+                            updated_at
+                        ) VALUES ($1, $2, $3, $4, $4)
+                        """,
+                        installation_id,
+                        uuid4(),
+                        hashlib.sha256(installation_id.encode()).hexdigest(),
+                        now,
+                    )
+                for account_id, namespace, installation_id in (
+                    (first_account, first_namespace, first_installation),
+                    (second_account, second_namespace, second_installation),
+                ):
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_accounts (
+                            account_id,
+                            storage_namespace,
+                            home_region,
+                            residency_policy_version,
+                            auth_valid_after
+                        ) VALUES ($1, $2, 'asia-south1', 'test-v1', $3)
+                        """,
+                        account_id,
+                        namespace,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_account_installations (
+                            account_id,
+                            installation_id,
+                            platform,
+                            token_valid_after,
+                            registered_at,
+                            last_seen_at
+                        ) VALUES ($1, $2, 'ios', $3, $3, $3)
+                        """,
+                        account_id,
+                        installation_id,
+                        now,
+                    )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_storage_plans (
+                        plan_code,
+                        revision,
+                        status,
+                        display_tier,
+                        max_total_bytes,
+                        max_inflight_bytes,
+                        max_chunk_bytes,
+                        max_uncompressed_chunk_bytes,
+                        max_installations,
+                        effective_at
+                    ) VALUES (
+                        'integration',
+                        1,
+                        'active',
+                        'noop_plus',
+                        1000000000,
+                        100000000,
+                        10000000,
+                        100000000,
+                        5,
+                        $1
+                    )
+                    """,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_plan_data_rules (
+                        plan_code,
+                        plan_revision,
+                        data_class,
+                        cloud_retention_days,
+                        summary_retention_days,
+                        recommended_local_raw_days,
+                        maximum_daily_bytes,
+                        storage_class,
+                        server_processing_allowed
+                    ) VALUES (
+                        'integration',
+                        1,
+                        'essential_timeseries',
+                        30,
+                        NULL,
+                        90,
+                        100000000,
+                        'standard',
+                        true
+                    )
+                    """
+                )
+                for account_id, subscription_id in (
+                    (first_account, first_subscription),
+                    (second_account, second_subscription),
+                ):
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_subscriptions (
+                            subscription_id,
+                            account_id,
+                            plan_code,
+                            plan_revision,
+                            status,
+                            billing_provider,
+                            period_started_at
+                        ) VALUES (
+                            $1,
+                            $2,
+                            'integration',
+                            1,
+                            'active',
+                            'manual',
+                            $3
+                        )
+                        """,
+                        subscription_id,
+                        account_id,
+                        now,
+                    )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_retention_policy_snapshots (
+                        retention_snapshot_id,
+                        account_id,
+                        subscription_id,
+                        plan_code,
+                        plan_revision,
+                        data_class,
+                        cloud_retention_days,
+                        summary_retention_days,
+                        local_raw_days,
+                        storage_class,
+                        policy_sha256,
+                        effective_at
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        'integration',
+                        1,
+                        'essential_timeseries',
+                        30,
+                        NULL,
+                        90,
+                        'standard',
+                        $4,
+                        $5
+                    )
+                    """,
+                    retention,
+                    first_account,
+                    first_subscription,
+                    "a" * 64,
+                    now,
+                )
+                for account_id, source_id, installation_id in (
+                    (first_account, first_source, first_installation),
+                    (second_account, second_source, second_installation),
+                ):
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_sources (
+                            account_id,
+                            source_id,
+                            installation_id,
+                            source_kind,
+                            platform,
+                            logical_source_hash,
+                            first_seen_at,
+                            last_seen_at
+                        ) VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            'band',
+                            'ios',
+                            $4,
+                            $5,
+                            $5
+                        )
+                        """,
+                        account_id,
+                        source_id,
+                        installation_id,
+                        hashlib.sha256(str(source_id).encode()).hexdigest(),
+                        now,
+                    )
+
+                async def insert_chunk(source_id: UUID) -> None:
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_chunks (
+                            chunk_id,
+                            account_id,
+                            storage_namespace,
+                            source_id,
+                            installation_id,
+                            retention_snapshot_id,
+                            data_class,
+                            schema_version,
+                            idempotency_key,
+                            content_mode,
+                            event_start,
+                            event_end,
+                            compression,
+                            content_type,
+                            expected_sha256,
+                            expected_compressed_bytes,
+                            expected_uncompressed_bytes,
+                            expires_at
+                        ) VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            'essential_timeseries',
+                            1,
+                            $7,
+                            'server_readable',
+                            $8,
+                            $9,
+                            'zstd',
+                            'application/vnd.noop.chunk+protobuf',
+                            $10,
+                            1024,
+                            4096,
+                            $11
+                        )
+                        """,
+                        chunk,
+                        first_account,
+                        first_namespace,
+                        source_id,
+                        first_installation,
+                        retention,
+                        uuid4(),
+                        now,
+                        now + timedelta(hours=1),
+                        "b" * 64,
+                        now + timedelta(days=30),
+                    )
+
+                with pytest.raises(Exception) as cross_tenant:
+                    async with connection.transaction():
+                        await insert_chunk(second_source)
+                assert getattr(cross_tenant.value, "sqlstate", None) == "23503"
+
+                await insert_chunk(first_source)
+                row = await connection.fetchrow(
+                    """
+                    SELECT object_key, state
+                    FROM managed_chunks
+                    WHERE chunk_id = $1
+                    """,
+                    chunk,
+                )
+                assert row["object_key"] == (f"v1/{str(first_namespace)}/{str(chunk)}")
+                assert row["state"] == "reserved"
+
+                with pytest.raises(Exception) as changed_content:
+                    async with connection.transaction():
+                        await connection.execute(
+                            """
+                            UPDATE managed_chunks
+                            SET expected_compressed_bytes = 2048
+                            WHERE chunk_id = $1
+                            """,
+                            chunk,
+                        )
+                assert getattr(changed_content.value, "sqlstate", None) == "23514"
+
+                await connection.execute(
+                    """
+                    UPDATE managed_chunks
+                    SET state = 'uploaded',
+                        object_generation = 1,
+                        object_metageneration = 1,
+                        object_crc32c = 'AAAAAA==',
+                        actual_compressed_bytes = 1024,
+                        uploaded_at = $2
+                    WHERE chunk_id = $1
+                    """,
+                    chunk,
+                    now + timedelta(minutes=2),
+                )
+                with pytest.raises(Exception) as replaced_object:
+                    async with connection.transaction():
+                        await connection.execute(
+                            """
+                            UPDATE managed_chunks
+                            SET object_generation = 2
+                            WHERE chunk_id = $1
+                            """,
+                            chunk,
+                        )
+                assert getattr(replaced_object.value, "sqlstate", None) == "23514"
+            finally:
+                await transaction.rollback()
+    finally:
         await repository.shutdown()
 
 
@@ -931,14 +1412,23 @@ async def test_postgres_profile_erasure_drains_provider_submission_permit() -> N
                 await release_permit.wait()
 
         permit_task = asyncio.create_task(hold_provider_permit())
-        await asyncio.wait_for(permit_started.wait(), timeout=1)
+        await asyncio.wait_for(
+            permit_started.wait(),
+            timeout=ASYNC_COMPLETION_TIMEOUT_SECONDS,
+        )
         delete_task = asyncio.create_task(safety.delete_profile(profile_id))
         await _wait_for_lock_waiters(repository._require_pool(), minimum=1)
         assert delete_task.done() is False
 
         release_permit.set()
-        await asyncio.wait_for(permit_task, timeout=1)
-        deleted = await asyncio.wait_for(delete_task, timeout=1)
+        await asyncio.wait_for(
+            permit_task,
+            timeout=ASYNC_COMPLETION_TIMEOUT_SECONDS,
+        )
+        deleted = await asyncio.wait_for(
+            delete_task,
+            timeout=ASYNC_COMPLETION_TIMEOUT_SECONDS,
+        )
         assert deleted["profiles"] == 1
         async with safety.paging_submission_permit(
             job_kind="delivery",
@@ -1261,7 +1751,10 @@ async def test_postgres_migrations_idempotency_rr_and_row_provenance() -> None:
                     "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
                     "noop-retention",
                 )
-            await asyncio.wait_for(retention_task, timeout=5)
+            await asyncio.wait_for(
+                retention_task,
+                timeout=ASYNC_COMPLETION_TIMEOUT_SECONDS,
+            )
 
         await repository.delete_device(
             raw.source.device_id,

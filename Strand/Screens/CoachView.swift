@@ -176,7 +176,7 @@ struct CoachView: View {
                 }
                 Spacer(minLength: 8)
                 Toggle("", isOn: $coach.dataConsent)
-                    .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                    .labelsHidden().toggleStyle(.noopSwitch)
                     .accessibilityLabel("Let the coach use my data")
             }
         }
@@ -201,7 +201,7 @@ struct CoachView: View {
                 }
                 Spacer(minLength: 8)
                 Toggle("", isOn: $coach.includeOnDeviceSignals)
-                    .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
+                    .labelsHidden().toggleStyle(.noopSwitch)
                     .accessibilityLabel("Also share my patterns and Lab Book with the coach")
             }
         }
@@ -584,8 +584,7 @@ struct CoachView: View {
                                 }
                             ))
                             .labelsHidden()
-                            .toggleStyle(.switch)
-                            .tint(StrandPalette.accent)
+                            .toggleStyle(.noopSwitch)
                             .accessibilityLabel(Text(String(
                                 format: String(localized: "coach.memory.use_format"),
                                 memory.text
@@ -680,8 +679,7 @@ struct CoachView: View {
                         set: { setCheckInEnabled($0) }
                     ))
                     .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.accent)
+                    .toggleStyle(.noopSwitch)
                     .accessibilityLabel(Text("coach.check_in.accessibility"))
                 }
 
@@ -788,8 +786,7 @@ struct CoachView: View {
                                     else { journalSelections.remove(question) }
                                 }
                             ))
-                            .toggleStyle(.switch)
-                            .tint(StrandPalette.accent)
+                            .toggleStyle(.noopSwitch)
                         }
                     }
                 }
@@ -857,8 +854,7 @@ struct CoachView: View {
                                 else { routineSelections.remove(exercise.id) }
                             }
                         ))
-                        .toggleStyle(.switch)
-                        .tint(StrandPalette.accent)
+                        .toggleStyle(.noopSwitch)
                     }
 
                     Text("coach.routine.detail")

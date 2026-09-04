@@ -18,6 +18,15 @@ enum BackgroundSyncPolicy {
         guard let lastAttempt else { return true }
         return now.timeIntervalSince(lastAttempt) >= duplicateAttemptFloor
     }
+
+    /// A wake is successful when the bounded maintenance pipeline reaches its end. Optional work such
+    /// as asking an already-connected band for history may be unavailable without making the wake fail.
+    static func completedMaintenance(
+        optionalBandWorkCompleted _: Bool,
+        cancelled: Bool
+    ) -> Bool {
+        !cancelled
+    }
 }
 
 /// Shared policy for the quiet reminder that a paired band has gone two hours without app-visible sync.

@@ -102,8 +102,7 @@ struct MedicationSettingsView: View {
                     .accessibilityLabel("Dose or timing, optional")
 
                 Toggle("Started or dose changed recently", isOn: $hasChangeDate)
-                    .toggleStyle(.switch)
-                    .tint(StrandPalette.accent)
+                    .toggleStyle(.noopSwitch)
 
                 if hasChangeDate {
                     DatePicker(

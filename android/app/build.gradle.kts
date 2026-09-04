@@ -4,6 +4,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
 
@@ -58,6 +59,24 @@ val demoStrengthMediaSetting = providers.gradleProperty("noopAllowDemoStrengthMe
     ?.lowercase()
 val allowDemoStrengthMedia =
     demoStrengthMediaSetting != "0" && demoStrengthMediaSetting != "false"
+fun managedBuildValue(propertyName: String, environmentName: String): String =
+    providers.gradleProperty(propertyName)
+        .orElse(providers.environmentVariable(environmentName))
+        .getOrElse("")
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+
+val managedApiUrl = managedBuildValue("noopManagedApiUrl", "NOOP_MANAGED_API_URL")
+val managedProjectId = managedBuildValue("noopManagedProjectId", "NOOP_MANAGED_PROJECT_ID")
+val managedApiKey = managedBuildValue("noopManagedApiKey", "NOOP_MANAGED_API_KEY")
+val managedGoogleAppId =
+    managedBuildValue("noopManagedGoogleAppId", "NOOP_MANAGED_GOOGLE_APP_ID")
+val managedGcmSenderId =
+    managedBuildValue("noopManagedGcmSenderId", "NOOP_MANAGED_GCM_SENDER_ID")
+val managedPolicyVersion =
+    managedBuildValue("noopManagedPolicyVersion", "NOOP_MANAGED_POLICY_VERSION")
+val managedPolicySha256 =
+    managedBuildValue("noopManagedPolicySha256", "NOOP_MANAGED_POLICY_SHA256")
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -109,6 +128,13 @@ android {
         buildConfigField("String", "STRENGTH_MEDIA_URL_TEMPLATE", "\"$strengthMediaUrlTemplate\"")
         buildConfigField("String", "STRENGTH_VIDEO_URL_TEMPLATE", "\"$strengthVideoUrlTemplate\"")
         buildConfigField("boolean", "ALLOW_DEMO_STRENGTH_MEDIA", allowDemoStrengthMedia.toString())
+        buildConfigField("String", "MANAGED_API_URL", "\"$managedApiUrl\"")
+        buildConfigField("String", "MANAGED_PROJECT_ID", "\"$managedProjectId\"")
+        buildConfigField("String", "MANAGED_API_KEY", "\"$managedApiKey\"")
+        buildConfigField("String", "MANAGED_GOOGLE_APP_ID", "\"$managedGoogleAppId\"")
+        buildConfigField("String", "MANAGED_GCM_SENDER_ID", "\"$managedGcmSenderId\"")
+        buildConfigField("String", "MANAGED_POLICY_VERSION", "\"$managedPolicyVersion\"")
+        buildConfigField("String", "MANAGED_POLICY_SHA256", "\"$managedPolicySha256\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -198,12 +224,6 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-
-    composeOptions {
-        // Compose Compiler extension matched to Kotlin 1.9.24 (see the official
-        // Compose-to-Kotlin compatibility map). Bumping Kotlin requires bumping this.
-        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {
@@ -339,7 +359,7 @@ dependencyLocking {
 
 dependencies {
     // --- Compose (BOM pins all Compose artifact versions in lockstep) ---
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2025.01.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
@@ -358,6 +378,9 @@ dependencies {
     // --- Activity / lifecycle / navigation ---
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.0")
+    // zxing-android-embedded still requests Fragment 1.1.0. Activity Results require 1.3.0+;
+    // keep an explicit maintained floor so permission callbacks are correct on every supported API.
+    implementation("androidx.fragment:fragment:1.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2") // collectAsStateWithLifecycle
@@ -379,6 +402,16 @@ dependencies {
     // --- AI Coach (opt-in, bring-your-own-key). HTTP client + Keystore-backed key storage. ---
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // --- Optional NOOP+ identity and app attestation. ---
+    // Firebase is initialized manually from BuildConfig so environment values remain outside source
+    // control and a community build can keep NOOP+ entirely disabled without google-services.json.
+    val firebaseBom = platform("com.google.firebase:firebase-bom:33.16.0")
+    implementation(firebaseBom)
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-appcheck")
+    releaseImplementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
 
     // Native exercise media and anatomy rendering. Keeping these in Compose avoids WebView
     // surface-composition failures inside the scrolling Strength Trainer sheet.

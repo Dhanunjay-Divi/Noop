@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import Strand
 
@@ -28,5 +29,68 @@ final class SettingsDisclosureDefaultsTests: XCTestCase {
         defaults.set(true, forKey: SettingsDisclosureDefaults.advancedOpenKey)
         XCTAssertTrue(defaults.bool(forKey: SettingsDisclosureDefaults.advancedOpenKey))
         defaults.removePersistentDomain(forName: "SettingsDisclosureDefaultsTests")
+    }
+}
+
+final class SwitchStyleContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    func testIOSSwitchesUseTheSemanticPositiveStyle() throws {
+        let components = try source(
+            "Packages/StrandDesign/Sources/StrandDesign/Components.swift"
+        )
+        XCTAssertTrue(
+            components.contains("SwitchToggleStyle(tint: StrandPalette.statusPositive)")
+        )
+
+        let app = try source("StrandiOS/App/StrandiOSApp.swift")
+        XCTAssertTrue(
+            app.contains(".toggleStyle(.noopSwitch)"),
+            "The root style is required for bare SwiftUI toggles."
+        )
+
+        for directory in ["Strand", "StrandiOS"] {
+            for file in try swiftSources(in: directory) {
+                let text = try String(contentsOf: file, encoding: .utf8)
+                XCTAssertFalse(
+                    text.contains(".toggleStyle(.switch)"),
+                    "\(file.lastPathComponent) bypasses the canonical green switch style."
+                )
+            }
+        }
+    }
+
+    func testSelectionControlsRetainTheirNonSwitchStyles() throws {
+        let keyMetrics = try source("Strand/Screens/KeyMetricsEditorSheet.swift")
+        XCTAssertTrue(keyMetrics.contains(".toggleStyle(KeyMetricSelectionToggleStyle())"))
+
+        let terms = try source("Strand/App/TermsGateView.swift")
+        XCTAssertTrue(terms.contains(".toggleStyle(.checkbox)"))
+    }
+
+    private func source(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    private func swiftSources(in relativePath: String) throws -> [URL] {
+        let root = repoRoot.appendingPathComponent(relativePath)
+        let enumerator = try XCTUnwrap(
+            FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        )
+        return enumerator.compactMap { item in
+            guard let url = item as? URL, url.pathExtension == "swift" else { return nil }
+            return url
+        }
     }
 }
