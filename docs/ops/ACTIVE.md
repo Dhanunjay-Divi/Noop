@@ -35,6 +35,9 @@ Apple and Android provide a snapshot-bound, manifest-backed complete
 managed-history ZIP export that verifies object digests, byte/object totals,
 and final archive structure. Evidence is recorded in
 [NOOP+ managed storage](rounds/2026-09-03-noop-plus-managed-storage.md).
+The clean implementation commit `3a55dfdb` also produced immutable runtime
+digest `sha256:7567a6fccfe73436f167b5df17a32a0a15422dc18dd0f664a116d1d8ab2665fb`;
+the on-demand scan reported zero findings. The image is stored but not deployed.
 
 The complete-history export uses the restore snapshot/list/download APIs and
 therefore includes history retained only in managed storage. It is deliberately

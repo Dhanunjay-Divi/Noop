@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `main`
 - Start commit: `9a7113f3`
-- End implementation commit: this round's mainline implementation commit
-- Record commit or PR: this round's mainline implementation commit
+- End implementation commit: `3a55dfdb`
+- Record commit or PR: commit containing this final record
 
 ## Objective
 
@@ -135,6 +135,7 @@ included without conflating the two facilities.
 | `tofu fmt -check -recursive` and `tofu validate` | Passed on 2026-09-04 | Current GCP source is formatted and provider-valid | Successful apply or runtime behavior |
 | Final identity plan | `7 add, 0 change, 0 destroy`; Android SHA-1 representation has no diff | Current plan is strictly additive and the prior certificate-format drift is fixed | Firebase terms acceptance or resource creation |
 | Identity apply and Cloud Audit Log | Apply retried at 2026-09-04 20:04 UTC and stopped before Firebase creation; Owner permission granted, status `Firebase Tos Not Accepted` | Failure is the account-level contractual terms gate, not missing project IAM or source configuration | Identity, App Check, SMS, or managed runtime deployment |
+| Clean runtime image build and on-demand scan | Cloud Build succeeded from implementation commit `3a55dfdb`; immutable digest `sha256:7567a6fccfe73436f167b5df17a32a0a15422dc18dd0f664a116d1d8ab2665fb`; scan reported zero findings | The exact reviewed server source builds as the minimal runtime image and passes the material vulnerability gate | Identity creation, migration, Cloud Run deployment, runtime behavior, or production security |
 
 ## Physical device and deployment
 
@@ -150,9 +151,10 @@ included without conflating the two facilities.
 
 - Changed paths: managed server/schema/IaC, Swift and Kotlin clients/storage/UI,
   dependency/legal inventories, diagnostics, tests, and architecture/ops docs.
-- Commits: publication follows this final record update.
-- Branch and remote state: worktree based on synchronized `main` commit
-  `9a7113f3`; final reviewed commit and push pending.
+- Commits: implementation published as `3a55dfdb`; the final evidence record is
+  the commit containing this update.
+- Branch and remote state: implementation commit `3a55dfdb` is published on
+  `origin/main`; this evidence-only update follows it.
 - Repository visibility verified: not repeated.
 - Version/build impact: Firebase libraries and local database migrations are
   additive; empty managed configuration keeps community/default builds
@@ -193,8 +195,8 @@ included without conflating the two facilities.
 1. Accept Firebase terms while signed in as the authenticated project-owner
    account, regenerate and review the identity plan, then apply.
 2. Generate ignored mobile configuration and prove debug App Check.
-3. Run Cloud SQL disposable integration, commit reviewed source, build and scan
-   a digest, migrate through `024`, and deploy the managed runtime IAM-only.
+3. Run Cloud SQL disposable integration, migrate through `024`, and deploy the
+   already built and scanned managed runtime digest IAM-only.
 4. Prove complete managed-history export against live cloud-only and
    large-account fixtures; add resumable continuation and documented import
    before public enrollment.
