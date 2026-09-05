@@ -6,9 +6,10 @@
 - Owner: project team
 - Branch: `main`
 - Start commit: `d3d05095`
-- End implementation commit: commit containing this record
-- Record commit or PR: the same direct-to-`main` documentation commit requested
-  by the owner
+- End implementation commit: `f49af635` plus the commit containing the editable
+  checklist update
+- Record commit or PR: the direct-to-`main` documentation commits requested by
+  the owner
 
 ## Objective
 
@@ -72,6 +73,11 @@ submission.
 - Added
   [`../../FIRST_PRODUCTION_RELEASE_PLAN.md`](../../FIRST_PRODUCTION_RELEASE_PLAN.md)
   as the canonical ordered plan for the first public production release.
+- Added
+  [`../../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../../FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
+  as the day-to-day action ledger: 325 pending points across 15 dependency
+  phases, stable insertion IDs, ownership labels, checkbox/evidence rules, and
+  a copyable form for owner-added work.
 - Defined the hardware/firmware input dossier that must exist before a
   production protocol is implemented: chipset, GATT, wire schema, security,
   sensors, calibration, history, clock, commands, power, OTA, manufacturing,
@@ -158,6 +164,7 @@ submission.
 | Android hosted details | APK, unit tests, and instrumentation compile pass; managed-emulator test is cancelled | The failure is the runtime instrumentation stage | OEM or physical-device behavior |
 | Server hosted details | 272 pass, three fail, one skip because reused PostgreSQL state reports changed checksum for `001_init.sql` | Migration-fixture isolation is a current blocker | Production database health |
 | Master plan and durable records | Added and cross-linked | Future rounds have one ordered source of truth with honest gates | Completion of any open implementation/external gate |
+| Editable release checklist | 325 pending points across 15 ordered phases; stable IDs are unique | Release work can be inserted, completed, superseded, and evidenced without renumbering or losing history | Completion of any listed point |
 | Operations record validation | `python3 Tools/validate-ops-rounds.py --all .` passed for 27 records | The new record and index satisfy the durable-ledger contract | Runtime behavior |
 | Private-data and targeted secret checks | Filename guard, credential-pattern, personal-path, and email scans passed | The changed documentation does not contain detected private paths, emails, or credential-shaped values | Exhaustive secret scanning outside the changed documentation |
 | Legal and distribution gates | Legal inventory verified for 213 runtime components and three container inputs; distribution provenance passed | This documentation did not break the current rights/notices contract | Trademark, store, hardware, or counsel approval |
@@ -176,9 +183,9 @@ submission.
 ## Git and release state
 
 - Changed paths: master release plan, this round record, round index, active
-  handoff, durable decisions, production-readiness ledger, and prior release
-  blocker pointer.
-- Commits: the commit containing this record.
+  handoff, durable decisions, production-readiness ledger, prior release
+  blocker pointer, and editable release checklist.
+- Commits: `f49af635` plus the commit containing the checklist update.
 - Branch and remote state: `main` was clean and equal to `origin/main` at
   `d3d05095` before this documentation-only work; the completed record is
   published directly to the tracked `origin/main` as requested.

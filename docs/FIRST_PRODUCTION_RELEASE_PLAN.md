@@ -6,11 +6,16 @@
 - **Public beta:** none
 - **Required validation:** private release-candidate testing before storefront
   submission
+- **Editable ordered checklist:**
+  [`FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](FIRST_PRODUCTION_RELEASE_CHECKLIST.md)
 
 This is the execution plan for reaching an actual public release. It is not a
 claim that the release is ready today. Code, simulator, staging, physical
 hardware, certification, signing, store, and production-operation evidence are
 separate gates.
+
+Use the checklist for day-to-day additions and completion. Keep this document
+for architecture, dependencies, rationale, and release boundaries.
 
 ## 1. Release definition
 

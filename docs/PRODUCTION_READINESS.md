@@ -14,6 +14,11 @@ mobile/cloud work, physical evidence, certification, signing, stores, and
 launch. This readiness file remains the status ledger; neither document marks
 an open gate complete.
 
+The appendable action ledger is
+[`FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](FIRST_PRODUCTION_RELEASE_CHECKLIST.md).
+New work belongs at its dependency position there; a checkbox closes only with
+the evidence required by this readiness record.
+
 ## Status vocabulary
 
 | Status | Meaning |

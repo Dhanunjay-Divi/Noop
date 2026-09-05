@@ -7,6 +7,8 @@ ordered execution plan, including the first-party NOOP Band, firmware/SDK,
 terminology/data migration, manufacturing, certification, signing, stores, and
 launch operations, is
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+The appendable ordered action list is
+[`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md).
 Use that plan and [`../PRODUCTION_READINESS.md`](../PRODUCTION_READINESS.md) for
 current go/no-go status.
 

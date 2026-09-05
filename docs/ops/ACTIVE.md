@@ -20,6 +20,10 @@ Last updated: **2026-09-05**
 
 The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+Its editable action ledger is
+[`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
+with 325 currently pending points and stable IDs for inserting owner requests
+without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
 performance, metric evidence, optional NOOP+ productionization, security,
