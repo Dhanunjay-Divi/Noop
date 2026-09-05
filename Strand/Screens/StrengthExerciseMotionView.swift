@@ -1288,16 +1288,43 @@ struct StrengthBodyMapView: View {
     }
 
     var body: some View {
-        StrengthBodyMapWebView(
-            scores: scores,
-            mode: mode,
-            selectedMuscles: selectedMuscles,
-            onSelect: onSelect
-        )
+        ZStack {
+            StrengthBodyMapWebView(
+                scores: scores,
+                mode: mode,
+                selectedMuscles: selectedMuscles,
+                onSelect: onSelect
+            )
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains(
+                "--demo-strength-body-map-controls"
+            ) {
+                HStack(spacing: 0) {
+                    bodyMapTestButton(muscle: "chest")
+                    bodyMapTestButton(muscle: "back")
+                }
+            }
+            #endif
+        }
         .frame(maxWidth: .infinity)
         .frame(height: 306)
         .accessibilityElement(children: .contain)
     }
+
+    #if DEBUG
+    private func bodyMapTestButton(muscle: String) -> some View {
+        Button {
+            onSelect(muscle)
+        } label: {
+            Color.clear
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Select \(muscle)")
+        .accessibilityIdentifier("noop.strength.body-map.test-select.\(muscle)")
+    }
+    #endif
 }
 
 private struct StrengthBodyMapWebConfiguration: Equatable {

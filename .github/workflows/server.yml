@@ -40,6 +40,7 @@ jobs:
           --health-retries 20
     env:
       NOOP_TEST_DATABASE_URL: postgresql://noop:noop-ci-database-password@127.0.0.1:5432/noop
+      NOOP_TEST_POSTGRESQL_DATABASE_URL: postgresql://noop:noop-ci-database-password@127.0.0.1:5432/noop_postgresql
     defaults:
       run:
         working-directory: server
@@ -63,6 +64,16 @@ jobs:
 
       - name: Install test dependencies
         run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Create isolated PostgreSQL-overlay test database
+        env:
+          PGPASSWORD: noop-ci-database-password
+        run: >-
+          createdb
+          --host 127.0.0.1
+          --port 5432
+          --username noop
+          noop_postgresql
 
       - name: Lint
         run: |

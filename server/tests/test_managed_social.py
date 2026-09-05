@@ -30,8 +30,8 @@ from app.managed_repository import (
 )
 from app.repository import PostgresRepository
 
-DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
-DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "postgresql")
+DATABASE_URL = os.getenv("NOOP_TEST_POSTGRESQL_DATABASE_URL")
+DATABASE_ENGINE = "postgresql"
 REPLAY_SECRET = "test-managed-social-replay-secret-at-least-32-bytes"
 
 
@@ -132,7 +132,10 @@ def test_managed_social_noop_id_is_canonical_and_exact() -> None:
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
 )
 @pytest.mark.asyncio
 async def test_managed_social_received_request_limit_is_concurrency_safe(
@@ -212,7 +215,10 @@ async def test_managed_social_received_request_limit_is_concurrency_safe(
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
 )
 @pytest.mark.asyncio
 async def test_managed_social_accept_and_block_cannot_leave_friendship() -> None:
@@ -328,7 +334,10 @@ async def test_managed_social_accept_and_block_cannot_leave_friendship() -> None
 
 @pytest.mark.skipif(
     not DATABASE_URL,
-    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
 )
 @pytest.mark.asyncio
 async def test_managed_social_consent_isolation_poke_and_lifecycle() -> None:

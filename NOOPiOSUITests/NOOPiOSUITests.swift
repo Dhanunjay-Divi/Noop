@@ -242,7 +242,10 @@ final class NOOPiOSUITests: XCTestCase {
     }
 
     func testStrengthBodyMapKeepsFrontAndBackRegionsSelectedTogether() {
-        let app = launchDemoScreen("strength")
+        let app = launchDemoScreen(
+            "strength",
+            extraArguments: ["--demo-strength-body-map-controls"]
+        )
         let tabs = app.segmentedControls["noop.strength.tabs"]
         XCTAssertTrue(tabs.waitForExistence(timeout: 20))
         XCTAssertTrue(tabs.buttons["Today"].isSelected)
@@ -264,15 +267,23 @@ final class NOOPiOSUITests: XCTestCase {
 
         let map = app.descendants(matching: .any)["noop.strength.body-map"]
         XCTAssertTrue(map.exists)
+        for _ in 0..<6 where map.frame.maxY > app.frame.maxY - 120 {
+            scroll.swipeUp()
+        }
+        XCTAssertGreaterThan(map.frame.minY, 0)
+        XCTAssertLessThanOrEqual(map.frame.maxY, app.frame.maxY - 120)
         let baselinePixels = selectedPixelCounts(in: map.screenshot().image)
-        map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.28)).tap()
+        let chest = app.buttons["noop.strength.body-map.test-select.chest"]
+        XCTAssertTrue(chest.waitForExistence(timeout: 5))
+        chest.tap()
         let selection = app.staticTexts["noop.strength.focus-selection"]
         XCTAssertTrue(selection.waitForExistence(timeout: 5))
         let frontSelection = selection.label
-        XCTAssertFalse(frontSelection.isEmpty)
-        XCTAssertNotEqual(frontSelection, "Back")
+        XCTAssertEqual(frontSelection, "Chest")
 
-        map.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.34)).tap()
+        let back = app.buttons["noop.strength.body-map.test-select.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
         let combined = NSPredicate(
             format: "label == %@",
             "\(frontSelection) + Back"
