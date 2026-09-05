@@ -18,7 +18,7 @@ Last updated: **2026-09-05**
 
 ## Active work
 
-Managed Friends is now implemented for optional NOOP+ accounts on Apple,
+Managed Friends is implemented for optional NOOP+ accounts on Apple,
 Android, FastAPI, and PostgreSQL. It provides random rotatable exact-match IDs,
 profile and expiring invitation links, explicit mutual requests, directional
 per-friend sharing of only Charge, Effort, Rest, sleep duration, HRV, and RHR,
@@ -26,10 +26,10 @@ non-competitive badges, and receiver-controlled bounded pokes. Both clients
 request generic local notification and an eligible worn-band haptic only after
 foreground/background catch-up. There is no public directory, contact upload,
 ranking, automatic sharing, production HTTPS universal/app link, or APNs/FCM
-immediate delivery. The focused PostgreSQL integration, complete 264-test
-server suite, 96 `NoopRemoteSync` tests, Android unit/compile/lint checkpoint,
-and complete iOS simulator graph pass. Migration `025` and the corrected
-lifecycle runtime still require private-staging deployment, and physical
+immediate delivery. Migration `025` and the corrected lifecycle/processor
+runtime are deployed to IAM-only synthetic staging. The 269-test PostgreSQL
+server suite, 96 `NoopRemoteSync` tests, Android unit/compile/lint gate, fresh
+89-target iOS graph, and a complete two-account private smoke pass. Physical
 notification/haptic behavior remains unverified. Evidence is recorded in
 [Managed Friends identity, sharing, badges, and pokes](rounds/2026-09-05-managed-friends-identity-pokes.md).
 
@@ -98,12 +98,12 @@ Apple and Android provide a snapshot-bound, manifest-backed complete
 managed-history ZIP export that verifies object digests, byte/object totals,
 and final archive structure. Evidence is recorded in
 [NOOP+ managed storage](rounds/2026-09-03-noop-plus-managed-storage.md).
-The earlier clean implementation commit `3a55dfdb` produced immutable runtime
-digest `sha256:7567a6fccfe73436f167b5df17a32a0a15422dc18dd0f664a116d1d8ab2665fb`;
-the on-demand scan reported zero findings. A newer private runtime is deployed,
-but its lifecycle query has a PostgreSQL parameter-typing defect. Corrected
-source and a real-PostgreSQL regression pass locally; a replacement immutable
-image must be built, scanned, deployed, and exercised.
+The current immutable runtime digest is
+`sha256:c55ec7eba9a7f66028ee1f67be3c567273bb4981652228b22f288e540852598a`.
+Its on-demand scan reported zero findings at every severity. Migration and
+lifecycle jobs complete, the private runtime smoke passes upload, processing,
+restore, isolation, erasure, retention, and managed social paths, and the
+post-deploy OpenTofu plan reports zero drift.
 
 The complete-history export uses the restore snapshot/list/download APIs and
 therefore includes history retained only in managed storage. It is deliberately
@@ -116,8 +116,18 @@ The Mumbai foundation remains synthetic-only with no connected released mobile
 client and no real health data. Firebase Identity Platform, enforced App Check,
 Cloud SQL, managed API, processor, lifecycle scheduler, KMS, Pub/Sub, and
 storage are deployed. The managed API remains IAM-only with no public invoker.
-The current source must migrate that private database through `025`, repair the
-lifecycle execution, and return to zero drift before this round closes.
+The database is migrated through `025`; the corrected lifecycle executions
+succeed and the stack is at zero drift. One fictional phone test configuration
+is retained for operator testing, while temporary smoke identities and App
+Check debug tokens are removed.
+
+The final native closeout rebuilt both app graphs. The fresh
+89-target iOS build installed and launched on an iOS 26.5 simulator, the
+floating-shell contract passes 14/14, and a deterministic Today-bottom render
+confirms content no longer reads through the glass controls. Android's forced
+Full compile/unit/lint run executed 59/59 tasks, and that APK installed and
+launched on an API 35 emulator. These are simulator and emulator checks only;
+they add no BLE, background, attestation, notification, or haptic evidence.
 
 The customer-day and scale contract is now explicit in
 [`../PLATFORM_ARCHITECTURE.md`](../PLATFORM_ARCHITECTURE.md): immediate guidance
@@ -214,15 +224,13 @@ participant, and native-speaker gates remain separate.
    dashboards, alerts, and ownership before managed public traffic.
 3. Install the current build on the physical iPhone without clearing data and
    prove durable HR advances while worn, locked, relaunched, and upgraded.
-4. Commit the reviewed observability, retention, and managed Friends source;
-   build and scan an immutable runtime, review a zero-destroy plan, migrate
-   private staging through `025`, deploy, prove lifecycle success, and verify
-   zero drift.
-5. Keep the public invoker and released mobile configuration disabled while
-   proving signed debug attestation and synthetic managed Friends, upload,
-   duplicate, reconnect, restore, isolation, retention, and erasure paths.
-6. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
-   erasure, load, and recovery before enabling public invocation.
+4. Keep the public invoker and released mobile configuration disabled while
+   proving signed physical-client attestation and the complete install,
+   enrollment, background, restore, revoke, and upgrade journeys.
+5. Load-test reconnect bursts and rehearse Cloud SQL PITR, object recovery,
+   secret rotation, and cell-level operational response.
+6. Establish production HTTPS links, minimal opaque APNs/FCM wake delivery,
+   abuse controls, support access, and deletion operations.
 7. Prove complete managed-history export with live cloud-only/large-account
    data, then add resumable continuation and documented import before public
    enrollment.

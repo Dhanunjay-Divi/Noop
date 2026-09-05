@@ -101,10 +101,10 @@ action:
 | Hydration, wind-down, workout caution, adaptive sleep/routine/travel | Implemented as bounded local policies and compact in-app actions | Cross-family fatigue budget and outcome learning remain |
 | Contextual action center | Implemented on Apple and Android with expiry, deduplication, dismiss, and completion | A shared candidate/outcome event schema remains |
 | NOOP+ phone OTP and App Check clients | Implemented; Firebase Identity Platform and enforced Authentication App Check are deployed in synthetic Mumbai staging | Ignored mobile configuration, signed physical clients, recovery and abuse tests |
-| Immutable managed chunk upload/restore | Implemented in clients, server, schema, processor, and tests; managed workloads are deployed IAM-only in synthetic staging | Synthetic end-to-end proof, restore drill, load/isolation evidence |
+| Immutable managed chunk upload/restore | Implemented and passed private synthetic upload, processing, duplicate, tenant-isolation, restore, retention, and erasure smoke against one scanned digest | Signed physical clients, recovery/load evidence, and public launch gates |
 | Complete managed-history ZIP export | Apple and Android finish pending phone backup, pin a server snapshot, page every retained chunk and current personal record, verify digests/counts/bytes, and finalize a manifest-backed archive | Live large-account/expiry/interruption tests, resumable continuation, and a documented importer remain |
 | Optional seven-day raw and 30-day essential local window after validated backup | Implemented, default off | Physical storage-pressure and interrupted-prune validation |
-| GCP managed runtime | Identity, App Check, Cloud SQL, API, processor, lifecycle, scheduler, KMS, Pub/Sub, and storage are deployed in synthetic staging with an IAM-only API | Corrected lifecycle image, synthetic end-to-end proof, recovery/load evidence, and every public-ingress gate |
+| GCP managed runtime | Identity, App Check, Cloud SQL, API, processor, lifecycle, scheduler, KMS, Pub/Sub, and storage are deployed IAM-only; migration/lifecycle, private smoke, and zero drift pass | Recovery/load evidence and every public-ingress gate |
 | Outcome-based personalization | Existing actions record local completion/dismissal in feature-specific stores | No general learning policy ships; experimental design and consent are required |
 
 ## 4. Architectural principles

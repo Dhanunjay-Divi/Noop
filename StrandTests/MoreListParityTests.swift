@@ -155,6 +155,10 @@ final class MoreListParityTests: XCTestCase {
                        "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
         XCTAssertFalse(shell.contains(".mask(alignment: .bottom)"),
                        "A shell mask washes out the final visible row before it reaches the reserved strip.")
+        XCTAssertTrue(shell.contains("appearanceMode == .black ? 0.94 : 0.90"),
+                      "Floating navigation needs a smoked base that prevents page copy showing through.")
+        XCTAssertTrue(shell.contains("private var opticalScrim: Color"),
+                      "The separate quick-action lens must use the same text-occlusion contract.")
         let interactionEnvironment = try XCTUnwrap(
             shell.range(of: #".environment(\.liquidInteractionInProgress"#)
         )
@@ -256,8 +260,8 @@ final class MoreListParityTests: XCTestCase {
                       "Tab selection needs a local animation so the capsule moves instead of jumping.")
         XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),
                       "Light mode needs a transparent smoke tint instead of a milk-white plate.")
-        XCTAssertTrue(shell.contains("return .black.opacity(0.025)"),
-                      "Light mode may use only a restrained contrast scrim over the live page.")
+        XCTAssertTrue(shell.contains("return .white.opacity(0.94)"),
+                      "Light mode must obscure body copy beneath the shape while retaining glass highlights.")
         XCTAssertTrue(shell.contains("navigationInk(active: active)"),
                       "Navigation ink must adapt to light and dark glass.")
         XCTAssertTrue(shell.contains(".opacity(navigationGlassOpacity)"),

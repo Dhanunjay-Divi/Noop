@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `implemented and locally verified; private staging and physical delivery pending`
+- State: `deployed and verified in private synthetic staging; physical delivery pending`
 - Owner: project team
 - Branch: `main`
 - Start commit: `68e305bd`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: commit containing this record
+- Record commit or PR: commit containing this record
 
 ## Objective
 
@@ -100,6 +100,11 @@ notification and best-effort band haptic behavior on both iOS and Android.
 - Added additive PostgreSQL migration `025_managed_social.sql`, API and
   repository methods, account/profile deletion cascades, bounded lifecycle
   cleanup, tenant and consent enforcement, and cross-platform tests.
+- Deployed migration `025` and the digest-pinned runtime to IAM-only synthetic
+  staging. A two-account smoke proved exact lookup, invitations, mutual
+  acceptance, post-acceptance-only feed visibility, all six directional fields,
+  badges, poke opt-in/cooldown/claim/acknowledgement, blocks, social deletion,
+  and account cleanup.
 
 ## Data, privacy, and medical truth
 
@@ -156,14 +161,15 @@ notification and best-effort band haptic behavior on both iOS and Android.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Source and architecture audit | Passed | Managed Friends is separate from self-hosted Friends and core local NOOP; only the intended six-field projection crosses the boundary | Live abuse rates or user comprehension |
-| Real PostgreSQL 14 focused managed-social integration | Passed | Profile/alias rotation, exact lookup, request consent, projection isolation, field clearing, poke controls, blocks, lifecycle, and deletion execute on PostgreSQL | Cloud SQL deployment until migration 025 runs there |
-| Complete server suite against fresh PostgreSQL 14 | `264 passed, 1 skipped` | Existing managed/self-hosted/Safety behavior remains compatible; the skip is the explicit real-carrier test | Twilio delivery or private staging |
+| Real PostgreSQL 14 focused managed-social integration | Passed | Profile/alias rotation, exact lookup, request consent, projection isolation, field clearing, poke controls, blocks, lifecycle, and deletion execute on PostgreSQL | Cloud-scale behavior |
+| Complete server suite against fresh PostgreSQL 14 | `269 passed, 1 skipped` | Existing managed/self-hosted/Safety behavior and processor JSONB handling remain compatible; the skip is the explicit real-carrier test | Twilio delivery |
 | `swift test --package-path Packages/NoopRemoteSync` | `96 passed` | Swift URL/capability validation, client routes, response bounds, diagnostics, retention, restore, and social models pass | iOS app-target compilation or deep-link launch |
 | `swift test --package-path Packages/WhoopStore` | `443 passed` | Managed sync state, retention, storage, and existing store behavior remain green | Physical storage pressure or cloud behavior |
 | Android focused managed-social tests and full-debug compile | Passed | Kotlin URL/capability validation, client contract, haptic gate, Compose/service source, and manifest compile | Installed-device notification or haptic behavior |
 | Android `testFullDebugUnitTest compileFullDebugKotlin lintFullDebug` checkpoint | Passed | Full Android production-flavor unit, compile, and lint graph remains green before the final invite-link completion | Physical Android behavior |
 | `python3 Tools/i18n_audit.py --ci origin/main` | Initially failed on 63 new Apple Friends literals; passed after adding 60 unique catalog keys with complete `de`, `es`, `fr`, and `pt-PT` translations and matching format placeholders | New Friends UI copy is extracted and all maintained focus locales remain complete on Apple and Android | Native-speaker review or every non-focus locale |
 | Fresh full iOS Debug simulator graph | Passed, 89 targets | iPhone app, Watch, widgets, Live Activities, and the corrected String Catalog compile from a new DerivedData directory | Signed deep links, push, BLE, or a felt band vibration |
+| Private synthetic managed runtime smoke | Passed in 79 seconds | Deployed migration and social authorization, privacy, badges, poke, block, and cleanup paths work end to end | Immediate closed-app push or physical haptics |
 | Ruff check and format check | Passed | Python source and tests satisfy repository static policy | Runtime deployment |
 | Health-claims, private-data, 213-component legal inventory, refined credential-pattern, OpenTofu format/validate, operations-record, and whitespace gates | Passed | The reviewed publication worktree satisfies the repository release policies and contains no detected tracked runtime credential | Independent legal/security review |
 | `git diff --check` | Passed | The current source has no whitespace errors | Functional correctness |
@@ -186,9 +192,8 @@ notification and best-effort band haptic behavior on both iOS and Android.
   and haptic paths, localized Android strings, diagnostics, and durable
   documentation. Intentional linked observability and staging-retention changes
   remain in the same publication worktree.
-- Commits: pending.
-- Branch and remote state: local `main` starts one commit ahead of
-  `origin/main`.
+- Commits: `4048f013`, `87d6b784`, plus the record commit.
+- Branch and remote state: publication to `origin/main` is part of closeout.
 - Repository visibility verified: not repeated.
 - Version/build impact: no marketing-version or build-number change.
 - Release or distribution impact: private synthetic staging only unless every
@@ -220,13 +225,10 @@ notification and best-effort band haptic behavior on both iOS and Android.
 
 ## Next round
 
-1. Publish the reviewed source, build and scan one immutable runtime, apply only
-   a zero-destroy private-staging plan, migrate through `025`, and verify a
-   successful lifecycle execution plus zero drift.
-2. Validate profile/invite links, notification authorization/receipt, cooldown,
+1. Validate profile/invite links, notification authorization/receipt, cooldown,
    quiet hours, foreground/background catch-up, and worn-band haptics on signed
    representative iOS and Android devices.
-3. Design the production HTTPS universal/app-link and minimal APNs/FCM wake
+2. Design the production HTTPS universal/app-link and minimal APNs/FCM wake
    path before public enrollment; do not place profile identity, health values,
    or poke content in push payloads.
 

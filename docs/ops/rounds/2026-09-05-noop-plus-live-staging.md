@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `in progress`
+- State: `completed for private synthetic staging; public and physical gates remain`
 - Owner: project team
 - Branch: `main`
 - Start commit: `68e305bd`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: commit containing this record
+- Record commit or PR: commit containing this record
 
 ## Objective
 
@@ -86,6 +86,35 @@ fully useful offline, and independent of NOOP+.
 - Updated the opt-in storage-reduction disclosure on both platforms and in the
   currently maintained locale catalogs. Deletion still requires an exact,
   processor-validated, unchanged managed window.
+- Built and scanned one immutable replacement image. The on-demand scan found
+  zero vulnerabilities at every reported severity. OpenTofu applied five
+  in-place workload updates with no additions or destroys, and all three
+  services plus both jobs now use digest
+  `sha256:c55ec7eba9a7f66028ee1f67be3c567273bb4981652228b22f288e540852598a`.
+- Deployed migration `025`, then proved successful migration and repeated
+  lifecycle executions. The managed API remains IAM-only, released clients
+  remain disconnected, and staging still contains no real health data.
+- The first private smoke exposed a real processor defect: PostgreSQL `jsonb`
+  was returned by `asyncpg` as a string, so a valid manifest was quarantined.
+  Repository decoding now accepts and bounds that representation, and the
+  processor emits only fixed `available`, `quarantined`, or
+  `already_processed` outcomes.
+- The next smoke correctly returned only the current day after friendship
+  acceptance, while the runner incorrectly expected seven pre-acceptance days.
+  The runner now proves that accepted friends cannot read earlier history and
+  sends the explicit confirmation required for managed Friends deletion.
+- The final 79-second private smoke passed fictional OTP identity, App Check,
+  enrollment and consent, upload, processing, duplicate idempotency, tenant
+  isolation, restore, raw erasure, retention, exact IDs, invites, directional
+  sharing, badges, pokes, blocks, social deletion, account erasure, and identity
+  cleanup. Exactly one pre-existing fictional login configuration remains for
+  operator testing; temporary identities and App Check debug tokens were
+  removed.
+- Closed the final iPhone shell readability regression without flattening the
+  glass treatment. Shape-local light and dark scrims now prevent page copy from
+  remaining legible through the floating navigation and quick-action lens.
+  Android needs no equivalent code change because its independently rendered
+  navigation is a `Scaffold` bottom slot and already reserves content space.
 
 ## Data, privacy, and medical truth
 
@@ -108,13 +137,18 @@ fully useful offline, and independent of NOOP+.
   pruning outcomes. The lifecycle job emits one bounded start and terminal
   event with fixed failure kind, duration, and aggregate counts.
 - Why existing evidence is sufficient, or why new evidence is required:
-  lifecycle logs exposed the exact operational boundary, while the new
-  PostgreSQL test prevents the SQL type regression. A successful deployed
-  lifecycle execution remains required after the replacement image is
-  scanned and applied.
+  lifecycle logs exposed the SQL type boundary, processor outcome evidence
+  exposed the manifest quarantine, and PostgreSQL regressions cover both.
+  Successful deployed lifecycle runs and the private smoke close those
+  synthetic boundaries.
 - Existing evidence reused: native `AppDiagnosticsRecorder`, server
   `RequestObservabilityMiddleware`, and `emit_operational_event`.
-- New bounded events or operation spans: pending.
+- New bounded events or operation spans: processor terminal outcomes are fixed
+  categories with no manifest, object, account, or job identifier.
+- Final shell observability decision: no new diagnostic event is warranted for
+  a deterministic rendering-only change. The source contract and untracked
+  synthetic simulator capture diagnose regression without recording a user
+  action, screenshot, health value, or dynamic identifier.
 - Redaction, retention, and high-frequency controls: no health values, contact
   data, credentials, tokens, payloads, dynamic identifiers, or arbitrary
   provider errors may enter diagnostics.
@@ -129,52 +163,67 @@ fully useful offline, and independent of NOOP+.
 |---|---|---|---|
 | `infra/gcp/scripts/verify-private-runtime.sh` | Passed | IAM-only runtime controls and deployed revisions satisfy the scripted private-staging contract | Application data paths |
 | `tofu plan -detailed-exitcode -no-color` | Exit 0, no changes | Real infrastructure matches current source inputs | Runtime behavior |
-| Latest migration execution | Completed successfully | Current deployed image migrated Cloud SQL through the checked-in migration set | Lifecycle query correctness |
-| Scheduled lifecycle logs | Failed repeatedly with one fixed PostgreSQL type category | The maintenance path was not healthy and the failure was reproducible | Corrected image behavior |
+| Latest migration execution | Completed successfully | Cloud SQL is migrated through `025` by the deployed digest | Mobile behavior |
+| Scheduled lifecycle logs | Initial executions failed with one fixed PostgreSQL type category; replacement executions completed successfully | The defect was observable and the corrected deployed query runs | Long-duration production retention |
 | Focused Swift and Android retention tests | Passed | Both clients compute 7-day raw and 30-day essential cutoffs and never select summaries | Physical-device storage pressure |
 | PostgreSQL 14 retention regression | Passed | The corrected purge statement prepares and executes on standard PostgreSQL | Cloud SQL deployment until the new image runs |
-| Pre-deployment private-runtime verification and OpenTofu plan | Private controls passed; detailed-exit plan returned `0` with no changes | The existing IAM-only staging runtime has no broad private-API invoker, retains Cloud SQL PITR/deletion protection, and matches the checked-in infrastructure before the image replacement | Corrected lifecycle behavior or migration `025` |
-| Current deployed runtime digest | `sha256:fece441d02a3e2b1a0c4b2311415171a81571c1bd33fb3f7cc6318da2f802088` | The exact rollback baseline is recorded before deployment | That this older image contains the lifecycle fix or managed Friends schema |
+| Runtime build and on-demand vulnerability scan | Digest `sha256:c55ec7eba9a7f66028ee1f67be3c567273bb4981652228b22f288e540852598a`; zero findings at all severities | The exact deployed source artifact passed the configured scan | Independent penetration testing |
+| Private synthetic runtime smoke | Passed in 79 seconds | OTP/App Check, storage, isolation, restore, erasure, lifecycle, and managed social contracts work together against deployed private staging | Public ingress, scale, real data, carrier, or physical-device behavior |
+| Post-deploy private verifier and OpenTofu plan | Passed; detailed-exit plan returned `0` with no changes | IAM-only invocation, PITR/deletion protection, digest pinning, and zero drift remain true | Public launch readiness |
+| Fresh iOS simulator graph and launch | Passed, 89 targets | The iPhone, Watch, widgets, and Live Activities compile and the app process launches | BLE, background execution, or signed-device attestation |
+| Final Apple shell contract and render | First run exposed one stale pre-fix source assertion; corrected rerun passed 14/14, and a deterministic Today-bottom capture passed visual inspection | The current floating controls retain glass highlights while body text beneath them is no longer readable | Physical-device contrast, motion, or accessibility acceptance |
+| Forced Android Full build and emulator launch | `BUILD SUCCESSFUL` in 3m22s with 59/59 tasks executed; APK installed and launched on API 35 | The current production-flavor compile, unit, lint, packaging, install, and first activity launch paths work together | Physical BLE, OEM background behavior, or managed attestation |
+| Final publication gates | Operations records, private-data and credential patterns, health claims, 17 policy tests, focus-locale coverage, 213-component legal inventory, Ruff check/format, Python syntax, OpenTofu format/validate, and whitespace passed | The reviewed publication tree satisfies repository policy and contains no detected tracked runtime credential | Independent security, privacy, legal, or native-speaker review |
 
 ## Physical device and deployment
 
-- Install/update action: not run.
-- Generalized device and OS class: not run.
-- Data-preservation result: no physical-device data modified at round start.
+- Install/update action: unsigned iOS simulator app and Android Full debug APK
+  installed and launched; no physical-device install.
+- Generalized device and OS class: current iOS 26.5 simulator and Android API 35
+  emulator.
+- Data-preservation result: no physical-device data modified.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all signed iOS/Android enrollment, background upload,
   BLE, battery, storage-pressure, restore, and in-place-upgrade scenarios.
 
 ## Git and release state
 
-- Changed paths: this starting operations record only; pre-existing dirty paths
-  belong to the active observability round.
-- Commits: pending.
-- Branch and remote state: local `main` at `68e305bd`, one commit ahead of
-  `origin/main` at round start.
+- Changed paths: managed retention clients/tests, lifecycle SQL/tests,
+  processor/repository handling and tests, deployment controls, synthetic smoke
+  runner, and durable records.
+- Commits: `68e305bd`, `4048f013`, and `87d6b784`, plus the record commit.
+- Branch and remote state: publication to `origin/main` is part of closeout.
 - Repository visibility verified: not repeated.
-- Version/build impact: pending.
+- Version/build impact: no marketing-version or build-number change.
 - Release or distribution impact: synthetic staging only unless later evidence
   and explicit gates permit more.
 
 ## Decisions
 
-- Durable decision added or changed: proposed local retention is a seven-day
+- Durable decision added or changed: local retention is a seven-day
   high-rate raw hot cache, approximately 30-day essential detail cache, and
   lifetime compact summaries; pruning remains opt-in and server-validated.
-- Decision-log entry: pending implementation and evidence.
+- Decision-log entry: `D-037`.
 
 ## Open risks and honest limitations
 
 - Provider credentials pasted into a conversation must be rotated; they are not
   suitable for source control or durable records.
-- Firebase contractual acceptance, Twilio sender registration, signing,
-  physical devices, independent security/privacy review, and production
-  operations cannot be completed by code alone.
+- Twilio sender registration, signing, physical devices, independent
+  security/privacy review, and production operations cannot be completed by
+  code alone. A credential previously pasted into conversation must be rotated
+  and was not used.
+- Two profiles from a failed synthetic attempt remain only while their already
+  scheduled account erasures observe the 24-hour cooling-off contract. No
+  provider identity remains for them, and the successful smoke added none.
 
 ## Next round
 
-1. Complete the live-state audit and execute the ordered plan above.
+1. Run signed iOS and Android pilot journeys for account creation, consent,
+   background catch-up, restore, storage pressure, and in-place upgrade.
+2. Prove large-account managed export/resume/import, load, PITR restore, secret
+   rotation, support access, and production HTTPS/push delivery before public
+   enrollment.
 
 ## Privacy check
 

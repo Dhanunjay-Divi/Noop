@@ -634,8 +634,22 @@ class ManagedStagingSmoke:
                 }
             ),
         )
-        if len(feed.get("days", [])) != 7:
-            raise SmokeFailure("social feed did not return the consented week")
+        feed_days = feed.get("days", [])
+        if (
+            not isinstance(feed_days, list)
+            or len(feed_days) != 1
+            or feed_days[0].get("day") != today.isoformat()
+            or set(feed_days[0].get("summary", {}))
+            != {
+                "charge",
+                "effort",
+                "rest",
+                "sleep_duration",
+                "hrv",
+                "rhr",
+            }
+        ):
+            raise SmokeFailure("social feed did not preserve acceptance boundaries")
         poke_request = str(uuid4())
         poke_body = {
             "request_id": poke_request,
@@ -725,6 +739,7 @@ class ManagedStagingSmoke:
                 account,
                 "DELETE",
                 "/v1/managed/social/profile",
+                social_delete_confirmation=True,
                 expected={204},
             )
             account.profile_id = ""
@@ -791,6 +806,7 @@ class ManagedStagingSmoke:
         *,
         body: dict[str, Any] | None = None,
         include_installation: bool = True,
+        social_delete_confirmation: bool = False,
         expected: set[int] | None = None,
     ) -> dict[str, Any]:
         if not path.startswith("/") or "://" in path:
@@ -808,6 +824,10 @@ class ManagedStagingSmoke:
                     "X-Noop-Installation-Token": account.installation_token,
                 }
             )
+        if social_delete_confirmation:
+            if method != "DELETE" or path != "/v1/managed/social/profile":
+                raise SmokeFailure("social deletion confirmation is misplaced")
+            headers["X-Noop-Confirm"] = "DELETE MANAGED FRIENDS"
         status_code, payload = self._json_request(
             self.api_url + path,
             method=method,
@@ -993,6 +1013,7 @@ class ManagedStagingSmoke:
                         account,
                         "DELETE",
                         "/v1/managed/social/profile",
+                        social_delete_confirmation=True,
                         expected={204, 404},
                     )
                 except SmokeFailure:

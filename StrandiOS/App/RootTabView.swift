@@ -1759,9 +1759,11 @@ private struct FloatingTabBar: View {
     private var navigationScrim: Color {
         guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
         if colorScheme == .dark {
-            return .black.opacity(appearanceMode == .black ? 0.21 : 0.10)
+            // Glass may reveal motion and color, but body copy beneath persistent navigation must
+            // never remain readable. Keep an opaque-enough smoked base under the native lens.
+            return .black.opacity(appearanceMode == .black ? 0.94 : 0.90)
         }
-        return .black.opacity(0.025)
+        return .white.opacity(0.94)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
@@ -1966,6 +1968,15 @@ private struct FloatingQuickAddButton: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.noopAppearanceMode) private var appearanceMode
+    private var opticalScrim: Color {
+        if reduceTransparency {
+            return colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98)
+        }
+        return colorScheme == .dark
+            ? .black.opacity(appearanceMode == .black ? 0.94 : 0.90)
+            : .white.opacity(0.94)
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
@@ -1974,7 +1985,7 @@ private struct FloatingQuickAddButton: View {
                 .frame(width: 48, height: 48)
                 .background {
                     Circle()
-                        .fill(.clear)
+                        .fill(opticalScrim)
                         .navigationGlass(
                             in: Circle(),
                             tint: reduceTransparency
