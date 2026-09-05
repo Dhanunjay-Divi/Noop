@@ -1171,18 +1171,18 @@ class ManagedStorageClient(
         val chunk = row.optJSONObject("chunk")?.let {
             ManagedChangedChunk(
                 chunkId = uuidOrThrow(it.optString("chunk_id")),
-                sourceId = it.optString("source_id").takeIf(String::isNotBlank)?.let(::uuidOrThrow),
+                sourceId = it.optionalText("source_id")?.let(::uuidOrThrow),
                 schemaVersion = it.optInt("schema_version").takeIf { value -> value > 0 },
-                contentMode = it.optString("content_mode").takeIf(String::isNotBlank),
-                state = it.optString("state").takeIf(String::isNotBlank),
-                compression = it.optString("compression").takeIf(String::isNotBlank),
-                contentType = it.optString("content_type").takeIf(String::isNotBlank),
+                contentMode = it.optionalText("content_mode"),
+                state = it.optionalText("state"),
+                compression = it.optionalText("compression"),
+                contentType = it.optionalText("content_type"),
                 expectedCompressedBytes = it.optInt("expected_compressed_bytes")
                     .takeIf { value -> value > 0 },
                 expectedUncompressedBytes = it.optInt("expected_uncompressed_bytes")
                     .takeIf { value -> value > 0 },
                 objectGeneration = it.optLong("object_generation").takeIf { value -> value > 0 },
-                expiresAt = it.optString("expires_at").takeIf(String::isNotBlank),
+                expiresAt = it.optionalText("expires_at"),
             )
         }
         val document = row.optJSONObject("document")?.let {
@@ -1191,13 +1191,9 @@ class ManagedStorageClient(
                 documentId = uuidOrThrow(it.optString("document_id")),
                 revision = it.requiredLong("revision"),
                 contentMode = it.optString("content_mode"),
-                clientKeyId = it.optString("client_key_id")
-                    .takeIf(String::isNotBlank)
-                    ?.let(::uuidOrThrow),
+                clientKeyId = it.optionalText("client_key_id")?.let(::uuidOrThrow),
                 updatedAt = it.optString("updated_at").requiredInstant(),
-                deletedAt = it.optString("deleted_at")
-                    .takeIf(String::isNotBlank)
-                    ?.requiredInstant(),
+                deletedAt = it.optionalText("deleted_at")?.requiredInstant(),
             ).also { parsed ->
                 if (parsed.revision <= 0L ||
                     parsed.contentMode !in setOf("server_readable", "client_encrypted")
@@ -1211,10 +1207,10 @@ class ManagedStorageClient(
             resourceKind = row.optString("resource_kind"),
             resourceId = uuidOrThrow(row.optString("resource_id")),
             operation = row.optString("operation"),
-            contentSha256 = row.optString("content_sha256").takeIf(String::isNotBlank),
-            dataClass = row.optString("data_class").takeIf(String::isNotBlank),
-            eventStart = row.optString("event_start").takeIf(String::isNotBlank),
-            eventEnd = row.optString("event_end").takeIf(String::isNotBlank),
+            contentSha256 = row.optionalText("content_sha256"),
+            dataClass = row.optionalText("data_class"),
+            eventStart = row.optionalText("event_start"),
+            eventEnd = row.optionalText("event_end"),
             chunk = chunk,
             document = document,
         )
@@ -1226,22 +1222,17 @@ class ManagedStorageClient(
             else -> value.optJSONObject("payload_json")
                 ?: throw ManagedStorageException.InvalidResponse()
         }
-        val deletedAt = value.optString("deleted_at")
-            .takeIf(String::isNotBlank)
-            ?.requiredInstant()
+        val deletedAt = value.optionalText("deleted_at")?.requiredInstant()
         val document = ManagedDocument(
             documentKind = ManagedDocumentKind.fromWire(value.optString("document_kind")),
             documentId = uuidOrThrow(value.optString("document_id")),
             revision = value.requiredLong("revision"),
             originInstallationId = value.optString("origin_installation_id"),
             contentMode = value.optString("content_mode"),
-            clientKeyId = value.optString("client_key_id")
-                .takeIf(String::isNotBlank)
-                ?.let(::uuidOrThrow),
+            clientKeyId = value.optionalText("client_key_id")?.let(::uuidOrThrow),
             contentSha256 = value.optString("content_sha256"),
             payloadJson = payload,
-            payloadCiphertextBase64 = value.optString("payload_ciphertext_base64")
-                .takeIf(String::isNotBlank),
+            payloadCiphertextBase64 = value.optionalText("payload_ciphertext_base64"),
             updatedAt = value.optString("updated_at").requiredInstant(),
             deletedAt = deletedAt,
             duplicate = value.optBoolean("duplicate", false),
@@ -1725,6 +1716,14 @@ class ManagedStorageClient(
             throw ManagedStorageException.InvalidResponse()
         }
         return getBoolean(name)
+    }
+
+    private fun JSONObject.optionalText(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        return runCatching { getString(name) }
+            .getOrElse { throw ManagedStorageException.InvalidResponse() }
+            .trim()
+            .takeIf(String::isNotEmpty)
     }
 
     private fun JSONObject.optionalFiniteDouble(name: String): Double? {

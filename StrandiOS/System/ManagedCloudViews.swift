@@ -84,7 +84,6 @@ struct ManagedCloudBackupCard: View {
                 }
             }
         }
-        .accessibilityIdentifier("noop.noop-plus.card")
         .sheet(isPresented: $showSetup) {
             ManagedCloudSetupSheet(
                 service: service,
@@ -131,6 +130,12 @@ private struct ManagedCloudSetupSheet: View {
     @State private var confirmDeletion = false
     @State private var confirmHistoryExport = false
     @State private var pendingRevoke: ManagedInstallation?
+    @FocusState private var focusedAuthenticationField: AuthenticationField?
+
+    private enum AuthenticationField: Hashable {
+        case phone
+        case code
+    }
 
     var body: some View {
         NavigationStack {
@@ -217,6 +222,12 @@ private struct ManagedCloudSetupSheet: View {
             )
         }
         .task(id: service.phase) {
+            if service.phase == .codeSent {
+                await Task.yield()
+                focusedAuthenticationField = .code
+            } else if service.phase != .signedOut {
+                focusedAuthenticationField = nil
+            }
             if service.phase == .enrolled {
                 await service.refreshOverview()
             }
@@ -237,6 +248,7 @@ private struct ManagedCloudSetupSheet: View {
                     .keyboardType(.phonePad)
                     .textFieldStyle(.roundedBorder)
                     .disabled(service.isBusy || service.phase == .codeSent)
+                    .focused($focusedAuthenticationField, equals: .phone)
                     .accessibilityLabel("NOOP+ phone number")
                     .accessibilityIdentifier("noop.noop-plus.phone")
 
@@ -246,6 +258,7 @@ private struct ManagedCloudSetupSheet: View {
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
+                        .focused($focusedAuthenticationField, equals: .code)
                         .accessibilityLabel("NOOP+ verification code")
                         .accessibilityIdentifier("noop.noop-plus.code")
 
@@ -341,6 +354,7 @@ private struct ManagedCloudSetupSheet: View {
             .font(StrandFont.caption)
             .foregroundStyle(StrandPalette.textTertiary)
             .disabled(service.isBusy)
+            .accessibilityIdentifier("noop.noop-plus.sign-out")
 
             status
             privacyBoundary
@@ -354,6 +368,7 @@ private struct ManagedCloudSetupSheet: View {
                 title: "Cloud backup is on",
                 detail: "Signed in with \(service.maskedPhoneNumber). Sync is incremental and resumes from durable checkpoints."
             )
+            .accessibilityIdentifier("noop.noop-plus.enrolled")
 
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -457,6 +472,7 @@ private struct ManagedCloudSetupSheet: View {
                 service.disconnect()
             }
             .disabled(service.isBusy)
+            .accessibilityIdentifier("noop.noop-plus.sign-out")
 
             Button("Delete NOOP+ cloud account…") {
                 confirmDeletion = true
@@ -488,7 +504,6 @@ private struct ManagedCloudSetupSheet: View {
 
             privacyBoundary
         }
-        .accessibilityIdentifier("noop.noop-plus.enrolled")
     }
 
     private var deletionScheduled: some View {

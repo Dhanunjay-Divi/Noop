@@ -311,9 +311,12 @@ class ManagedStorageClientTest {
             .put("revision", 1)
             .put("origin_installation_id", authorization.installationId)
             .put("content_mode", "server_readable")
+            .put("client_key_id", JSONObject.NULL)
             .put("content_sha256", "a".repeat(64))
             .put("payload_json", payload)
+            .put("payload_ciphertext_base64", JSONObject.NULL)
             .put("updated_at", "2026-09-04T12:00:00Z")
+            .put("deleted_at", JSONObject.NULL)
             .put("duplicate", false)
         val captured = mutableListOf<Request>()
         val client = ManagedStorageClient(
@@ -388,6 +391,59 @@ class ManagedStorageClientTest {
         assertEquals("/v1/managed/documents", captured[2].url.encodedPath)
         assertEquals("false", captured[2].url.queryParameter("include_deleted"))
         assertEquals("25", captured[2].url.queryParameter("limit"))
+    }
+
+    @Test
+    fun changeFeedAcceptsExplicitNullDocumentFields() = runTest {
+        val documentId = UUID.fromString("a2810672-1c29-5e68-9ddd-45e8c3164500")
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "changes",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("sequence", 1)
+                                    .put("resource_kind", "document")
+                                    .put("resource_id", documentId.toString())
+                                    .put("operation", "upsert")
+                                    .put("content_sha256", "a".repeat(64))
+                                    .put("data_class", "user_documents")
+                                    .put("event_start", JSONObject.NULL)
+                                    .put("event_end", JSONObject.NULL)
+                                    .put(
+                                        "document",
+                                        JSONObject()
+                                            .put("document_kind", "preferences")
+                                            .put("document_id", documentId.toString())
+                                            .put("revision", 1)
+                                            .put("content_mode", "server_readable")
+                                            .put("client_key_id", JSONObject.NULL)
+                                            .put("updated_at", "2026-09-04T12:00:00Z")
+                                            .put("deleted_at", JSONObject.NULL),
+                                    ),
+                            ),
+                        )
+                        .put("minimum_sequence", 1)
+                        .put("high_watermark", 1)
+                        .put("next_sequence", 1)
+                        .put("has_more", false)
+                        .toString(),
+                )
+            },
+        )
+
+        val feed = client.changes(authorization, afterSequence = 0, limit = 200)
+
+        assertEquals(1, feed.changes.size)
+        assertNull(feed.changes.single().eventStart)
+        assertNull(feed.changes.single().eventEnd)
+        assertNull(feed.changes.single().document?.clientKeyId)
+        assertNull(feed.changes.single().document?.deletedAt)
     }
 
     @Test

@@ -59,6 +59,85 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(more.isSelected)
     }
 
+    func testPrivateNativePilotEnrollmentAndIdempotentSync() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["NOOP_RUN_PRIVATE_NATIVE_PILOT"] == "private-synthetic-staging" else {
+            throw XCTSkip("Private synthetic pilot inputs are not enabled.")
+        }
+        guard let phone = privatePilotValue("NOOP_NATIVE_PILOT_PHONE", in: environment),
+              let code = privatePilotValue("NOOP_NATIVE_PILOT_CODE", in: environment),
+              let appCheckToken = privatePilotValue(
+                  "NOOP_NATIVE_PILOT_APPCHECK_TOKEN",
+                  in: environment
+              ) else {
+            XCTFail("Private synthetic pilot inputs are incomplete.")
+            return
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--demo-screen", "noopplus"]
+        app.launchEnvironment["AppCheckDebugToken"] = appCheckToken
+        app.launch()
+
+        let setup = app.buttons["noop.noop-plus.setup"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 30))
+        setup.tap()
+
+        let phoneField = app.textFields["noop.noop-plus.phone"]
+        let consent = app.switches["noop.noop-plus.consent"]
+        let enrolled = app.descendants(matching: .any)["noop.noop-plus.enrolled"]
+        XCTAssertTrue(waitUntil(timeout: 10) {
+            phoneField.exists || consent.exists || enrolled.exists
+        })
+        if !phoneField.exists {
+            let signOut = app.buttons["noop.noop-plus.sign-out"]
+            for _ in 0..<8 where !signOut.isHittable {
+                app.swipeUp()
+            }
+            XCTAssertTrue(signOut.isHittable)
+            signOut.tap()
+        }
+        XCTAssertTrue(phoneField.waitForExistence(timeout: 10))
+        focusAndType(phone, into: phoneField, in: app)
+
+        let sendCode = app.buttons["noop.noop-plus.send-code"]
+        XCTAssertTrue(sendCode.isEnabled)
+        sendCode.tap()
+
+        let codeField = app.textFields["noop.noop-plus.code"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 30))
+        focusAndType(code, into: codeField, in: app)
+
+        let verifyCode = app.buttons["noop.noop-plus.verify-code"]
+        XCTAssertTrue(verifyCode.isEnabled)
+        verifyCode.tap()
+
+        XCTAssertTrue(consent.waitForExistence(timeout: 30))
+        let enroll = app.buttons["noop.noop-plus.enroll"]
+        XCTAssertTrue(enroll.exists)
+        XCTAssertFalse(enroll.isEnabled, "Cloud backup must remain blocked before consent.")
+
+        consent.tap()
+        XCTAssertTrue(waitUntil(timeout: 5) { enroll.isEnabled })
+        enroll.tap()
+
+        XCTAssertTrue(enrolled.waitForExistence(timeout: 60))
+
+        for _ in 0..<2 {
+            let sync = app.buttons["noop.noop-plus.sync"]
+            for _ in 0..<8 where !sync.exists {
+                app.swipeUp()
+            }
+            XCTAssertTrue(waitUntil(timeout: 90) {
+                sync.exists && sync.isHittable && sync.isEnabled
+            })
+            sync.tap()
+            XCTAssertTrue(waitUntil(timeout: 60) {
+                sync.exists && sync.isEnabled && sync.label == "Sync now"
+            })
+        }
+    }
+
     func testFloatingQuickActionsOpenTheProductionLauncher() {
         let app = launchApp()
         let quickActions = app.buttons["noop.quick-actions"]
@@ -1102,6 +1181,56 @@ final class NOOPiOSUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         } while Date() < deadline
         return condition()
+    }
+
+    private func privatePilotValue(
+        _ key: String,
+        in environment: [String: String]
+    ) -> String? {
+        guard let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private func focusAndType(
+        _ value: String,
+        into field: XCUIElement,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(field.waitForExistence(timeout: 10), file: file, line: line)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { field.isHittable },
+            "Text field never became hittable.",
+            file: file,
+            line: line
+        )
+        let focusedField = app.textFields.matching(
+            NSPredicate(
+                format: "identifier == %@ AND hasKeyboardFocus == true",
+                field.identifier
+            )
+        ).firstMatch
+        for attempt in 0..<8 where !focusedField.exists {
+            if attempt.isMultiple(of: 2) {
+                field.tap()
+            } else {
+                field.coordinate(
+                    withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+                ).tap()
+            }
+            _ = focusedField.waitForExistence(timeout: 1)
+        }
+        XCTAssertTrue(
+            focusedField.exists,
+            "Text field never acquired keyboard focus.",
+            file: file,
+            line: line
+        )
+        focusedField.typeText(value)
     }
 
     private func semanticGreenPixelCount(in image: UIImage) -> Int {

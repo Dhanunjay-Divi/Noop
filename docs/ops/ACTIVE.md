@@ -18,6 +18,20 @@ Last updated: **2026-09-05**
 
 ## Active work
 
+The private native NOOP+ simulator pilot is complete. One fictional Firebase
+identity remains for repeat operator testing with only the exact
+`noop_managed_pilot` admission attribute; it is not an application or Google
+Cloud administrator. iOS and Android each completed the private enrollment,
+consent, synthetic sync, and idempotent repeat-sync path through loopback-only
+operator access while Cloud Run remained IAM-only. Production-shaped response
+decoding, iOS Firebase phone-auth callbacks, bounded provider failure
+categories, final app builds, connected instrumentation, private-runtime
+verification, cleanup, and an OpenTofu zero-drift plan pass. Temporary App
+Check assertions and local relay/proxy processes are absent. Physical
+attestation, carrier delivery, background execution, BLE, battery, haptic, and
+public-ingress evidence remain open. Evidence is recorded in
+[Native managed staging pilot](rounds/2026-09-05-native-managed-staging-pilot.md).
+
 Managed Friends is implemented for optional NOOP+ accounts on Apple,
 Android, FastAPI, and PostgreSQL. It provides random rotatable exact-match IDs,
 profile and expiring invitation links, explicit mutual requests, directional

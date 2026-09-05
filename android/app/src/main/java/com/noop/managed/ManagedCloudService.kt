@@ -1446,6 +1446,34 @@ class ManagedCloudService private constructor(context: Context) {
     private fun diagnosticSyncFailureKind(error: Throwable): String = when (error) {
         is kotlinx.coroutines.CancellationException -> "canceled"
         is IllegalArgumentException -> "invalid_input"
+        is FirebaseAuthException -> when (error.errorCode) {
+            "ERROR_MISSING_PHONE_NUMBER",
+            "ERROR_INVALID_PHONE_NUMBER",
+            "ERROR_MISSING_VERIFICATION_CODE",
+            "ERROR_INVALID_VERIFICATION_CODE",
+            "ERROR_MISSING_VERIFICATION_ID",
+            "ERROR_INVALID_VERIFICATION_ID",
+            -> "identity_input"
+            "ERROR_TOO_MANY_REQUESTS",
+            "ERROR_QUOTA_EXCEEDED",
+            -> "rate_limited"
+            "ERROR_OPERATION_NOT_ALLOWED" -> "identity_provider_disabled"
+            "ERROR_NETWORK_REQUEST_FAILED" -> "network_transport"
+            "ERROR_INVALID_API_KEY",
+            "ERROR_APP_NOT_AUTHORIZED",
+            -> "identity_configuration"
+            "ERROR_MISSING_APP_CREDENTIAL",
+            "ERROR_INVALID_APP_CREDENTIAL",
+            "ERROR_MISSING_APP_TOKEN",
+            "ERROR_NOTIFICATION_NOT_FORWARDED",
+            "ERROR_APP_NOT_VERIFIED",
+            "ERROR_CAPTCHA_CHECK_FAILED",
+            "ERROR_APP_VERIFICATION_USER_INTERACTION_FAILURE",
+            -> "app_verification"
+            "ERROR_SESSION_EXPIRED" -> "verification_expired"
+            "ERROR_INVALID_CREDENTIAL" -> "authentication"
+            else -> "identity_provider"
+        }
         is ManagedCloudException.InvalidPhone,
         is ManagedCloudException.InvalidCode,
         is ManagedCloudException.CodeRequired,
@@ -1476,6 +1504,10 @@ class ManagedCloudService private constructor(context: Context) {
     private fun diagnosticOperationOutcome(error: Throwable): String =
         when (diagnosticSyncFailureKind(error)) {
             "identity_input",
+            "app_verification",
+            "identity_provider_disabled",
+            "verification_expired",
+            "rate_limited",
             "not_signed_in",
             "consent_required",
             "authentication",

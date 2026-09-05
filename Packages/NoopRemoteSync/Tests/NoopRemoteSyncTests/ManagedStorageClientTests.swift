@@ -116,6 +116,222 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertTrue(response.productBoundary.localMetricsAvailable)
     }
 
+    func testSourceRegistrationDecodesProductionSnakeCaseResponse() async throws {
+        let (client, authorization) = try makeClient()
+        let sourceID = UUID(uuidString: "4baec329-3dc1-5f72-91bd-f9524c74bb22")!
+        ManagedURLProtocolStub.handler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/managed/sources")
+            let data = try requestBody(request)
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            XCTAssertEqual(
+                (object["source_id"] as? String).flatMap(UUID.init(uuidString:)),
+                sourceID
+            )
+            XCTAssertEqual(object["source_kind"] as? String, "live_ble")
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 201,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "source": {
+                    "source_id": "\(sourceID.uuidString.lowercased())",
+                    "source_kind": "live_ble"
+                  }
+                }
+                """.utf8)
+            )
+        }
+
+        let response = try await client.registerSource(
+            ManagedSourceRegistration(
+                sourceID: sourceID,
+                sourceKind: "live_ble",
+                platform: .iOS,
+                logicalSourceHash: String(repeating: "b", count: 64)
+            ),
+            authorization: authorization
+        )
+
+        XCTAssertEqual(response.source.sourceID, sourceID)
+        XCTAssertEqual(response.source.sourceKind, "live_ble")
+    }
+
+    func testChangeFeedAndDocumentDecodeProductionSnakeCaseResponses() async throws {
+        let (client, authorization) = try makeClient()
+        let documentID = UUID(uuidString: "a2810672-1c29-5e68-9ddd-45e8c3164500")!
+        ManagedURLProtocolStub.handler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/managed/changes"):
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data("""
+                    {
+                      "changes": [{
+                        "sequence": 1,
+                        "change_event_id": "63c83b6e-6c36-4ad6-9477-831fe995fe41",
+                        "resource_kind": "document",
+                        "resource_id": "\(documentID.uuidString.lowercased())",
+                        "resource_revision": 1,
+                        "operation": "upsert",
+                        "content_sha256": "\(String(repeating: "a", count: 64))",
+                        "data_class": null,
+                        "event_start": null,
+                        "event_end": null,
+                        "metadata": {},
+                        "occurred_at": "2026-09-04T12:00:00Z",
+                        "document": {
+                          "document_kind": "preferences",
+                          "document_id": "\(documentID.uuidString.lowercased())",
+                          "revision": 1,
+                          "content_mode": "server_readable",
+                          "client_key_id": null,
+                          "updated_at": "2026-09-04T12:00:00Z",
+                          "deleted_at": null
+                        }
+                      }],
+                      "minimum_sequence": 1,
+                      "high_watermark": 1,
+                      "next_sequence": 1,
+                      "has_more": false
+                    }
+                    """.utf8)
+                )
+            case ("GET", "/v1/managed/documents/preferences/\(documentID.uuidString.lowercased())"):
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data("""
+                    {
+                      "document": {
+                        "document_kind": "preferences",
+                        "document_id": "\(documentID.uuidString.lowercased())",
+                        "revision": 1,
+                        "origin_installation_id": "android-installation",
+                        "content_mode": "server_readable",
+                        "client_key_id": null,
+                        "content_sha256": "\(String(repeating: "a", count: 64))",
+                        "payload_json": {"theme": "dark"},
+                        "payload_ciphertext_base64": null,
+                        "updated_at": "2026-09-04T12:00:00Z",
+                        "deleted_at": null,
+                        "duplicate": false
+                      }
+                    }
+                    """.utf8)
+                )
+            default:
+                XCTFail("Unexpected managed request \(request.httpMethod ?? "")")
+                throw ManagedStorageError.invalidResponse
+            }
+        }
+
+        let feed = try await client.changes(
+            after: 0,
+            authorization: authorization
+        )
+        let change = try XCTUnwrap(feed.changes.first)
+        XCTAssertEqual(change.resourceID, documentID)
+        XCTAssertEqual(change.contentSHA256, String(repeating: "a", count: 64))
+        XCTAssertEqual(change.document?.documentID, documentID)
+        XCTAssertNil(change.document?.clientKeyID)
+
+        let document = try await client.document(
+            kind: .preferences,
+            id: documentID,
+            revision: 1,
+            authorization: authorization
+        )
+        XCTAssertEqual(document.documentID, documentID)
+        XCTAssertEqual(document.originInstallationID, "android-installation")
+        XCTAssertEqual(document.payloadJSON?["theme"], .string("dark"))
+        XCTAssertNil(document.clientKeyID)
+    }
+
+    func testManagedResponseModelsDecodeAcronymWireKeys() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let chunkID = UUID(uuidString: "790984d2-5569-5ba9-848a-475d2f299914")!
+        let grantID = UUID(uuidString: "7d48d80a-a4dd-5f68-99a2-4b30952cf55d")!
+        let documentID = UUID(uuidString: "2e959bb4-c6cd-5599-aefe-92aadf05b9fc")!
+
+        let reservation = try decoder.decode(
+            ManagedChunkReservationResponse.self,
+            from: Data("""
+            {
+              "chunk": {
+                "chunk_id": "\(chunkID.uuidString.lowercased())",
+                "state": "reserved",
+                "object_generation": null,
+                "duplicate": false
+              },
+              "upload": {
+                "grant_id": "\(grantID.uuidString.lowercased())",
+                "method": "PUT",
+                "url": "https://storage.googleapis.com/bucket/object",
+                "headers": {"Content-Type": "application/octet-stream"},
+                "expires_at": "2026-09-04T12:10:00Z"
+              }
+            }
+            """.utf8)
+        )
+        XCTAssertEqual(reservation.chunk.chunkID, chunkID)
+        XCTAssertEqual(reservation.upload?.grantID, grantID)
+
+        let page = try decoder.decode(
+            ManagedDocumentPage.self,
+            from: Data("""
+            {
+              "documents": [],
+              "next_cursor": {
+                "after_updated_at": "2026-09-04T12:00:00Z",
+                "after_document_kind": "preferences",
+                "after_document_id": "\(documentID.uuidString.lowercased())"
+              }
+            }
+            """.utf8)
+        )
+        XCTAssertEqual(page.nextCursor?.afterDocumentID, documentID)
+
+        let download = try decoder.decode(
+            ManagedDownloadCapability.self,
+            from: Data("""
+            {
+              "grant_id": "\(grantID.uuidString.lowercased())",
+              "method": "GET",
+              "url": "https://storage.googleapis.com/bucket/object",
+              "headers": {},
+              "expires_at": "2026-09-04T12:10:00Z",
+              "chunk": {
+                "chunk_id": "\(chunkID.uuidString.lowercased())",
+                "expected_sha256": "\(String(repeating: "b", count: 64))",
+                "compression": "gzip",
+                "content_type": "application/vnd.noop.chunk+json",
+                "expected_uncompressed_bytes": 512
+              }
+            }
+            """.utf8)
+        )
+        XCTAssertEqual(download.grantID, grantID)
+        XCTAssertEqual(download.chunk.chunkID, chunkID)
+        XCTAssertEqual(download.chunk.expectedSHA256, String(repeating: "b", count: 64))
+    }
+
     func testOverviewAndInstallationManagementUseCurrentInstallationScope() async throws {
         let (client, authorization) = try makeClient()
         let otherInstallation = "android-installation"

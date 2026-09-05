@@ -1,10 +1,58 @@
 #if os(iOS)
+import FirebaseAuth
+import FirebaseCore
 import SwiftUI
 import StrandAnalytics
 import StrandDesign
 import UserNotifications
 import UIKit
 import WidgetKit
+
+final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate {
+    private var pendingAPNSToken: Data?
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        pendingAPNSToken = deviceToken
+        forwardPendingAPNSTokenIfPossible()
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        if FirebaseApp.app() != nil {
+            _ = Auth.auth().canHandleNotification(userInfo)
+        }
+        completionHandler(.noData)
+    }
+
+    func application(
+        _ application: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        Self.handleOpenURL(url)
+    }
+
+    func forwardPendingAPNSTokenIfPossible() {
+        guard FirebaseApp.app() != nil, let pendingAPNSToken else { return }
+        Auth.auth().setAPNSToken(pendingAPNSToken, type: .unknown)
+    }
+
+    static func forwardPendingAPNSTokenIfPossible() {
+        (UIApplication.shared.delegate as? ManagedFirebaseApplicationDelegate)?
+            .forwardPendingAPNSTokenIfPossible()
+    }
+
+    static func handleOpenURL(_ url: URL) -> Bool {
+        guard FirebaseApp.app() != nil else { return false }
+        return Auth.auth().canHandle(url)
+    }
+}
 
 /// iOS entry point. Unlike the macOS app (which adds a `MenuBarExtra` scene), iOS uses a single
 /// `WindowGroup`; the glanceable menu-bar role is filled by the Home/Lock-Screen widget instead.
@@ -17,6 +65,8 @@ import WidgetKit
 /// `RootTabView` so the iOS app keeps the same gating without depending on the macOS-only shell.
 @main
 struct StrandiOSApp: App {
+    @UIApplicationDelegateAdaptor(ManagedFirebaseApplicationDelegate.self)
+    private var applicationDelegate
     /// Temporary App Store launch-access state. A successful gate version is persisted in this-device-only
     /// Keychain storage; it does not alter the app container, database, onboarding, or Terms state.
     @StateObject private var launchAccess: LaunchAccessController
@@ -444,6 +494,9 @@ struct StrandiOSApp: App {
                 // HealthKit-free payload. Filter on the host so other future schemes don't trip the
                 // importer; macOS never registers the scheme so this stays iOS-only.
                 .onOpenURL { url in
+                    if ManagedFirebaseApplicationDelegate.handleOpenURL(url) {
+                        return
+                    }
                     let managedSocialLink =
                         ManagedCloudService.shared.stageSocialProfileLink(url)
                         || ManagedCloudService.shared.stageSocialInviteLink(url)

@@ -1636,6 +1636,35 @@ final class ManagedCloudService: ObservableObject {
                 return "network_transport"
             }
         }
+        let nsError = error as NSError
+        if nsError.domain == AuthErrors.domain,
+           let auth = AuthErrorCode(rawValue: nsError.code) {
+            switch auth {
+            case .missingPhoneNumber, .invalidPhoneNumber,
+                 .missingVerificationCode, .invalidVerificationCode,
+                 .missingVerificationID, .invalidVerificationID:
+                return "identity_input"
+            case .tooManyRequests, .quotaExceeded:
+                return "rate_limited"
+            case .operationNotAllowed:
+                return "identity_provider_disabled"
+            case .networkError, .webNetworkRequestFailed:
+                return "network_transport"
+            case .invalidAPIKey, .appNotAuthorized, .missingIosBundleID,
+                 .invalidClientID:
+                return "identity_configuration"
+            case .missingAppCredential, .invalidAppCredential, .missingAppToken,
+                 .notificationNotForwarded, .appNotVerified, .captchaCheckFailed,
+                 .appVerificationUserInteractionFailure:
+                return "app_verification"
+            case .sessionExpired:
+                return "verification_expired"
+            case .invalidCredential, .rejectedCredential:
+                return "authentication"
+            default:
+                return "identity_provider"
+            }
+        }
         if let storage = error as? ManagedStorageError {
             switch storage {
             case .invalidConfiguration:
@@ -1688,7 +1717,9 @@ final class ManagedCloudService: ObservableObject {
     private static func diagnosticOperationOutcome(_ error: Error) -> String {
         switch diagnosticSyncFailureKind(error) {
         case "input", "authentication", "forbidden", "consent",
-             "policy_changed", "quota_exceeded", "conflict", "server_rejected":
+             "identity_input", "app_verification", "identity_provider_disabled",
+             "verification_expired", "rate_limited", "policy_changed",
+             "quota_exceeded", "conflict", "server_rejected":
             return "rejected"
         case "canceled":
             return "canceled"
@@ -2058,6 +2089,7 @@ final class ManagedCloudService: ObservableObject {
             options.bundleID = Bundle.main.bundleIdentifier ?? options.bundleID
             FirebaseApp.configure(options: options)
         }
+        ManagedFirebaseApplicationDelegate.forwardPendingAPNSTokenIfPossible()
         _ = configuration
         firebaseConfigured = true
     }

@@ -198,6 +198,11 @@ public struct ManagedSourceResponse: Codable, Sendable {
     public struct Source: Codable, Sendable {
         public let sourceID: UUID
         public let sourceKind: String
+
+        private enum CodingKeys: String, CodingKey {
+            case sourceID = "sourceId"
+            case sourceKind
+        }
     }
 
     public let source: Source
@@ -286,6 +291,13 @@ public struct ManagedChunkReservationResponse: Codable, Sendable {
         public let state: String
         public let objectGeneration: Int64?
         public let duplicate: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case chunkID = "chunkId"
+            case state
+            case objectGeneration
+            case duplicate
+        }
     }
 
     public struct Upload: Codable, Sendable {
@@ -294,6 +306,14 @@ public struct ManagedChunkReservationResponse: Codable, Sendable {
         public let url: URL
         public let headers: [String: String]
         public let expiresAt: String
+
+        private enum CodingKeys: String, CodingKey {
+            case grantID = "grantId"
+            case method
+            case url
+            case headers
+            case expiresAt
+        }
     }
 
     public let chunk: Chunk
@@ -336,6 +356,20 @@ public struct ManagedChangeFeed: Codable, Sendable {
             public let expectedUncompressedBytes: Int?
             public let objectGeneration: Int64?
             public let expiresAt: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case chunkID = "chunkId"
+                case sourceID = "sourceId"
+                case schemaVersion
+                case contentMode
+                case state
+                case compression
+                case contentType
+                case expectedCompressedBytes
+                case expectedUncompressedBytes
+                case objectGeneration
+                case expiresAt
+            }
         }
 
         public struct Document: Codable, Sendable {
@@ -346,6 +380,16 @@ public struct ManagedChangeFeed: Codable, Sendable {
             public let clientKeyID: UUID?
             public let updatedAt: String
             public let deletedAt: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case documentKind
+                case documentID = "documentId"
+                case revision
+                case contentMode
+                case clientKeyID = "clientKeyId"
+                case updatedAt
+                case deletedAt
+            }
         }
 
         public let sequence: Int64
@@ -358,6 +402,19 @@ public struct ManagedChangeFeed: Codable, Sendable {
         public let eventEnd: String?
         public let chunk: Chunk?
         public let document: Document?
+
+        private enum CodingKeys: String, CodingKey {
+            case sequence
+            case resourceKind
+            case resourceID = "resourceId"
+            case operation
+            case contentSHA256 = "contentSha256"
+            case dataClass
+            case eventStart
+            case eventEnd
+            case chunk
+            case document
+        }
     }
 
     public let changes: [Change]
@@ -645,6 +702,21 @@ public struct ManagedDocument: Codable, Equatable, Sendable {
     public let updatedAt: String
     public let deletedAt: String?
     public let duplicate: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case documentKind
+        case documentID = "documentId"
+        case revision
+        case originInstallationID = "originInstallationId"
+        case contentMode
+        case clientKeyID = "clientKeyId"
+        case contentSHA256 = "contentSha256"
+        case payloadJSON = "payloadJson"
+        case payloadCiphertextBase64
+        case updatedAt
+        case deletedAt
+        case duplicate
+    }
 }
 
 public struct ManagedDocumentResponse: Codable, Sendable {
@@ -665,6 +737,12 @@ public struct ManagedDocumentPage: Codable, Sendable {
             self.afterUpdatedAt = afterUpdatedAt
             self.afterDocumentKind = afterDocumentKind
             self.afterDocumentID = afterDocumentID
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case afterUpdatedAt
+            case afterDocumentKind
+            case afterDocumentID = "afterDocumentId"
         }
     }
 
@@ -712,6 +790,14 @@ public struct ManagedDownloadCapability: Codable, Sendable {
         public let compression: String
         public let contentType: String
         public let expectedUncompressedBytes: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case chunkID = "chunkId"
+            case expectedSHA256 = "expectedSha256"
+            case compression
+            case contentType
+            case expectedUncompressedBytes
+        }
     }
 
     public let grantID: UUID
@@ -720,6 +806,15 @@ public struct ManagedDownloadCapability: Codable, Sendable {
     public let headers: [String: String]
     public let expiresAt: String
     public let chunk: Chunk
+
+    private enum CodingKeys: String, CodingKey {
+        case grantID = "grantId"
+        case method
+        case url
+        case headers
+        case expiresAt
+        case chunk
+    }
 }
 
 public enum ManagedErasureScope: String, Codable, Sendable {
