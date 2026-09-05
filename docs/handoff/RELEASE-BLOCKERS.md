@@ -2,6 +2,14 @@
 
 **Assessed:** 2026-08-27
 
+This older blocker summary remains useful historical context. The current
+ordered execution plan, including the first-party NOOP Band, firmware/SDK,
+terminology/data migration, manufacturing, certification, signing, stores, and
+launch operations, is
+[`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+Use that plan and [`../PRODUCTION_READINESS.md`](../PRODUCTION_READINESS.md) for
+current go/no-go status.
+
 **Product verdict:** not yet production-ready
 
 NOOP's project license and runtime dependency notices are internally

@@ -7,6 +7,13 @@ test proves code behavior only. It does not prove carrier delivery, wearable
 firmware compatibility, algorithm accuracy, clinical safety, store acceptance,
 or a person's response to a page.
 
+The ordered first-release execution plan is
+[`FIRST_PRODUCTION_RELEASE_PLAN.md`](FIRST_PRODUCTION_RELEASE_PLAN.md). It is the
+canonical plan for the first-party NOOP Band, safe terminology/data migration,
+mobile/cloud work, physical evidence, certification, signing, stores, and
+launch. This readiness file remains the status ledger; neither document marks
+an open gate complete.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -18,8 +25,16 @@ or a person's response to a page.
 
 ## Code-side readiness
 
+Current hosted `main` is not a release base. At `d3d05095`, the Apple app
+builds but its iOS production-shell test exits 65; Android build, unit, and
+instrumentation compilation pass but the managed-emulator test is cancelled;
+and server CI has 272 passing tests plus three failures from a reused
+PostgreSQL migration ledger. These phase-R1 failures must be fixed rather than
+waived.
+
 | Area | Status | Current evidence and boundary |
 |---|---|---|
+| First-party NOOP Band and SDK | **Not implemented; hardware and protocol inputs pending** | Reusable framing, history, clock, storage, analytics, diagnostics, and pluggable-source patterns exist, but there is no NOOP firmware, GATT/wire contract, device provisioning, secure boot, signed DFU, manufacturing interface, or first-party native SDK. The required input dossier, architecture, conformance gates, and physical matrix are defined in the master plan. Existing third-party hardware cannot be relabeled as proof. |
 | macOS app | **Locally verified** | The current app suite passes 1,428 tests with one intentional fixture skip, and the unsigned app builds. A distributable Developer ID build and notarization remain external. |
 | iPhone, Watch, widgets | **Locally verified by build, focused test, and current simulator render** | A fresh unsigned 89-target Debug graph validates the current iPhone app, embedded Watch app, widgets, and Live Activities. The final app installed and launched on an iOS 26.5 simulator; a deterministic Today-bottom render confirms page text no longer remains legible through the floating navigation or quick-action lens, and the 14-test shell contract passes. Simulator execution does not validate CoreBluetooth, HealthKit entitlements, background collection, or Watch connectivity. |
 | Android app | **Locally verified** | A forced `assembleFullDebug testFullDebugUnitTest lintFullDebug --rerun-tasks` executed all 59 tasks successfully. The resulting production-flavor APK installed and launched through the first-run flow on an API 35 emulator. The broader JVM, Android-test source, and Gradle-managed-device gates also pass. Physical-device/OEM behavior remains an external gate. |
@@ -43,6 +58,7 @@ or a person's response to a page.
 
 | Gate | Required evidence before the related claim ships |
 |---|---|
+| NOOP Band production support | Final hardware/firmware dossier; secure provisioning and key custody; signed secure-boot/OTA rollback; offline flash retention; protocol conformance across firmware, Swift, and Kotlin; manufacturing calibration/traceability; required market certifications; and the complete physical collection, history, clock, power, haptic, update, storage, and upgrade matrix. |
 | Twilio/carrier paging | Controlled-number staging in every launch country/carrier; invitation, SMS, voice, DTMF, callback, retry, worker/API restart, cancellation, and alert evidence with timestamps and provider references. |
 | WHOOP 5/MG and other wearables | Model/firmware/OS matrix covering pair/re-pair, live data, overnight history, backlog, reconnect, background/termination, clock/DST, haptics, battery, duplicates, loss, and source attribution. |
 | HealthKit, Watch, Health Connect, Android OEMs | Signed physical-device runs with real permissions, entitlement checks, process death/reboot, delayed delivery, upgrade preservation, and representative OEM battery policies. |

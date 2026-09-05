@@ -18,6 +18,21 @@ Last updated: **2026-09-05**
 
 ## Active work
 
+The first public production release now has one ordered execution plan:
+[`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+It covers the first-party NOOP Band input dossier, firmware and native SDK
+boundaries, safe terminology/data migration, mobile parity, storage and
+performance, metric evidence, optional NOOP+ productionization, security,
+certification, manufacturing, signing, stores, physical release-candidate
+validation, and launch operations. The plan does not claim readiness. There is
+currently no NOOP firmware or first-party protocol in the repository, and
+current `main` has red Apple app, Android managed-emulator, and server database
+workflow results. The terminology audit found 15,451 matching tracked lines in
+1,313 files; active customer/core removal must use a reviewed allowlist and
+additive migration rather than destructive replacement. Evidence is recorded
+in
+[First production release plan](rounds/2026-09-05-first-production-release-plan.md).
+
 The private native NOOP+ simulator pilot is complete. One fictional Firebase
 identity remains for repeat operator testing with only the exact
 `noop_managed_pilot` admission attribute; it is not an application or Google
@@ -231,29 +246,29 @@ participant, and native-speaker gates remain separate.
 
 ## Next priorities after this round
 
-1. Validate shake reports on representative iPhone and Android hardware during
-   UI lag, active collection, locked-background operation, and managed sync;
-   inspect every attachment before sharing.
-2. Define backend log retention, access control, volume/cost budgets,
-   dashboards, alerts, and ownership before managed public traffic.
-3. Install the current build on the physical iPhone without clearing data and
-   prove durable HR advances while worn, locked, relaunched, and upgraded.
-4. Keep the public invoker and released mobile configuration disabled while
-   proving signed physical-client attestation and the complete install,
-   enrollment, background, restore, revoke, and upgrade journeys.
-5. Load-test reconnect bursts and rehearse Cloud SQL PITR, object recovery,
-   secret rotation, and cell-level operational response.
-6. Establish production HTTPS links, minimal opaque APNs/FCM wake delivery,
-   abuse controls, support access, and deletion operations.
-7. Prove complete managed-history export with live cloud-only/large-account
-   data, then add resumable continuation and documented import before public
-   enrollment.
-8. Complete signed physical-device background, storage-pressure, battery,
-   upgrade, multi-device, profile/invite-link, notification, and worn-band
-   haptic validation.
-9. Consolidate ordinary wellness notifications through the shared day arbiter
-   after this storage round closes.
-10. Complete privacy/legal, security, support-access, carrier, accuracy, store,
-   and native-speaker external gates.
-11. Keep automatic emergency inference unavailable until its separate
-   validation and regulatory program is complete.
+1. Repair the red Apple, Android managed-emulator, and server hosted workflows;
+   make the complete release gate green on current `main`.
+2. Record the launch-market, language, NOOP+, Safety, pricing, public-version,
+   owner, and legacy-support decisions in phase zero of the master plan.
+3. Obtain the versioned NOOP Band hardware/firmware input dossier and
+   representative engineering units. Do not infer the protocol.
+4. Build the terminology classifier/allowlist, correct the false
+   legacy-to-first-party display mapping, and introduce neutral core boundaries
+   with old-data migration fixtures.
+5. Create the protocol-spec template, neutral Swift/Kotlin SDK interfaces,
+   deterministic virtual band, conformance corpus, and bounded observability
+   categories before hardware arrives.
+6. On hardware arrival, implement and prove authenticated provisioning,
+   offline flash collection, durable history acknowledgement, clock, wear/power,
+   haptics, and signed rollback-capable OTA on both phones.
+7. Validate shake reports and performance on representative physical phones
+   during lag, active collection, locked-background work, storage pressure,
+   history, OTA, and managed sync.
+8. Keep NOOP+ public ingress and released enrollment disabled until signed
+   physical attestation, privacy, restore, load, monitoring, support, push,
+   deletion, and production-operations gates pass.
+9. Complete sensor/metric evidence, certifications, manufacturing, signing,
+   store records, reviewer sample mode, accessibility, localization, and the
+   signed physical release-candidate matrix.
+10. Keep automatic emergency inference unavailable until its separate
+    validation and regulatory program is complete.
