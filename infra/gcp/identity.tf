@@ -98,12 +98,18 @@ resource "google_firebase_android_app" "staging" {
   provider = google-beta
   count    = var.enable_managed_identity ? 1 : 0
 
-  project         = var.project_id
-  display_name    = "NOOP Android synthetic staging"
-  package_name    = var.managed_android_package_name
-  api_key_id      = google_apikeys_key.managed_android[0].uid
-  sha1_hashes     = var.managed_android_sha1_fingerprints
-  sha256_hashes   = var.managed_android_sha256_fingerprints
+  project      = var.project_id
+  display_name = "NOOP Android synthetic staging"
+  package_name = var.managed_android_package_name
+  api_key_id   = google_apikeys_key.managed_android[0].uid
+  sha1_hashes = [
+    for fingerprint in var.managed_android_sha1_fingerprints :
+    lower(replace(fingerprint, ":", ""))
+  ]
+  sha256_hashes = [
+    for fingerprint in var.managed_android_sha256_fingerprints :
+    lower(replace(fingerprint, ":", ""))
+  ]
   deletion_policy = "PREVENT"
 
   depends_on = [google_firebase_project.managed]

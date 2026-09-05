@@ -7,6 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /service
 
+RUN apk upgrade --no-cache
+
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes --requirement requirements.lock \
     && python -m pip uninstall --yes pip \

@@ -52,6 +52,7 @@ def test_production_server_disables_raw_access_logs_with_signed_query_tokens() -
     assert "NOOP_FORWARDED_ALLOW_IPS=127.0.0.1" in dockerfile
     assert '--forwarded-allow-ips \\"$NOOP_FORWARDED_ALLOW_IPS\\"' in dockerfile
     assert "--forwarded-allow-ips=127.0.0.1" not in dockerfile
+    assert "RUN apk upgrade --no-cache" in dockerfile
     assert "python -m pip uninstall --yes pip" in dockerfile
     assert "rm -rf /usr/local/lib/python3.12/ensurepip" in dockerfile
     assert "FROM scratch" in dockerfile
