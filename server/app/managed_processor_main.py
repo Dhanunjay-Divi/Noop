@@ -203,7 +203,7 @@ def create_managed_processor_app(
             )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         try:
-            await processor.process(
+            result = await processor.process(
                 object_key=event.object_key,
                 generation=event.generation,
                 queue_event_hash=event.event_hash,
@@ -245,9 +245,10 @@ def create_managed_processor_app(
             ) from None
         emit_operational_event(
             "managed_processor.event",
+            severity=("WARNING" if result.status == "quarantined" else "INFO"),
             service="noop-managed-processor",
             request_id=request_id,
-            outcome="processed",
+            outcome=result.status,
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -2431,7 +2431,13 @@ class PostgresManagedRepository:
         result = dict(chunk)
         result["processing_attempt_id"] = attempt_id
         result["processing_attempt_number"] = attempt_number
-        result["streams"] = [dict(stream) for stream in streams]
+        result["streams"] = [
+            {
+                **dict(stream),
+                "value_schema": _decoded_json(stream["value_schema"]),
+            }
+            for stream in streams
+        ]
         return result
 
     async def finish_chunk_processing(

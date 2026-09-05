@@ -434,13 +434,30 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             (row["chunk_id"], row["object_generation"])
             for row in reconciliation_candidates
         ] == [(chunk_id, 11)]
-        available = await repository.mark_chunk_validated(
-            account_id=first_principal.account_id,
-            chunk_id=chunk_id,
+        processing_now = await repository.coordination_now()
+        processing = await repository.lease_chunk_processing(
+            object_key=reserved["object_key"],
+            processor_revision="managed-json-v1",
+            queue_event_hash="e" * 64,
+            lease_token_hash="f" * 64,
+            now=processing_now,
+            lease_seconds=300,
+        )
+        assert processing is not None
+        assert isinstance(processing["streams"][0]["value_schema"], dict)
+        assert processing["streams"][0]["value_schema"]["encoding"] == "tabular_v1"
+        await repository.finish_chunk_processing(
+            processing_attempt_id=processing["processing_attempt_id"],
+            lease_token_hash="f" * 64,
+            now=processing_now + timedelta(seconds=1),
+            succeeded=True,
             verified_sha256="c" * 64,
-            uncompressed_bytes=16_384,
-            sample_count=120,
-            now=now + timedelta(minutes=1),
+            decompressed_bytes=16_384,
+            decoded_samples=120,
+        )
+        available = await repository.available_chunk(
+            principal=first_principal,
+            chunk_id=chunk_id,
         )
         assert available["state"] == "available"
 
