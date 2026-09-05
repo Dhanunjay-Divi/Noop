@@ -5,6 +5,18 @@
 CDSCO, or India in any doc or server file. No Indian locale ships. Every compliance artefact built so far
 (A2P 10DLC, 11 references) targets the **second** market.
 
+> **2026-09-05 update:** India-first and USA-second are now owner-confirmed in
+> [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+> The earlier local-only launch recommendation is superseded for one narrow
+> purpose: a first-party band requires a NOOP ownership account and one-time
+> network claim. Ongoing collection, scoring, export, and local controls remain
+> subscription-independent, and NOOP+ health-data consent remains separate.
+> V1 has no user-facing unpair; remote terms and a still-undecided 14- or
+> 30-day return policy now require India-specific consumer and operations
+> review.
+> The original assessment below is retained as historical rationale; its
+> statement that the repository has no India coverage is no longer current.
+
 ---
 
 ## The good news first: local-first is a structural advantage under DPDP

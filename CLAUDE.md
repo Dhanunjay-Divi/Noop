@@ -13,6 +13,12 @@ strap). It pairs over Bluetooth, stores everything in on-device SQLite, and comp
 / HRV / sleep locally. There is **no required account, Noop-operated cloud, or telemetry**, and the
 public distribution is permitted only after its signing, privacy, device-validation,
 and redistribution gates pass.
+That sentence describes the current compatible-device implementation. The
+first-party NOOP Band release target adds one narrow exception: initial band
+claim, replacement-phone authorization, and approved ownership release use a
+NOOP ownership account. After activation, collection, scoring, history, export,
+and supported local device control must continue without NOOP+, payment,
+subscription, or continuous network access.
 Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
 replication/private friend sharing through a server the user operates. A separately consented NOOP+
 managed-sync service may be developed, but it must never become a dependency of core collection,
@@ -20,8 +26,12 @@ storage, metrics, export, or device control. The core BLE, storage, and analytic
 fully useful offline.
 
 These are hard constraints, not preferences. A PR is out of scope if it:
-- makes a Noop-operated account/cloud mandatory, enables network transfer by default, or sends data
-  anywhere other than the exact destination and data classes the user explicitly selected;
+- makes ongoing core collection, scoring, history, export, or local device
+  control depend on a Noop-operated account/cloud, NOOP+, payment, or
+  subscription; the first-party ownership claim exception may hold only
+  identity/control records and must not imply managed-health-data consent;
+- enables health-data network transfer by default or sends data anywhere other
+  than the exact destination and data classes the user explicitly selected;
 - moves core metric computation behind NOOP+, withholds local history to force an upgrade, or
   silently enrolls an existing user into managed sync;
 - weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
@@ -149,6 +159,12 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
   canonical resolver (`DeviceFamily.forRegistryModel` on both platforms), never a scattered
   string compare — the wizard stores `"4.0"`, other paths `"WHOOP 4.0"`, and single-spelling checks
   silently miss straps. Reads must thread the registry's **active** strap id, not a raw BLE address.
+- **First-party band ownership:** a printed number is only a discovery locator.
+  Claim requires fresh authenticated physical-band proof plus an atomic
+  server-side single-owner transaction. V1 exposes no user-facing unpair or
+  transfer; operator return/RMA/legal exits and future eligible-upgrade release
+  follow D-048. Terms are immutable remote documents under D-050, not bundled
+  or persisted in full by the app. Ownership records contain no health payload.
 - **Design system is law:** UI uses only design tokens — `StrandPalette` / `StrandFont` / shared
   components on Apple, `Palette` / `Metrics` on Android. No hardcoded colors, fonts, or spacing.
 - **Migrations:** add a versioned migration + a test; never mutate an existing migration. Watch for

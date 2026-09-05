@@ -16,8 +16,10 @@ making the band, an account, or the network a single point of failure.
 
 The product contract is:
 
-1. Collection, current metrics, immediate coaching, and user controls continue
-   locally without an account or network.
+1. App exploration and imports remain account-free. A first-party band needs a
+   one-time ownership claim; after activation, collection, current metrics,
+   immediate coaching, export, and user controls continue locally without
+   NOOP+, payment, subscription, or continuous network.
 2. Opening the app never waits for cloud login, upload, restore, or a large
    analytics query.
 3. The user sees data freshness, gaps, source, confidence, and sync progress.
@@ -34,6 +36,12 @@ The product contract is:
    without deleting the local app database. Apple and Android can assemble a
    snapshot-bound ZIP containing every currently retained managed chunk and
    personal record, including history no longer present on that phone.
+9. Band ownership identity and NOOP+ health-data consent are separate. A plan
+   downgrade or payment failure cannot deactivate a band or remove core local
+   capability.
+10. The exact accepted Terms and Conditions come from immutable NOOP-controlled
+    remote storage and are not persisted as a full document by the app. Return,
+    inspection, deduction, refund, and appeal rules are published before sale.
 
 These are architecture constraints, not marketing copy.
 
@@ -95,12 +103,14 @@ action:
 | Capability | Current evidence | Target or remaining gate |
 |---|---|---|
 | Local BLE capture and durable SQLite | Implemented on Apple and Android | Physical-device reconnect, suspension, battery, and upgrade matrix remains |
+| First-party band ownership account | Not implemented; the current compatible-device path has no ownership account | Verified email/password plus optional phone, printed-label match, authenticated physical confirmation, atomic single-owner claim, replacement-phone recovery, controlled release, and India/USA legal review |
+| Remote terms and returns | Not implemented; return duration is undecided between 14 and 30 days | Immutable signed terms, no persistent app copy, exact acceptance evidence, public historical versions, approved return clock, objective condition grades, lawful refund deductions, appeals, and operator-only wipe/release |
 | Local scoring and source provenance | Implemented with pure Swift/Kotlin engines and explicit missing-data behavior | Held-out accuracy and subgroup validation remains metric-specific |
 | Stress breathing cue | Local, opt-in, freshness/corroboration/cooldown/quiet-hour gated | Physical delivery and false-interruption evidence remains |
 | Morning Sleep and evening Journal prompts | Local, opt-in, private copy, completion aware | One shared cross-domain arbiter is not yet implemented |
 | Hydration, wind-down, workout caution, adaptive sleep/routine/travel | Implemented as bounded local policies and compact in-app actions | Cross-family fatigue budget and outcome learning remain |
 | Contextual action center | Implemented on Apple and Android with expiry, deduplication, dismiss, and completion | A shared candidate/outcome event schema remains |
-| NOOP+ phone OTP and App Check clients | Implemented; Firebase Identity Platform and enforced Authentication App Check are deployed in synthetic Mumbai staging | Ignored mobile configuration, signed physical clients, recovery and abuse tests |
+| NOOP+ phone OTP and App Check clients | Implemented; Firebase Identity Platform and enforced Authentication App Check are deployed in synthetic Mumbai staging | Migrate release identity to the approved email/password ownership account with optional linked phone while preserving separate NOOP+ consent, then prove signed physical clients, recovery, and abuse controls |
 | Immutable managed chunk upload/restore | Implemented and passed private synthetic upload, processing, duplicate, tenant-isolation, restore, retention, and erasure smoke against one scanned digest | Signed physical clients, recovery/load evidence, and public launch gates |
 | Complete managed-history ZIP export | Apple and Android finish pending phone backup, pin a server snapshot, page every retained chunk and current personal record, verify digests/counts/bytes, and finalize a manifest-backed archive | Live large-account/expiry/interruption tests, resumable continuation, and a documented importer remain |
 | Optional seven-day raw and 30-day essential local window after validated backup | Implemented, default off | Physical storage-pressure and interrupted-prune validation |
@@ -142,10 +152,13 @@ indefinite duplicate of every high-rate sample.
 
 Local NOOP, Self-hosted Sync, and NOOP+ are distinct destinations:
 
-- Local NOOP requires no account.
+- Local NOOP exploration, imports, metrics, records, and exports require no
+  account. First-party band activation uses a minimal ownership account, but
+  its identity/control records contain no health payload and ongoing local band
+  use does not depend on NOOP+ or payment.
 - Self-hosted Sync trusts the operator selected by the user.
-- NOOP+ uses phone identity, app attestation, per-installation credentials, and
-  an internal tenant identifier.
+- NOOP+ uses the approved release identity, app attestation, per-installation
+  credentials, separate health-data consent, and an internal tenant identifier.
 
 Server-readable sync and a future end-to-end encrypted private backup are
 different products. The current managed chunk format is server-readable and
@@ -569,7 +582,8 @@ path are not a reliability system.
 NOOP does not beat a mature wearable platform by copying every screen or moving
 all intelligence to the cloud. It can be materially better through:
 
-- useful account-free operation and immediate local feedback;
+- useful account-free exploration and subscription-independent post-activation
+  operation with immediate local feedback;
 - source-visible, confidence-visible metrics with missing data kept missing;
 - transparent deterministic guidance before opaque personalization;
 - one coherent action at a time instead of notification volume;
@@ -585,6 +599,9 @@ insights.
 
 ### Phase 0: current code completion
 
+- Define the first-party account, claim, release, and entitlement schemas and
+  prove them with a deterministic virtual-band possession flow before supplier
+  bytes are implemented.
 - Finish NOOP+ source review and full local test/build matrix.
 - Accept Firebase terms and deploy identity/App Check to synthetic staging.
 - Generate ignored environment configuration and register debug attestation.
@@ -631,23 +648,41 @@ insights.
 
 The product is not launch-ready until all of these work end to end:
 
-1. A new user declines NOOP+ and still collects, scores, exports, exercises,
-   journals, and uses automations without any managed request.
-2. A user verifies a phone but declines consent; no health data uploads.
-3. An enrolled user loses network mid-upload; local collection continues and
+1. A new user matches the printed number, receives the identify vibration,
+   confirms possession from the worn band, accepts the ownership disclosure,
+   verifies an email account, and becomes the band's only owner despite a
+   simultaneous second-account claim.
+2. The owner chooses NOOP rather than NOOP+ and still collects, scores, exports,
+   exercises, journals, and uses automations without a managed-health request.
+3. A user optionally verifies a phone but declines NOOP+ consent; no health
+   data uploads.
+4. An enrolled user loses network mid-upload; local collection continues and
    the exact chunk resumes without duplication.
-4. A second signed device restores an exact snapshot, catches incremental
+5. A second signed device restores an exact snapshot, catches incremental
    changes, and preserves source provenance.
-5. A token for account A cannot discover, reserve, download, export, revoke, or
+6. A token for account A cannot discover, reserve, download, export, revoke, or
    erase any resource for account B.
-6. Storage reduction prunes only exact server-validated clean windows after
+7. Storage reduction prunes only exact server-validated clean windows after
    seven days for high-rate raw streams or 30 days for essential time series,
    and keeps summaries, user records, dirty windows, and unvalidated data.
-7. Revoking a device stops its managed access without deleting its local data
+8. Revoking a device stops its managed access without deleting its local data
    or the account backup.
-8. Account erasure requires recent authentication, honors cooling-off/cancel,
+9. Account erasure requires recent authentication, honors cooling-off/cancel,
    and completes every documented data-class timeline.
-9. A cloud outage leaves the app interactive and local collection durable.
+10. A cloud outage leaves the app interactive and local collection durable.
+11. A replacement phone signed into the same account proves possession and
+    reconnects without changing ownership; a different account learns no owner
+    identity and cannot claim the band.
+12. Return, RMA, recovery, deletion, verified dispute, and eligible-upgrade
+    release revoke owner credentials and wipe personal band state before any
+    new account can claim it.
+13. A new claim cannot proceed with missing or altered remote terms; the app
+    stores no full terms copy, while the server can reproduce the exact accepted
+    version and an already-activated band remains locally usable during a terms
+    outage.
+14. An eligible return follows the approved 14- or 30-day clock, receives a
+    repeatable condition grade and itemized lawful refund decision, permits an
+    appeal, and finishes with operator-only wipe, unlink, and quarantine.
 10. Several simultaneous wellness candidates result in one explainable action,
     while a separate explicit SOS remains unsuppressed.
 

@@ -3,6 +3,7 @@
 - **Plan date:** 2026-09-05
 - **Target:** first public production release of the NOOP mobile apps and the
   first-party NOOP Band
+- **Launch sequence:** India first, then the USA
 - **Public beta:** none
 - **Required validation:** private release-candidate testing before storefront
   submission
@@ -43,10 +44,16 @@ remains manual until the final go/no-go review.
 
 ## 2. Product invariants
 
-- Core NOOP remains local-first, account-free, fully useful offline, and
-  independent of NOOP+.
+- App exploration, imports, local metrics, user-authored records, and exports
+  remain account-free. A first-party NOOP Band requires a one-time ownership
+  account and network claim, but an activated band keeps collecting, scoring,
+  exporting, and accepting supported local controls without NOOP+,
+  subscription, or continuous network access.
 - Core scoring stays on device. Cloud availability cannot decide whether a
   user can see local metrics.
+- Band ownership and NOOP+ entitlement are separate. Payment failure,
+  cancellation, or downgrade cannot deactivate a claimed band or remove core
+  local capability.
 - NOOP+ is explicit opt-in managed storage and network functionality. It never
   silently uploads an existing local history.
 - A production band must collect to local flash while the app is suspended or
@@ -85,6 +92,9 @@ remains manual until the final go/no-go review.
 - There is no first-party NOOP firmware, GATT contract, packet schema, device
   identity, provisioning flow, secure boot, DFU contract, manufacturing test
   interface, or NOOP Band SDK in this repository.
+- There is no first-party band ownership account, email/password flow,
+  printed-label discovery contract, authenticated tap confirmation, atomic
+  claim service, release workflow, or ownership database in the repository.
 - The current `Noop Band` presentation can label a legacy third-party source
   with the persisted ID `my-whoop`. This false identity must not reach the
   first-party hardware release.
@@ -136,12 +146,21 @@ not dishonest deletion of legal, historical, migration, or import facts.
 
 ## 4. Required owner decisions
 
-These decisions are phase-zero blockers:
+Some directions are now owner-confirmed; unresolved rows remain phase-zero
+blockers:
 
-| Decision | Recommended default | Why it blocks work |
+| Decision | Current direction | Why it blocks work |
 |---|---|---|
-| First launch markets | India first, then USA | Certification, privacy, carrier, tax, store, locale, and support requirements differ. |
-| First release network scope | Core plus NOOP Band required; enable NOOP+ only after every production gate passes | An unavailable or staging service cannot be advertised as a production feature. |
+| First launch markets | **Confirmed:** India first, then USA | Certification, privacy, carrier, tax, store, locale, and support requirements differ. |
+| First-party band activation | **Confirmed:** one ownership account and network claim; ongoing local operation remains subscription-independent | Single-account enforcement needs a durable authority without moving scoring or health history behind cloud availability. |
+| Pairing confirmation | **Confirmed intent:** match the printed band number, identify by vibration, then confirm from the worn band with at least three taps; exact firmware event and proof remain supplier-dependent | A printed number or unauthenticated motion event is not secure possession proof. |
+| v1 transfer | **Confirmed:** no user-facing unpair or transfer; ordinary ownership remains bound for the band's life and consumer release appears only with an eligible successor-band upgrade. Operator-only return, RMA, recovery, deletion, dispute, legal, and security exits remain required. | Internal exits must protect customer rights and returned hardware without creating a resale feature. |
+| Return window | **Pending:** choose 14 or 30 calendar days and its start event | Store copy, fulfillment, inspection, refund, support, and accounting must use one enforceable rule. |
+| Return condition | **Pending:** approve objective grades and lawful refund deductions for marked or damaged units | An arbitrary post-return charge creates consumer, payment, and support risk. |
+| Terms delivery | **Confirmed:** canonical terms load from NOOP-controlled remote storage and the full document is not persisted in the app | Claim must bind to one immutable verified version while remaining auditable and publicly accessible. |
+| Pre-home plan choice | **Confirmed:** show NOOP and an accessible gold NOOP+ option before Home | Both platforms need one honest, non-coercive product boundary. |
+| Payment | **Pending:** show no working checkout until India gateway, store billing, tax, refund, and receipt behavior are approved | A placeholder cannot charge, grant entitlement, or imply production billing. |
+| First release network scope | Band ownership claim is required; enable NOOP+ data services only after every production gate passes | Ownership identity must not silently become managed health-data consent. |
 | Legacy direct-band support | Keep during bring-up; remove from the public first-party release after NOOP Band physical parity, while preserving old data and import provenance | Removing it earlier destroys the only hardware development path; retaining it as `Noop Band` is false. |
 | Public version | Validate `1.0.0` with monotonic platform build numbers | Current source version is an internal development sequence, not necessarily the correct first storefront identity. |
 | Launch languages | English plus professionally reviewed launch-market locales | Machine completeness does not establish native-speaker quality. |
@@ -157,11 +176,13 @@ from a sample device or another vendor's protocol.
 | Required input | Minimum artifact |
 |---|---|
 | Hardware identity | MCU/chipset, BLE controller and stack, board revisions, radio/module identity, memory map, flash capacity, secure-element use, battery and charger design |
+| Physical label and claim mapping | Public printed identifier format and uniqueness; mapping to the opaque provisioned identity and hardware revision; manufacturing, replacement, and privacy rules |
 | Sensor bill of materials | Exact PPG/SpO2, accelerometer/gyro, temperature, contact, battery, and optional sensor parts with datasheets |
 | Sampling contract | Supported rates, resolutions, ranges, units, channels, LED currents, timestamps, batching, quality flags, calibration coefficients, and expected power per mode |
 | GATT contract | Assigned service and characteristic UUIDs, properties, permissions, MTU assumptions, notification ordering, connection parameters, and bonding requirements |
 | Wire schema | Envelope, version, length, type, sequence, flags, device time, payload, checksum or authentication tag, fragmentation, and maximum sizes |
 | Security | Device identity, per-unit key provisioning, phone authentication, replay protection, key rotation/revocation, debug-lock policy, secure boot, image signing, and threat model |
+| Pairing and possession | Pairing-mode entry/expiry/cancel, discovery eligibility, identify haptic, firmware-debounced at-least-three-tap confirmation event, challenge binding, timeout, retry, and simultaneous-phone behavior |
 | History | Flash layout, capacity by sampling mode, immutable chunk identity, cursors, read windows, checksums, acknowledgment rules, retry behavior, overflow policy, and factory reset |
 | Clock | Device epoch or monotonic ticks, oscillator tolerance, UTC anchors, drift correction, reboot/reset behavior, timezone independence, and invalid-clock state |
 | Commands | Capability discovery, sampling modes, live stream, history, battery, wear state, haptics, alarms, safe reset, diagnostics, and command idempotency |
@@ -247,6 +268,15 @@ vendor material.
 - Expose flash used, flash capacity, oldest/newest range, overflow, and
   completion so the app can distinguish an empty history from a failed drain.
 - Use per-device identity and keys. Do not use one shared fleet credential.
+- Treat the printed identifier as a locator, not a secret. A claim requires a
+  fresh app challenge and authenticated response from the selected physical
+  band.
+- Firmware, not the phone, converts at least three deliberate taps within the
+  possession window into one debounced confirmation event. Extra motion must
+  not create multiple confirmations.
+- Bind pairing mode, identify haptic, possession confirmation, provisioning,
+  and ownership claim to one expiring session and reject replay, stale
+  responses, wrong-band responses, and concurrent claim races.
 - Authenticate state-changing commands and reject replay, downgrade, stale
   sequence, wrong-device, and wrong-firmware messages.
 - Haptic, alarm, sampling, reset, and DFU commands are bounded, idempotent, and
@@ -260,6 +290,10 @@ vendor material.
 
 Both native implementations must expose equivalent concepts:
 
+- `BandPairingCandidate`: privacy-safe printed-label match, compatibility,
+  pairing eligibility, and identify state without exposing a Bluetooth address;
+- `BandPossessionChallenge`: an expiring challenge and fixed result categories
+  without exposing challenge bytes to diagnostics;
 - `BandIdentity`: opaque local handle, hardware revision, firmware version,
   protocol version, and capability set;
 - `BandSessionState`: fixed lifecycle states and fixed failure categories;
@@ -281,6 +315,8 @@ arbitrary platform errors part of the diagnostic-facing API.
 Apple and Android must record bounded, fixed-category evidence for:
 
 - discovery start/end and no-result timeout;
+- candidate selected, identify haptic accepted/rejected, possession window,
+  confirmation accepted/rejected/timed out, and concurrent-claim conflict;
 - connection, encryption, authentication, capability negotiation, and
   subscription;
 - live stream start, durable-progress stall, notification repair, reconnect,
@@ -311,6 +347,95 @@ arbitrary errors.
   tested.
 - No band capability is marked production-supported until its physical matrix
   passes.
+
+### 6.7 Ownership and onboarding contract
+
+The first-party release target uses this sequence on Apple and Android:
+
+1. Show the existing initial education needed before hardware setup.
+2. Ask the user to wear the band and place it in an explicitly time-bounded
+   pairing mode.
+3. Scan only eligible NOOP Bands and show the minimum characters needed to
+   match the number printed on the selected physical band.
+4. Send an identify vibration to that exact candidate.
+5. Ask for at least three deliberate taps. Firmware emits one authenticated,
+   debounced confirmation bound to the app challenge; the app does not infer
+   raw taps from motion.
+6. Fetch the exact versioned Terms and Conditions from NOOP-controlled object
+   storage, render it without persistent local document storage, explain that
+   a successful claim binds the band to one account, list the supported
+   recovery and release paths, and require a versioned explicit `I agree`.
+7. Create or sign in to a managed account using verified email and password.
+   Mobile number is optional and receives an OTP only when provided. NOOP never
+   stores plaintext passwords or OTPs.
+8. Atomically claim the band using app attestation plus fresh physical-band
+   proof, then provision owner-scoped credentials. A partial failure remains
+   resumable and cannot create two owners.
+9. Continue the remaining profile, permission, goal, notification, and product
+   education pages from an idempotent checkpoint.
+10. Before Home, offer NOOP and NOOP+. NOOP continues without payment. NOOP+
+    uses an accessible gold identity, but payment remains clearly unavailable
+    until billing is production-ready.
+11. A replacement phone signs in to the same account, proves physical
+    possession again, and authorizes a new installation without changing
+    ownership.
+12. V1 exposes no user-facing unpair or transfer. The band remains bound to the
+    account for its ordinary lifetime. Operator-only return, RMA, recovery,
+    deletion, verified dispute, legal, and security release paths must exist.
+    Only after an eligible successor band is released can the product expose a
+    reauthenticated upgrade release, after owner keys and personal band state
+    are removed.
+
+Discovery, identify vibration, and physical confirmation form a provisional
+session, not a completed ownership bond. The product must not say the band is
+paired, persist owner credentials, or permit ordinary collection/control until
+the account claim commits. If the supplier stack requires an earlier platform
+bond, it must use a bounded provisional credential that expires and cannot
+establish ownership by itself.
+
+The ownership account is not NOOP+ consent. Claim records contain identity and
+control state, not health samples. Enrolling in NOOP+ requires its own plan,
+health-data disclosure, consent, entitlement, retention, export, and erasure
+flow. Cancelling NOOP+ never releases or deactivates the band.
+
+### 6.8 Remote terms and returns
+
+Terms and Conditions are canonical remote documents, not bundled app assets:
+
+- each version is immutable, content-addressed, locale-specific, and referenced
+  by a signed manifest with policy version, effective date, and digest;
+- the app uses an ephemeral no-persistent-cache fetch and sanitized static
+  renderer, and does not write the full document to its container, database,
+  preferences, diagnostics, or report archive;
+- claim fails closed if the selected version is unavailable, altered, expired,
+  or does not match the manifest;
+- the server retains account-scoped acceptance evidence for document
+  version/hash, locale, policy version, and server time, while diagnostics
+  retain no account, contact, band, document-content, or challenge data;
+- every accepted historical version remains available at an immutable public
+  URL, and reacceptance follows an approved version/effective-date policy;
+- remote content contains no arbitrary script, third-party tracker,
+  advertising, fingerprinting, or credential capture.
+
+The voluntary return window is not yet selected. The owner must choose 14 or
+30 calendar days and define whether it starts at order, shipment, delivery,
+activation, or another approved event. Before sale, the public policy must
+define unopened, opened, paired, worn, defective, transit-damaged, warranty,
+and change-of-mind eligibility.
+
+Any condition deduction must use a published objective inspection and refund
+schedule. Marks, structural damage, missing accessories, hygiene, battery,
+radio, sensor, and tamper state require repeatable privacy-safe evidence.
+Ordinary inspection, manufacturing defect, transit damage, customer damage,
+and normal wear must remain distinct. Where lawful, a disclosed amount may be
+deducted from the refund through the original payment rail with an itemized
+decision and appeal path; NOOP must not create an undisclosed later charge.
+
+An accepted return or RMA invokes an operator-only release. It revokes owner
+credentials, wipes personal band state, removes the account link, and places
+the unit into quarantine for approved refurbishment, reprovisioning, or
+destruction. This internal path is not a user-facing v1 unpair or resale
+feature.
 
 ## 7. Safe terminology and data migration
 
@@ -409,11 +534,13 @@ Statuses:
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| R0.1 | OPEN | Record launch markets, territories, languages, network features, pricing, and whether NOOP+ and contact paging are enabled in version 1. | Signed product scope in the release record |
+| R0.1 | PARTIAL | India-first and USA-second are recorded; territories, languages, network features, pricing, NOOP+, and contact paging remain open. | Signed product scope in the release record |
 | R0.2 | OPEN | Name accountable owners for firmware, hardware, mobile, backend, security, privacy, metric validation, manufacturing, support, and release. | Owner/RACI table with backups |
 | R0.3 | OPEN | Decide the legacy direct-band compatibility end state. | Written migration and support policy |
 | R0.4 | OPEN | Select public marketing version and monotonic Apple/Android build numbers. | Upgrade-tested version map |
 | R0.5 | PARTIAL | Freeze general-wellness and automatic-emergency boundaries. | Claims matrix approved for app, packaging, and stores |
+| R0.6 | PARTIAL | Preserve the confirmed ownership-account, physical-confirmation, and pre-home plan flow while completing privacy, legal, support, and payment decisions. | Approved customer and operations contract |
+| R0.7 | OPEN | Approve the v1 no-self-service-transfer policy and every required return, RMA, recovery, deletion, dispute, and future-upgrade exit. | India/USA legal and support sign-off |
 
 **Exit:** no unresolved product decision changes the architecture, data
 contract, certification plan, or store disclosure.
@@ -444,6 +571,7 @@ artifact can be traced to one reviewed commit.
 | B2.5 | OPEN | Implement history, clock, haptics, alarms, capability negotiation, and manufacturing diagnostics. | Firmware conformance and hardware-in-loop results |
 | B2.6 | EXTERNAL | Build factory fixtures, calibration, identity injection, key custody, yield, traceability, and RMA diagnostics. | Pilot-run manufacturing records |
 | B2.7 | EXTERNAL | Complete battery, radio, Bluetooth, safety, and market certifications. | Certificates tied to production design |
+| B2.8 | OPEN | Implement pairing-mode expiry, identify vibration, authenticated at-least-three-tap possession confirmation, and owner-key provisioning. | Firmware/phone claim conformance and physical matrix |
 
 **Exit:** a production-representative band can collect without a phone, survive
 power loss, authenticate, offload exactly once, update safely, and be produced
@@ -461,9 +589,31 @@ with traceable calibration and identity.
 | S3.6 | OPEN | Add bounded cross-platform diagnostics and report coverage. | Redaction, bounding, stall, and failure tests |
 | S3.7 | OPEN | Publish internal SDK integration docs, API compatibility policy, and examples. | A new client can integrate without transport internals |
 | S3.8 | OPEN | Run firmware/Swift/Kotlin conformance in CI and hardware-in-loop. | Version-pair compatibility matrix |
+| S3.9 | OPEN | Model printed-label matching, identify, possession challenge, confirmation, and claim-proof results without exposing identifiers. | Shared fixtures, redaction tests, and supplier conformance |
 
 **Exit:** mobile integration uses the SDK, not duplicated screen-level GATT
 logic, and both clients agree with firmware on every supported protocol version.
+
+### Phase 3A - ownership account, claim, and onboarding
+
+| ID | Status | Work | Exit evidence |
+|---|---|---|---|
+| A3A.1 | OPEN | Implement managed email/password identity, verified email, optional phone OTP, recovery, reauthentication, session rotation, and abuse controls. | Signed-client identity and recovery matrix |
+| A3A.2 | OPEN | Add isolated account, band, claim, installation, challenge, release, and ownership-event schemas with no health payloads. | Migration, tenant-isolation, backup, restore, and erasure tests |
+| A3A.3 | OPEN | Implement an attested, fresh, band-proven, atomic, idempotent single-owner claim transaction. | Two-phone/two-account race and replay matrix |
+| A3A.4 | OPEN | Make account, claim, band provisioning, local persistence, and final acknowledgement recover from every partial-success boundary. | Fault-injection state-machine evidence |
+| A3A.5 | OPEN | Keep post-activation collection, metrics, export, and local controls working through identity-service and network outages. | Physical offline and outage matrix |
+| A3A.6 | OPEN | Implement same-account replacement-phone authorization and old-installation revocation without changing ownership or losing data. | Signed physical replacement-phone journey |
+| A3A.7 | OPEN | Implement support-controlled return, RMA, recovery, deletion, dispute, and eligible-upgrade release with owner-key revocation and band wipe. | Legal approval, operator exercise, and physical reclaim |
+| A3A.8 | OPEN | Build matched Apple/Android disclosure, `I agree`, account, remaining onboarding, NOOP/NOOP+ choice, and resumable progress. | Accessibility trees, visual states, and end-to-end tests |
+| A3A.9 | OPEN | Keep billing and NOOP+ consent separate from band ownership; leave checkout unavailable until gateway and store billing pass. | Entitlement, cancellation, downgrade, and no-charge tests |
+| A3A.10 | OPEN | Add bounded local/backend claim evidence without band, account, contact, challenge, credential, or health identifiers. | Redaction, retention, and outcome tests |
+| A3A.11 | OPEN | Serve immutable signed remote terms, record exact acceptance metadata, retain historical versions, and persist no full terms document in the app. | Tamper, outage, version-race, accessibility, privacy, and publication tests |
+| A3A.12 | OPEN | Implement the approved 14- or 30-day return policy, condition inspection, lawful refund deduction, appeal, and operator-only wipe/release. | India/USA approval and end-to-end returns exercise |
+
+**Exit:** a legitimate owner can identify, prove possession of, claim, recover,
+and continue using one band without a subscription; another account cannot
+claim it; and controlled release paths do not expose the previous owner.
 
 ### Phase 4 - terminology, identity, and data migration
 
@@ -486,7 +636,7 @@ legacy name.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| M5.1 | OPEN | Build matched onboarding, discovery, secure pairing, ownership transfer, reconnect, unpair, and factory-reset guidance. | Fresh, denied, failed, retry, and replacement-device journeys on both platforms |
+| M5.1 | OPEN | Build the matched printed-number, identify-vibration, physical-confirmation, consent, account, claim, remaining-onboarding, plan-choice, reconnect, and recovery journey. | Fresh, denied, failed, retry, conflict, offline, and replacement-device journeys on both platforms |
 | M5.2 | OPEN | Show live state, freshness, battery, wear, storage/backlog, firmware, sync stage, progress, last completion, and actionable failures. | Matched screenshots and accessibility trees |
 | M5.3 | OPEN | Keep foreground waits short while durable history continues in OS-permitted background work with truthful status. | Long-backlog physical tests |
 | M5.4 | OPEN | Integrate live and history samples through one provenance-aware store path. | No duplicate, gap, source, or clock regression |
@@ -540,7 +690,7 @@ reference protocol, confidence/coverage rule, and honest failure state.
 | C8.5 | OPEN | Add dashboards, SLOs, alerts, bounded log retention/access, cost budgets, on-call, incident response, and status/support procedures. | Alert and incident game-day evidence |
 | C8.6 | OPEN | Load-test enrollment, reconnect bursts, chunk upload, processing, restore, export, Friends, and mixed workloads to the launch and 10,000-user targets. | Capacity limits and scaling/rollback plan |
 | C8.7 | OPEN | Add production HTTPS universal/app links and opaque minimal APNs/FCM wake delivery with token lifecycle and abuse controls. | Closed-app physical delivery matrix |
-| C8.8 | PARTIAL | Complete NOOP+ OTP/provider production configuration without embedding provider credentials. | Real controlled-number, rate-limit, recovery, and support evidence |
+| C8.8 | PARTIAL | Migrate the current phone-OTP-only staging identity to the approved release account: verified email/password plus optional linked phone, without embedding provider credentials. | Email, optional controlled-number, rate-limit, recovery, and support evidence |
 | C8.9 | PARTIAL | Complete Friends invite, consent, removal, block, badge, poke, haptic, deletion, and abuse/support operations. | Two-user physical and backend matrix |
 | C8.10 | OPEN | If contact paging ships, complete country-specific sender registration, dual-provider strategy, SMS/voice/DTMF/callback/retry/cancel evidence, and 24/7 operations. | Carrier IDs, latency, failover, and on-call evidence |
 
@@ -619,6 +769,10 @@ The final matrix must cover at least:
 - clean install, in-place upgrade from every supported pre-release schema,
   app update during backlog, phone replacement, band replacement, and
   multi-device ownership;
+- printed-number match, multiple nearby bands, identify vibration,
+  at-least-three-tap confirmation, expiry, replay, simultaneous accounts,
+  partial claim failure, already-claimed privacy, replacement phone, support
+  release, and eligible-upgrade release;
 - foreground, screen off, locked, app backgrounded, process killed by OS, app
   force-stopped, phone rebooted, Bluetooth toggled, airplane mode, low-power
   mode, low storage, thermal pressure, and timezone/DST travel;
@@ -645,6 +799,8 @@ Do not record a participant's raw health values in the release ledger.
 | Scope and claims | Approved market, feature, pricing, wellness, Safety, and legacy-support decisions |
 | Source and CI | Clean release commit; all required hosted/local gates green; no open release-severity defect |
 | SDK and firmware | Cross-language conformance, signed firmware, secure provisioning, history integrity, OTA rollback, hardware-in-loop |
+| Account and band ownership | Verified identity, optional phone, attestation, physical possession proof, atomic single-owner claim, remote immutable terms acceptance, offline post-activation use, no user-facing v1 unpair, recovery, operator-only release, deletion, successor-upgrade release, and transfer-policy approval |
+| Returns | Approved 14- or 30-day clock, eligibility, condition grades, disclosed lawful deductions, original-rail refund, appeal, operator wipe/release, quarantine, and support evidence |
 | Data continuity | Old-to-new upgrade, backup, restore, source/provenance, interrupted migration, and rollback pass |
 | Terminology | Zero unallowlisted customer/core matches; reviewed legal/provenance/migration exceptions only |
 | Mobile product | Signed Apple/Android feature, parity, accessibility, localization, performance, and physical matrices pass |
@@ -663,9 +819,10 @@ run, or a successful store upload alone.
 
 Provide these through the appropriate secure or account-owned channel:
 
-1. The band input dossier, firmware owner contact, firmware source/toolchain
-   access, and at least three representative engineering bands per hardware
-   revision for cross-platform and destructive OTA testing.
+1. The band input dossier, supplier SDK and license, printed-label mapping,
+   pairing/identify/gesture/claim contract, firmware owner contact, firmware
+   source/toolchain access, and at least three representative engineering bands
+   per hardware revision for cross-platform and destructive OTA testing.
 2. Written launch-market, launch-language, NOOP+, Safety, pricing, public
    version, and legacy-support decisions.
 3. Legal entity, trademark owner, manufacturing agreement, certification lab,
@@ -683,6 +840,15 @@ Provide these through the appropriate secure or account-owned channel:
    statistical owner, and budget for sensor and metric validation.
 8. Final support contact, privacy/support website ownership, storefront
    content, fulfillment/RMA process, and launch staffing.
+9. India and USA counsel review of the single-account ownership lock, v1
+   no-self-service-transfer policy, return/RMA/recovery/deletion/dispute exits,
+   and future eligible-upgrade release.
+10. The India hardware checkout and digital subscription billing decision,
+    including gateway, IAP, GST/tax, renewal, cancellation, refund, receipt,
+    chargeback, and support ownership.
+11. The 14- or 30-day return decision, clock start, eligibility rules,
+    condition-grade/deduction schedule, inspection owner, return logistics,
+    refund SLA, and appeal owner.
 
 ## 12. Immediate next rounds
 
@@ -690,14 +856,18 @@ Work can start before bands arrive:
 
 1. Repair all three red hosted workflows and establish protected release
    controls.
-2. Record phase-zero owner decisions.
-3. Build the terminology classifier/allowlist and remove the false
+2. Finish the remaining phase-zero owner, legal, transfer, support, and payment
+   decisions now that India-first, USA-second, and the ownership flow are
+   recorded.
+3. Define the account/claim schemas, state machine, API contract, virtual-band
+   possession proof, and failure matrix without guessing supplier bytes.
+4. Build the terminology classifier/allowlist and remove the false
    legacy-to-first-party display mapping.
-4. Introduce neutral core stream/store/source boundaries and old-data
+5. Introduce neutral core stream/store/source boundaries and old-data
    migration fixtures without removing the working hardware adapter.
-5. Create the protocol-spec template, neutral SDK interfaces, deterministic
+6. Create the protocol-spec template, neutral SDK interfaces, deterministic
    virtual band, synthetic conformance corpus, and observability categories.
-6. Start signing, store, privacy, certification, manufacturing, and metric
+7. Start signing, store, privacy, certification, manufacturing, and metric
    validation work because their lead times are independent of mobile code.
 
 When the hardware dossier and engineering bands arrive, freeze protocol v1,

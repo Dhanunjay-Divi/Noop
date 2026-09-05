@@ -12,8 +12,12 @@ configuration points to it, and no real health data is permitted in staging.
 
 NOOP remains local-first:
 
-- BLE collection, local SQLite history, scoring, export, and device control work
-  without an account or network.
+- The current compatible-device path and app exploration/import path work
+  without an account.
+- A first-party NOOP Band release requires one network-backed ownership claim.
+  After activation, BLE collection, local SQLite history, scoring, export, and
+  supported local device control work without NOOP+, payment, subscription, or
+  continuous network.
 - Existing users are never silently enrolled or uploaded.
 - Core metrics are not a subscription entitlement.
 - Self-hosted Sync remains available for a destination the user controls.
@@ -84,11 +88,20 @@ separately disclosed server-readable subset. Do not describe one as the other.
 
 ## Identity and authorization
 
-Phone OTP is the selected managed identity provider, restricted to reviewed SMS
-regions. App Attest on iOS and Play Integrity on Android are the selected App
-Check providers. The apps initialize Firebase only when every ignored
-environment value is present. A verified phone session still uploads nothing
-until the user accepts the versioned managed-storage policy.
+Private synthetic staging currently uses phone OTP, restricted to reviewed SMS
+regions. The first-party release target changes the base ownership account to
+verified email/password with an optional linked phone verified by OTP. Passwords
+remain inside the managed identity provider; NOOP applications and services
+must never receive or store plaintext credentials. App Attest on iOS and Play
+Integrity on Android remain the selected App Check providers. The apps
+initialize Firebase only when every ignored environment value is present.
+
+Band ownership identity and NOOP+ health-data consent are separate. A verified
+ownership account can claim only after fresh app attestation and
+cryptographically authenticated proof from the selected pairing-mode band.
+Claiming a band uploads no health history and grants no NOOP+ entitlement. A
+NOOP+ upload still requires the versioned managed-storage policy and applicable
+payment/entitlement state.
 
 The source implements reauthentication for account erasure, per-installation
 credentials, device revocation, a 24-hour deletion cooling-off/cancel path, and
@@ -101,6 +114,38 @@ Identity Provider authentication is only the first boundary. Every database row,
 object manifest, signed upload capability, export, and delete operation must
 also carry and enforce an internal tenant identifier. App Check or device
 attestation may reduce abuse but cannot replace authorization.
+
+The ownership control plane requires additive, tenant-isolated account, band,
+claim, installation, possession-challenge, release, and ownership-event
+records. It stores no sensor payloads. Claim is atomic and idempotent, returns
+privacy-preserving conflict states, and recovers from partial provisioning.
+Approved release revokes owner keys and removes personal band state before
+another account can claim it. Return, RMA, account recovery, deletion, dispute,
+and future eligible-upgrade paths remain launch gates.
+
+## Terms and return control plane
+
+The target terms service stores immutable content-addressed documents and a
+signed locale/version manifest in NOOP-controlled object storage. Public terms
+URLs are stable and unauthenticated. Claim clients fetch with an ephemeral
+no-persistent-cache session, verify the manifest and digest, render sanitized
+static content, and write no full terms document to app storage. The account
+service records only the accepted document version/hash, locale, policy
+version, and server time. Every accepted historical version remains available.
+
+Terms publication needs integrity, version-race, rollback, availability,
+latency, accessibility, localization, and retention controls. Content cannot
+run arbitrary script or include third-party trackers, advertising,
+fingerprinting, or credential capture. A terms outage blocks a new ownership
+claim but cannot interrupt an already-activated band's local operation.
+
+Return records remain separate from health data. The pending policy must select
+14 or 30 calendar days and its start event, then encode eligibility, return
+authorization, shipment, inspection grade, lawful disclosed refund deduction,
+original-payment-rail refund, appeal, and terminal outcome. An accepted return
+or RMA creates an operator-only release task that revokes owner credentials,
+wipes personal band state, removes the account relationship, and quarantines
+the unit for approved refurbishment, reprovisioning, or destruction.
 
 ## Managed Friends boundary
 
@@ -188,6 +233,11 @@ Mobile connection to a public managed endpoint remains blocked until all of
 these pass:
 
 - public identity, recovery, consent, and support-access review;
+- email verification, optional phone linking, band possession proof, atomic
+  single-owner claim, replacement-phone authorization, account deletion,
+  controlled release, and India/USA transfer-policy review;
+- immutable remote terms publication/acceptance plus approved return duration,
+  inspection, lawful deduction, refund, appeal, and operator wipe/release;
 - deployed immutable chunk upload and processor validation;
 - tenant-isolation and cross-tenant adversarial tests;
 - synthetic upload, duplicate, reconnect-burst, export, erasure, and retention

@@ -22,7 +22,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 325 currently pending points and stable IDs for inserting owner requests
+with 391 currently pending points and stable IDs for inserting owner requests
 without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -36,6 +36,34 @@ workflow results. The terminology audit found 15,451 matching tracked lines in
 additive migration rather than destructive replacement. Evidence is recorded
 in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
+
+The owner has fixed the public market sequence as India first and the USA
+second. The first-party band target now has a narrow ownership-account
+exception: the user matches the printed band number, receives an identify
+vibration, confirms possession from the worn band through a firmware-authenticated
+at-least-three-tap event, accepts the binding disclosure, creates or signs in
+with verified email/password and optional phone, and completes one atomic
+single-owner claim. After activation, collection, metrics, export, and local
+control stay independent of NOOP+, payment, subscription, and continuous
+network. General v1 self-service resale release is not planned, but return,
+RMA, recovery, deletion, verified dispute, and future eligible-upgrade exits
+must pass India/USA legal and support review. The NOOP/NOOP+ choice appears
+before Home; NOOP+ has an accessible gold identity and no working payment until
+billing is approved. V1 exposes no user-facing unpair or transfer; an ordinary
+claim remains bound for the band's life, and a consumer release appears only
+through a future eligible successor-band upgrade. Operator-only return, RMA,
+legal, deletion, recovery, and security exits remain required.
+
+Terms are targeted as immutable versioned remote documents in NOOP-controlled
+storage. The app verifies and renders them through an ephemeral
+no-persistent-cache path and stores no full local terms document; the server
+retains exact acceptance metadata and historical versions. The owner intends a
+voluntary return period but has not selected 14 versus 30 days or its start
+event. Condition grading, lawful disclosed refund deductions, appeals, wipe,
+unlink, quarantine, and India/USA approval remain open. None of this flow is
+implemented or physically validated.
+Evidence is recorded in
+[Band ownership and onboarding contract](rounds/2026-09-05-band-ownership-onboarding.md).
 
 The private native NOOP+ simulator pilot is complete. One fictional Firebase
 identity remains for repeat operator testing with only the exact
@@ -215,7 +243,9 @@ participant, and native-speaker gates remain separate.
 
 ## Decisions that remain binding
 
-- NOOP remains local-first and account-free by default.
+- NOOP remains local-first. App exploration, imports, metrics, records, and
+  exports remain account-free; first-party band activation has the narrow
+  ownership-account exception in D-046.
 - Missing physiology is not zero and is never guessed.
 - Wellness metrics are not medical outputs.
 - Automatic medical, Rhythm, anomaly, and unvalidated fall paging remains
@@ -229,8 +259,14 @@ participant, and native-speaker gates remain separate.
 - NOOP's PolyForm license and independent dependency notices remain intact.
 - Daily guidance and automatic stress interruptions remain explicit opt-ins,
   private, evidence-gated, and honest about best-effort OS delivery.
-- Core NOOP remains fully local and account-free; NOOP+ managed sync requires
-  explicit enrollment and must never silently upload existing history.
+- Core scoring and post-activation band use remain fully local and
+  subscription-independent; NOOP+ managed sync requires separate explicit
+  enrollment and must never silently upload existing history.
+- Band ownership identity, NOOP+ consent, and NOOP+ payment are separate
+  boundaries. A plan downgrade or payment failure cannot deactivate a band.
+- V1 has no user-facing unpair or transfer. Remote terms, operator-only
+  return/RMA release, and any condition-based refund deduction require exact
+  versioning, disclosure, legal approval, and auditable operations.
 - NOOP+ can restrict managed storage, restore, and multi-device history only;
   core product capability is not a storage-tier entitlement.
 - Optional local storage reduction keeps seven days of high-rate raw data and
@@ -252,27 +288,31 @@ participant, and native-speaker gates remain separate.
 
 1. Repair the red Apple, Android managed-emulator, and server hosted workflows;
    make the complete release gate green on current `main`.
-2. Record the launch-market, language, NOOP+, Safety, pricing, public-version,
-   owner, and legacy-support decisions in phase zero of the master plan.
-3. Obtain the versioned NOOP Band hardware/firmware input dossier and
+2. Finish the launch-language, NOOP+, Safety, pricing, public-version, owner,
+   transfer/legal, payment, and legacy-support decisions; India-first and
+   USA-second are already recorded.
+3. Obtain the supplier SDK, license, printed-label/identity mapping, pairing and
+   gesture contract, versioned NOOP Band hardware/firmware dossier, and
    representative engineering units. Do not infer the protocol.
-4. Build the terminology classifier/allowlist, correct the false
+4. Define the ownership account, claim, release, installation, entitlement,
+   observability, and partial-failure contracts with a virtual band.
+5. Build the terminology classifier/allowlist, correct the false
    legacy-to-first-party display mapping, and introduce neutral core boundaries
    with old-data migration fixtures.
-5. Create the protocol-spec template, neutral Swift/Kotlin SDK interfaces,
+6. Create the protocol-spec template, neutral Swift/Kotlin SDK interfaces,
    deterministic virtual band, conformance corpus, and bounded observability
    categories before hardware arrives.
-6. On hardware arrival, implement and prove authenticated provisioning,
+7. On hardware arrival, implement and prove authenticated provisioning,
    offline flash collection, durable history acknowledgement, clock, wear/power,
    haptics, and signed rollback-capable OTA on both phones.
-7. Validate shake reports and performance on representative physical phones
+8. Validate shake reports and performance on representative physical phones
    during lag, active collection, locked-background work, storage pressure,
    history, OTA, and managed sync.
-8. Keep NOOP+ public ingress and released enrollment disabled until signed
+9. Keep NOOP+ public ingress and released enrollment disabled until signed
    physical attestation, privacy, restore, load, monitoring, support, push,
    deletion, and production-operations gates pass.
-9. Complete sensor/metric evidence, certifications, manufacturing, signing,
+10. Complete sensor/metric evidence, certifications, manufacturing, signing,
    store records, reviewer sample mode, accessibility, localization, and the
    signed physical release-candidate matrix.
-10. Keep automatic emergency inference unavailable until its separate
+11. Keep automatic emergency inference unavailable until its separate
     validation and regulatory program is complete.

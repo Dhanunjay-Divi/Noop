@@ -2,6 +2,15 @@
 
 **Assessed:** 2026-08-26 · **Model:** paid hardware + paid premium tier · **Markets:** India, then USA
 
+> **2026-09-05 update:** the owner has confirmed an account-bound first-party
+> band claim and a visible NOOP/NOOP+ choice before Home. The account is an
+> activation and ownership boundary, not a subscription gate: an activated
+> band and every core local metric continue without NOOP+ or payment. The
+> current direction also removes user-facing v1 unpair, serves terms remotely,
+> and leaves the 14- versus 30-day return window and condition deductions open.
+> The detailed current contract and open legal/support exits are in
+> [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
+
 ---
 
 ## 1. Where you actually are, stated plainly

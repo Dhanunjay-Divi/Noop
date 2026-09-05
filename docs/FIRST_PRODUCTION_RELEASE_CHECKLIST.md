@@ -3,6 +3,7 @@
 - **Status date:** 2026-09-05
 - **Purpose:** one editable, ordered list of everything still required for the
   first public production release
+- **Confirmed market sequence:** India first, then the USA
 - **Architecture and rationale:**
   [`FIRST_PRODUCTION_RELEASE_PLAN.md`](FIRST_PRODUCTION_RELEASE_PLAN.md)
 - **Release status ledger:** [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md)
@@ -42,14 +43,24 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 1. Product scope and accountable ownership
 
-- [ ] DEC-010 [OWNER] Confirm the first launch country and storefront
-  territories.
-- [ ] DEC-020 [OWNER] Confirm whether the USA follows the first market or ships
-  simultaneously.
+- [x] DEC-010 [OWNER] Confirm India as the first launch country.
+  (Evidence:
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
+- [x] DEC-020 [OWNER] Confirm that the USA follows India rather than launching
+  simultaneously. (Evidence:
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
 - [ ] DEC-030 [OWNER] Confirm the languages included in the first public
   release.
-- [ ] DEC-040 [OWNER] Confirm whether NOOP+ enrollment is enabled in the first
-  release.
+- [x] DEC-035 [OWNER] Require a NOOP ownership account to claim and activate a
+  first-party band while keeping ongoing local collection, metrics, export,
+  and device control independent of NOOP+ and payment. (Evidence:
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
+- [ ] DEC-040 [OWNER] Confirm whether paid NOOP+ enrollment, rather than its
+  visible plan option, is enabled in the first release.
+- [x] DEC-045 [OWNER] Show NOOP and NOOP+ before Home, give NOOP+ an accessible
+  gold identity, and keep payment unavailable until its gateway is approved.
+  (Evidence:
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
 - [ ] DEC-050 [OWNER] Confirm whether Friends is enabled in the first release.
 - [ ] DEC-060 [OWNER] Confirm that contact paging is disabled unless every
   carrier, legal, physical, and operations gate passes.
@@ -63,6 +74,15 @@ position without changing its ID. This inbox intentionally starts empty.
   boundaries.
 - [ ] DEC-110 [OWNER] Confirm that every core local metric remains account-free
   and available without a subscription.
+- [x] DEC-115 [OWNER] Keep v1 bands bound to the claiming account for the
+  band's ordinary lifetime with no user-facing unpair or transfer; permit
+  consumer release only through an eligible successor-band upgrade while
+  retaining operator-only return, RMA, legal, and security exits. (Evidence:
+  `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
+- [ ] DEC-116 [OWNER] Choose a 14-day or 30-day return window and the event from
+  which it starts.
+- [ ] DEC-117 [JOINT] Approve the objective condition-grading and lawful refund
+  deduction schedule for marked or damaged returned bands.
 - [ ] DEC-120 [OWNER] Decide whether the legacy direct-band adapter is removed
   from public builds or retained as an isolated compatibility module.
 - [ ] DEC-130 [OWNER] Approve the general-wellness-only claims boundary for
@@ -238,7 +258,183 @@ position without changing its ID. This inbox intentionally starts empty.
   and integration examples.
 - [ ] SDK-200 [ENG] Publish the firmware/Swift/Kotlin compatibility matrix.
 
-## 6. Terminology, identity, and existing-data migration
+## 6. Band claim, account, and plan onboarding
+
+- [ ] ACC-010 [JOINT] Freeze the activation boundary: app exploration, imports,
+  local metrics, and exports remain available without NOOP+, a first-party band
+  requires one ownership claim, and an activated band keeps working locally
+  without a subscription or continuous network.
+- [ ] ACC-020 [EXT] Obtain the supplier contract mapping the public identifier
+  printed on each band to its opaque provisioned identity, hardware revision,
+  and per-unit cryptographic material.
+- [ ] ACC-030 [ENG] Treat the printed band number only as a discovery
+  disambiguator, never as an authentication secret or ownership proof.
+- [ ] ACC-040 [ENG] Require the band to be worn and explicitly in a
+  time-bounded pairing mode with cancel, expiry, and rate-limit behavior.
+- [ ] ACC-050 [ENG] Scan only eligible pairing-mode NOOP Bands and suppress
+  stale, incompatible, already-bonded, or unsupported candidates.
+- [ ] ACC-060 [ENG] Show only the minimum privacy-safe label characters needed
+  for the user to match the discovered candidate to the number printed on the
+  band.
+- [ ] ACC-070 [ENG] Send the identify vibration only to the selected candidate
+  and present clear retry, choose-another-band, and timeout actions.
+- [ ] ACC-080 [ENG] Have firmware convert at least three deliberate taps inside
+  the possession window into one debounced confirmation event; the apps must
+  not count raw motion as taps.
+- [ ] ACC-090 [ENG] Bind the confirmation event cryptographically to the exact
+  band, app challenge, session, and expiry window.
+- [ ] ACC-100 [ENG] Reject replay, stale confirmation, wrong-band responses,
+  simultaneous-phone races, and confirmation outside pairing mode.
+- [ ] ACC-110 [ENG] Provide matched no-band, multiple-band, wrong-number,
+  vibration-missed, gesture-missed, Bluetooth-denied, offline, and retry states.
+- [ ] ACC-120 [JOINT] Approve a concise ownership disclosure explaining that a
+  successful claim binds the band to one account and describing all supported
+  recovery and release paths.
+- [ ] ACC-130 [ENG] Require an explicit versioned `I agree` action before
+  account creation or ownership claim; persist policy version, locale, and
+  server time without storing the rendered copy in diagnostics.
+- [ ] ACC-140 [ENG] Implement account creation and existing-account sign-in
+  with email, password, and password confirmation where applicable using native
+  password-manager and autofill support.
+- [ ] ACC-150 [ENG] Verify the email address before final ownership claim and
+  define safe resend, expiry, correction, and already-used-email behavior.
+- [ ] ACC-160 [ENG] Keep mobile number optional; if supplied, verify it by OTP
+  and support resend, expiry, attempt limits, country code, and number change.
+- [ ] ACC-170 [ENG] Use a managed identity provider and never store, proxy, or
+  log plaintext passwords or OTPs in NOOP application databases or services.
+- [ ] ACC-180 [ENG] Add password policy, breached-password controls where
+  supported, rate limits, enumeration resistance, App Check/attestation, and
+  abuse monitoring.
+- [ ] ACC-190 [ENG] Implement password reset, email change, optional phone
+  change, reauthentication, session rotation, sign-out, lost-phone recovery,
+  and account recovery.
+- [ ] ACC-200 [ENG] Give every identity, network, verification, consent, and
+  claim failure a private actionable state without revealing another account.
+- [ ] ACC-210 [ENG] Implement an atomic backend claim that links one opaque
+  account tenant to one provisioned band identity.
+- [ ] ACC-220 [ENG] Require valid app attestation and a fresh band-signed
+  possession challenge before the claim transaction can commit.
+- [ ] ACC-230 [ENG] Make claim creation idempotent and concurrency-safe so two
+  phones or accounts cannot both succeed.
+- [ ] ACC-240 [ENG] Return the same privacy-preserving already-claimed response
+  regardless of the current owner's identity or account state.
+- [ ] ACC-250 [ENG] Recover safely when account creation, server claim, band
+  provisioning, local persistence, or final acknowledgement succeeds only
+  partially.
+- [ ] ACC-260 [ENG] Provision owner-scoped band credentials only after the
+  durable claim and bind them to protocol and firmware versions.
+- [ ] ACC-270 [ENG] Store local account and band credentials only in
+  Keychain/Keystore-backed storage and rotate or revoke them independently.
+- [ ] ACC-280 [ENG] Ensure a successfully activated band continues collecting,
+  backfilling, scoring, exporting, and accepting supported local controls
+  during account-service or network outages.
+- [ ] ACC-290 [ENG] On a replacement phone, require sign-in to the same account,
+  fresh physical possession proof, and installation authorization without
+  creating a second ownership claim.
+- [ ] ACC-300 [ENG] Let the owner revoke a lost or replaced phone installation
+  without deleting band history or disabling other authorized installations.
+- [ ] ACC-310 [JOINT] Disclose before purchase and claim that v1 has no general
+  self-service unpair or transfer and remains bound to the claiming account for
+  its ordinary lifetime, subject only to approved operator and legal exits.
+- [ ] ACC-320 [EXT] Obtain India and USA consumer, warranty, privacy, account
+  deletion, and transfer review for the ownership-lock policy.
+- [ ] ACC-330 [ENG] Implement support-controlled release for returns, RMA,
+  replacement, account recovery, verified disputes, fraud handling, recycling,
+  and other legally required cases.
+- [ ] ACC-340 [ENG] Make account deletion erase personal data without exposing
+  user-facing unpair: the v1 band must enter the approved retired, wiped, or
+  operator-recovery state, and ownership lock must never block a deletion right.
+- [ ] ACC-350 [ENG] Only after an eligible successor NOOP Band is released, add
+  an upgrade flow that reauthenticates the owner, proves possession,
+  permanently releases the old band, and records the release before another
+  account can claim it.
+- [ ] ACC-360 [ENG] On approved release, revoke owner keys and sessions, remove
+  personal state from the band, preserve only required bounded anti-replay
+  records, and prove factory-ready state.
+- [ ] ACC-370 [JOINT] Define proof-of-purchase, stolen-band, inheritance,
+  chargeback, closed-account, and ownership-dispute procedures.
+- [ ] ACC-380 [ENG] Add additive schemas for accounts, bands, claims,
+  ownership events, installations, challenges, releases, and entitlement state
+  without storing raw health data in the ownership control plane.
+- [ ] ACC-390 [ENG] Prove tenant isolation, least-privilege support access,
+  immutable security audit, backup/PITR, restoration, retention, and erasure
+  for the ownership control plane.
+- [ ] ACC-400 [ENG] Add bounded lifecycle evidence for discovery, selection,
+  vibration, possession confirmation, consent, identity, claim, provisioning,
+  conflict, recovery, and release without identifiers or payloads.
+- [ ] ACC-410 [ENG] Show the NOOP versus NOOP+ chooser after remaining
+  onboarding and before the first Home presentation on Apple and Android.
+- [ ] ACC-420 [ENG] Let NOOP continue immediately without payment while keeping
+  every core local metric, workout, Journal, Coach, automation, backup, and
+  export promised for the free product.
+- [ ] ACC-430 [ENG] Give NOOP+ a restrained gold mark and highlight with text,
+  shape, contrast, screen-reader labels, and non-color selection state.
+- [ ] ACC-440 [ENG] Until billing is approved, render NOOP+ payment as clearly
+  unavailable or coming later; do not open a fake checkout, collect payment, or
+  grant an entitlement.
+- [ ] ACC-450 [OWNER] Select India hardware checkout, Apple/Google digital
+  subscription billing, gateway, tax, refund, receipt, renewal, and support
+  ownership before enabling payment.
+- [ ] ACC-460 [ENG] Keep band ownership separate from NOOP+ entitlement so
+  cancellation, payment failure, or downgrade never deactivates the band or
+  removes core local capability.
+- [ ] ACC-470 [ENG] Let users inspect and change plan later from a stable
+  account destination without repeating pairing or base onboarding.
+- [ ] ACC-480 [ENG] Resume the remaining existing initial pages after a claim,
+  persist each completion boundary idempotently, and never strand a user after
+  process death or network loss.
+- [ ] ACC-490 [ENG] Pass virtual-band, backend, Apple, Android, accessibility,
+  two-phone/two-account race, offline, recovery, support-release, and
+  representative physical-band end-to-end matrices.
+- [ ] ACC-500 [OWNER] Select 14 or 30 calendar days for voluntary returns.
+- [ ] ACC-510 [JOINT] Define whether the return clock begins at order,
+  shipment, delivery, activation, or another legally approved event in each
+  market.
+- [ ] ACC-520 [JOINT] Define unopened, opened, paired, worn, defective,
+  incorrect-item, damaged-in-transit, warranty, and change-of-mind eligibility.
+- [ ] ACC-530 [EXT] Obtain India and USA legal review of the return window,
+  exclusions, inspection, condition deductions, refund timing, and appeals.
+- [ ] ACC-540 [ENG] Implement an authenticated return request with order lookup,
+  eligibility result, return authorization, shipping instructions, status, and
+  support escalation.
+- [ ] ACC-550 [ENG] Define a repeatable condition inspection for cosmetic
+  marks, structural damage, missing accessories, hygiene, battery, radio,
+  sensors, and tamper state using privacy-safe evidence.
+- [ ] ACC-560 [JOINT] Publish an objective condition-grade and refund-deduction
+  schedule before purchase; distinguish ordinary inspection, manufacturing
+  defect, transit damage, customer damage, and normal wear.
+- [ ] ACC-570 [ENG] Apply only lawful disclosed deductions to the refund through
+  the original payment rail, issue an itemized decision, and provide a bounded
+  appeal path; never create an undisclosed post-return charge.
+- [ ] ACC-580 [ENG] On accepted return or RMA, use an operator-only workflow to
+  revoke owner credentials, wipe personal band state, remove the account link,
+  and quarantine, refurbish, reprovision, or destroy the unit.
+- [ ] ACC-590 [ENG] Store every Terms and Conditions version as an immutable,
+  content-addressed, locale-specific document and signed manifest in
+  NOOP-controlled object storage.
+- [ ] ACC-600 [ENG] Fetch terms over authenticated TLS with an ephemeral,
+  no-persistent-cache client; do not bundle or write the full terms document to
+  the app container, preferences, database, diagnostics, or report archive.
+- [ ] ACC-610 [ENG] Fail claim closed if the exact terms version cannot be
+  fetched or verified, and retain server-side acceptance evidence containing
+  only account scope, document version/hash, locale, policy version, and time.
+- [ ] ACC-620 [ENG] Retain every accepted historical terms version remotely,
+  expose its public immutable URL, and require reacceptance only under a
+  reviewed version/effective-date policy.
+- [ ] ACC-630 [ENG] Make the remotely loaded terms readable without login on
+  the public website and accessible in-app with screen readers, text scaling,
+  localization, copy/share, and an explicit return to the claim flow.
+- [ ] ACC-640 [ENG] Render only sanitized static terms content with no arbitrary
+  script, third-party tracker, advertising, fingerprinting, or credential
+  capture.
+- [ ] ACC-650 [ENG] Add version, integrity, availability, latency, publication,
+  rollback, and acceptance monitoring without logging document contents,
+  account identifiers, contact data, or band identifiers.
+- [ ] ACC-660 [ENG] Test terms outage/tamper/version races and the complete
+  return, inspection, deduction, refund, appeal, operator wipe, and
+  reconditioning matrix on Apple, Android, backend, and operations tooling.
+
+## 7. Terminology, identity, and existing-data migration
 
 - [ ] MIG-010 [ENG] Generate a tracked classification of every legacy-name
   occurrence.
@@ -282,7 +478,7 @@ position without changing its ID. This inbox intentionally starts empty.
   Band physical parity.
 - [ ] MIG-240 [ENG] Reach zero unallowlisted customer and active-core matches.
 
-## 7. Apple and Android product experience
+## 8. Apple and Android product experience
 
 - [ ] MOB-010 [ENG] Build matched first-run NOOP Band education on Apple and
   Android.
@@ -345,7 +541,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] MOB-300 [ENG] Ensure Review Sample Mode never touches BLE, production
   storage, health stores, cloud, Friends, notifications, or Safety.
 
-## 8. Storage, performance, backup, and recovery
+## 9. Storage, performance, backup, and recovery
 
 - [ ] DAT-010 [JOINT] Approve local raw, essential time-series, aggregate,
   user-authored, and backup retention rules.
@@ -381,7 +577,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] DAT-180 [ENG] Verify existing local data survives every signed app
   upgrade and band replacement.
 
-## 9. Sensor and metric evidence
+## 10. Sensor and metric evidence
 
 - [ ] MET-010 [JOINT] Approve a preregistered validation protocol and frozen
   metric revisions.
@@ -426,7 +622,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] MET-230 [ENG] Define safe reprocessing and metric rollback rules.
 - [ ] MET-240 [EXT] Obtain independent statistical and claims review.
 
-## 10. NOOP+ production services, if enabled
+## 11. NOOP+ production services, if enabled
 
 - [ ] CLD-010 [OWNER] Confirm the GCP organization, billing owner, launch
   regions, and data-residency policy.
@@ -475,7 +671,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CLD-240 [OWNER] Keep NOOP+ and paging enrollment disabled until every
   applicable point above is complete.
 
-## 11. Security, privacy, legal, and certification
+## 12. Security, privacy, legal, and certification
 
 - [ ] SEC-010 [JOINT] Complete hardware, firmware, BLE, mobile, cloud,
   manufacturing, account, Friends, OTA, and Safety threat models.
@@ -514,7 +710,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] SEC-210 [ENG] Pass exact release SBOM, license, dependency notice, owner
   rights, and distribution gates.
 
-## 12. Manufacturing, fulfillment, and support
+## 13. Manufacturing, fulfillment, and support
 
 - [ ] OPS-010 [EXT] Qualify pilot and production manufacturers.
 - [ ] OPS-020 [EXT] Approve golden units, test limits, calibration, yield, and
@@ -543,7 +739,7 @@ position without changing its ID. This inbox intentionally starts empty.
   incident response.
 - [ ] OPS-160 [OWNER] Staff launch support and on-call coverage.
 
-## 13. Signing and storefront preparation
+## 14. Signing and storefront preparation
 
 - [ ] STO-010 [OWNER] Confirm paid Apple organization membership, agreements,
   tax, banking, and App Store Connect roles.
@@ -584,7 +780,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] STO-210 [OWNER] Keep first storefront release under manual release
   control.
 
-## 14. Signed private release-candidate validation
+## 15. Signed private release-candidate validation
 
 - [ ] RC-010 [ENG] Freeze one app, firmware, protocol, schema, metric, and
   backend compatibility manifest.
@@ -636,7 +832,7 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] RC-280 [ENG] Archive generalized evidence without raw health data or
   personal identifiers.
 
-## 15. Final go-live and post-launch
+## 16. Final go-live and post-launch
 
 - [ ] LCH-010 [JOINT] Verify every applicable checklist point has evidence or a
   documented superseding decision.
