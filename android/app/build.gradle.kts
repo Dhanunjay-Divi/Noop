@@ -59,9 +59,20 @@ val demoStrengthMediaSetting = providers.gradleProperty("noopAllowDemoStrengthMe
     ?.lowercase()
 val allowDemoStrengthMedia =
     demoStrengthMediaSetting != "0" && demoStrengthMediaSetting != "false"
+val managedCloudPropsFile = rootProject.file("managed-cloud.properties")
+val managedCloudProps = Properties().apply {
+    if (managedCloudPropsFile.isFile) {
+        managedCloudPropsFile.inputStream().use { load(it) }
+    }
+}
 fun managedBuildValue(propertyName: String, environmentName: String): String =
     providers.gradleProperty(propertyName)
         .orElse(providers.environmentVariable(environmentName))
+        .orElse(
+            providers.provider {
+                managedCloudProps.getProperty(propertyName, "")
+            },
+        )
         .getOrElse("")
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")

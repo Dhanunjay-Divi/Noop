@@ -100,17 +100,24 @@ class TwilioPagingProvider:
         auth_token: str,
         from_phone: str,
         status_callback_url: str | None,
+        api_key_sid: str | None = None,
+        api_key_secret: str | None = None,
         timeout_seconds: float = 15,
     ) -> None:
         self.account_sid = account_sid
         self.auth_token = auth_token
+        self.api_key_sid = api_key_sid
+        self.api_key_secret = api_key_secret
         self.from_phone = from_phone
         self.status_callback_url = status_callback_url
         self.timeout_seconds = timeout_seconds
 
     @property
     def available(self) -> bool:
-        return bool(self.account_sid and self.auth_token and self.from_phone)
+        outbound_credential = bool(self.api_key_sid and self.api_key_secret) or bool(
+            self.auth_token
+        )
+        return bool(self.account_sid and outbound_credential and self.from_phone)
 
     async def send_invitation(
         self,
@@ -207,9 +214,11 @@ class TwilioPagingProvider:
         url = (
             f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/{endpoint}"
         )
-        basic = base64.b64encode(
-            f"{self.account_sid}:{self.auth_token}".encode("utf-8")
-        ).decode("ascii")
+        username = self.api_key_sid or self.account_sid
+        password = self.api_key_secret or self.auth_token
+        basic = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode(
+            "ascii"
+        )
         request = Request(
             url,
             data=urlencode(fields, doseq=True).encode("utf-8"),

@@ -28,4 +28,34 @@ class AppDiagnosticsRecorderTest {
         )
         assertEquals("unknown", AppDiagnosticsRecorder.sanitizedRoute(null))
     }
+
+    @Test fun sensitiveFieldNamesAreDroppedAtRecorderBoundary() {
+        val sanitized = AppDiagnosticsRecorder.sanitizedFields(
+            mapOf(
+                "route" to "/v1/managed/chunks/{chunk_id}",
+                "authorization" to "Bearer private-value",
+                "phone_number" to "+15555550123",
+                "installation_id" to "noop-private-installation",
+                "request_url" to "https://private.example/signed",
+                "user_note" to "private user text",
+            ),
+        )
+
+        assertEquals("/v1/managed/chunks/{chunk_id}", sanitized["route"])
+        assertEquals("5", sanitized["redacted_fields"])
+        assertTrue(!sanitized.values.any { it.contains("private-value") })
+        assertTrue(!sanitized.values.any { it.contains("15555550123") })
+        assertTrue(!sanitized.values.any { it.contains("noop-private-installation") })
+        assertTrue(!sanitized.values.any { it.contains("private.example") })
+        assertTrue(!sanitized.values.any { it.contains("private user text") })
+    }
+
+    @Test fun freshnessBucketsDoNotRetainHealthTimestamps() {
+        assertEquals("missing", AppDiagnosticsRecorder.freshnessBucket(null))
+        assertEquals("future_clock", AppDiagnosticsRecorder.freshnessBucket(-120))
+        assertEquals("under_2m", AppDiagnosticsRecorder.freshnessBucket(30))
+        assertEquals("2m_to_15m", AppDiagnosticsRecorder.freshnessBucket(300))
+        assertEquals("15m_to_2h", AppDiagnosticsRecorder.freshnessBucket(1_800))
+        assertEquals("over_2h", AppDiagnosticsRecorder.freshnessBucket(8_000))
+    }
 }

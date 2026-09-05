@@ -157,7 +157,8 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "safety_check_in", "safety_contact_setup", "safety_sos_result",
             "illness_check_in", "daily_review", "inactivity", "smart_alarm",
             "battery", "wind_down", "hydration", "metric_review",
-            "contextual_vital", "caffeine_cutoff", "stale_sync", "unknown",
+            "contextual_vital", "caffeine_cutoff", "stale_sync",
+            "managed_poke", "unknown",
         ])
         if canonical.contains(raw) {
             return raw
@@ -173,6 +174,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "safety-gesture-result": "safety_sos_result",
             "wellness-check-in": "illness_check_in",
             "noop.band-sync.stale": "stale_sync",
+            "managed-poke": "managed_poke",
         ]
         if let mapped = exact[raw] {
             return mapped
@@ -189,6 +191,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             ("vital-", "contextual_vital"),
             ("caffeine-cutoff-", "caffeine_cutoff"),
             ("illness-", "illness_check_in"),
+            ("managed-poke-", "managed_poke"),
         ]
         return prefixes.first(where: { raw.hasPrefix($0.0) })?.1 ?? "unknown"
     }

@@ -5,7 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.managed_lifecycle import ManagedLifecycleRunner
+from app import managed_lifecycle
+from app.managed_lifecycle import ManagedLifecycleResult, ManagedLifecycleRunner
 from app.managed_identity_deletion import ManagedIdentityDeletionError
 from app.managed_object_store import ManagedObjectStoreError
 from app.managed_repository import ManagedProcessingBusyError
@@ -284,3 +285,57 @@ async def test_lifecycle_reconciles_stranded_uploads_and_reports_retry_state() -
     assert result.chunk_reconciliation_failures == 1
     assert len(processor.processed) == 3
     assert all(len(queue_hash) == 64 for _, _, queue_hash in processor.processed)
+
+
+def test_lifecycle_cli_emits_bounded_failure_without_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def fail() -> ManagedLifecycleResult:
+        raise RuntimeError("private database detail")
+
+    monkeypatch.setattr(managed_lifecycle, "_run", fail)
+    monkeypatch.setattr(
+        managed_lifecycle,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        managed_lifecycle.main()
+
+    assert exit_info.value.code == 1
+    assert capsys.readouterr().err == ""
+    assert events[-1][0] == "managed_lifecycle.run"
+    assert events[-1][1]["outcome"] == "failed"
+    assert events[-1][1]["failure_kind"] == "RuntimeError"
+    assert "private database detail" not in repr(events)
+
+
+def test_lifecycle_cli_partial_failure_exits_without_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def partial() -> ManagedLifecycleResult:
+        return ManagedLifecycleResult(
+            lease_acquired=True,
+            object_delete_failures=1,
+        )
+
+    monkeypatch.setattr(managed_lifecycle, "_run", partial)
+    monkeypatch.setattr(
+        managed_lifecycle,
+        "emit_operational_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        managed_lifecycle.main()
+
+    assert exit_info.value.code == 1
+    assert capsys.readouterr().err == ""
+    assert events[-1][1]["outcome"] == "partial_failure"

@@ -6,7 +6,6 @@ import android.graphics.drawable.Animatable
 import android.media.MediaPlayer
 import android.media.MediaMetadataRetriever
 import android.os.Build
-import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.background
@@ -651,7 +650,14 @@ private object StrengthVideoCache {
         }.onFailure {
             temporary.delete()
             destination.takeIf { file -> file.length() <= 32 }?.delete()
-            Log.w("StrengthNativeMedia", "Exercise video download failed", it)
+            com.noop.AppDiagnosticsRecorder.record(
+                "strength_media.load",
+                fields = mapOf(
+                    "media_kind" to "video_download",
+                    "outcome" to "failed",
+                    "failure_kind" to it.javaClass.simpleName,
+                ),
+            )
         }.getOrNull()
     }
 
@@ -787,7 +793,14 @@ private class StrengthLoopingVideoTextureView(
                 mediaPlayer.prepareAsync()
             }
         }.onFailure {
-            Log.w("StrengthNativeMedia", "Exercise video playback failed", it)
+            com.noop.AppDiagnosticsRecorder.record(
+                "strength_media.load",
+                fields = mapOf(
+                    "media_kind" to "video_playback",
+                    "outcome" to "failed",
+                    "failure_kind" to it.javaClass.simpleName,
+                ),
+            )
             failCurrent()
         }
     }
@@ -1052,10 +1065,13 @@ internal fun StrengthNativeExerciseMedia(
                             if (mediaPaused) animation?.stop() else animation?.start()
                         },
                         onError = {
-                            Log.w(
-                                "StrengthNativeMedia",
-                                "Exercise media decode failed",
-                                it.result.throwable,
+                            com.noop.AppDiagnosticsRecorder.record(
+                                "strength_media.load",
+                                fields = mapOf(
+                                    "media_kind" to "exercise_animation",
+                                    "outcome" to "decode_failed",
+                                    "failure_kind" to it.result.throwable.javaClass.simpleName,
+                                ),
                             )
                             advanceSource()
                         },
@@ -1378,7 +1394,14 @@ internal fun StrengthNativeBodyMap(
         contentDescription = stringResource(R.string.strength_train_by_muscle),
         contentScale = ContentScale.Fit,
         onError = {
-            Log.e("StrengthNativeMedia", "Body map SVG decode failed", it.result.throwable)
+            com.noop.AppDiagnosticsRecorder.record(
+                "strength_media.load",
+                fields = mapOf(
+                    "media_kind" to "body_map",
+                    "outcome" to "decode_failed",
+                    "failure_kind" to it.result.throwable.javaClass.simpleName,
+                ),
+            )
         },
         modifier = modifier
             .fillMaxWidth()

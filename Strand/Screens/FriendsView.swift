@@ -17,6 +17,12 @@ struct FriendsView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var service = FriendsService()
 
+    #if os(iOS)
+    @ObservedObject private var managedService = ManagedCloudService.shared
+    @AppStorage("friends.source.v1")
+    private var selectedSource = FriendsSource.managed.rawValue
+    #endif
+
     @State private var displayName = ""
     @State private var invite: FriendsService.Invite?
     @State private var selectedFriend: FriendsService.Friend?
@@ -30,13 +36,40 @@ struct FriendsView: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        Group {
+            if selectedSource == FriendsSource.managed.rawValue {
+                ManagedFriendsView(selectedSource: $selectedSource)
+            } else {
+                selfHostedBody
+            }
+        }
+        .onAppear {
+            if managedService.pendingSocialInviteCapability != nil {
+                selectedSource = FriendsSource.managed.rawValue
+            }
+        }
+        .onChange(of: managedService.pendingSocialInviteCapability) { _, capability in
+            if capability != nil {
+                selectedSource = FriendsSource.managed.rawValue
+            }
+        }
+        #else
+        selfHostedBody
+        #endif
+    }
+
+    private var selfHostedBody: some View {
         ScreenScaffold(
             title: "Friends",
-            subtitle: "Private scores. Your server. Your rules.",
+            subtitle: "Private summaries through a server you control.",
             onRefresh: { await service.refresh(repo: model.repo) },
             topBackground: liquidScaffoldSky()
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                #if os(iOS)
+                FriendsSourcePicker(selection: $selectedSource)
+                #endif
                 switch service.setupState {
                 case .needsServer:
                     serverSetupCard
@@ -487,6 +520,34 @@ struct FriendsView: View {
         return String(format: "%04d-%02d-%02d", c.year ?? 1970, c.month ?? 1, c.day ?? 1)
     }
 }
+
+#if os(iOS)
+enum FriendsSource: String, CaseIterable {
+    case managed
+    case selfHosted
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .managed: return "NOOP+"
+        case .selfHosted: return "Self-hosted"
+        }
+    }
+}
+
+struct FriendsSourcePicker: View {
+    @Binding var selection: String
+
+    var body: some View {
+        Picker("Friends service", selection: $selection) {
+            ForEach(FriendsSource.allCases, id: \.rawValue) { source in
+                Text(source.title).tag(source.rawValue)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityHint("Switches between NOOP+ and a server you operate.")
+    }
+}
+#endif
 
 // MARK: - Dimensional friend identity
 

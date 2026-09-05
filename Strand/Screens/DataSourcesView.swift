@@ -354,7 +354,14 @@ struct DataSourcesView: View {
         case .failure(let error):
             // Surface the failure instead of swallowing it (#179) — a silent return read as
             // "import does nothing", with no clue why.
-            NSLog("Import: file picker failed for \(target) - \(error.localizedDescription)")
+            AppDiagnosticsRecorder.shared.record(
+                "import.file_picker",
+                fields: [
+                    "target": target.diagnosticName,
+                    "outcome": "failed",
+                    "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+                ]
+            )
         }
     }
 
@@ -763,6 +770,18 @@ struct DataSourcesView: View {
         case lifting
         case activityFile
         case wearable
+
+        var diagnosticName: String {
+            switch self {
+            case .whoop: return "band_export"
+            case .appleHealth: return "apple_health"
+            case .xiaomi: return "xiaomi_export"
+            case .nutrition: return "nutrition"
+            case .lifting: return "lifting"
+            case .activityFile: return "activity_file"
+            case .wearable: return "wearable_export"
+            }
+        }
 
         var allowedContentTypes: [UTType] {
             // `.folder` lets macOS users point at an *unzipped* export directory. On iOS the Files

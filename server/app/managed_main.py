@@ -20,6 +20,10 @@ from app.managed_identity import IdentityToolkitTokenVerifier
 from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
 from app.managed_object_store import GCSV4ObjectStore, IAMBlobSigner
 from app.managed_repository import PostgresManagedRepository
+from app.observability import (
+    RequestObservabilityMiddleware,
+    internal_server_error_response,
+)
 from app.repository import PostgresRepository
 
 
@@ -107,6 +111,11 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
         ),
         max_keys=runtime_settings.rate_limit_max_keys,
     )
+    app.add_middleware(
+        RequestObservabilityMiddleware,
+        service="noop-managed-api",
+    )
+    app.add_exception_handler(Exception, internal_server_error_response)
 
     @app.exception_handler(RequestValidationError)
     async def redact_validation_inputs(

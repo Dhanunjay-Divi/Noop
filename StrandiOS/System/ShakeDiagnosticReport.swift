@@ -141,12 +141,50 @@ final class ShakeDiagnosticReportController: ObservableObject {
 
         Task { @MainActor [weak self, weak live] in
             guard let self, let live else { return }
-            // File size plus one indexed HR-frontier query is deliberate here. Full table COUNTs can
-            // compete with a large database at exactly the moment the user is reporting a freeze.
+            // Read only filesystem/resource counts here. A normal app report must not query or attach the
+            // latest health timestamp, and full table COUNTs can compete with a large database at exactly
+            // the moment the user is reporting a freeze.
             let storage = await TestCentreReport.storageProbe(
                 repo: repo,
                 live: live,
-                includeRowCounts: false
+                includeRowCounts: false,
+                includeHealthFrontier: false
+            )
+            let nowUnix = Date().timeIntervalSince1970
+            let latestHrUnix = await repo.latestPersistedHRSampleTs()
+            let bondState = live.encryptedBond
+                ? "encrypted"
+                : live.bonded
+                ? "partial"
+                : "none"
+            let historySyncState: String
+            if live.backfilling {
+                switch HistorySyncDurableProgressPolicy.activity(
+                    startedAt: live.historySyncStartedAt,
+                    lastDurableProgressAt: live.historySyncLastDurableProgressAt,
+                    now: nowUnix
+                ) {
+                case .starting: historySyncState = "starting"
+                case .advancing: historySyncState = "advancing"
+                case .waiting: historySyncState = "waiting"
+                case .stalled: historySyncState = "stalled"
+                }
+            } else {
+                historySyncState = "idle"
+            }
+            AppDiagnosticsRecorder.shared.record(
+                "band.collection_snapshot",
+                fields: [
+                    "connection_state": live.connected ? "connected" : "disconnected",
+                    "bond_state": bondState,
+                    "history_sync_state": historySyncState,
+                    "live_frame_freshness": AppDiagnosticsRecorder.freshnessBucket(
+                        ageSeconds: live.lastFrameAtUnix.map { nowUnix - Double($0) }
+                    ),
+                    "collection_freshness": AppDiagnosticsRecorder.freshnessBucket(
+                        ageSeconds: latestHrUnix.map { nowUnix - Double($0) }
+                    ),
+                ]
             )
             let runtimeDiagnostics = await AppDiagnosticsRecorder.shared.diagnosticEntriesAsync()
             let model = UserDefaults.standard.string(forKey: "selectedWhoopModel")
@@ -163,6 +201,11 @@ final class ShakeDiagnosticReportController: ObservableObject {
             guard !assembled.isEmpty else {
                 self.phase = .failed
                 self.statusMessage = "NOOP could not prepare the report. Try again after reopening the app."
+                AppDiagnosticsRecorder.shared.record(
+                    "report.build_failed",
+                    fields: ["reason": "empty_bundle"],
+                    includeResourceSnapshot: true
+                )
                 return
             }
             self.entries = assembled
@@ -206,9 +249,17 @@ final class ShakeDiagnosticReportController: ObservableObject {
             if result == nil {
                 self.phase = .failed
                 self.statusMessage = "The ZIP could not be created. No report was shared."
+                AppDiagnosticsRecorder.shared.record(
+                    "report.share_completed",
+                    fields: ["outcome": "archive_failed"]
+                )
             } else {
                 self.phase = .review
                 self.statusMessage = "Share sheet opened for \(name)"
+                AppDiagnosticsRecorder.shared.record(
+                    "report.share_completed",
+                    fields: ["outcome": "share_sheet_opened"]
+                )
             }
         }
     }

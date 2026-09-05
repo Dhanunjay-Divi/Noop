@@ -301,6 +301,110 @@ final class ManagedSyncStateTests: XCTestCase {
         XCTAssertEqual(upload?.localPrunedAtMs, 6)
     }
 
+    func testValidatedRawWindowsPruneMappedRowsAndKeepDailySummary() async throws {
+        let store = try await WhoopStore.inMemory()
+        let scope = String(repeating: "b", count: 64)
+        let sourceID = "11111111-1111-5111-8111-111111111111"
+        try await store.upsertManagedSyncSource(
+            ManagedSyncSourceState(
+                sourceID: sourceID,
+                localSourceID: "strap",
+                sourceKind: "live_ble",
+                platform: "ios",
+                logicalSourceHash: String(repeating: "a", count: 64),
+                createdAtMs: 1,
+                updatedAtMs: 1
+            )
+        )
+        try await store.registryWriter.write { db in
+            for statement in [
+                "INSERT INTO skinTempSample (deviceId, ts, raw, synced) VALUES ('strap', 100, 1, 0)",
+                "INSERT INTO respSample (deviceId, ts, raw, synced) VALUES ('strap', 100, 2, 0)",
+                "INSERT INTO sleepStateSample (deviceId, ts, state, synced) VALUES ('strap', 100, 1, 0)",
+                "INSERT INTO spo2Sample (deviceId, ts, red, ir, synced) VALUES ('strap', 100, 3, 4, 0)",
+                "INSERT INTO ppgWaveformSample (deviceId, ts, samples, synced) VALUES ('strap', 100, X'0001', 0)",
+                "INSERT INTO gravitySample (deviceId, ts, x, y, z, synced) VALUES ('strap', 100, 0, 0, 1, 0)",
+                "INSERT INTO rawImuSample (deviceId, ts, samples) VALUES ('strap', 100, X'0001')",
+                "INSERT INTO dailyMetric (deviceId, day) VALUES ('strap', '1970-01-01')",
+            ] {
+                try db.execute(sql: statement)
+            }
+        }
+
+        let classes: [(name: String, rowCount: Int, chunkID: String)] = [
+            ("raw_auxiliary", 3, "22222222-2222-5222-8222-222222222221"),
+            ("raw_ppg", 2, "22222222-2222-5222-8222-222222222222"),
+            ("raw_motion", 2, "22222222-2222-5222-8222-222222222223"),
+        ]
+        for (index, item) in classes.enumerated() {
+            let dirty = try await store.claimManagedDirtyWindow(
+                localSourceID: "strap",
+                dataClass: item.name,
+                windowStartMs: 0,
+                windowEndMs: 3_600_000,
+                updatedAtMs: Int64(index + 2)
+            )
+            try await store.saveManagedWindowUpload(
+                ManagedWindowUploadState(
+                    accountScopeHash: scope,
+                    sourceID: sourceID,
+                    dataClass: item.name,
+                    windowStartMs: 0,
+                    windowEndMs: 3_599_999,
+                    chunkID: item.chunkID,
+                    rowCount: item.rowCount,
+                    phase: "awaiting_validation",
+                    objectGeneration: nil,
+                    objectMetageneration: nil,
+                    objectCRC32C: nil,
+                    updatedAtMs: Int64(index + 10),
+                    snapshotGeneration: dirty.generation
+                )
+            )
+            let acknowledged = try await store.acknowledgeManagedAvailableChunk(
+                accountScopeHash: scope,
+                sourceID: sourceID,
+                dataClass: item.name,
+                windowStartMs: 0,
+                windowEndMs: 3_599_999,
+                chunkID: item.chunkID,
+                validatedAtMs: Int64(index + 20)
+            )
+            XCTAssertTrue(acknowledged)
+            let result = try await store.pruneManagedAvailableWindows(
+                accountScopeHash: scope,
+                sourceID: sourceID,
+                localSourceID: "strap",
+                dataClass: item.name,
+                endingBeforeMs: 3_600_001,
+                limit: 4,
+                prunedAtMs: Int64(index + 30)
+            )
+            XCTAssertEqual(result.prunedWindows, 1, item.name)
+            XCTAssertEqual(result.deletedRows, item.rowCount, item.name)
+        }
+
+        let counts = try await store.registryWriter.read { db in
+            try [
+                "skinTempSample", "respSample", "sleepStateSample",
+                "spo2Sample", "ppgWaveformSample", "gravitySample", "rawImuSample",
+            ].map { table in
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM \(table) WHERE deviceId = 'strap'"
+                ) ?? 0
+            }
+        }
+        XCTAssertEqual(counts, Array(repeating: 0, count: 7))
+        let dailyCount = try await store.registryWriter.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM dailyMetric WHERE deviceId = 'strap'"
+            ) ?? 0
+        }
+        XCTAssertEqual(dailyCount, 1)
+    }
+
     func testCloudImportWritesNeverCreateDirtyWindows() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.registryWriter.write { db in

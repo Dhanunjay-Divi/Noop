@@ -2,8 +2,9 @@ package com.noop
 
 import android.content.Context
 import java.io.File
-import java.io.PrintWriter
-import java.io.StringWriter
+import java.time.Instant
+import java.util.Collections
+import java.util.IdentityHashMap
 
 /**
  * Captures the last uncaught exception to a file so a crash that only reproduces on a user's own
@@ -14,6 +15,7 @@ import java.io.StringWriter
  */
 object CrashCapture {
     private const val FILE = "last_crash.txt"
+    private const val SCHEMA_HEADER = "schema: noop.android.crash.v2"
 
     fun install(context: Context) {
         val appContext = context.applicationContext
@@ -24,20 +26,15 @@ object CrashCapture {
                 AppDiagnosticsRecorder.recordCritical(
                     "process.uncaught_exception",
                     fields = mapOf(
-                        "thread" to thread.name,
-                        "exception" to throwable.javaClass.name,
+                        "thread_kind" to if (thread.name == "main") "main" else "background",
+                        "failure_kind" to throwable.javaClass.simpleName,
                     ),
                 )
-                val sw = StringWriter()
-                throwable.printStackTrace(PrintWriter(sw))
-                val text = buildString {
-                    appendLine("when:   ${java.util.Date()}")
-                    appendLine("thread: ${thread.name}")
-                    appendLine(sw.toString())
+                runCatching {
+                    File(appContext.filesDir, FILE).writeText(
+                        privacySafeTrace(thread.name, throwable),
+                    )
                 }
-                // Keep the top of the trace, where the exception and application frames live. A recursive
-                // failure or pathological suppressed chain must not consume unbounded phone storage.
-                File(appContext.filesDir, FILE).writeText(text.take(MAX_BYTES))
             }
             previous?.uncaughtException(thread, throwable)
         }
@@ -47,8 +44,58 @@ object CrashCapture {
     fun lastCrash(context: Context): String? {
         val f = File(context.applicationContext.filesDir, FILE)
         if (!f.exists()) return null
-        return runCatching { f.readText() }.getOrNull()?.ifBlank { null }
+        val text = runCatching { f.readText() }.getOrNull()?.ifBlank { null } ?: return null
+        if (!text.startsWith(SCHEMA_HEADER)) {
+            // Older builds stored Throwable.printStackTrace(), including arbitrary exception messages.
+            // Never attach that legacy file to a new privacy-safe report.
+            runCatching { f.delete() }
+            return null
+        }
+        return text
     }
 
-    private const val MAX_BYTES = 512 * 1024
+    internal fun privacySafeTrace(
+        threadName: String,
+        throwable: Throwable,
+        capturedAtMillis: Long = System.currentTimeMillis(),
+    ): String {
+        val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+        val text = buildString {
+            appendLine(SCHEMA_HEADER)
+            appendLine("captured_at: ${Instant.ofEpochMilli(capturedAtMillis)}")
+            appendLine("thread_kind: ${if (threadName == "main") "main" else "background"}")
+            var current: Throwable? = throwable
+            var causeIndex = 0
+            var frameCount = 0
+            while (current != null && causeIndex < MAX_CAUSES && seen.add(current)) {
+                appendLine("exception_$causeIndex: ${safeCodeToken(current.javaClass.name)}")
+                for (frame in current.stackTrace) {
+                    if (frameCount >= MAX_FRAMES) break
+                    append("frame_")
+                    append(frameCount)
+                    append(": ")
+                    append(safeCodeToken(frame.className))
+                    append(".")
+                    append(safeCodeToken(frame.methodName))
+                    append(":")
+                    appendLine(frame.lineNumber.coerceAtLeast(0))
+                    frameCount += 1
+                }
+                current = current.cause
+                causeIndex += 1
+            }
+            appendLine("frame_count: $frameCount")
+            appendLine("cause_count: $causeIndex")
+        }
+        return text.take(MAX_BYTES)
+    }
+
+    private fun safeCodeToken(value: String): String =
+        value.take(240).map { character ->
+            if (character.isLetterOrDigit() || character in "._\$") character else '_'
+        }.joinToString("").ifBlank { "unknown" }
+
+    private const val MAX_CAUSES = 8
+    private const val MAX_FRAMES = 256
+    private const val MAX_BYTES = 64 * 1024
 }

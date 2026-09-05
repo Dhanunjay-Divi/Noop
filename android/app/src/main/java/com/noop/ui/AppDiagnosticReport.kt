@@ -230,6 +230,33 @@ internal class AppDiagnosticReportController(
                         File(dbPath + suffix).takeIf(File::isFile)?.length() ?: 0L
                     }
                     val latestHr = app.repository.latestHrSampleTsUnion(app.activeDeviceId)
+                    val live = app.ble.state.value
+                    val nowUnix = System.currentTimeMillis() / 1_000L
+                    val bondState = when {
+                        live.encryptedBond -> "encrypted"
+                        live.bonded -> "partial"
+                        else -> "none"
+                    }
+                    AppDiagnosticsRecorder.record(
+                        "band.collection_snapshot",
+                        fields = mapOf(
+                            "connection_state" to
+                                if (live.connected) "connected" else "disconnected",
+                            "bond_state" to bondState,
+                            "history_sync_state" to
+                                if (live.backfilling) "active" else "idle",
+                            "live_frame_freshness" to
+                                AppDiagnosticsRecorder.freshnessBucket(
+                                    live.heartRateReceivedAtMillis?.let {
+                                        nowUnix - (it / 1_000L)
+                                    },
+                                ),
+                            "collection_freshness" to
+                                AppDiagnosticsRecorder.freshnessBucket(
+                                    latestHr?.let { nowUnix - it },
+                                ),
+                        ),
+                    )
                     val captureBytes = listOf(
                         com.noop.ble.WhoopBleClient.WHOOP5_CAPTURE_FILE,
                         com.noop.ble.WhoopBleClient.WHOOP5_CAPTURE_FILE + ".1",
@@ -241,7 +268,6 @@ internal class AppDiagnosticReportController(
                         rows = emptyMap(),
                         rawCaptureBytes =
                             captureBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-                        latestHrUnix = latestHr,
                     )
                     val model = NoopPrefs.of(activity)
                         .getString("noop.selectedWhoopModel", null)
@@ -272,6 +298,11 @@ internal class AppDiagnosticReportController(
             if (assembled.isEmpty()) {
                 phase = Phase.FAILED
                 statusMessage = activity.getString(R.string.app_report_error_prepare)
+                AppDiagnosticsRecorder.record(
+                    "report.build_failed",
+                    fields = mapOf("reason" to "empty_bundle"),
+                    includeResourceSnapshot = true,
+                )
                 return@launch
             }
             entries = assembled
@@ -313,6 +344,13 @@ internal class AppDiagnosticReportController(
             } else {
                 activity.getString(R.string.app_report_status_share_opened, name)
             }
+            AppDiagnosticsRecorder.record(
+                "report.share_completed",
+                fields = mapOf(
+                    "outcome" to
+                        if (result == null) "archive_failed" else "share_sheet_opened",
+                ),
+            )
         }
     }
 

@@ -23,11 +23,56 @@ class ManagedSyncCoordinatorTest {
     )
 
     @Test
-    fun localRetentionPolicyKeepsNinetyDaysAndClampsAtEpoch() {
+    fun localRetentionPolicyKeepsRawHotAndEssentialDetail() {
         val dayMs = 86_400_000L
-        assertEquals(90L, ManagedLocalRetentionPolicy.DETAILED_HISTORY_DAYS)
-        assertEquals(10 * dayMs, ManagedLocalRetentionPolicy.cutoff(100 * dayMs))
-        assertEquals(0L, ManagedLocalRetentionPolicy.cutoff(89 * dayMs))
+        assertEquals(7L, ManagedLocalRetentionPolicy.RAW_HISTORY_DAYS)
+        assertEquals(30L, ManagedLocalRetentionPolicy.ESSENTIAL_HISTORY_DAYS)
+        assertEquals(
+            70 * dayMs,
+            ManagedLocalRetentionPolicy.cutoff(100 * dayMs, "essential_timeseries"),
+        )
+        assertEquals(
+            93 * dayMs,
+            ManagedLocalRetentionPolicy.cutoff(100 * dayMs, "raw_ppg"),
+        )
+        assertEquals(
+            0L,
+            ManagedLocalRetentionPolicy.cutoff(6 * dayMs, "raw_motion"),
+        )
+        assertNull(
+            ManagedLocalRetentionPolicy.cutoff(100 * dayMs, "derived_summaries"),
+        )
+        assertNull(ManagedLocalRetentionPolicy.cutoff(100 * dayMs, "unknown"))
+    }
+
+    @Test
+    fun localRetentionAppliesPerDataClassCutoffs() = runTest {
+        val dayMs = 86_400_000L
+        val state = FakeState()
+        ManagedSyncCoordinator(
+            FakeTransport(),
+            MultiWindowExtractor(emptyList()),
+            state,
+            FakeRestore(),
+        ).sync(
+            source = source,
+            authorization = authorization,
+            nowMs = 100 * dayMs,
+            dataClasses = ManagedSyncCoordinator.DATA_CLASSES,
+            maxChangePages = 0,
+            maxDocumentUploads = 0,
+            localPruneNowMs = 100 * dayMs,
+        )
+
+        assertEquals(
+            mapOf(
+                "essential_timeseries" to 70 * dayMs,
+                "raw_auxiliary" to 93 * dayMs,
+                "raw_ppg" to 93 * dayMs,
+                "raw_motion" to 93 * dayMs,
+            ),
+            state.pruneCutoffs,
+        )
     }
 
     @Test
@@ -818,6 +863,7 @@ class ManagedSyncCoordinatorTest {
         val applied = mutableSetOf<Long>()
         var acknowledgements = 0
         var snapshotClears = 0
+        val pruneCutoffs = mutableMapOf<String, Long>()
         private var generation = 0L
 
         fun markWindowAvailable() {
@@ -903,7 +949,10 @@ class ManagedSyncCoordinatorTest {
             dataClass: String,
             endingBeforeMs: Long,
             limit: Int,
-        ) = ManagedPruneResult(0, 0)
+        ): ManagedPruneResult {
+            pruneCutoffs[dataClass] = endingBeforeMs
+            return ManagedPruneResult(0, 0)
+        }
 
         override suspend fun changeSequence() = sequence
 

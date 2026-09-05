@@ -29,7 +29,7 @@ single SQLite file on your own device.
 
 NOOP's runtime network clients have exactly **four optional data-bearing destinations**: the **AI Coach** (§1.1a),
 the **Oura history import** (§1.1b), and a server the user operates through
-**Self-hosted Sync** (§1.1c), plus **NOOP+ managed backup** (§1.1f).
+**Self-hosted Sync** (§1.1c), plus **NOOP+ managed backup and Friends** (§1.1f).
 **Friends** (§1.1d) and the **Safety Network**
 (§1.1e) are separately scoped services on that same self-hosted server, not
 additional NOOP-operated destinations. The AI Coach is off until you turn it on with your own API key; when you
@@ -60,7 +60,7 @@ one of the explicit outputs:
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
 | Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
 | Safety Network (§1.1e, §1.4) | HTTPS to the configured server; server-to-provider HTTPS; carrier SMS/voice | Contact enrollment and an explicit app/band SOS, or a separately approved possible-fall event → the server and its configured provider; delivery/response state → NOOP |
-| NOOP+ managed backup (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable backup chunks and control records ↔ NOOP's managed service, only after verification and versioned consent |
+| NOOP+ managed backup and Friends (§1.1f) | HTTPS with phone identity, App Check, and per-installation authorization | Selected server-readable backup chunks/control records and explicitly consented six-field Friends projections ↔ NOOP's managed service, only after verification and the relevant controls |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 | Safety message handoff | OS share sheet, user-initiated | Prepared text and an optional fresh one-shot location → the destination app and recipient you choose (§1.4) |
@@ -358,7 +358,7 @@ has a separate device-bound credential and data boundary:
   result. A provider receipt does not prove that a person saw the page, and no
   carrier or human response is guaranteed.
 
-### 1.1f NOOP+ managed backup (optional, off by default)
+### 1.1f NOOP+ managed backup and Friends (optional, off by default)
 
 NOOP+ is the optional NOOP-operated storage, restore, and multi-device path. It
 does not participate in BLE collection or local scoring:
@@ -397,18 +397,41 @@ does not participate in BLE collection or local scoring:
   foreground catch-up is always required. Cloud cannot prevent a BLE dropout or
   operating-system suspension.
 - **Optional local storage reduction.** The setting is off by default. When
-  enabled, it keeps 90 days of detailed sensor history and prunes only an exact
-  clean window after the server processor validated the corresponding
-  authoritative chunk. Daily summaries, sleep, workouts, body measurements,
-  journals, plans, preferences, dirty windows, and unvalidated data remain
-  local.
+  enabled, it keeps seven days of high-rate raw optical, motion, and auxiliary
+  streams and 30 days of essential time series. It prunes only an exact clean
+  window after the server processor validated the corresponding authoritative
+  chunk. Daily summaries, sleep, workouts, body measurements, journals, plans,
+  preferences, dirty windows, and unvalidated data remain local.
 - **Revocation and deletion.** A user can disconnect one phone, revoke another
   installation, or request managed-account erasure after fresh phone
   reauthentication. Account deletion has a 24-hour cooling-off/cancel state.
   Local app data is not deleted by disconnecting or erasing NOOP+.
-- **Current release boundary.** Source and local tests exist, but the Firebase
-  project, signed-device attestation, IAM-only managed runtime, public endpoint,
-  and physical mobile validation are not complete. No released client is
+- **Managed Friends is separately controlled.** Creating a managed Friends
+  profile assigns a random rotatable exact-match NOOP ID; there is no public
+  directory or contact upload. A profile link exposes only that alias. An
+  expiring, revocable invitation link carries a random capability whose digest
+  is stored on the server and creates only a pending request.
+- **Sharing is accepted-only and directional.** Each owner independently
+  selects from Charge, Effort, Rest, sleep duration, HRV, and resting heart
+  rate for each friend. Disabling a field clears it when no accepted reader
+  remains. Raw streams, location, journal text, sleep stages, workouts, routes,
+  and device identifiers are excluded. Badges acknowledge connection or
+  projected-day presence and do not rank health.
+- **Pokes are receiver-controlled and best effort.** The recipient must enable
+  pokes globally and for the specific friend. Blocks, quiet hours, cooldowns,
+  daily limits, expiry, leased claims, and idempotent acknowledgements apply.
+  The local notification omits sender and health context, and a band haptic is
+  requested only for an eligible connected, encrypted, worn session. There is
+  no APNs/FCM remote delivery yet, so suspended/closed-app receipt waits for a
+  later background or foreground catch-up and is not immediate.
+- **Link boundary.** Managed profile and invitation links currently use the
+  registered `noop://` custom scheme. A production HTTPS universal/app link,
+  fallback page, association files, and domain-abuse controls remain required
+  before public enrollment.
+- **Current release boundary.** Firebase identity, App Check, Cloud SQL, and the
+  IAM-only managed workloads are deployed in synthetic Mumbai staging. Public
+  invocation, signed-device attestation, physical mobile validation, and
+  privacy/security launch review are not complete. No released client is
   configured to send real health data to synthetic staging.
 
 ### 1.2 The macOS sandbox (and what it means for optional network features)
@@ -954,7 +977,8 @@ visibility alone.
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
 | Process | Data exfiltration / network egress | Four explicit optional destinations: AI Coach (your provider/key and text summary, §1.1a), Oura import (your OAuth app, inbound-only, §1.1b), your self-hosted server (Sync plus optional Friends/Safety, §1.1c-e), and separately consented NOOP+ managed backup (§1.1f). No telemetry; default builds have no NOOP+ endpoint configuration. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `infra/gcp/` |
-| NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; 90-day local prune only after exact server validation; revoke and erasure state machines. Apple and Android now assemble a restore-snapshot-bound ZIP of every retained managed chunk and current personal record, verify digest/size/object/byte totals, and fail closed before publishing an incomplete archive. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Live deployment, large-account interruption/resume, import, and physical-device evidence remain blocked. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `024_*`, `infra/gcp/` |
+| NOOP+ managed backup | Identity abuse, cross-tenant access, token leak, oversized/decompression payload, ambiguous upload, over-retention | Separate phone verification and versioned health-data consent; App Check plus ID token plus per-installation credential plus tenant/resource authorization; secret credentials in Keychain/Keystore-backed encrypted storage; one-object generation-safe upload capabilities; compressed and uncompressed bounds plus digests; idempotent manifests/change feed; seven-day raw and 30-day essential local pruning only after exact server validation; revoke and erasure state machines. Apple and Android assemble a restore-snapshot-bound ZIP of every retained managed chunk and current personal record, verify digest/size/object/byte totals, and fail closed before publishing an incomplete archive. The readable sensitive ZIP is user-initiated and is separate from the server `/exports` route, which only verifies a client-produced encrypted archive. Synthetic end-to-end, large-account interruption/resume, import, and physical-device evidence remain blocked. | `Packages/NoopRemoteSync`, `Packages/WhoopStore`, `Strand/System/ManagedHistoryArchiveWriter.swift`, `StrandiOS/System/ManagedCloudService.swift`, `android/app/src/main/java/com/noop/managed/`, `server/app/managed_*`, `server/migrations/014_*` through `025_*`, `infra/gcp/` |
+| NOOP+ managed Friends | Alias/invite enumeration, over-sharing, harassment, link interception, stale poke delivery | Random rotatable exact-match aliases; no directory/contact upload; hashed expiring revocable invite capabilities; mutual acceptance; directional six-field allowlists; field clearing; blocks/removal/profile deletion; non-competitive badges; receiver global and per-friend poke controls; quiet hours, cooldowns, daily limits, expiry, leased claims, and idempotent acknowledgement. Received capabilities stay in Keychain/encrypted preferences and diagnostics omit links, aliases, names, IDs, values, and payloads. Current custom links and catch-up-only local notification/haptics are disclosed as pre-launch limitations. | `server/migrations/025_managed_social.sql`, `server/app/managed_repository.py`, `Packages/NoopRemoteSync/.../ManagedSocialModels.swift`, `StrandiOS/System/ManagedFriendsView.swift`, `android/app/src/main/java/com/noop/managed/`, `android/app/src/main/java/com/noop/ui/ManagedFriendsScreen.kt` |
 | Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
 | Private Friends | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain/Keystore token plus idempotent enrollment UUID; explicit interrupted-join recovery and server-confirmed pending cleanup; no biometric summary values before acceptance; empty replacement maps clear stale shares; accepted-friend field union limited to six range-checked keys; dedicated `*-noop-friends` producer; per-friend projection only from acceptance date; explicit not-E2E/operator-trust disclosure; remove/block/token rotation and Leave & delete controls; foreground/WorkManager catch-up is best effort, not guaranteed delivery. | `Strand/Data/FriendsService.swift`, `Strand/Screens/FriendsView.swift`, `android/app/src/main/java/com/noop/social/`, `android/app/src/main/java/com/noop/ui/FriendsScreen.kt`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |
 | Oura history import | OAuth token / scope leakage, cross-account data mixing | Compiled out by default (`OURA_CLOUD_IMPORT`, §1.1b); tokens Keychain-only (`kSecAttrAccessibleAfterFirstUnlock`, never UserDefaults/plist); fixed OAuth scopes set at build time; raw + normalized rows partitioned under `deviceId = "oura-api"`; Oura's own scores kept reference-only (`ref_*`/`oura_*` metricSeries keys, never NOOP's Charge/Effort/Rest); `.cloudImport` is structurally priority-2 so it never seizes a WHOOP day; Forget Oura access purges tokens + every `oura-api` row incl. the raw archive | `Strand/Oura/OuraTokenStore.swift`, `Strand/Oura/OuraConnectModel.swift`, `Packages/WhoopStore/Sources/WhoopStore/OuraRawStore.swift` |

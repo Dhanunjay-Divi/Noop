@@ -112,6 +112,8 @@ class Settings:
     public_base_url: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
+    twilio_api_key_sid: str | None = None
+    twilio_api_key_secret: str | None = None
     twilio_from_phone: str | None = None
     twilio_status_callback_secret: str | None = None
     safety_capability_secret: str | None = None
@@ -259,6 +261,8 @@ class Settings:
             public_base_url=os.getenv("NOOP_PUBLIC_BASE_URL"),
             twilio_account_sid=os.getenv("NOOP_TWILIO_ACCOUNT_SID"),
             twilio_auth_token=os.getenv("NOOP_TWILIO_AUTH_TOKEN"),
+            twilio_api_key_sid=os.getenv("NOOP_TWILIO_API_KEY_SID"),
+            twilio_api_key_secret=os.getenv("NOOP_TWILIO_API_KEY_SECRET"),
             twilio_from_phone=os.getenv("NOOP_TWILIO_FROM_PHONE"),
             twilio_status_callback_secret=os.getenv(
                 "NOOP_TWILIO_STATUS_CALLBACK_SECRET"
@@ -536,9 +540,19 @@ class Settings:
             self.twilio_status_callback_secret,
             self.safety_capability_secret,
         )
-        if any(paging_values) and not all(paging_values):
+        api_key_values = (
+            self.twilio_api_key_sid,
+            self.twilio_api_key_secret,
+        )
+        if any((*paging_values, *api_key_values)) and not all(paging_values):
             raise RuntimeError(
-                "paging requires NOOP_PUBLIC_BASE_URL and every NOOP_TWILIO_* setting"
+                "paging requires NOOP_PUBLIC_BASE_URL, account Auth Token, "
+                "sender, and both application secrets"
+            )
+        if any(api_key_values) and not all(api_key_values):
+            raise RuntimeError(
+                "NOOP_TWILIO_API_KEY_SID and NOOP_TWILIO_API_KEY_SECRET "
+                "must be configured together"
             )
         if self.paging_configured:
             public = urlsplit(self.public_base_url or "")
@@ -551,8 +565,20 @@ class Settings:
                 or public.fragment
             ):
                 raise RuntimeError("NOOP_PUBLIC_BASE_URL must be a public HTTPS origin")
-            if not (self.twilio_account_sid or "").startswith("AC"):
-                raise RuntimeError("NOOP_TWILIO_ACCOUNT_SID must start with AC")
+            if not re.fullmatch(
+                r"AC[0-9A-Fa-f]{32}",
+                self.twilio_account_sid or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_TWILIO_ACCOUNT_SID must be an AC-prefixed Twilio SID"
+                )
+            if self.twilio_api_key_sid and not re.fullmatch(
+                r"SK[0-9A-Fa-f]{32}",
+                self.twilio_api_key_sid,
+            ):
+                raise RuntimeError(
+                    "NOOP_TWILIO_API_KEY_SID must be an SK-prefixed Twilio SID"
+                )
             phone = self.twilio_from_phone or ""
             if not (
                 phone.startswith("+")
@@ -563,6 +589,11 @@ class Settings:
                 raise RuntimeError("NOOP_TWILIO_FROM_PHONE must use E.164 format")
             if len((self.twilio_auth_token or "").encode("utf-8")) < 16:
                 raise RuntimeError("NOOP_TWILIO_AUTH_TOKEN is too short")
+            if (
+                self.twilio_api_key_secret
+                and len(self.twilio_api_key_secret.encode("utf-8")) < 16
+            ):
+                raise RuntimeError("NOOP_TWILIO_API_KEY_SECRET is too short")
             if len((self.twilio_status_callback_secret or "").encode("utf-8")) < 32:
                 raise RuntimeError(
                     "NOOP_TWILIO_STATUS_CALLBACK_SECRET must be at least 32 bytes"

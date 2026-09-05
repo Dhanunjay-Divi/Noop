@@ -322,16 +322,28 @@ final class AppModel: ObservableObject {
             switch try PendingDatabaseRestore.applyIfPresent(toDatabaseAt: path) {
             case .none:
                 break
-            case .applied(let safetySnapshot):
-                NSLog("NOOP: applied pending restore before app-model startup; previous database saved at \(safetySnapshot.path)")
-            case .discarded(let reason):
-                NSLog("NOOP: discarded pending restore safely before app-model startup: \(reason)")
+            case .applied:
+                AppDiagnosticsRecorder.shared.record(
+                    "database_restore.cold_launch",
+                    fields: ["outcome": "applied"]
+                )
+            case .discarded:
+                AppDiagnosticsRecorder.shared.record(
+                    "database_restore.cold_launch",
+                    fields: ["outcome": "discarded"]
+                )
             }
         } catch {
             // The per-process claim prevents StoreOpenGate from retrying after ProfileStore/BLE/Repository
             // have been constructed; it repeats the recorded failure instead of opening an uncertain
             // store. The untouched pending manifest is retried from this same cold boundary next launch.
-            NSLog("NOOP: pending restore deferred after a safe startup failure: \(error.localizedDescription)")
+            AppDiagnosticsRecorder.shared.record(
+                "database_restore.cold_launch",
+                fields: [
+                    "outcome": "deferred",
+                    "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+                ]
+            )
         }
     }
 
@@ -1899,6 +1911,20 @@ final class AppModel: ObservableObject {
     /// button and the Buzz Strap App Intent both route through this single sequence.
     func buzzStrapOnce() {
         ble.buzzStrapOnce()
+    }
+
+    /// Best-effort receiver-side handoff for an explicitly enabled managed Friends poke. The caller
+    /// acknowledges only that an eligible command was requested; BLE acceptance still requires
+    /// physical-device evidence and is never inferred from this return value.
+    func requestManagedSocialPokeHaptic() -> Bool {
+        guard live.connected,
+              live.bonded,
+              live.encryptedBond,
+              live.worn else {
+            return false
+        }
+        buzz(loops: 1)
+        return true
     }
 
     /// Fire a specific preset haptic pattern (patternId 0–6 on Harvard; loops sets length).

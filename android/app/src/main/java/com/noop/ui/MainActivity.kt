@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
+        stageManagedFriendsLink(intent)
         // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
         // trusted route now; AppRoot consumes it once its navigation host mounts.
         NotificationRouteBridge.recordFromIntent(applicationContext, intent)
@@ -182,10 +183,23 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         super.onNewIntent(intent)
         setIntent(intent)
         demoRoute = intent.getStringExtra(EXTRA_DEMO_ROUTE).takeIf { BuildConfig.DEBUG }
+        stageManagedFriendsLink(intent)
         // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
         // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
         NotificationRouteBridge.recordFromIntent(applicationContext, intent)
         requestDemoReportIfNeeded()
+    }
+
+    private fun stageManagedFriendsLink(intent: Intent) {
+        val service = (application as NoopApplication).managedCloud
+        val staged = service.stageSocialProfileLink(intent.data) ||
+            service.stageSocialInviteLink(intent.data)
+        if (!staged) return
+        intent.data = null
+        intent.putExtra(
+            NotificationRouteBridge.EXTRA_ROUTE,
+            NoopNotificationRoute.FRIENDS.navRoute,
+        )
     }
 
     override fun onSensorChanged(event: SensorEvent) {

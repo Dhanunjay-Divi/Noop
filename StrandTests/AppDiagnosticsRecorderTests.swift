@@ -18,6 +18,15 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         XCTAssertEqual(accumulator.meanDurationMs, 91.25, accuracy: 0.001)
     }
 
+    func testFreshnessBucketsDoNotRetainHealthTimestamps() {
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: nil), "missing")
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: -120), "future_clock")
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: 30), "under_2m")
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: 300), "2m_to_15m")
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: 1_800), "15m_to_2h")
+        XCTAssertEqual(AppDiagnosticsRecorder.freshnessBucket(ageSeconds: 8_000), "over_2h")
+    }
+
     func testBoundedTailKeepsNewestCompleteJSONLines() throws {
         let lines = (0..<200).map {
             "{\"schema\":1,\"event\":\"sample\",\"fields\":{\"index\":\"\($0)\"}}\n"
@@ -117,6 +126,43 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         )
     }
 
+    func testSensitiveFieldNamesAreDroppedAtRecorderBoundary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noop-app-redaction-\(UUID())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let recorder = AppDiagnosticsRecorder(directory: directory)
+        recorder.start(subscribeToSystem: false)
+        recorder.record(
+            "test.redaction",
+            fields: [
+                "route": "/v1/managed/chunks/{chunk_id}",
+                "authorization": "Bearer private-value",
+                "phone_number": "+15555550123",
+                "installation_id": "noop-private-installation",
+                "request_url": "https://private.example/signed",
+                "user_note": "private user text",
+            ]
+        )
+
+        let current = try XCTUnwrap(recorder.diagnosticEntries().first {
+            $0.name == AppDiagnosticsRecorder.currentSessionEntryName
+        })
+        let text = try XCTUnwrap(String(data: current.data, encoding: .utf8))
+        let event = try XCTUnwrap(text.split(separator: "\n").last)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(event.utf8)) as? [String: Any]
+        )
+        let fields = try XCTUnwrap(object["fields"] as? [String: String])
+        XCTAssertEqual(fields["route"], "/v1/managed/chunks/{chunk_id}")
+        XCTAssertEqual(fields["redacted_fields"], "5")
+        XCTAssertFalse(text.contains("private-value"))
+        XCTAssertFalse(text.contains("15555550123"))
+        XCTAssertFalse(text.contains("noop-private-installation"))
+        XCTAssertFalse(text.contains("private.example"))
+        XCTAssertFalse(text.contains("private user text"))
+    }
+
     @MainActor
     func testAppHangBundleExcludesResearchDataAndQuestionnaire() throws {
         let capture = FileManager.default.temporaryDirectory
@@ -130,9 +176,17 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
 
         let live = LiveState()
         live.puffinCaptureURL = capture
+        live.append(log: "private health evidence bpm=137 hrv=42")
+        let storage = TestBundleMeta.Storage(
+            dbBytes: 123,
+            rows: ["hr": 456],
+            rawCaptureBytes: 789,
+            latestHrUnix: 1_788_000_123
+        )
         let entries = TestBundleAssembler.assemble(
             profile: .master,
             live: live,
+            storage: storage,
             purpose: .appHang
         )
         let names = Set(entries.map(\.name))
@@ -144,13 +198,18 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         XCTAssertFalse(names.contains { $0.hasPrefix("oura-") })
         XCTAssertFalse(names.contains { $0.hasSuffix(".sqlite") || $0.hasSuffix(".db") })
         XCTAssertFalse(entries.contains { String(decoding: $0.data, as: UTF8.self).contains("must-not-ship") })
+        XCTAssertFalse(entries.contains { String(decoding: $0.data, as: UTF8.self).contains("bpm=137") })
+        XCTAssertFalse(entries.contains { String(decoding: $0.data, as: UTF8.self).contains("hrv=42") })
+        XCTAssertFalse(entries.contains { String(decoding: $0.data, as: UTF8.self).contains("1788000123") })
 
         let metaEntry = try XCTUnwrap(entries.first { $0.name == "meta.json" })
         let meta = try JSONDecoder().decode(TestBundleMeta.self, from: metaEntry.data)
         XCTAssertEqual(meta.testProfile, "app-hang")
+        XCTAssertEqual(meta.source, ["App runtime diagnostics"])
         XCTAssertTrue(meta.questionnaire.isEmpty)
         XCTAssertTrue(meta.captureCheck.isEmpty)
         XCTAssertNil(meta.profileStartedAt)
+        XCTAssertNil(meta.storage.latestHrUnix)
     }
 
     @MainActor

@@ -47,6 +47,7 @@ object NotificationLifecycleId {
     const val DAILY_REVIEW_EVENING = "daily_review_evening"
     const val ADAPTIVE_DAY = "adaptive_day"
     const val WORKOUT_CAUTION = "workout_caution"
+    const val MANAGED_FRIENDS_POKE = "managed_friends_poke"
 
     internal val all = setOf(
         CONNECTION_SERVICE,
@@ -74,6 +75,7 @@ object NotificationLifecycleId {
         DAILY_REVIEW_EVENING,
         ADAPTIVE_DAY,
         WORKOUT_CAUTION,
+        MANAGED_FRIENDS_POKE,
     )
 }
 

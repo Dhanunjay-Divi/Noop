@@ -16,9 +16,20 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
+data class ManagedStorageRequestDiagnostic(
+    val target: String,
+    val routeGroup: String,
+    val method: String,
+    val statusCode: Int?,
+    val durationMilliseconds: Long,
+    val requestId: String?,
+    val outcome: String,
+)
+
 class ManagedStorageClient(
     private val configuration: ManagedStorageConfiguration,
     private val http: OkHttpClient = defaultHttp(configuration.timeoutSeconds),
+    private val requestObserver: (ManagedStorageRequestDiagnostic) -> Unit = {},
 ) : ManagedStorageTransport {
     suspend fun overview(
         authorization: ManagedAuthorization,
@@ -122,6 +133,491 @@ class ManagedStorageClient(
             response.optJSONObject("installation")
                 ?: throw ManagedStorageException.InvalidResponse(),
         )
+    }
+
+    suspend fun createSocialProfile(
+        authorization: ManagedAuthorization,
+        displayName: String,
+        requestId: UUID,
+    ): ManagedSocialProfile = withContext(Dispatchers.IO) {
+        val normalized = displayName.trim()
+        if (normalized.length !in 1..64) {
+            throw IllegalArgumentException("Invalid managed Friends display name")
+        }
+        parseSocialProfile(
+            executeJson(
+                apiRequest("v1/managed/social/profile", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("display_name", normalized)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("profile"),
+        )
+    }
+
+    suspend fun socialProfile(
+        authorization: ManagedAuthorization,
+    ): ManagedSocialProfile = withContext(Dispatchers.IO) {
+        parseSocialProfile(
+            executeJson(
+                apiRequest("v1/managed/social/profile", authorization)
+                    .get()
+                    .build(),
+            ).requireObject("profile"),
+        )
+    }
+
+    suspend fun deleteSocialProfile(
+        authorization: ManagedAuthorization,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest("v1/managed/social/profile", authorization)
+                .header("X-Noop-Confirm", "DELETE MANAGED FRIENDS")
+                .delete()
+                .build(),
+        )
+    }
+
+    suspend fun updateSocialProfile(
+        authorization: ManagedAuthorization,
+        patch: ManagedSocialProfilePatch,
+    ): ManagedSocialProfile = withContext(Dispatchers.IO) {
+        if (!patch.hasChange ||
+            patch.displayName?.trim()?.length?.let { it !in 1..64 } == true ||
+            patch.quietStartMinute?.let { it !in 0..1439 } == true ||
+            patch.quietEndMinute?.let { it !in 0..1439 } == true ||
+            patch.timeZone?.let { it.isBlank() || it.length > 64 } == true
+        ) {
+            throw IllegalArgumentException("Invalid managed Friends profile patch")
+        }
+        val body = JSONObject().apply {
+            patch.displayName?.let { put("display_name", it.trim()) }
+            patch.pokeOptIn?.let { put("poke_opt_in", it) }
+            patch.quietStartMinute?.let { put("quiet_start_minute", it) }
+            patch.quietEndMinute?.let { put("quiet_end_minute", it) }
+            patch.timeZone?.let { put("time_zone", it) }
+        }
+        parseSocialProfile(
+            executeJson(
+                apiRequest("v1/managed/social/profile", authorization)
+                    .patch(body.toString().toRequestBody(JSON))
+                    .build(),
+            ).requireObject("profile"),
+        )
+    }
+
+    suspend fun rotateSocialNoopId(
+        authorization: ManagedAuthorization,
+    ): ManagedSocialProfile = withContext(Dispatchers.IO) {
+        parseSocialProfile(
+            executeJson(
+                apiRequest("v1/managed/social/noop-id:rotate", authorization)
+                    .post(EMPTY_BODY)
+                    .build(),
+            ).requireObject("profile"),
+        )
+    }
+
+    suspend fun lookupSocialProfile(
+        authorization: ManagedAuthorization,
+        noopId: String,
+    ): ManagedSocialLookupProfile = withContext(Dispatchers.IO) {
+        val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+            ?: throw IllegalArgumentException("Invalid NOOP ID")
+        val row = executeJson(
+            apiRequest(
+                "v1/managed/social/lookup?noop_id=${queryValue(canonical)}",
+                authorization,
+            ).get().build(),
+        ).requireObject("profile")
+        val profile = ManagedSocialLookupProfile(
+            profileId = uuidOrThrow(row.optString("profile_id")),
+            displayName = row.optString("display_name").requiredText(),
+            noopId = row.optString("noop_id"),
+            isSelf = row.requiredBoolean("self"),
+        )
+        if (profile.displayName.length > 64 ||
+            ManagedSocialIdentifier.canonicalNoopId(profile.noopId) != profile.noopId
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        profile
+    }
+
+    suspend fun createSocialInvite(
+        authorization: ManagedAuthorization,
+        capability: String,
+        requestId: UUID,
+        expiresInHours: Int = 72,
+    ): ManagedSocialInvite = withContext(Dispatchers.IO) {
+        if (!ManagedSocialIdentifier.invitePattern.matches(capability) ||
+            expiresInHours !in 1..168
+        ) {
+            throw IllegalArgumentException("Invalid managed Friends invitation")
+        }
+        val invite = parseSocialInvite(
+            executeJson(
+                apiRequest("v1/managed/social/invites", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("capability", capability)
+                            .put("expires_in_hours", expiresInHours)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("invite"),
+        )
+        if (invite.capability != capability) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        invite
+    }
+
+    suspend fun revokeSocialInvite(
+        authorization: ManagedAuthorization,
+        inviteId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/social/invites/${inviteId.toString().lowercase()}",
+                authorization,
+            ).delete().build(),
+        )
+    }
+
+    suspend fun redeemSocialInvite(
+        authorization: ManagedAuthorization,
+        capability: String,
+        requestId: UUID,
+    ): ManagedSocialRequest = withContext(Dispatchers.IO) {
+        if (!ManagedSocialIdentifier.invitePattern.matches(capability)) {
+            throw IllegalArgumentException("Invalid managed Friends invitation")
+        }
+        parseSocialRequest(
+            executeJson(
+                apiRequest("v1/managed/social/invites:redeem", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("capability", capability)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun createSocialRequest(
+        authorization: ManagedAuthorization,
+        noopId: String,
+        requestId: UUID,
+    ): ManagedSocialRequest = withContext(Dispatchers.IO) {
+        val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+            ?: throw IllegalArgumentException("Invalid NOOP ID")
+        parseSocialRequest(
+            executeJson(
+                apiRequest("v1/managed/social/requests", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("noop_id", canonical)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun socialRequests(
+        authorization: ManagedAuthorization,
+    ): List<ManagedSocialRequest> = withContext(Dispatchers.IO) {
+        val rows = executeJson(
+            apiRequest("v1/managed/social/requests", authorization)
+                .get()
+                .build(),
+        ).requireArray("requests")
+        if (rows.length() > 100) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSocialRequest(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun decideSocialRequest(
+        authorization: ManagedAuthorization,
+        requestId: UUID,
+        accept: Boolean,
+    ): ManagedSocialRequest = withContext(Dispatchers.IO) {
+        parseSocialRequest(
+            executeJson(
+                apiRequest(
+                    "v1/managed/social/requests/${requestId.toString().lowercase()}",
+                    authorization,
+                ).post(
+                    JSONObject()
+                        .put("decision", if (accept) "accept" else "decline")
+                        .toString()
+                        .toRequestBody(JSON),
+                ).build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun socialFriends(
+        authorization: ManagedAuthorization,
+    ): List<ManagedSocialFriend> = withContext(Dispatchers.IO) {
+        val rows = executeJson(
+            apiRequest("v1/managed/social/friends", authorization)
+                .get()
+                .build(),
+        ).requireArray("friends")
+        if (rows.length() > 500) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSocialFriend(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun updateSocialVisibility(
+        authorization: ManagedAuthorization,
+        friendProfileId: UUID,
+        patch: ManagedSocialVisibilityPatch,
+    ): ManagedSocialVisibility = withContext(Dispatchers.IO) {
+        if (!patch.hasChange) {
+            throw IllegalArgumentException("Managed Friends privacy patch is empty")
+        }
+        val body = JSONObject().apply {
+            patch.charge?.let { put("charge", it) }
+            patch.effort?.let { put("effort", it) }
+            patch.rest?.let { put("rest", it) }
+            patch.sleepDuration?.let { put("sleep_duration", it) }
+            patch.hrv?.let { put("hrv", it) }
+            patch.rhr?.let { put("rhr", it) }
+            patch.pokeAllowed?.let { put("poke_allowed", it) }
+        }
+        parseSocialVisibility(
+            executeJson(
+                apiRequest(
+                    "v1/managed/social/friends/" +
+                        "${friendProfileId.toString().lowercase()}/privacy",
+                    authorization,
+                ).patch(body.toString().toRequestBody(JSON)).build(),
+            ).requireObject("sharing"),
+        )
+    }
+
+    suspend fun removeSocialFriend(
+        authorization: ManagedAuthorization,
+        profileId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/social/friends/${profileId.toString().lowercase()}",
+                authorization,
+            ).delete().build(),
+        )
+    }
+
+    suspend fun blockSocialProfile(
+        authorization: ManagedAuthorization,
+        profileId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/social/blocks/${profileId.toString().lowercase()}",
+                authorization,
+            ).post(EMPTY_BODY).build(),
+        )
+    }
+
+    suspend fun socialBlockedProfiles(
+        authorization: ManagedAuthorization,
+    ): List<ManagedSocialBlockedProfile> = withContext(Dispatchers.IO) {
+        val rows = executeJson(
+            apiRequest("v1/managed/social/blocks", authorization)
+                .get()
+                .build(),
+        ).requireArray("blocks")
+        if (rows.length() > 500) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSocialBlockedProfile(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun unblockSocialProfile(
+        authorization: ManagedAuthorization,
+        profileId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/social/blocks/${profileId.toString().lowercase()}",
+                authorization,
+            ).delete().build(),
+        )
+    }
+
+    suspend fun putSocialSummary(
+        authorization: ManagedAuthorization,
+        day: String,
+        summary: ManagedSocialSummary,
+        requestId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        if (!isDay(day) || !valid(summary)) {
+            throw IllegalArgumentException("Invalid managed Friends summary")
+        }
+        val body = JSONObject()
+            .put("request_id", requestId.toString())
+            .put("summary", socialSummaryJson(summary))
+        val response = executeJson(
+            apiRequest("v1/managed/social/summaries/$day", authorization)
+                .put(body.toString().toRequestBody(JSON))
+                .build(),
+        )
+        if (!response.has("summary")) throw ManagedStorageException.InvalidResponse()
+    }
+
+    suspend fun socialFeed(
+        authorization: ManagedAuthorization,
+        startDay: String,
+        endDay: String,
+    ): List<ManagedSocialFeedDay> = withContext(Dispatchers.IO) {
+        if (!isDay(startDay) || !isDay(endDay)) {
+            throw IllegalArgumentException("Invalid managed Friends feed range")
+        }
+        val response = executeJson(
+            apiRequest(
+                "v1/managed/social/feed?start=$startDay&end=$endDay",
+                authorization,
+            ).get().build(),
+        )
+        if (response.optString("start") != startDay ||
+            response.optString("end") != endDay
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val rows = response.requireArray("days")
+        if (rows.length() > 45_000) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                val row = rows.requireObject(index)
+                val day = row.optString("day")
+                val displayName = row.optString("display_name").requiredText()
+                if (!isDay(day) || displayName.length > 64) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+                add(
+                    ManagedSocialFeedDay(
+                        profileId = uuidOrThrow(row.optString("profile_id")),
+                        displayName = displayName,
+                        day = day,
+                        summary = parseSocialSummary(row.requireObject("summary")),
+                    ),
+                )
+            }
+        }
+    }
+
+    suspend fun createSocialPoke(
+        authorization: ManagedAuthorization,
+        recipientProfileId: UUID,
+        requestId: UUID,
+    ): ManagedSocialPoke = withContext(Dispatchers.IO) {
+        val poke = parseSocialPoke(
+            executeJson(
+                apiRequest("v1/managed/social/pokes", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put(
+                                "recipient_profile_id",
+                                recipientProfileId.toString(),
+                            )
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("poke"),
+        )
+        if (poke.recipientProfileId != recipientProfileId ||
+            poke.status != "queued"
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        poke
+    }
+
+    suspend fun claimSocialPokes(
+        authorization: ManagedAuthorization,
+        limit: Int = 3,
+    ): List<ManagedSocialPokeClaim> = withContext(Dispatchers.IO) {
+        if (limit !in 1..10) throw IllegalArgumentException("Invalid poke claim limit")
+        val rows = executeJson(
+            apiRequest(
+                "v1/managed/social/pokes:claim?limit=$limit",
+                authorization,
+            ).post(EMPTY_BODY).build(),
+        ).requireArray("pokes")
+        if (rows.length() > limit) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSocialPokeClaim(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun acknowledgeSocialPoke(
+        authorization: ManagedAuthorization,
+        pokeId: UUID,
+        acknowledgement: ManagedSocialPokeAcknowledgement,
+    ): ManagedSocialPokeReceipt = withContext(Dispatchers.IO) {
+        if (acknowledgement.notificationOutcome !in NOTIFICATION_OUTCOMES ||
+            acknowledgement.hapticOutcome !in HAPTIC_OUTCOMES
+        ) {
+            throw IllegalArgumentException("Invalid managed poke acknowledgement")
+        }
+        val row = executeJson(
+            apiRequest(
+                "v1/managed/social/pokes/${pokeId.toString().lowercase()}:ack",
+                authorization,
+            ).post(
+                JSONObject()
+                    .put("claim_id", acknowledgement.claimId.toString())
+                    .put(
+                        "notification_outcome",
+                        acknowledgement.notificationOutcome,
+                    )
+                    .put("haptic_outcome", acknowledgement.hapticOutcome)
+                    .toString()
+                    .toRequestBody(JSON),
+            ).build(),
+        ).requireObject("poke")
+        val receipt = ManagedSocialPokeReceipt(
+            pokeId = uuidOrThrow(row.optString("poke_id")),
+            status = row.optString("status"),
+            duplicate = row.optBoolean("duplicate", false),
+            notificationOutcome = row.optString("notification_outcome"),
+            hapticOutcome = row.optString("haptic_outcome"),
+        )
+        if (receipt.pokeId != pokeId ||
+            receipt.status != "acknowledged" ||
+            receipt.notificationOutcome != acknowledgement.notificationOutcome ||
+            receipt.hapticOutcome != acknowledgement.hapticOutcome
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        receipt
     }
 
     suspend fun requestErasure(
@@ -895,6 +1391,214 @@ class ManagedStorageClient(
         )
     }
 
+    private fun parseSocialProfile(value: JSONObject): ManagedSocialProfile {
+        val badges = parseSocialBadges(value.optJSONArray("badges") ?: JSONArray())
+        val profile = ManagedSocialProfile(
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            noopId = value.optString("noop_id"),
+            pokeOptIn = value.requiredBoolean("poke_opt_in"),
+            quietStartMinute = value.requiredNonnegativeInt("quiet_start_minute"),
+            quietEndMinute = value.requiredNonnegativeInt("quiet_end_minute"),
+            timeZone = value.optString("time_zone").requiredText(),
+            createdAt = value.optString("created_at").requiredInstant(),
+            updatedAt = value.optString("updated_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+            badges = badges,
+        )
+        if (profile.displayName.length > 64 ||
+            ManagedSocialIdentifier.canonicalNoopId(profile.noopId) != profile.noopId ||
+            profile.quietStartMinute !in 0..1439 ||
+            profile.quietEndMinute !in 0..1439 ||
+            profile.timeZone.length > 64
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return profile
+    }
+
+    private fun parseSocialBadges(values: JSONArray): List<ManagedSocialBadge> {
+        if (values.length() > 3) throw ManagedStorageException.InvalidResponse()
+        return buildList {
+            for (index in 0 until values.length()) {
+                val row = values.requireObject(index)
+                val badge = ManagedSocialBadge(
+                    code = row.optString("code"),
+                    earnedAt = row.optString("earned_at").requiredInstant(),
+                )
+                if (badge.code !in SOCIAL_BADGES) {
+                    throw ManagedStorageException.InvalidResponse()
+                }
+                add(badge)
+            }
+        }
+    }
+
+    private fun parseSocialInvite(value: JSONObject): ManagedSocialInvite {
+        val invite = ManagedSocialInvite(
+            inviteId = uuidOrThrow(value.optString("invite_id")),
+            capability = value.optString("capability"),
+            status = value.optString("status"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (!ManagedSocialIdentifier.invitePattern.matches(invite.capability) ||
+            invite.status !in setOf("active", "revoked", "redeemed", "expired")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return invite
+    }
+
+    private fun parseSocialRequest(value: JSONObject): ManagedSocialRequest {
+        val request = ManagedSocialRequest(
+            requestId = uuidOrThrow(value.optString("request_id")),
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            direction = value.optString("direction"),
+            source = value.optString("source"),
+            status = value.optString("status"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            decidedAt = value.optString("decided_at")
+                .takeIf(String::isNotBlank)
+                ?.requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (request.displayName.length > 64 ||
+            request.direction !in setOf("incoming", "outgoing") ||
+            request.source !in setOf("noop_id", "invite") ||
+            request.status !in setOf("pending", "accepted", "declined")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return request
+    }
+
+    private fun parseSocialFriend(value: JSONObject): ManagedSocialFriend {
+        val latest = value.optJSONObject("latest")?.let { row ->
+            val day = row.optString("day")
+            if (!isDay(day)) throw ManagedStorageException.InvalidResponse()
+            ManagedSocialLatestSummary(
+                day = day,
+                summary = parseSocialSummary(row.requireObject("summary")),
+            )
+        }
+        val friend = ManagedSocialFriend(
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            friendsSince = value.optString("friends_since").requiredInstant(),
+            sharing = parseSocialVisibility(value.requireObject("sharing")),
+            sharedWithMe = parseSocialVisibility(
+                value.requireObject("shared_with_me"),
+            ),
+            latest = latest,
+            badges = parseSocialBadges(
+                value.optJSONArray("badges") ?: JSONArray(),
+            ),
+        )
+        if (friend.displayName.length > 64) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return friend
+    }
+
+    private fun parseSocialBlockedProfile(
+        value: JSONObject,
+    ): ManagedSocialBlockedProfile {
+        val blocked = ManagedSocialBlockedProfile(
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            blockedAt = value.optString("blocked_at").requiredInstant(),
+        )
+        if (blocked.displayName.length > 64) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return blocked
+    }
+
+    private fun parseSocialVisibility(value: JSONObject): ManagedSocialVisibility =
+        ManagedSocialVisibility(
+            charge = value.requiredBoolean("charge"),
+            effort = value.requiredBoolean("effort"),
+            rest = value.requiredBoolean("rest"),
+            sleepDuration = value.requiredBoolean("sleep_duration"),
+            hrv = value.requiredBoolean("hrv"),
+            rhr = value.requiredBoolean("rhr"),
+            pokeAllowed = value.requiredBoolean("poke_allowed"),
+        )
+
+    private fun parseSocialSummary(value: JSONObject): ManagedSocialSummary {
+        val supported = setOf(
+            "charge",
+            "effort",
+            "rest",
+            "sleep_duration",
+            "hrv",
+            "rhr",
+        )
+        if (value.keys().asSequence().any { it !in supported }) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        val summary = ManagedSocialSummary(
+            charge = value.optionalFiniteDouble("charge"),
+            effort = value.optionalFiniteDouble("effort"),
+            rest = value.optionalFiniteDouble("rest"),
+            sleepDuration = value.optionalFiniteDouble("sleep_duration"),
+            hrv = value.optionalFiniteDouble("hrv"),
+            rhr = value.optionalFiniteDouble("rhr"),
+        )
+        if (!valid(summary)) throw ManagedStorageException.InvalidResponse()
+        return summary
+    }
+
+    private fun socialSummaryJson(summary: ManagedSocialSummary): JSONObject =
+        JSONObject().apply {
+            summary.charge?.let { put("charge", it) }
+            summary.effort?.let { put("effort", it) }
+            summary.rest?.let { put("rest", it) }
+            summary.sleepDuration?.let { put("sleep_duration", it) }
+            summary.hrv?.let { put("hrv", it) }
+            summary.rhr?.let { put("rhr", it) }
+        }
+
+    private fun parseSocialPoke(value: JSONObject): ManagedSocialPoke {
+        val poke = ManagedSocialPoke(
+            pokeId = uuidOrThrow(value.optString("poke_id")),
+            recipientProfileId = uuidOrThrow(
+                value.optString("recipient_profile_id"),
+            ),
+            recipientDisplayName = value.optString(
+                "recipient_display_name",
+            ).requiredText(),
+            status = value.optString("status"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (poke.recipientDisplayName.length > 64) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return poke
+    }
+
+    private fun parseSocialPokeClaim(value: JSONObject): ManagedSocialPokeClaim {
+        val claim = ManagedSocialPokeClaim(
+            pokeId = uuidOrThrow(value.optString("poke_id")),
+            claimId = uuidOrThrow(value.optString("claim_id")),
+            senderProfileId = uuidOrThrow(value.optString("sender_profile_id")),
+            senderDisplayName = value.optString("sender_display_name").requiredText(),
+            createdAt = value.optString("created_at").requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            claimExpiresAt = value.optString("claim_expires_at").requiredInstant(),
+        )
+        if (claim.senderDisplayName.length > 64) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return claim
+    }
+
     private fun executeJson(request: Request): JSONObject {
         val response = execute(request)
         response.use {
@@ -905,10 +1609,75 @@ class ManagedStorageClient(
         }
     }
 
-    private fun execute(request: Request) = try {
-        http.newCall(request).execute()
-    } catch (error: IOException) {
-        throw ManagedStorageException.Network(error)
+    private fun executeNoContent(request: Request) {
+        val response = execute(request)
+        response.use {
+            val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
+            if (!it.isSuccessful) throw serverError(it.code, body)
+            if (it.code !in setOf(200, 202, 204) || body.isNotBlank()) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+    }
+
+    private fun execute(request: Request): okhttp3.Response {
+        val startedAt = System.nanoTime()
+        return try {
+            http.newCall(request).execute().also { response ->
+                observe(
+                    request = request,
+                    statusCode = response.code,
+                    requestId = response.header("X-Noop-Request-ID"),
+                    startedAt = startedAt,
+                    outcome = if (response.isSuccessful) "completed" else "rejected",
+                )
+            }
+        } catch (error: IOException) {
+            observe(
+                request = request,
+                statusCode = null,
+                requestId = null,
+                startedAt = startedAt,
+                outcome = "transport_failed",
+            )
+            throw ManagedStorageException.Network(error)
+        }
+    }
+
+    private fun observe(
+        request: Request,
+        statusCode: Int?,
+        requestId: String?,
+        startedAt: Long,
+        outcome: String,
+    ) {
+        val base = configuration.baseUrl.toHttpUrlOrNull()
+        val managedApi = base != null &&
+            request.url.scheme.equals(base.scheme, ignoreCase = true) &&
+            request.url.host.equals(base.host, ignoreCase = true) &&
+            request.url.port == base.port
+        val routeGroup = if (managedApi) {
+            "/" + request.url.pathSegments.take(3).joinToString("/")
+        } else {
+            "object_store"
+        }
+        val boundedRequestId = requestId?.takeIf { it.matches(REQUEST_ID) }
+        runCatching {
+            requestObserver(
+                ManagedStorageRequestDiagnostic(
+                    target = if (managedApi) "managed_api" else "object_store",
+                    routeGroup = routeGroup,
+                    method = request.method.uppercase(),
+                    statusCode = statusCode,
+                    durationMilliseconds = (
+                        (System.nanoTime() - startedAt).coerceAtLeast(0L) /
+                            1_000_000L
+                        ),
+                    requestId = boundedRequestId,
+                    outcome = outcome,
+                ),
+            )
+        }
     }
 
     private fun serverError(statusCode: Int, body: String): ManagedStorageException = when (statusCode) {
@@ -950,6 +1719,30 @@ class ManagedStorageClient(
         return value.takeIf { it <= Int.MAX_VALUE }?.toInt()
             ?: throw ManagedStorageException.InvalidResponse()
     }
+
+    private fun JSONObject.requiredBoolean(name: String): Boolean {
+        if (!has(name) || isNull(name) || get(name) !is Boolean) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return getBoolean(name)
+    }
+
+    private fun JSONObject.optionalFiniteDouble(name: String): Double? {
+        if (!has(name) || isNull(name)) return null
+        val value = runCatching { getDouble(name) }
+            .getOrElse { throw ManagedStorageException.InvalidResponse() }
+        return value.takeIf(Double::isFinite)
+            ?: throw ManagedStorageException.InvalidResponse()
+    }
+
+    private fun JSONObject.requireObject(name: String): JSONObject =
+        optJSONObject(name) ?: throw ManagedStorageException.InvalidResponse()
+
+    private fun JSONObject.requireArray(name: String): JSONArray =
+        optJSONArray(name) ?: throw ManagedStorageException.InvalidResponse()
+
+    private fun JSONArray.requireObject(index: Int): JSONObject =
+        optJSONObject(index) ?: throw ManagedStorageException.InvalidResponse()
 
     private fun JSONObject.requiredPositiveInt(name: String): Int {
         val value = requiredNonnegativeInt(name)
@@ -995,13 +1788,36 @@ class ManagedStorageClient(
         return value
     }
 
+    private fun valid(summary: ManagedSocialSummary): Boolean =
+        listOf(
+            summary.charge to 0.0..100.0,
+            summary.effort to 0.0..100.0,
+            summary.rest to 0.0..100.0,
+            summary.sleepDuration to 0.0..2_880.0,
+            summary.hrv to 0.0..1_000.0,
+            summary.rhr to 20.0..260.0,
+        ).all { (value, range) ->
+            value == null || value.isFinite() && value in range
+        }
+
+    private fun isDay(value: String): Boolean =
+        value.matches(Regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) &&
+            runCatching { java.time.LocalDate.parse(value) }.isSuccess
+
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+        private val EMPTY_BODY = ByteArray(0).toRequestBody(null)
         private val CRC32C = Regex("^[A-Za-z0-9+/]{6}==$")
+        private val REQUEST_ID = Regex("^[0-9a-f]{32}$")
         private val SHA256 = Regex("^[0-9a-f]{64}$")
         private val DATA_CLASS = Regex("^[a-z][a-z0-9_]{1,63}$")
         private val INSTALLATION_ID =
             Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+        private val SOCIAL_BADGES = setOf("connected", "steady_week", "steady_month")
+        private val NOTIFICATION_OUTCOMES =
+            setOf("scheduled", "not_authorized", "failed")
+        private val HAPTIC_OUTCOMES =
+            setOf("requested", "band_unavailable", "not_eligible", "failed")
 
         internal fun defaultHttp(timeoutSeconds: Long): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(minOf(timeoutSeconds, 20), TimeUnit.SECONDS)

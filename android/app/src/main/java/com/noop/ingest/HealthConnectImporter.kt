@@ -939,7 +939,14 @@ object HealthConnectImporter {
             // than 1" seen on some Health Connect builds) must NOT abort the whole import - log it and
             // keep whatever was read, so every other data type still comes in (issue #34). The reads
             // accumulate into shared buckets, so a partial type is simply absent, never corrupt.
-            android.util.Log.w("HealthConnect", "read of ${type.simpleName} failed; skipping: ${e.message}")
+            com.noop.AppDiagnosticsRecorder.record(
+                "health_connect.read",
+                fields = mapOf(
+                    "record_type" to (type.simpleName ?: "unknown"),
+                    "outcome" to "skipped",
+                    "failure_kind" to e.javaClass.simpleName,
+                ),
+            )
             return false
         }
     }

@@ -25,10 +25,15 @@ async def test_real_twilio_accepts_sms_and_voice_submissions() -> None:
             "NOOP_TWILIO_STAGING_RESPONSE_URL",
         )
     }
+    api_key_sid = os.getenv("NOOP_TWILIO_API_KEY_SID")
+    api_key_secret = os.getenv("NOOP_TWILIO_API_KEY_SECRET")
+    assert bool(api_key_sid) == bool(api_key_secret)
     assert required["NOOP_TWILIO_STAGING_RESPONSE_URL"].startswith("https://")
     provider = TwilioPagingProvider(
         account_sid=required["NOOP_TWILIO_ACCOUNT_SID"],
         auth_token=required["NOOP_TWILIO_AUTH_TOKEN"],
+        api_key_sid=api_key_sid,
+        api_key_secret=api_key_secret,
         from_phone=required["NOOP_TWILIO_FROM_PHONE"],
         status_callback_url=None,
     )

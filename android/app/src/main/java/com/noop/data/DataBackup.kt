@@ -3,7 +3,6 @@ package com.noop.data
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
-import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
@@ -682,10 +681,13 @@ class CorruptionPreservingOpenHelperFactory(
             // the way keeps the crash-recovery the platform default gives (next open finds no file → clean
             // rebuild) WITHOUT the silent data loss — the corrupt copy stays as `*.corrupt` for recovery.
             val path = runCatching { db.path }.getOrNull()
-            Log.e(
-                "WhoopDatabase",
-                "SQLite reported corruption in $path - quarantining it to *.corrupt.<epoch> and recreating " +
-                    "a fresh store. The corrupt copy is kept; restore from a backup to get your data back.",
+            com.noop.AppDiagnosticsRecorder.record(
+                "database.corruption_detected",
+                fields = mapOf(
+                    "outcome" to
+                        if (path == null || path == ":memory:") "no_file_path" else "quarantine_started",
+                ),
+                includeResourceSnapshot = true,
             )
             runCatching { db.close() }
             if (path != null && path != ":memory:") {

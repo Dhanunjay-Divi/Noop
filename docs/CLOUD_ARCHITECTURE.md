@@ -1,14 +1,12 @@
 # NOOP cloud architecture
 
-**Status:** managed-storage source locally verified; mobile clients disconnected
+**Status:** synthetic IAM-only staging deployed; mobile clients disconnected
 **Primary staging region:** Google Cloud Mumbai (`asia-south1`)
 
-The identity apply is currently blocked before Firebase project registration:
-the authenticated project Owner has `firebase.projects.update`, but Google
-returns `Firebase Tos Not Accepted`. The account holder must accept the Firebase
-terms in the Firebase console before regenerating and applying the identity
-plan. The managed API has no public invoker, no mobile configuration has been
-generated, and no real health data is permitted in staging.
+Firebase Identity Platform, App Check, Cloud SQL, managed API, processor,
+lifecycle scheduler, KMS, Pub/Sub, and object storage are deployed for
+synthetic testing. The managed API has no public invoker, no released mobile
+configuration points to it, and no real health data is permitted in staging.
 
 ## Product boundary
 
@@ -41,12 +39,11 @@ OpenTofu in `infra/gcp/` manages:
 - an optional deletion-protected PostgreSQL 16 Cloud SQL instance;
 - a one-shot Cloud Run migration job and an internal-ingress private API.
 
-The existing private API uses a digest-pinned image, IAM, Secret Manager, the
-Cloud SQL connector, scale-to-zero, and `/readyz` as its startup gate. It has no
-public invoker. The Safety worker is disabled. Managed API, processor, lifecycle,
-scheduler, phone identity, and App Check definitions now exist, but the managed
-workloads remain disabled and the Firebase resources above are not deployed. No
-real health data belongs in this environment.
+The private and managed APIs use a digest-pinned image, IAM, Secret Manager, the
+Cloud SQL connector, scale-to-zero, and `/readyz` as the startup gate. Neither
+has a public invoker. The Safety worker is disabled. The managed processor,
+lifecycle job, scheduler, phone identity, and enforced Authentication App Check
+are deployed. No real health data belongs in this environment.
 
 ## Target data plane
 
@@ -95,23 +92,57 @@ until the user accepts the versioned managed-storage policy.
 
 The source implements reauthentication for account erasure, per-installation
 credentials, device revocation, a 24-hour deletion cooling-off/cancel path, and
-account-scoped restore. Public rollout remains blocked until Firebase terms are
-accepted, the resources are deployed, signed-device attestation is proven, and
-enrollment abuse, recovery, lost-device, support-access, and erasure operations
-pass review.
+account-scoped restore. Identity and App Check resources are deployed for
+synthetic staging. Public rollout remains blocked until signed-device
+attestation is proven and enrollment abuse, recovery, lost-device,
+support-access, and erasure operations pass review.
 
 Identity Provider authentication is only the first boundary. Every database row,
 object manifest, signed upload capability, export, and delete operation must
 also carry and enforce an internal tenant identifier. App Check or device
 attestation may reduce abuse but cannot replace authorization.
 
+## Managed Friends boundary
+
+Managed Friends is an optional social projection inside NOOP+, not a public
+social network and not a dependency of core NOOP or self-hosted Friends:
+
+- Each enrolled account may separately create one managed Friends profile. The
+  service assigns a random, rotatable exact-match NOOP ID; there is no browseable
+  name directory, contact upload, suggested-profile graph, or follower count.
+- A profile link carries only the exact-match alias. An invitation link carries
+  a random, server-hashed capability that expires, can be revoked, and creates a
+  pending request. Both currently use the registered `noop://` app scheme; a
+  production HTTPS universal/app-link domain and fallback remain launch gates.
+- Mutual acceptance precedes sharing. Each owner independently grants each
+  friend access to any subset of Charge, Effort, Rest, sleep duration, HRV, and
+  resting heart rate. Raw streams, locations, journals, stages, workouts,
+  routes, and device identifiers are not part of the projection.
+- Badges acknowledge connection or the presence of seven/30 projected days.
+  They do not rank health values, compare users, or affect a wellness metric.
+- Pokes require the recipient's global opt-in and per-friend permission, and
+  enforce quiet hours, blocks, cooldowns, daily limits, expiry, leased claims,
+  and idempotent acknowledgement. The current clients claim during best-effort
+  background or foreground catch-up and then request a generic local
+  notification and eligible worn-band haptic.
+- There is no APNs/FCM remote delivery in the current implementation. A closed
+  app therefore does not receive an immediate poke. Any future wake path must
+  use a minimal opaque payload, avoid health/profile content, support token
+  deletion and rotation, and pass privacy and physical-device review.
+
+PostgreSQL holds this bounded control and six-field projection state. Expired
+invites, requests, pokes, summaries, and revoked aliases are lifecycle-managed;
+deleting a managed Friends profile cascades its social state without deleting
+the NOOP+ backup account or on-device data.
+
 ## Retention and deletion
 
 Retention is explicit by data class and tier. The optional
-**Reduce phone storage after backup** setting keeps 90 days of detailed sensor
-history locally. It prunes only an exact server-validated, clean, supersession-
-aware window and retains summaries, user-authored records, dirty windows, and
-unvalidated data. It is off by default.
+**Reduce phone storage after backup** setting keeps seven days of high-rate raw
+optical, motion, and auxiliary streams plus 30 days of essential time series.
+It prunes only an exact server-validated, clean, supersession-aware window and
+retains summaries, user-authored records, dirty windows, and unvalidated data.
+It is off by default.
 
 Local deletion cannot be introduced merely to force payment. Before this policy
 ships it still needs:
@@ -167,7 +198,10 @@ these pass:
   drills;
 - cost/load tests using measured device cadence and compressed chunk sizes;
 - privacy/legal review for India and every launch market;
-- physical iOS and Android background/foreground catch-up tests.
+- physical iOS and Android background/foreground catch-up tests;
+- production HTTPS universal/app links, abuse reporting/support operations, and
+  minimal remote poke wake delivery or an explicit non-immediate product
+  disclosure.
 
 Infrastructure readiness is not metric-accuracy evidence, medical validation,
 or permission to upload a user's data.

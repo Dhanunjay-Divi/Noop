@@ -153,6 +153,11 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
   components on Apple, `Palette` / `Metrics` on Android. No hardcoded colors, fonts, or spacing.
 - **Migrations:** add a versioned migration + a test; never mutate an existing migration. Watch for
   data-loss traps (window-wide deletes, backfill rewrites) — prefer additive/transactional changes.
+- **Observability:** every material change reviews its lifecycle, latency, and failure evidence using
+  the existing bounded recorders. Log fixed outcomes, durations, counts, route templates, and
+  server-generated correlation IDs; never log health values, user text, payloads, credentials, URLs,
+  or persistent user/device/job identifiers. Apply the path to both mobile platforms when relevant
+  and test the redaction/bounding boundary. See [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 - **Deriving a physiological signal from raw sensor data — validate against the artifact, not one
   match:** the WHOOP optical/motion buffers are fixed-N-samples-per-record, so autocorrelation/spectral
   methods can manufacture a peak at the record period that *looks* physiological and coincidentally

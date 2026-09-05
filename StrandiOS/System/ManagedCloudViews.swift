@@ -373,7 +373,7 @@ private struct ManagedCloudSetupSheet: View {
                     Text("Reduce phone storage after backup")
                         .font(StrandFont.body)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("Keeps \(ManagedLocalRetentionPolicy.detailedHistoryDays) days of validated sensor detail on this iPhone. Daily metrics, sleep, workouts, body measurements, journals, plans, and preferences remain local.")
+                    Text("After exact cloud validation, keeps \(ManagedLocalRetentionPolicy.rawHistoryDays) days of raw optical, motion, and auxiliary data and \(ManagedLocalRetentionPolicy.essentialHistoryDays) days of essential sensor detail on this iPhone. Daily metrics, sleep, workouts, body measurements, journals, plans, and preferences remain local.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

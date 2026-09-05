@@ -37,10 +37,14 @@ round:
 4. Before stopping, record exact verification, data and migration effects,
    physical-device evidence, Git/remote state, open limitations, and the next
    ordered action.
-5. Update [`rounds/INDEX.md`](rounds/INDEX.md), [`ACTIVE.md`](ACTIVE.md), and
+5. Review observability for every material code change. Reuse or add bounded,
+   privacy-safe evidence at lifecycle, latency, and failure boundaries; record
+   the decision and remaining blind spots. Follow
+   [`../OBSERVABILITY.md`](../OBSERVABILITY.md).
+6. Update [`rounds/INDEX.md`](rounds/INDEX.md), [`ACTIVE.md`](ACTIVE.md), and
    [`DECISIONS.md`](DECISIONS.md) when a durable product or engineering decision
    changed.
-6. If work is interrupted, mark the round `incomplete` or `blocked` and leave a
+7. If work is interrupted, mark the round `incomplete` or `blocked` and leave a
    reproducible handoff. An unfinished record is better than an invented result.
 
 Run `python3 Tools/validate-ops-rounds.py --all .` before handing off. Pull

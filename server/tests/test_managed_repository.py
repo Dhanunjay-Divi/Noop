@@ -137,6 +137,39 @@ def _essential_streams(
     ]
 
 
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_control_retention_accepts_timestamp_parameters() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        counts = await _managed(primary).purge_expired_control_rows(
+            now=datetime.now(UTC),
+            batch_size=10,
+        )
+        assert {
+            "access_grants",
+            "upload_grants",
+            "processing_attempts",
+            "usage_ledger",
+            "audit_events",
+            "replay_tombstones",
+            "daily_ingest_usage",
+            "chunk_manifests",
+        }.issubset(counts)
+    finally:
+        await primary.shutdown()
+
+
 def test_server_readable_reservation_accepts_only_deployed_wire_format() -> None:
     now = datetime.now(UTC)
     common = {

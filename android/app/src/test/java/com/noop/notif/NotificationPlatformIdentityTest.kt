@@ -9,7 +9,7 @@ class NotificationPlatformIdentityTest {
     fun notificationIdsAreCollisionFree() {
         val ids = NotificationPlatformIdentity.NotificationId.all
 
-        assertEquals(25, ids.size)
+        assertEquals(26, ids.size)
         assertEquals(ids.size, ids.toSet().size)
         assertTrue(ids.all { it > 0 })
     }
@@ -18,7 +18,7 @@ class NotificationPlatformIdentityTest {
     fun activityPendingIntentIdentitiesAreCollisionFree() {
         val identities = NotificationPlatformIdentity.ActivityIntent.all
 
-        assertEquals(27, identities.size)
+        assertEquals(28, identities.size)
         assertEquals(
             identities.size,
             identities.map { it.requestCode }.toSet().size,

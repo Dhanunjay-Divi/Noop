@@ -332,12 +332,20 @@ data class ManagedSyncPolicy(
 }
 
 object ManagedLocalRetentionPolicy {
-    const val DETAILED_HISTORY_DAYS = 90L
+    const val RAW_HISTORY_DAYS = 7L
+    const val ESSENTIAL_HISTORY_DAYS = 30L
     private const val DAY_MS = 86_400_000L
-    const val DETAILED_HISTORY_MS = DETAILED_HISTORY_DAYS * DAY_MS
 
-    fun cutoff(nowMs: Long): Long =
-        if (nowMs > DETAILED_HISTORY_MS) nowMs - DETAILED_HISTORY_MS else 0L
+    fun retainedDays(dataClass: String): Long? = when (dataClass) {
+        "essential_timeseries" -> ESSENTIAL_HISTORY_DAYS
+        "raw_auxiliary", "raw_ppg", "raw_motion" -> RAW_HISTORY_DAYS
+        else -> null
+    }
+
+    fun cutoff(nowMs: Long, dataClass: String): Long? {
+        val retainedMs = retainedDays(dataClass)?.times(DAY_MS) ?: return null
+        return if (nowMs > retainedMs) nowMs - retainedMs else 0L
+    }
 }
 
 data class ManagedSyncRunResult(
@@ -378,7 +386,7 @@ class ManagedSyncCoordinator(
         maxSnapshotRestoreObjects: Int = 16,
         maxSnapshotRestoreBytes: Int = 32 * 1_024 * 1_024,
         maxDocumentUploads: Int = 16,
-        localPruneBeforeMs: Long? = null,
+        localPruneNowMs: Long? = null,
         maxPruneWindowsPerClass: Int = 4,
     ): ManagedSyncRunResult {
         require(maxForwardWindowsPerClass in 1..100)
@@ -389,7 +397,7 @@ class ManagedSyncCoordinator(
         require(maxSnapshotRestoreBytes > 0)
         require(maxDocumentUploads in 0..100)
         require(maxPruneWindowsPerClass in 0..16)
-        require(localPruneBeforeMs == null || localPruneBeforeMs >= 0L)
+        require(localPruneNowMs == null || localPruneNowMs >= 0L)
         require(dataClasses.distinct().size == dataClasses.size)
         transport.registerSource(
             authorization,
@@ -526,8 +534,10 @@ class ManagedSyncCoordinator(
                 }
             }
             state.saveUploadCheckpoint(checkpoint, source.sourceId, dataClass)
-            if (dataClass != "derived_summaries" &&
-                localPruneBeforeMs != null &&
+            val localPruneBeforeMs = localPruneNowMs?.let {
+                ManagedLocalRetentionPolicy.cutoff(it, dataClass)
+            }
+            if (localPruneBeforeMs != null &&
                 maxPruneWindowsPerClass > 0
             ) {
                 val result = state.pruneAvailableWindows(

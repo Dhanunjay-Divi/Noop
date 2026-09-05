@@ -789,6 +789,7 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
     case decoding
     case transport
     case authentication
+    case forbidden
     case notFound
     case policyChanged
     case cursorExpired(minimumSequence: Int64?)
@@ -813,6 +814,8 @@ public enum ManagedStorageError: Error, Equatable, LocalizedError {
             return "NOOP+ could not be reached."
         case .authentication:
             return "NOOP+ authentication expired. Sign in again."
+        case .forbidden:
+            return "NOOP+ did not allow that action."
         case .notFound:
             return "The requested NOOP+ resource no longer exists."
         case .policyChanged:

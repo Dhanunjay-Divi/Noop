@@ -86,11 +86,25 @@ class TestBundleAssemblerTest {
         )
 
         assertEquals(
-            listOf("App runtime diagnostics", "Live Bluetooth"),
+            listOf("App runtime diagnostics"),
             metadata.source,
         )
         assertEquals("app-hang", metadata.testProfile)
         assertTrue(metadata.questionnaire.isEmpty())
+    }
+
+    @Test fun appReportBodyExcludesBandTranscriptAndHealthFrontier() {
+        val report = TestBundleAssembler.reportBody(
+            purpose = TestBundleAssembler.Purpose.APP_HANG,
+            header = "safe header",
+            logText = "private health evidence bpm=137 hrv=42",
+            collectionLine = "latestPersistedHrUnix=1788000123 ageSeconds=4",
+        )
+
+        assertTrue(report.contains(TestBundleAssembler.APP_RUNTIME_REPORT_TEXT))
+        assertFalse(report.contains("bpm=137"))
+        assertFalse(report.contains("hrv=42"))
+        assertFalse(report.contains("1788000123"))
     }
 
     @Test fun capTruncatesRawCaptureTailAndFlags() {

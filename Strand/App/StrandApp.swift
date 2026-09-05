@@ -5,6 +5,7 @@ import UserNotifications
 @main
 struct StrandApp: App {
     init() {
+        AppDiagnosticsRecorder.shared.start()
         PuffinExperiment.migrateContinuousHrvOvernightDefault()
         HydrationReminders.migrateIndependentChannelsIfNeeded()
         #if DEBUG
@@ -17,9 +18,10 @@ struct StrandApp: App {
         // Foreground presentation: without a delegate, macOS suppresses a notification's banner while the
         // app is frontmost, so a reminder tested with NOOP open would show nothing. Mirrors iOS.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
+        _model = StateObject(wrappedValue: AppModel())
     }
 
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
     /// Shared cross-screen navigation hook (e.g. Live → Devices). The macOS shell (`RootView`)
     /// observes it and drives the sidebar selection.
     @StateObject private var router = NavRouter()
@@ -51,6 +53,7 @@ struct StrandApp: App {
                 // card observes the SAME instance the central detector (AppModel.evaluateStress) posts to.
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
                 .onAppear {
+                    AppDiagnosticsRecorder.shared.setApplicationActive(scenePhase == .active)
                     model.setRealtimeForeground(
                         acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
                     )
@@ -74,6 +77,7 @@ struct StrandApp: App {
                 // Single-param form (not the two-param `{ _, phase in }`) — that overload needs macOS 14,
                 // this target is macOS 13.
                 .onChange(of: scenePhase) { phase in
+                    AppDiagnosticsRecorder.shared.setApplicationActive(phase == .active)
                     // Dense Live/workout/session streaming is foreground-only. This does not drop the
                     // BLE connection, history sync, or the separate Continuous HRV background opt-in.
                     guard acceptedTermsVersion == Terms.currentVersion else {

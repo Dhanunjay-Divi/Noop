@@ -74,7 +74,8 @@ final class TestCentreReport: ObservableObject {
     static func storageProbe(
         repo: Repository?,
         live: LiveState,
-        includeRowCounts: Bool = true
+        includeRowCounts: Bool = true,
+        includeHealthFrontier: Bool = true
     ) async -> TestBundleMeta.Storage? {
         let fm = FileManager.default
         var dbBytes = 0
@@ -85,7 +86,9 @@ final class TestCentreReport: ObservableObject {
         }
         var rows: [String: Int] = [:]
         var rawBytes = 0
-        let latestHrUnix = await repo?.latestPersistedHRSampleTs()
+        let latestHrUnix = includeHealthFrontier
+            ? await repo?.latestPersistedHRSampleTs()
+            : nil
         if let store = await repo?.storeHandle() {
             if includeRowCounts {
                 if let c = try? await store.storageStats_rowCountsForTest() {

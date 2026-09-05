@@ -89,14 +89,15 @@ class AndroidLocalizationPolicyTest {
         val expectedKeys = partial.getValue("values-it").keys
         val allowed = Regex(
             """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
-                """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
+            """string:(profile_(bmi_|target_weight_)|vital_range_summary_).*|""" +
                 """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
-                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*)""",
+                """string:(nav_alarms|today_calibration_valid_hrv_progress|sleep_stage_detail_withheld|stale_sync_.*|changelog_.*|whats_new_.*)""",
         )
+        val unscopedKeys = expectedKeys.filterNot(allowed::matches)
 
         assertTrue(
-            "Partial strings.xml contains an unscoped key",
-            expectedKeys.all { allowed.matches(it) },
+            "Partial strings.xml contains unscoped keys: $unscopedKeys",
+            unscopedKeys.isEmpty(),
         )
         for ((folder, localized) in partial) {
             assertEquals("$folder feature key parity", expectedKeys, localized.keys)

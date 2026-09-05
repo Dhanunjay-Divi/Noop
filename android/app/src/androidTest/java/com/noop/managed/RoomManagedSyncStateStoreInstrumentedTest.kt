@@ -148,6 +148,101 @@ class RoomManagedSyncStateStoreInstrumentedTest {
     }
 
     @Test
+    fun validatedRawWindowsPruneMappedRowsAndKeepDailySummary() = runBlocking {
+        registerSource()
+        listOf(
+            "INSERT INTO skinTempSample (deviceId, ts, raw, synced) VALUES (?, 100, 1, 0)",
+            "INSERT INTO respSample (deviceId, ts, raw, synced) VALUES (?, 100, 2, 0)",
+            "INSERT INTO sleepStateSample (deviceId, ts, state, synced) VALUES (?, 100, 1, 0)",
+            "INSERT INTO spo2Sample (deviceId, ts, red, ir, synced) VALUES (?, 100, 3, 4, 0)",
+            "INSERT INTO ppgWaveformSample (deviceId, ts, samples, synced) VALUES (?, 100, X'0001', 0)",
+            "INSERT INTO gravitySample (deviceId, ts, x, y, z, synced) VALUES (?, 100, 0, 0, 1, 0)",
+            "INSERT INTO rawImuSample (deviceId, ts, samples) VALUES (?, 100, X'0001')",
+        ).forEach { exec(it, SOURCE) }
+        exec(
+            "INSERT INTO dailyMetric (deviceId, day) VALUES (?, '1970-01-01')",
+            SOURCE,
+        )
+
+        data class RawClass(val name: String, val rows: Int, val chunkId: UUID)
+        val classes = listOf(
+            RawClass(
+                "raw_auxiliary",
+                3,
+                UUID.fromString("22222222-2222-5222-8222-222222222221"),
+            ),
+            RawClass(
+                "raw_ppg",
+                2,
+                UUID.fromString("22222222-2222-5222-8222-222222222222"),
+            ),
+            RawClass(
+                "raw_motion",
+                2,
+                UUID.fromString("22222222-2222-5222-8222-222222222223"),
+            ),
+        )
+        classes.forEach { item ->
+            val generation = state.claimWindowGeneration(
+                SOURCE_ID,
+                SOURCE,
+                item.name,
+                ManagedSyncWindow(0, RAW_WINDOW_MS),
+            )
+            state.saveWindowUpload(
+                ManagedWindowUpload(
+                    windowEndMs = RAW_WINDOW_MS - 1,
+                    chunkId = item.chunkId,
+                    rowCount = item.rows,
+                    phase = ManagedWindowUploadPhase.AWAITING_VALIDATION,
+                    snapshotGeneration = generation,
+                ),
+                SOURCE_ID,
+                item.name,
+                0,
+            )
+            assertTrue(
+                state.acknowledgeAvailableChunk(
+                    SOURCE_ID,
+                    item.name,
+                    0,
+                    RAW_WINDOW_MS - 1,
+                    item.chunkId,
+                ),
+            )
+            val result = state.pruneAvailableWindows(
+                SOURCE_ID,
+                SOURCE,
+                item.name,
+                RAW_WINDOW_MS + 1,
+                4,
+            )
+            assertEquals(item.name, 1, result.prunedWindows)
+            assertEquals(item.name, item.rows, result.deletedRows)
+        }
+
+        listOf(
+            "skinTempSample",
+            "respSample",
+            "sleepStateSample",
+            "spo2Sample",
+            "ppgWaveformSample",
+            "gravitySample",
+            "rawImuSample",
+        ).forEach { table ->
+            assertEquals(
+                table,
+                0L,
+                long("SELECT COUNT(*) FROM $table WHERE deviceId = ?", SOURCE),
+            )
+        }
+        assertEquals(
+            1L,
+            long("SELECT COUNT(*) FROM dailyMetric WHERE deviceId = ?", SOURCE),
+        )
+    }
+
+    @Test
     fun snapshotRestoreCheckpointRoundTripsAndFinishCannotRegressCursor() = runBlocking {
         val checkpoint = ManagedSnapshotRestoreCheckpoint(
             requestId = UUID.fromString("11111111-1111-5111-8111-111111111111"),
@@ -213,6 +308,7 @@ class RoomManagedSyncStateStoreInstrumentedTest {
     companion object {
         private const val SOURCE = "strap"
         private const val WINDOW_MS = 6 * 60 * 60 * 1_000L
+        private const val RAW_WINDOW_MS = 60 * 60 * 1_000L
         private val SOURCE_ID =
             UUID.fromString("11111111-1111-5111-8111-111111111111")
         private val SCOPE = "b".repeat(64)

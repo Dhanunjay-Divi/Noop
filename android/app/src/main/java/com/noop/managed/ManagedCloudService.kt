@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.icu.text.ListFormatter
 import android.net.Uri
-import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -15,12 +14,15 @@ import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken
+import com.noop.NoopApplication
 import com.noop.R
 import com.noop.data.BackupSettingsBridge
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import com.noop.notif.ManagedSocialPokeNotifier
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.coroutineContext
@@ -57,6 +59,16 @@ data class ManagedCloudState(
     val deletionNotBefore: String? = null,
     val overview: ManagedStorageOverview? = null,
     val installations: List<ManagedInstallation> = emptyList(),
+    val socialProfile: ManagedSocialProfile? = null,
+    val socialFriends: List<ManagedSocialFriend> = emptyList(),
+    val socialBlockedProfiles: List<ManagedSocialBlockedProfile> = emptyList(),
+    val socialRequests: List<ManagedSocialRequest> = emptyList(),
+    val socialFeed: List<ManagedSocialFeedDay> = emptyList(),
+    val socialLookup: ManagedSocialLookupProfile? = null,
+    val socialInvite: ManagedSocialInvite? = null,
+    val socialStatus: String = "",
+    val hasPendingSocialInvite: Boolean = false,
+    val pendingSocialNoopId: String? = null,
 )
 
 data class ManagedCloudSyncSummary(
@@ -83,13 +95,17 @@ class ManagedCloudService private constructor(context: Context) {
     private val configuration = ManagedCloudConfiguration.load()
     private val preferences by lazy { ManagedCloudPreferences(appContext) }
     private val database by lazy { WhoopDatabase.get(appContext) }
+    private val application by lazy { appContext as NoopApplication }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
+    private val socialMutex = Mutex()
     private val firebaseLock = Any()
     private val stateLock = Any()
 
     @Volatile
     private var firebaseRuntime: FirebaseRuntime? = null
+    @Volatile
+    private var socialRunning = false
 
     private val mutableState = MutableStateFlow(
         ManagedCloudState(
@@ -116,6 +132,9 @@ class ManagedCloudService private constructor(context: Context) {
                         status = preferences.status,
                         lastSuccessMs = preferences.lastSuccessMs,
                         deletionNotBefore = preferences.erasureNotBefore,
+                        hasPendingSocialInvite =
+                            preferences.pendingSocialInviteCapability != null,
+                        pendingSocialNoopId = preferences.pendingSocialNoopId,
                     )
                 }
             }
@@ -245,6 +264,20 @@ class ManagedCloudService private constructor(context: Context) {
             if (summary.hasMore) {
                 ManagedCloudScheduler.enqueueContinuation(appContext)
             }
+            try {
+                refreshSocialData(deliverPokes = true)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                setSocialStatus(userMessage(error))
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_social.catch_up",
+                    fields = mapOf(
+                        "outcome" to "failed",
+                        "failure_kind" to diagnosticSyncFailureKind(error),
+                    ),
+                )
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -257,6 +290,7 @@ class ManagedCloudService private constructor(context: Context) {
     suspend fun exportCompleteCloudHistory(destination: Uri) {
         if (!beginBusy()) return
         var writer: ManagedHistorySafArchiveWriter? = null
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("managed_export")
         try {
             withContext(Dispatchers.IO) {
                 for (pass in 1..MAXIMUM_EXPORT_PREPARATION_PASSES) {
@@ -287,16 +321,38 @@ class ManagedCloudService private constructor(context: Context) {
                 archiveWriter.finish(manifest)
                 writer = null
                 setStatus(text(R.string.managed_cloud_status_export_saved))
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "completed",
+                    fields = mapOf(
+                        "objects" to manifest.exportedObjects.toString(),
+                        "chunk_bytes" to manifest.exportedChunkBytes.toString(),
+                    ),
+                    includeResourceSnapshot = true,
+                )
             }
         } catch (error: CancellationException) {
             writer?.abort()
                 ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
             setStatus(text(R.string.managed_cloud_status_export_canceled))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                includeResourceSnapshot = true,
+            )
             throw error
         } catch (error: Throwable) {
             writer?.abort()
                 ?: ManagedHistorySafArchiveWriter.removePartial(appContext, destination)
             setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "failed",
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+                includeResourceSnapshot = true,
+            )
         } finally {
             endBusy()
         }
@@ -304,6 +360,36 @@ class ManagedCloudService private constructor(context: Context) {
 
     internal suspend fun syncForWorker(): ManagedCloudSyncSummary =
         performSync(SyncMode.AUTOMATIC)
+
+    internal suspend fun socialCatchUpForWorker(
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (state.value.phase != ManagedCloudPhase.ENROLLED ||
+            !preferences.socialEnabled ||
+            !ManagedSocialRuntime.isCatchUpDue(
+                preferences.socialLastAttemptMs,
+                nowMs,
+            )
+        ) {
+            return false
+        }
+        preferences.socialLastAttemptMs = nowMs
+        return try {
+            refreshSocialData(deliverPokes = true)
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_social.catch_up",
+                fields = mapOf(
+                    "outcome" to "failed",
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
+            throw error
+        }
+    }
 
     suspend fun refreshOverview() {
         if (!beginBusy()) return
@@ -356,13 +442,323 @@ class ManagedCloudService private constructor(context: Context) {
         }
     }
 
+    // MARK: Managed Friends
+
+    fun stageSocialProfileLink(uri: Uri?): Boolean {
+        val noopId = ManagedSocialRuntime.profileNoopId(uri) ?: return false
+        preferences.pendingSocialNoopId = noopId
+        replaceState { it.copy(pendingSocialNoopId = noopId) }
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_social.profile_link_staged",
+            fields = mapOf(
+                "outcome" to "accepted",
+                "persistence" to "encrypted_preferences",
+            ),
+        )
+        return true
+    }
+
+    fun socialProfileUri(): Uri? =
+        state.value.socialProfile?.let { ManagedSocialRuntime.profileUri(it.noopId) }
+
+    fun stageSocialInviteLink(uri: Uri?): Boolean {
+        val capability = ManagedSocialRuntime.inviteCapability(uri) ?: return false
+        preferences.pendingSocialInviteCapability = capability
+        replaceState { it.copy(hasPendingSocialInvite = true) }
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_social.invite_link_staged",
+            fields = mapOf(
+                "outcome" to "accepted",
+                "persistence" to "encrypted_preferences",
+            ),
+        )
+        return true
+    }
+
+    fun socialInviteUri(): Uri? =
+        state.value.socialInvite
+            ?.takeIf { it.status == "active" }
+            ?.let { ManagedSocialRuntime.inviteUri(it.capability) }
+
+    fun clearPendingSocialProfileLink() {
+        preferences.pendingSocialNoopId = null
+        replaceState { it.copy(pendingSocialNoopId = null) }
+    }
+
+    fun clearPendingSocialInvite() {
+        preferences.pendingSocialInviteCapability = null
+        replaceState { it.copy(hasPendingSocialInvite = false) }
+    }
+
+    fun clearSocialLookup() {
+        replaceState { it.copy(socialLookup = null) }
+    }
+
+    suspend fun createSocialProfile(displayName: String) =
+        socialAction("profile_create") {
+            val profile = client().createSocialProfile(
+                authorization = authorization(forceRefresh = true),
+                displayName = displayName,
+                requestId = preferences.socialProfileRequestId(),
+            )
+            preferences.clearSocialProfileRequestId()
+            preferences.socialEnabled = true
+            ManagedCloudScheduler.reconcile(appContext)
+            replaceState {
+                it.copy(
+                    socialProfile = profile,
+                    socialStatus = text(R.string.managed_friends_status_profile_ready),
+                )
+            }
+            refreshSocialData(deliverPokes = true)
+        }
+
+    suspend fun refreshSocial() =
+        socialAction("refresh") {
+            refreshSocialData(deliverPokes = true)
+        }
+
+    suspend fun updateSocialProfile(
+        displayName: String? = null,
+        pokeOptIn: Boolean? = null,
+        quietStartMinute: Int? = null,
+        quietEndMinute: Int? = null,
+    ) = socialAction("profile_update") {
+        val profile = client().updateSocialProfile(
+            authorization = authorization(forceRefresh = true),
+            patch = ManagedSocialProfilePatch(
+                displayName = displayName,
+                pokeOptIn = pokeOptIn,
+                quietStartMinute = quietStartMinute,
+                quietEndMinute = quietEndMinute,
+                timeZone = ZoneId.systemDefault().id,
+            ),
+        )
+        replaceState {
+            it.copy(
+                socialProfile = profile,
+                socialStatus = if (pokeOptIn == true) {
+                    text(R.string.managed_friends_status_pokes_enabled)
+                } else {
+                    text(R.string.managed_friends_status_settings_saved)
+                },
+            )
+        }
+        refreshSocialData(deliverPokes = true)
+    }
+
+    suspend fun rotateSocialNoopId() =
+        socialAction("noop_id_rotate") {
+            val profile = client().rotateSocialNoopId(
+                authorization(forceRefresh = true),
+            )
+            replaceState {
+                it.copy(
+                    socialProfile = profile,
+                    socialLookup = null,
+                    socialStatus = text(R.string.managed_friends_status_id_rotated),
+                )
+            }
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun lookupSocialProfile(noopId: String) =
+        socialAction("lookup") {
+            val profile = client().lookupSocialProfile(
+                authorization = authorization(forceRefresh = false),
+                noopId = noopId,
+            )
+            replaceState {
+                it.copy(
+                    socialLookup = profile,
+                    socialStatus = text(
+                        if (profile.isSelf) {
+                            R.string.managed_friends_status_lookup_self
+                        } else {
+                            R.string.managed_friends_status_lookup_found
+                        },
+                    ),
+                )
+            }
+        }
+
+    suspend fun sendSocialRequest(noopId: String) =
+        socialAction("request_create") {
+            client().createSocialRequest(
+                authorization = authorization(forceRefresh = true),
+                noopId = noopId,
+                requestId = UUID.randomUUID(),
+            )
+            replaceState {
+                it.copy(
+                    socialLookup = null,
+                    socialStatus = text(R.string.managed_friends_status_request_sent),
+                )
+            }
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun createSocialInvite() =
+        socialAction("invite_create") {
+            val managedClient = client()
+            val auth = authorization(forceRefresh = true)
+            var invite = managedClient.createSocialInvite(
+                authorization = auth,
+                capability = preferences.socialInviteCapability(),
+                requestId = preferences.socialInviteRequestId(),
+            )
+            if (invite.status != "active") {
+                preferences.clearSocialInviteRequestId()
+                preferences.clearSocialInviteCapability()
+                invite = managedClient.createSocialInvite(
+                    authorization = auth,
+                    capability = preferences.socialInviteCapability(),
+                    requestId = preferences.socialInviteRequestId(),
+                )
+            }
+            if (invite.status != "active") {
+                throw ManagedStorageException.InvalidResponse()
+            }
+            replaceState {
+                it.copy(
+                    socialInvite = invite,
+                    socialStatus = text(R.string.managed_friends_status_invite_ready),
+                )
+            }
+        }
+
+    suspend fun revokeSocialInvite() =
+        socialAction("invite_revoke") {
+            val invite = state.value.socialInvite ?: return@socialAction
+            client().revokeSocialInvite(
+                authorization = authorization(forceRefresh = true),
+                inviteId = invite.inviteId,
+            )
+            preferences.clearSocialInviteRequestId()
+            preferences.clearSocialInviteCapability()
+            replaceState {
+                it.copy(
+                    socialInvite = null,
+                    socialStatus = text(R.string.managed_friends_status_invite_revoked),
+                )
+            }
+        }
+
+    suspend fun redeemPendingSocialInvite() =
+        socialAction("invite_redeem") {
+            val capability = preferences.pendingSocialInviteCapability
+                ?: return@socialAction
+            val scopeHash = accountScopeHash()
+            client().redeemSocialInvite(
+                authorization = authorization(forceRefresh = true),
+                capability = capability,
+                requestId = ManagedSocialRuntime.inviteRedemptionRequestId(
+                    scopeHash,
+                    capability,
+                ),
+            )
+            preferences.pendingSocialInviteCapability = null
+            replaceState {
+                it.copy(
+                    hasPendingSocialInvite = false,
+                    socialStatus = text(R.string.managed_friends_status_invite_redeemed),
+                )
+            }
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun decideSocialRequest(requestId: UUID, accept: Boolean) =
+        socialAction("request_decide") {
+            client().decideSocialRequest(
+                authorization = authorization(forceRefresh = true),
+                requestId = requestId,
+                accept = accept,
+            )
+            setSocialStatus(
+                text(
+                    if (accept) {
+                        R.string.managed_friends_status_request_accepted
+                    } else {
+                        R.string.managed_friends_status_request_declined
+                    },
+                ),
+            )
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun updateSocialVisibility(
+        friendProfileId: UUID,
+        patch: ManagedSocialVisibilityPatch,
+    ) = socialAction("privacy_update") {
+        client().updateSocialVisibility(
+            authorization = authorization(forceRefresh = true),
+            friendProfileId = friendProfileId,
+            patch = patch,
+        )
+        setSocialStatus(text(R.string.managed_friends_status_privacy_saved))
+        refreshSocialData(deliverPokes = false)
+    }
+
+    suspend fun removeSocialFriend(profileId: UUID) =
+        socialAction("friend_remove") {
+            client().removeSocialFriend(
+                authorization = authorization(forceRefresh = true),
+                profileId = profileId,
+            )
+            setSocialStatus(text(R.string.managed_friends_status_friend_removed))
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun blockSocialProfile(profileId: UUID) =
+        socialAction("profile_block") {
+            client().blockSocialProfile(
+                authorization = authorization(forceRefresh = true),
+                profileId = profileId,
+            )
+            setSocialStatus(text(R.string.managed_friends_status_profile_blocked))
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun unblockSocialProfile(profileId: UUID) =
+        socialAction("profile_unblock") {
+            client().unblockSocialProfile(
+                authorization = authorization(forceRefresh = true),
+                profileId = profileId,
+            )
+            setSocialStatus(text(R.string.managed_friends_status_profile_unblocked))
+            refreshSocialData(deliverPokes = false)
+        }
+
+    suspend fun deleteSocialProfile() =
+        socialAction("profile_delete") {
+            client().deleteSocialProfile(
+                authorization = authorization(forceRefresh = true),
+            )
+            preferences.clearSocialState()
+            ManagedCloudScheduler.reconcile(appContext)
+            clearSocialPresentation()
+            setSocialStatus(text(R.string.managed_friends_status_profile_deleted))
+        }
+
+    suspend fun sendSocialPoke(profileId: UUID) =
+        socialAction("poke_send") {
+            client().createSocialPoke(
+                authorization = authorization(forceRefresh = true),
+                recipientProfileId = profileId,
+                requestId = UUID.randomUUID(),
+            )
+            setSocialStatus(text(R.string.managed_friends_status_poke_queued))
+        }
+
     fun disconnect() {
         runCatching { runtime().auth.signOut() }
             .onFailure {
                 setStatus(userMessage(it))
                 return
-            }
+        }
         preferences.disconnect()
+        preferences.clearSocialState()
+        clearSocialPresentation()
         setPhase(ManagedCloudPhase.SIGNED_OUT)
         setStatus(text(R.string.managed_cloud_status_disconnected))
         ManagedCloudScheduler.reconcile(appContext)
@@ -499,13 +895,369 @@ class ManagedCloudService private constructor(context: Context) {
         val config = configuration ?: return false
         val user = runCatching { runtime().auth.currentUser }.getOrNull() ?: return false
         val scopeHash = accountScopeHash(user)
-        return preferences.automatic &&
-            preferences.erasureJobId == null &&
-            preferences.isEnrolled(scopeHash, config.storage.policyVersion)
+        return preferences.erasureJobId == null &&
+            preferences.isEnrolled(scopeHash, config.storage.policyVersion) &&
+            (preferences.automatic || preferences.socialEnabled)
     }
 
-    internal fun lastAttemptMs(): Long =
-        runCatching { preferences.lastAttemptMs }.getOrDefault(0L)
+    internal fun shouldSyncForWorker(): Boolean = preferences.automatic
+
+    internal fun shouldRunSocialForWorker(): Boolean = preferences.socialEnabled
+
+    internal fun schedulerLastAttemptMs(): Long = when {
+        preferences.automatic && preferences.socialEnabled ->
+            minOf(preferences.lastAttemptMs, preferences.socialLastAttemptMs)
+        preferences.socialEnabled -> preferences.socialLastAttemptMs
+        else -> preferences.lastAttemptMs
+    }
+
+    private fun beginSocialAction(): Boolean = synchronized(stateLock) {
+        if (mutableState.value.phase != ManagedCloudPhase.ENROLLED ||
+            mutableState.value.busy ||
+            socialRunning
+        ) {
+            return@synchronized false
+        }
+        mutableState.value = mutableState.value.copy(busy = true)
+        true
+    }
+
+    private suspend fun socialAction(
+        operation: String,
+        body: suspend () -> Unit,
+    ) {
+        if (!beginSocialAction()) return
+        try {
+            runSocialOperation(operation, body)
+        } finally {
+            endBusy()
+        }
+    }
+
+    private suspend fun runSocialOperation(
+        operation: String,
+        body: suspend () -> Unit,
+    ) {
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_social",
+            fields = mapOf("operation" to operation),
+        )
+        try {
+            body()
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+                fields = mapOf("operation" to operation),
+            )
+        } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                fields = mapOf("operation" to operation),
+            )
+            throw error
+        } catch (error: Throwable) {
+            setSocialStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "failed",
+                fields = mapOf(
+                    "operation" to operation,
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
+        }
+    }
+
+    private suspend fun refreshSocialData(deliverPokes: Boolean) =
+        socialMutex.withLock {
+            if (state.value.phase != ManagedCloudPhase.ENROLLED) {
+                throw ManagedCloudException.ConsentRequired
+            }
+            socialRunning = true
+            val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                "managed_social_refresh",
+                fields = mapOf(
+                    "delivery" to if (deliverPokes) "enabled" else "disabled",
+                ),
+            )
+            try {
+                val managedClient = client()
+                val auth = authorization(forceRefresh = false)
+                val profile = try {
+                    managedClient.socialProfile(auth)
+                } catch (_: ManagedStorageException.NotFound) {
+                    preferences.socialEnabled = false
+                    ManagedCloudScheduler.reconcile(appContext)
+                    replaceState {
+                        it.copy(
+                            socialProfile = null,
+                            socialFriends = emptyList(),
+                            socialBlockedProfiles = emptyList(),
+                            socialRequests = emptyList(),
+                            socialFeed = emptyList(),
+                            socialLookup = null,
+                            socialInvite = null,
+                        )
+                    }
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "completed",
+                        fields = mapOf(
+                            "profile" to "absent",
+                            "friends" to "0",
+                            "blocks" to "0",
+                            "requests" to "0",
+                            "summaries_uploaded" to "0",
+                            "pokes_claimed" to "0",
+                        ),
+                    )
+                    return@withLock
+                }
+                preferences.socialEnabled = true
+                val friends = managedClient.socialFriends(auth)
+                    .sortedBy { it.displayName.lowercase() }
+                val blockedProfiles = managedClient.socialBlockedProfiles(auth)
+                    .sortedBy { it.displayName.lowercase() }
+                val requests = managedClient.socialRequests(auth)
+                    .sortedByDescending(ManagedSocialRequest::createdAt)
+                val feedDays = ManagedSocialRuntime.summaryDays().takeLast(7)
+                var feed = emptyList<ManagedSocialFeedDay>()
+                var feedOutcome = "empty_range"
+                if (feedDays.isNotEmpty()) {
+                    feed = try {
+                        managedClient.socialFeed(
+                            authorization = auth,
+                            startDay = feedDays.first(),
+                            endDay = feedDays.last(),
+                        ).also {
+                            feedOutcome = "completed"
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        feedOutcome = "failed"
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "managed_social.feed",
+                            fields = mapOf(
+                                "outcome" to "failed",
+                                "failure_kind" to diagnosticSyncFailureKind(error),
+                            ),
+                        )
+                        emptyList()
+                    }
+                }
+                replaceState {
+                    it.copy(
+                        socialProfile = profile,
+                        socialFriends = friends,
+                        socialBlockedProfiles = blockedProfiles,
+                        socialRequests = requests,
+                        socialFeed = feed,
+                    )
+                }
+                val summariesUploaded = uploadChangedSocialSummaries(
+                    friends = friends,
+                    managedClient = managedClient,
+                    authorization = auth,
+                )
+                if (summariesUploaded > 0) {
+                    val refreshedProfile = managedClient.socialProfile(auth)
+                    replaceState {
+                        it.copy(socialProfile = refreshedProfile)
+                    }
+                }
+                val pokesClaimed = if (deliverPokes) {
+                    deliverSocialPokes(managedClient, auth)
+                } else {
+                    0
+                }
+                if (state.value.socialStatus.isBlank()) {
+                    setSocialStatus(text(R.string.managed_friends_status_up_to_date))
+                }
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "completed",
+                    fields = mapOf(
+                        "profile" to "active",
+                        "friends" to friends.size.toString(),
+                        "blocks" to blockedProfiles.size.toString(),
+                        "requests" to requests.size.toString(),
+                        "feed_rows" to feed.size.toString(),
+                        "feed_outcome" to feedOutcome,
+                        "summaries_uploaded" to summariesUploaded.toString(),
+                        "pokes_claimed" to pokesClaimed.toString(),
+                    ),
+                )
+            } catch (error: CancellationException) {
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "canceled",
+                )
+                throw error
+            } catch (error: Throwable) {
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "failed",
+                    fields = mapOf(
+                        "failure_kind" to diagnosticSyncFailureKind(error),
+                    ),
+                )
+                throw error
+            } finally {
+                socialRunning = false
+            }
+        }
+
+    private suspend fun uploadChangedSocialSummaries(
+        friends: List<ManagedSocialFriend>,
+        managedClient: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+    ): Int {
+        val days = ManagedSocialRuntime.summaryDays()
+        if (days.isEmpty()) return 0
+        val firstDay = days.first()
+        val lastDay = days.last()
+        val summaries = days.associateWithTo(linkedMapOf()) {
+            ManagedSocialSummary()
+        }
+        val allowed = ManagedSocialRuntime.visibilityUnion(friends)
+        val repository = application.repository
+        for (source in repository.computedSourceIds(application.activeDeviceId)) {
+            repository.dailyMetrics(source, firstDay, lastDay).forEach { row ->
+                val current = summaries[row.day] ?: return@forEach
+                summaries[row.day] = current.copy(
+                    charge = current.charge ?: if (allowed.charge) {
+                        ManagedSocialRuntime.value(row.recovery, 0.0..100.0)
+                    } else {
+                        null
+                    },
+                    effort = current.effort ?: if (allowed.effort) {
+                        ManagedSocialRuntime.value(row.strain, 0.0..100.0)
+                    } else {
+                        null
+                    },
+                    sleepDuration = current.sleepDuration ?: if (allowed.sleepDuration) {
+                        ManagedSocialRuntime.value(row.totalSleepMin, 0.0..1_440.0)
+                    } else {
+                        null
+                    },
+                    hrv = current.hrv ?: if (allowed.hrv) {
+                        ManagedSocialRuntime.value(row.avgHrv, 0.0..500.0)
+                    } else {
+                        null
+                    },
+                    rhr = current.rhr ?: if (allowed.rhr) {
+                        ManagedSocialRuntime.value(
+                            row.restingHr?.toDouble(),
+                            20.0..250.0,
+                        )
+                    } else {
+                        null
+                    },
+                )
+            }
+            if (allowed.rest) {
+                repository.metricSeries(
+                    source,
+                    "sleep_performance",
+                    firstDay,
+                    lastDay,
+                ).forEach { point ->
+                    val current = summaries[point.day] ?: return@forEach
+                    summaries[point.day] = current.copy(
+                        rest = current.rest ?: ManagedSocialRuntime.value(
+                            point.value,
+                            0.0..100.0,
+                        ),
+                    )
+                }
+            }
+        }
+
+        val scopeHash = accountScopeHash()
+        val retainedDays = days.toSet()
+        val digests = preferences.socialSummaryDigests(scopeHash)
+            .filterKeys(retainedDays::contains)
+            .toMutableMap()
+        var uploaded = 0
+        for (day in days) {
+            coroutineContext.ensureActive()
+            val summary = summaries.getValue(day)
+            val digest = ManagedSocialRuntime.digest(day, summary, allowed)
+            if (digests[day] == digest ||
+                digests[day] == null && !summary.hasValue
+            ) {
+                continue
+            }
+            managedClient.putSocialSummary(
+                authorization = authorization,
+                day = day,
+                summary = summary,
+                requestId = ManagedSocialRuntime.summaryRequestId(
+                    scopeHash,
+                    day,
+                    digest,
+                ),
+            )
+            digests[day] = digest
+            uploaded += 1
+            preferences.storeSocialSummaryDigests(scopeHash, digests)
+        }
+        preferences.storeSocialSummaryDigests(scopeHash, digests)
+        return uploaded
+    }
+
+    private suspend fun deliverSocialPokes(
+        managedClient: ManagedStorageClient,
+        authorization: ManagedAuthorization,
+    ): Int {
+        val claims = managedClient.claimSocialPokes(
+            authorization = authorization,
+            limit = 3,
+        )
+        for (claim in claims) {
+            coroutineContext.ensureActive()
+            val existing = preferences.socialDeliveryReceipt(claim.pokeId)
+            val receipt = existing ?: ManagedSocialDeliveryReceipt(
+                pokeId = claim.pokeId,
+                notificationOutcome = ManagedSocialPokeNotifier.post(appContext),
+                hapticOutcome = if (application.requestManagedSocialPokeHaptic()) {
+                    "requested"
+                } else {
+                    "band_unavailable"
+                },
+                recordedAtMs = System.currentTimeMillis(),
+            ).also(preferences::storeSocialDeliveryReceipt)
+            managedClient.acknowledgeSocialPoke(
+                authorization = authorization,
+                pokeId = claim.pokeId,
+                acknowledgement = ManagedSocialPokeAcknowledgement(
+                    claimId = claim.claimId,
+                    notificationOutcome = receipt.notificationOutcome,
+                    hapticOutcome = receipt.hapticOutcome,
+                ),
+            )
+        }
+        if (claims.isNotEmpty()) {
+            val receipts = claims.mapNotNull {
+                preferences.socialDeliveryReceipt(it.pokeId)
+            }
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_social.poke_delivery",
+                fields = mapOf(
+                    "claimed" to claims.size.toString(),
+                    "notifications_scheduled" to receipts.count {
+                        it.notificationOutcome == "scheduled"
+                    }.toString(),
+                    "haptics_requested" to receipts.count {
+                        it.hapticOutcome == "requested"
+                    }.toString(),
+                ),
+            )
+        }
+        return claims.size
+    }
 
     private suspend fun performSync(mode: SyncMode): ManagedCloudSyncSummary =
         syncMutex.withLock {
@@ -537,10 +1289,6 @@ class ManagedCloudService private constructor(context: Context) {
                     val summary = ManagedAuthenticationRetry.run(
                         authorization = { forceRefresh ->
                             if (forceRefresh) {
-                                Log.i(
-                                    TAG,
-                                    "Managed sync token rejected; retrying once with forced refresh",
-                                )
                                 com.noop.AppDiagnosticsRecorder.record(
                                     "managed_sync.auth_refresh",
                                     fields = mapOf(
@@ -640,6 +1388,7 @@ class ManagedCloudService private constructor(context: Context) {
 
     private fun diagnosticSyncFailureKind(error: Throwable): String = when (error) {
         is kotlinx.coroutines.CancellationException -> "canceled"
+        is IllegalArgumentException -> "invalid_input"
         is ManagedCloudException.InvalidPhone,
         is ManagedCloudException.InvalidCode,
         is ManagedCloudException.CodeRequired,
@@ -699,11 +1448,11 @@ class ManagedCloudService private constructor(context: Context) {
         var hasMore = false
         var prunedWindows = 0
         var prunedRows = 0
-        val localPruneBeforeMs = if (
+        val localPruneNowMs = if (
             preferences.optimizePhoneStorage &&
             mode != SyncMode.EXPORT_PREPARATION
         ) {
-            ManagedLocalRetentionPolicy.cutoff(System.currentTimeMillis())
+            System.currentTimeMillis()
         } else {
             null
         }
@@ -757,7 +1506,7 @@ class ManagedCloudService private constructor(context: Context) {
                 maxSnapshotRestoreObjects = limits.snapshotObjects,
                 maxSnapshotRestoreBytes = limits.snapshotBytes,
                 maxDocumentUploads = if (index == 0) limits.documents else 0,
-                localPruneBeforeMs = localPruneBeforeMs,
+                localPruneNowMs = localPruneNowMs,
                 maxPruneWindowsPerClass = limits.prune,
             )
             uploadedChunks = Math.addExact(uploadedChunks, result.uploadedChunks)
@@ -820,6 +1569,7 @@ class ManagedCloudService private constructor(context: Context) {
             return
         }
         val user = runtime().auth.currentUser ?: run {
+            clearSocialPresentation()
             setPhase(ManagedCloudPhase.SIGNED_OUT)
             return
         }
@@ -835,6 +1585,7 @@ class ManagedCloudService private constructor(context: Context) {
                 else -> ManagedCloudPhase.CONSENT_REQUIRED
             },
         )
+        if (!enrolled) clearSocialPresentation()
     }
 
     private fun completeLocalErasureState() {
@@ -846,6 +1597,16 @@ class ManagedCloudService private constructor(context: Context) {
                 deletionNotBefore = null,
                 overview = null,
                 installations = emptyList(),
+                socialProfile = null,
+                socialFriends = emptyList(),
+                socialBlockedProfiles = emptyList(),
+                socialRequests = emptyList(),
+                socialFeed = emptyList(),
+                socialLookup = null,
+                socialInvite = null,
+                socialStatus = "",
+                hasPendingSocialInvite = false,
+                pendingSocialNoopId = null,
             )
         }
         setStatus(text(R.string.managed_cloud_status_deletion_completed))
@@ -861,6 +1622,16 @@ class ManagedCloudService private constructor(context: Context) {
                 deletionNotBefore = null,
                 overview = null,
                 installations = emptyList(),
+                socialProfile = null,
+                socialFriends = emptyList(),
+                socialBlockedProfiles = emptyList(),
+                socialRequests = emptyList(),
+                socialFeed = emptyList(),
+                socialLookup = null,
+                socialInvite = null,
+                socialStatus = "",
+                hasPendingSocialInvite = false,
+                pendingSocialNoopId = null,
             )
         }
         setStatus(text(R.string.managed_cloud_status_deletion_processing))
@@ -904,7 +1675,29 @@ class ManagedCloudService private constructor(context: Context) {
 
     private fun client(): ManagedStorageClient =
         ManagedStorageClient(
-            requireNotNull(configuration) { "Managed storage is not configured." }.storage,
+            configuration =
+                requireNotNull(configuration) { "Managed storage is not configured." }.storage,
+            requestObserver = { diagnostic ->
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_http.request",
+                    fields = buildMap {
+                        put("target", diagnostic.target)
+                        put("route_group", diagnostic.routeGroup)
+                        put("method", diagnostic.method)
+                        put(
+                            "duration_ms",
+                            diagnostic.durationMilliseconds.toString(),
+                        )
+                        put("outcome", diagnostic.outcome)
+                        diagnostic.statusCode?.let {
+                            put("status_code", it.toString())
+                        }
+                        diagnostic.requestId?.let {
+                            put("server_request_id", it)
+                        }
+                    },
+                )
+            },
         )
 
     private fun currentUser(): FirebaseUser =
@@ -1019,6 +1812,28 @@ class ManagedCloudService private constructor(context: Context) {
         replaceState { it.copy(status = bounded) }
     }
 
+    private fun setSocialStatus(value: String) {
+        replaceState { it.copy(socialStatus = value.trim().take(512)) }
+    }
+
+    private fun clearSocialPresentation() {
+        replaceState {
+            it.copy(
+                socialProfile = null,
+                socialFriends = emptyList(),
+                socialBlockedProfiles = emptyList(),
+                socialRequests = emptyList(),
+                socialFeed = emptyList(),
+                socialLookup = null,
+                socialInvite = null,
+                socialStatus = "",
+                hasPendingSocialInvite =
+                    preferences.pendingSocialInviteCapability != null,
+                pendingSocialNoopId = preferences.pendingSocialNoopId,
+            )
+        }
+    }
+
     private fun text(resource: Int, vararg arguments: Any): String =
         appContext.getString(resource, *arguments)
 
@@ -1051,6 +1866,8 @@ class ManagedCloudService private constructor(context: Context) {
     )
 
     private fun userMessage(error: Throwable): String = when (error) {
+        is IllegalArgumentException ->
+            text(R.string.managed_friends_error_invalid_input)
         is ManagedCloudException.InvalidPhone ->
             text(R.string.managed_cloud_error_invalid_phone)
         is ManagedCloudException.InvalidCode ->
@@ -1142,7 +1959,6 @@ class ManagedCloudService private constructor(context: Context) {
     )
 
     companion object {
-        private const val TAG = "ManagedCloudService"
         private const val FIREBASE_APP_NAME = "noop-managed"
         private const val CLOUD_RESTORE_PREFIX = "noop-plus-"
         private const val MAXIMUM_EXPORT_PREPARATION_PASSES = 256

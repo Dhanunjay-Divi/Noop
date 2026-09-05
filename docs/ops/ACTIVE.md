@@ -18,6 +18,37 @@ Last updated: **2026-09-05**
 
 ## Active work
 
+Managed Friends is now implemented for optional NOOP+ accounts on Apple,
+Android, FastAPI, and PostgreSQL. It provides random rotatable exact-match IDs,
+profile and expiring invitation links, explicit mutual requests, directional
+per-friend sharing of only Charge, Effort, Rest, sleep duration, HRV, and RHR,
+non-competitive badges, and receiver-controlled bounded pokes. Both clients
+request generic local notification and an eligible worn-band haptic only after
+foreground/background catch-up. There is no public directory, contact upload,
+ranking, automatic sharing, production HTTPS universal/app link, or APNs/FCM
+immediate delivery. The focused PostgreSQL integration, complete 264-test
+server suite, 96 `NoopRemoteSync` tests, Android unit/compile/lint checkpoint,
+and complete iOS simulator graph pass. Migration `025` and the corrected
+lifecycle runtime still require private-staging deployment, and physical
+notification/haptic behavior remains unverified. Evidence is recorded in
+[Managed Friends identity, sharing, badges, and pokes](rounds/2026-09-05-managed-friends-identity-pokes.md).
+
+The current observability round makes bounded diagnostic evidence part of the
+definition of done. Apple and Android app reports now capture lifecycle,
+responsiveness, storage, navigation, database/analysis work, managed and
+self-hosted sync, fixed-category band connection failures, and begin/end
+history-sync spans. Reports omit band transcripts, sensor values, health
+timestamps, health databases, credentials, persistent identifiers, and
+arbitrary exception messages; user notes and screenshots remain explicit,
+reviewed attachments. Managed clients retain the server-generated request ID
+with a static route group, while API, processor, lifecycle, retention, and
+Safety paths emit payload-free structured events. The server suite,
+`NoopRemoteSync`'s 89 tests, 1,614 macOS tests, 4,038 Android tests plus
+lint/build gates, and the complete iOS simulator graph pass. No physical
+device, cloud deployment, or live log-volume/retention validation occurred.
+Evidence and remaining gates are recorded in
+[Privacy-safe observability contract](rounds/2026-09-05-observability-contract.md).
+
 The v9.2.1 client-discovery round makes NOOP+ an always-visible first item in
 More on iPhone and Android, adds a dedicated Data row and destination, and
 renders an explicit unavailable state instead of hiding the feature when the
@@ -26,8 +57,9 @@ automations, local backup, and exports remain account-free. The same release
 adds a one-current-version welcome, one-time first-install edge treatment, and
 permanent More -> Updates history. Apple and Android focused tests, complete
 debug builds, visual captures, version parity, localization, health-claims,
-legal, private-data, and whitespace gates pass. The managed GCP runtime remains
-disabled and no enrollment or real health-data upload is claimed. Evidence is
+legal, private-data, and whitespace gates pass. Released mobile managed
+configuration remains disabled and no enrollment or real health-data upload is
+claimed. Evidence is
 recorded in
 [NOOP+ discovery and release welcome](rounds/2026-09-05-noop-plus-discovery-release-welcome.md).
 
@@ -52,7 +84,8 @@ The optional NOOP+ managed-storage source is implemented across iOS, Android,
 FastAPI/PostgreSQL, and guarded GCP IaC. It adds phone OTP, App Check,
 per-installation credentials, explicit versioned consent, immutable compressed
 chunk upload, processor validation, snapshot plus incremental restore, quotas,
-device revocation, erasure, and an optional 90-day detailed local window.
+device revocation, erasure, and optional seven-day raw plus 30-day essential
+detail retention after exact server validation.
 Core NOOP remains account-free; metrics, workouts, coaching, journal,
 automations, and local export are not plan entitlements. The final local
 checkpoint passed the complete server suite against PostgreSQL 14, Android
@@ -65,9 +98,12 @@ Apple and Android provide a snapshot-bound, manifest-backed complete
 managed-history ZIP export that verifies object digests, byte/object totals,
 and final archive structure. Evidence is recorded in
 [NOOP+ managed storage](rounds/2026-09-03-noop-plus-managed-storage.md).
-The clean implementation commit `3a55dfdb` also produced immutable runtime
+The earlier clean implementation commit `3a55dfdb` produced immutable runtime
 digest `sha256:7567a6fccfe73436f167b5df17a32a0a15422dc18dd0f664a116d1d8ab2665fb`;
-the on-demand scan reported zero findings. The image is stored but not deployed.
+the on-demand scan reported zero findings. A newer private runtime is deployed,
+but its lifecycle query has a PostgreSQL parameter-typing defect. Corrected
+source and a real-PostgreSQL regression pass locally; a replacement immutable
+image must be built, scanned, deployed, and exercised.
 
 The complete-history export uses the restore snapshot/list/download APIs and
 therefore includes history retained only in managed storage. It is deliberately
@@ -76,14 +112,12 @@ client-produced encrypted archive. Live large-account interruption/expiry
 evidence, resumable continuation, and a documented importer remain
 public-launch gates.
 
-The Mumbai foundation remains synthetic-only with no connected mobile client
-and no real health data. The final identity plan on 2026-09-04 contained seven
-adds, zero changes, and zero destroys. Apply again stopped before Firebase
-resource creation. Cloud Audit Logs confirm the project Owner was granted
-`firebase.projects.update`; Google rejected the request because
-`Firebase Tos Not Accepted`. The account holder must accept the terms at
-`https://console.firebase.google.com/`, after which the plan must be regenerated.
-The managed runtime and public invoker remain disabled.
+The Mumbai foundation remains synthetic-only with no connected released mobile
+client and no real health data. Firebase Identity Platform, enforced App Check,
+Cloud SQL, managed API, processor, lifecycle scheduler, KMS, Pub/Sub, and
+storage are deployed. The managed API remains IAM-only with no public invoker.
+The current source must migrate that private database through `025`, repair the
+lifecycle execution, and return to zero drift before this round closes.
 
 The customer-day and scale contract is now explicit in
 [`../PLATFORM_ARCHITECTURE.md`](../PLATFORM_ARCHITECTURE.md): immediate guidance
@@ -156,32 +190,48 @@ participant, and native-speaker gates remain separate.
   explicit enrollment and must never silently upload existing history.
 - NOOP+ can restrict managed storage, restore, and multi-device history only;
   core product capability is not a storage-tier entitlement.
-- Optional local storage reduction keeps 90 days of detailed data and prunes
-  only an exact server-validated clean window.
+- Optional local storage reduction keeps seven days of high-rate raw data and
+  30 days of essential time series, and prunes only an exact
+  server-validated clean window.
 - Ordinary customer-day prompts must converge on one explainable local arbiter;
   safety and fresh workout caution remain separate lanes.
 - No real health data enters the GCP staging project until identity, processor,
   isolation, restore, privacy/legal, and physical-device gates pass.
+- Every material change must review observability. Mobile evidence remains
+  bounded, local, and user-shared; backend events remain payload-free. Neither
+  may contain health values, user text, credentials, dynamic URLs, or
+  persistent user/device/job identifiers.
+- Managed Friends remains exact-match and accepted-only. Its six-field sharing
+  is directional, badges are non-competitive, and pokes are receiver-controlled
+  and best effort.
 
 ## Next priorities after this round
 
-1. Install the current build on the physical iPhone without clearing data and
+1. Validate shake reports on representative iPhone and Android hardware during
+   UI lag, active collection, locked-background operation, and managed sync;
+   inspect every attachment before sharing.
+2. Define backend log retention, access control, volume/cost budgets,
+   dashboards, alerts, and ownership before managed public traffic.
+3. Install the current build on the physical iPhone without clearing data and
    prove durable HR advances while worn, locked, relaunched, and upgraded.
-2. Accept Firebase terms, regenerate the zero-destroy identity plan, and deploy
-   Identity Platform plus App Check to synthetic staging.
-3. Generate ignored mobile configuration, prove debug attestation, run managed
-   Cloud SQL tests, build/scan a digest, migrate through `024`, and deploy the
-   managed runtime IAM-only.
-4. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
+4. Commit the reviewed observability, retention, and managed Friends source;
+   build and scan an immutable runtime, review a zero-destroy plan, migrate
+   private staging through `025`, deploy, prove lifecycle success, and verify
+   zero drift.
+5. Keep the public invoker and released mobile configuration disabled while
+   proving signed debug attestation and synthetic managed Friends, upload,
+   duplicate, reconnect, restore, isolation, retention, and erasure paths.
+6. Prove synthetic upload, duplicate, reconnect, restore, isolation, retention,
    erasure, load, and recovery before enabling public invocation.
-5. Prove complete managed-history export with live cloud-only/large-account
+7. Prove complete managed-history export with live cloud-only/large-account
    data, then add resumable continuation and documented import before public
    enrollment.
-6. Complete signed physical-device background, storage-pressure, battery,
-   upgrade, and multi-device validation.
-7. Consolidate ordinary wellness notifications through the shared day arbiter
+8. Complete signed physical-device background, storage-pressure, battery,
+   upgrade, multi-device, profile/invite-link, notification, and worn-band
+   haptic validation.
+9. Consolidate ordinary wellness notifications through the shared day arbiter
    after this storage round closes.
-8. Complete privacy/legal, security, support-access, carrier, accuracy, store,
+10. Complete privacy/legal, security, support-access, carrier, accuracy, store,
    and native-speaker external gates.
-9. Keep automatic emergency inference unavailable until its separate
+11. Keep automatic emergency inference unavailable until its separate
    validation and regulatory program is complete.

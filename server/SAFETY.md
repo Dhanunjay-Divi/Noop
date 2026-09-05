@@ -53,11 +53,19 @@ Paging is disabled unless every required variable is present:
 ```text
 NOOP_PUBLIC_BASE_URL=https://noop.example.com
 NOOP_TWILIO_ACCOUNT_SID=AC...
-NOOP_TWILIO_AUTH_TOKEN=...
+NOOP_TWILIO_AUTH_TOKEN=<account Auth Token for webhook verification>
+NOOP_TWILIO_API_KEY_SID=SK...
+NOOP_TWILIO_API_KEY_SECRET=<restricted outbound API key secret>
 NOOP_TWILIO_FROM_PHONE=+14155550123
 NOOP_TWILIO_STATUS_CALLBACK_SECRET=<at least 32 random bytes>
 NOOP_SAFETY_CAPABILITY_SECRET=<different, at least 32 random bytes>
 ```
+
+The `SK...` pair is optional but recommended for least-privilege outbound REST
+calls. If it is absent, the account Auth Token is also used for outbound calls.
+The account Auth Token remains required because Twilio signs callbacks with it.
+Rotate any credential that was pasted into chat, a ticket, source control, or a
+diagnostic report before use.
 
 Generate the two application secrets independently:
 

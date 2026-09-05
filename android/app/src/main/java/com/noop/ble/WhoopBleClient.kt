@@ -25,6 +25,7 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
+import com.noop.AppDiagnosticsRecorder
 import com.noop.brand.CustomerFacingBrand
 import com.noop.data.HrRow
 import com.noop.data.RrRow
@@ -100,6 +101,42 @@ import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Stable categories shared by the bounded app report. Inputs are primitives so raw GATT errors,
+ * peripheral addresses, and dynamic exception text can never enter the diagnostic event.
+ */
+internal object BandDiagnostics {
+    fun transportReason(
+        intentional: Boolean,
+        timedOut: Boolean,
+        pairingReset: Boolean,
+        hasTransportError: Boolean,
+        wasConnected: Boolean,
+    ): String = when {
+        pairingReset -> "pairing_reset"
+        timedOut -> "timeout"
+        intentional && !hasTransportError -> "intentional"
+        hasTransportError -> "transport_error"
+        wasConnected -> "remote"
+        else -> "unavailable"
+    }
+
+    fun reconnectPlan(intentional: Boolean, paused: Boolean, pairingReset: Boolean): String = when {
+        intentional -> "none"
+        paused || pairingReset -> "user_action"
+        else -> "retry"
+    }
+
+    fun historyOutcome(reason: String): String = when (reason) {
+        "HISTORY_COMPLETE" -> "completed"
+        "timeout" -> "idle_timeout"
+        "durableProgressTimeout" -> "progress_stalled"
+        "disconnect" -> "interrupted"
+        "retry" -> "retrying"
+        else -> "other"
+    }
+}
 
 /**
  * Immutable snapshot of the live connection + biometric state.
@@ -2470,6 +2507,9 @@ class WhoopBleClient(
     /** Chunks acked this offload session — feeds LiveState.syncChunksThisSession (throttled). Only
      *  touched on the serial backfill drain coroutine + the begin/exit lifecycle. */
     private var ackedChunksThisSession = 0
+    /** Bounded report span for one history attempt. It contains only duration and aggregate counts. */
+    @Volatile private var historySyncDiagnostic: AppDiagnosticsRecorder.OperationToken? = null
+    private val historySyncDiagnosticLock = Any()
     /** Visible progress spans automatic continuation slices in one deep-drain burst. */
     private var syncBurstProgress = BackfillBurstProgress()
     /** #77 family: per-session chunk tallies to tell an EMPTY completed sync (strap handed over only
@@ -3235,6 +3275,22 @@ class WhoopBleClient(
         val n = loops.coerceIn(0, 255)
         send(CommandNumber.RUN_HAPTICS_PATTERN, byteArrayOf(2, n.toByte(), 0, 0, 0))
         log("Buzz: patternId=2 loops=$n")
+    }
+
+    /**
+     * Best-effort managed Friends poke. A generic social event may reach the wrist only through a
+     * currently connected, genuinely encrypted, worn WHOOP session. Standard-HR-only and off-wrist
+     * states fail closed; callers can acknowledge only that a request was queued, never that it was
+     * physically felt.
+     */
+    fun requestManagedSocialPokeHaptic(): Boolean {
+        if (!ManagedSocialHapticPolicy.isEligible(_state.value)) return false
+        handler.post {
+            if (ManagedSocialHapticPolicy.isEligible(_state.value)) {
+                buzz(loops = 1)
+            }
+        }
+        return true
     }
 
     /**
@@ -4516,6 +4572,7 @@ class WhoopBleClient(
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice, autoConnect: Boolean = false) {
         // Reset per-connection state (mirrors the Swift flags cleared on connect/disconnect).
+        finishHistorySyncDiagnostic("disconnect")
         reset()
         // Remember the device so a later dropout can reconnect straight to it (#61).
         lastDevice = device
@@ -4591,6 +4648,17 @@ class WhoopBleClient(
                         reconnectGuide = if (keepGuide) it.reconnectGuide else null,
                     ) }
                     connectGeneration += 1
+                    val transportFields = buildMap {
+                        put("state", "connected")
+                        put("family", if (connectedFamily == DeviceFamily.WHOOP5) "modern" else "legacy")
+                        connectAttemptStartedAtMs?.let {
+                            put(
+                                "connect_duration_ms",
+                                (System.currentTimeMillis() - it).coerceAtLeast(0L).toString(),
+                            )
+                        }
+                    }
+                    AppDiagnosticsRecorder.record("band.transport", transportFields)
                     if (keepGuide) {
                         // Clear the guide only if the SAME continuous connection survives the window (a
                         // reconnect/loop cycle bumps connectGeneration, so a transient cycle-connect can't
@@ -6351,6 +6419,33 @@ class WhoopBleClient(
     // MARK: Historical offload  (port of BLEManager backfill helpers + state machine)
     // ====================================================================================
 
+    private fun beginHistorySyncDiagnostic(continuing: Boolean) {
+        val diagnostic = AppDiagnosticsRecorder.beginOperation(
+            "band.history_sync",
+            mapOf(
+                "mode" to if (continuing) "continuation" else "initial",
+                "family" to if (connectedFamily == DeviceFamily.WHOOP5) "modern" else "legacy",
+            ),
+        )
+        synchronized(historySyncDiagnosticLock) {
+            historySyncDiagnostic = diagnostic
+        }
+    }
+
+    private fun finishHistorySyncDiagnostic(reason: String) {
+        val diagnostic = synchronized(historySyncDiagnosticLock) {
+            historySyncDiagnostic.also { historySyncDiagnostic = null }
+        } ?: return
+        AppDiagnosticsRecorder.endOperation(
+            diagnostic,
+            outcome = BandDiagnostics.historyOutcome(reason),
+            fields = mapOf(
+                "persisted_rows" to backfiller.sessionRowsPersisted.toString(),
+                "acknowledged_batches" to ackedChunksThisSession.toString(),
+            ),
+        )
+    }
+
     /**
      * Start a historical-offload session: tell the state machine to begin, flip the routing flag,
      * kick the strap with SEND_HISTORICAL_DATA, and arm the idle watchdog. Port of `beginBackfill`.
@@ -6380,10 +6475,12 @@ class WhoopBleClient(
         // not "no banked history / charge to 100%". A fresh offload (count 0) keeps the honest guidance.
         val continuingBurst = consecutiveAutoContinues > 0
         val nowSec = System.currentTimeMillis() / 1_000L
+        finishHistorySyncDiagnostic("retry")
         backfiller.begin(connectedFamily, continuedAfterRows = continuingBurst)   // family drives the +4 puffin offset for 5/MG (#78)
         backfilling = true
         lastBackfillAtMs = System.currentTimeMillis()   // the BackfillPolicy floor is measured from the last KICK
         ackedChunksThisSession = 0
+        beginHistorySyncDiagnostic(continuingBurst)
         if (!continuingBurst) {
             syncBurstProgress = BackfillBurstProgress()
         }
@@ -6611,6 +6708,7 @@ class WhoopBleClient(
         ) {
             whoop5HistoryAttempts++
             backfiller.timeoutFired()
+            finishHistorySyncDiagnostic("retry")
             backfilling = false
             _state.update {
                 it.copy(
@@ -6638,6 +6736,7 @@ class WhoopBleClient(
     private fun exitBackfilling(reason: String) {
         if (!backfilling) return
         backfilling = false
+        finishHistorySyncDiagnostic(reason)
         refreshConnectionPriority()   // #477: offload done — drop back to idle priority. No-op unless enabled.
         // #533: offload done — hand the PHY back to 1M too, so the 2M preference is BOUNDED to the burst
         // exactly like the priority escalation above. A PHY PERSISTS once negotiated, so without this a link
@@ -7095,6 +7194,7 @@ class WhoopBleClient(
         // involuntary drop (macOS didDisconnectPeripheral, the plain `reconnect` line); false => a failed
         // connect that never came up (macOS didFailToConnect, the `failedConnect` variant). Read once.
         val wasConnected = _state.value.connected
+        val historySyncInterrupted = backfilling
         // Capture BEFORE reset() wipes didBond: a bonded fast-path connect that dropped without ever
         // reaching a session means the OS bond is stale — fall back to a scan so a new/re-paired
         // strap can still be found (and "No WHOOP strap found" guidance still appears). (#78 fork)
@@ -7173,6 +7273,27 @@ class WhoopBleClient(
                 ) }
             }
         }
+
+        finishHistorySyncDiagnostic("disconnect")
+        AppDiagnosticsRecorder.record(
+            "band.transport",
+            mapOf(
+                "state" to if (wasConnected) "disconnected" else "connect_failed",
+                "reason" to BandDiagnostics.transportReason(
+                    intentional = intentionalDisconnect,
+                    timedOut = status == GATT_CONN_TIMEOUT,
+                    pairingReset = staleDirectBond,
+                    hasTransportError = status != BluetoothGatt.GATT_SUCCESS,
+                    wasConnected = wasConnected,
+                ),
+                "reconnect_plan" to BandDiagnostics.reconnectPlan(
+                    intentional = intentionalDisconnect,
+                    paused = autoReconnectPausedForBondLoop,
+                    pairingReset = staleDirectBond,
+                ),
+                "history_sync_interrupted" to historySyncInterrupted.toString(),
+            ),
+        )
 
         // Persist anything buffered before tearing down (port of the collector.flush() +
         // flushStandardHR() calls in didDisconnectPeripheral). Runs on the IO scope.
@@ -7652,6 +7773,14 @@ class WhoopBleClient(
 
     /** Snapshot of the recent strap log, newest last, for the "Share strap log" diagnostics export. */
     fun exportLogText(): String = synchronized(logBuffer) { logBuffer.joinToString("\n") }
+}
+
+internal object ManagedSocialHapticPolicy {
+    fun isEligible(state: LiveState): Boolean =
+        state.connected &&
+            state.bonded &&
+            state.encryptedBond &&
+            state.worn
 }
 
 // PII scrubbers for the shareable strap log (#445). Kept at FILE scope (not inside WhoopBleClient) so

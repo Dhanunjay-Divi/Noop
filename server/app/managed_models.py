@@ -12,6 +12,11 @@ from app.models import INSTALLATION_ID_PATTERN, StrictModel
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 MANAGED_KEY_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 MANAGED_INSTALLATION_TOKEN_PATTERN = r"^noopm_[A-Za-z0-9_-]{43}$"
+MANAGED_SOCIAL_ALIAS_PATTERN = (
+    r"^NOOP-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-"
+    r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$"
+)
+MANAGED_SOCIAL_INVITE_PATTERN = r"^noopinvite_[A-Za-z0-9_-]{43}$"
 MANAGED_CONTENT_TYPES = frozenset(
     {
         "application/vnd.noop.chunk+protobuf",
@@ -373,3 +378,172 @@ class ManagedExportCompletion(StrictModel):
     object_generation: int = Field(gt=0)
     object_metageneration: int = Field(gt=0)
     object_crc32c: str = Field(pattern=r"^[A-Za-z0-9+/]{6}==$")
+
+
+class ManagedSocialProfileCreate(StrictModel):
+    request_id: UUID
+    display_name: str = Field(min_length=1, max_length=64)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalized_display_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(
+            not character.isprintable() for character in normalized
+        ):
+            raise ValueError("display_name contains unsupported characters")
+        return normalized
+
+
+class ManagedSocialProfilePatch(StrictModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=64)
+    poke_opt_in: bool | None = None
+    quiet_start_minute: int | None = Field(default=None, ge=0, le=1439)
+    quiet_end_minute: int | None = Field(default=None, ge=0, le=1439)
+    time_zone: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=(
+            r"^(?:[A-Za-z0-9][A-Za-z0-9_+./:-]{0,63}"
+            r"|[+-][0-9]{2}:[0-9]{2})$"
+        ),
+    )
+
+    @field_validator("display_name")
+    @classmethod
+    def normalized_optional_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized or any(
+            not character.isprintable() for character in normalized
+        ):
+            raise ValueError("display_name contains unsupported characters")
+        return normalized
+
+    @model_validator(mode="after")
+    def has_change(self) -> "ManagedSocialProfilePatch":
+        if not self.model_fields_set:
+            raise ValueError("profile patch must include at least one field")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("profile patch fields cannot be null")
+        return self
+
+
+class ManagedSocialInviteCreate(StrictModel):
+    request_id: UUID
+    capability: SecretStr
+    expires_in_hours: int = Field(default=72, ge=1, le=168)
+
+    @field_validator("capability")
+    @classmethod
+    def valid_capability(cls, value: SecretStr) -> SecretStr:
+        if (
+            re.fullmatch(
+                MANAGED_SOCIAL_INVITE_PATTERN,
+                value.get_secret_value(),
+            )
+            is None
+        ):
+            raise ValueError("managed social invite is invalid")
+        return value
+
+
+class ManagedSocialInviteRedeem(StrictModel):
+    request_id: UUID
+    capability: SecretStr
+
+    @field_validator("capability")
+    @classmethod
+    def valid_capability(cls, value: SecretStr) -> SecretStr:
+        if (
+            re.fullmatch(
+                MANAGED_SOCIAL_INVITE_PATTERN,
+                value.get_secret_value(),
+            )
+            is None
+        ):
+            raise ValueError("managed social invite is invalid")
+        return value
+
+
+class ManagedSocialRequestCreate(StrictModel):
+    request_id: UUID
+    noop_id: str = Field(pattern=MANAGED_SOCIAL_ALIAS_PATTERN)
+
+    @field_validator("noop_id", mode="before")
+    @classmethod
+    def canonical_noop_id(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+
+class ManagedSocialRequestDecision(StrictModel):
+    decision: Literal["accept", "decline"]
+
+
+class ManagedSocialVisibilityPatch(StrictModel):
+    charge: bool | None = None
+    effort: bool | None = None
+    rest: bool | None = None
+    sleep_duration: bool | None = None
+    hrv: bool | None = None
+    rhr: bool | None = None
+    poke_allowed: bool | None = None
+
+    @model_validator(mode="after")
+    def has_change(self) -> "ManagedSocialVisibilityPatch":
+        if not self.model_fields_set:
+            raise ValueError("visibility patch must include at least one field")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("visibility patch fields cannot be null")
+        return self
+
+
+MANAGED_SOCIAL_SUMMARY_RANGES: dict[str, tuple[float, float]] = {
+    "charge": (0.0, 100.0),
+    "effort": (0.0, 100.0),
+    "rest": (0.0, 100.0),
+    "sleep_duration": (0.0, 2_880.0),
+    "hrv": (0.0, 1_000.0),
+    "rhr": (20.0, 260.0),
+}
+
+
+class ManagedSocialSummaryMutation(StrictModel):
+    request_id: UUID
+    summary: dict[str, float | None] = Field(max_length=6)
+
+    @field_validator("summary")
+    @classmethod
+    def valid_summary(cls, values: dict[str, float | None]) -> dict[str, float | None]:
+        unknown = set(values) - set(MANAGED_SOCIAL_SUMMARY_RANGES)
+        if unknown:
+            raise ValueError("summary contains an unsupported field")
+        for key, value in values.items():
+            if value is None:
+                continue
+            lower, upper = MANAGED_SOCIAL_SUMMARY_RANGES[key]
+            if not lower <= value <= upper:
+                raise ValueError(f"summary field {key} is out of range")
+        return dict(sorted(values.items()))
+
+
+class ManagedSocialPokeCreate(StrictModel):
+    request_id: UUID
+    recipient_profile_id: UUID
+
+
+class ManagedSocialPokeAcknowledgement(StrictModel):
+    claim_id: UUID
+    notification_outcome: Literal[
+        "scheduled",
+        "not_authorized",
+        "failed",
+    ]
+    haptic_outcome: Literal[
+        "requested",
+        "band_unavailable",
+        "not_eligible",
+        "failed",
+    ]

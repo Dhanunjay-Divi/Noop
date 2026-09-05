@@ -46,6 +46,16 @@ platform integration, backend, documentation, or operations.
 - Permissions/network disclosure impact:
 - Health/medical claim impact and limitations:
 
+## Observability
+
+- Evidence that diagnoses success, stall/rejection, and failure:
+- Why existing evidence is sufficient, or why new evidence is required:
+- Existing evidence reused:
+- New bounded events or operation spans:
+- Redaction, retention, and high-frequency controls:
+- Cross-platform/backend correlation:
+- Remaining blind spots:
+
 ## Evidence
 
 Record exact commands and results. Distinguish unit, integration, simulator,

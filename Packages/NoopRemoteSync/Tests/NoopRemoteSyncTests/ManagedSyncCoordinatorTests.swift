@@ -7,16 +7,86 @@ final class ManagedSyncCoordinatorTests: XCTestCase {
     private let settleMs: Int64 = 5 * 60 * 1_000
     private let installationToken = "noopm_" + String(repeating: "a", count: 43)
 
-    func testLocalRetentionPolicyKeepsNinetyDaysAndClampsAtEpoch() {
+    func testLocalRetentionPolicyKeepsRawHotAndEssentialDetail() {
         let dayMs: Int64 = 86_400_000
-        XCTAssertEqual(ManagedLocalRetentionPolicy.detailedHistoryDays, 90)
+        XCTAssertEqual(ManagedLocalRetentionPolicy.rawHistoryDays, 7)
+        XCTAssertEqual(ManagedLocalRetentionPolicy.essentialHistoryDays, 30)
         XCTAssertEqual(
-            ManagedLocalRetentionPolicy.cutoff(nowMs: 100 * dayMs),
-            10 * dayMs
+            ManagedLocalRetentionPolicy.cutoff(
+                nowMs: 100 * dayMs,
+                dataClass: "essential_timeseries"
+            ),
+            70 * dayMs
         )
         XCTAssertEqual(
-            ManagedLocalRetentionPolicy.cutoff(nowMs: 89 * dayMs),
+            ManagedLocalRetentionPolicy.cutoff(
+                nowMs: 100 * dayMs,
+                dataClass: "raw_ppg"
+            ),
+            93 * dayMs
+        )
+        XCTAssertEqual(
+            ManagedLocalRetentionPolicy.cutoff(
+                nowMs: 6 * dayMs,
+                dataClass: "raw_motion"
+            ),
             0
+        )
+        XCTAssertNil(
+            ManagedLocalRetentionPolicy.cutoff(
+                nowMs: 100 * dayMs,
+                dataClass: "derived_summaries"
+            )
+        )
+        XCTAssertNil(
+            ManagedLocalRetentionPolicy.cutoff(
+                nowMs: 100 * dayMs,
+                dataClass: "unknown"
+            )
+        )
+    }
+
+    func testLocalRetentionAppliesPerDataClassCutoffs() async throws {
+        let dayMs: Int64 = 86_400_000
+        let state = CoordinatorState()
+        let coordinator = ManagedSyncCoordinator(
+            transport: CoordinatorTransport(),
+            extractor: MultiWindowExtractor(eventTimes: []),
+            state: state,
+            restore: CoordinatorRestore()
+        )
+        let source = try ManagedSourceDescriptor(
+            localSourceID: "strap",
+            sourceKind: "live_ble",
+            platform: .iOS,
+            installationID: "installation"
+        )
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "installation",
+            installationToken: installationToken
+        )
+
+        _ = try await coordinator.sync(
+            source: source,
+            authorization: authorization,
+            now: Date(timeIntervalSince1970: Double(100 * dayMs) / 1_000),
+            dataClasses: ManagedSyncCoordinator.chunkDataClasses,
+            maxChangePages: 0,
+            maxDocumentUploads: 0,
+            localPruneNowMs: 100 * dayMs
+        )
+
+        let recordedCutoffs = await state.recordedPruneCutoffs()
+        XCTAssertEqual(
+            recordedCutoffs,
+            [
+                "essential_timeseries": 70 * dayMs,
+                "raw_auxiliary": 93 * dayMs,
+                "raw_ppg": 93 * dayMs,
+                "raw_motion": 93 * dayMs,
+            ]
         )
     }
 
@@ -1025,6 +1095,7 @@ private actor CoordinatorState: ManagedSyncStateStoring {
     private var acknowledgements = 0
     private var snapshotCheckpoint: ManagedSnapshotRestoreCheckpoint?
     private var snapshotClears = 0
+    private var pruneCutoffs: [String: Int64] = [:]
 
     init(
         localChunkIDs: Set<UUID> = [],
@@ -1042,6 +1113,7 @@ private actor CoordinatorState: ManagedSyncStateStoring {
         snapshotCheckpoint
     }
     func snapshotClearCount() -> Int { snapshotClears }
+    func recordedPruneCutoffs() -> [String: Int64] { pruneCutoffs }
     func markCurrentWindowAvailable() {
         guard let window else { return }
         self.window = ManagedWindowUpload(
@@ -1148,7 +1220,8 @@ private actor CoordinatorState: ManagedSyncStateStoring {
         endingBeforeMs: Int64,
         limit: Int
     ) async throws -> ManagedPruneResult {
-        ManagedPruneResult(prunedWindows: 0, deletedRows: 0)
+        pruneCutoffs[dataClass] = endingBeforeMs
+        return ManagedPruneResult(prunedWindows: 0, deletedRows: 0)
     }
 
     func changeSequence() async throws -> Int64 { sequence }

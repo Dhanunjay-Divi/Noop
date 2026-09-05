@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import html as html_lib
 import json
-import logging
 import math
 import re
 import secrets
@@ -77,6 +76,11 @@ from app.models import (
     SyncPayload,
     SyncResult,
 )
+from app.observability import (
+    RequestObservabilityMiddleware,
+    emit_operational_event,
+    internal_server_error_response,
+)
 from app.paging import (
     PagingProvider,
     TwilioPagingProvider,
@@ -130,7 +134,6 @@ SOCIAL_SYNC_DAILY_RANGES: dict[str, tuple[float, float]] = {
 SOCIAL_SYNC_DAILY_METRICS = frozenset(SOCIAL_SYNC_DAILY_RANGES)
 DEVICE_RE = re.compile(IDENTIFIER_PATTERN)
 security = HTTPBearer(auto_error=False)
-logger = logging.getLogger("noop.retention")
 
 
 class RequestSizeLimitMiddleware:
@@ -810,15 +813,29 @@ async def _retention_worker(repository: Repository, settings: Settings) -> None:
     interval_seconds = settings.retention_interval_hours * 60 * 60
     while True:
         await asyncio.sleep(interval_seconds)
+        started = time.monotonic()
         try:
             counts = await _run_retention_once(repository, settings)
-            logger.info("scheduled retention completed: %s", counts)
+            emit_operational_event(
+                "retention.run",
+                service="noop-api",
+                outcome="completed",
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+                **counts,
+            )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
             # A transient database failure must be visible to operators, but it
             # must not take down ingestion. The next bounded cycle retries.
-            logger.exception("scheduled retention failed")
+            emit_operational_event(
+                "retention.run",
+                severity="ERROR",
+                service="noop-api",
+                outcome="failed",
+                failure_kind=type(error).__name__,
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+            )
 
 
 async def _run_safety_retention_once(
@@ -871,13 +888,27 @@ async def _safety_retention_worker(
     interval_seconds = settings.safety_retention_interval_hours * 60 * 60
     while True:
         await asyncio.sleep(interval_seconds)
+        started = time.monotonic()
         try:
             counts = await _run_safety_retention_once(repository, settings)
-            logger.info("scheduled Safety retention completed: %s", counts)
+            emit_operational_event(
+                "safety_retention.run",
+                service="noop-api",
+                outcome="completed",
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+                **counts,
+            )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("scheduled Safety retention failed")
+        except Exception as error:
+            emit_operational_event(
+                "safety_retention.run",
+                severity="ERROR",
+                service="noop-api",
+                outcome="failed",
+                failure_kind=type(error).__name__,
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+            )
 
 
 async def require_friend_profile(
@@ -896,11 +927,14 @@ async def require_friend_profile(
         else None
     )
     if profile is None:
+        request.state.auth_result = "social_member_rejected"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing member token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    request.state.auth_scope = "social_member"
+    request.state.auth_result = "social_member_accepted"
     return profile
 
 
@@ -920,11 +954,14 @@ async def require_safety_profile(
         else None
     )
     if profile is None:
+        request.state.auth_result = "safety_profile_rejected"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing safety token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    request.state.auth_scope = "safety_profile"
+    request.state.auth_result = "safety_profile_accepted"
     return profile
 
 
@@ -1065,6 +1102,8 @@ def create_app(
         runtime_paging_provider = TwilioPagingProvider(
             account_sid=runtime_settings.twilio_account_sid or "",
             auth_token=runtime_settings.twilio_auth_token or "",
+            api_key_sid=runtime_settings.twilio_api_key_sid,
+            api_key_secret=runtime_settings.twilio_api_key_secret,
             from_phone=runtime_settings.twilio_from_phone or "",
             status_callback_url=runtime_twilio_callback_url,
             timeout_seconds=runtime_settings.safety_provider_request_timeout_seconds,
@@ -1188,6 +1227,11 @@ def create_app(
         ),
         max_keys=runtime_settings.rate_limit_max_keys,
     )
+    app.add_middleware(
+        RequestObservabilityMiddleware,
+        service="noop-api",
+    )
+    app.add_exception_handler(Exception, internal_server_error_response)
 
     @app.exception_handler(RequestValidationError)
     async def redact_request_validation_secrets(
@@ -1239,6 +1283,7 @@ def create_app(
         )
         if is_admin:
             request.state.auth_scope = "admin"
+            request.state.auth_result = "admin_accepted"
             return
         if supplied.startswith("noop_install_"):
             installation = await runtime_installation_repository.installation_for_token(
@@ -1246,6 +1291,7 @@ def create_app(
             )
             if installation is not None:
                 request.state.auth_scope = "installation"
+                request.state.auth_result = "installation_accepted"
                 request.state.installation = installation
                 return
         if request.url.path in {"/v1/sync", "/v1/status"} and supplied.startswith(
@@ -1256,8 +1302,10 @@ def create_app(
             )
             if profile is not None:
                 request.state.auth_scope = "social_member"
+                request.state.auth_result = "social_member_accepted"
                 request.state.friend_profile = profile
                 return
+        request.state.auth_result = "bearer_rejected"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing bearer token",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
+import time
 from dataclasses import asdict, dataclass
 from uuid import UUID, uuid4
 
@@ -27,6 +27,7 @@ from app.managed_repository import (
     PostgresManagedRepository,
 )
 from app.repository import PostgresRepository
+from app.observability import emit_operational_event
 
 LIFECYCLE_LEASE = "managed_storage_lifecycle"
 
@@ -367,15 +368,45 @@ async def _run() -> ManagedLifecycleResult:
 
 
 def main() -> None:
-    result = asyncio.run(_run())
-    print(json.dumps(asdict(result), sort_keys=True))
-    if (
+    operation_id = uuid4().hex
+    started = time.monotonic()
+    emit_operational_event(
+        "managed_lifecycle.run",
+        service="noop-managed-lifecycle",
+        operation_id=operation_id,
+        outcome="started",
+    )
+    try:
+        result = asyncio.run(_run())
+    except Exception as error:
+        emit_operational_event(
+            "managed_lifecycle.run",
+            severity="ERROR",
+            service="noop-managed-lifecycle",
+            operation_id=operation_id,
+            outcome="failed",
+            failure_kind=type(error).__name__,
+            duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+        )
+        raise SystemExit(1) from None
+
+    has_failures = bool(
         result.object_delete_failures
         or result.chunk_reconciliation_failures
         or result.export_delete_failures
         or result.identity_delete_failures
-    ):
-        raise RuntimeError("one or more managed resources could not be deleted")
+    )
+    emit_operational_event(
+        "managed_lifecycle.run",
+        severity="ERROR" if has_failures else "INFO",
+        service="noop-managed-lifecycle",
+        operation_id=operation_id,
+        outcome="partial_failure" if has_failures else "completed",
+        duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
+        **asdict(result),
+    )
+    if has_failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

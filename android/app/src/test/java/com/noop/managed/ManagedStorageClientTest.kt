@@ -402,6 +402,305 @@ class ManagedStorageClientTest {
         }
     }
 
+    @Test
+    fun requestDiagnosticCorrelatesWithoutDynamicPathOrQuery() = runTest {
+        val diagnostics = mutableListOf<ManagedStorageRequestDiagnostic>()
+        val requestId = "b".repeat(32)
+        val client = ManagedStorageClient(
+            configuration = config,
+            http = client { request ->
+                response(
+                    request,
+                    410,
+                    """{"detail":{"minimum_sequence":55}}""",
+                    mapOf("X-Noop-Request-ID" to requestId),
+                )
+            },
+            requestObserver = { diagnostics += it },
+        )
+
+        try {
+            client.changes(
+                authorization = authorization,
+                afterSequence = 123,
+                limit = 200,
+            )
+            fail("Expected cursor expiry")
+        } catch (error: ManagedStorageException.CursorExpired) {
+            assertEquals(55L, error.minimumSequence)
+        }
+
+        val diagnostic = diagnostics.single()
+        assertEquals("managed_api", diagnostic.target)
+        assertEquals("/v1/managed/changes", diagnostic.routeGroup)
+        assertEquals("GET", diagnostic.method)
+        assertEquals(410, diagnostic.statusCode)
+        assertEquals(requestId, diagnostic.requestId)
+        assertEquals("rejected", diagnostic.outcome)
+        assertTrue(!diagnostic.toString().contains("after_sequence"))
+    }
+
+    @Test
+    fun managedSocialProfileUsesInstallationScopeAndStrictIdentity() = runTest {
+        var captured: Request? = null
+        val profileId = UUID.randomUUID()
+        val requestId = UUID.randomUUID()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    201,
+                    JSONObject()
+                        .put(
+                            "profile",
+                            JSONObject()
+                                .put("profile_id", profileId.toString())
+                                .put("display_name", "Private Friend")
+                                .put("noop_id", "NOOP-ABCD-EFGH-JKLM-NPQR")
+                                .put("poke_opt_in", false)
+                                .put("quiet_start_minute", 1_320)
+                                .put("quiet_end_minute", 420)
+                                .put("time_zone", "America/New_York")
+                                .put("created_at", "2026-09-05T12:00:00Z")
+                                .put("updated_at", "2026-09-05T12:00:00Z")
+                                .put("duplicate", false)
+                                .put("badges", org.json.JSONArray()),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        val profile = client.createSocialProfile(
+            authorization = authorization,
+            displayName = " Private Friend ",
+            requestId = requestId,
+        )
+
+        assertEquals(profileId, profile.profileId)
+        assertEquals("NOOP-ABCD-EFGH-JKLM-NPQR", profile.noopId)
+        assertEquals(authorization.installationId, captured!!.header("X-Noop-Installation-ID"))
+        assertEquals(authorization.installationToken, captured!!.header("X-Noop-Installation-Token"))
+        assertEquals("/v1/managed/social/profile", captured!!.url.encodedPath)
+        val body = JSONObject(okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8())
+        assertEquals(requestId.toString(), body.getString("request_id"))
+        assertEquals("Private Friend", body.getString("display_name"))
+    }
+
+    @Test
+    fun managedSocialSummarySendsOnlyApprovedProjection() = runTest {
+        var captured: Request? = null
+        val requestId = UUID.randomUUID()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    """{"summary":{"day":"2026-09-05"}}""",
+                )
+            },
+        )
+
+        client.putSocialSummary(
+            authorization = authorization,
+            day = "2026-09-05",
+            summary = ManagedSocialSummary(
+                charge = 74.0,
+                sleepDuration = 442.0,
+                hrv = 53.2,
+            ),
+            requestId = requestId,
+        )
+
+        assertEquals(
+            "/v1/managed/social/summaries/2026-09-05",
+            captured!!.url.encodedPath,
+        )
+        val body = JSONObject(okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8())
+        assertEquals(requestId.toString(), body.getString("request_id"))
+        val summary = body.getJSONObject("summary")
+        assertEquals(setOf("charge", "sleep_duration", "hrv"), summary.keys().asSequence().toSet())
+    }
+
+    @Test
+    fun managedSocialReturnsExpiredInviteReplayForRotation() = runTest {
+        val capability = "noopinvite_" + "a".repeat(43)
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "invite",
+                            JSONObject()
+                                .put(
+                                    "invite_id",
+                                    "00000000-0000-0000-0000-000000000555",
+                                )
+                                .put("capability", capability)
+                                .put("status", "expired")
+                                .put("created_at", "2026-09-01T10:00:00Z")
+                                .put("expires_at", "2026-09-04T10:00:00Z")
+                                .put("duplicate", true),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        val invite = client.createSocialInvite(
+            authorization = authorization,
+            capability = capability,
+            requestId = UUID.randomUUID(),
+        )
+
+        assertEquals("expired", invite.status)
+        assertTrue(invite.duplicate)
+    }
+
+    @Test
+    fun managedSocialPokeAcknowledgementIsClaimBound() = runTest {
+        var captured: Request? = null
+        val pokeId = UUID.randomUUID()
+        val claimId = UUID.randomUUID()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "poke",
+                            JSONObject()
+                                .put("poke_id", pokeId.toString())
+                                .put("status", "acknowledged")
+                                .put("duplicate", false)
+                                .put("notification_outcome", "scheduled")
+                                .put("haptic_outcome", "band_unavailable"),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        client.acknowledgeSocialPoke(
+            authorization = authorization,
+            pokeId = pokeId,
+            acknowledgement = ManagedSocialPokeAcknowledgement(
+                claimId = claimId,
+                notificationOutcome = "scheduled",
+                hapticOutcome = "band_unavailable",
+            ),
+        )
+
+        assertEquals(
+            "/v1/managed/social/pokes/${pokeId.toString().lowercase()}:ack",
+            captured!!.url.encodedPath,
+        )
+        val body = JSONObject(okio.Buffer().also { captured!!.body!!.writeTo(it) }.readUtf8())
+        assertEquals(claimId.toString(), body.getString("claim_id"))
+        assertEquals("scheduled", body.getString("notification_outcome"))
+        assertEquals("band_unavailable", body.getString("haptic_outcome"))
+    }
+
+    @Test
+    fun managedSocialBlockedProfilesAreValidated() = runTest {
+        var captured: Request? = null
+        val profileId = UUID.randomUUID()
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                captured = request
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "blocks",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("profile_id", profileId.toString())
+                                    .put("display_name", "Blocked profile")
+                                    .put(
+                                        "blocked_at",
+                                        "2026-09-05T12:00:00Z",
+                                    ),
+                            ),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        val blocks = client.socialBlockedProfiles(authorization)
+
+        assertEquals("/v1/managed/social/blocks", captured!!.url.encodedPath)
+        assertEquals(profileId, blocks.single().profileId)
+        assertEquals("Blocked profile", blocks.single().displayName)
+    }
+
+    @Test
+    fun managedSocialFriendRejectsUnapprovedHealthField() = runTest {
+        val profileId = UUID.randomUUID()
+        val visibility = JSONObject()
+            .put("charge", true)
+            .put("effort", false)
+            .put("rest", false)
+            .put("sleep_duration", false)
+            .put("hrv", false)
+            .put("rhr", false)
+            .put("poke_allowed", false)
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                response(
+                    request,
+                    200,
+                    JSONObject()
+                        .put(
+                            "friends",
+                            org.json.JSONArray().put(
+                                JSONObject()
+                                    .put("profile_id", profileId.toString())
+                                    .put("display_name", "Friend")
+                                    .put("friends_since", "2026-09-05T12:00:00Z")
+                                    .put("sharing", visibility)
+                                    .put("shared_with_me", visibility)
+                                    .put("badges", org.json.JSONArray())
+                                    .put(
+                                        "latest",
+                                        JSONObject()
+                                            .put("day", "2026-09-05")
+                                            .put(
+                                                "summary",
+                                                JSONObject()
+                                                    .put("charge", 70)
+                                                    .put("steps", 10_000),
+                                            ),
+                                    ),
+                            ),
+                        )
+                        .toString(),
+                )
+            },
+        )
+
+        try {
+            client.socialFriends(authorization)
+            fail("Expected unapproved managed Friends field rejection")
+        } catch (_: ManagedStorageException.InvalidResponse) {
+            // Expected.
+        }
+    }
+
     private fun client(block: (Request) -> Response): OkHttpClient =
         OkHttpClient.Builder().addInterceptor(Interceptor { chain -> block(chain.request()) }).build()
 

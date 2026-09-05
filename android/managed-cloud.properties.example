@@ -1,0 +1,10 @@
+# Copy this file to managed-cloud.properties, which is ignored by Git.
+# Gradle -P values override environment variables, which override this file.
+# Use only a reviewed NOOP+ environment; never commit real configuration.
+noopManagedApiUrl=https://managed-api.example.invalid
+noopManagedProjectId=your-staging-project
+noopManagedApiKey=replace-with-restricted-firebase-api-key
+noopManagedGoogleAppId=1:000000000000:android:0000000000000000
+noopManagedGcmSenderId=000000000000
+noopManagedPolicyVersion=staging-v1
+noopManagedPolicySha256=0000000000000000000000000000000000000000000000000000000000000000

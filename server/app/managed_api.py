@@ -4,11 +4,11 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings
@@ -39,8 +39,19 @@ from app.managed_models import (
     ManagedExportRequest,
     ManagedRestoreCompletion,
     ManagedRestoreRequest,
+    ManagedSocialInviteCreate,
+    ManagedSocialInviteRedeem,
+    ManagedSocialPokeAcknowledgement,
+    ManagedSocialPokeCreate,
+    ManagedSocialProfileCreate,
+    ManagedSocialProfilePatch,
+    ManagedSocialRequestCreate,
+    ManagedSocialRequestDecision,
+    ManagedSocialSummaryMutation,
+    ManagedSocialVisibilityPatch,
     ManagedSourceRegistration,
 )
+from app.observability import emit_operational_event
 from app.managed_object_store import (
     ManagedObjectStoreError,
     ManagedObjectStoring,
@@ -98,6 +109,7 @@ def managed_router(
     router = APIRouter(prefix="/v1/managed", tags=["managed-storage"])
 
     async def require_app_check(
+        request: Request,
         app_check_token: Annotated[
             str | None,
             Header(alias="X-Firebase-AppCheck"),
@@ -107,19 +119,23 @@ def managed_router(
         try:
             claims = await app_check_verifier.verify(supplied)
         except ManagedAppCheckRejectedError:
+            request.state.auth_result = "app_check_rejected"
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="invalid or expired managed app assertion",
             ) from None
         except ManagedAppCheckUnavailableError:
+            request.state.auth_result = "app_check_unavailable"
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="managed app verification is temporarily unavailable",
                 headers={"Retry-After": "5"},
             ) from None
+        request.state.auth_result = "app_check_accepted"
         return ManagedAppAssertion(token=supplied, claims=claims)
 
     async def require_claims(
+        request: Request,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None,
             Depends(managed_security),
@@ -132,24 +148,30 @@ def managed_router(
             else ""
         )
         try:
-            return await token_verifier.verify(
+            claims = await token_verifier.verify(
                 supplied,
                 app_check_token=app_assertion.token,
             )
         except ManagedIdentityRejectedError:
+            request.state.auth_result = "identity_rejected"
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="invalid or expired managed identity token",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from None
         except ManagedIdentityUnavailableError:
+            request.state.auth_result = "identity_unavailable"
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="managed identity verification is temporarily unavailable",
                 headers={"Retry-After": "5"},
             ) from None
+        request.state.auth_scope = "managed_identity"
+        request.state.auth_result = "identity_accepted"
+        return claims
 
     def installation_header(
+        request: Request,
         installation_id: Annotated[
             str | None,
             Header(alias="X-Noop-Installation-ID"),
@@ -159,13 +181,16 @@ def managed_router(
             installation_id is None
             or INSTALLATION_RE.fullmatch(installation_id) is None
         ):
+            request.state.auth_result = "installation_id_rejected"
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="managed installation credential was rejected",
             )
+        request.state.auth_result = "installation_id_accepted"
         return installation_id
 
     def installation_token_header(
+        request: Request,
         installation_token: Annotated[
             str | None,
             Header(alias="X-Noop-Installation-Token"),
@@ -179,13 +204,16 @@ def managed_router(
             )
             is None
         ):
+            request.state.auth_result = "installation_token_rejected"
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="managed installation credential was rejected",
             )
+        request.state.auth_result = "installation_token_accepted"
         return hashlib.sha256(installation_token.encode("ascii")).hexdigest()
 
     async def require_identity(
+        request: Request,
         claims: ManagedIdentityClaims = Depends(require_claims),
         installation_id: str = Depends(installation_header),
         installation_token_hash: str = Depends(installation_token_header),
@@ -198,8 +226,11 @@ def managed_router(
                 installation_token_hash=installation_token_hash,
             )
         except ManagedStorageError as error:
+            request.state.auth_result = "installation_rejected"
             _raise_managed(error)
             raise AssertionError("unreachable")
+        request.state.auth_scope = "managed_installation"
+        request.state.auth_result = "installation_accepted"
         return ManagedRequestIdentity(
             claims=claims,
             principal=principal,
@@ -253,6 +284,445 @@ def managed_router(
     ) -> dict:
         try:
             return await repository.overview(principal=identity.principal)
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/social/profile",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_social_profile(
+        body: ManagedSocialProfileCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "profile": await repository.create_social_profile(
+                    principal=identity.principal,
+                    request=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/profile")
+    async def social_profile(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "profile": await repository.get_social_profile(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/social/profile",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def delete_social_profile(
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        if confirmation != "DELETE MANAGED FRIENDS":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="set X-Noop-Confirm to 'DELETE MANAGED FRIENDS'",
+            )
+        try:
+            await repository.delete_social_profile(
+                principal=identity.principal,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.patch("/social/profile")
+    async def update_social_profile(
+        body: ManagedSocialProfilePatch,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "profile": await repository.update_social_profile(
+                    principal=identity.principal,
+                    patch=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/social/noop-id:rotate")
+    async def rotate_social_noop_id(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "profile": await repository.rotate_social_alias(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/lookup")
+    async def lookup_social_profile(
+        noop_id: Annotated[str, Query(min_length=24, max_length=24)],
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        canonical = noop_id.upper()
+        if (
+            re.fullmatch(
+                (
+                    r"NOOP-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-"
+                    r"[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}"
+                ),
+                canonical,
+            )
+            is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="NOOP ID is invalid",
+            )
+        try:
+            return {
+                "profile": await repository.lookup_social_profile(
+                    principal=identity.principal,
+                    noop_id=canonical,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/social/invites",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_social_invite(
+        body: ManagedSocialInviteCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "invite": await repository.create_social_invite(
+                    principal=identity.principal,
+                    request=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/social/invites/{invite_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def revoke_social_invite(
+        invite_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        try:
+            await repository.revoke_social_invite(
+                principal=identity.principal,
+                invite_id=invite_id,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/social/invites:redeem")
+    async def redeem_social_invite(
+        body: ManagedSocialInviteRedeem,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "request": await repository.redeem_social_invite(
+                    principal=identity.principal,
+                    request_id=body.request_id,
+                    capability=body.capability.get_secret_value(),
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/social/requests",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_social_request(
+        body: ManagedSocialRequestCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "request": await repository.create_social_request(
+                    principal=identity.principal,
+                    request=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/requests")
+    async def social_requests(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "requests": await repository.list_social_requests(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/social/requests/{request_id}")
+    async def decide_social_request(
+        request_id: UUID,
+        body: ManagedSocialRequestDecision,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "request": await repository.decide_social_request(
+                    principal=identity.principal,
+                    request_id=request_id,
+                    decision=body.decision,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/friends")
+    async def social_friends(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "friends": await repository.list_social_friends(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.patch("/social/friends/{friend_profile_id}/privacy")
+    async def update_social_visibility(
+        friend_profile_id: UUID,
+        body: ManagedSocialVisibilityPatch,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "sharing": await repository.update_social_visibility(
+                    principal=identity.principal,
+                    friend_profile_id=friend_profile_id,
+                    patch=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/social/friends/{friend_profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def remove_social_friend(
+        friend_profile_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        try:
+            await repository.remove_social_friend(
+                principal=identity.principal,
+                friend_profile_id=friend_profile_id,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/social/blocks/{blocked_profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def block_social_profile(
+        blocked_profile_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        try:
+            await repository.block_social_profile(
+                principal=identity.principal,
+                blocked_profile_id=blocked_profile_id,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/blocks")
+    async def social_blocks(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "blocks": await repository.list_social_blocks(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/social/blocks/{blocked_profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def unblock_social_profile(
+        blocked_profile_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        try:
+            await repository.unblock_social_profile(
+                principal=identity.principal,
+                blocked_profile_id=blocked_profile_id,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.put("/social/summaries/{summary_day}")
+    async def put_social_summary(
+        summary_day: date,
+        body: ManagedSocialSummaryMutation,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            return {
+                "summary": await repository.put_social_summary(
+                    principal=identity.principal,
+                    day=summary_day,
+                    mutation=body,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/social/feed")
+    async def social_feed(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+        start: date | None = None,
+        end: date | None = None,
+    ) -> dict:
+        selected_end = end or datetime.now(UTC).date()
+        selected_start = start or selected_end - timedelta(days=6)
+        try:
+            return {
+                "start": selected_start.isoformat(),
+                "end": selected_end.isoformat(),
+                "days": await repository.social_feed(
+                    principal=identity.principal,
+                    start=selected_start,
+                    end=selected_end,
+                ),
+                "units": {
+                    "charge": "score_0_to_100",
+                    "effort": "score_0_to_100",
+                    "rest": "score_0_to_100",
+                    "sleep_duration": "minutes",
+                    "hrv": "milliseconds",
+                    "rhr": "beats_per_minute",
+                },
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/social/pokes",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_social_poke(
+        body: ManagedSocialPokeCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            poke = await repository.create_social_poke(
+                principal=identity.principal,
+                request=body,
+            )
+            emit_operational_event(
+                "managed_social.poke_created",
+                service="noop-managed-api",
+                outcome="queued",
+                duplicate=bool(poke["duplicate"]),
+            )
+            return {"poke": poke}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/social/pokes:claim")
+    async def claim_social_pokes(
+        limit: Annotated[int, Query(ge=1, le=10)] = 3,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            pokes = await repository.claim_social_pokes(
+                principal=identity.principal,
+                installation_id=identity.installation_id,
+                limit=limit,
+            )
+            emit_operational_event(
+                "managed_social.pokes_claimed",
+                service="noop-managed-api",
+                outcome="completed",
+                count=len(pokes),
+            )
+            return {"pokes": pokes}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/social/pokes/{poke_id}:ack")
+    async def acknowledge_social_poke(
+        poke_id: UUID,
+        body: ManagedSocialPokeAcknowledgement,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        try:
+            result = await repository.acknowledge_social_poke(
+                principal=identity.principal,
+                installation_id=identity.installation_id,
+                poke_id=poke_id,
+                acknowledgement=body,
+            )
+            emit_operational_event(
+                "managed_social.poke_acknowledged",
+                service="noop-managed-api",
+                outcome="completed",
+                duplicate=bool(result["duplicate"]),
+                notification=result.get("notification_outcome", "reported"),
+                haptic=result.get("haptic_outcome", "reported"),
+            )
+            return {"poke": result}
         except ManagedStorageError as error:
             _raise_managed(error)
             raise AssertionError("unreachable")

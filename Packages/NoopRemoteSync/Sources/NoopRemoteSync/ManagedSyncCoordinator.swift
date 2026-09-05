@@ -391,13 +391,25 @@ public struct ManagedSyncPolicy: Equatable, Sendable {
 }
 
 public enum ManagedLocalRetentionPolicy {
-    public static let detailedHistoryDays: Int64 = 90
-    public static let detailedHistoryMilliseconds =
-        detailedHistoryDays * 86_400_000
+    public static let rawHistoryDays: Int64 = 7
+    public static let essentialHistoryDays: Int64 = 30
+    private static let dayMilliseconds: Int64 = 86_400_000
 
-    public static func cutoff(nowMs: Int64) -> Int64 {
-        guard nowMs > detailedHistoryMilliseconds else { return 0 }
-        return nowMs - detailedHistoryMilliseconds
+    public static func retainedDays(for dataClass: String) -> Int64? {
+        switch dataClass {
+        case "essential_timeseries":
+            essentialHistoryDays
+        case "raw_auxiliary", "raw_ppg", "raw_motion":
+            rawHistoryDays
+        default:
+            nil
+        }
+    }
+
+    public static func cutoff(nowMs: Int64, dataClass: String) -> Int64? {
+        guard let days = retainedDays(for: dataClass) else { return nil }
+        let retainedMilliseconds = days * dayMilliseconds
+        return nowMs > retainedMilliseconds ? nowMs - retainedMilliseconds : 0
     }
 }
 
@@ -462,7 +474,7 @@ public actor ManagedSyncCoordinator {
         maxSnapshotRestoreObjects: Int = 16,
         maxSnapshotRestoreBytes: Int = 32 * 1_024 * 1_024,
         maxDocumentUploads: Int = 16,
-        localPruneBeforeMs: Int64? = nil,
+        localPruneNowMs: Int64? = nil,
         maxPruneWindowsPerClass: Int = 4
     ) async throws -> ManagedSyncRunResult {
         guard (1...100).contains(maxForwardWindowsPerClass),
@@ -473,7 +485,7 @@ public actor ManagedSyncCoordinator {
               maxSnapshotRestoreBytes > 0,
               (0...100).contains(maxDocumentUploads),
               (0...16).contains(maxPruneWindowsPerClass),
-              localPruneBeforeMs.map({ $0 >= 0 }) ?? true,
+              localPruneNowMs.map({ $0 >= 0 }) ?? true,
               Set(dataClasses).count == dataClasses.count else {
             throw ManagedStorageError.invalidConfiguration
         }
@@ -658,8 +670,11 @@ public actor ManagedSyncCoordinator {
                 sourceID: source.sourceID,
                 dataClass: dataClass
             )
-            if dataClass != "derived_summaries",
-               let localPruneBeforeMs,
+            if let localPruneNowMs,
+               let localPruneBeforeMs = ManagedLocalRetentionPolicy.cutoff(
+                   nowMs: localPruneNowMs,
+                   dataClass: dataClass
+               ),
                maxPruneWindowsPerClass > 0 {
                 let result = try await state.pruneAvailableWindows(
                     sourceID: source.sourceID,

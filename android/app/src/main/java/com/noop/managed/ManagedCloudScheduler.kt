@@ -58,7 +58,7 @@ object ManagedCloudScheduler {
         val appContext = context.applicationContext
         val service = ManagedCloudService.get(appContext)
         if (!service.shouldSchedule()) return
-        if (nowMs - service.lastAttemptMs() < CATCH_UP_INTERVAL_MS) return
+        if (nowMs - service.schedulerLastAttemptMs() < CATCH_UP_INTERVAL_MS) return
         val request = OneTimeWorkRequestBuilder<ManagedCloudWorker>()
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -101,9 +101,14 @@ class ManagedCloudWorker(
         service.bootstrap()
         if (!service.shouldSchedule()) return Result.success()
         return try {
-            val summary = service.syncForWorker()
-            if (ManagedCloudScheduler.successfulPassNeedsContinuation(summary.hasMore)) {
-                ManagedCloudScheduler.enqueueContinuation(applicationContext)
+            if (service.shouldSyncForWorker()) {
+                val summary = service.syncForWorker()
+                if (ManagedCloudScheduler.successfulPassNeedsContinuation(summary.hasMore)) {
+                    ManagedCloudScheduler.enqueueContinuation(applicationContext)
+                }
+            }
+            if (service.shouldRunSocialForWorker()) {
+                service.socialCatchUpForWorker()
             }
             Result.success()
         } catch (error: ManagedStorageException.Network) {

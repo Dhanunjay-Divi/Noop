@@ -486,6 +486,350 @@ final class ManagedStorageClientTests: XCTestCase {
         }
     }
 
+    func testRequestDiagnosticCorrelatesWithoutDynamicPathOrQuery() async throws {
+        let diagnostics = LockedManagedDiagnostics()
+        let (_, authorization) = try makeClient()
+        let configuration = try ManagedStorageConfiguration(
+            baseURL: XCTUnwrap(URL(string: "https://noop.example")),
+            policyVersion: "synthetic-v1",
+            policySHA256: String(repeating: "a", count: 64)
+        )
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ManagedURLProtocolStub.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let requestID = String(repeating: "b", count: 32)
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 410,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "X-Noop-Request-ID": requestID,
+                    ]
+                )!,
+                Data(#"{"detail":{"minimum_sequence":55}}"#.utf8)
+            )
+        }
+        let client = ManagedStorageClient(
+            configuration: configuration,
+            session: session,
+            requestObserver: { diagnostics.append($0) }
+        )
+
+        do {
+            let _: ManagedChangeFeed = try await client.changes(
+                after: 123,
+                authorization: authorization
+            )
+            XCTFail("Expected cursor expiry")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedStorageError,
+                .cursorExpired(minimumSequence: 55)
+            )
+        }
+
+        let diagnostic = try XCTUnwrap(diagnostics.values.first)
+        XCTAssertEqual(diagnostic.target, "managed_api")
+        XCTAssertEqual(diagnostic.routeGroup, "/v1/managed/changes")
+        XCTAssertEqual(diagnostic.method, "GET")
+        XCTAssertEqual(diagnostic.statusCode, 410)
+        XCTAssertEqual(diagnostic.requestID, requestID)
+        XCTAssertEqual(diagnostic.outcome, "rejected")
+        XCTAssertFalse(String(describing: diagnostic).contains("after_sequence"))
+    }
+
+    func testManagedSocialContractUsesExactConsentAndBoundedDiagnostics() async throws {
+        let diagnostics = LockedManagedDiagnostics()
+        let configuration = try ManagedStorageConfiguration(
+            baseURL: XCTUnwrap(URL(string: "https://noop.example")),
+            policyVersion: "synthetic-v1",
+            policySHA256: String(repeating: "a", count: 64)
+        )
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ManagedURLProtocolStub.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let authorization = try ManagedAuthorization(
+            identityToken: "identity",
+            appCheckToken: "app-check",
+            installationID: "ios-installation",
+            installationToken: "noopm_" + String(repeating: "a", count: 43)
+        )
+        let client = ManagedStorageClient(
+            configuration: configuration,
+            session: session,
+            requestObserver: { diagnostics.append($0) }
+        )
+        let profileID = UUID(uuidString: "00000000-0000-0000-0000-000000000111")!
+        let friendID = UUID(uuidString: "00000000-0000-0000-0000-000000000222")!
+        let pokeID = UUID(uuidString: "00000000-0000-0000-0000-000000000333")!
+        let claimID = UUID(uuidString: "00000000-0000-0000-0000-000000000444")!
+        let noopID = "NOOP-ABCD-EFGH-JKLM-NPQR"
+        let capability = "noopinvite_" + String(repeating: "a", count: 43)
+
+        ManagedURLProtocolStub.handler = { request in
+            let path = request.url?.path ?? ""
+            let json: String
+            switch (request.httpMethod, path) {
+            case ("POST", "/v1/managed/social/profile"):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["display_name"] as? String, "Maya")
+                json = """
+                {"profile":{
+                  "profile_id":"\(profileID)",
+                  "display_name":"Maya",
+                  "noop_id":"\(noopID)",
+                  "poke_opt_in":false,
+                  "quiet_start_minute":1320,
+                  "quiet_end_minute":420,
+                  "time_zone":"UTC",
+                  "created_at":"2026-09-05T10:00:00Z",
+                  "updated_at":"2026-09-05T10:00:00Z",
+                  "duplicate":false
+                }}
+                """
+            case ("GET", "/v1/managed/social/lookup"):
+                XCTAssertEqual(
+                    request.url?.query,
+                    "noop_id=NOOP-ABCD-EFGH-JKLM-NPQR"
+                )
+                json = """
+                {"profile":{
+                  "profile_id":"\(friendID)",
+                  "display_name":"Alex",
+                  "noop_id":"\(noopID)",
+                  "self":false
+                }}
+                """
+            case ("POST", "/v1/managed/social/invites"):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["capability"] as? String, capability)
+                json = """
+                {"invite":{
+                  "invite_id":"00000000-0000-0000-0000-000000000555",
+                  "capability":"\(capability)",
+                  "status":"active",
+                  "created_at":"2026-09-05T10:00:00Z",
+                  "expires_at":"2026-09-08T10:00:00Z",
+                  "duplicate":false
+                }}
+                """
+            case ("GET", "/v1/managed/social/friends"):
+                json = """
+                {"friends":[{
+                  "profile_id":"\(friendID)",
+                  "display_name":"Alex",
+                  "friends_since":"2026-09-05T10:00:00Z",
+                  "sharing":{
+                    "charge":true,"effort":false,"rest":false,
+                    "sleep_duration":false,"hrv":false,"rhr":false,
+                    "poke_allowed":false
+                  },
+                  "shared_with_me":{
+                    "charge":false,"effort":false,"rest":false,
+                    "sleep_duration":false,"hrv":false,"rhr":false,
+                    "poke_allowed":true
+                  },
+                  "latest":null,
+                  "badges":[{
+                    "code":"connected",
+                    "earned_at":"2026-09-05T10:00:00Z"
+                  }]
+                }]}
+                """
+            case ("GET", "/v1/managed/social/blocks"):
+                json = """
+                {"blocks":[{
+                  "profile_id":"\(friendID)",
+                  "display_name":"Alex",
+                  "blocked_at":"2026-09-05T10:00:00Z"
+                }]}
+                """
+            case ("POST", "/v1/managed/social/pokes:claim"):
+                json = """
+                {"pokes":[{
+                  "poke_id":"\(pokeID)",
+                  "claim_id":"\(claimID)",
+                  "sender_profile_id":"\(friendID)",
+                  "sender_display_name":"Alex",
+                  "created_at":"2026-09-05T10:00:00Z",
+                  "expires_at":"2026-09-06T10:00:00Z",
+                  "claim_expires_at":"2026-09-05T10:05:00Z"
+                }]}
+                """
+            case ("POST", "/v1/managed/social/pokes/\(pokeID.uuidString.lowercased()):ack"):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["notification_outcome"] as? String, "scheduled")
+                XCTAssertEqual(body["haptic_outcome"] as? String, "requested")
+                json = """
+                {"poke":{
+                  "poke_id":"\(pokeID)",
+                  "status":"acknowledged",
+                  "duplicate":false,
+                  "notification_outcome":"scheduled",
+                  "haptic_outcome":"requested"
+                }}
+                """
+            case ("DELETE", "/v1/managed/social/profile"):
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "X-Noop-Confirm"),
+                    "DELETE MANAGED FRIENDS"
+                )
+                json = ""
+            default:
+                XCTFail("Unexpected managed social request \(request.httpMethod ?? "") \(path)")
+                throw ManagedStorageError.invalidResponse
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: path.hasSuffix(":ack") ? 200 : 200,
+                    httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "X-Noop-Request-ID": String(repeating: "c", count: 32),
+                    ]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let profile = try await client.createSocialProfile(
+            displayName: " Maya ",
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertEqual(profile.profileID, profileID)
+        XCTAssertEqual(profile.badges, [])
+        let lookup = try await client.lookupSocialProfile(
+            noopID: noopID.lowercased(),
+            authorization: authorization
+        )
+        XCTAssertEqual(lookup.profileID, friendID)
+        let invite = try await client.createSocialInvite(
+            capability: capability,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertEqual(invite.capability, capability)
+        let friends = try await client.socialFriends(authorization: authorization)
+        XCTAssertTrue(friends[0].sharedWithMe.pokeAllowed)
+        let blocks = try await client.socialBlockedProfiles(
+            authorization: authorization
+        )
+        XCTAssertEqual(blocks[0].profileID, friendID)
+        let claims = try await client.claimSocialPokes(authorization: authorization)
+        XCTAssertEqual(claims[0].claimID, claimID)
+        let receipt = try await client.acknowledgeSocialPoke(
+            pokeID,
+            acknowledgement: ManagedSocialPokeAcknowledgement(
+                claimID: claimID,
+                notificationOutcome: "scheduled",
+                hapticOutcome: "requested"
+            ),
+            authorization: authorization
+        )
+        XCTAssertEqual(receipt.status, "acknowledged")
+        try await client.deleteSocialProfile(authorization: authorization)
+
+        XCTAssertEqual(diagnostics.values.count, 8)
+        XCTAssertTrue(
+            diagnostics.values.allSatisfy {
+                $0.routeGroup == "/v1/managed/social"
+                    && $0.target == "managed_api"
+            }
+        )
+        let evidence = String(describing: diagnostics.values)
+        XCTAssertFalse(evidence.contains(capability))
+        XCTAssertFalse(evidence.contains(noopID))
+        XCTAssertFalse(evidence.contains(profileID.uuidString))
+    }
+
+    func testManagedSocialRejectsOutOfRangeHealthResponse() async throws {
+        let (client, authorization) = try makeClient()
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {
+                  "start":"2026-09-05",
+                  "end":"2026-09-05",
+                  "days":[{
+                    "profile_id":"00000000-0000-0000-0000-000000000222",
+                    "display_name":"Alex",
+                    "day":"2026-09-05",
+                    "summary":{"hrv":1001}
+                  }]
+                }
+                """.utf8)
+            )
+        }
+
+        do {
+            _ = try await client.socialFeed(
+                startDay: "2026-09-05",
+                endDay: "2026-09-05",
+                authorization: authorization
+            )
+            XCTFail("Expected response validation failure")
+        } catch {
+            XCTAssertEqual(error as? ManagedStorageError, .invalidResponse)
+        }
+    }
+
+    func testManagedSocialReturnsExpiredInviteReplayForRotation() async throws {
+        let (client, authorization) = try makeClient()
+        let capability = "noopinvite_" + String(repeating: "a", count: 43)
+        ManagedURLProtocolStub.handler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data("""
+                {"invite":{
+                  "invite_id":"00000000-0000-0000-0000-000000000555",
+                  "capability":"\(capability)",
+                  "status":"expired",
+                  "created_at":"2026-09-01T10:00:00Z",
+                  "expires_at":"2026-09-04T10:00:00Z",
+                  "duplicate":true
+                }}
+                """.utf8)
+            )
+        }
+
+        let invite = try await client.createSocialInvite(
+            capability: capability,
+            requestID: UUID(),
+            authorization: authorization
+        )
+
+        XCTAssertEqual(invite.status, "expired")
+        XCTAssertTrue(invite.duplicate)
+    }
+
     private func makeClient() throws -> (ManagedStorageClient, ManagedAuthorization) {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [ManagedURLProtocolStub.self]
@@ -505,6 +849,23 @@ final class ManagedStorageClientTests: XCTestCase {
             ManagedStorageClient(configuration: configuration, session: session),
             authorization
         )
+    }
+}
+
+private final class LockedManagedDiagnostics: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [ManagedStorageRequestDiagnostic] = []
+
+    var values: [ManagedStorageRequestDiagnostic] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: ManagedStorageRequestDiagnostic) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
     }
 }
 

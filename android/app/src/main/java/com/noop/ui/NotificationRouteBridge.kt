@@ -18,6 +18,7 @@ internal enum class NoopNotificationRoute(val navRoute: String) {
     BREATHE("breathe"),
     JOURNAL("insights"),
     SAFETY("safety"),
+    FRIENDS("friends"),
     COACH("coach");
 
     companion object {

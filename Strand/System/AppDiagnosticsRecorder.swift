@@ -85,6 +85,50 @@ final class AppDiagnosticsRecorder: NSObject {
     private static let metricPayloadIDsKey = "appDiagnostics.metricPayloadIDs.v1"
     static let mainThreadStallThresholdSeconds: TimeInterval = 1
     private static let watchdogIntervalMilliseconds = 500
+    private static let sensitiveFieldFragments = [
+        "account_id",
+        "account_scope",
+        "address",
+        "authorization",
+        "biometric",
+        "body",
+        "contact_id",
+        "cookie",
+        "credential",
+        "delivery_id",
+        "device_id",
+        "dispatch_id",
+        "email",
+        "endpoint",
+        "health_value",
+        "installation_id",
+        "invite",
+        "journal",
+        "latitude",
+        "location",
+        "longitude",
+        "member_id",
+        "message",
+        "note",
+        "object_key",
+        "otp",
+        "password",
+        "path",
+        "payload",
+        "phone",
+        "profile_id",
+        "query",
+        "serial",
+        "session_id",
+        "secret",
+        "signed_url",
+        "source_id",
+        "text",
+        "token",
+        "url",
+        "user_id",
+        "uuid",
+    ]
 
     private let directory: URL
     private let ioQueue = DispatchQueue(label: "com.noop.app-diagnostics.io", qos: .utility)
@@ -504,10 +548,42 @@ final class AppDiagnosticsRecorder: NSObject {
 
     private static func sanitizedFields(_ fields: [String: String]) -> [String: String] {
         var result: [String: String] = [:]
+        var redacted = 0
         for (key, value) in fields.prefix(24) {
-            result[sanitizedToken(key)] = String(value.prefix(512))
+            let safeKey = sanitizedToken(key)
+            let lowered = safeKey.lowercased()
+            guard !sensitiveFieldFragments.contains(where: lowered.contains) else {
+                redacted += 1
+                continue
+            }
+            result[safeKey] = sanitizedFieldValue(value)
         }
+        if redacted > 0 { result["redacted_fields"] = String(redacted) }
         return result
+    }
+
+    private static func sanitizedFieldValue(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(
+            CharacterSet(charactersIn: "._-/:{}+")
+        )
+        let scalars = value.unicodeScalars.prefix(512).map {
+            allowed.contains($0) ? Character(String($0)) : "_"
+        }
+        return String(scalars)
+    }
+
+    static func freshnessBucket(ageSeconds: TimeInterval?) -> String {
+        guard let ageSeconds, ageSeconds.isFinite else { return "missing" }
+        if ageSeconds < -60 { return "future_clock" }
+        let age = max(0, ageSeconds)
+        if age < 120 { return "under_2m" }
+        if age < 15 * 60 { return "2m_to_15m" }
+        if age < 2 * 60 * 60 { return "15m_to_2h" }
+        return "over_2h"
+    }
+
+    static func failureKind(_ error: Error) -> String {
+        sanitizedToken(String(reflecting: type(of: error)))
     }
 
     // MARK: - Main-thread watchdog and system signals

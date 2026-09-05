@@ -825,7 +825,13 @@ final class IntelligenceEngine: ObservableObject {
         do {
             result = try await store.healImplausibleTimestamps()
         } catch {
-            NSLog("IntelligenceEngine: timestamp heal (#547) FAILED , \(error); will retry next launch")
+            AppDiagnosticsRecorder.shared.record(
+                "database.timestamp_heal",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+                ]
+            )
             return   // leave the flag unset so a transient failure retries
         }
         if result.didChange {

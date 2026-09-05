@@ -71,6 +71,16 @@ class FakeManagedRepository:
         self.export_row: dict | None = None
         self.completed_exports: list[dict] = []
         self.erasure_requests: list[dict] = []
+        self.social_profile_requests = []
+        self.social_profile_deletions = 0
+        self.social_invite_requests = []
+        self.social_poke_requests = []
+        self.social_claims = []
+        self.social_acknowledgements = []
+        self.social_profile_id = uuid4()
+        self.social_friend_id = uuid4()
+        self.social_poke_id = uuid4()
+        self.social_claim_id = uuid4()
         self.installation_token_hashes = {
             "ios-test-1": hashlib.sha256(
                 INSTALLATION_TOKEN.encode("ascii")
@@ -296,6 +306,95 @@ class FakeManagedRepository:
             "scope": kwargs["scope"],
             "status": "cooling_off",
             "not_before": datetime.now(UTC) + timedelta(hours=24),
+        }
+
+    async def create_social_profile(self, *, principal, request) -> dict:
+        assert principal == self.principal
+        self.social_profile_requests.append(request)
+        now = datetime.now(UTC)
+        return {
+            "profile_id": str(self.social_profile_id),
+            "display_name": request.display_name,
+            "noop_id": "NOOP-ABCD-EFGH-JKLM-NPQR",
+            "poke_opt_in": False,
+            "quiet_start_minute": 1320,
+            "quiet_end_minute": 420,
+            "time_zone": "UTC",
+            "created_at": now,
+            "updated_at": now,
+            "duplicate": False,
+        }
+
+    async def delete_social_profile(self, *, principal) -> None:
+        assert principal == self.principal
+        self.social_profile_deletions += 1
+
+    async def lookup_social_profile(self, *, principal, noop_id) -> dict:
+        assert principal == self.principal
+        assert noop_id == "NOOP-ABCD-EFGH-JKLM-NPQR"
+        return {
+            "profile_id": str(self.social_friend_id),
+            "display_name": "Friend",
+            "noop_id": noop_id,
+            "self": False,
+        }
+
+    async def create_social_invite(self, *, principal, request) -> dict:
+        assert principal == self.principal
+        self.social_invite_requests.append(request)
+        now = datetime.now(UTC)
+        return {
+            "invite_id": str(uuid4()),
+            "capability": request.capability.get_secret_value(),
+            "status": "active",
+            "created_at": now,
+            "expires_at": now + timedelta(hours=request.expires_in_hours),
+            "duplicate": False,
+        }
+
+    async def create_social_poke(self, *, principal, request) -> dict:
+        assert principal == self.principal
+        self.social_poke_requests.append(request)
+        now = datetime.now(UTC)
+        return {
+            "poke_id": str(self.social_poke_id),
+            "recipient_profile_id": str(request.recipient_profile_id),
+            "recipient_display_name": "Friend",
+            "status": "queued",
+            "created_at": now,
+            "expires_at": now + timedelta(hours=24),
+            "duplicate": False,
+        }
+
+    async def claim_social_pokes(
+        self,
+        *,
+        principal,
+        installation_id,
+        limit,
+    ) -> list[dict]:
+        assert principal == self.principal
+        self.social_claims.append((installation_id, limit))
+        now = datetime.now(UTC)
+        return [
+            {
+                "poke_id": str(self.social_poke_id),
+                "claim_id": str(self.social_claim_id),
+                "sender_profile_id": str(self.social_friend_id),
+                "sender_display_name": "Friend",
+                "created_at": now,
+                "expires_at": now + timedelta(hours=1),
+                "claim_expires_at": now + timedelta(minutes=5),
+            }
+        ]
+
+    async def acknowledge_social_poke(self, **kwargs) -> dict:
+        assert kwargs["principal"] == self.principal
+        self.social_acknowledgements.append(kwargs)
+        return {
+            "poke_id": str(kwargs["poke_id"]),
+            "status": "acknowledged",
+            "duplicate": False,
         }
 
 
@@ -828,3 +927,131 @@ def test_managed_erasure_cancel_does_not_require_fresh_destructive_auth() -> Non
 
     assert response.status_code == 200
     assert response.json()["erasure"]["status"] == "canceled"
+
+
+def test_managed_social_profile_lookup_and_invite_use_managed_identity() -> None:
+    client, repository = _managed_client()
+    capability = "noopinvite_" + ("c" * 43)
+    with client:
+        created = client.post(
+            "/v1/managed/social/profile",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "display_name": "  Test person  ",
+            },
+        )
+        found = client.get(
+            "/v1/managed/social/lookup",
+            headers=_managed_headers(),
+            params={"noop_id": "noop-abcd-efgh-jklm-npqr"},
+        )
+        invite = client.post(
+            "/v1/managed/social/invites",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "capability": capability,
+                "expires_in_hours": 24,
+            },
+        )
+
+    assert created.status_code == 201
+    assert created.json()["profile"]["display_name"] == "Test person"
+    assert repository.social_profile_requests[0].display_name == "Test person"
+    assert found.status_code == 200
+    assert found.json()["profile"]["noop_id"] == "NOOP-ABCD-EFGH-JKLM-NPQR"
+    assert invite.status_code == 201
+    assert invite.json()["invite"]["capability"] == capability
+    assert (
+        repository.social_invite_requests[0].capability.get_secret_value() == capability
+    )
+
+
+def test_managed_social_profile_delete_requires_exact_confirmation() -> None:
+    client, repository = _managed_client()
+    with client:
+        missing = client.delete(
+            "/v1/managed/social/profile",
+            headers=_managed_headers(),
+        )
+        incorrect = client.delete(
+            "/v1/managed/social/profile",
+            headers={
+                **_managed_headers(),
+                "X-Noop-Confirm": "DELETE MY MANAGED ACCOUNT",
+            },
+        )
+        deleted = client.delete(
+            "/v1/managed/social/profile",
+            headers={
+                **_managed_headers(),
+                "X-Noop-Confirm": "DELETE MANAGED FRIENDS",
+            },
+        )
+
+    assert missing.status_code == 409
+    assert incorrect.status_code == 409
+    assert deleted.status_code == 204
+    assert repository.social_profile_deletions == 1
+
+
+def test_managed_social_validation_never_echoes_invite_or_extra_health_data() -> None:
+    client, _ = _managed_client()
+    leaked = "noopinvite_" + ("z" * 42) + "!"
+    with client:
+        invalid_invite = client.post(
+            "/v1/managed/social/invites",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "capability": leaked,
+                "expires_in_hours": 24,
+            },
+        )
+        invalid_summary = client.put(
+            "/v1/managed/social/summaries/2026-09-05",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "summary": {"spo2": 98.0},
+            },
+        )
+
+    assert invalid_invite.status_code == 422
+    assert leaked not in invalid_invite.text
+    assert invalid_summary.status_code == 422
+    assert "98.0" not in invalid_summary.text
+
+
+def test_managed_social_poke_claim_is_installation_bound_and_acknowledged() -> None:
+    client, repository = _managed_client()
+    with client:
+        sent = client.post(
+            "/v1/managed/social/pokes",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "recipient_profile_id": str(repository.social_friend_id),
+            },
+        )
+        claimed = client.post(
+            "/v1/managed/social/pokes:claim",
+            headers=_managed_headers(),
+            params={"limit": 2},
+        )
+        acknowledged = client.post(
+            f"/v1/managed/social/pokes/{repository.social_poke_id}:ack",
+            headers=_managed_headers(),
+            json={
+                "claim_id": str(repository.social_claim_id),
+                "notification_outcome": "scheduled",
+                "haptic_outcome": "requested",
+            },
+        )
+
+    assert sent.status_code == 202
+    assert claimed.status_code == 200
+    assert repository.social_claims == [("ios-test-1", 2)]
+    assert acknowledged.status_code == 200
+    assert repository.social_acknowledgements[0]["installation_id"] == "ios-test-1"

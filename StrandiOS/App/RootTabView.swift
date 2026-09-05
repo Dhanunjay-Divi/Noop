@@ -673,6 +673,8 @@ struct RootTabView: View {
                 selectedTab = IPhonePrimaryTab.activity.rawValue
             case .devices:
                 routeToMore(.devices)
+            case .friends:
+                routeToMore(.friends)
             case .safety:
                 routeToMore(.safety)
             case .coach:

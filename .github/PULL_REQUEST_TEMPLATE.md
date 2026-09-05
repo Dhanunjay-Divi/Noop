@@ -18,6 +18,14 @@ strap (4.0 / 5.0 / MG). For protocol or analytics changes, point to the test
 that covers it. "Builds and unit tests pass" alone is not enough for BLE work.
 -->
 
+## Observability
+
+<!--
+What exact evidence diagnoses success, stall/rejection, and failure at each
+material boundary? How is it bounded, and what prevents health data, user
+content, credentials, dynamic identifiers, or payloads from entering it?
+-->
+
 ## Checklist
 
 - [ ] Swift package tests pass for any package I touched (`swift test` in `Packages/<name>`)
@@ -25,6 +33,7 @@ that covers it. "Builds and unit tests pass" alone is not enough for BLE work.
 - [ ] No new build warnings introduced
 - [ ] UI changes use only `StrandDesign` tokens — no hardcoded colors, fonts, or spacing
 - [ ] No hardcoded hex frame bytes; protocol facts live in the schema / decoders
+- [ ] I reviewed observability for each material path; new events are bounded, categorical, privacy-safe, tested, and paired across Apple/Android where applicable
 - [ ] Follows the conventions in [`docs/CONTRIBUTING.md`](../docs/CONTRIBUTING.md)
 - [ ] I did not commit generated output (`Strand.xcodeproj/`) or any secrets/keystores
 - [ ] I did not commit personal health exports, raw captures, databases, backups, routes, journal notes, or other participant data; any fixture is minimized synthetic data

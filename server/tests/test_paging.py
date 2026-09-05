@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from datetime import UTC, datetime
 from email.utils import format_datetime
@@ -65,8 +66,10 @@ def test_twilio_voice_callback_events_are_repeated_form_values(monkeypatch) -> N
 
     monkeypatch.setattr(paging, "urlopen", fake_urlopen)
     provider = TwilioPagingProvider(
-        account_sid="AC123",
-        auth_token="secret",
+        account_sid=f"AC{'1' * 32}",
+        auth_token="webhook-auth-token",
+        api_key_sid=f"SK{'2' * 32}",
+        api_key_secret="restricted-api-secret",
         from_phone="+14155550100",
         status_callback_url="https://safety.example.test/twilio/status",
     )
@@ -82,6 +85,13 @@ def test_twilio_voice_callback_events_are_repeated_form_values(monkeypatch) -> N
 
     request = captured["request"]
     values = parse_qs(request.data.decode("utf-8"))
+    authorization = request.get_header("Authorization")
+    assert authorization is not None
+    encoded_credential = authorization.removeprefix("Basic ")
+    assert base64.b64decode(encoded_credential).decode("utf-8") == (
+        f"SK{'2' * 32}:restricted-api-secret"
+    )
+    assert f"/Accounts/AC{'1' * 32}/Calls.json" in request.full_url
     assert submission.provider_reference == "CA123"
     assert values["StatusCallbackEvent"] == [
         "initiated",
@@ -89,6 +99,52 @@ def test_twilio_voice_callback_events_are_repeated_form_values(monkeypatch) -> N
         "answered",
         "completed",
     ]
+
+
+def test_twilio_falls_back_to_account_auth_token_without_api_key(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class ProviderResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        @staticmethod
+        def read(_: int) -> bytes:
+            return json.dumps({"sid": "SM123", "status": "queued"}).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["request"] = request
+        return ProviderResponse()
+
+    monkeypatch.setattr(paging, "urlopen", fake_urlopen)
+    provider = TwilioPagingProvider(
+        account_sid=f"AC{'1' * 32}",
+        auth_token="account-auth-token",
+        from_phone="+14155550100",
+        status_callback_url=None,
+    )
+
+    asyncio.run(
+        provider.send_page_sms(
+            to_phone="+14155550101",
+            owner_name="Jordan",
+            incident_summary="Started from the NOOP app.",
+            response_url="https://safety.example.test/respond",
+        )
+    )
+
+    request = captured["request"]
+    authorization = request.get_header("Authorization")
+    assert authorization is not None
+    encoded_credential = authorization.removeprefix("Basic ")
+    assert base64.b64decode(encoded_credential).decode("utf-8") == (
+        f"AC{'1' * 32}:account-auth-token"
+    )
 
 
 @pytest.mark.parametrize(

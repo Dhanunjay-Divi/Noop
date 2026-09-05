@@ -134,6 +134,43 @@ struct PostBondTimeoutLoopDetector {
     }
 }
 
+/// Stable, cross-platform categories for user-shared band diagnostics.
+///
+/// These helpers accept booleans rather than an Error so reports never inherit localized messages,
+/// raw GATT codes, peripheral identifiers, or other dynamic values.
+struct BandDiagnostics {
+    static func transportReason(intentional: Bool,
+                                timedOut: Bool,
+                                pairingReset: Bool,
+                                hasTransportError: Bool,
+                                wasConnected: Bool) -> String {
+        if pairingReset { return "pairing_reset" }
+        if timedOut { return "timeout" }
+        if intentional && !hasTransportError { return "intentional" }
+        if hasTransportError { return "transport_error" }
+        return wasConnected ? "remote" : "unavailable"
+    }
+
+    static func reconnectPlan(intentional: Bool,
+                              paused: Bool,
+                              pairingReset: Bool) -> String {
+        if intentional { return "none" }
+        if paused || pairingReset { return "user_action" }
+        return "retry"
+    }
+
+    static func historyOutcome(reason: String) -> String {
+        switch reason {
+        case "HISTORY_COMPLETE": return "completed"
+        case "timeout": return "idle_timeout"
+        case "durableProgressTimeout": return "progress_stalled"
+        case "disconnect": return "interrupted"
+        case "retry": return "retrying"
+        default: return "other"
+        }
+    }
+}
+
 /// #747 / #750: decides when a strap that keeps REFUSING the encrypted bond ("Encryption/Authentication is
 /// insufficient", no genuine bond in between) has refused enough times that hammering it further is
 /// pointless. Two responsibilities, both pure so they're unit-testable without a CoreBluetooth seam:
@@ -779,6 +816,9 @@ public final class BLEManager: NSObject, ObservableObject {
     private var backfillFrameQueue: [[UInt8]] = []
     /// True while the drain task is running (prevents a second drain task from launching).
     private var backfillDraining = false
+    /// Bounded app-report span for the current history attempt. It carries only duration and aggregate
+    /// persistence counts; raw frames, health values, timestamps, and band identifiers stay excluded.
+    private var historySyncDiagnostic: AppDiagnosticsRecorder.OperationToken?
     /// Keep each main-actor drain slice small enough that SwiftUI can process input/paint between slices.
     private static let backfillDrainBatchSize = 12
 
@@ -1930,6 +1970,29 @@ public final class BLEManager: NSObject, ObservableObject {
 
     // MARK: Backfill helpers
 
+    private func beginHistorySyncDiagnostic(continuing: Bool) {
+        historySyncDiagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "band.history_sync",
+            fields: [
+                "mode": continuing ? "continuation" : "initial",
+                "family": selectedModel.deviceFamily == .whoop5 ? "modern" : "legacy",
+            ]
+        )
+    }
+
+    private func finishHistorySyncDiagnostic(reason: String) {
+        guard let diagnostic = historySyncDiagnostic else { return }
+        historySyncDiagnostic = nil
+        AppDiagnosticsRecorder.shared.endOperation(
+            diagnostic,
+            outcome: BandDiagnostics.historyOutcome(reason: reason),
+            fields: [
+                "persisted_rows": String(backfiller?.sessionRowsPersisted ?? 0),
+                "acknowledged_batches": String(acknowledgedBatchesThisSession),
+            ]
+        )
+    }
+
     /// Start a historical-offload session: tell the store machine to begin, flip the routing
     /// flag, kick the strap with sendHistoricalData, and arm the idle timeout.
     @discardableResult
@@ -1979,9 +2042,11 @@ public final class BLEManager: NSObject, ObservableObject {
         // the same burst banked rows - tell the backfiller so its no-cursor END reads as "caught up", not
         // "no banked history / charge to 100%". A fresh offload (count 0) keeps the honest guidance.
         let continuingBurst = consecutiveAutoContinues > 0
+        finishHistorySyncDiagnostic(reason: "retry")
         backfiller.begin(family: selectedModel.deviceFamily, continuedAfterRows: continuingBurst)
         backfilling = true
         acknowledgedBatchesThisSession = 0
+        beginHistorySyncDiagnostic(continuing: continuingBurst)
         state.beginHistorySync(continuing: continuingBurst)
         state.backfilling = true
         state.rejectedFramesThisSession = 0
@@ -2111,6 +2176,7 @@ public final class BLEManager: NSObject, ObservableObject {
     private func exitBackfilling(reason: String) {
         guard backfilling else { return }
         backfilling = false
+        finishHistorySyncDiagnostic(reason: reason)
         state.finishHistorySyncProgress()
         state.backfilling = false
         // #174: a backfill just ended. Start (or extend) the deep-packet cooldown from this instant so
@@ -4398,6 +4464,17 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         biometricNotificationsRearmed = false
         confirmedWristOffAt = nil
         offWristStallLogged = false
+        var diagnosticFields = [
+            "state": "connected",
+            "restored": wasRestoredConnection ? "true" : "false",
+            "family": selectedModel.deviceFamily == .whoop5 ? "modern" : "legacy",
+        ]
+        if let connectAttemptStartedAt {
+            diagnosticFields["connect_duration_ms"] = String(
+                max(0, Int(connectedAt.timeIntervalSince(connectAttemptStartedAt) * 1_000))
+            )
+        }
+        AppDiagnosticsRecorder.shared.record("band.transport", fields: diagnosticFields)
         log("Connected - discovering services")
         // Connection test mode: report the connect latency + the uptime-start marker the readout reads.
         // Gated zero-cost: the .connection bool is read before any string is built, so this is a no-op
@@ -4426,6 +4503,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?) {
+        let historySyncInterrupted = backfilling
         Task { @MainActor in await collector?.flush() }
         // Each durable insert publishes its own history receipt. Do not infer one from a teardown snapshot:
         // this delegate can run while the final insert is suspended and would otherwise miss that commit.
@@ -4492,6 +4570,27 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             }
         }
         bondedAt = nil   // cleared after the bond-loop detector above read it (#617)
+        let pairingReset = (error as? CBError)?.code == .peerRemovedPairingInformation
+        finishHistorySyncDiagnostic(reason: "disconnect")
+        AppDiagnosticsRecorder.shared.record(
+            "band.transport",
+            fields: [
+                "state": "disconnected",
+                "reason": BandDiagnostics.transportReason(
+                    intentional: intentionalDisconnect,
+                    timedOut: connTimedOut,
+                    pairingReset: pairingReset,
+                    hasTransportError: error != nil,
+                    wasConnected: true
+                ),
+                "reconnect_plan": BandDiagnostics.reconnectPlan(
+                    intentional: intentionalDisconnect,
+                    paused: autoReconnectPausedForBondLoop,
+                    pairingReset: pairingReset
+                ),
+                "history_sync_interrupted": historySyncInterrupted ? "true" : "false",
+            ]
+        )
         state.connected = false
         observedGattFamily = nil
         // Publish the real down edge. SourceCoordinator uses it to clear physical-strap identity state
@@ -4623,6 +4722,27 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
                                didFailToConnect peripheral: CBPeripheral,
                                error: Error?) {
         log("Failed to connect\(error.map { " - \($0.localizedDescription)" } ?? "")")
+        let pairingReset = (error as? CBError)?.code == .peerRemovedPairingInformation
+        let timedOut = (error as? CBError)?.code == .connectionTimeout
+        AppDiagnosticsRecorder.shared.record(
+            "band.transport",
+            fields: [
+                "state": "connect_failed",
+                "reason": BandDiagnostics.transportReason(
+                    intentional: intentionalDisconnect,
+                    timedOut: timedOut,
+                    pairingReset: pairingReset,
+                    hasTransportError: error != nil,
+                    wasConnected: false
+                ),
+                "reconnect_plan": BandDiagnostics.reconnectPlan(
+                    intentional: intentionalDisconnect,
+                    paused: autoReconnectPausedForBondLoop,
+                    pairingReset: pairingReset
+                ),
+                "history_sync_interrupted": "false",
+            ]
+        )
         // The strap wiped its bond (a firmware update, or the official WHOOP app re-bonding it). macOS keeps
         // re-presenting the now-stale pairing key, so every reconnect loops on this same error with no
         // recovery and no user guidance. Surface an actionable re-pair guide instead of failing silently —

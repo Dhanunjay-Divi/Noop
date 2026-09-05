@@ -26,6 +26,11 @@ from app.managed_repository import (
     PostgresManagedRepository,
 )
 from app.repository import PostgresRepository
+from app.observability import (
+    RequestObservabilityMiddleware,
+    emit_operational_event,
+    internal_server_error_response,
+)
 
 OBJECT_KEY_RE = re.compile(
     r"^v1/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
@@ -160,6 +165,11 @@ def create_managed_processor_app(
         ),
         max_keys=runtime_settings.rate_limit_max_keys,
     )
+    app.add_middleware(
+        RequestObservabilityMiddleware,
+        service="noop-managed-processor",
+    )
+    app.add_exception_handler(Exception, internal_server_error_response)
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:
@@ -176,6 +186,7 @@ def create_managed_processor_app(
 
     @app.post("/v1/events/storage-finalized", status_code=204)
     async def storage_finalized(request: Request) -> Response:
+        request_id = request.scope.get("noop_request_id", "unknown")
         try:
             body = await request.json()
             event = parse_storage_finalize_event(
@@ -183,6 +194,13 @@ def create_managed_processor_app(
                 expected_bucket=runtime_settings.managed_raw_bucket or "",
             )
         except (ValueError, json.JSONDecodeError):
+            emit_operational_event(
+                "managed_processor.event",
+                severity="WARNING",
+                service="noop-managed-processor",
+                request_id=request_id,
+                outcome="rejected_envelope",
+            )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         try:
             await processor.process(
@@ -191,19 +209,46 @@ def create_managed_processor_app(
                 queue_event_hash=event.event_hash,
             )
         except ManagedNotFoundError:
+            emit_operational_event(
+                "managed_processor.event",
+                severity="WARNING",
+                service="noop-managed-processor",
+                request_id=request_id,
+                outcome="reservation_not_found",
+            )
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         except (ManagedObjectStoreError, ManagedProcessingBusyError):
+            emit_operational_event(
+                "managed_processor.event",
+                severity="ERROR",
+                service="noop-managed-processor",
+                request_id=request_id,
+                outcome="retryable_failure",
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="managed object processing is temporarily unavailable",
                 headers={"Retry-After": "10"},
             ) from None
         except ManagedConflictError:
+            emit_operational_event(
+                "managed_processor.event",
+                severity="WARNING",
+                service="noop-managed-processor",
+                request_id=request_id,
+                outcome="state_conflict",
+            )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="managed object processing conflicted with current state",
                 headers={"Retry-After": "10"},
             ) from None
+        emit_operational_event(
+            "managed_processor.event",
+            service="noop-managed-processor",
+            request_id=request_id,
+            outcome="processed",
+        )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return app

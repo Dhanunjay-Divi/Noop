@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import random
 import signal
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from app import __version__
+from app.observability import emit_operational_event
 from app.paging import (
     PagingOutcomeUnknownError,
     PagingProvider,
@@ -19,8 +20,6 @@ from app.paging import (
 )
 from app.safety_capabilities import SafetyCapabilitySigner
 from app.safety_repository import SafetyNotFoundError, SafetyRepository
-
-logger = logging.getLogger("noop.safety")
 
 
 def safety_incident_summary(
@@ -89,8 +88,14 @@ class SafetyDeliveryWorker:
                 self._record_local_liveness()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("safety delivery cycle failed")
+            except Exception as error:
+                emit_operational_event(
+                    "safety_delivery.cycle",
+                    severity="ERROR",
+                    service="noop-safety-worker",
+                    outcome="failed",
+                    failure_kind=type(error).__name__,
+                )
             if stop_event is not None and stop_event.is_set():
                 break
             if processed > 0:
@@ -140,8 +145,17 @@ class SafetyDeliveryWorker:
         if self._submission_limit is None:
             self._submission_limit = asyncio.Semaphore(self.max_concurrency)
         if deliveries:
+            started = time.monotonic()
             await asyncio.gather(
                 *(self._submit_delivery_bounded(delivery) for delivery in deliveries)
+            )
+            emit_operational_event(
+                "safety_delivery.batch",
+                service="noop-safety-worker",
+                job_kind="delivery",
+                outcome="completed",
+                claimed_count=len(deliveries),
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
             )
             return len(deliveries)
 
@@ -152,11 +166,20 @@ class SafetyDeliveryWorker:
             limit=min(self.batch_size, self.max_concurrency),
         )
         if invitations:
+            started = time.monotonic()
             await asyncio.gather(
                 *(
                     self._submit_invitation_bounded(invitation)
                     for invitation in invitations
                 )
+            )
+            emit_operational_event(
+                "safety_delivery.batch",
+                service="noop-safety-worker",
+                job_kind="invitation",
+                outcome="completed",
+                claimed_count=len(invitations),
+                duration_ms=max(0, int((time.monotonic() - started) * 1_000)),
             )
         return len(invitations)
 
@@ -225,9 +248,12 @@ class SafetyDeliveryWorker:
                 now=await self.repository.coordination_now(),
             )
             if not released:
-                logger.warning(
-                    "safety delivery could not release its paused lease",
-                    extra={"delivery_id": str(delivery["delivery_id"])},
+                emit_operational_event(
+                    "safety_delivery.submission",
+                    severity="WARNING",
+                    service="noop-safety-worker",
+                    job_kind="delivery",
+                    outcome="lease_release_failed",
                 )
             return
 
@@ -258,20 +284,36 @@ class SafetyDeliveryWorker:
         except SafetyNotFoundError:
             # Hard deletion may commit after the provider call drains but before
             # this post-submission bookkeeping obtains its lock.
-            logger.info(
-                "safety delivery was erased after provider submission",
-                extra={"delivery_id": str(delivery["delivery_id"])},
+            emit_operational_event(
+                "safety_delivery.submission",
+                service="noop-safety-worker",
+                job_kind="delivery",
+                channel=str(delivery["channel"]),
+                outcome="erased_after_submission",
             )
             return
         if error is not None:
-            logger.warning(
-                "safety delivery submission failed",
-                extra={
-                    "dispatch_id": str(delivery["dispatch_id"]),
-                    "delivery_id": str(delivery["delivery_id"]),
-                    "channel": str(delivery["channel"]),
-                    "attempt": attempt_count,
-                },
+            emit_operational_event(
+                "safety_delivery.submission",
+                severity="WARNING",
+                service="noop-safety-worker",
+                job_kind="delivery",
+                channel=str(delivery["channel"]),
+                attempt=attempt_count,
+                outcome="retry_scheduled",
+                failure_kind=_paging_failure_kind(error),
+            )
+        else:
+            emit_operational_event(
+                "safety_delivery.submission",
+                service="noop-safety-worker",
+                job_kind="delivery",
+                channel=str(delivery["channel"]),
+                attempt=attempt_count,
+                outcome="submitted",
+                provider_status=_provider_status_kind(
+                    submission.status if submission else None
+                ),
             )
 
     async def _submit_invitation(self, invitation: dict[str, Any]) -> None:
@@ -322,9 +364,12 @@ class SafetyDeliveryWorker:
                 now=await self.repository.coordination_now(),
             )
             if not released:
-                logger.warning(
-                    "safety invitation could not release its paused lease",
-                    extra={"contact_id": str(invitation["contact_id"])},
+                emit_operational_event(
+                    "safety_delivery.submission",
+                    severity="WARNING",
+                    service="noop-safety-worker",
+                    job_kind="invitation",
+                    outcome="lease_release_failed",
                 )
             return
 
@@ -353,18 +398,33 @@ class SafetyDeliveryWorker:
                 retry_at=now + timedelta(seconds=delay),
             )
         except SafetyNotFoundError:
-            logger.info(
-                "safety invitation was erased after provider submission",
-                extra={"contact_id": str(invitation["contact_id"])},
+            emit_operational_event(
+                "safety_delivery.submission",
+                service="noop-safety-worker",
+                job_kind="invitation",
+                outcome="erased_after_submission",
             )
             return
         if error is not None:
-            logger.warning(
-                "safety invitation submission failed",
-                extra={
-                    "contact_id": str(invitation["contact_id"]),
-                    "attempt": attempt_count,
-                },
+            emit_operational_event(
+                "safety_delivery.submission",
+                severity="WARNING",
+                service="noop-safety-worker",
+                job_kind="invitation",
+                attempt=attempt_count,
+                outcome="retry_scheduled",
+                failure_kind=_paging_failure_kind(error),
+            )
+        else:
+            emit_operational_event(
+                "safety_delivery.submission",
+                service="noop-safety-worker",
+                job_kind="invitation",
+                attempt=attempt_count,
+                outcome="submitted",
+                provider_status=_provider_status_kind(
+                    submission.status if submission else None
+                ),
             )
 
     async def _wait_for_sender_slot(self) -> None:
@@ -410,6 +470,33 @@ class SafetyDeliveryWorker:
 def _safe_error(error: Exception) -> str:
     text = str(error).strip() or error.__class__.__name__
     return text[:240]
+
+
+def _paging_failure_kind(error: Exception) -> str:
+    if isinstance(error, PagingOutcomeUnknownError):
+        return "provider_outcome_unknown"
+    if isinstance(error, PagingRateLimitedError):
+        return "provider_rate_limited"
+    if isinstance(error, TimeoutError):
+        return "provider_timeout"
+    return "provider_failure"
+
+
+def _provider_status_kind(value: str | None) -> str:
+    normalized = (value or "").strip().casefold()
+    if normalized in {
+        "accepted",
+        "answered",
+        "completed",
+        "delivered",
+        "initiated",
+        "queued",
+        "ringing",
+        "sending",
+        "sent",
+    }:
+        return normalized
+    return "other"
 
 
 def _retry_delay_seconds(
@@ -467,7 +554,11 @@ async def _run_standalone() -> None:
                 "database schema does not match this Safety worker build"
             )
         if not settings.paging_configured:
-            logger.info("safety worker idle because paging is not configured")
+            emit_operational_event(
+                "safety_delivery.worker",
+                service="noop-safety-worker",
+                outcome="idle_not_configured",
+            )
             idle_interval = min(
                 settings.safety_worker_poll_seconds,
                 max(1, settings.safety_worker_heartbeat_timeout_seconds // 2),
@@ -494,6 +585,8 @@ async def _run_standalone() -> None:
         provider = TwilioPagingProvider(
             account_sid=settings.twilio_account_sid or "",
             auth_token=settings.twilio_auth_token or "",
+            api_key_sid=settings.twilio_api_key_sid,
+            api_key_secret=settings.twilio_api_key_secret,
             from_phone=settings.twilio_from_phone or "",
             status_callback_url=callback_url,
             timeout_seconds=settings.safety_provider_request_timeout_seconds,
@@ -527,5 +620,4 @@ async def _run_standalone() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     asyncio.run(_run_standalone())

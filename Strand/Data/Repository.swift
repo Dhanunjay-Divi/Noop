@@ -1123,10 +1123,12 @@ final class Repository: ObservableObject {
         let openTrace = AppDiagnosticsRecorder.shared.beginOperation("database.open")
         let task = Task { [deviceId, openTrace] () -> WhoopStore? in
             var outcome = "failed"
+            var failureKind: String?
             defer {
                 AppDiagnosticsRecorder.shared.endOperation(
                     openTrace,
                     outcome: outcome,
+                    fields: failureKind.map { ["failure_kind": $0] } ?? [:],
                     includeResourceSnapshot: true
                 )
             }
@@ -1138,7 +1140,7 @@ final class Repository: ObservableObject {
                 path = try StorePaths.defaultDatabasePath()
             } catch {
                 outcome = "path_failed"
-                NSLog("WhoopStore: ensureStore FAILED resolving DB path: \(error)")
+                failureKind = AppDiagnosticsRecorder.failureKind(error)
                 return nil
             }
             let s: WhoopStore
@@ -1146,8 +1148,7 @@ final class Repository: ObservableObject {
                 s = try await WhoopStore(path: path)
             } catch {
                 outcome = "open_failed"
-                let ns = error as NSError
-                NSLog("WhoopStore: ensureStore FAILED opening store: \(ns.domain) code=\(ns.code): \(ns.localizedDescription)")
+                failureKind = AppDiagnosticsRecorder.failureKind(error)
                 return nil
             }
             try? await s.upsertDevice(id: deviceId, mac: nil, name: "Noop Band")

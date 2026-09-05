@@ -54,6 +54,50 @@ object AppDiagnosticsRecorder {
     private const val FRAME_WINDOW_SIZE = 120
     private const val HITCH_MS = 50L
     private const val SEVERE_HITCH_MS = 150L
+    private val sensitiveFieldFragments = setOf(
+        "account_id",
+        "account_scope",
+        "address",
+        "authorization",
+        "biometric",
+        "body",
+        "contact_id",
+        "cookie",
+        "credential",
+        "delivery_id",
+        "device_id",
+        "dispatch_id",
+        "email",
+        "endpoint",
+        "health_value",
+        "installation_id",
+        "invite",
+        "journal",
+        "latitude",
+        "location",
+        "longitude",
+        "member_id",
+        "message",
+        "note",
+        "object_key",
+        "otp",
+        "password",
+        "path",
+        "payload",
+        "phone",
+        "profile_id",
+        "query",
+        "serial",
+        "session_id",
+        "secret",
+        "signed_url",
+        "source_id",
+        "text",
+        "token",
+        "url",
+        "user_id",
+        "uuid",
+    )
 
     private val startLock = Any()
     private val operationCounter = AtomicLong()
@@ -104,16 +148,18 @@ object AppDiagnosticsRecorder {
         synchronized(startLock) {
             if (started) return
             appContext = context.applicationContext
-            diagnosticsDirectory().mkdirs()
-            previousSessionFile().delete()
-            if (currentSessionFile().exists()) {
-                currentSessionFile().renameTo(previousSessionFile())
+            runCatching {
+                diagnosticsDirectory().mkdirs()
+                previousSessionFile().delete()
+                if (currentSessionFile().exists()) {
+                    currentSessionFile().renameTo(previousSessionFile())
+                }
+                // Exit reasons are refreshed from Android on every process launch. Remove the prior snapshot
+                // first so an OS-pruned ANR cannot be mistaken for evidence from the current failure window.
+                exitHistoryFile().delete()
+                lastAnrFile().delete()
+                currentSessionFile().createNewFile()
             }
-            // Exit reasons are refreshed from Android on every process launch. Remove the prior snapshot
-            // first so an OS-pruned ANR cannot be mistaken for evidence from the current failure window.
-            exitHistoryFile().delete()
-            lastAnrFile().delete()
-            currentSessionFile().createNewFile()
             started = true
         }
         record(
@@ -126,7 +172,11 @@ object AppDiagnosticsRecorder {
             ),
             includeResourceSnapshot = true,
         )
-        ioExecutor.execute { captureHistoricalExits() }
+        runCatching {
+            ioExecutor.execute {
+                runCatching { captureHistoricalExits() }
+            }
+        }
     }
 
     fun record(
@@ -139,14 +189,18 @@ object AppDiagnosticsRecorder {
         val safeFields = sanitizedFields(fields)
         val at = System.currentTimeMillis()
         val uptime = SystemClock.elapsedRealtime()
-        ioExecutor.execute {
-            appendEvent(
-                event = safeEvent,
-                fields = safeFields,
-                includeResourceSnapshot = includeResourceSnapshot,
-                atMs = at,
-                uptimeMs = uptime,
-            )
+        runCatching {
+            ioExecutor.execute {
+                runCatching {
+                    appendEvent(
+                        event = safeEvent,
+                        fields = safeFields,
+                        includeResourceSnapshot = includeResourceSnapshot,
+                        atMs = at,
+                        uptimeMs = uptime,
+                    )
+                }
+            }
         }
     }
 
@@ -157,15 +211,17 @@ object AppDiagnosticsRecorder {
         includeResourceSnapshot: Boolean = true,
     ) {
         if (!started) return
-        val task = ioExecutor.submit {
-            appendEvent(
-                event = sanitizedToken(event),
-                fields = sanitizedFields(fields),
-                includeResourceSnapshot = includeResourceSnapshot,
-                atMs = System.currentTimeMillis(),
-                uptimeMs = SystemClock.elapsedRealtime(),
-            )
-        }
+        val task = runCatching {
+            ioExecutor.submit {
+                appendEvent(
+                    event = sanitizedToken(event),
+                    fields = sanitizedFields(fields),
+                    includeResourceSnapshot = includeResourceSnapshot,
+                    atMs = System.currentTimeMillis(),
+                    uptimeMs = SystemClock.elapsedRealtime(),
+                )
+            }
+        }.getOrNull() ?: return
         runCatching { task.get(350, TimeUnit.MILLISECONDS) }
     }
 
@@ -279,16 +335,18 @@ object AppDiagnosticsRecorder {
      */
     fun diagnosticEntries(): List<Pair<String, ByteArray>> {
         if (!started) return emptyList()
-        val task: Future<List<Pair<String, ByteArray>>> = ioExecutor.submit<List<Pair<String, ByteArray>>> {
-            listOf(
-                CURRENT_SESSION_ENTRY to currentSessionFile(),
-                PREVIOUS_SESSION_ENTRY to previousSessionFile(),
-                EXIT_HISTORY_ENTRY to exitHistoryFile(),
-                LAST_ANR_ENTRY to lastAnrFile(),
-            ).mapNotNull { (name, file) ->
-                file.takeIf { it.isFile && it.length() > 0L }?.readBytes()?.let { name to it }
+        val task: Future<List<Pair<String, ByteArray>>> = runCatching {
+            ioExecutor.submit<List<Pair<String, ByteArray>>> {
+                listOf(
+                    CURRENT_SESSION_ENTRY to currentSessionFile(),
+                    PREVIOUS_SESSION_ENTRY to previousSessionFile(),
+                    EXIT_HISTORY_ENTRY to exitHistoryFile(),
+                    LAST_ANR_ENTRY to lastAnrFile(),
+                ).mapNotNull { (name, file) ->
+                    file.takeIf { it.isFile && it.length() > 0L }?.readBytes()?.let { name to it }
+                }
             }
-        }
+        }.getOrNull() ?: return emptyList()
         return runCatching { task.get(2, TimeUnit.SECONDS) }.getOrDefault(emptyList())
     }
 
@@ -555,10 +613,18 @@ object AppDiagnosticsRecorder {
     private fun exitHistoryFile() = File(diagnosticsDirectory(), "exit-history.jsonl")
     private fun lastAnrFile() = File(diagnosticsDirectory(), "last-anr.txt")
 
-    private fun sanitizedFields(fields: Map<String, String>): Map<String, String> =
-        fields.entries.take(24).associate { (key, value) ->
-            sanitizedToken(key) to value.take(512)
+    internal fun sanitizedFields(fields: Map<String, String>): Map<String, String> = buildMap {
+        var redacted = 0
+        fields.entries.take(24).forEach { (key, value) ->
+            val safeKey = sanitizedToken(key)
+            if (sensitiveFieldFragments.any { safeKey.contains(it, ignoreCase = true) }) {
+                redacted += 1
+            } else {
+                put(safeKey, sanitizedFieldValue(value))
+            }
         }
+        if (redacted > 0) put("redacted_fields", redacted.toString())
+    }
 
     private fun sanitizedToken(value: String): String {
         val token = value.take(96).map { character ->
@@ -566,6 +632,15 @@ object AppDiagnosticsRecorder {
         }.joinToString("")
         return token.ifBlank { "unknown" }
     }
+
+    private fun sanitizedFieldValue(value: String): String =
+        value.take(512).map { character ->
+            if (character.isLetterOrDigit() || character in "._-/:{}+") {
+                character
+            } else {
+                '_'
+            }
+        }.joinToString("")
 
     internal fun sanitizedRoute(route: String?): String {
         val staticRoute = route
@@ -575,6 +650,15 @@ object AppDiagnosticsRecorder {
             ?.trim()
             .orEmpty()
         return sanitizedToken(staticRoute)
+    }
+
+    internal fun freshnessBucket(ageSeconds: Long?): String = when {
+        ageSeconds == null -> "missing"
+        ageSeconds < -60L -> "future_clock"
+        ageSeconds < 120L -> "under_2m"
+        ageSeconds < 15L * 60L -> "2m_to_15m"
+        ageSeconds < 2L * 60L * 60L -> "15m_to_2h"
+        else -> "over_2h"
     }
 
     private fun thermalStatusName(status: Int?): String = when (status) {

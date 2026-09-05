@@ -37,6 +37,7 @@ internal object NotificationPlatformIdentity {
         const val DAILY_REVIEW_EVENING = 4_322
         const val ADAPTIVE_DAY = 4_323
         const val WORKOUT_CAUTION = 4_324
+        const val MANAGED_FRIENDS_POKE = 4_325
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -64,6 +65,7 @@ internal object NotificationPlatformIdentity {
             DAILY_REVIEW_EVENING,
             ADAPTIVE_DAY,
             WORKOUT_CAUTION,
+            MANAGED_FRIENDS_POKE,
         )
     }
 
@@ -101,6 +103,7 @@ internal object NotificationPlatformIdentity {
         val DAILY_REVIEW_EVENING = identity(5_125, "daily_review_evening")
         val ADAPTIVE_DAY = identity(5_126, "adaptive_day")
         val WORKOUT_CAUTION = identity(5_127, "workout_caution")
+        val MANAGED_FRIENDS_POKE = identity(5_128, "managed_friends_poke")
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -130,6 +133,7 @@ internal object NotificationPlatformIdentity {
             DAILY_REVIEW_EVENING,
             ADAPTIVE_DAY,
             WORKOUT_CAUTION,
+            MANAGED_FRIENDS_POKE,
         )
     }
 

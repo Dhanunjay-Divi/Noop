@@ -37,7 +37,7 @@ object TestBundleAssembler {
         questionnaire: Map<String, String>,
     ): PurposeMetadata = if (purpose == Purpose.APP_HANG) {
         PurposeMetadata(
-            source = listOf("App runtime diagnostics", "Live Bluetooth"),
+            source = listOf("App runtime diagnostics"),
             testProfile = "app-hang",
             questionnaire = emptyMap(),
         )
@@ -52,6 +52,11 @@ object TestBundleAssembler {
     const val REDACTION_VERSION = "v2"
     const val MAX_USER_NOTE_CHARACTERS = 1_000
     const val MAX_APP_REPORT_SCREENSHOT_BYTES = 8 * 1024 * 1024
+    internal const val APP_RUNTIME_REPORT_TEXT =
+        "NOOP app runtime report\n\n" +
+            "This report contains bounded operational diagnostics for lifecycle, responsiveness, " +
+            "storage, and sync.\n" +
+            "Band transcripts, sensor values, health timestamps, and the health database are not included."
     private val PNG_SIGNATURE =
         byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
 
@@ -177,6 +182,20 @@ object TestBundleAssembler {
      *  today; raw-capture.jsonl stays text (JSON lines) and is still scrubbed. */
     private fun isBinaryEntry(name: String): Boolean = name == DisplayScreenshot.BUNDLE_NAME
 
+    internal fun reportBody(
+        purpose: Purpose,
+        header: String,
+        logText: String,
+        collectionLine: String?,
+    ): String {
+        if (purpose == Purpose.APP_HANG) return header + "\n" + APP_RUNTIME_REPORT_TEXT
+        val body = logText.ifBlank {
+            "(strap log is empty, connect to your strap, reproduce the issue, then report again)"
+        }
+        return header + "\n" + body +
+            (collectionLine?.let { "\n[collection] $it" } ?: "")
+    }
+
     /**
      * Hard cap the bundle at [capBytes] (20 MB default, under GitHub's 25 MB; spec section 5.4). The
      * strap-log tail is already bounded, so only raw-capture can exceed. Keep the MOST-RECENT tail of
@@ -257,15 +276,15 @@ object TestBundleAssembler {
             for (line in AndroidDiagnostics.summaryLines(context)) appendLine(line)
             appendLine("-".repeat(40))
         }
-        val body = logText.ifBlank {
-            "(strap log is empty, connect to your strap, reproduce the issue, then report again)"
-        }
         // CAPTURE-completeness: append the "Capture check" section so report.txt itself states, per active
         // domain, whether its killer trace landed. Computed over the header+body that will ship (the guard
         // reads exactly what the maintainer reads). Byte-identical section to the Swift twin.
-        val collectionLine = persistedHrFrontierLine(storage?.latestHrUnix)
-        val reportBody = header + "\n" + body +
-            (collectionLine?.let { "\n[collection] $it" } ?: "")
+        val collectionLine = if (purpose == Purpose.TEST_CENTRE) {
+            persistedHrFrontierLine(storage?.latestHrUnix)
+        } else {
+            null
+        }
+        val reportBody = reportBody(purpose, header, logText, collectionLine)
         val captureCheck = ReportCompleteness.captureCheckSection(reportBody, activeDomains)
         val reportText = reportBody + "\n" + captureCheck
         val entries = ArrayList<Pair<String, ByteArray>>()
@@ -317,6 +336,13 @@ object TestBundleAssembler {
                 .format(java.util.Date(it * 1000L))
         }
         val purposeMetadata = purposeMetadata(purpose, profile, tc.answers(profile))
+        val measuredStorage = storage
+            ?: TestBundleMeta.Storage(dbBytes = 0, rows = emptyMap(), rawCaptureBytes = 0)
+        val reportStorage = if (purpose == Purpose.APP_HANG) {
+            measuredStorage.copy(latestHrUnix = null)
+        } else {
+            measuredStorage
+        }
         val meta = TestBundleMeta(
             schema = 1,
             appVersion = BuildConfig.VERSION_NAME,
@@ -330,7 +356,7 @@ object TestBundleAssembler {
             // optional context the user just reviewed in user-note.txt.
             questionnaire = purposeMetadata.questionnaire,
             build = TestBundleMeta.Build(channel = "GitHub", signed = false),
-            storage = storage ?: TestBundleMeta.Storage(dbBytes = 0, rows = emptyMap(), rawCaptureBytes = 0),
+            storage = reportStorage,
             redaction = REDACTION_VERSION,
             truncated = truncated,
             // The same completeness guard, machine-readable. Computed over the SHIPPING report.txt (the

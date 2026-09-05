@@ -6,6 +6,7 @@ import FirebaseCore
 import Foundation
 import NoopRemoteSync
 import Security
+import UserNotifications
 import WhoopStore
 
 @MainActor
@@ -38,6 +39,16 @@ final class ManagedCloudService: ObservableObject {
     @Published private(set) var deletionNotBefore: String?
     @Published private(set) var overview: ManagedStorageOverview?
     @Published private(set) var installations: [ManagedInstallation] = []
+    @Published private(set) var socialProfile: ManagedSocialProfile?
+    @Published private(set) var socialFriends: [ManagedSocialFriend] = []
+    @Published private(set) var socialBlockedProfiles: [ManagedSocialBlockedProfile] = []
+    @Published private(set) var socialRequests: [ManagedSocialRequest] = []
+    @Published private(set) var socialFeed: [ManagedSocialFeedDay] = []
+    @Published private(set) var socialLookup: ManagedSocialLookupProfile?
+    @Published private(set) var socialInvite: ManagedSocialInvite?
+    @Published private(set) var socialStatus = ""
+    @Published private(set) var pendingSocialInviteCapability: String?
+    @Published private(set) var pendingSocialNOOPID: String?
 
     var isAvailable: Bool { configuration != nil }
     var isEnrolled: Bool {
@@ -76,9 +87,18 @@ final class ManagedCloudService: ObservableObject {
         static let enrollmentRequestID = "managedCloud.enrollmentRequestID.v1"
         static let erasureJobID = "managedCloud.erasureJobID.v1"
         static let erasureNotBefore = "managedCloud.erasureNotBefore.v1"
+        static let socialProfileRequestID = "managedCloud.social.profileRequestID.v1"
+        static let socialInviteRequestID = "managedCloud.social.inviteRequestID.v1"
+        static let socialSummaryDigests = "managedCloud.social.summaryDigests.v1"
+        static let socialSummaryScope = "managedCloud.social.summaryScope.v1"
+        static let socialLastAttempt = "managedCloud.social.lastAttempt.v1"
+        static let socialDeliveryReceipts = "managedCloud.social.deliveryReceipts.v1"
+        static let socialEnabled = "managedCloud.social.enabled.v1"
+        static let socialPendingNOOPID = "managedCloud.social.pendingNoopID.v1"
     }
 
     private static let automaticInterval: TimeInterval = 15 * 60
+    private static let socialAutomaticInterval: TimeInterval = 5 * 60
     private static let enrollmentDataClasses = ManagedSyncCoordinator.chunkDataClasses
     private static let accountDeletionConfirmation = Data(
         "delete-noop-plus-managed-account-v1".utf8
@@ -90,6 +110,8 @@ final class ManagedCloudService: ObservableObject {
     private var verificationID: String?
     private var deletionVerificationID: String?
     private var running = false
+    private var socialRunning = false
+    private var socialPokeHaptic: (() -> Bool)?
 
     private init(bundle: Bundle = .main) {
         configuration = Self.loadConfiguration(bundle: bundle)
@@ -97,6 +119,11 @@ final class ManagedCloudService: ObservableObject {
         let success = defaults.double(forKey: Key.lastSuccess)
         lastSuccessAt = success > 0 ? Date(timeIntervalSince1970: success) : nil
         deletionNotBefore = defaults.string(forKey: Key.erasureNotBefore)
+        pendingSocialInviteCapability =
+            ManagedCloudPendingSocialInviteSecret.value()
+        pendingSocialNOOPID = defaults.string(
+            forKey: Key.socialPendingNOOPID
+        ).flatMap(ManagedSocialIdentifier.canonicalNOOPID)
         phase = configuration == nil ? .unavailable : .signedOut
     }
 
@@ -222,6 +249,7 @@ final class ManagedCloudService: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         var writer: ManagedHistoryArchiveWriter?
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("managed_export")
         do {
             for pass in 1...Self.maximumExportPreparationPasses {
                 try Task.checkCancellation()
@@ -264,29 +292,35 @@ final class ManagedCloudService: ObservableObject {
                     "Complete cloud history is ready. Choose where to save the sensitive archive."
                 )
             )
-            AppDiagnosticsRecorder.shared.record(
-                "managed_export.end",
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
                 fields: [
-                    "outcome": "completed",
                     "objects": String(manifest.exportedObjects),
                     "chunk_bytes": String(manifest.exportedChunkBytes),
-                ]
+                ],
+                includeResourceSnapshot: true
             )
             return url
         } catch is CancellationError {
             if let writer { await writer.cancel() }
             setStatus(String(localized: "Cloud-history export was canceled."))
-            AppDiagnosticsRecorder.shared.record(
-                "managed_export.end",
-                fields: ["outcome": "canceled"]
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled",
+                includeResourceSnapshot: true
             )
             return nil
         } catch {
             if let writer { await writer.cancel() }
             setStatus(Self.userMessage(for: error))
-            AppDiagnosticsRecorder.shared.record(
-                "managed_export.end",
-                fields: ["outcome": "failed"]
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ],
+                includeResourceSnapshot: true
             )
             return nil
         }
@@ -322,31 +356,417 @@ final class ManagedCloudService: ObservableObject {
         }
     }
 
+    // MARK: - Managed Friends
+
+    func configureSocialPokeHaptic(_ action: @escaping () -> Bool) {
+        socialPokeHaptic = action
+    }
+
+    @discardableResult
+    func stageSocialProfileLink(_ url: URL) -> Bool {
+        guard let noopID = ManagedSocialIdentifier.profileNOOPID(from: url) else {
+            return false
+        }
+        defaults.set(noopID, forKey: Key.socialPendingNOOPID)
+        pendingSocialNOOPID = noopID
+        AppDiagnosticsRecorder.shared.record(
+            "managed_social.profile_link_staged",
+            fields: [
+                "outcome": "accepted",
+                "persistence": "preferences",
+            ]
+        )
+        return true
+    }
+
+    func clearPendingSocialProfileLink() {
+        defaults.removeObject(forKey: Key.socialPendingNOOPID)
+        pendingSocialNOOPID = nil
+    }
+
+    func clearPendingSocialInvite() {
+        ManagedCloudPendingSocialInviteSecret.clear()
+        pendingSocialInviteCapability = nil
+    }
+
+    @discardableResult
+    func stageSocialInviteLink(_ url: URL) -> Bool {
+        guard let capability = ManagedSocialIdentifier.inviteCapability(
+            from: url
+        ),
+        ManagedCloudPendingSocialInviteSecret.store(capability) else {
+            return false
+        }
+        pendingSocialInviteCapability = capability
+        AppDiagnosticsRecorder.shared.record(
+            "managed_social.invite_link_staged",
+            fields: [
+                "outcome": "accepted",
+                "persistence": "keychain",
+            ]
+        )
+        return true
+    }
+
+    func socialProfileURL(_ profile: ManagedSocialProfile) -> URL? {
+        ManagedSocialIdentifier.profileURL(noopID: profile.noopID)
+    }
+
+    func socialInviteURL(_ invite: ManagedSocialInvite) -> URL? {
+        guard invite.status == "active" else { return nil }
+        return ManagedSocialIdentifier.inviteURL(
+            capability: invite.capability
+        )
+    }
+
+    func createSocialProfile(displayName: String, repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("profile_create") {
+            let profile = try await client().createSocialProfile(
+                displayName: displayName,
+                requestID: socialRequestID(for: Key.socialProfileRequestID),
+                authorization: try await authorization(forceRefresh: true)
+            )
+            defaults.removeObject(forKey: Key.socialProfileRequestID)
+            defaults.set(true, forKey: Key.socialEnabled)
+            socialProfile = profile
+            socialStatus = String(
+                localized: "Your private NOOP ID is ready. Nothing is shared until you accept a friend and choose details."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: true)
+        }
+    }
+
+    func refreshSocial(repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("refresh") {
+            try await refreshSocialData(repo: repo, deliverPokes: true)
+        }
+    }
+
+    func updateSocialProfile(
+        displayName: String? = nil,
+        pokeOptIn: Bool? = nil,
+        quietStartMinute: Int? = nil,
+        quietEndMinute: Int? = nil,
+        repo: Repository
+    ) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("profile_update") {
+            if pokeOptIn == true {
+                _ = try? await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .sound])
+            }
+            let patch = ManagedSocialProfilePatch(
+                displayName: displayName,
+                pokeOptIn: pokeOptIn,
+                quietStartMinute: quietStartMinute,
+                quietEndMinute: quietEndMinute,
+                timeZone: TimeZone.current.identifier
+            )
+            socialProfile = try await client().updateSocialProfile(
+                patch,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = pokeOptIn == true
+                ? String(localized: "Pokes are on. Quiet hours and each friend's permission still apply.")
+                : String(localized: "NOOP Friends settings updated.")
+            try await refreshSocialData(repo: repo, deliverPokes: true)
+        }
+    }
+
+    func rotateSocialNOOPID(repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("noop_id_rotate") {
+            socialProfile = try await client().rotateSocialNOOPID(
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialLookup = nil
+            socialStatus = String(
+                localized: "Your old NOOP ID no longer accepts new requests."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func lookupSocialProfile(noopID: String) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("lookup") {
+            socialLookup = try await client().lookupSocialProfile(
+                noopID: noopID,
+                authorization: try await authorization(forceRefresh: false)
+            )
+            socialStatus = socialLookup?.isSelf == true
+                ? String(localized: "That is your own NOOP ID.")
+                : String(localized: "Exact NOOP ID found. Sending a request still requires confirmation.")
+        }
+    }
+
+    func clearSocialLookup() {
+        socialLookup = nil
+    }
+
+    func sendSocialRequest(noopID: String, repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("request_create") {
+            _ = try await client().createSocialRequest(
+                noopID: noopID,
+                requestID: UUID(),
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialLookup = nil
+            socialStatus = String(
+                localized: "Friend request sent. Sharing starts only after acceptance."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func createSocialInvite() async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("invite_create") {
+            let scope = try accountScopeHash()
+            let managedClient = try client()
+            let auth = try await authorization(forceRefresh: true)
+            var capability = try ManagedCloudSocialInviteSecret.value(
+                accountScopeHash: scope
+            )
+            var invite = try await managedClient.createSocialInvite(
+                capability: capability,
+                requestID: socialRequestID(for: Key.socialInviteRequestID),
+                authorization: auth
+            )
+            if invite.status != "active" {
+                try ManagedCloudSocialInviteSecret.clear(
+                    accountScopeHash: scope
+                )
+                defaults.removeObject(forKey: Key.socialInviteRequestID)
+                capability = try ManagedCloudSocialInviteSecret.value(
+                    accountScopeHash: scope
+                )
+                invite = try await managedClient.createSocialInvite(
+                    capability: capability,
+                    requestID: socialRequestID(
+                        for: Key.socialInviteRequestID
+                    ),
+                    authorization: auth
+                )
+            }
+            guard invite.status == "active" else {
+                throw ManagedStorageError.invalidResponse
+            }
+            socialInvite = invite
+            socialStatus = String(
+                localized: "Invitation ready. It expires within 72 hours and creates a request, not an automatic friendship."
+            )
+        }
+    }
+
+    func revokeSocialInvite() async {
+        guard beginSocialAction(), let invite = socialInvite else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("invite_revoke") {
+            try await client().revokeSocialInvite(
+                invite.inviteID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            try? ManagedCloudSocialInviteSecret.clear(
+                accountScopeHash: accountScopeHash()
+            )
+            defaults.removeObject(forKey: Key.socialInviteRequestID)
+            socialInvite = nil
+            socialStatus = String(localized: "Invitation revoked.")
+        }
+    }
+
+    func redeemPendingSocialInvite(repo: Repository) async {
+        guard beginSocialAction(),
+              let capability = pendingSocialInviteCapability else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("invite_redeem") {
+            let requestID = ManagedStableIdentifier.uuid(
+                seed: Data(
+                    "noop-managed-social-redeem-v1\0\(try accountScopeHash())\0\(capability)"
+                        .utf8
+                )
+            )
+            _ = try await client().redeemSocialInvite(
+                capability: capability,
+                requestID: requestID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            clearPendingSocialInvite()
+            socialStatus = String(
+                localized: "Friend request sent from the invitation. Sharing starts only after acceptance."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func decideSocialRequest(
+        _ requestID: UUID,
+        accept: Bool,
+        repo: Repository
+    ) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("request_decide") {
+            _ = try await client().decideSocialRequest(
+                requestID,
+                accept: accept,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = accept
+                ? String(localized: "Friend accepted. Choose exactly what they can see.")
+                : String(localized: "Friend request declined.")
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func updateSocialVisibility(
+        friendProfileID: UUID,
+        patch: ManagedSocialVisibilityPatch,
+        repo: Repository
+    ) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("privacy_update") {
+            _ = try await client().updateSocialVisibility(
+                friendProfileID: friendProfileID,
+                patch: patch,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = String(localized: "Sharing choices updated.")
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func removeSocialFriend(_ profileID: UUID, repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("friend_remove") {
+            try await client().removeSocialFriend(
+                profileID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = String(localized: "Friend removed. Sharing stopped in both directions.")
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func blockSocialProfile(_ profileID: UUID, repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("profile_block") {
+            try await client().blockSocialProfile(
+                profileID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = String(
+                localized: "Profile blocked. Requests, sharing, and pending pokes were removed."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func unblockSocialProfile(_ profileID: UUID, repo: Repository) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("profile_unblock") {
+            try await client().unblockSocialProfile(
+                profileID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = String(
+                localized: "Profile unblocked. A new friend request is still required."
+            )
+            try await refreshSocialData(repo: repo, deliverPokes: false)
+        }
+    }
+
+    func deleteSocialProfile() async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("profile_delete") {
+            try await client().deleteSocialProfile(
+                authorization: try await authorization(forceRefresh: true)
+            )
+            clearSocialState()
+            socialStatus = String(
+                localized: "Managed Friends was deleted. NOOP+ backup and on-device data are unchanged."
+            )
+        }
+    }
+
+    func sendSocialPoke(to profileID: UUID) async {
+        guard beginSocialAction() else { return }
+        defer { endSocialAction() }
+        await runSocialOperation("poke_send") {
+            _ = try await client().createSocialPoke(
+                recipientProfileID: profileID,
+                requestID: UUID(),
+                authorization: try await authorization(forceRefresh: true)
+            )
+            socialStatus = String(localized: "Poke queued.")
+        }
+    }
+
     @discardableResult
     func catchUpIfDue(repo: Repository) async -> Bool {
         if !firebaseConfigured {
             bootstrap()
         }
         guard phase == .enrolled,
-              automatic,
               !isBusy,
-              !running else { return true }
+              !running,
+              !socialRunning,
+              automatic || defaults.bool(forKey: Key.socialEnabled)
+        else { return true }
         let continuationPending = defaults.bool(
             forKey: Key.continuationPending
         )
         let lastAttempt = defaults.double(forKey: Key.lastAttempt)
-        guard continuationPending
-                || Date().timeIntervalSince1970 - lastAttempt >= Self.automaticInterval else {
-            return true
+        let now = Date().timeIntervalSince1970
+        var completed = true
+        if automatic
+            && (
+                continuationPending
+                    || now - lastAttempt >= Self.automaticInterval
+            ) {
+            do {
+                let summary = try await sync(repo: repo, mode: .automatic)
+                scheduleContinuationIfNeeded(summary)
+                completed = !summary.hasMore
+            } catch {
+                setStatus(Self.userMessage(for: error))
+                completed = false
+            }
         }
-        do {
-            let summary = try await sync(repo: repo, mode: .automatic)
-            scheduleContinuationIfNeeded(summary)
-            return !summary.hasMore
-        } catch {
-            setStatus(Self.userMessage(for: error))
-            return false
+        let socialLastAttempt = defaults.double(forKey: Key.socialLastAttempt)
+        if defaults.bool(forKey: Key.socialEnabled),
+           now - socialLastAttempt >= Self.socialAutomaticInterval {
+            defaults.set(now, forKey: Key.socialLastAttempt)
+            do {
+                try await refreshSocialData(repo: repo, deliverPokes: true)
+            } catch {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_social.catch_up",
+                    fields: [
+                        "outcome": "failed",
+                        "failure_kind": Self.diagnosticSyncFailureKind(error),
+                    ]
+                )
+                completed = false
+            }
         }
+        return completed
     }
 
     func disconnect() {
@@ -363,6 +783,7 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.continuationPending)
         overview = nil
         installations = []
+        clearSocialPresentation()
         phase = .signedOut
         setStatus(
             String(localized:
@@ -489,6 +910,548 @@ final class ManagedCloudService: ObservableObject {
         } catch {
             setStatus(Self.userMessage(for: error))
         }
+    }
+
+    private func beginSocialAction() -> Bool {
+        guard phase == .enrolled, !isBusy, !socialRunning else { return false }
+        isBusy = true
+        return true
+    }
+
+    private func endSocialAction() {
+        isBusy = false
+    }
+
+    private func runSocialOperation(
+        _ operation: String,
+        body: () async throws -> Void
+    ) async {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_social",
+            fields: ["operation": operation]
+        )
+        do {
+            try await body()
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: ["operation": operation]
+            )
+        } catch {
+            socialStatus = Self.userMessage(for: error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "operation": operation,
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    private func refreshSocialData(
+        repo: Repository,
+        deliverPokes: Bool
+    ) async throws {
+        guard phase == .enrolled else { throw ManagedCloudError.consentRequired }
+        guard !socialRunning else { return }
+        socialRunning = true
+        defer { socialRunning = false }
+
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_social_refresh",
+            fields: ["delivery": deliverPokes ? "enabled" : "disabled"]
+        )
+        do {
+            let managedClient = try client()
+            let auth = try await authorization(forceRefresh: false)
+            let profile: ManagedSocialProfile
+            do {
+                profile = try await managedClient.socialProfile(
+                    authorization: auth
+                )
+            } catch ManagedStorageError.notFound {
+                defaults.set(false, forKey: Key.socialEnabled)
+                socialProfile = nil
+                socialFriends = []
+                socialBlockedProfiles = []
+                socialRequests = []
+                socialFeed = []
+                socialLookup = nil
+                AppDiagnosticsRecorder.shared.endOperation(
+                    diagnostic,
+                    outcome: "completed",
+                    fields: [
+                        "profile": "absent",
+                        "friends": "0",
+                        "blocks": "0",
+                        "requests": "0",
+                        "summaries_uploaded": "0",
+                        "pokes_claimed": "0",
+                    ]
+                )
+                return
+            }
+
+            defaults.set(true, forKey: Key.socialEnabled)
+            async let loadedFriends = managedClient.socialFriends(
+                authorization: auth
+            )
+            async let loadedBlocks = managedClient.socialBlockedProfiles(
+                authorization: auth
+            )
+            async let loadedRequests = managedClient.socialRequests(
+                authorization: auth
+            )
+            let (friends, blockedProfiles, requests) = try await (
+                loadedFriends,
+                loadedBlocks,
+                loadedRequests
+            )
+            let feedDays = Self.socialSummaryDays(daysBack: 6)
+            var feed: [ManagedSocialFeedDay] = []
+            var feedOutcome = "empty_range"
+            if let startDay = feedDays.first,
+               let endDay = feedDays.last {
+                do {
+                    feed = try await managedClient.socialFeed(
+                        startDay: startDay,
+                        endDay: endDay,
+                        authorization: auth
+                    )
+                    feedOutcome = "completed"
+                } catch {
+                    if error is CancellationError {
+                        throw error
+                    }
+                    feedOutcome = "failed"
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_social.feed",
+                        fields: [
+                            "outcome": "failed",
+                            "failure_kind": Self.diagnosticSyncFailureKind(error),
+                        ]
+                    )
+                }
+            }
+            socialProfile = profile
+            socialFriends = friends
+            socialBlockedProfiles = blockedProfiles
+            socialRequests = requests
+            socialFeed = feed
+
+            let summariesUploaded = try await uploadChangedSocialSummaries(
+                repo: repo,
+                friends: friends,
+                client: managedClient,
+                authorization: auth
+            )
+            if summariesUploaded > 0 {
+                socialProfile = try await managedClient.socialProfile(
+                    authorization: auth
+                )
+            }
+            let pokesClaimed = deliverPokes
+                ? try await deliverSocialPokes(
+                    client: managedClient,
+                    authorization: auth
+                )
+                : 0
+            if socialStatus.isEmpty {
+                socialStatus = String(
+                    localized: "Managed Friends is up to date."
+                )
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "profile": "active",
+                    "friends": String(friends.count),
+                    "blocks": String(blockedProfiles.count),
+                    "requests": String(requests.count),
+                    "feed_rows": String(feed.count),
+                    "feed_outcome": feedOutcome,
+                    "summaries_uploaded": String(summariesUploaded),
+                    "pokes_claimed": String(pokesClaimed),
+                ]
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            throw error
+        }
+    }
+
+    private func uploadChangedSocialSummaries(
+        repo: Repository,
+        friends: [ManagedSocialFriend],
+        client: ManagedStorageClient,
+        authorization: ManagedAuthorization
+    ) async throws -> Int {
+        guard let store = await repo.storeHandle() else {
+            throw ManagedCloudError.storeUnavailable
+        }
+        let days = Self.socialSummaryDays()
+        guard let firstDay = days.first, let lastDay = days.last else { return 0 }
+        var dailyByDay = Dictionary(
+            uniqueKeysWithValues: days.map {
+                ($0, ManagedSocialSummary())
+            }
+        )
+        let allowed = Self.socialVisibilityUnion(friends)
+        var sourceIDs = [repo.deviceId + "-noop"]
+        let canonicalID = Repository.whoopSource + "-noop"
+        if !sourceIDs.contains(canonicalID) {
+            sourceIDs.append(canonicalID)
+        }
+        for sourceID in sourceIDs {
+            let dailyRows = try await store.dailyMetrics(
+                deviceId: sourceID,
+                from: firstDay,
+                to: lastDay
+            )
+            for row in dailyRows {
+                guard let current = dailyByDay[row.day] else { continue }
+                dailyByDay[row.day] = ManagedSocialSummary(
+                    charge: current.charge ?? (
+                        allowed.charge
+                            ? Self.socialValue(row.recovery, in: 0...100)
+                            : nil
+                    ),
+                    effort: current.effort ?? (
+                        allowed.effort
+                            ? Self.socialValue(row.strain, in: 0...100)
+                            : nil
+                    ),
+                    rest: current.rest,
+                    sleepDuration: current.sleepDuration ?? (
+                        allowed.sleepDuration
+                            ? Self.socialValue(
+                                row.totalSleepMin,
+                                in: 0...1_440
+                            )
+                            : nil
+                    ),
+                    hrv: current.hrv ?? (
+                        allowed.hrv
+                            ? Self.socialValue(row.avgHrv, in: 0...500)
+                            : nil
+                    ),
+                    rhr: current.rhr ?? (
+                        allowed.rhr
+                            ? Self.socialValue(
+                                row.restingHr.map(Double.init),
+                                in: 20...250
+                            )
+                            : nil
+                    )
+                )
+            }
+            if allowed.rest {
+                let restRows = try await store.metricSeries(
+                    deviceId: sourceID,
+                    key: "sleep_performance",
+                    from: firstDay,
+                    to: lastDay
+                )
+                for point in restRows {
+                    guard let current = dailyByDay[point.day] else { continue }
+                    dailyByDay[point.day] = ManagedSocialSummary(
+                        charge: current.charge,
+                        effort: current.effort,
+                        rest: current.rest ?? Self.socialValue(
+                            point.value,
+                            in: 0...100
+                        ),
+                        sleepDuration: current.sleepDuration,
+                        hrv: current.hrv,
+                        rhr: current.rhr
+                    )
+                }
+            }
+        }
+
+        let scope = try accountScopeHash()
+        if defaults.string(forKey: Key.socialSummaryScope) != scope {
+            defaults.set(scope, forKey: Key.socialSummaryScope)
+            defaults.removeObject(forKey: Key.socialSummaryDigests)
+        }
+        var digests = defaults.dictionary(
+            forKey: Key.socialSummaryDigests
+        ) as? [String: String] ?? [:]
+        var uploaded = 0
+        for day in days {
+            try Task.checkCancellation()
+            let summary = dailyByDay[day] ?? ManagedSocialSummary()
+            let digest = try Self.socialSummaryDigest(
+                day: day,
+                summary: summary,
+                visibility: allowed
+            )
+            if digests[day] == digest { continue }
+            if digests[day] == nil, !Self.hasSocialValue(summary) {
+                continue
+            }
+            let requestID = ManagedStableIdentifier.uuid(
+                seed: Data(
+                    "noop-managed-social-summary-v1\0\(scope)\0\(day)\0\(digest)"
+                        .utf8
+                )
+            )
+            try await client.putSocialSummary(
+                day: day,
+                summary: summary,
+                requestID: requestID,
+                authorization: authorization
+            )
+            digests[day] = digest
+            uploaded += 1
+            let retained = Set(days)
+            digests = digests.filter { retained.contains($0.key) }
+            defaults.set(digests, forKey: Key.socialSummaryDigests)
+        }
+        return uploaded
+    }
+
+    private func deliverSocialPokes(
+        client: ManagedStorageClient,
+        authorization: ManagedAuthorization
+    ) async throws -> Int {
+        let claims = try await client.claimSocialPokes(
+            limit: 3,
+            authorization: authorization
+        )
+        for claim in claims {
+            try Task.checkCancellation()
+            let existing = socialDeliveryReceipt(for: claim.pokeID)
+            let notificationOutcome: String
+            let hapticOutcome: String
+            if let existing {
+                notificationOutcome = existing.notificationOutcome
+                hapticOutcome = existing.hapticOutcome
+            } else {
+                notificationOutcome = await scheduleSocialPokeNotification(
+                    pokeID: claim.pokeID
+                )
+                hapticOutcome = socialPokeHaptic?() == true
+                    ? "requested"
+                    : "band_unavailable"
+                storeSocialDeliveryReceipt(
+                    pokeID: claim.pokeID,
+                    notificationOutcome: notificationOutcome,
+                    hapticOutcome: hapticOutcome
+                )
+            }
+            _ = try await client.acknowledgeSocialPoke(
+                claim.pokeID,
+                acknowledgement: ManagedSocialPokeAcknowledgement(
+                    claimID: claim.claimID,
+                    notificationOutcome: notificationOutcome,
+                    hapticOutcome: hapticOutcome
+                ),
+                authorization: authorization
+            )
+        }
+        if !claims.isEmpty {
+            let scheduled = claims.filter {
+                socialDeliveryReceipt(for: $0.pokeID)?.notificationOutcome
+                    == "scheduled"
+            }.count
+            let haptics = claims.filter {
+                socialDeliveryReceipt(for: $0.pokeID)?.hapticOutcome
+                    == "requested"
+            }.count
+            AppDiagnosticsRecorder.shared.record(
+                "managed_social.poke_delivery",
+                fields: [
+                    "claimed": String(claims.count),
+                    "notifications_scheduled": String(scheduled),
+                    "haptics_requested": String(haptics),
+                ]
+            )
+        }
+        return claims.count
+    }
+
+    private func scheduleSocialPokeNotification(pokeID: UUID) async -> String {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard [.authorized, .provisional, .ephemeral]
+            .contains(settings.authorizationStatus) else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: "managed-poke",
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return "not_authorized"
+        }
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "A friend sent a poke")
+        content.body = String(localized: "Open NOOP when you have a moment.")
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey:
+                NoopNotificationRoute.friends.rawValue,
+        ]
+        content.applyProminence(.standard)
+        let request = UNNotificationRequest(
+            identifier: "managed-poke-\(pokeID.uuidString.lowercased())",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await LocalNotificationLifecycle.schedule(request, on: center)
+            return "scheduled"
+        } catch {
+            return "failed"
+        }
+    }
+
+    private struct SocialDeliveryReceipt: Codable {
+        let pokeID: UUID
+        let notificationOutcome: String
+        let hapticOutcome: String
+        let recordedAt: Date
+    }
+
+    private func socialDeliveryReceipt(
+        for pokeID: UUID
+    ) -> SocialDeliveryReceipt? {
+        socialDeliveryReceipts().first { $0.pokeID == pokeID }
+    }
+
+    private func storeSocialDeliveryReceipt(
+        pokeID: UUID,
+        notificationOutcome: String,
+        hapticOutcome: String
+    ) {
+        var receipts = socialDeliveryReceipts().filter {
+            $0.pokeID != pokeID
+        }
+        receipts.append(
+            SocialDeliveryReceipt(
+                pokeID: pokeID,
+                notificationOutcome: notificationOutcome,
+                hapticOutcome: hapticOutcome,
+                recordedAt: Date()
+            )
+        )
+        receipts = Array(receipts.suffix(64))
+        if let data = try? JSONEncoder().encode(receipts) {
+            defaults.set(data, forKey: Key.socialDeliveryReceipts)
+        }
+    }
+
+    private func socialDeliveryReceipts() -> [SocialDeliveryReceipt] {
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        guard let data = defaults.data(forKey: Key.socialDeliveryReceipts),
+              let decoded = try? JSONDecoder().decode(
+                  [SocialDeliveryReceipt].self,
+                  from: data
+              ) else {
+            return []
+        }
+        return Array(decoded.filter { $0.recordedAt >= cutoff }.suffix(64))
+    }
+
+    private func socialRequestID(for key: String) -> UUID {
+        if let raw = defaults.string(forKey: key),
+           let existing = UUID(uuidString: raw) {
+            return existing
+        }
+        let created = UUID()
+        defaults.set(created.uuidString.lowercased(), forKey: key)
+        return created
+    }
+
+    private static func socialVisibilityUnion(
+        _ friends: [ManagedSocialFriend]
+    ) -> ManagedSocialVisibility {
+        ManagedSocialVisibility(
+            charge: friends.contains { $0.sharing.charge },
+            effort: friends.contains { $0.sharing.effort },
+            rest: friends.contains { $0.sharing.rest },
+            sleepDuration: friends.contains { $0.sharing.sleepDuration },
+            hrv: friends.contains { $0.sharing.hrv },
+            rhr: friends.contains { $0.sharing.rhr },
+            pokeAllowed: friends.contains { $0.sharing.pokeAllowed }
+        )
+    }
+
+    private static func socialSummaryDays(
+        daysBack: Int = 30,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [String] {
+        let end = calendar.startOfDay(for: now)
+        guard let start = calendar.date(
+            byAdding: .day,
+            value: -max(0, daysBack),
+            to: end
+        ) else {
+            return []
+        }
+        return (0...max(0, daysBack)).compactMap { offset in
+            calendar.date(
+                byAdding: .day,
+                value: offset,
+                to: start
+            ).map(Self.socialDayString)
+        }
+    }
+
+    private static func socialDayString(_ date: Date) -> String {
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day],
+            from: date
+        )
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 1970,
+            components.month ?? 1,
+            components.day ?? 1
+        )
+    }
+
+    private static func socialValue(
+        _ value: Double?,
+        in range: ClosedRange<Double>
+    ) -> Double? {
+        guard let value, value.isFinite, range.contains(value) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func hasSocialValue(_ summary: ManagedSocialSummary) -> Bool {
+        summary.charge != nil
+            || summary.effort != nil
+            || summary.rest != nil
+            || summary.sleepDuration != nil
+            || summary.hrv != nil
+            || summary.rhr != nil
+    }
+
+    private static func socialSummaryDigest(
+        day: String,
+        summary: ManagedSocialSummary,
+        visibility: ManagedSocialVisibility
+    ) throws -> String {
+        guard let digest = ManagedSocialProjection.digest(
+            day: day,
+            summary: summary,
+            visibility: visibility
+        ) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return digest
     }
 
     // MARK: - Sync composition
@@ -628,6 +1591,8 @@ final class ManagedCloudService: ObservableObject {
                 return "configuration"
             case .invalidAuthorization, .authentication:
                 return "authentication"
+            case .forbidden:
+                return "forbidden"
             case .invalidResponse, .decoding:
                 return "invalid_response"
             case .encoding:
@@ -718,10 +1683,8 @@ final class ManagedCloudService: ObservableObject {
         var hasMore = false
         var prunedWindows = 0
         var prunedRows = 0
-        let localPruneBeforeMs = optimizePhoneStorage && mode != .exportPreparation
-            ? ManagedLocalRetentionPolicy.cutoff(
-                nowMs: Int64(Date().timeIntervalSince1970 * 1_000)
-            )
+        let localPruneNowMs = optimizePhoneStorage && mode != .exportPreparation
+            ? Int64(Date().timeIntervalSince1970 * 1_000)
             : nil
         let limits: (
             forward: Int,
@@ -753,7 +1716,7 @@ final class ManagedCloudService: ObservableObject {
                 maxSnapshotRestoreObjects: limits.snapshotObjects,
                 maxSnapshotRestoreBytes: limits.snapshotBytes,
                 maxDocumentUploads: index == 0 ? limits.documents : 0,
-                localPruneBeforeMs: localPruneBeforeMs,
+                localPruneNowMs: localPruneNowMs,
                 maxPruneWindowsPerClass: limits.prune
             )
             uploadedChunks += result.uploadedChunks
@@ -822,7 +1785,28 @@ final class ManagedCloudService: ObservableObject {
 
     private func client() throws -> ManagedStorageClient {
         guard let configuration else { throw ManagedStorageError.invalidConfiguration }
-        return ManagedStorageClient(configuration: configuration)
+        return ManagedStorageClient(
+            configuration: configuration,
+            requestObserver: { diagnostic in
+                var fields = [
+                    "target": diagnostic.target,
+                    "route_group": diagnostic.routeGroup,
+                    "method": diagnostic.method,
+                    "duration_ms": String(diagnostic.durationMilliseconds),
+                    "outcome": diagnostic.outcome,
+                ]
+                if let status = diagnostic.statusCode {
+                    fields["status_code"] = String(status)
+                }
+                if let requestID = diagnostic.requestID {
+                    fields["server_request_id"] = requestID
+                }
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_http.request",
+                    fields: fields
+                )
+            }
+        )
     }
 
     private func authorization(forceRefresh: Bool) async throws -> ManagedAuthorization {
@@ -895,9 +1879,45 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.enrollmentRequestID)
         defaults.removeObject(forKey: Key.erasureJobID)
         defaults.removeObject(forKey: Key.erasureNotBefore)
+        defaults.removeObject(forKey: Key.socialProfileRequestID)
+        defaults.removeObject(forKey: Key.socialInviteRequestID)
+        defaults.removeObject(forKey: Key.socialSummaryDigests)
+        defaults.removeObject(forKey: Key.socialSummaryScope)
+        defaults.removeObject(forKey: Key.socialLastAttempt)
+        defaults.removeObject(forKey: Key.socialDeliveryReceipts)
+        defaults.removeObject(forKey: Key.socialEnabled)
+        defaults.removeObject(forKey: Key.socialPendingNOOPID)
+        ManagedCloudSocialInviteSecret.clearAll()
         deletionNotBefore = nil
         overview = nil
         installations = []
+        clearSocialPresentation()
+    }
+
+    private func clearSocialPresentation() {
+        socialProfile = nil
+        socialFriends = []
+        socialBlockedProfiles = []
+        socialRequests = []
+        socialFeed = []
+        socialLookup = nil
+        socialInvite = nil
+        clearPendingSocialInvite()
+        clearPendingSocialProfileLink()
+        socialStatus = ""
+    }
+
+    private func clearSocialState() {
+        defaults.removeObject(forKey: Key.socialProfileRequestID)
+        defaults.removeObject(forKey: Key.socialInviteRequestID)
+        defaults.removeObject(forKey: Key.socialSummaryDigests)
+        defaults.removeObject(forKey: Key.socialSummaryScope)
+        defaults.removeObject(forKey: Key.socialLastAttempt)
+        defaults.removeObject(forKey: Key.socialDeliveryReceipts)
+        defaults.removeObject(forKey: Key.socialEnabled)
+        defaults.removeObject(forKey: Key.socialPendingNOOPID)
+        ManagedCloudSocialInviteSecret.clearAll()
+        clearSocialPresentation()
     }
 
     private func completeLocalErasureState() {
@@ -1174,6 +2194,10 @@ final class ManagedCloudService: ObservableObject {
                 return String(
                     localized: "NOOP+ authentication expired. Sign in again."
                 )
+            case .forbidden:
+                return String(
+                    localized: "That action is not allowed by the current Friends permissions or quiet hours."
+                )
             case .notFound:
                 return String(
                     localized: "The requested NOOP+ resource no longer exists."
@@ -1352,6 +2376,168 @@ private enum ManagedCloudInstallationToken {
             return nil
         }
         return value
+    }
+}
+
+private enum ManagedCloudSocialInviteSecret {
+    private static let service = "com.noop.managed-social-invite"
+    private static let accountPrefix = "capability-v1-"
+
+    static func value(accountScopeHash: String) throws -> String {
+        let account = accountPrefix + accountScopeHash
+        if let existing = read(account: account) { return existing }
+
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(
+            kSecRandomDefault,
+            bytes.count,
+            &bytes
+        ) == errSecSuccess else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        let capability = "noopinvite_" + Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        guard capability.range(
+            of: ManagedSocialIdentifier.invitePattern,
+            options: .regularExpression
+        ) != nil else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data(capability.utf8),
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        if status == errSecDuplicateItem, let existing = read(account: account) {
+            return existing
+        }
+        guard status == errSecSuccess else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        return capability
+    }
+
+    static func clear(accountScopeHash: String) throws {
+        let status = SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: accountPrefix + accountScopeHash,
+            ] as CFDictionary
+        )
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+    }
+
+    static func clearAll() {
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+            ] as CFDictionary
+        )
+    }
+
+    private static func read(account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(
+            query as CFDictionary,
+            &item
+        ) == errSecSuccess,
+        let data = item as? Data,
+        let value = String(data: data, encoding: .utf8),
+        value.range(
+            of: ManagedSocialIdentifier.invitePattern,
+            options: .regularExpression
+        ) != nil else {
+            return nil
+        }
+        return value
+    }
+}
+
+private enum ManagedCloudPendingSocialInviteSecret {
+    private static let service = "com.noop.managed-social-pending-invite"
+    private static let account = "capability-v1"
+
+    static func value() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let value = String(data: data, encoding: .utf8),
+              value.range(
+                  of: ManagedSocialIdentifier.invitePattern,
+                  options: .regularExpression
+              ) != nil else {
+            return nil
+        }
+        return value
+    }
+
+    @discardableResult
+    static func store(_ capability: String) -> Bool {
+        guard capability.range(
+            of: ManagedSocialIdentifier.invitePattern,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String: Data(capability.utf8),
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(
+            query as CFDictionary,
+            update as CFDictionary
+        )
+        if status == errSecSuccess {
+            return true
+        }
+        guard status == errSecItemNotFound else {
+            return false
+        }
+        return SecItemAdd(
+            query.merging(update) { _, replacement in replacement }
+                as CFDictionary,
+            nil
+        ) == errSecSuccess
+    }
+
+    static func clear() {
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ] as CFDictionary
+        )
     }
 }
 #endif

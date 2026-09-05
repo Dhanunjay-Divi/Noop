@@ -126,6 +126,9 @@ struct StrandiOSApp: App {
             includeResourceSnapshot: true
         )
         _model = StateObject(wrappedValue: model)
+        ManagedCloudService.shared.configureSocialPokeHaptic { [weak model] in
+            model?.requestManagedSocialPokeHaptic() ?? false
+        }
         let bridge = HealthKitBridge(
             repo: model.repo,
             profile: model.profile,
@@ -441,6 +444,17 @@ struct StrandiOSApp: App {
                 // HealthKit-free payload. Filter on the host so other future schemes don't trip the
                 // importer; macOS never registers the scheme so this stays iOS-only.
                 .onOpenURL { url in
+                    let managedSocialLink =
+                        ManagedCloudService.shared.stageSocialProfileLink(url)
+                        || ManagedCloudService.shared.stageSocialInviteLink(url)
+                    if managedSocialLink {
+                        guard launchAccess.isUnlocked,
+                              acceptedTermsVersion == Terms.currentVersion else {
+                            return
+                        }
+                        router.openFriends()
+                        return
+                    }
                     guard launchAccess.isUnlocked,
                           acceptedTermsVersion == Terms.currentVersion else { return }
                     if let destination = NOOPWidgetDestination(url: url) {

@@ -128,13 +128,19 @@ public struct NoopButtonStyle: ButtonStyle {
             .labelStyle(.titleAndIcon)
             .font(StrandFont.headline.weight(.semibold))
             .tracking(NoopButtonMetrics.tracking)
-            .lineLimit(1)
-            .minimumScaleFactor(0.9)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .minimumScaleFactor(0.85)
             .foregroundStyle(appearance.label)
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .padding(.horizontal, NoopButtonMetrics.hPadding)
-            .frame(height: NoopButtonMetrics.height)
-            .frame(minHeight: NoopButtonMetrics.minHitTarget)
+            .padding(.vertical, 10)
+            .frame(
+                minHeight: max(
+                    NoopButtonMetrics.height,
+                    NoopButtonMetrics.minHitTarget
+                )
+            )
             .contentShape(Rectangle())
             .background(NoopButtonBackground(appearance: appearance))
             .clipShape(RoundedRectangle(cornerRadius: NoopButtonMetrics.cornerRadius, style: .continuous))

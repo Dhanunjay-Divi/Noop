@@ -13,9 +13,9 @@ enum TestBundleAssembler {
     /// Controls optional evidence that is appropriate for the report being built.
     ///
     /// A Test Centre capture may deliberately include a screenshot or an enabled research stream. A
-    /// shake-created app-hang report is narrower: app/runtime diagnostics plus the redacted strap log,
-    /// an optional bounded user note, and an optional explicitly approved screen snapshot. It never
-    /// includes raw frame capture, an Oura sidecar, or the health database.
+    /// shake-created app-hang report is narrower: app/runtime diagnostics, an optional bounded user note,
+    /// and an optional explicitly approved screen snapshot. It never includes the strap transcript, a
+    /// latest-health timestamp, raw frame capture, an Oura sidecar, or the health database.
     enum Purpose {
         case testCentre
         case appHang
@@ -41,6 +41,12 @@ enum TestBundleAssembler {
     /// 20 MiB bundle cap; an unexpectedly huge or malformed image fails closed instead of being shared.
     static let maxAppReportScreenshotBytes = 8 * 1024 * 1024
     private static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    static let appRuntimeReportText = """
+    NOOP app runtime report
+
+    This report contains bounded operational diagnostics for lifecycle, responsiveness, storage, and sync.
+    Band transcripts, sensor values, health timestamps, and the health database are not included.
+    """
 
     /// The bundle files that may be trimmed to fit the cap (newest-tail kept). The strap-log tail and
     /// meta.json are already bounded, so only these raw research streams can blow the budget: the WHOOP
@@ -306,18 +312,24 @@ enum TestBundleAssembler {
         //    mode. Built from the strap-range snapshot BLEManager banked (LiveState.strapRange). Appended to
         //    the report body BEFORE the completeness scan so its `dayOwner`-sibling token is part of the text
         //    the guard reads. No-op when no range was ever seen this session (no strap reply yet).
-        var baseReport = live.exportableLogText()
-        if let collectionLine = persistedHRFrontierLine(
-            latestUnix: storage?.latestHrUnix
-        ) {
-            baseReport += "\n[collection] \(collectionLine)"
+        let reportText: String
+        if purpose == .appHang {
+            reportText = appRuntimeReportText
+        } else {
+            var baseReport = live.exportableLogText()
+            if let collectionLine = persistedHRFrontierLine(
+                latestUnix: storage?.latestHrUnix
+            ) {
+                baseReport += "\n[collection] \(collectionLine)"
+            }
+            let universalLine = universalClockDriftLine(range: live.strapRange)
+            reportText = universalLine.map {
+                baseReport + "\n[universal] " + $0
+            } ?? baseReport
         }
-        let universalLine = universalClockDriftLine(range: live.strapRange)
-        let reportText = universalLine.map { baseReport + "\n[universal] " + $0 } ?? baseReport
 
-        // 1. report.txt: the same exportable strap log the strap-log card shares, plus the universal
-        //    clock-drift line. Already redacted by the append(log:) sink, but the whole-bundle redactEntries
-        //    pass below re-scrubs it anyway (5.3).
+        // 1. report.txt: Test Centre gets its explicitly captured strap evidence. A normal shake report gets
+        //    only a fixed manifest note; its evidence lives in the bounded structured attachments below.
         let reportEntry = FileExport.BundleEntry(name: "report.txt", data: Data(reportText.utf8))
 
         // 1b. Display & Performance: capture a screenshot for the .display profile (or any mode that
@@ -358,8 +370,9 @@ enum TestBundleAssembler {
         //     ALSO rides the redactEntries pass. There is no crash producer wired yet, so this is normally
         //     absent; the lookup is a no-op then. Pluggable via `crashLogURL` so a future crash handler need
         //     only drop a file at the known path for it to start attaching, fully redacted, automatically.
-        let crash: FileExport.BundleEntry? = crashLogURL()
-            .flatMap { fileEntry(at: $0, name: "last-crash.txt") }
+        let crash: FileExport.BundleEntry? = purpose == .testCentre
+            ? crashLogURL().flatMap { fileEntry(at: $0, name: "last-crash.txt") }
+            : nil
 
         // 1f. Oura ring diagnostics: the Tier-B JSONL sidecars (raw notifications / IBI-HR / activity MET)
         //     the ring writes to <App Support>/OpenWhoop/Diagnostics whenever it connects. Attached WHEN
@@ -434,6 +447,19 @@ enum TestBundleAssembler {
             : nil
         let ended = ISO8601DateFormatter().string(from: Date())
         let selectedModel = strapModel.flatMap(WhoopModel.init(rawValue:))
+        let fallbackStorage = TestBundleMeta.Storage(
+            dbBytes: 0,
+            rows: [:],
+            rawCaptureBytes: 0
+        )
+        let measuredStorage = storage ?? fallbackStorage
+        let reportStorage = purpose == .appHang
+            ? TestBundleMeta.Storage(
+                dbBytes: measuredStorage.dbBytes,
+                rows: measuredStorage.rows,
+                rawCaptureBytes: measuredStorage.rawCaptureBytes
+            )
+            : measuredStorage
         let meta = TestBundleMeta(
             schema: 1,
             appVersion: version,
@@ -446,7 +472,7 @@ enum TestBundleAssembler {
             deviceFamily: selectedModel?.deviceFamily.rawValue,
             deviceVariant: live.whoop5Variant,
             source: purpose == .appHang
-                ? ["App runtime diagnostics", "Live Bluetooth"]
+                ? ["App runtime diagnostics"]
                 : ["Live Bluetooth"],
             testProfile: purpose == .appHang ? "app-hang" : profile.id,
             profileStartedAt: started,
@@ -455,7 +481,7 @@ enum TestBundleAssembler {
             questionnaire: purpose == .appHang ? [:] : TestCentre.answers(profile),
             build: buildProvenance(),
             capabilities: capabilitySnapshot(),
-            storage: storage ?? TestBundleMeta.Storage(dbBytes: 0, rows: [:], rawCaptureBytes: 0),
+            storage: reportStorage,
             redaction: redactionVersion,
             truncated: truncated,
             captureCheck: checks)

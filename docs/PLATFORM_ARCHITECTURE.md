@@ -100,11 +100,11 @@ action:
 | Morning Sleep and evening Journal prompts | Local, opt-in, private copy, completion aware | One shared cross-domain arbiter is not yet implemented |
 | Hydration, wind-down, workout caution, adaptive sleep/routine/travel | Implemented as bounded local policies and compact in-app actions | Cross-family fatigue budget and outcome learning remain |
 | Contextual action center | Implemented on Apple and Android with expiry, deduplication, dismiss, and completion | A shared candidate/outcome event schema remains |
-| NOOP+ phone OTP and App Check clients | Implemented, disabled when environment configuration is absent | Firebase terms, deployed identity, signed physical clients, abuse tests |
-| Immutable managed chunk upload/restore | Implemented in clients, server, schema, processor, and tests | Live private staging, restore drill, load/isolation evidence |
+| NOOP+ phone OTP and App Check clients | Implemented; Firebase Identity Platform and enforced Authentication App Check are deployed in synthetic Mumbai staging | Ignored mobile configuration, signed physical clients, recovery and abuse tests |
+| Immutable managed chunk upload/restore | Implemented in clients, server, schema, processor, and tests; managed workloads are deployed IAM-only in synthetic staging | Synthetic end-to-end proof, restore drill, load/isolation evidence |
 | Complete managed-history ZIP export | Apple and Android finish pending phone backup, pin a server snapshot, page every retained chunk and current personal record, verify digests/counts/bytes, and finalize a manifest-backed archive | Live large-account/expiry/interruption tests, resumable continuation, and a documented importer remain |
-| Optional 90-day detailed local window after validated backup | Implemented, default off | Physical storage-pressure and interrupted-prune validation |
-| GCP managed runtime | Source and guarded IaC implemented | Identity deployment is blocked by account-level Firebase terms; runtime stays IAM-only |
+| Optional seven-day raw and 30-day essential local window after validated backup | Implemented, default off | Physical storage-pressure and interrupted-prune validation |
+| GCP managed runtime | Identity, App Check, Cloud SQL, API, processor, lifecycle, scheduler, KMS, Pub/Sub, and storage are deployed in synthetic staging with an IAM-only API | Corrected lifecycle image, synthetic end-to-end proof, recovery/load evidence, and every public-ingress gate |
 | Outcome-based personalization | Existing actions record local completion/dismissal in feature-specific stores | No general learning policy ships; experimental design and consent are required |
 
 ## 4. Architectural principles
@@ -640,9 +640,9 @@ The product is not launch-ready until all of these work end to end:
    changes, and preserves source provenance.
 5. A token for account A cannot discover, reserve, download, export, revoke, or
    erase any resource for account B.
-6. Storage reduction prunes only an exact server-validated clean window older
-   than 90 days and keeps summaries, user records, dirty windows, and
-   unvalidated data.
+6. Storage reduction prunes only exact server-validated clean windows after
+   seven days for high-rate raw streams or 30 days for essential time series,
+   and keeps summaries, user records, dirty windows, and unvalidated data.
 7. Revoking a device stops its managed access without deleting its local data
    or the account backup.
 8. Account erasure requires recent authentication, honors cooling-off/cancel,

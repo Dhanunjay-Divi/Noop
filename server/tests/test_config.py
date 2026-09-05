@@ -108,6 +108,37 @@ def test_worker_concurrency_reserves_a_database_connection() -> None:
         settings.validate_for_startup(needs_database=False)
 
 
+def test_twilio_api_key_is_optional_but_must_be_a_complete_pair() -> None:
+    common = {
+        "api_token": "a" * 32,
+        "database_url": None,
+        "public_base_url": "https://safety.example.test",
+        "twilio_account_sid": f"AC{'1' * 32}",
+        "twilio_auth_token": "account-auth-token",
+        "twilio_from_phone": "+14155550100",
+        "twilio_status_callback_secret": "c" * 32,
+        "safety_capability_secret": "s" * 32,
+    }
+    Settings(
+        **common,
+        twilio_api_key_sid=f"SK{'2' * 32}",
+        twilio_api_key_secret="restricted-api-secret",
+    ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="configured together"):
+        Settings(
+            **common,
+            twilio_api_key_sid=f"SK{'2' * 32}",
+        ).validate_for_startup(needs_database=False)
+
+    with pytest.raises(RuntimeError, match="SK-prefixed"):
+        Settings(
+            **common,
+            twilio_api_key_sid=f"AC{'2' * 32}",
+            twilio_api_key_secret="restricted-api-secret",
+        ).validate_for_startup(needs_database=False)
+
+
 def test_automatic_paging_requires_an_approved_fall_contract() -> None:
     settings = Settings(
         api_token="a" * 32,

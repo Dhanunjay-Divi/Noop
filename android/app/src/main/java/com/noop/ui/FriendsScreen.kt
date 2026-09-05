@@ -106,8 +106,9 @@ import kotlinx.coroutines.delay
  * is accepted, every field is directional, and only six daily summary scalars can reach this surface.
  */
 @Composable
-internal fun FriendsScreen(
+internal fun SelfHostedFriendsScreen(
     onOpenBackupSync: () -> Unit,
+    sourcePicker: @Composable () -> Unit = {},
     vm: FriendsViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -319,6 +320,7 @@ internal fun FriendsScreen(
         },
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        sourcePicker()
         state.notice?.let {
             StatePill(
                 title = friendsNoticeText(it),

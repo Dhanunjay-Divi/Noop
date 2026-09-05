@@ -422,7 +422,8 @@ private fun ManagedCloudSetupSheet(
                             Text(
                                 stringResource(
                                     R.string.managed_cloud_reduce_storage_detail_android,
-                                    ManagedLocalRetentionPolicy.DETAILED_HISTORY_DAYS,
+                                    ManagedLocalRetentionPolicy.RAW_HISTORY_DAYS,
+                                    ManagedLocalRetentionPolicy.ESSENTIAL_HISTORY_DAYS,
                                 ),
                                 style = NoopType.caption,
                                 color = Palette.textTertiary,

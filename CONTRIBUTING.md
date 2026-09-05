@@ -85,6 +85,11 @@ generated output (`Strand.xcodeproj/`) or any secrets, keystores, or `local.prop
    or spacing.
 6. For a material engineering, research, device, or release round, update the
    [`docs/ops` round record](docs/ops/README.md) in the same branch.
+7. Review observability for every material change. Reuse the bounded local
+   recorders and payload-free server events, add cross-platform coverage when
+   applicable, and never log health values, user text, credentials, URLs,
+   payloads, or persistent identifiers. See
+   [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 
 By opening a pull request you agree your contribution is licensed under the same
 terms as the project — see [`LICENSE`](LICENSE).

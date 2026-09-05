@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -127,6 +128,11 @@ class AppShellInstrumentedTest {
                     .isNotEmpty()
             }.getOrDefault(false)
         }
+        compose.onNodeWithTag("noop.friends.source.managed").performClick()
+        compose.onNodeWithTag("noop.friends.source.managed").assertIsSelected()
+        compose.onNodeWithTag("noop.friends.source.selfHosted").performClick()
+        compose.onNodeWithTag("noop.friends.source.selfHosted").assertIsSelected()
+        compose.onNodeWithTag("noop.screen.friends").assertIsDisplayed()
     }
 
     @Test

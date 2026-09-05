@@ -5,10 +5,12 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.managed_identity import ManagedIdentityClaims
 from app.managed_models import (
@@ -18,9 +20,36 @@ from app.managed_models import (
     ManagedEnrollment,
     ManagedExportRequest,
     ManagedRestoreRequest,
+    ManagedSocialInviteCreate,
+    ManagedSocialPokeAcknowledgement,
+    ManagedSocialPokeCreate,
+    ManagedSocialProfileCreate,
+    ManagedSocialProfilePatch,
+    ManagedSocialRequestCreate,
+    ManagedSocialSummaryMutation,
+    ManagedSocialVisibilityPatch,
     ManagedSourceRegistration,
 )
 from app.managed_object_store import ManagedObjectMetadata
+
+SOCIAL_ALIAS_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+SOCIAL_SUMMARY_FIELDS = (
+    "charge",
+    "effort",
+    "rest",
+    "sleep_duration",
+    "hrv",
+    "rhr",
+)
+SOCIAL_FIXED_TIME_ZONE = re.compile(r"^(?:(?:UTC|GMT))?([+-])([0-9]{2}):?([0-9]{2})$")
+SOCIAL_MAX_ACTIVE_INVITES = 10
+SOCIAL_MAX_INVITES_PER_DAY = 50
+SOCIAL_MAX_SENT_REQUESTS_PER_DAY = 50
+SOCIAL_MAX_PENDING_REQUESTS = 100
+SOCIAL_MAX_RECEIVED_REQUESTS_PER_DAY = 100
+SOCIAL_MAX_FRIENDS = 500
+SOCIAL_MAX_SENT_POKES_PER_DAY = 10
+SOCIAL_MAX_RECEIVED_POKES_PER_DAY = 20
 
 
 class ManagedStorageError(Exception):
@@ -3530,6 +3559,7 @@ class PostgresManagedRepository:
                             "DELETE FROM managed_upload_grants WHERE account_id = $1",
                             "DELETE FROM managed_restore_jobs WHERE account_id = $1",
                             "DELETE FROM managed_export_jobs WHERE account_id = $1",
+                            "DELETE FROM managed_social_profiles WHERE account_id = $1",
                         ):
                             database_rows += affected(
                                 await connection.execute(
@@ -5018,6 +5048,2321 @@ class PostgresManagedRepository:
             raise ManagedNotFoundError("managed restore was not found")
         return self._public_restore(dict(row), duplicate=False)
 
+    async def _social_profile(
+        self,
+        connection: Any,
+        *,
+        account_id: UUID,
+        for_update: bool = False,
+    ) -> Any:
+        suffix = " FOR UPDATE OF profile" if for_update else ""
+        row = await connection.fetchrow(
+            """
+            SELECT profile.*,
+                   alias.alias_value AS noop_id
+            FROM managed_social_profiles profile
+            LEFT JOIN managed_social_aliases alias
+              ON alias.profile_id = profile.profile_id
+             AND alias.status = 'active'
+            WHERE profile.account_id = $1
+            """
+            + suffix,
+            account_id,
+        )
+        if row is None or row["status"] != "active":
+            raise ManagedNotFoundError("managed Friends profile was not found")
+        return row
+
+    @staticmethod
+    async def _lock_social_profile_scope(
+        connection: Any,
+        *,
+        scope: str,
+        profile_ids: tuple[UUID, ...],
+    ) -> None:
+        for profile_id in sorted(set(profile_ids), key=str):
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"noop-managed-social:{scope}:{profile_id}",
+            )
+
+    @staticmethod
+    def _social_relationship_lock_key(
+        first_profile_id: UUID,
+        second_profile_id: UUID,
+    ) -> str:
+        low_profile_id = min(first_profile_id, second_profile_id)
+        high_profile_id = max(first_profile_id, second_profile_id)
+        return f"noop-managed-social:relationship:{low_profile_id}:{high_profile_id}"
+
+    @classmethod
+    async def _lock_social_relationship(
+        cls,
+        connection: Any,
+        *,
+        first_profile_id: UUID,
+        second_profile_id: UUID,
+    ) -> None:
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            cls._social_relationship_lock_key(
+                first_profile_id,
+                second_profile_id,
+            ),
+        )
+
+    @staticmethod
+    async def _lock_active_social_profiles(
+        connection: Any,
+        *,
+        profile_ids: tuple[UUID, ...],
+    ) -> dict[UUID, Any]:
+        ordered_profile_ids = sorted(set(profile_ids), key=str)
+        rows = await connection.fetch(
+            """
+            SELECT profile.*
+            FROM managed_social_profiles profile
+            WHERE profile.profile_id = ANY($1::uuid[])
+              AND profile.status = 'active'
+            ORDER BY profile.profile_id
+            FOR UPDATE OF profile
+            """,
+            ordered_profile_ids,
+        )
+        if len(rows) != len(ordered_profile_ids):
+            raise ManagedNotFoundError("managed profile was not found")
+        return {row["profile_id"]: row for row in rows}
+
+    @staticmethod
+    def _public_social_profile(row: Any, *, duplicate: bool = False) -> dict[str, Any]:
+        return {
+            "profile_id": str(row["profile_id"]),
+            "display_name": str(row["display_name"]),
+            "noop_id": row["noop_id"],
+            "poke_opt_in": bool(row["poke_opt_in"]),
+            "quiet_start_minute": int(row["quiet_start_minute"]),
+            "quiet_end_minute": int(row["quiet_end_minute"]),
+            "time_zone": str(row["time_zone"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "duplicate": duplicate,
+        }
+
+    async def _insert_social_alias(
+        self,
+        connection: Any,
+        *,
+        profile_id: UUID,
+        now: datetime,
+    ) -> str:
+        for _ in range(16):
+            symbols = "".join(secrets.choice(SOCIAL_ALIAS_ALPHABET) for _ in range(16))
+            alias_value = "NOOP-" + "-".join(
+                symbols[index : index + 4] for index in range(0, 16, 4)
+            )
+            inserted = await connection.fetchval(
+                """
+                INSERT INTO managed_social_aliases (
+                    alias_id,
+                    profile_id,
+                    alias_value,
+                    status,
+                    created_at
+                ) VALUES ($1, $2, $3, 'active', $4)
+                ON CONFLICT (alias_value) DO NOTHING
+                RETURNING alias_value
+                """,
+                uuid4(),
+                profile_id,
+                alias_value,
+                now,
+            )
+            if inserted is not None:
+                return str(inserted)
+        raise ManagedConflictError("a unique NOOP ID could not be allocated")
+
+    async def create_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request: ManagedSocialProfileCreate,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-social-profile:{principal.account_id}",
+                )
+                existing = await connection.fetchrow(
+                    """
+                    SELECT profile.*, alias.alias_value AS noop_id
+                    FROM managed_social_profiles profile
+                    LEFT JOIN managed_social_aliases alias
+                      ON alias.profile_id = profile.profile_id
+                     AND alias.status = 'active'
+                    WHERE profile.account_id = $1
+                    FOR UPDATE OF profile
+                    """,
+                    principal.account_id,
+                )
+                if existing is not None:
+                    if existing["status"] != "active":
+                        raise ManagedForbiddenError(
+                            "managed Friends profile is unavailable"
+                        )
+                    return self._public_social_profile(existing, duplicate=True)
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                profile_id = uuid4()
+                await connection.execute(
+                    """
+                    INSERT INTO managed_social_profiles (
+                        profile_id,
+                        account_id,
+                        creation_request_id,
+                        display_name,
+                        created_at,
+                        updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $5)
+                    """,
+                    profile_id,
+                    principal.account_id,
+                    request.request_id,
+                    request.display_name,
+                    now,
+                )
+                noop_id = await self._insert_social_alias(
+                    connection,
+                    profile_id=profile_id,
+                    now=now,
+                )
+                created = await connection.fetchrow(
+                    """
+                    SELECT profile.*, $2::text AS noop_id
+                    FROM managed_social_profiles profile
+                    WHERE profile.profile_id = $1
+                    """,
+                    profile_id,
+                    noop_id,
+                )
+        return self._public_social_profile(created)
+
+    async def get_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        row = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        badges = await self._pool().fetch(
+            """
+            SELECT badge_code, earned_at
+            FROM managed_social_badges
+            WHERE profile_id = $1
+            ORDER BY earned_at, badge_code
+            """,
+            row["profile_id"],
+        )
+        result = self._public_social_profile(row)
+        result["badges"] = [
+            {"code": str(badge["badge_code"]), "earned_at": badge["earned_at"]}
+            for badge in badges
+        ]
+        return result
+
+    async def delete_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> None:
+        self._require_active(principal)
+        deleted = await self._pool().execute(
+            """
+            DELETE FROM managed_social_profiles
+            WHERE account_id = $1
+            """,
+            principal.account_id,
+        )
+        if deleted == "DELETE 0":
+            raise ManagedNotFoundError("managed Friends profile was not found")
+
+    async def update_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        patch: ManagedSocialProfilePatch,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        if patch.time_zone is not None:
+            try:
+                self._social_time_zone(patch.time_zone)
+            except ValueError:
+                raise ManagedConflictError(
+                    "managed Friends time zone is unknown"
+                ) from None
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_social_profiles profile
+                    SET display_name = COALESCE($2, profile.display_name),
+                        poke_opt_in = COALESCE($3, profile.poke_opt_in),
+                        quiet_start_minute =
+                            COALESCE($4, profile.quiet_start_minute),
+                        quiet_end_minute =
+                            COALESCE($5, profile.quiet_end_minute),
+                        time_zone = COALESCE($6, profile.time_zone),
+                        updated_at = $7
+                    FROM managed_social_aliases alias
+                    WHERE profile.account_id = $1
+                      AND profile.status = 'active'
+                      AND alias.profile_id = profile.profile_id
+                      AND alias.status = 'active'
+                    RETURNING profile.*, alias.alias_value AS noop_id
+                    """,
+                    principal.account_id,
+                    patch.display_name,
+                    patch.poke_opt_in,
+                    patch.quiet_start_minute,
+                    patch.quiet_end_minute,
+                    patch.time_zone,
+                    now,
+                )
+                if row is not None and patch.poke_opt_in is False:
+                    await connection.execute(
+                        """
+                        UPDATE managed_social_pokes
+                        SET status = 'expired'
+                        WHERE recipient_profile_id = $1
+                          AND status IN ('queued', 'claimed')
+                        """,
+                        row["profile_id"],
+                    )
+        if row is None:
+            raise ManagedNotFoundError("managed Friends profile was not found")
+        return self._public_social_profile(row)
+
+    async def rotate_social_alias(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await connection.execute(
+                    """
+                    UPDATE managed_social_aliases
+                    SET status = 'revoked',
+                        revoked_at = $2,
+                        purge_after = $2::timestamptz + interval '400 days'
+                    WHERE profile_id = $1 AND status = 'active'
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
+                noop_id = await self._insert_social_alias(
+                    connection,
+                    profile_id=profile["profile_id"],
+                    now=now,
+                )
+                row = await connection.fetchrow(
+                    """
+                    SELECT profile.*, $2::text AS noop_id
+                    FROM managed_social_profiles profile
+                    WHERE profile.profile_id = $1
+                    """,
+                    profile["profile_id"],
+                    noop_id,
+                )
+        return self._public_social_profile(row)
+
+    async def lookup_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        noop_id: str,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        caller = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        row = await self._pool().fetchrow(
+            """
+            SELECT target.profile_id, target.display_name, alias.alias_value
+            FROM managed_social_aliases alias
+            JOIN managed_social_profiles target USING (profile_id)
+            WHERE alias.alias_value = $1
+              AND alias.status = 'active'
+              AND target.status = 'active'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM managed_social_blocks block
+                  WHERE (
+                      block.blocker_profile_id = $2
+                      AND block.blocked_profile_id = target.profile_id
+                  ) OR (
+                      block.blocker_profile_id = target.profile_id
+                      AND block.blocked_profile_id = $2
+                  )
+              )
+            """,
+            noop_id,
+            caller["profile_id"],
+        )
+        if row is None:
+            raise ManagedNotFoundError("NOOP ID was not found")
+        return {
+            "profile_id": str(row["profile_id"]),
+            "display_name": str(row["display_name"]),
+            "noop_id": str(row["alias_value"]),
+            "self": row["profile_id"] == caller["profile_id"],
+        }
+
+    async def create_social_invite(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request: ManagedSocialInviteCreate,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                replay = await connection.fetchrow(
+                    """
+                    SELECT invite_id,
+                           capability_hash,
+                           status,
+                           created_at,
+                           expires_at
+                    FROM managed_social_invites
+                    WHERE inviter_profile_id = $1
+                      AND creation_request_id = $2
+                    """,
+                    profile["profile_id"],
+                    request.request_id,
+                )
+                if replay is not None:
+                    supplied_hash = hashlib.sha256(
+                        request.capability.get_secret_value().encode("ascii")
+                    ).hexdigest()
+                    if not hmac.compare_digest(
+                        str(replay["capability_hash"]).strip(),
+                        supplied_hash,
+                    ):
+                        raise ManagedConflictError("invite request id was reused")
+                    replay_status = str(replay["status"])
+                    if replay_status == "active" and replay["expires_at"] <= now:
+                        await connection.execute(
+                            """
+                            UPDATE managed_social_invites
+                            SET status = 'expired'
+                            WHERE invite_id = $1 AND status = 'active'
+                            """,
+                            replay["invite_id"],
+                        )
+                        replay_status = "expired"
+                    return {
+                        "invite_id": str(replay["invite_id"]),
+                        "capability": request.capability.get_secret_value(),
+                        "status": replay_status,
+                        "created_at": replay["created_at"],
+                        "expires_at": replay["expires_at"],
+                        "duplicate": True,
+                    }
+                invite_counts = await connection.fetchrow(
+                    """
+                    SELECT
+                        count(*) FILTER (
+                            WHERE status = 'active' AND expires_at > $2
+                        ) AS active_count,
+                        count(*) FILTER (
+                            WHERE created_at >
+                                $2::timestamptz - interval '24 hours'
+                        ) AS recent_count
+                    FROM managed_social_invites
+                    WHERE inviter_profile_id = $1
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
+                if int(invite_counts["active_count"]) >= SOCIAL_MAX_ACTIVE_INVITES:
+                    raise ManagedConflictError(
+                        "revoke an active invite before creating another"
+                    )
+                if int(invite_counts["recent_count"]) >= SOCIAL_MAX_INVITES_PER_DAY:
+                    raise ManagedConflictError(
+                        "managed Friends invite limit has been reached"
+                    )
+                capability = request.capability.get_secret_value()
+                capability_hash = hashlib.sha256(capability.encode("ascii")).hexdigest()
+                invite_id = uuid4()
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_social_invites (
+                        invite_id,
+                        inviter_profile_id,
+                        creation_request_id,
+                        capability_hash,
+                        status,
+                        created_at,
+                        expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, 'active', $5,
+                        $5::timestamptz + $6::int * interval '1 hour'
+                    )
+                    RETURNING invite_id, status, created_at, expires_at
+                    """,
+                    invite_id,
+                    profile["profile_id"],
+                    request.request_id,
+                    capability_hash,
+                    now,
+                    request.expires_in_hours,
+                )
+        return {
+            "invite_id": str(row["invite_id"]),
+            "capability": capability,
+            "status": str(row["status"]),
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "duplicate": False,
+        }
+
+    async def revoke_social_invite(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        invite_id: UUID,
+    ) -> None:
+        self._require_active(principal)
+        now = await self.coordination_now()
+        status = await self._pool().execute(
+            """
+            UPDATE managed_social_invites invite
+            SET status = 'revoked', revoked_at = $3
+            FROM managed_social_profiles profile
+            WHERE invite.invite_id = $1
+              AND invite.inviter_profile_id = profile.profile_id
+              AND profile.account_id = $2
+              AND invite.status = 'active'
+            """,
+            invite_id,
+            principal.account_id,
+            now,
+        )
+        if status == "UPDATE 0":
+            row = await self._pool().fetchrow(
+                """
+                SELECT invite.status
+                FROM managed_social_invites invite
+                JOIN managed_social_profiles profile
+                  ON profile.profile_id = invite.inviter_profile_id
+                WHERE invite.invite_id = $1 AND profile.account_id = $2
+                """,
+                invite_id,
+                principal.account_id,
+            )
+            if row is None:
+                raise ManagedNotFoundError("managed Friends invite was not found")
+            if row["status"] != "revoked":
+                raise ManagedConflictError("managed Friends invite is no longer active")
+
+    async def _create_social_request(
+        self,
+        connection: Any,
+        *,
+        sender_profile_id: UUID,
+        recipient_profile_id: UUID,
+        client_request_id: UUID,
+        source: str,
+        invite_id: UUID | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        if sender_profile_id == recipient_profile_id:
+            raise ManagedConflictError("a profile cannot add itself")
+        await self._lock_social_relationship(
+            connection,
+            first_profile_id=sender_profile_id,
+            second_profile_id=recipient_profile_id,
+        )
+        await self._lock_social_profile_scope(
+            connection,
+            scope="request-rate",
+            profile_ids=(sender_profile_id, recipient_profile_id),
+        )
+        profiles = await self._lock_active_social_profiles(
+            connection,
+            profile_ids=(sender_profile_id, recipient_profile_id),
+        )
+        replay = await connection.fetchrow(
+            """
+            SELECT request.*, recipient.display_name AS other_display_name
+            FROM managed_social_requests request
+            JOIN managed_social_profiles recipient
+              ON recipient.profile_id = request.recipient_profile_id
+            WHERE request.sender_profile_id = $1
+              AND request.client_request_id = $2
+            """,
+            sender_profile_id,
+            client_request_id,
+        )
+        if replay is not None:
+            if (
+                replay["recipient_profile_id"] != recipient_profile_id
+                or replay["source"] != source
+            ):
+                raise ManagedConflictError("friend request id was reused")
+            result = self._public_social_request(replay, sender_profile_id)
+            result["duplicate"] = True
+            return result
+        blocked = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM managed_social_blocks
+                WHERE (
+                    blocker_profile_id = $1 AND blocked_profile_id = $2
+                ) OR (
+                    blocker_profile_id = $2 AND blocked_profile_id = $1
+                )
+            )
+            """,
+            sender_profile_id,
+            recipient_profile_id,
+        )
+        if blocked:
+            raise ManagedNotFoundError("NOOP ID or invite was not found")
+        friendship = await connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM managed_social_friendships
+                WHERE profile_low_id = LEAST($1::uuid, $2::uuid)
+                  AND profile_high_id = GREATEST($1::uuid, $2::uuid)
+            )
+            """,
+            sender_profile_id,
+            recipient_profile_id,
+        )
+        if friendship:
+            raise ManagedConflictError("profiles are already friends")
+        pending = await connection.fetchrow(
+            """
+            SELECT request.*, other.display_name AS other_display_name
+            FROM managed_social_requests request
+            JOIN managed_social_profiles other
+              ON other.profile_id = CASE
+                  WHEN request.sender_profile_id = $1
+                  THEN request.recipient_profile_id
+                  ELSE request.sender_profile_id
+              END
+            WHERE request.status = 'pending'
+              AND LEAST(
+                    request.sender_profile_id,
+                    request.recipient_profile_id
+                  ) = LEAST($1::uuid, $2::uuid)
+              AND GREATEST(
+                    request.sender_profile_id,
+                    request.recipient_profile_id
+                  ) = GREATEST($1::uuid, $2::uuid)
+            FOR UPDATE OF request
+            """,
+            sender_profile_id,
+            recipient_profile_id,
+        )
+        if pending is not None:
+            raise ManagedConflictError("a friend request is already pending")
+        request_counts = await connection.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT count(*)
+                    FROM managed_social_requests
+                    WHERE sender_profile_id = $1
+                      AND created_at >
+                          $3::timestamptz - interval '24 hours'
+                ) AS sent_recent,
+                (
+                    SELECT count(*)
+                    FROM managed_social_requests
+                    WHERE recipient_profile_id = $2
+                      AND created_at >
+                          $3::timestamptz - interval '24 hours'
+                ) AS received_recent,
+                (
+                    SELECT count(*)
+                    FROM managed_social_requests
+                    WHERE sender_profile_id = $1
+                      AND status = 'pending'
+                      AND expires_at > $3
+                ) AS pending_sent,
+                (
+                    SELECT count(*)
+                    FROM managed_social_requests
+                    WHERE sender_profile_id = $1
+                      AND recipient_profile_id = $2
+                      AND created_at >
+                          $3::timestamptz - interval '24 hours'
+                ) AS sent_to_pair_recent
+            """,
+            sender_profile_id,
+            recipient_profile_id,
+            now,
+        )
+        if (
+            int(request_counts["sent_recent"]) >= SOCIAL_MAX_SENT_REQUESTS_PER_DAY
+            or int(request_counts["pending_sent"]) >= SOCIAL_MAX_PENDING_REQUESTS
+        ):
+            raise ManagedConflictError("managed Friends request limit has been reached")
+        if int(request_counts["sent_to_pair_recent"]) >= 1:
+            raise ManagedConflictError(
+                "wait before sending this profile another request"
+            )
+        if (
+            int(request_counts["received_recent"])
+            >= SOCIAL_MAX_RECEIVED_REQUESTS_PER_DAY
+        ):
+            raise ManagedConflictError(
+                "this profile cannot receive more requests right now"
+            )
+        recipient = profiles[recipient_profile_id]
+        row = await connection.fetchrow(
+            """
+            INSERT INTO managed_social_requests (
+                request_id,
+                client_request_id,
+                sender_profile_id,
+                recipient_profile_id,
+                invite_id,
+                source,
+                status,
+                created_at,
+                expires_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, 'pending', $7,
+                $7::timestamptz + interval '30 days'
+            )
+            RETURNING *, $8::text AS other_display_name
+            """,
+            uuid4(),
+            client_request_id,
+            sender_profile_id,
+            recipient_profile_id,
+            invite_id,
+            source,
+            now,
+            recipient["display_name"],
+        )
+        result = self._public_social_request(row, sender_profile_id)
+        result["duplicate"] = False
+        return result
+
+    @staticmethod
+    def _public_social_request(row: Any, caller_profile_id: UUID) -> dict[str, Any]:
+        incoming = row["recipient_profile_id"] == caller_profile_id
+        other_profile_id = (
+            row["sender_profile_id"] if incoming else row["recipient_profile_id"]
+        )
+        return {
+            "request_id": str(row["request_id"]),
+            "profile_id": str(other_profile_id),
+            "display_name": str(row["other_display_name"]),
+            "direction": "incoming" if incoming else "outgoing",
+            "source": str(row["source"]),
+            "status": str(row["status"]),
+            "created_at": row["created_at"],
+            "decided_at": row["decided_at"],
+            "expires_at": row["expires_at"],
+        }
+
+    async def create_social_request(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request: ManagedSocialRequestCreate,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                sender = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                recipient = await connection.fetchrow(
+                    """
+                    SELECT profile.profile_id
+                    FROM managed_social_aliases alias
+                    JOIN managed_social_profiles profile USING (profile_id)
+                    WHERE alias.alias_value = $1
+                      AND alias.status = 'active'
+                      AND profile.status = 'active'
+                    """,
+                    request.noop_id,
+                )
+                if recipient is None:
+                    raise ManagedNotFoundError("NOOP ID was not found")
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                return await self._create_social_request(
+                    connection,
+                    sender_profile_id=sender["profile_id"],
+                    recipient_profile_id=recipient["profile_id"],
+                    client_request_id=request.request_id,
+                    source="noop_id",
+                    invite_id=None,
+                    now=now,
+                )
+
+    async def redeem_social_invite(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request_id: UUID,
+        capability: str,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        capability_hash = hashlib.sha256(capability.encode("ascii")).hexdigest()
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                sender = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                invite_snapshot = await connection.fetchrow(
+                    """
+                    SELECT inviter_profile_id
+                    FROM managed_social_invites
+                    WHERE capability_hash = $1
+                    """,
+                    capability_hash,
+                )
+                if invite_snapshot is None:
+                    raise ManagedNotFoundError("NOOP invite was not found")
+                if invite_snapshot["inviter_profile_id"] == sender["profile_id"]:
+                    raise ManagedConflictError("a profile cannot add itself")
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=sender["profile_id"],
+                    second_profile_id=invite_snapshot["inviter_profile_id"],
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                invite = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_social_invites
+                    WHERE capability_hash = $1
+                    FOR UPDATE
+                    """,
+                    capability_hash,
+                )
+                if invite is None:
+                    raise ManagedNotFoundError("NOOP invite was not found")
+                if (
+                    invite["status"] == "redeemed"
+                    and invite["redeemed_by_profile_id"] == sender["profile_id"]
+                    and invite["friend_request_id"] is not None
+                ):
+                    row = await connection.fetchrow(
+                        """
+                        SELECT request.*, recipient.display_name
+                            AS other_display_name
+                        FROM managed_social_requests request
+                        JOIN managed_social_profiles recipient
+                          ON recipient.profile_id =
+                             request.recipient_profile_id
+                        WHERE request.request_id = $1
+                        """,
+                        invite["friend_request_id"],
+                    )
+                    result = self._public_social_request(
+                        row,
+                        sender["profile_id"],
+                    )
+                    result["duplicate"] = True
+                    return result
+                if invite["status"] != "active" or invite["expires_at"] <= now:
+                    if invite["status"] == "active":
+                        await connection.execute(
+                            """
+                            UPDATE managed_social_invites
+                            SET status = 'expired'
+                            WHERE invite_id = $1
+                            """,
+                            invite["invite_id"],
+                        )
+                    raise ManagedNotFoundError("NOOP invite was not found")
+                result = await self._create_social_request(
+                    connection,
+                    sender_profile_id=sender["profile_id"],
+                    recipient_profile_id=invite["inviter_profile_id"],
+                    client_request_id=request_id,
+                    source="invite",
+                    invite_id=invite["invite_id"],
+                    now=now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_invites
+                    SET status = 'redeemed',
+                        redeemed_at = $2,
+                        redeemed_by_profile_id = $3,
+                        friend_request_id = $4
+                    WHERE invite_id = $1
+                    """,
+                    invite["invite_id"],
+                    now,
+                    sender["profile_id"],
+                    UUID(result["request_id"]),
+                )
+                return result
+
+    async def list_social_requests(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        profile = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        rows = await self._pool().fetch(
+            """
+            SELECT request.*,
+                   other.display_name AS other_display_name
+            FROM managed_social_requests request
+            JOIN managed_social_profiles other
+              ON other.profile_id = CASE
+                  WHEN request.sender_profile_id = $1
+                  THEN request.recipient_profile_id
+                  ELSE request.sender_profile_id
+              END
+            WHERE (
+                    request.sender_profile_id = $1
+                    OR request.recipient_profile_id = $1
+                  )
+              AND request.status = 'pending'
+              AND request.expires_at > clock_timestamp()
+            ORDER BY request.created_at DESC, request.request_id
+            LIMIT 100
+            """,
+            profile["profile_id"],
+        )
+        return [self._public_social_request(row, profile["profile_id"]) for row in rows]
+
+    async def decide_social_request(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request_id: UUID,
+        decision: str,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        target_status = "accepted" if decision == "accept" else "declined"
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                request_snapshot = await connection.fetchrow(
+                    """
+                    SELECT sender_profile_id, recipient_profile_id
+                    FROM managed_social_requests
+                    WHERE request_id = $1
+                      AND recipient_profile_id = $2
+                    """,
+                    request_id,
+                    profile["profile_id"],
+                )
+                if request_snapshot is None:
+                    raise ManagedNotFoundError("friend request was not found")
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=request_snapshot["sender_profile_id"],
+                    second_profile_id=request_snapshot["recipient_profile_id"],
+                )
+                if decision == "accept":
+                    await self._lock_social_profile_scope(
+                        connection,
+                        scope="friend-capacity",
+                        profile_ids=(
+                            request_snapshot["sender_profile_id"],
+                            request_snapshot["recipient_profile_id"],
+                        ),
+                    )
+                await self._lock_active_social_profiles(
+                    connection,
+                    profile_ids=(
+                        request_snapshot["sender_profile_id"],
+                        request_snapshot["recipient_profile_id"],
+                    ),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                request = await connection.fetchrow(
+                    """
+                    SELECT request.*, sender.display_name AS other_display_name
+                    FROM managed_social_requests request
+                    JOIN managed_social_profiles sender
+                      ON sender.profile_id = request.sender_profile_id
+                    WHERE request.request_id = $1
+                      AND request.recipient_profile_id = $2
+                    FOR UPDATE OF request
+                    """,
+                    request_id,
+                    profile["profile_id"],
+                )
+                if request is None:
+                    raise ManagedNotFoundError("friend request was not found")
+                if request["status"] != "pending":
+                    if request["status"] != target_status:
+                        raise ManagedConflictError(
+                            "friend request was already decided differently"
+                        )
+                    result = self._public_social_request(
+                        request,
+                        profile["profile_id"],
+                    )
+                    result["duplicate"] = True
+                    return result
+                if request["expires_at"] <= now:
+                    await connection.execute(
+                        """
+                        UPDATE managed_social_requests
+                        SET status = 'expired', decided_at = $2
+                        WHERE request_id = $1
+                        """,
+                        request_id,
+                        now,
+                    )
+                    raise ManagedConflictError("friend request has expired")
+                if decision == "accept":
+                    blocked = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_social_blocks
+                            WHERE (
+                                blocker_profile_id = $1
+                                AND blocked_profile_id = $2
+                            ) OR (
+                                blocker_profile_id = $2
+                                AND blocked_profile_id = $1
+                            )
+                        )
+                        """,
+                        request["sender_profile_id"],
+                        request["recipient_profile_id"],
+                    )
+                    if blocked:
+                        raise ManagedConflictError(
+                            "friend request can no longer be accepted"
+                        )
+                    counts = await connection.fetchrow(
+                        """
+                        SELECT
+                            (
+                                SELECT count(*)
+                                FROM managed_social_friendships
+                                WHERE profile_low_id = $1
+                                   OR profile_high_id = $1
+                            ) AS recipient_count,
+                            (
+                                SELECT count(*)
+                                FROM managed_social_friendships
+                                WHERE profile_low_id = $2
+                                   OR profile_high_id = $2
+                            ) AS sender_count
+                        """,
+                        request["recipient_profile_id"],
+                        request["sender_profile_id"],
+                    )
+                    if (
+                        int(counts["recipient_count"]) >= SOCIAL_MAX_FRIENDS
+                        or int(counts["sender_count"]) >= SOCIAL_MAX_FRIENDS
+                    ):
+                        raise ManagedConflictError("friend limit has been reached")
+                    low = min(
+                        request["sender_profile_id"],
+                        request["recipient_profile_id"],
+                    )
+                    high = max(
+                        request["sender_profile_id"],
+                        request["recipient_profile_id"],
+                    )
+                    await connection.execute(
+                        """
+                        INSERT INTO managed_social_friendships (
+                            friendship_id,
+                            profile_low_id,
+                            profile_high_id,
+                            accepted_request_id,
+                            created_at
+                        ) VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (profile_low_id, profile_high_id)
+                        DO NOTHING
+                        """,
+                        uuid4(),
+                        low,
+                        high,
+                        request_id,
+                        now,
+                    )
+                    for owner, reader in (
+                        (
+                            request["sender_profile_id"],
+                            request["recipient_profile_id"],
+                        ),
+                        (
+                            request["recipient_profile_id"],
+                            request["sender_profile_id"],
+                        ),
+                    ):
+                        await connection.execute(
+                            """
+                            INSERT INTO managed_social_visibility (
+                                owner_profile_id,
+                                reader_profile_id,
+                                updated_at
+                            ) VALUES ($1, $2, $3)
+                            ON CONFLICT (
+                                owner_profile_id,
+                                reader_profile_id
+                            ) DO NOTHING
+                            """,
+                            owner,
+                            reader,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            INSERT INTO managed_social_badges (
+                                profile_id,
+                                badge_code,
+                                earned_at
+                            ) VALUES ($1, 'connected', $2)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            owner,
+                            now,
+                        )
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_social_requests
+                    SET status = $2, decided_at = $3
+                    WHERE request_id = $1
+                    RETURNING *, $4::text AS other_display_name
+                    """,
+                    request_id,
+                    target_status,
+                    now,
+                    request["other_display_name"],
+                )
+        result = self._public_social_request(row, profile["profile_id"])
+        result["duplicate"] = False
+        return result
+
+    @staticmethod
+    def _public_visibility(row: Any, prefix: str) -> dict[str, bool]:
+        return {
+            field: bool(row[f"{prefix}{field}"])
+            for field in (*SOCIAL_SUMMARY_FIELDS, "poke_allowed")
+        }
+
+    async def _social_visibility_union(
+        self,
+        connection: Any,
+        *,
+        owner_profile_id: UUID,
+    ) -> dict[str, bool]:
+        row = await connection.fetchrow(
+            """
+            SELECT
+                COALESCE(bool_or(visibility.charge), false) AS charge,
+                COALESCE(bool_or(visibility.effort), false) AS effort,
+                COALESCE(bool_or(visibility.rest), false) AS rest,
+                COALESCE(
+                    bool_or(visibility.sleep_duration),
+                    false
+                ) AS sleep_duration,
+                COALESCE(bool_or(visibility.hrv), false) AS hrv,
+                COALESCE(bool_or(visibility.rhr), false) AS rhr
+            FROM managed_social_visibility visibility
+            JOIN managed_social_friendships friendship
+              ON friendship.profile_low_id = LEAST(
+                    visibility.owner_profile_id,
+                    visibility.reader_profile_id
+                 )
+             AND friendship.profile_high_id = GREATEST(
+                    visibility.owner_profile_id,
+                    visibility.reader_profile_id
+                 )
+            WHERE visibility.owner_profile_id = $1
+            """,
+            owner_profile_id,
+        )
+        return {field: bool(row[field]) for field in SOCIAL_SUMMARY_FIELDS}
+
+    async def _clear_unshared_social_summary_fields(
+        self,
+        connection: Any,
+        *,
+        owner_profile_id: UUID,
+    ) -> None:
+        allowed = await self._social_visibility_union(
+            connection,
+            owner_profile_id=owner_profile_id,
+        )
+        await connection.execute(
+            """
+            UPDATE managed_social_daily_summaries
+            SET charge = CASE WHEN $2 THEN charge ELSE NULL END,
+                effort = CASE WHEN $3 THEN effort ELSE NULL END,
+                rest = CASE WHEN $4 THEN rest ELSE NULL END,
+                sleep_duration =
+                    CASE WHEN $5 THEN sleep_duration ELSE NULL END,
+                hrv = CASE WHEN $6 THEN hrv ELSE NULL END,
+                rhr = CASE WHEN $7 THEN rhr ELSE NULL END,
+                revision = revision + 1,
+                updated_at = clock_timestamp()
+            WHERE profile_id = $1
+              AND (
+                    (NOT $2 AND charge IS NOT NULL)
+                    OR (NOT $3 AND effort IS NOT NULL)
+                    OR (NOT $4 AND rest IS NOT NULL)
+                    OR (NOT $5 AND sleep_duration IS NOT NULL)
+                    OR (NOT $6 AND hrv IS NOT NULL)
+                    OR (NOT $7 AND rhr IS NOT NULL)
+                  )
+            """,
+            owner_profile_id,
+            allowed["charge"],
+            allowed["effort"],
+            allowed["rest"],
+            allowed["sleep_duration"],
+            allowed["hrv"],
+            allowed["rhr"],
+        )
+
+    async def list_social_friends(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        profile = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        rows = await self._pool().fetch(
+            """
+            SELECT friend.profile_id,
+                   friend.display_name,
+                   friendship.created_at AS friends_since,
+                   own.charge AS own_charge,
+                   own.effort AS own_effort,
+                   own.rest AS own_rest,
+                   own.sleep_duration AS own_sleep_duration,
+                   own.hrv AS own_hrv,
+                   own.rhr AS own_rhr,
+                   own.poke_allowed AS own_poke_allowed,
+                   shared.charge AS shared_charge,
+                   shared.effort AS shared_effort,
+                   shared.rest AS shared_rest,
+                   shared.sleep_duration AS shared_sleep_duration,
+                   shared.hrv AS shared_hrv,
+                   shared.rhr AS shared_rhr,
+                   shared.poke_allowed AS shared_poke_allowed,
+                   latest.day AS latest_day,
+                   latest.charge AS latest_charge,
+                   latest.effort AS latest_effort,
+                   latest.rest AS latest_rest,
+                   latest.sleep_duration AS latest_sleep_duration,
+                   latest.hrv AS latest_hrv,
+                   latest.rhr AS latest_rhr
+            FROM managed_social_friendships friendship
+            JOIN managed_social_profiles friend
+              ON friend.profile_id = CASE
+                  WHEN friendship.profile_low_id = $1
+                  THEN friendship.profile_high_id
+                  ELSE friendship.profile_low_id
+              END
+            JOIN managed_social_visibility own
+              ON own.owner_profile_id = $1
+             AND own.reader_profile_id = friend.profile_id
+            JOIN managed_social_visibility shared
+              ON shared.owner_profile_id = friend.profile_id
+             AND shared.reader_profile_id = $1
+            LEFT JOIN LATERAL (
+                SELECT summary.*
+                FROM managed_social_daily_summaries summary
+                WHERE summary.profile_id = friend.profile_id
+                  AND summary.day >= friendship.created_at::date
+                  AND (
+                        (shared.charge AND summary.charge IS NOT NULL)
+                        OR (shared.effort AND summary.effort IS NOT NULL)
+                        OR (shared.rest AND summary.rest IS NOT NULL)
+                        OR (
+                            shared.sleep_duration
+                            AND summary.sleep_duration IS NOT NULL
+                        )
+                        OR (shared.hrv AND summary.hrv IS NOT NULL)
+                        OR (shared.rhr AND summary.rhr IS NOT NULL)
+                      )
+                ORDER BY summary.day DESC
+                LIMIT 1
+            ) latest ON true
+            WHERE friendship.profile_low_id = $1
+               OR friendship.profile_high_id = $1
+            ORDER BY friend.display_name, friend.profile_id
+            LIMIT 500
+            """,
+            profile["profile_id"],
+        )
+        friend_ids = [row["profile_id"] for row in rows]
+        badge_rows = (
+            await self._pool().fetch(
+                """
+                SELECT profile_id, badge_code, earned_at
+                FROM managed_social_badges
+                WHERE profile_id = ANY($1::uuid[])
+                ORDER BY earned_at, badge_code
+                """,
+                friend_ids,
+            )
+            if friend_ids
+            else []
+        )
+        badges: dict[UUID, list[dict[str, Any]]] = {}
+        for badge in badge_rows:
+            badges.setdefault(badge["profile_id"], []).append(
+                {
+                    "code": str(badge["badge_code"]),
+                    "earned_at": badge["earned_at"],
+                }
+            )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            shared = self._public_visibility(row, "shared_")
+            latest = None
+            if row["latest_day"] is not None:
+                projected = {
+                    field: row[f"latest_{field}"]
+                    for field in SOCIAL_SUMMARY_FIELDS
+                    if shared[field] and row[f"latest_{field}"] is not None
+                }
+                if projected:
+                    latest = {
+                        "day": row["latest_day"].isoformat(),
+                        "summary": projected,
+                    }
+            result.append(
+                {
+                    "profile_id": str(row["profile_id"]),
+                    "display_name": str(row["display_name"]),
+                    "friends_since": row["friends_since"],
+                    "sharing": self._public_visibility(row, "own_"),
+                    "shared_with_me": shared,
+                    "latest": latest,
+                    "badges": badges.get(row["profile_id"], []),
+                }
+            )
+        return result
+
+    async def update_social_visibility(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        friend_profile_id: UUID,
+        patch: ManagedSocialVisibilityPatch,
+    ) -> dict[str, bool]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=profile["profile_id"],
+                    second_profile_id=friend_profile_id,
+                )
+                await self._lock_active_social_profiles(
+                    connection,
+                    profile_ids=(profile["profile_id"], friend_profile_id),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                row = await connection.fetchrow(
+                    """
+                    UPDATE managed_social_visibility visibility
+                    SET charge = COALESCE($3, visibility.charge),
+                        effort = COALESCE($4, visibility.effort),
+                        rest = COALESCE($5, visibility.rest),
+                        sleep_duration =
+                            COALESCE($6, visibility.sleep_duration),
+                        hrv = COALESCE($7, visibility.hrv),
+                        rhr = COALESCE($8, visibility.rhr),
+                        poke_allowed =
+                            COALESCE($9, visibility.poke_allowed),
+                        updated_at = $10
+                    WHERE visibility.owner_profile_id = $1
+                      AND visibility.reader_profile_id = $2
+                      AND EXISTS (
+                          SELECT 1
+                          FROM managed_social_friendships friendship
+                          WHERE friendship.profile_low_id =
+                                LEAST($1::uuid, $2::uuid)
+                            AND friendship.profile_high_id =
+                                GREATEST($1::uuid, $2::uuid)
+                      )
+                    RETURNING
+                        charge AS value_charge,
+                        effort AS value_effort,
+                        rest AS value_rest,
+                        sleep_duration AS value_sleep_duration,
+                        hrv AS value_hrv,
+                        rhr AS value_rhr,
+                        poke_allowed AS value_poke_allowed
+                    """,
+                    profile["profile_id"],
+                    friend_profile_id,
+                    patch.charge,
+                    patch.effort,
+                    patch.rest,
+                    patch.sleep_duration,
+                    patch.hrv,
+                    patch.rhr,
+                    patch.poke_allowed,
+                    now,
+                )
+                if row is not None:
+                    if patch.poke_allowed is False:
+                        await connection.execute(
+                            """
+                            UPDATE managed_social_pokes
+                            SET status = 'expired'
+                            WHERE recipient_profile_id = $1
+                              AND sender_profile_id = $2
+                              AND status IN ('queued', 'claimed')
+                            """,
+                            profile["profile_id"],
+                            friend_profile_id,
+                        )
+                    await self._clear_unshared_social_summary_fields(
+                        connection,
+                        owner_profile_id=profile["profile_id"],
+                    )
+        if row is None:
+            raise ManagedNotFoundError("managed friend was not found")
+        return self._public_visibility(row, "value_")
+
+    async def remove_social_friend(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        friend_profile_id: UUID,
+    ) -> None:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=profile["profile_id"],
+                    second_profile_id=friend_profile_id,
+                )
+                await self._lock_active_social_profiles(
+                    connection,
+                    profile_ids=(profile["profile_id"], friend_profile_id),
+                )
+                low = min(profile["profile_id"], friend_profile_id)
+                high = max(profile["profile_id"], friend_profile_id)
+                deleted = await connection.execute(
+                    """
+                    DELETE FROM managed_social_friendships
+                    WHERE profile_low_id = $1 AND profile_high_id = $2
+                    """,
+                    low,
+                    high,
+                )
+                if deleted == "DELETE 0":
+                    raise ManagedNotFoundError("managed friend was not found")
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_visibility
+                    WHERE (
+                        owner_profile_id = $1 AND reader_profile_id = $2
+                    ) OR (
+                        owner_profile_id = $2 AND reader_profile_id = $1
+                    )
+                    """,
+                    profile["profile_id"],
+                    friend_profile_id,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes
+                    SET status = 'expired'
+                    WHERE status IN ('queued', 'claimed')
+                      AND (
+                          (
+                            sender_profile_id = $1
+                            AND recipient_profile_id = $2
+                          ) OR (
+                            sender_profile_id = $2
+                            AND recipient_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    friend_profile_id,
+                )
+                for owner_profile_id in (
+                    profile["profile_id"],
+                    friend_profile_id,
+                ):
+                    await self._clear_unshared_social_summary_fields(
+                        connection,
+                        owner_profile_id=owner_profile_id,
+                    )
+
+    async def block_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        blocked_profile_id: UUID,
+    ) -> None:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                if profile["profile_id"] == blocked_profile_id:
+                    raise ManagedConflictError("a profile cannot block itself")
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=profile["profile_id"],
+                    second_profile_id=blocked_profile_id,
+                )
+                await self._lock_active_social_profiles(
+                    connection,
+                    profile_ids=(profile["profile_id"], blocked_profile_id),
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await connection.execute(
+                    """
+                    INSERT INTO managed_social_blocks (
+                        blocker_profile_id,
+                        blocked_profile_id,
+                        created_at
+                    ) VALUES ($1, $2, $3)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                low = min(profile["profile_id"], blocked_profile_id)
+                high = max(profile["profile_id"], blocked_profile_id)
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_friendships
+                    WHERE profile_low_id = $1 AND profile_high_id = $2
+                    """,
+                    low,
+                    high,
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_visibility
+                    WHERE (
+                        owner_profile_id = $1 AND reader_profile_id = $2
+                    ) OR (
+                        owner_profile_id = $2 AND reader_profile_id = $1
+                    )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_requests
+                    SET status = 'canceled', decided_at = $3
+                    WHERE status = 'pending'
+                      AND (
+                          (
+                            sender_profile_id = $1
+                            AND recipient_profile_id = $2
+                          ) OR (
+                            sender_profile_id = $2
+                            AND recipient_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes
+                    SET status = 'expired'
+                    WHERE status IN ('queued', 'claimed')
+                      AND (
+                          (
+                            sender_profile_id = $1
+                            AND recipient_profile_id = $2
+                          ) OR (
+                            sender_profile_id = $2
+                            AND recipient_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                )
+                for owner_profile_id in (
+                    profile["profile_id"],
+                    blocked_profile_id,
+                ):
+                    await self._clear_unshared_social_summary_fields(
+                        connection,
+                        owner_profile_id=owner_profile_id,
+                    )
+
+    async def unblock_social_profile(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        blocked_profile_id: UUID,
+    ) -> None:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                if profile["profile_id"] == blocked_profile_id:
+                    raise ManagedConflictError("a profile cannot unblock itself")
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=profile["profile_id"],
+                    second_profile_id=blocked_profile_id,
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_blocks
+                    WHERE blocker_profile_id = $1 AND blocked_profile_id = $2
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                )
+
+    async def list_social_blocks(
+        self,
+        *,
+        principal: ManagedPrincipal,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        profile = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        rows = await self._pool().fetch(
+            """
+            SELECT blocked.profile_id,
+                   blocked.display_name,
+                   social_block.created_at AS blocked_at
+            FROM managed_social_blocks social_block
+            JOIN managed_social_profiles blocked
+              ON blocked.profile_id = social_block.blocked_profile_id
+            WHERE social_block.blocker_profile_id = $1
+            ORDER BY social_block.created_at DESC, blocked.profile_id
+            LIMIT 500
+            """,
+            profile["profile_id"],
+        )
+        return [
+            {
+                "profile_id": str(row["profile_id"]),
+                "display_name": str(row["display_name"]),
+                "blocked_at": row["blocked_at"],
+            }
+            for row in rows
+        ]
+
+    async def put_social_summary(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        day: date,
+        mutation: ManagedSocialSummaryMutation,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        if day > datetime.now(UTC).date() + timedelta(days=1):
+            raise ManagedConflictError("managed Friends summary day is in the future")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                allowed = await self._social_visibility_union(
+                    connection,
+                    owner_profile_id=profile["profile_id"],
+                )
+                if any(
+                    mutation.summary.get(field) is not None and not allowed[field]
+                    for field in SOCIAL_SUMMARY_FIELDS
+                ):
+                    raise ManagedForbiddenError(
+                        "summary contains a field that is not currently shared"
+                    )
+                replay = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_social_daily_summaries
+                    WHERE profile_id = $1 AND request_id = $2
+                    """,
+                    profile["profile_id"],
+                    mutation.request_id,
+                )
+                if replay is not None:
+                    expected_values = {
+                        field: mutation.summary.get(field)
+                        for field in SOCIAL_SUMMARY_FIELDS
+                    }
+                    if replay["day"] != day or any(
+                        replay[field] != expected_values[field]
+                        for field in SOCIAL_SUMMARY_FIELDS
+                    ):
+                        raise ManagedConflictError("summary request id was reused")
+                    return self._public_social_summary(replay, duplicate=True)
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                values = mutation.summary
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_social_daily_summaries (
+                        profile_id,
+                        day,
+                        request_id,
+                        charge,
+                        effort,
+                        rest,
+                        sleep_duration,
+                        hrv,
+                        rhr,
+                        revision,
+                        updated_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10
+                    )
+                    ON CONFLICT (profile_id, day)
+                    DO UPDATE SET
+                        request_id = EXCLUDED.request_id,
+                        charge = EXCLUDED.charge,
+                        effort = EXCLUDED.effort,
+                        rest = EXCLUDED.rest,
+                        sleep_duration = EXCLUDED.sleep_duration,
+                        hrv = EXCLUDED.hrv,
+                        rhr = EXCLUDED.rhr,
+                        revision =
+                            managed_social_daily_summaries.revision + 1,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING *
+                    """,
+                    profile["profile_id"],
+                    day,
+                    mutation.request_id,
+                    values.get("charge"),
+                    values.get("effort"),
+                    values.get("rest"),
+                    values.get("sleep_duration"),
+                    values.get("hrv"),
+                    values.get("rhr"),
+                    now,
+                )
+                count = await connection.fetchval(
+                    """
+                    SELECT count(*)
+                    FROM managed_social_daily_summaries
+                    WHERE profile_id = $1
+                      AND (
+                          charge IS NOT NULL
+                          OR effort IS NOT NULL
+                          OR rest IS NOT NULL
+                          OR sleep_duration IS NOT NULL
+                          OR hrv IS NOT NULL
+                          OR rhr IS NOT NULL
+                      )
+                    """,
+                    profile["profile_id"],
+                )
+                for threshold, code in (
+                    (7, "steady_week"),
+                    (30, "steady_month"),
+                ):
+                    if int(count) >= threshold:
+                        await connection.execute(
+                            """
+                            INSERT INTO managed_social_badges (
+                                profile_id,
+                                badge_code,
+                                earned_at
+                            ) VALUES ($1, $2, $3)
+                            ON CONFLICT DO NOTHING
+                            """,
+                            profile["profile_id"],
+                            code,
+                            now,
+                        )
+        return self._public_social_summary(row, duplicate=False)
+
+    @staticmethod
+    def _public_social_summary(row: Any, *, duplicate: bool) -> dict[str, Any]:
+        return {
+            "day": row["day"].isoformat(),
+            "summary": {
+                field: row[field]
+                for field in SOCIAL_SUMMARY_FIELDS
+                if row[field] is not None
+            },
+            "revision": int(row["revision"]),
+            "updated_at": row["updated_at"],
+            "duplicate": duplicate,
+        }
+
+    async def social_feed(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        start: date,
+        end: date,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        if end < start or end - start > timedelta(days=89):
+            raise ManagedConflictError("managed Friends feed range is invalid")
+        profile = await self._social_profile(
+            self._pool(),
+            account_id=principal.account_id,
+        )
+        rows = await self._pool().fetch(
+            """
+            SELECT owner.profile_id,
+                   owner.display_name,
+                   summary.*,
+                   visibility.charge AS allowed_charge,
+                   visibility.effort AS allowed_effort,
+                   visibility.rest AS allowed_rest,
+                   visibility.sleep_duration AS allowed_sleep_duration,
+                   visibility.hrv AS allowed_hrv,
+                   visibility.rhr AS allowed_rhr
+            FROM managed_social_daily_summaries summary
+            JOIN managed_social_profiles owner
+              ON owner.profile_id = summary.profile_id
+            JOIN managed_social_visibility visibility
+              ON visibility.owner_profile_id = summary.profile_id
+             AND visibility.reader_profile_id = $1
+            JOIN managed_social_friendships friendship
+              ON friendship.profile_low_id =
+                    LEAST(summary.profile_id, $1::uuid)
+             AND friendship.profile_high_id =
+                    GREATEST(summary.profile_id, $1::uuid)
+            WHERE summary.day BETWEEN $2 AND $3
+              AND summary.day >= friendship.created_at::date
+            ORDER BY summary.day DESC, owner.display_name, owner.profile_id
+            LIMIT 45000
+            """,
+            profile["profile_id"],
+            start,
+            end,
+        )
+        feed: list[dict[str, Any]] = []
+        for row in rows:
+            projected = {
+                field: row[field]
+                for field in SOCIAL_SUMMARY_FIELDS
+                if row[f"allowed_{field}"] and row[field] is not None
+            }
+            if projected:
+                feed.append(
+                    {
+                        "profile_id": str(row["profile_id"]),
+                        "display_name": str(row["display_name"]),
+                        "day": row["day"].isoformat(),
+                        "summary": projected,
+                    }
+                )
+        return feed
+
+    @staticmethod
+    def _social_time_zone(value: str) -> ZoneInfo | timezone:
+        try:
+            return ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            match = SOCIAL_FIXED_TIME_ZONE.fullmatch(value)
+            if match is None:
+                raise ValueError("unknown managed Friends time zone") from None
+            sign = 1 if match.group(1) == "+" else -1
+            hours = int(match.group(2))
+            minutes = int(match.group(3))
+            if minutes > 59 or hours > 14 or (hours == 14 and minutes != 0):
+                raise ValueError("invalid managed Friends UTC offset")
+            return timezone(
+                sign * timedelta(hours=hours, minutes=minutes),
+                name=value,
+            )
+
+    @staticmethod
+    def _inside_quiet_hours(
+        *,
+        now: datetime,
+        time_zone: str,
+        start_minute: int,
+        end_minute: int,
+    ) -> bool:
+        local = now.astimezone(PostgresManagedRepository._social_time_zone(time_zone))
+        minute = local.hour * 60 + local.minute
+        if start_minute == end_minute:
+            return False
+        if start_minute < end_minute:
+            return start_minute <= minute < end_minute
+        return minute >= start_minute or minute < end_minute
+
+    async def create_social_poke(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        request: ManagedSocialPokeCreate,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                sender_snapshot = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                await self._lock_social_relationship(
+                    connection,
+                    first_profile_id=sender_snapshot["profile_id"],
+                    second_profile_id=request.recipient_profile_id,
+                )
+                locked_profiles = await self._lock_active_social_profiles(
+                    connection,
+                    profile_ids=(
+                        sender_snapshot["profile_id"],
+                        request.recipient_profile_id,
+                    ),
+                )
+                sender = locked_profiles[sender_snapshot["profile_id"]]
+                replay = await connection.fetchrow(
+                    """
+                    SELECT poke.*, recipient.display_name
+                        AS recipient_display_name
+                    FROM managed_social_pokes poke
+                    JOIN managed_social_profiles recipient
+                      ON recipient.profile_id = poke.recipient_profile_id
+                    WHERE poke.sender_profile_id = $1
+                      AND poke.request_id = $2
+                    """,
+                    sender["profile_id"],
+                    request.request_id,
+                )
+                if replay is not None:
+                    if replay["recipient_profile_id"] != request.recipient_profile_id:
+                        raise ManagedConflictError("poke request id was reused")
+                    return self._public_social_poke(replay, duplicate=True)
+                recipient = await connection.fetchrow(
+                    """
+                    SELECT profile.*
+                    FROM managed_social_profiles profile
+                    JOIN managed_social_friendships friendship
+                      ON friendship.profile_low_id =
+                            LEAST($1::uuid, profile.profile_id)
+                     AND friendship.profile_high_id =
+                            GREATEST($1::uuid, profile.profile_id)
+                    JOIN managed_social_visibility visibility
+                      ON visibility.owner_profile_id = profile.profile_id
+                     AND visibility.reader_profile_id = $1
+                    WHERE profile.profile_id = $2
+                      AND profile.status = 'active'
+                      AND profile.poke_opt_in
+                      AND visibility.poke_allowed
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM managed_social_blocks block
+                          WHERE (
+                              block.blocker_profile_id = $1
+                              AND block.blocked_profile_id = profile.profile_id
+                          ) OR (
+                              block.blocker_profile_id = profile.profile_id
+                              AND block.blocked_profile_id = $1
+                          )
+                      )
+                    """,
+                    sender["profile_id"],
+                    request.recipient_profile_id,
+                )
+                if recipient is None:
+                    raise ManagedForbiddenError(
+                        "this friend is not accepting pokes right now"
+                    )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if self._inside_quiet_hours(
+                    now=now,
+                    time_zone=str(recipient["time_zone"]),
+                    start_minute=int(recipient["quiet_start_minute"]),
+                    end_minute=int(recipient["quiet_end_minute"]),
+                ):
+                    raise ManagedForbiddenError(
+                        "this friend is not accepting pokes right now"
+                    )
+                pair_recent = await connection.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM managed_social_pokes
+                        WHERE sender_profile_id = $1
+                          AND recipient_profile_id = $2
+                          AND created_at >
+                              $3::timestamptz - interval '15 minutes'
+                    )
+                    """,
+                    sender["profile_id"],
+                    recipient["profile_id"],
+                    now,
+                )
+                if pair_recent:
+                    raise ManagedConflictError("wait before poking this friend again")
+                counts = await connection.fetchrow(
+                    """
+                    SELECT
+                        (
+                            SELECT count(*)
+                            FROM managed_social_pokes
+                            WHERE sender_profile_id = $1
+                              AND created_at >=
+                                  date_trunc('day', $3::timestamptz)
+                        ) AS sent_today,
+                        (
+                            SELECT count(*)
+                            FROM managed_social_pokes
+                            WHERE recipient_profile_id = $2
+                              AND created_at >=
+                                  date_trunc('day', $3::timestamptz)
+                        ) AS received_today
+                    """,
+                    sender["profile_id"],
+                    recipient["profile_id"],
+                    now,
+                )
+                if int(counts["sent_today"]) >= SOCIAL_MAX_SENT_POKES_PER_DAY:
+                    raise ManagedConflictError("daily poke limit has been reached")
+                if int(counts["received_today"]) >= SOCIAL_MAX_RECEIVED_POKES_PER_DAY:
+                    raise ManagedConflictError(
+                        "this friend cannot receive more pokes today"
+                    )
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO managed_social_pokes (
+                        poke_id,
+                        request_id,
+                        sender_profile_id,
+                        recipient_profile_id,
+                        status,
+                        created_at,
+                        expires_at
+                    ) VALUES (
+                        $1, $2, $3, $4, 'queued', $5,
+                        $5::timestamptz + interval '24 hours'
+                    )
+                    RETURNING *, $6::text AS recipient_display_name
+                    """,
+                    uuid4(),
+                    request.request_id,
+                    sender["profile_id"],
+                    recipient["profile_id"],
+                    now,
+                    recipient["display_name"],
+                )
+        return self._public_social_poke(row, duplicate=False)
+
+    @staticmethod
+    def _public_social_poke(row: Any, *, duplicate: bool) -> dict[str, Any]:
+        return {
+            "poke_id": str(row["poke_id"]),
+            "recipient_profile_id": str(row["recipient_profile_id"]),
+            "recipient_display_name": str(row["recipient_display_name"]),
+            "status": str(row["status"]),
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "duplicate": duplicate,
+        }
+
+    async def claim_social_pokes(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if not bool(profile["poke_opt_in"]):
+                    await connection.execute(
+                        """
+                        UPDATE managed_social_pokes
+                        SET status = 'expired'
+                        WHERE recipient_profile_id = $1
+                          AND status IN ('queued', 'claimed')
+                        """,
+                        profile["profile_id"],
+                    )
+                    return []
+                if self._inside_quiet_hours(
+                    now=now,
+                    time_zone=str(profile["time_zone"]),
+                    start_minute=int(profile["quiet_start_minute"]),
+                    end_minute=int(profile["quiet_end_minute"]),
+                ):
+                    return []
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes poke
+                    SET status = 'expired'
+                    WHERE poke.recipient_profile_id = $1
+                      AND poke.status IN ('queued', 'claimed')
+                      AND (
+                          NOT EXISTS (
+                              SELECT 1
+                              FROM managed_social_friendships friendship
+                              WHERE friendship.profile_low_id = LEAST(
+                                    poke.sender_profile_id,
+                                    poke.recipient_profile_id
+                                  )
+                                AND friendship.profile_high_id = GREATEST(
+                                    poke.sender_profile_id,
+                                    poke.recipient_profile_id
+                                  )
+                          )
+                          OR NOT EXISTS (
+                              SELECT 1
+                              FROM managed_social_visibility visibility
+                              WHERE visibility.owner_profile_id =
+                                    poke.recipient_profile_id
+                                AND visibility.reader_profile_id =
+                                    poke.sender_profile_id
+                                AND visibility.poke_allowed
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM managed_social_blocks block
+                              WHERE (
+                                  block.blocker_profile_id =
+                                        poke.sender_profile_id
+                                  AND block.blocked_profile_id =
+                                        poke.recipient_profile_id
+                              ) OR (
+                                  block.blocker_profile_id =
+                                        poke.recipient_profile_id
+                                  AND block.blocked_profile_id =
+                                        poke.sender_profile_id
+                              )
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes
+                    SET status = 'expired'
+                    WHERE recipient_profile_id = $1
+                      AND status IN ('queued', 'claimed')
+                      AND expires_at <= $2
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes
+                    SET status = 'queued',
+                        claim_id = NULL,
+                        claimed_installation_id = NULL,
+                        claimed_at = NULL,
+                        claim_expires_at = NULL
+                    WHERE recipient_profile_id = $1
+                      AND status = 'claimed'
+                      AND claim_expires_at <= $2
+                      AND expires_at > $2
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
+                candidates = await connection.fetch(
+                    """
+                    SELECT poke.*, sender.display_name AS sender_display_name
+                    FROM managed_social_pokes poke
+                    JOIN managed_social_profiles sender
+                      ON sender.profile_id = poke.sender_profile_id
+                    WHERE poke.recipient_profile_id = $1
+                      AND poke.status = 'queued'
+                      AND poke.expires_at > $2
+                    ORDER BY poke.created_at, poke.poke_id
+                    FOR UPDATE OF poke SKIP LOCKED
+                    LIMIT $3
+                    """,
+                    profile["profile_id"],
+                    now,
+                    limit,
+                )
+                claimed: list[dict[str, Any]] = []
+                for candidate in candidates:
+                    claim_id = uuid4()
+                    claim_expires_at = min(
+                        candidate["expires_at"],
+                        now + timedelta(minutes=5),
+                    )
+                    await connection.execute(
+                        """
+                        UPDATE managed_social_pokes
+                        SET status = 'claimed',
+                            claim_id = $2,
+                            claimed_installation_id = $3,
+                            claimed_at = $4,
+                            claim_expires_at = $5
+                        WHERE poke_id = $1
+                        """,
+                        candidate["poke_id"],
+                        claim_id,
+                        installation_id,
+                        now,
+                        claim_expires_at,
+                    )
+                    claimed.append(
+                        {
+                            "poke_id": str(candidate["poke_id"]),
+                            "claim_id": str(claim_id),
+                            "sender_profile_id": str(candidate["sender_profile_id"]),
+                            "sender_display_name": str(
+                                candidate["sender_display_name"]
+                            ),
+                            "created_at": candidate["created_at"],
+                            "expires_at": candidate["expires_at"],
+                            "claim_expires_at": claim_expires_at,
+                        }
+                    )
+        return claimed
+
+    async def acknowledge_social_poke(
+        self,
+        *,
+        principal: ManagedPrincipal,
+        installation_id: str,
+        poke_id: UUID,
+        acknowledgement: ManagedSocialPokeAcknowledgement,
+    ) -> dict[str, Any]:
+        self._require_active(principal)
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                row = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_social_pokes
+                    WHERE poke_id = $1
+                      AND recipient_profile_id = $2
+                    FOR UPDATE
+                    """,
+                    poke_id,
+                    profile["profile_id"],
+                )
+                if row is None:
+                    raise ManagedNotFoundError("managed poke was not found")
+                if row["status"] == "acknowledged":
+                    if (
+                        row["claim_id"] != acknowledgement.claim_id
+                        or row["claimed_installation_id"] != installation_id
+                        or row["notification_outcome"]
+                        != acknowledgement.notification_outcome
+                        or row["haptic_outcome"] != acknowledgement.haptic_outcome
+                    ):
+                        raise ManagedConflictError(
+                            "managed poke was acknowledged differently"
+                        )
+                    return {
+                        "poke_id": str(poke_id),
+                        "status": "acknowledged",
+                        "duplicate": True,
+                        "notification_outcome": str(row["notification_outcome"]),
+                        "haptic_outcome": str(row["haptic_outcome"]),
+                    }
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if (
+                    row["status"] != "claimed"
+                    or row["claim_id"] != acknowledgement.claim_id
+                    or row["claimed_installation_id"] != installation_id
+                    or row["claim_expires_at"] <= now
+                ):
+                    raise ManagedConflictError("managed poke claim is no longer valid")
+                await connection.execute(
+                    """
+                    UPDATE managed_social_pokes
+                    SET status = 'acknowledged',
+                        acknowledged_at = $2,
+                        notification_outcome = $3,
+                        haptic_outcome = $4
+                    WHERE poke_id = $1
+                    """,
+                    poke_id,
+                    now,
+                    acknowledgement.notification_outcome,
+                    acknowledgement.haptic_outcome,
+                )
+        return {
+            "poke_id": str(poke_id),
+            "status": "acknowledged",
+            "duplicate": False,
+            "notification_outcome": acknowledgement.notification_outcome,
+            "haptic_outcome": acknowledgement.haptic_outcome,
+        }
+
     async def purge_expired_control_rows(
         self,
         *,
@@ -5091,6 +7436,97 @@ class PostgresManagedRepository:
                 )
                 counts["export_jobs_expired"] = len(expired_exports)
 
+                expired_social_invites = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT invite_id
+                        FROM managed_social_invites
+                        WHERE status = 'active' AND expires_at <= $1
+                        ORDER BY expires_at, invite_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_social_invites invite
+                    SET status = 'expired'
+                    FROM candidates
+                    WHERE invite.invite_id = candidates.invite_id
+                    RETURNING invite.invite_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["social_invites_expired"] = len(expired_social_invites)
+
+                expired_social_requests = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT request_id
+                        FROM managed_social_requests
+                        WHERE status = 'pending' AND expires_at <= $1
+                        ORDER BY expires_at, request_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_social_requests request
+                    SET status = 'expired', decided_at = $1
+                    FROM candidates
+                    WHERE request.request_id = candidates.request_id
+                    RETURNING request.request_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["social_requests_expired"] = len(expired_social_requests)
+
+                expired_social_pokes = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT poke_id
+                        FROM managed_social_pokes
+                        WHERE status IN ('queued', 'claimed')
+                          AND expires_at <= $1
+                        ORDER BY expires_at, poke_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_social_pokes poke
+                    SET status = 'expired'
+                    FROM candidates
+                    WHERE poke.poke_id = candidates.poke_id
+                    RETURNING poke.poke_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["social_pokes_expired"] = len(expired_social_pokes)
+
+                released_social_claims = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT poke_id
+                        FROM managed_social_pokes
+                        WHERE status = 'claimed'
+                          AND claim_expires_at <= $1
+                          AND expires_at > $1
+                        ORDER BY claim_expires_at, poke_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    UPDATE managed_social_pokes poke
+                    SET status = 'queued',
+                        claim_id = NULL,
+                        claimed_installation_id = NULL,
+                        claimed_at = NULL,
+                        claim_expires_at = NULL
+                    FROM candidates
+                    WHERE poke.poke_id = candidates.poke_id
+                    RETURNING poke.poke_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["social_poke_claims_released"] = len(released_social_claims)
+
                 for key, statement in (
                     (
                         "access_grants",
@@ -5113,7 +7549,8 @@ class PostgresManagedRepository:
                         WHERE upload_grant_id IN (
                             SELECT upload_grant_id
                             FROM managed_upload_grants
-                            WHERE expires_at <= $1 - interval '7 days'
+                            WHERE expires_at
+                                <= $1::timestamptz - interval '7 days'
                             ORDER BY expires_at, upload_grant_id
                             LIMIT $2
                         )
@@ -5127,7 +7564,8 @@ class PostgresManagedRepository:
                         WHERE processing_attempt_id IN (
                             SELECT processing_attempt_id
                             FROM managed_processing_attempts
-                            WHERE finished_at <= $1 - interval '30 days'
+                            WHERE finished_at
+                                <= $1::timestamptz - interval '30 days'
                             ORDER BY finished_at, processing_attempt_id
                             LIMIT $2
                         )
@@ -5188,6 +7626,99 @@ class PostgresManagedRepository:
                             LIMIT $2
                         )
                         RETURNING account_id
+                        """,
+                    ),
+                    (
+                        "social_aliases",
+                        """
+                        DELETE FROM managed_social_aliases
+                        WHERE alias_id IN (
+                            SELECT alias_id
+                            FROM managed_social_aliases
+                            WHERE status = 'revoked'
+                              AND purge_after <= $1
+                            ORDER BY purge_after, alias_id
+                            LIMIT $2
+                        )
+                        RETURNING alias_id
+                        """,
+                    ),
+                    (
+                        "social_invites",
+                        """
+                        DELETE FROM managed_social_invites
+                        WHERE invite_id IN (
+                            SELECT invite_id
+                            FROM managed_social_invites
+                            WHERE status IN ('revoked', 'redeemed', 'expired')
+                              AND COALESCE(
+                                    redeemed_at,
+                                    revoked_at,
+                                    expires_at
+                                  ) <= $1::timestamptz - interval '30 days'
+                            ORDER BY expires_at, invite_id
+                            LIMIT $2
+                        )
+                        RETURNING invite_id
+                        """,
+                    ),
+                    (
+                        "social_requests",
+                        """
+                        DELETE FROM managed_social_requests request
+                        WHERE request.request_id IN (
+                            SELECT candidate.request_id
+                            FROM managed_social_requests candidate
+                            WHERE candidate.status IN (
+                                    'accepted',
+                                    'declined',
+                                    'canceled',
+                                    'expired'
+                                  )
+                              AND candidate.decided_at
+                                  <= $1::timestamptz - interval '90 days'
+                              AND NOT EXISTS (
+                                  SELECT 1
+                                  FROM managed_social_friendships friendship
+                                  WHERE friendship.accepted_request_id =
+                                        candidate.request_id
+                              )
+                            ORDER BY candidate.decided_at, candidate.request_id
+                            LIMIT $2
+                        )
+                        RETURNING request.request_id
+                        """,
+                    ),
+                    (
+                        "social_summaries",
+                        """
+                        DELETE FROM managed_social_daily_summaries
+                        WHERE (profile_id, day) IN (
+                            SELECT profile_id, day
+                            FROM managed_social_daily_summaries
+                            WHERE day < (
+                                ($1 AT TIME ZONE 'UTC')::date - 89
+                            )
+                            ORDER BY day, profile_id
+                            LIMIT $2
+                        )
+                        RETURNING profile_id
+                        """,
+                    ),
+                    (
+                        "social_pokes",
+                        """
+                        DELETE FROM managed_social_pokes
+                        WHERE poke_id IN (
+                            SELECT poke_id
+                            FROM managed_social_pokes
+                            WHERE status IN ('acknowledged', 'expired')
+                              AND created_at
+                                  <= $1::timestamptz - interval '30 days'
+                            ORDER BY created_at, poke_id
+                            LIMIT $2
+                        )
+                        RETURNING poke_id
                         """,
                     ),
                 ):
@@ -5260,7 +7791,7 @@ class PostgresManagedRepository:
                         FROM managed_chunks candidate
                         WHERE candidate.state = 'deleted'
                           AND candidate.deleted_at
-                              <= $1 - interval '400 days'
+                              <= $1::timestamptz - interval '400 days'
                           AND NOT EXISTS (
                               SELECT 1
                               FROM managed_storage_usage_ledger ledger

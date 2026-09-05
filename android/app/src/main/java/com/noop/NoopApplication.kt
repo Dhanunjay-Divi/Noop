@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
-import android.util.Log
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
 import com.noop.analytics.RegistryDayOwnerSource
@@ -173,7 +172,13 @@ class NoopApplication : Application() {
         startupScope.launch {
             val resolved = runCatching { deviceRegistry.activeDeviceId() }
                 .onFailure {
-                    Log.w("NoopApplication", "activeDeviceId resolve failed; using fallback", it)
+                    AppDiagnosticsRecorder.record(
+                        "device_registry.resolve",
+                        fields = mapOf(
+                            "outcome" to "fallback",
+                            "failure_kind" to it.javaClass.simpleName,
+                        ),
+                    )
                 }
                 .getOrNull()
                 ?.takeIf(String::isNotBlank)
@@ -232,6 +237,15 @@ class NoopApplication : Application() {
     // Serialize first construction with active-id publication. Otherwise a switch could observe the
     // delegate as "initializing", skip re-pointing it, and race its constructor reading the old fallback.
     val ble: WhoopBleClient get() = synchronized(activeDeviceLock) { bleDelegate.value }
+
+    /** Do not construct the BLE stack merely because a background social delivery arrived. */
+    fun requestManagedSocialPokeHaptic(): Boolean = synchronized(activeDeviceLock) {
+        if (!bleDelegate.isInitialized()) {
+            false
+        } else {
+            bleDelegate.value.requestManagedSocialPokeHaptic()
+        }
+    }
 
     /**
      * Multi-source coordinator (Phase 1B): runs exactly one device's live BLE at a time, driven by the

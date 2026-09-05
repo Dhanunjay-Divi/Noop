@@ -75,7 +75,9 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_DASHBOARD_ENABLED` | no | `true` | Serve the static dashboard |
 | `NOOP_PUBLIC_BASE_URL` | for paging | none | Exact public HTTPS origin used in responder links and Twilio signature validation |
 | `NOOP_TWILIO_ACCOUNT_SID` | for paging | none | Twilio account SID |
-| `NOOP_TWILIO_AUTH_TOKEN` | for paging | none | Twilio REST credential and webhook-signature secret |
+| `NOOP_TWILIO_AUTH_TOKEN` | for paging | none | Twilio account Auth Token used to validate provider webhook signatures; also the outbound fallback when no API key is configured |
+| `NOOP_TWILIO_API_KEY_SID` | no | none | Optional restricted `SK...` credential for outbound REST calls; requires `NOOP_TWILIO_API_KEY_SECRET` |
+| `NOOP_TWILIO_API_KEY_SECRET` | no | none | Secret for the optional restricted outbound API key |
 | `NOOP_TWILIO_FROM_PHONE` | for paging | none | SMS-and-voice-capable E.164 sender |
 | `NOOP_TWILIO_STATUS_CALLBACK_SECRET` | for paging | none | Independent random callback capability, at least 32 bytes |
 | `NOOP_SAFETY_CAPABILITY_SECRET` | for paging | none | Independent random responder-link signing secret, at least 32 bytes |
@@ -108,11 +110,13 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 Changing `NOOP_API_TOKEN` invalidates existing app/dashboard connections. Never
 commit `.env`, put the token in a URL, or send it in a bug report.
 
-Paging remains disabled unless all six required paging values are present. A
+Paging remains disabled unless all six base paging values are present. A
 partial configuration fails startup, and `NOOP_PUBLIC_BASE_URL` must be a public
-HTTPS origin. Complete carrier registration and geographic permissions before
-enabling it. See [SAFETY.md](SAFETY.md) for the incident contract, staging test,
-monitoring thresholds, and the explicit non-emergency boundary.
+HTTPS origin. Use a restricted Twilio API key for outbound calls when possible;
+the account Auth Token is still required for webhook validation. Complete
+carrier registration and geographic permissions before enabling it. See
+[SAFETY.md](SAFETY.md) for the incident contract, staging test, monitoring
+thresholds, and the explicit non-emergency boundary.
 For multi-replica deployment, capacity testing, paging controls, and the honest
 10,000-user tenancy boundary, see
 [PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).

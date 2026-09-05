@@ -636,7 +636,13 @@ final class AICoachEngine: ObservableObject {
             messages.removeFirst(messages.count - Self.maxStoredMessages)
         }
         guard let store = await repo.storeHandle() else {
-            NSLog("AICoach: local store unavailable while persisting transcript")
+            AppDiagnosticsRecorder.shared.record(
+                "coach.persistence",
+                fields: [
+                    "operation": "append_message",
+                    "outcome": "store_unavailable",
+                ]
+            )
             return
         }
         do {
@@ -647,7 +653,14 @@ final class AICoachEngine: ObservableObject {
                 text: message.text
             ))
         } catch {
-            NSLog("AICoach: failed to persist transcript: \(error)")
+            AppDiagnosticsRecorder.shared.record(
+                "coach.persistence",
+                fields: [
+                    "operation": "append_message",
+                    "outcome": "write_failed",
+                    "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+                ]
+            )
         }
     }
 
@@ -988,7 +1001,14 @@ final class AICoachEngine: ObservableObject {
             }
             memories = try await store.coachMemories()
         } catch {
-            NSLog("AICoach: failed to load durable state: \(error)")
+            AppDiagnosticsRecorder.shared.record(
+                "coach.persistence",
+                fields: [
+                    "operation": "load_state",
+                    "outcome": "read_failed",
+                    "failure_kind": AppDiagnosticsRecorder.failureKind(error),
+                ]
+            )
         }
     }
 

@@ -3,6 +3,34 @@ import Foundation
 import FoundationNetworking
 #endif
 
+public struct ManagedStorageRequestDiagnostic: Sendable, Equatable {
+    public let target: String
+    public let routeGroup: String
+    public let method: String
+    public let statusCode: Int?
+    public let durationMilliseconds: Int
+    public let requestID: String?
+    public let outcome: String
+
+    public init(
+        target: String,
+        routeGroup: String,
+        method: String,
+        statusCode: Int?,
+        durationMilliseconds: Int,
+        requestID: String?,
+        outcome: String
+    ) {
+        self.target = target
+        self.routeGroup = routeGroup
+        self.method = method
+        self.statusCode = statusCode
+        self.durationMilliseconds = durationMilliseconds
+        self.requestID = requestID
+        self.outcome = outcome
+    }
+}
+
 public actor ManagedStorageClient {
     private struct EmptyResponse: Decodable {}
     private struct AccessRequest: Encodable { let requestID: UUID }
@@ -34,17 +62,86 @@ public actor ManagedStorageClient {
     private struct InstallationResponse: Decodable {
         let installation: ManagedInstallation
     }
+    private struct SocialProfileResponse: Decodable {
+        let profile: ManagedSocialProfile
+    }
+    private struct SocialLookupResponse: Decodable {
+        let profile: ManagedSocialLookupProfile
+    }
+    private struct SocialInviteResponse: Decodable {
+        let invite: ManagedSocialInvite
+    }
+    private struct SocialRequestResponse: Decodable {
+        let request: ManagedSocialRequest
+    }
+    private struct SocialRequestsResponse: Decodable {
+        let requests: [ManagedSocialRequest]
+    }
+    private struct SocialFriendsResponse: Decodable {
+        let friends: [ManagedSocialFriend]
+    }
+    private struct SocialBlocksResponse: Decodable {
+        let blocks: [ManagedSocialBlockedProfile]
+    }
+    private struct SocialVisibilityResponse: Decodable {
+        let sharing: ManagedSocialVisibility
+    }
+    private struct SocialFeedResponse: Decodable {
+        let start: String
+        let end: String
+        let days: [ManagedSocialFeedDay]
+    }
+    private struct SocialPokeResponse: Decodable {
+        let poke: ManagedSocialPoke
+    }
+    private struct SocialPokeClaimsResponse: Decodable {
+        let pokes: [ManagedSocialPokeClaim]
+    }
+    private struct SocialPokeReceiptResponse: Decodable {
+        let poke: ManagedSocialPokeReceipt
+    }
+    private struct SocialProfileCreateRequest: Encodable {
+        let requestID: UUID
+        let displayName: String
+    }
+    private struct SocialInviteCreateRequest: Encodable {
+        let requestID: UUID
+        let capability: String
+        let expiresInHours: Int
+    }
+    private struct SocialInviteRedeemRequest: Encodable {
+        let requestID: UUID
+        let capability: String
+    }
+    private struct SocialRequestCreateRequest: Encodable {
+        let requestID: UUID
+        let noopID: String
+    }
+    private struct SocialRequestDecisionRequest: Encodable {
+        let decision: String
+    }
+    private struct SocialSummaryMutationRequest: Encodable {
+        let requestID: UUID
+        let summary: ManagedSocialSummary
+    }
+    private struct SocialPokeCreateRequest: Encodable {
+        let requestID: UUID
+        let recipientProfileID: UUID
+    }
 
     private let configuration: ManagedStorageConfiguration
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let requestObserver: (@Sendable (ManagedStorageRequestDiagnostic) -> Void)?
 
     public init(
         configuration: ManagedStorageConfiguration,
-        session: URLSession? = nil
+        session: URLSession? = nil,
+        requestObserver: (@Sendable (ManagedStorageRequestDiagnostic) -> Void)? = nil
     ) {
         self.configuration = configuration
+        self.requestObserver = requestObserver
         if let session {
             self.session = session
         } else {
@@ -162,6 +259,437 @@ public actor ManagedStorageClient {
             throw ManagedStorageError.invalidResponse
         }
         return response.installation
+    }
+
+    public func createSocialProfile(
+        displayName: String,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialProfile {
+        let normalized = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...64).contains(normalized.count) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialProfileResponse = try await send(
+            path: "v1/managed/social/profile",
+            method: "POST",
+            body: SocialProfileCreateRequest(
+                requestID: requestID,
+                displayName: normalized
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.profile)
+        return response.profile
+    }
+
+    public func socialProfile(
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialProfile {
+        let response: SocialProfileResponse = try await send(
+            path: "v1/managed/social/profile",
+            method: "GET",
+            authorization: authorization
+        )
+        try Self.validate(response.profile)
+        return response.profile
+    }
+
+    public func deleteSocialProfile(
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/social/profile",
+            method: "DELETE",
+            authorization: authorization,
+            additionalHeaders: [
+                "X-Noop-Confirm": "DELETE MANAGED FRIENDS",
+            ]
+        )
+    }
+
+    public func updateSocialProfile(
+        _ patch: ManagedSocialProfilePatch,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialProfile {
+        guard patch.hasChange,
+              patch.displayName.map({
+                  let value = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                  return (1...64).contains(value.count)
+              }) ?? true,
+              patch.quietStartMinute.map({ (0...1439).contains($0) }) ?? true,
+              patch.quietEndMinute.map({ (0...1439).contains($0) }) ?? true,
+              patch.timeZone.map({ !$0.isEmpty && $0.count <= 64 }) ?? true else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialProfileResponse = try await send(
+            path: "v1/managed/social/profile",
+            method: "PATCH",
+            body: patch,
+            authorization: authorization
+        )
+        try Self.validate(response.profile)
+        return response.profile
+    }
+
+    public func rotateSocialNOOPID(
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialProfile {
+        let response: SocialProfileResponse = try await send(
+            path: "v1/managed/social/noop-id:rotate",
+            method: "POST",
+            authorization: authorization
+        )
+        try Self.validate(response.profile)
+        return response.profile
+    }
+
+    public func lookupSocialProfile(
+        noopID: String,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialLookupProfile {
+        guard let canonical = ManagedSocialIdentifier.canonicalNOOPID(noopID) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialLookupResponse = try await send(
+            path: "v1/managed/social/lookup?noop_id=\(Self.queryValue(canonical))",
+            method: "GET",
+            authorization: authorization
+        )
+        guard ManagedSocialIdentifier.canonicalNOOPID(response.profile.noopID)
+                == response.profile.noopID,
+              !response.profile.displayName.isEmpty,
+              response.profile.displayName.count <= 64 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.profile
+    }
+
+    public func createSocialInvite(
+        capability: String,
+        expiresInHours: Int = 72,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialInvite {
+        guard capability.range(
+            of: ManagedSocialIdentifier.invitePattern,
+            options: .regularExpression
+        ) != nil,
+        (1...168).contains(expiresInHours) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialInviteResponse = try await send(
+            path: "v1/managed/social/invites",
+            method: "POST",
+            body: SocialInviteCreateRequest(
+                requestID: requestID,
+                capability: capability,
+                expiresInHours: expiresInHours
+            ),
+            authorization: authorization
+        )
+        guard response.invite.capability == capability,
+              ["active", "revoked", "redeemed", "expired"].contains(
+                  response.invite.status
+              ),
+              ManagedTimestamp.milliseconds(iso8601: response.invite.createdAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: response.invite.expiresAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.invite
+    }
+
+    public func revokeSocialInvite(
+        _ inviteID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/social/invites/\(inviteID.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func redeemSocialInvite(
+        capability: String,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialRequest {
+        guard capability.range(
+            of: ManagedSocialIdentifier.invitePattern,
+            options: .regularExpression
+        ) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialRequestResponse = try await send(
+            path: "v1/managed/social/invites:redeem",
+            method: "POST",
+            body: SocialInviteRedeemRequest(
+                requestID: requestID,
+                capability: capability
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func createSocialRequest(
+        noopID: String,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialRequest {
+        guard let canonical = ManagedSocialIdentifier.canonicalNOOPID(noopID) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialRequestResponse = try await send(
+            path: "v1/managed/social/requests",
+            method: "POST",
+            body: SocialRequestCreateRequest(
+                requestID: requestID,
+                noopID: canonical
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func socialRequests(
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSocialRequest] {
+        let response: SocialRequestsResponse = try await send(
+            path: "v1/managed/social/requests",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.requests.count <= 100 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.requests.forEach(Self.validate)
+        return response.requests
+    }
+
+    public func decideSocialRequest(
+        _ requestID: UUID,
+        accept: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialRequest {
+        let response: SocialRequestResponse = try await send(
+            path: "v1/managed/social/requests/\(requestID.uuidString.lowercased())",
+            method: "POST",
+            body: SocialRequestDecisionRequest(
+                decision: accept ? "accept" : "decline"
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func socialFriends(
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSocialFriend] {
+        let response: SocialFriendsResponse = try await send(
+            path: "v1/managed/social/friends",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.friends.count <= 500 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.friends.forEach(Self.validate)
+        return response.friends
+    }
+
+    public func updateSocialVisibility(
+        friendProfileID: UUID,
+        patch: ManagedSocialVisibilityPatch,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialVisibility {
+        guard patch.hasChange else { throw ManagedStorageError.invalidResponse }
+        let response: SocialVisibilityResponse = try await send(
+            path: "v1/managed/social/friends/"
+                + "\(friendProfileID.uuidString.lowercased())/privacy",
+            method: "PATCH",
+            body: patch,
+            authorization: authorization
+        )
+        return response.sharing
+    }
+
+    public func removeSocialFriend(
+        _ profileID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/social/friends/\(profileID.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func blockSocialProfile(
+        _ profileID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/social/blocks/\(profileID.uuidString.lowercased())",
+            method: "POST",
+            authorization: authorization
+        )
+    }
+
+    public func socialBlockedProfiles(
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSocialBlockedProfile] {
+        let response: SocialBlocksResponse = try await send(
+            path: "v1/managed/social/blocks",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.blocks.count <= 500 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.blocks.forEach(Self.validate)
+        return response.blocks
+    }
+
+    public func unblockSocialProfile(
+        _ profileID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/social/blocks/\(profileID.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func putSocialSummary(
+        day: String,
+        summary: ManagedSocialSummary,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        guard Self.isDay(day), Self.valid(summary) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let _: EmptyResponse = try await send(
+            path: "v1/managed/social/summaries/\(day)",
+            method: "PUT",
+            body: SocialSummaryMutationRequest(
+                requestID: requestID,
+                summary: summary
+            ),
+            authorization: authorization,
+            acceptAnyJSONObject: true
+        )
+    }
+
+    public func socialFeed(
+        startDay: String,
+        endDay: String,
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSocialFeedDay] {
+        guard Self.isDay(startDay), Self.isDay(endDay) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialFeedResponse = try await send(
+            path: "v1/managed/social/feed?start=\(startDay)&end=\(endDay)",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.start == startDay,
+              response.end == endDay,
+              response.days.count <= 45_000,
+              response.days.allSatisfy({
+                  Self.isDay($0.day)
+                      && !$0.displayName.isEmpty
+                      && Self.valid($0.summary)
+              }) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.days
+    }
+
+    public func createSocialPoke(
+        recipientProfileID: UUID,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialPoke {
+        let response: SocialPokeResponse = try await send(
+            path: "v1/managed/social/pokes",
+            method: "POST",
+            body: SocialPokeCreateRequest(
+                requestID: requestID,
+                recipientProfileID: recipientProfileID
+            ),
+            authorization: authorization
+        )
+        guard response.poke.recipientProfileID == recipientProfileID,
+              response.poke.status == "queued",
+              !response.poke.recipientDisplayName.isEmpty,
+              ManagedTimestamp.milliseconds(iso8601: response.poke.createdAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: response.poke.expiresAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.poke
+    }
+
+    public func claimSocialPokes(
+        limit: Int = 3,
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSocialPokeClaim] {
+        guard (1...10).contains(limit) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialPokeClaimsResponse = try await send(
+            path: "v1/managed/social/pokes:claim?limit=\(limit)",
+            method: "POST",
+            authorization: authorization
+        )
+        guard response.pokes.count <= limit,
+              response.pokes.allSatisfy({
+                  !$0.senderDisplayName.isEmpty
+                      && ManagedTimestamp.milliseconds(iso8601: $0.createdAt) != nil
+                      && ManagedTimestamp.milliseconds(iso8601: $0.expiresAt) != nil
+                      && ManagedTimestamp.milliseconds(
+                          iso8601: $0.claimExpiresAt
+                      ) != nil
+              }) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.pokes
+    }
+
+    public func acknowledgeSocialPoke(
+        _ pokeID: UUID,
+        acknowledgement: ManagedSocialPokeAcknowledgement,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSocialPokeReceipt {
+        guard ["scheduled", "not_authorized", "failed"].contains(
+            acknowledgement.notificationOutcome
+        ),
+        ["requested", "band_unavailable", "not_eligible", "failed"].contains(
+            acknowledgement.hapticOutcome
+        ) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SocialPokeReceiptResponse = try await send(
+            path: "v1/managed/social/pokes/\(pokeID.uuidString.lowercased()):ack",
+            method: "POST",
+            body: acknowledgement,
+            authorization: authorization
+        )
+        guard response.poke.pokeID == pokeID,
+              response.poke.status == "acknowledged",
+              response.poke.notificationOutcome
+                == acknowledgement.notificationOutcome,
+              response.poke.hapticOutcome == acknowledgement.hapticOutcome else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.poke
     }
 
     public func registerSource(
@@ -648,24 +1176,117 @@ public actor ManagedStorageClient {
         }
     }
 
+    private func sendWithoutResponse(
+        path: String,
+        method: String,
+        authorization: ManagedAuthorization,
+        additionalHeaders: [String: String] = [:]
+    ) async throws {
+        var request = try makeRequest(
+            path: path,
+            method: method,
+            body: Optional<Int>.none,
+            authorization: authorization,
+            includeInstallation: true
+        )
+        for (name, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let (data, response) = try await data(for: request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw Self.error(for: response.statusCode, data: data)
+        }
+    }
+
     private func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else {
+                observe(
+                    request,
+                    response: nil,
+                    startedAt: startedAt,
+                    outcome: "invalid_response"
+                )
                 throw ManagedStorageError.invalidResponse
             }
+            observe(
+                request,
+                response: response,
+                startedAt: startedAt,
+                outcome: (200..<300).contains(response.statusCode)
+                    ? "completed"
+                    : "rejected"
+            )
             return (data, response)
         } catch let error as ManagedStorageError {
             throw error
         } catch {
+            observe(
+                request,
+                response: nil,
+                startedAt: startedAt,
+                outcome: "transport_failed"
+            )
             throw ManagedStorageError.transport
         }
     }
 
+    private func observe(
+        _ request: URLRequest,
+        response: HTTPURLResponse?,
+        startedAt: TimeInterval,
+        outcome: String
+    ) {
+        guard let requestObserver else { return }
+        let isManagedAPI = request.url.map {
+            $0.scheme?.caseInsensitiveCompare(configuration.baseURL.scheme ?? "") == .orderedSame
+                && $0.host?.caseInsensitiveCompare(configuration.baseURL.host ?? "") == .orderedSame
+                && $0.port == configuration.baseURL.port
+        } ?? false
+        let routeGroup: String
+        if isManagedAPI {
+            let components = request.url?.pathComponents.filter { $0 != "/" } ?? []
+            routeGroup = "/" + components.prefix(3).joined(separator: "/")
+        } else {
+            routeGroup = "object_store"
+        }
+        let requestID = response?
+            .value(forHTTPHeaderField: "X-Noop-Request-ID")
+            .flatMap { value in
+                value.range(
+                    of: #"^[0-9a-f]{32}$"#,
+                    options: .regularExpression
+                ) == nil ? nil : value
+            }
+        requestObserver(
+            ManagedStorageRequestDiagnostic(
+                target: isManagedAPI ? "managed_api" : "object_store",
+                routeGroup: routeGroup,
+                method: request.httpMethod?.uppercased() ?? "UNKNOWN",
+                statusCode: response?.statusCode,
+                durationMilliseconds: max(
+                    0,
+                    Int(
+                        (
+                            ProcessInfo.processInfo.systemUptime
+                                - startedAt
+                        ) * 1_000
+                    )
+                ),
+                requestID: requestID,
+                outcome: outcome
+            )
+        )
+    }
+
     private static func error(for status: Int, data: Data) -> ManagedStorageError {
         switch status {
-        case 401, 403:
+        case 401:
             return .authentication
+        case 403:
+            return .forbidden
         case 404:
             return .notFound
         case 409:
@@ -698,6 +1319,93 @@ public actor ManagedStorageClient {
                 CharacterSet(charactersIn: "-._~")
             )
         ) ?? ""
+    }
+
+    private static func validate(_ profile: ManagedSocialProfile) throws {
+        guard !profile.displayName.isEmpty,
+              profile.displayName.count <= 64,
+              ManagedSocialIdentifier.canonicalNOOPID(profile.noopID)
+                == profile.noopID,
+              (0...1439).contains(profile.quietStartMinute),
+              (0...1439).contains(profile.quietEndMinute),
+              !profile.timeZone.isEmpty,
+              profile.timeZone.count <= 64,
+              ManagedTimestamp.milliseconds(iso8601: profile.createdAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: profile.updatedAt) != nil,
+              profile.badges.count <= 3,
+              profile.badges.allSatisfy(Self.valid) else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ request: ManagedSocialRequest) throws {
+        guard !request.displayName.isEmpty,
+              request.displayName.count <= 64,
+              ["incoming", "outgoing"].contains(request.direction),
+              ["noop_id", "invite"].contains(request.source),
+              ["pending", "accepted", "declined"].contains(request.status),
+              ManagedTimestamp.milliseconds(iso8601: request.createdAt) != nil,
+              request.decidedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              ManagedTimestamp.milliseconds(iso8601: request.expiresAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ friend: ManagedSocialFriend) throws {
+        guard !friend.displayName.isEmpty,
+              friend.displayName.count <= 64,
+              ManagedTimestamp.milliseconds(iso8601: friend.friendsSince) != nil,
+              friend.badges.count <= 3,
+              friend.badges.allSatisfy(Self.valid),
+              friend.latest.map({
+                  isDay($0.day) && valid($0.summary)
+              }) ?? true else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ blocked: ManagedSocialBlockedProfile) throws {
+        guard !blocked.displayName.isEmpty,
+              blocked.displayName.count <= 64,
+              ManagedTimestamp.milliseconds(iso8601: blocked.blockedAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func valid(_ badge: ManagedSocialBadge) -> Bool {
+        ["connected", "steady_week", "steady_month"].contains(badge.code)
+            && ManagedTimestamp.milliseconds(iso8601: badge.earnedAt) != nil
+    }
+
+    private static func valid(_ summary: ManagedSocialSummary) -> Bool {
+        [
+            (summary.charge, 0.0...100.0),
+            (summary.effort, 0.0...100.0),
+            (summary.rest, 0.0...100.0),
+            (summary.sleepDuration, 0.0...2_880.0),
+            (summary.hrv, 0.0...1_000.0),
+            (summary.rhr, 20.0...260.0),
+        ].allSatisfy { value, range in
+            value.map { $0.isFinite && range.contains($0) } ?? true
+        }
+    }
+
+    private static func isDay(_ value: String) -> Bool {
+        guard value.range(
+            of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.isLenient = false
+        return formatter.date(from: value) != nil
     }
 
     private static func validate(

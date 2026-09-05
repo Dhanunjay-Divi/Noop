@@ -23,6 +23,7 @@ non-negotiable (especially on the Bluetooth path).
 - [Build & test](#build--test)
 - [The design system is the law](#the-design-system-is-the-law)
 - [Coding conventions](#coding-conventions)
+- [Observability contract](#observability-contract)
 - [The BLE safety contract](#the-ble-safety-contract-read-this-before-touching-bluetooth)
 - [How to add things safely](#how-to-add-things-safely)
   - [Add a new metric](#add-a-new-metric)
@@ -324,6 +325,27 @@ then used. Screens stay thin; the system stays canonical.
 - **Validate before you trust.** Any data coming off the wire is gated on its checksum *and*
   range-checked before it can drive state (see `FrameRouter.handle` rejecting `crcOK == false` and
   clamping HR to 30…220). New inbound paths follow the same pattern.
+
+---
+
+## Observability contract
+
+Every material change reviews the evidence needed to diagnose its lifecycle,
+latency, and failure boundaries. Use `AppDiagnosticsRecorder` on Apple and
+Android and `RequestObservabilityMiddleware` / `emit_operational_event` on the
+server. Prefer fixed outcomes, durations, counts, resource summaries, route
+templates, and server-generated correlation IDs.
+
+Do not log sensor or health values, database rows, user text, screenshots,
+payloads, arbitrary errors, credentials, URLs, or account/device/installation/
+job identifiers. Do not log every sample, frame, recomposition, or tap. High
+frequency signals must be aggregated and throttled, mobile storage stays
+bounded and local, and the user reviews a report before sharing it.
+
+When a path exists on Apple and Android, instrument and test both in the same
+change. Tests should pin redaction, bounding, stable categories, and relevant
+failure behavior. The full event and review contract is in
+[`OBSERVABILITY.md`](OBSERVABILITY.md).
 
 ---
 
