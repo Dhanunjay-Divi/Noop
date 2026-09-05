@@ -358,4 +358,6 @@
     <string name="strength_signal_today_context">今日實測背景</string>
     <string name="strength_signal_measured_sleep">實測睡眠</string>
     <string name="strength_signal_honesty">心率反映心血管反應。次數和負重僅來自你的紀錄。</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">更清晰的更新與協助修正問題的報告</string>
+    <string name="whats_new_welcome_version">歡迎使用 %1$s 版本</string>
 </resources>

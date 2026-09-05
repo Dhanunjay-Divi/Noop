@@ -2592,4 +2592,6 @@
     <string name="app_report_status_share_opened">Teilen-Menü für %1$s geöffnet</string>
     <string name="app_report_preview_shortened">Vorschau gekürzt. Die vollständigen begrenzten Dateien sind oben aufgeführt.</string>
     <string name="app_report_open_button">App-Problem melden</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Klarere Updates und Berichte, die bei der Fehlerbehebung helfen</string>
+    <string name="whats_new_welcome_version">Willkommen bei Version %1$s</string>
 </resources>

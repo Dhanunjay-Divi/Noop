@@ -265,6 +265,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 }
 
 internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
+internal const val DEMO_RELEASE_WELCOME_ROUTE = "release_welcome"
 internal const val DEMO_APP_REPORT_ROUTE = "app-report"
 
 internal fun appLaunchIntent(context: Context): Intent =
@@ -320,6 +321,8 @@ object NoopPrefs {
     const val NAME = "noop_prefs"
     const val KEY_ONBOARDED = "noop.onboarded"
     const val KEY_LAST_SEEN_CHANGELOG = "noop.lastSeenChangelogVersion"
+    const val KEY_FIRST_INSTALL_WELCOME_PENDING = "noop.firstInstallWelcomePending"
+    const val KEY_COMPLETED_FIRST_INSTALL_WELCOME = "noop.completedFirstInstallWelcome"
     /** Terms-of-use version the user last accepted. Empty until the first-run gate is accepted; a
      *  material terms change bumps [Terms.CURRENT_VERSION] and re-prompts. Mirrors macOS @AppStorage. */
     const val KEY_ACCEPTED_TERMS_VERSION = "noop.acceptedTermsVersion"
@@ -1247,12 +1250,43 @@ fun NoopRoot(demoRoute: String? = null) {
     val context = LocalContext.current
     val prefs = remember { NoopPrefs.of(context) }
     val demoBypass = BuildConfig.DEBUG && demoRoute != null
+    if (BuildConfig.DEBUG && demoRoute == DEMO_RELEASE_WELCOME_ROUTE) {
+        WhatsNewSheet(
+            onClose = {},
+            presentation = WhatsNewPresentation.Welcome,
+            showFirstInstallGlow = true,
+            onSkip = {},
+        )
+        return
+    }
 
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
     }
     var lastSeenChangelog by remember {
         mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
+    }
+    val preparedInstallWelcome = remember {
+        ReleaseWelcomeInstallState.prepared(
+            onboarded = onboarded,
+            storedPending = prefs.getBoolean(NoopPrefs.KEY_FIRST_INSTALL_WELCOME_PENDING, false),
+            storedCompleted = prefs.getBoolean(NoopPrefs.KEY_COMPLETED_FIRST_INSTALL_WELCOME, false),
+        )
+    }
+    var completedFirstInstallWelcome by remember {
+        mutableStateOf(preparedInstallWelcome.completed)
+    }
+    var firstInstallWelcomePending by remember {
+        mutableStateOf(preparedInstallWelcome.pending)
+    }
+
+    // Persist the installation classification before onboarding can be interrupted. Existing installs
+    // already have KEY_ONBOARDED and migrate to "completed" without receiving a false first-install glow.
+    LaunchedEffect(Unit) {
+        prefs.edit()
+            .putBoolean(NoopPrefs.KEY_FIRST_INSTALL_WELCOME_PENDING, firstInstallWelcomePending)
+            .putBoolean(NoopPrefs.KEY_COMPLETED_FIRST_INSTALL_WELCOME, completedFirstInstallWelcome)
+            .apply()
     }
 
     // Seed the current What's New into the Updates inbox ONCE per version (idempotent, tracks the last
@@ -1306,13 +1340,9 @@ fun NoopRoot(demoRoute: String? = null) {
         OnboardingScreen(
             viewModel = appViewModel,
             onFinished = {
-                // A brand-new user just saw the expectations in onboarding, don't also pop the
-                // changelog at them; mark them current (mirrors macOS ContentView onFinished).
                 prefs.edit()
                     .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
-                    .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
                     .apply()
-                lastSeenChangelog = AppChangelog.CURRENT_VERSION
                 onboarded = true
             },
         )
@@ -1323,24 +1353,37 @@ fun NoopRoot(demoRoute: String? = null) {
     // (stored version behind current), show "What's New" once over the top.
     AppRoot(viewModel = appViewModel, initialRoute = demoRoute)
 
-    if (lastSeenChangelog != AppChangelog.CURRENT_VERSION && !demoBypass) {
+    val completeWhatsNewPresentation = {
+        val completed = ReleaseWelcomeInstallState(
+            pending = firstInstallWelcomePending,
+            completed = completedFirstInstallWelcome,
+        ).completingWelcome()
+        prefs.edit()
+            .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
+            .putBoolean(NoopPrefs.KEY_FIRST_INSTALL_WELCOME_PENDING, completed.pending)
+            .putBoolean(NoopPrefs.KEY_COMPLETED_FIRST_INSTALL_WELCOME, completed.completed)
+            .apply()
+        lastSeenChangelog = AppChangelog.CURRENT_VERSION
+        firstInstallWelcomePending = completed.pending
+        completedFirstInstallWelcome = completed.completed
+    }
+
+    if (
+        ReleaseWelcomeInstallState.isReleaseDue(
+            currentVersion = AppChangelog.CURRENT_VERSION,
+            lastSeenVersion = lastSeenChangelog,
+        ) && !demoBypass
+    ) {
         Dialog(
-            onDismissRequest = {
-                prefs.edit()
-                    .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-                    .apply()
-                lastSeenChangelog = AppChangelog.CURRENT_VERSION
-            },
+            onDismissRequest = completeWhatsNewPresentation,
             properties = DialogProperties(usePlatformDefaultWidth = false),
         ) {
             Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
                 WhatsNewSheet(
-                    onClose = {
-                        prefs.edit()
-                            .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-                            .apply()
-                        lastSeenChangelog = AppChangelog.CURRENT_VERSION
-                    },
+                    onClose = completeWhatsNewPresentation,
+                    presentation = WhatsNewPresentation.Welcome,
+                    showFirstInstallGlow = firstInstallWelcomePending,
+                    onSkip = completeWhatsNewPresentation,
                 )
             }
         }

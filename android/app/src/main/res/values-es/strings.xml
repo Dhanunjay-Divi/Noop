@@ -2576,4 +2576,6 @@
     <string name="app_report_status_share_opened">Se abrió la hoja para compartir %1$s</string>
     <string name="app_report_preview_shortened">Vista previa abreviada. Los archivos limitados completos aparecen arriba.</string>
     <string name="app_report_open_button">Informar de un problema de la aplicación</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Actualizaciones más claras e informes que ayudan a corregir problemas</string>
+    <string name="whats_new_welcome_version">Te damos la bienvenida a la versión %1$s</string>
 </resources>

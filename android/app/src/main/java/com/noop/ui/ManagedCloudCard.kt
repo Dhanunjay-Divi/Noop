@@ -72,6 +72,16 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
+internal fun NoopPlusScreen() {
+    LazyScreenScaffold(
+        title = stringResource(R.string.managed_cloud_brand),
+        subtitle = stringResource(R.string.managed_cloud_summary),
+    ) {
+        item { ManagedCloudBackupCard() }
+    }
+}
+
+@Composable
 internal fun ManagedCloudBackupCard() {
     val context = LocalContext.current
     val service = remember {
@@ -137,25 +147,33 @@ internal fun ManagedCloudBackupCard() {
                     color = Palette.textTertiary,
                 )
             }
-            NoopButton(
-                text = if (state.phase == ManagedCloudPhase.ENROLLED) {
-                    stringResource(R.string.managed_cloud_manage)
-                } else {
-                    stringResource(R.string.managed_cloud_set_up)
-                },
-                leadingIcon = if (state.phase == ManagedCloudPhase.ENROLLED) {
-                    Icons.Filled.CloudDone
-                } else {
-                    Icons.Filled.Cloud
-                },
-                kind = if (state.phase == ManagedCloudPhase.ENROLLED) {
-                    NoopButtonKind.Secondary
-                } else {
-                    NoopButtonKind.Primary
-                },
-                fullWidth = true,
-                onClick = { showSetup = true },
-            )
+            if (state.phase == ManagedCloudPhase.UNAVAILABLE) {
+                Text(
+                    text = stringResource(R.string.managed_cloud_unavailable_detail),
+                    style = NoopType.caption,
+                    color = Palette.statusWarning,
+                )
+            } else {
+                NoopButton(
+                    text = if (state.phase == ManagedCloudPhase.ENROLLED) {
+                        stringResource(R.string.managed_cloud_manage)
+                    } else {
+                        stringResource(R.string.managed_cloud_set_up)
+                    },
+                    leadingIcon = if (state.phase == ManagedCloudPhase.ENROLLED) {
+                        Icons.Filled.CloudDone
+                    } else {
+                        Icons.Filled.Cloud
+                    },
+                    kind = if (state.phase == ManagedCloudPhase.ENROLLED) {
+                        NoopButtonKind.Secondary
+                    } else {
+                        NoopButtonKind.Primary
+                    },
+                    fullWidth = true,
+                    onClick = { showSetup = true },
+                )
+            }
         }
     }
 

@@ -2576,4 +2576,6 @@
     <string name="app_report_status_share_opened">Feuille de partage ouverte pour %1$s</string>
     <string name="app_report_preview_shortened">Aperçu raccourci. Les fichiers limités complets sont répertoriés ci-dessus.</string>
     <string name="app_report_open_button">Signaler un problème de l’application</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Des mises à jour plus claires et des rapports utiles au diagnostic</string>
+    <string name="whats_new_welcome_version">Bienvenue dans la version %1$s</string>
 </resources>

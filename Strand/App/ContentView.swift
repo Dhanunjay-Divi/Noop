@@ -10,6 +10,8 @@ struct ContentView: View {
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     /// Local timestamp of the last terms acceptance — the on-device consent record (version + when).
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
+    @AppStorage("noop.firstInstallWelcomePending") private var firstInstallWelcomePending = false
+    @AppStorage("noop.completedFirstInstallWelcome") private var completedFirstInstallWelcome = false
     @State private var showWhatsNew = false
 
     private var isStrengthGuideDemo: Bool {
@@ -38,9 +40,6 @@ struct ContentView: View {
                 OnboardingWizard(onFinished: {
                     onOnboardingFinished()
                     onboarded = true
-                    // A brand-new user just saw the expectations in onboarding — don't also pop the
-                    // changelog at them; mark them current.
-                    lastSeenChangelog = AppChangelog.currentVersion
                 })
                 .transition(.opacity)
                 .zIndex(1)
@@ -60,29 +59,56 @@ struct ContentView: View {
         // the full-screen onboarding / terms overlays — decelerating, nothing overshoots.
         .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.42), value: onboarded)
         .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.42), value: acceptedTerms)
-        .sheet(isPresented: $showWhatsNew) {
-            WhatsNewView(onClose: {
-                lastSeenChangelog = AppChangelog.currentVersion
-                showWhatsNew = false
-            })
+        .sheet(isPresented: $showWhatsNew, onDismiss: completeWhatsNewPresentation) {
+            WhatsNewView(
+                presentation: .welcome(firstInstall: firstInstallWelcomePending),
+                onSkip: { showWhatsNew = false },
+                onClose: { showWhatsNew = false }
+            )
         }
         // The Terms gate must stay "over everything" - don't pop What's New on top of it after a
         // combined terms+version update. Gate on terms being current, and re-check when they're
         // accepted (onAppear already fired before acceptance), so What's New shows right after.
         .onAppear {
+            prepareFirstInstallExperience()
             showWhatsNewIfDue()
             // Seed the current What's New into the Updates inbox (idempotent per version) so the bell
             // collects it even if the user dismisses the auto sheet.
             UpdateStore.shared.seedWhatsNewIfNeeded()
         }
         .onChangeCompat(of: acceptedTerms) { _ in showWhatsNewIfDue() }
+        .onChangeCompat(of: onboarded) { _ in showWhatsNewIfDue() }
     }
 
     private func showWhatsNewIfDue() {
-        // Existing users who updated: their last-seen version is behind the current one.
+        // Existing users who updated, plus a brand-new user after onboarding: their last-seen version
+        // is genuinely behind the current one. A downgrade never replays newer notes.
         if onboarded && acceptedTerms == Terms.currentVersion
-            && lastSeenChangelog != AppChangelog.currentVersion {
+            && TrialNoticePolicy.isNewerMarketingVersion(
+                AppChangelog.currentVersion,
+                than: lastSeenChangelog
+            ) {
             showWhatsNew = true
         }
+    }
+
+    private func prepareFirstInstallExperience() {
+        let prepared = ReleaseWelcomeInstallState.prepared(
+            onboarded: onboarded,
+            storedPending: firstInstallWelcomePending,
+            storedCompleted: completedFirstInstallWelcome
+        )
+        firstInstallWelcomePending = prepared.pending
+        completedFirstInstallWelcome = prepared.completed
+    }
+
+    private func completeWhatsNewPresentation() {
+        lastSeenChangelog = AppChangelog.currentVersion
+        let completed = ReleaseWelcomeInstallState(
+            pending: firstInstallWelcomePending,
+            completed: completedFirstInstallWelcome
+        ).completingWelcome()
+        firstInstallWelcomePending = completed.pending
+        completedFirstInstallWelcome = completed.completed
     }
 }

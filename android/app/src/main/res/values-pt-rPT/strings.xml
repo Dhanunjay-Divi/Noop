@@ -2570,4 +2570,6 @@
     <string name="app_report_status_share_opened">Folha de partilha aberta para %1$s</string>
     <string name="app_report_preview_shortened">Pré-visualização abreviada. Os ficheiros limitados completos estão listados acima.</string>
     <string name="app_report_open_button">Comunicar um problema da aplicação</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Atualizações mais claras e relatórios que ajudam a corrigir problemas</string>
+    <string name="whats_new_welcome_version">Bem-vindo à versão %1$s</string>
 </resources>

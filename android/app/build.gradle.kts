@@ -123,8 +123,8 @@ android {
         applicationId = "com.noop.whoop"
         minSdk = 26
         targetSdk = noopTargetSdk
-        versionCode = 303
-        versionName = "9.2.0"
+        versionCode = 304
+        versionName = "9.2.1"
         buildConfigField("String", "STRENGTH_MEDIA_URL_TEMPLATE", "\"$strengthMediaUrlTemplate\"")
         buildConfigField("String", "STRENGTH_VIDEO_URL_TEMPLATE", "\"$strengthVideoUrlTemplate\"")
         buildConfigField("boolean", "ALLOW_DEMO_STRENGTH_MEDIA", allowDemoStrengthMedia.toString())

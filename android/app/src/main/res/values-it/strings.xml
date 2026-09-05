@@ -358,4 +358,6 @@
     <string name="strength_signal_today_context">contesto misurato di oggi</string>
     <string name="strength_signal_measured_sleep">sonno misurato</string>
     <string name="strength_signal_honesty">La frequenza cardiaca descrive la risposta cardiovascolare. Ripetizioni e carico derivano solo da ciò che registri.</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Aggiornamenti più chiari e rapporti che ci aiutano a risolvere i problemi</string>
+    <string name="whats_new_welcome_version">Ti diamo il benvenuto nella versione %1$s</string>
 </resources>

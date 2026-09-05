@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.DarkMode
@@ -205,9 +206,11 @@ private enum class Destination(
     Safety("safety", R.string.nav_safety, Icons.Filled.Shield),
     Devices("devices", R.string.nav_devices, Icons.Filled.Watch),
     DataSources("data_sources", R.string.nav_data_sources, Icons.Filled.Storage),
+    NoopPlus("noop_plus", R.string.managed_cloud_brand, Icons.Filled.Cloud),
     BackupSync("backup_sync", R.string.nav_backup_sync, Icons.Filled.CloudSync),
     FusedRecord("fused_record", R.string.nav_fused_record, Icons.AutoMirrored.Filled.CompareArrows),
     Notifications("notifications", R.string.nav_notifications, Icons.Filled.Notifications),
+    Updates("updates", R.string.l10n_app_root_updates_c76d1807, Icons.Filled.AutoAwesome),
     Settings("settings", R.string.nav_settings, Icons.Filled.Settings),
     TestCentre("test_centre", R.string.nav_test_centre, Icons.Filled.BugReport),
 
@@ -271,11 +274,11 @@ private val drawerGroups: List<DrawerGroup> = listOf(
     ), defaultExpanded = true),
     DrawerGroup("Data", R.string.more_group_data, listOf(
         Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
-        Destination.BackupSync,
+        Destination.NoopPlus, Destination.BackupSync,
     ), defaultExpanded = false),
     DrawerGroup("App", R.string.more_group_app, listOf(
         Destination.Safety, Destination.SmartAlarm, Destination.Automations, Destination.Notifications,
-        Destination.TestCentre, Destination.Settings,
+        Destination.Updates, Destination.TestCentre, Destination.Settings,
     ), defaultExpanded = false),
 )
 
@@ -606,8 +609,15 @@ fun AppRoot(
                     )
                 }
                 composable(Destination.DataSources.route) { DataSourcesScreen(viewModel) }
+                composable(Destination.NoopPlus.route) { NoopPlusScreen() }
                 composable(Destination.BackupSync.route) { BackupSyncScreen() }
                 composable(Destination.Notifications.route) { NotificationsSettingsScreen(viewModel) }
+                composable(Destination.Updates.route) {
+                    WhatsNewSheet(
+                        onClose = { nav.popBackStack() },
+                        presentation = WhatsNewPresentation.History,
+                    )
+                }
                 composable(Destination.Settings.route) {
                     SettingsScreen(
                         viewModel,
@@ -787,6 +797,7 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down.
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        NoopPlusEntry(onNavigate = onNavigate)
         MoreQuickAccess(onNavigate = onNavigate)
 
         // Mirror the iOS More page: each group is a tappable UPPERCASE overline header (with a disclosure
@@ -822,6 +833,66 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** An always-visible NOOP+ door. Managed storage used to be discoverable only after expanding Data
+ * and opening Backup & Sync, which also made an unavailable build look as though NOOP+ did not exist. */
+@Composable
+private fun NoopPlusEntry(onNavigate: (String) -> Unit) {
+    val title = stringResource(R.string.managed_cloud_brand)
+    NoopCard(
+        modifier = Modifier
+            .clickable { onNavigate(Destination.NoopPlus.route) }
+            .semantics { contentDescription = title }
+            .testTag("noop.more.noop_plus_entry"),
+        padding = 0.dp,
+        tint = Palette.accent,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Palette.surfaceInset.copy(alpha = 0.86f))
+                    .border(0.8.dp, Palette.hairline, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Cloud,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    title,
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                )
+                Text(
+                    stringResource(R.string.managed_cloud_summary),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = Palette.textTertiary,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

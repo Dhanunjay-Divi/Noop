@@ -27,7 +27,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "9.2.0"
+    const val CURRENT_VERSION = "9.2.1"
 
     data class Release(
         val version: String,
@@ -38,6 +38,18 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "9.2.1",
+            title = uiString(R.string.changelog_clearer_updates_and_reports_9_2_1),
+            date = "September 2026",
+            items = listOf(
+                "**Meet every release clearly.** After each app update, NOOP opens one scrollable welcome with that version's improvements and clear Skip and OK actions. The complete update history stays available under More.",
+                "**A small first-install welcome.** A restrained edge glow appears only around the first release welcome on a new installation, respects reduced-motion and battery-saving settings, and never becomes recurring app chrome.",
+                "**Reports that make 'buggy' actionable.** Shake the phone or open Test Centre to add an optional description and screen snapshot, then share a privacy-bounded ZIP with UI responsiveness, lifecycle, storage, Bluetooth, sync, and recent OS failure evidence.",
+                "**NOOP+ is easy to find and honest about availability.** More now has an always-visible NOOP+ entry plus a dedicated Data row for optional managed storage and multi-device restore. Builds that are not connected to the managed service say so clearly; core NOOP stays account-free.",
+                "**Matched on iPhone and Android.** Version gating, release content, first-install behavior, dismissal, and the permanent More entry follow the same rules on both platforms.",
+            ),
+        ),
         Release(
             version = "9.2.0",
             title = uiString(R.string.l10n_app_changelog_today_first_insights_9_2_0),
@@ -2578,8 +2590,8 @@ object AppChangelog {
         ),
         Expectation(
             icon = Icons.Outlined.Shield,
-            title = uiString(R.string.l10n_app_changelog_everything_stays_on_your_device_575125e9),
-            body = "No account, no cloud, no sync. NOOP talks only to your strap and keeps everything local. Your data is yours alone.",
+            title = uiString(R.string.l10n_onboarding_screen_own_your_data_offline_997fe15e),
+            body = "No account or project cloud is required. NOOP keeps data local unless you explicitly share it, use an external Coach provider, connect Oura, or enable your own self-hosted sync.",
         ),
     )
 }

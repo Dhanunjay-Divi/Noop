@@ -52,6 +52,22 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
+    fun noopPlusIsAlwaysDiscoverableAndHasItsOwnRoute() {
+        val source = appRootSource()
+        assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
+        val text = source!!
+
+        assertTrue(text.contains(
+            "NoopPlus(\"noop_plus\", R.string.managed_cloud_brand, Icons.Filled.Cloud)"
+        ))
+        assertTrue(text.contains("Destination.NoopPlus, Destination.BackupSync"))
+        assertTrue(text.contains("NoopPlusEntry(onNavigate = onNavigate)"))
+        assertTrue(text.contains(
+            "composable(Destination.NoopPlus.route) { NoopPlusScreen() }"
+        ))
+    }
+
+    @Test
     fun nestedDetailsKeepTheirTabOwnerAndReselectPopsToRoot() {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)

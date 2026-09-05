@@ -734,6 +734,8 @@ private struct iOSRootView: View {
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
+    @AppStorage("noop.firstInstallWelcomePending") private var firstInstallWelcomePending = false
+    @AppStorage("noop.completedFirstInstallWelcome") private var completedFirstInstallWelcome = false
     /// Local-only build marker. It contains no account or health data and makes the preview disclosure
     /// appear once per genuinely newer app build instead of once per cold process launch.
     @AppStorage(TrialNoticePolicy.acknowledgedBuildStorageKey)
@@ -773,9 +775,6 @@ private struct iOSRootView: View {
                 OnboardingWizard(onFinished: {
                     onboarded = true
                     model.refreshAgeMetricsIfProfileChanged()
-                    // A brand-new user just saw the expectations in onboarding — don't also pop the
-                    // changelog at them; mark them current.
-                    lastSeenChangelog = AppChangelog.currentVersion
                 })
                 .transition(.opacity)
                 .zIndex(1)
@@ -815,16 +814,18 @@ private struct iOSRootView: View {
         .animation(.easeInOut(duration: 0.35), value: onboarded)
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
         .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
-        .sheet(isPresented: $showWhatsNew) {
-            WhatsNewView(onClose: {
-                lastSeenChangelog = AppChangelog.currentVersion
-                showWhatsNew = false
-            })
+        .sheet(isPresented: $showWhatsNew, onDismiss: completeWhatsNewPresentation) {
+            WhatsNewView(
+                presentation: .welcome(firstInstall: firstInstallWelcomePending),
+                onSkip: { showWhatsNew = false },
+                onClose: { showWhatsNew = false }
+            )
         }
         // The Terms gate must stay "over everything" - don't pop What's New on top of it after a
         // combined terms+version update. Gate on terms being current, and re-check when they're
         // accepted (onAppear already fired before acceptance), so What's New shows right after.
         .onAppear {
+            prepareFirstInstallExperience()
             showWhatsNewIfDue()
             // Seed the current What's New into the Updates inbox (idempotent per version) so the bell
             // collects it even if the user dismisses the auto sheet.
@@ -833,6 +834,7 @@ private struct iOSRootView: View {
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }
         .onChange(of: acknowledgedTrialBuild) { _, _ in showWhatsNewIfDue() }
         .onChange(of: launchAccess.state) { _, _ in showWhatsNewIfDue() }
+        .onChange(of: onboarded) { _, _ in showWhatsNewIfDue() }
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the
@@ -851,9 +853,9 @@ private struct iOSRootView: View {
 
     private func showWhatsNewIfDue() {
         if demoBypass || !launchAccess.isUnlocked { return }
-        // Existing users who updated: their last-seen release is genuinely behind the current one.
-        // Persist before presentation so an interactive swipe-dismiss or process termination cannot make
-        // the same release notes replay on the next launch. They remain manually available in Settings.
+        // Existing users who updated, plus a brand-new user after onboarding: their last-seen release is
+        // genuinely behind the current one. A swipe/back dismissal is acknowledged by the sheet's
+        // onDismiss callback; a process killed before dismissal correctly offers the unread notes again.
         guard !TrialNoticePolicy.shouldPresent(
             acknowledgedBuildIdentifier: acknowledgedTrialBuild,
             currentBuildIdentifier: TrialNoticePolicy.currentBuildIdentifier(),
@@ -864,8 +866,27 @@ private struct iOSRootView: View {
                AppChangelog.currentVersion,
                than: lastSeenChangelog
            ) else { return }
-        lastSeenChangelog = AppChangelog.currentVersion
         showWhatsNew = true
+    }
+
+    private func prepareFirstInstallExperience() {
+        let prepared = ReleaseWelcomeInstallState.prepared(
+            onboarded: onboarded,
+            storedPending: firstInstallWelcomePending,
+            storedCompleted: completedFirstInstallWelcome
+        )
+        firstInstallWelcomePending = prepared.pending
+        completedFirstInstallWelcome = prepared.completed
+    }
+
+    private func completeWhatsNewPresentation() {
+        lastSeenChangelog = AppChangelog.currentVersion
+        let completed = ReleaseWelcomeInstallState(
+            pending: firstInstallWelcomePending,
+            completed: completedFirstInstallWelcome
+        ).completingWelcome()
+        firstInstallWelcomePending = completed.pending
+        completedFirstInstallWelcome = completed.completed
     }
 }
 
@@ -882,6 +903,18 @@ enum DemoScreens {
         guard let i = args.firstIndex(of: "--demo-screen"), i + 1 < args.count else { return nil }
         switch args[i + 1].lowercased() {
         case "today":    return AnyView(TodayView())
+        case "releasewelcome", "release_welcome":
+            return AnyView(
+                WhatsNewView(
+                    presentation: .welcome(firstInstall: true),
+                    onSkip: {},
+                    onClose: {}
+                )
+            )
+        case "updates", "whatsnew", "whats_new":
+            return AnyView(WhatsNewView(presentation: .history, onClose: {}))
+        case "noopplus", "noop_plus":
+            return AnyView(NoopPlusView())
         // The DEFAULT iOS Today (`noop.liquidTodayEnabled` ships true), so it needs its own entry — plain
         // "today" renders the CLASSIC screen, which is exactly the screen whose behaviour Liquid was found
         // to have diverged from. Without this, the default Today was the one screen the harness could not

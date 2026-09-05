@@ -2566,4 +2566,6 @@
     <string name="app_report_status_share_opened">已打开 %1$s 的分享面板</string>
     <string name="app_report_preview_shortened">预览已缩短。完整的有限文件已列在上方。</string>
     <string name="app_report_open_button">报告应用问题</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">更清晰的更新和有助于修复问题的报告</string>
+    <string name="whats_new_welcome_version">欢迎使用 %1$s 版本</string>
 </resources>

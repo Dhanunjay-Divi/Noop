@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-04**
+Last updated: **2026-09-05**
 
 ## Repository
 
@@ -17,6 +17,19 @@ Last updated: **2026-09-04**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The v9.2.1 client-discovery round makes NOOP+ an always-visible first item in
+More on iPhone and Android, adds a dedicated Data row and destination, and
+renders an explicit unavailable state instead of hiding the feature when the
+managed runtime is disconnected. Core metrics, coaching, workouts, journal,
+automations, local backup, and exports remain account-free. The same release
+adds a one-current-version welcome, one-time first-install edge treatment, and
+permanent More -> Updates history. Apple and Android focused tests, complete
+debug builds, visual captures, version parity, localization, health-claims,
+legal, private-data, and whitespace gates pass. The managed GCP runtime remains
+disabled and no enrollment or real health-data upload is claimed. Evidence is
+recorded in
+[NOOP+ discovery and release welcome](rounds/2026-09-05-noop-plus-discovery-release-welcome.md).
 
 The newest transport round separates live biometric health from generic BLE
 traffic on Apple and Android. Battery, metadata, and command packets can no

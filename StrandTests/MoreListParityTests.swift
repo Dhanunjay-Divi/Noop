@@ -64,6 +64,22 @@ final class MoreListParityTests: XCTestCase {
                       "The real Nutrition destination needs a deterministic simulator capture route.")
     }
 
+    /// NOOP+ must not disappear merely because Data is collapsed or this build lacks managed-cloud
+    /// configuration. More exposes one always-visible entry and one conventional Data row, both routing
+    /// to a dedicated screen whose card renders the unavailable state instead of hiding itself.
+    func testNoopPlusIsDiscoverableAndHonestWhenUnavailable() throws {
+        let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        let managed = try sourceText("StrandiOS/System/ManagedCloudViews.swift")
+
+        XCTAssertTrue(shell.contains("noopPlusEntry"))
+        XCTAssertTrue(shell.contains("MoreRow(\"NOOP+\", \"icloud.fill\", .noopPlus)"))
+        XCTAssertTrue(shell.contains("case .noopPlus:        NoopPlusView()"))
+        XCTAssertTrue(shell.contains("case \"noopplus\", \"noop_plus\": return .noopPlus"))
+        XCTAssertTrue(managed.contains("struct NoopPlusView: View"))
+        XCTAssertTrue(managed.contains("if service.phase == .unavailable"))
+        XCTAssertTrue(managed.contains("Local NOOP and folder backup continue to work."))
+    }
+
     // MARK: - M5 gate (S1 grouping): every destination stays reachable after grouping
 
     /// The S1 macOS sidebar grouping (#805) folds the flat `NavItem` cases into collapsible

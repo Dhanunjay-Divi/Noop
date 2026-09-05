@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "9.2.0"
+    static let currentVersion = "9.2.1"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,18 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "9.2.1",
+            title: "Clearer updates and reports that help us fix problems",
+            date: "September 2026",
+            items: [
+                "**Meet every release clearly.** After each app update, NOOP opens one scrollable welcome with that version's improvements and clear Skip and OK actions. The complete update history stays available under More.",
+                "**A small first-install welcome.** A restrained edge glow appears only around the first release welcome on a new installation, respects reduced-motion and battery-saving settings, and never becomes recurring app chrome.",
+                "**Reports that make 'buggy' actionable.** Shake the phone or open Test Centre to add an optional description and screen snapshot, then share a privacy-bounded ZIP with UI responsiveness, lifecycle, storage, Bluetooth, sync, and recent OS failure evidence.",
+                "**NOOP+ is easy to find and honest about availability.** More now has an always-visible NOOP+ entry plus a dedicated Data row for optional managed storage and multi-device restore. Builds that are not connected to the managed service say so clearly; core NOOP stays account-free.",
+                "**Matched on iPhone and Android.** Version gating, release content, first-install behavior, dismissal, and the permanent More entry follow the same rules on both platforms.",
+            ]
+        ),
         Release(
             version: "9.2.0",
             title: "Today-first insights, quieter automation, and evidence you can inspect",

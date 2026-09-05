@@ -3,6 +3,23 @@ import NoopRemoteSync
 import SwiftUI
 import StrandDesign
 
+struct NoopPlusView: View {
+    @EnvironmentObject private var model: AppModel
+    @StateObject private var service = ManagedCloudService.shared
+
+    var body: some View {
+        ScreenScaffold(
+            title: "NOOP+",
+            subtitle: "Optional storage and multi-device restore. Core metrics, coaching, workouts, journal, automations and exports stay available without an account."
+        ) {
+            ManagedCloudBackupCard(
+                service: service,
+                repo: model.repo
+            )
+        }
+    }
+}
+
 struct ManagedCloudBackupCard: View {
     @ObservedObject var service: ManagedCloudService
     let repo: Repository
@@ -47,13 +64,22 @@ struct ManagedCloudBackupCard: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
 
-                NoopButton(
-                    service.phase == .enrolled ? "Manage NOOP+" : "Set up NOOP+",
-                    systemImage: service.phase == .enrolled ? "gearshape" : "arrow.right",
-                    kind: service.phase == .enrolled ? .secondary : .primary,
-                    fullWidth: true
-                ) {
-                    showSetup = true
+                if service.phase == .unavailable {
+                    Text(
+                        "This build is not connected to a managed storage environment. Local NOOP and folder backup continue to work."
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    NoopButton(
+                        service.phase == .enrolled ? "Manage NOOP+" : "Set up NOOP+",
+                        systemImage: service.phase == .enrolled ? "gearshape" : "arrow.right",
+                        kind: service.phase == .enrolled ? .secondary : .primary,
+                        fullWidth: true
+                    ) {
+                        showSetup = true
+                    }
                 }
             }
         }

@@ -2606,4 +2606,6 @@
     <string name="app_report_status_share_opened">Share sheet opened for %1$s</string>
     <string name="app_report_preview_shortened">Preview shortened. The complete bounded files are listed above.</string>
     <string name="app_report_open_button">Report an app problem</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Clearer updates and reports that help us fix problems</string>
+    <string name="whats_new_welcome_version">Welcome to version %1$s</string>
 </resources>

@@ -358,4 +358,6 @@
     <string name="strength_signal_today_context">измеренный контекст за сегодня</string>
     <string name="strength_signal_measured_sleep">измеренный сон</string>
     <string name="strength_signal_honesty">Пульс описывает реакцию сердечно-сосудистой системы. Повторы и вес берутся только из ваших записей.</string>
+    <string name="changelog_clearer_updates_and_reports_9_2_1">Понятные обновления и отчёты, которые помогают исправлять проблемы</string>
+    <string name="whats_new_welcome_version">Добро пожаловать в версию %1$s</string>
 </resources>

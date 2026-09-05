@@ -845,6 +845,7 @@ struct RootTabView: View {
                            onRefresh: { await repo.refresh() },
                            topBackground: liquidScaffoldSky(),
                            trailing: { appearanceQuickMenu }) {
+                noopPlusEntry
                 moreQuickAccess
                 moreSection("Insights") {
                     MoreRow("Month", "calendar", .calendar)
@@ -876,6 +877,7 @@ struct RootTabView: View {
                     MoreRow("Apple Health", "heart.fill", .appleHealth)
                     MoreRow("Mi Band", "figure.walk.motion", .miBand)
                     MoreRow("Data Sources", "externaldrive.fill", .dataSources)
+                    MoreRow("NOOP+", "icloud.fill", .noopPlus)
                     MoreRow("Backup & Sync", "externaldrive.fill.badge.icloud", .backupSync)
                     // #155: HealthKit-free Apple Health path for sideloaded installs (Siri Shortcut
                     // reads the opt-in Documents/noop_sync.txt drop file).
@@ -897,6 +899,7 @@ struct RootTabView: View {
                     MoreRow("Sleep Planner", "alarm.fill", .alarms)
                     MoreRow("Automations", "wand.and.stars", .automations)
                     MoreRow("Widgets", "rectangle.3.group.fill", .widgets)
+                    MoreRow("Updates", "sparkles", .updates)
                     // The Test Centre (the diagnostics + bug-report hub) gets a first-class home here, not
                     // just buried in Settings, so the feedback loop is one tap from the More tab.
                     MoreRow("Test Centre", "stethoscope", .testCentre)
@@ -940,6 +943,20 @@ struct RootTabView: View {
             reportScrollPosition(offset, for: IPhonePrimaryTab.more.rawValue)
         })
         .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
+    }
+
+    /// NOOP+ used to exist only inside the collapsed Backup & Sync destination, and an unavailable
+    /// runtime could hide it there entirely. Keep one honest, always-visible door at the top of More;
+    /// the destination itself explains when this build is not connected to managed storage.
+    private var noopPlusEntry: some View {
+        NavigationLink(value: MoreDestination.noopPlus) {
+            NoopPlusDiscoveryLabel()
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityLabel("NOOP+")
+        .accessibilityHint(
+            "Optional managed storage and multi-device restore"
+        )
     }
 
     /// The everyday utility doors, kept separate from the complete catalogue below. Four is intentional:
@@ -1257,8 +1274,8 @@ private final class StatusBarContrastOverlayView: UIView {
 private enum MoreDestination: Hashable {
     case calendar, insightsHub, intelligence, coach, insights, explore, compare
     case profile, friends, devices, live, workouts, nutrition, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
-    case safety, alarms, automations, widgets, testCentre, siriShortcuts, settings
+    case fusedRecord, appleHealth, miBand, dataSources, noopPlus, backupSync, shortcutsExport
+    case safety, alarms, automations, widgets, updates, testCentre, siriShortcuts, settings
 
     /// Fixed enum case only; never includes a user's content or an object identifier.
     var diagnosticName: String { String(describing: self) }
@@ -1288,12 +1305,14 @@ private enum MoreDestination: Hashable {
         case .appleHealth:     AppleHealthView()
         case .miBand:          XiaomiBandView()
         case .dataSources:     DataSourcesView()
+        case .noopPlus:        NoopPlusView()
         case .backupSync:      BackupSyncView()
         case .shortcutsExport: ShortcutExportSettingsView()
         case .safety:          SafetyCenterView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .widgets:         WidgetSettingsView()
+        case .updates:         UpdateHistoryDestination()
         case .testCentre:      TestCentreView()
         case .siriShortcuts:   SiriShortcutsSettingsView()
         case .settings:        SettingsView()
@@ -1324,6 +1343,7 @@ private enum MoreDestination: Hashable {
         case "applehealth", "apple_health": return .appleHealth
         case "miband", "mi_band": return .miBand
         case "datasources", "data_sources": return .dataSources
+        case "noopplus", "noop_plus": return .noopPlus
         case "backupsync", "backup_sync": return .backupSync
         case "shortcutsexport", "shortcuts_export": return .shortcutsExport
         case "insights": return .insights
@@ -1333,6 +1353,7 @@ private enum MoreDestination: Hashable {
         case "alarms", "sleepplanner": return .alarms
         case "automations": return .automations
         case "widgets": return .widgets
+        case "updates", "whatsnew", "whats_new": return .updates
         case "testcentre", "test_centre": return .testCentre
         case "sirishortcuts", "siri_shortcuts": return .siriShortcuts
         case "settings": return .settings
@@ -1340,6 +1361,70 @@ private enum MoreDestination: Hashable {
         }
     }
     #endif
+}
+
+private struct NoopPlusDiscoveryLabel: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "icloud.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .frame(width: 38, height: 38)
+                .background(
+                    StrandPalette.surfaceInset.opacity(0.86),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 0.8)
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NOOP+")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(
+                    "Optional storage and multi-device restore. Core metrics, coaching, workouts, journal, automations and exports stay available without an account."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .background(
+            StrandPalette.surfaceRaised.opacity(0.94),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    StrandPalette.accent.opacity(0.42),
+                    lineWidth: 0.9
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct UpdateHistoryDestination: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        WhatsNewView(
+            presentation: .history,
+            onClose: { dismiss() }
+        )
+    }
 }
 
 /// The visual half of one Quick Access tile, split from the shell to keep SwiftUI's type checker out of
