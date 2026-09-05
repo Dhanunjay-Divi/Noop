@@ -202,7 +202,7 @@ class Settings:
             managed_entitlement_mode=_choice(
                 "NOOP_MANAGED_ENTITLEMENT_MODE",
                 "closed",
-                frozenset({"closed", "open_beta", "paid"}),
+                frozenset({"closed", "pilot", "open_beta", "paid"}),
             ),
             managed_project_id=os.getenv("NOOP_MANAGED_PROJECT_ID"),
             managed_project_number=os.getenv("NOOP_MANAGED_PROJECT_NUMBER"),
@@ -360,9 +360,15 @@ class Settings:
             raise RuntimeError("NOOP_DATABASE_ENGINE must be postgresql or timescaledb")
         if self.auth_mode not in {"single_owner", "shared"}:
             raise RuntimeError("NOOP_AUTH_MODE must be single_owner or shared")
-        if self.managed_entitlement_mode not in {"closed", "open_beta", "paid"}:
+        if self.managed_entitlement_mode not in {
+            "closed",
+            "pilot",
+            "open_beta",
+            "paid",
+        }:
             raise RuntimeError(
-                "NOOP_MANAGED_ENTITLEMENT_MODE must be closed, open_beta, or paid"
+                "NOOP_MANAGED_ENTITLEMENT_MODE must be closed, pilot, "
+                "open_beta, or paid"
             )
         if self.managed_storage_enabled:
             required_managed = {

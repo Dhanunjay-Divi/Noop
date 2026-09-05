@@ -75,6 +75,10 @@
 	<string>$(NOOP_MANAGED_API_KEY)</string>
 	<key>NOOPManagedAPIURL</key>
 	<string>$(NOOP_MANAGED_API_URL)</string>
+	<key>NOOPManagedAllowLocalHTTP</key>
+	<string>$(NOOP_MANAGED_ALLOW_LOCAL_HTTP)</string>
+	<key>NOOPManagedDisablePhoneAppVerification</key>
+	<string>$(NOOP_MANAGED_DISABLE_PHONE_APP_VERIFICATION)</string>
 	<key>NOOPManagedGCMSenderID</key>
 	<string>$(NOOP_MANAGED_GCM_SENDER_ID)</string>
 	<key>NOOPManagedGoogleAppID</key>
@@ -85,6 +89,8 @@
 	<string>$(NOOP_MANAGED_POLICY_VERSION)</string>
 	<key>NOOPManagedProjectID</key>
 	<string>$(NOOP_MANAGED_PROJECT_ID)</string>
+	<key>NOOPManagedTestPhone</key>
+	<string>$(NOOP_MANAGED_TEST_PHONE)</string>
 	<key>NOOPStrengthMediaURLTemplate</key>
 	<string>$(NOOP_STRENGTH_MEDIA_URL_TEMPLATE)</string>
 	<key>NOOPStrengthVideoURLTemplate</key>

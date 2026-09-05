@@ -34,6 +34,7 @@ class ManagedIdentityClaims:
     issued_at: datetime
     auth_time: datetime
     expires_at: datetime
+    managed_pilot: bool = False
 
     @property
     def subject_hash(self) -> str:
@@ -252,6 +253,7 @@ class IdentityToolkitTokenVerifier:
                         "managed identity token was rejected"
                     )
                 tenant = candidate
+        managed_pilot = self._managed_pilot_claim(user)
         return ManagedIdentityClaims(
             issuer=expected_issuer,
             subject=subject,
@@ -259,7 +261,28 @@ class IdentityToolkitTokenVerifier:
             issued_at=issued_at,
             auth_time=auth_time,
             expires_at=expires_at,
+            managed_pilot=managed_pilot,
         )
+
+    @staticmethod
+    def _managed_pilot_claim(user: dict[str, Any]) -> bool:
+        raw = user.get("customAttributes")
+        if raw is None or raw == "":
+            return False
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > 2048:
+            raise ManagedIdentityRejectedError("managed identity token was rejected")
+        try:
+            attributes = json.loads(raw)
+        except json.JSONDecodeError:
+            raise ManagedIdentityRejectedError(
+                "managed identity token was rejected"
+            ) from None
+        if not isinstance(attributes, dict):
+            raise ManagedIdentityRejectedError("managed identity token was rejected")
+        value = attributes.get("noop_managed_pilot", False)
+        if not isinstance(value, bool):
+            raise ManagedIdentityRejectedError("managed identity token was rejected")
+        return value
 
     @staticmethod
     def _claim_time(payload: dict[str, Any], name: str) -> datetime:

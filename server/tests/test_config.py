@@ -30,6 +30,14 @@ def test_database_engine_rejects_unknown_values(
         Settings.from_env()
 
 
+def test_managed_entitlement_accepts_scoped_pilot_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NOOP_MANAGED_ENTITLEMENT_MODE", "PILOT")
+
+    assert Settings.from_env().managed_entitlement_mode == "pilot"
+
+
 def test_non_api_process_can_validate_without_global_administrator_token() -> None:
     Settings(
         api_token=None,

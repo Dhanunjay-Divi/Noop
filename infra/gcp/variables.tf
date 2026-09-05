@@ -279,12 +279,12 @@ variable "enable_public_managed_api" {
 }
 
 variable "managed_entitlement_mode" {
-  description = "Managed enrollment admission: closed, explicit open beta, or pre-provisioned paid accounts."
+  description = "Managed enrollment admission: closed, verified pilot claim, explicit open beta, or pre-provisioned paid accounts."
   type        = string
   default     = "closed"
 
   validation {
-    condition     = contains(["closed", "open_beta", "paid"], var.managed_entitlement_mode)
-    error_message = "managed_entitlement_mode must be closed, open_beta, or paid."
+    condition     = contains(["closed", "pilot", "open_beta", "paid"], var.managed_entitlement_mode)
+    error_message = "managed_entitlement_mode must be closed, pilot, open_beta, or paid."
   }
 }

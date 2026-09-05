@@ -360,8 +360,11 @@ targets:
         NOOPManagedGoogleAppID: $(NOOP_MANAGED_GOOGLE_APP_ID)
         NOOPManagedGCMSenderID: $(NOOP_MANAGED_GCM_SENDER_ID)
         NOOPManagedAPIURL: $(NOOP_MANAGED_API_URL)
+        NOOPManagedAllowLocalHTTP: $(NOOP_MANAGED_ALLOW_LOCAL_HTTP)
+        NOOPManagedDisablePhoneAppVerification: $(NOOP_MANAGED_DISABLE_PHONE_APP_VERIFICATION)
         NOOPManagedPolicyVersion: $(NOOP_MANAGED_POLICY_VERSION)
         NOOPManagedPolicySHA256: $(NOOP_MANAGED_POLICY_SHA256)
+        NOOPManagedTestPhone: $(NOOP_MANAGED_TEST_PHONE)
         # Oura public-client configuration (values come from configFiles above); read at runtime via
         # OuraCredentials.fromBundle. Absent/blank values cleanly disable the Connect-Oura lane.
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)

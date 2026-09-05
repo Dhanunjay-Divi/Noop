@@ -27,6 +27,37 @@ final class ManagedStorageClientTests: XCTestCase {
         )
     }
 
+    func testConfigurationAllowsOnlyExplicitLoopbackHTTP() throws {
+        for value in [
+            "http://127.0.0.1:8765",
+            "http://localhost:8765",
+            "http://[::1]:8765",
+        ] {
+            XCTAssertNoThrow(
+                try ManagedStorageConfiguration(
+                    baseURL: XCTUnwrap(URL(string: value)),
+                    policyVersion: "synthetic-v1",
+                    policySHA256: String(repeating: "a", count: 64),
+                    allowLocalHTTP: true
+                )
+            )
+        }
+        for value in [
+            "http://noop.example",
+            "http://192.168.1.20:8765",
+            "http://10.0.2.2:8765",
+        ] {
+            XCTAssertThrowsError(
+                try ManagedStorageConfiguration(
+                    baseURL: XCTUnwrap(URL(string: value)),
+                    policyVersion: "synthetic-v1",
+                    policySHA256: String(repeating: "a", count: 64),
+                    allowLocalHTTP: true
+                )
+            )
+        }
+    }
+
     func testEnrollmentCarriesAppCheckIdentityAndExplicitPolicy() async throws {
         let (client, authorization) = try makeClient()
         let requestID = UUID(uuidString: "397f4624-1c42-49ea-8af7-ced2ca439a36")!

@@ -956,6 +956,7 @@ struct RootTabView: View {
         }
         .buttonStyle(LiquidPressStyle())
         .accessibilityLabel("NOOP+")
+        .accessibilityIdentifier("noop.more.noop-plus")
         .accessibilityHint(
             "Optional managed storage and multi-device restore"
         )

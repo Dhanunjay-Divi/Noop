@@ -8,3 +8,7 @@ noopManagedGoogleAppId=1:000000000000:android:0000000000000000
 noopManagedGcmSenderId=000000000000
 noopManagedPolicyVersion=staging-v1
 noopManagedPolicySha256=0000000000000000000000000000000000000000000000000000000000000000
+# Debug emulator pilot only. Release builds ignore these switches.
+noopManagedAllowLocalHttp=false
+noopManagedDisablePhoneAppVerification=false
+noopManagedTestPhone=

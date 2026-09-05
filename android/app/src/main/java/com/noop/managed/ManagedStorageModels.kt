@@ -9,10 +9,19 @@ data class ManagedStorageConfiguration(
     val policyVersion: String,
     val policySha256: String,
     val timeoutSeconds: Long = 60,
+    val allowLocalHttp: Boolean = false,
 ) {
     init {
-        val url = baseUrl.toHttpUrlOrNull()
-        require(url != null && url.isHttps && url.username.isEmpty() && url.password.isEmpty())
+        val url = requireNotNull(baseUrl.toHttpUrlOrNull())
+        val localRelayHosts = setOf("127.0.0.1", "::1", "localhost", "10.0.2.2")
+        val validTransport = (
+            url.isHttps || (
+                allowLocalHttp &&
+                    url.scheme == "http" &&
+                    url.host.lowercase() in localRelayHosts
+                )
+            )
+        require(validTransport && url.username.isEmpty() && url.password.isEmpty())
         require(url.querySize == 0 && url.fragment == null)
         require(policyVersion.isNotBlank())
         require(policySha256.matches(Regex("^[0-9a-f]{64}$")))

@@ -93,6 +93,67 @@ async def test_identity_toolkit_verifier_binds_lookup_user_and_project() -> None
 
 
 @pytest.mark.asyncio
+async def test_identity_toolkit_verifier_reads_current_pilot_claim() -> None:
+    now = datetime(2026, 9, 3, 12, tzinfo=UTC)
+    verifier = StubIdentityVerifier(
+        response={
+            "users": [
+                {
+                    "localId": "firebase-user-1",
+                    "customAttributes": '{"noop_managed_pilot":true}',
+                }
+            ]
+        },
+        now=now,
+    )
+
+    claims = await verifier.verify(
+        _token(
+            project="noop-test-project",
+            subject="firebase-user-1",
+            now=now,
+        )
+    )
+
+    assert claims.managed_pilot is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "custom_attributes",
+    [
+        "[]",
+        '{"noop_managed_pilot":"true"}',
+        "{not-json}",
+    ],
+)
+async def test_identity_toolkit_verifier_rejects_invalid_pilot_claim(
+    custom_attributes: str,
+) -> None:
+    now = datetime(2026, 9, 3, 12, tzinfo=UTC)
+    verifier = StubIdentityVerifier(
+        response={
+            "users": [
+                {
+                    "localId": "firebase-user-1",
+                    "customAttributes": custom_attributes,
+                }
+            ]
+        },
+        now=now,
+    )
+
+    with pytest.raises(ManagedIdentityRejectedError):
+        await verifier.verify(
+            _token(
+                project="noop-test-project",
+                subject="firebase-user-1",
+                now=now,
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_identity_toolkit_verifier_rejects_lookup_subject_mismatch() -> None:
     now = datetime(2026, 9, 3, 12, tzinfo=UTC)
     verifier = StubIdentityVerifier(

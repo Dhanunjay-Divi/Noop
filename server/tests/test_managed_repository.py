@@ -44,7 +44,12 @@ async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
     raise AssertionError(f"expected at least {minimum} lock waiters")
 
 
-def _claims(subject: str, now: datetime) -> ManagedIdentityClaims:
+def _claims(
+    subject: str,
+    now: datetime,
+    *,
+    managed_pilot: bool = False,
+) -> ManagedIdentityClaims:
     return ManagedIdentityClaims(
         issuer="https://securetoken.google.com/noop-test-project",
         subject=subject,
@@ -52,6 +57,7 @@ def _claims(subject: str, now: datetime) -> ManagedIdentityClaims:
         issued_at=now,
         auth_time=now - timedelta(minutes=1),
         expires_at=now + timedelta(hours=1),
+        managed_pilot=managed_pilot,
     )
 
 
@@ -93,7 +99,11 @@ def _installation_token_hash(installation_id: str) -> str:
     ).hexdigest()
 
 
-def _managed(primary: PostgresRepository) -> PostgresManagedRepository:
+def _managed(
+    primary: PostgresRepository,
+    *,
+    entitlement_mode: str = "open_beta",
+) -> PostgresManagedRepository:
     return PostgresManagedRepository(
         primary,
         home_region="asia-south1",
@@ -101,7 +111,7 @@ def _managed(primary: PostgresRepository) -> PostgresManagedRepository:
         default_plan_code="noop_plus_staging",
         default_plan_revision=1,
         consent_policy_kind="managed_storage",
-        entitlement_mode="open_beta",
+        entitlement_mode=entitlement_mode,
         replay_secret="test-managed-replay-secret-at-least-32-bytes",
     )
 
@@ -166,6 +176,43 @@ async def test_control_retention_accepts_timestamp_parameters() -> None:
             "daily_ingest_usage",
             "chunk_manifests",
         }.issubset(counts)
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_pilot_mode_requires_verified_claim_for_first_enrollment() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary, entitlement_mode="pilot")
+        now = datetime.now(UTC)
+        subject = f"pilot-{uuid4()}"
+        installation_id = str(uuid4())
+        enrollment = _enrollment(installation_id, uuid4())
+
+        with pytest.raises(ManagedForbiddenError, match="provisioned entitlement"):
+            await repository.enroll(
+                claims=_claims(subject, now),
+                enrollment=enrollment,
+            )
+
+        enrolled = await repository.enroll(
+            claims=_claims(subject, now, managed_pilot=True),
+            enrollment=enrollment,
+        )
+
+        assert enrolled["created"] is True
     finally:
         await primary.shutdown()
 

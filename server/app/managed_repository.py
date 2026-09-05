@@ -117,7 +117,7 @@ class PostgresManagedRepository:
         entitlement_mode: str = "closed",
         replay_secret: str = "",
     ) -> None:
-        if entitlement_mode not in {"closed", "open_beta", "paid"}:
+        if entitlement_mode not in {"closed", "pilot", "open_beta", "paid"}:
             raise ValueError("invalid managed entitlement mode")
         self.primary_repository = primary_repository
         self.home_region = home_region
@@ -482,9 +482,13 @@ class PostgresManagedRepository:
                 created = identity is None
                 if self.entitlement_mode == "closed":
                     raise ManagedForbiddenError("managed storage enrollment is closed")
-                if identity is None and self.entitlement_mode != "open_beta":
+                if (
+                    identity is None
+                    and self.entitlement_mode != "open_beta"
+                    and not (self.entitlement_mode == "pilot" and claims.managed_pilot)
+                ):
                     raise ManagedForbiddenError(
-                        "managed storage requires a provisioned paid entitlement"
+                        "managed storage requires a provisioned entitlement"
                     )
                 selected_plan_code = self.default_plan_code
                 selected_plan_revision = self.default_plan_revision

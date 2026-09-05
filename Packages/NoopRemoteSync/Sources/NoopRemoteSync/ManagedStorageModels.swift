@@ -10,10 +10,20 @@ public struct ManagedStorageConfiguration: Equatable, Sendable {
         baseURL: URL,
         policyVersion: String,
         policySHA256: String,
-        timeout: TimeInterval = 60
+        timeout: TimeInterval = 60,
+        allowLocalHTTP: Bool = false
     ) throws {
-        guard baseURL.scheme?.lowercased() == "https",
-              baseURL.host != nil,
+        let scheme = baseURL.scheme?.lowercased()
+        let host = baseURL.host?.lowercased()
+        let localRelayHosts = Set(["127.0.0.1", "::1", "localhost"])
+        let validTransport = scheme == "https"
+            || (
+                allowLocalHTTP
+                    && scheme == "http"
+                    && host.map(localRelayHosts.contains) == true
+            )
+        guard validTransport,
+              host != nil,
               baseURL.user == nil,
               baseURL.password == nil,
               baseURL.query == nil,

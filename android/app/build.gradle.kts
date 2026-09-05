@@ -88,6 +88,20 @@ val managedPolicyVersion =
     managedBuildValue("noopManagedPolicyVersion", "NOOP_MANAGED_POLICY_VERSION")
 val managedPolicySha256 =
     managedBuildValue("noopManagedPolicySha256", "NOOP_MANAGED_POLICY_SHA256")
+fun managedDebugBoolean(propertyName: String, environmentName: String): Boolean {
+    val raw = managedBuildValue(propertyName, environmentName).trim()
+    if (raw.isEmpty()) return false
+    return raw.toBooleanStrictOrNull()
+        ?: throw GradleException("$propertyName must be true or false")
+}
+val managedAllowLocalHttp =
+    managedDebugBoolean("noopManagedAllowLocalHttp", "NOOP_MANAGED_ALLOW_LOCAL_HTTP")
+val managedDisablePhoneAppVerification = managedDebugBoolean(
+    "noopManagedDisablePhoneAppVerification",
+    "NOOP_MANAGED_DISABLE_PHONE_APP_VERIFICATION",
+)
+val managedTestPhone =
+    managedBuildValue("noopManagedTestPhone", "NOOP_MANAGED_TEST_PHONE")
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -146,6 +160,17 @@ android {
         buildConfigField("String", "MANAGED_GCM_SENDER_ID", "\"$managedGcmSenderId\"")
         buildConfigField("String", "MANAGED_POLICY_VERSION", "\"$managedPolicyVersion\"")
         buildConfigField("String", "MANAGED_POLICY_SHA256", "\"$managedPolicySha256\"")
+        buildConfigField(
+            "boolean",
+            "MANAGED_ALLOW_LOCAL_HTTP",
+            managedAllowLocalHttp.toString(),
+        )
+        buildConfigField(
+            "boolean",
+            "MANAGED_DISABLE_PHONE_APP_VERIFICATION",
+            managedDisablePhoneAppVerification.toString(),
+        )
+        buildConfigField("String", "MANAGED_TEST_PHONE", "\"$managedTestPhone\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

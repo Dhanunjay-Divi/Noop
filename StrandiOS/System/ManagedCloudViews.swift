@@ -80,9 +80,11 @@ struct ManagedCloudBackupCard: View {
                     ) {
                         showSetup = true
                     }
+                    .accessibilityIdentifier("noop.noop-plus.setup")
                 }
             }
         }
+        .accessibilityIdentifier("noop.noop-plus.card")
         .sheet(isPresented: $showSetup) {
             ManagedCloudSetupSheet(
                 service: service,
@@ -236,6 +238,7 @@ private struct ManagedCloudSetupSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(service.isBusy || service.phase == .codeSent)
                     .accessibilityLabel("NOOP+ phone number")
+                    .accessibilityIdentifier("noop.noop-plus.phone")
 
                 if service.phase == .codeSent {
                     TextField("Verification code", text: $code)
@@ -244,6 +247,7 @@ private struct ManagedCloudSetupSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .disabled(service.isBusy)
                         .accessibilityLabel("NOOP+ verification code")
+                        .accessibilityIdentifier("noop.noop-plus.code")
 
                     NoopButton(
                         service.isBusy ? "Verifying…" : "Verify code",
@@ -254,6 +258,7 @@ private struct ManagedCloudSetupSheet: View {
                         Task { await service.verifyCode(code) }
                     }
                     .disabled(service.isBusy || code.isEmpty)
+                    .accessibilityIdentifier("noop.noop-plus.verify-code")
 
                     Button("Use a different number") {
                         code = ""
@@ -273,6 +278,7 @@ private struct ManagedCloudSetupSheet: View {
                         Task { await service.sendCode(to: phoneNumber) }
                     }
                     .disabled(service.isBusy || phoneNumber.isEmpty)
+                    .accessibilityIdentifier("noop.noop-plus.send-code")
                 }
             }
 
@@ -315,7 +321,7 @@ private struct ManagedCloudSetupSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .toggleStyle(.noopSwitch)
-            .accessibilityIdentifier("managed-cloud-consent")
+            .accessibilityIdentifier("noop.noop-plus.consent")
 
             NoopButton(
                 service.isBusy ? "Enabling…" : "Allow cloud backup",
@@ -326,6 +332,7 @@ private struct ManagedCloudSetupSheet: View {
                 Task { await service.enroll(repo: repo) }
             }
             .disabled(service.isBusy || !consent)
+            .accessibilityIdentifier("noop.noop-plus.enroll")
 
             Button("Sign out without enabling cloud backup") {
                 service.disconnect()
@@ -427,6 +434,7 @@ private struct ManagedCloudSetupSheet: View {
                 Task { await service.syncNow(repo: repo) }
             }
             .disabled(service.isBusy)
+            .accessibilityIdentifier("noop.noop-plus.sync")
 
             NoopButton(
                 service.isBusy
@@ -480,6 +488,7 @@ private struct ManagedCloudSetupSheet: View {
 
             privacyBoundary
         }
+        .accessibilityIdentifier("noop.noop-plus.enrolled")
     }
 
     private var deletionScheduled: some View {

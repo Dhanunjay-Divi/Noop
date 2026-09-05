@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -171,6 +172,7 @@ internal fun ManagedCloudBackupCard() {
                         NoopButtonKind.Primary
                     },
                     fullWidth = true,
+                    modifier = Modifier.testTag("noop.noop-plus.setup"),
                     onClick = { showSetup = true },
                 )
             }
@@ -236,7 +238,10 @@ private fun ManagedCloudSetupSheet(
     }
 
     NoopBottomSheet(onDismiss = onDismiss) {
-        Column(verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap)) {
+        Column(
+            modifier = Modifier.testTag("noop.noop-plus.sheet"),
+            verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+        ) {
             Text(
                 stringResource(R.string.managed_cloud_brand),
                 style = NoopType.title2,
@@ -259,7 +264,9 @@ private fun ManagedCloudSetupSheet(
                     OutlinedTextField(
                         value = phone,
                         onValueChange = { phone = it },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("noop.noop-plus.phone"),
                         enabled = !state.busy && state.phase != ManagedCloudPhase.CODE_SENT,
                         singleLine = true,
                         label = { Text(stringResource(R.string.managed_cloud_phone_label)) },
@@ -271,7 +278,9 @@ private fun ManagedCloudSetupSheet(
                         OutlinedTextField(
                             value = code,
                             onValueChange = { code = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("noop.noop-plus.code"),
                             enabled = !state.busy,
                             singleLine = true,
                             label = {
@@ -290,6 +299,7 @@ private fun ManagedCloudSetupSheet(
                             leadingIcon = Icons.Filled.CheckCircle,
                             fullWidth = true,
                             enabled = !state.busy && code.isNotBlank(),
+                            modifier = Modifier.testTag("noop.noop-plus.verify-code"),
                             onClick = { scope.launch { service.verifyCode(code) } },
                         )
                         NoopButton(
@@ -312,6 +322,7 @@ private fun ManagedCloudSetupSheet(
                             leadingIcon = Icons.AutoMirrored.Filled.Message,
                             fullWidth = true,
                             enabled = !state.busy && phone.isNotBlank() && activity != null,
+                            modifier = Modifier.testTag("noop.noop-plus.send-code"),
                             onClick = {
                                 val host = activity ?: return@NoopButton
                                 scope.launch { service.sendCode(host, phone) }
@@ -353,6 +364,7 @@ private fun ManagedCloudSetupSheet(
                         NoopToggleSwitch(
                             checked = consent,
                             enabled = !state.busy,
+                            modifier = Modifier.testTag("noop.noop-plus.consent"),
                             onCheckedChange = { consent = it },
                         )
                     }
@@ -365,6 +377,7 @@ private fun ManagedCloudSetupSheet(
                         leadingIcon = Icons.Filled.CloudDone,
                         fullWidth = true,
                         enabled = !state.busy && consent,
+                        modifier = Modifier.testTag("noop.noop-plus.enroll"),
                         onClick = { scope.launch { service.enroll() } },
                     )
                     NoopButton(
@@ -378,14 +391,16 @@ private fun ManagedCloudSetupSheet(
                     ManagedCloudBoundary()
                 }
                 ManagedCloudPhase.ENROLLED -> {
-                    ManagedCloudHeader(
-                        icon = Icons.Filled.CloudDone,
-                        title = stringResource(R.string.managed_cloud_enrolled_title),
-                        detail = stringResource(
-                            R.string.managed_cloud_enrolled_detail,
-                            service.maskedPhoneNumber,
-                        ),
-                    )
+                    Box(modifier = Modifier.testTag("noop.noop-plus.enrolled")) {
+                        ManagedCloudHeader(
+                            icon = Icons.Filled.CloudDone,
+                            title = stringResource(R.string.managed_cloud_enrolled_title),
+                            detail = stringResource(
+                                R.string.managed_cloud_enrolled_detail,
+                                service.maskedPhoneNumber,
+                            ),
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(
                             modifier = Modifier.weight(1f),
@@ -497,6 +512,7 @@ private fun ManagedCloudSetupSheet(
                         leadingIcon = Icons.Filled.Sync,
                         fullWidth = true,
                         enabled = !state.busy,
+                        modifier = Modifier.testTag("noop.noop-plus.sync"),
                         onClick = { scope.launch { service.syncNow() } },
                     )
                     NoopButton(

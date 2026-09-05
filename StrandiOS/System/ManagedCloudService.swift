@@ -149,21 +149,45 @@ final class ManagedCloudService: ObservableObject {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_auth.send_code"
+        )
         do {
             try configureFirebaseIfNeeded()
             let phone = try Self.normalizedPhone(rawPhoneNumber)
+            try Self.configureDebugPhoneVerification(for: phone)
             verificationID = try await PhoneAuthProvider.provider(auth: Auth.auth())
                 .verifyPhoneNumber(phone, uiDelegate: nil)
             phase = .codeSent
             setStatus(String(localized: "A verification code was sent."))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
         } catch {
             setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
         }
     }
 
     func verifyCode(_ rawCode: String) async {
-        guard !isBusy, let verificationID else {
+        guard !isBusy else { return }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_auth.verify_code"
+        )
+        guard let verificationID else {
             setStatus(String(localized: "Request a new verification code."))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "rejected",
+                fields: ["failure_kind": "verification_state"]
+            )
             return
         }
         isBusy = true
@@ -186,8 +210,19 @@ final class ManagedCloudService: ObservableObject {
             } else {
                 setStatus(String(localized: "Signed in to NOOP+."))
             }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
         } catch {
             setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
         }
     }
 
@@ -195,6 +230,9 @@ final class ManagedCloudService: ObservableObject {
         guard !isBusy, configuration != nil else { return }
         isBusy = true
         defer { isBusy = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_enrollment"
+        )
         do {
             let client = try client()
             let authorization = try await authorization(forceRefresh: true)
@@ -223,11 +261,23 @@ final class ManagedCloudService: ObservableObject {
             let summary = try await sync(repo: repo, mode: .manual)
             scheduleContinuationIfNeeded(summary)
             try await refreshOverviewData()
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
         } catch {
             if Auth.auth().currentUser != nil {
                 phase = .consentRequired
             }
             setStatus(Self.userMessage(for: error))
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: Self.diagnosticOperationOutcome(error),
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ],
+                includeResourceSnapshot: true
+            )
         }
     }
 
@@ -801,6 +851,7 @@ final class ManagedCloudService: ObservableObject {
             guard let phone = Auth.auth().currentUser?.phoneNumber else {
                 throw ManagedCloudError.notSignedIn
             }
+            try Self.configureDebugPhoneVerification(for: phone)
             deletionVerificationID = try await PhoneAuthProvider.provider(auth: Auth.auth())
                 .verifyPhoneNumber(phone, uiDelegate: nil)
             setStatus(
@@ -1634,6 +1685,18 @@ final class ManagedCloudService: ObservableObject {
         return "other"
     }
 
+    private static func diagnosticOperationOutcome(_ error: Error) -> String {
+        switch diagnosticSyncFailureKind(error) {
+        case "input", "authentication", "forbidden", "consent",
+             "policy_changed", "quota_exceeded", "conflict", "server_rejected":
+            return "rejected"
+        case "canceled":
+            return "canceled"
+        default:
+            return "failed"
+        }
+    }
+
     private func syncPass(
         repo: Repository,
         store: WhoopStore,
@@ -2043,8 +2106,57 @@ final class ManagedCloudService: ObservableObject {
         return try? ManagedStorageConfiguration(
             baseURL: url,
             policyVersion: version,
-            policySHA256: digest
+            policySHA256: digest,
+            allowLocalHTTP: debugManagedFlag(
+                "NOOPManagedAllowLocalHTTP",
+                bundle: bundle
+            )
         )
+    }
+
+    private static func debugManagedFlag(
+        _ key: String,
+        bundle: Bundle = .main
+    ) -> Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if let value = bundle.object(forInfoDictionaryKey: key) as? NSNumber {
+            return value.boolValue
+        }
+        guard let raw = bundle.object(forInfoDictionaryKey: key) as? String else {
+            return false
+        }
+        return ["1", "true", "yes"].contains(
+            raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        )
+        #else
+        _ = key
+        _ = bundle
+        return false
+        #endif
+    }
+
+    private static func configureDebugPhoneVerification(
+        for phone: String,
+        bundle: Bundle = .main
+    ) throws {
+        #if DEBUG && targetEnvironment(simulator)
+        guard debugManagedFlag(
+            "NOOPManagedDisablePhoneAppVerification",
+            bundle: bundle
+        ) else {
+            return
+        }
+        guard let raw = bundle.object(
+            forInfoDictionaryKey: "NOOPManagedTestPhone"
+        ) as? String,
+              try normalizedPhone(raw) == phone else {
+            throw ManagedCloudError.invalidPhone
+        }
+        Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+        #else
+        _ = phone
+        _ = bundle
+        #endif
     }
 
     private static func appCheckToken(forceRefresh: Bool) async throws -> String {

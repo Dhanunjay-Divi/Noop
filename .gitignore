@@ -143,6 +143,7 @@ entradas_diario.csv
 # supported location is the encrypted private root outside git.
 /.noop-study/
 /.noop-private/
+/.noop-pilot/
 /StudyData/
 /StudyRuns/
 /private-data/

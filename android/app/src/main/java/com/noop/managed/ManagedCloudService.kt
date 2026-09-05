@@ -183,6 +183,9 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun sendCode(activity: Activity, rawPhoneNumber: String) {
         if (!beginBusy()) return
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_auth.send_code",
+        )
         try {
             val phone = normalizedPhone(rawPhoneNumber)
             val verificationId = requestPhoneVerification(activity, phone)
@@ -191,10 +194,26 @@ class ManagedCloudService private constructor(context: Context) {
                 setPhase(ManagedCloudPhase.CODE_SENT)
                 setStatus(text(R.string.managed_cloud_status_code_sent))
             }
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+            )
         } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
             throw error
         } catch (error: Throwable) {
             setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
         } finally {
             endBusy()
         }
@@ -202,6 +221,9 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun verifyCode(rawCode: String) {
         if (!beginBusy()) return
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_auth.verify_code",
+        )
         try {
             val verificationId = preferences.verificationId
                 ?: throw ManagedCloudException.CodeRequired
@@ -217,10 +239,26 @@ class ManagedCloudService private constructor(context: Context) {
             } else {
                 setStatus(text(R.string.managed_cloud_status_signed_in))
             }
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+            )
         } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
             throw error
         } catch (error: Throwable) {
             setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
         } finally {
             endBusy()
         }
@@ -228,6 +266,9 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun enroll() {
         if (!beginBusy()) return
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "managed_enrollment",
+        )
         try {
             val config = requireNotNull(configuration)
             val authorization = authorization(forceRefresh = true)
@@ -243,13 +284,29 @@ class ManagedCloudService private constructor(context: Context) {
             setPhase(ManagedCloudPhase.ENROLLED)
             setStatus(text(R.string.managed_cloud_status_enabled))
             ManagedCloudScheduler.reconcile(appContext)
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+            )
         } catch (error: CancellationException) {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "canceled",
+                fields = mapOf("failure_kind" to "canceled"),
+            )
             throw error
         } catch (error: Throwable) {
             if (runCatching { runtime().auth.currentUser != null }.getOrDefault(false)) {
                 setPhase(ManagedCloudPhase.CONSENT_REQUIRED)
             }
             setStatus(userMessage(error))
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOperationOutcome(error),
+                fields = mapOf(
+                    "failure_kind" to diagnosticSyncFailureKind(error),
+                ),
+            )
             return
         } finally {
             endBusy()
@@ -1416,6 +1473,20 @@ class ManagedCloudService private constructor(context: Context) {
         else -> "unexpected"
     }
 
+    private fun diagnosticOperationOutcome(error: Throwable): String =
+        when (diagnosticSyncFailureKind(error)) {
+            "identity_input",
+            "not_signed_in",
+            "consent_required",
+            "authentication",
+            "policy_changed",
+            "quota_exceeded",
+            "sync_conflict",
+            -> "rejected"
+            "canceled" -> "canceled"
+            else -> "failed"
+        }
+
     private suspend fun performSyncPass(
         mode: SyncMode,
         scopeHash: String,
@@ -1747,6 +1818,13 @@ class ManagedCloudService private constructor(context: Context) {
         deletion: Boolean = false,
     ): String? = suspendCancellableCoroutine { continuation ->
         val auth = runtime().auth
+        if (configuration?.disablePhoneAppVerificationForTesting == true) {
+            if (phone != configuration.testPhoneNumber) {
+                continuation.resumeWithException(ManagedCloudException.InvalidPhone)
+                return@suspendCancellableCoroutine
+            }
+            auth.firebaseAuthSettings.setAppVerificationDisabledForTesting(true)
+        }
         val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
             override fun onVerificationCompleted(credential: PhoneAuthCredential) {
                 scope.launch {

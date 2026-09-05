@@ -30,6 +30,38 @@ class ManagedStorageClientTest {
     )
 
     @Test
+    fun localHttpRequiresExplicitEmulatorOrLoopbackHost() {
+        listOf(
+            "http://127.0.0.1:8765",
+            "http://localhost:8765",
+            "http://[::1]:8765",
+            "http://10.0.2.2:8765",
+        ).forEach { baseUrl ->
+            ManagedStorageConfiguration(
+                baseUrl,
+                "synthetic-v1",
+                "a".repeat(64),
+                allowLocalHttp = true,
+            )
+        }
+        listOf(
+            "http://noop.example",
+            "http://192.168.1.20:8765",
+        ).forEach { baseUrl ->
+            runCatching {
+                ManagedStorageConfiguration(
+                    baseUrl,
+                    "synthetic-v1",
+                    "a".repeat(64),
+                    allowLocalHttp = true,
+                )
+            }.onSuccess {
+                fail("public or LAN cleartext managed endpoint was accepted")
+            }
+        }
+    }
+
+    @Test
     fun enrollmentCarriesBothAssertionsAndExplicitPolicy() = runTest {
         var captured: Request? = null
         val client = ManagedStorageClient(

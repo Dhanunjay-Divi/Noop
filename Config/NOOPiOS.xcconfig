@@ -21,6 +21,9 @@ NOOP_MANAGED_ENCODED_APP_ID = noop-managed-disabled
 NOOP_MANAGED_API_URL =
 NOOP_MANAGED_POLICY_VERSION =
 NOOP_MANAGED_POLICY_SHA256 =
+NOOP_MANAGED_ALLOW_LOCAL_HTTP = NO
+NOOP_MANAGED_DISABLE_PHONE_APP_VERIFICATION = NO
+NOOP_MANAGED_TEST_PHONE =
 #include? "ManagedCloudSecrets.xcconfig"
 
 // Xcode resolves the entitlement value from the active configuration. Release
