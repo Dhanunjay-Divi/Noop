@@ -1,0 +1,140 @@
+{
+  "$id": "https://github.com/Dhanunjay-Divi/Noop/release/evidence/manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "mediaType": {
+            "enum": [
+              "application/json",
+              "application/octet-stream",
+              "application/vnd.cyclonedx+json",
+              "text/plain"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "sha256",
+          "size",
+          "mediaType"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "checks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[a-z][a-z0-9-]{1,63}$",
+            "type": "string"
+          },
+          "status": {
+            "const": "passed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "manifestSchema": {
+      "$ref": "#/$defs/sourceFile"
+    },
+    "policy": {
+      "$ref": "#/$defs/sourceFile"
+    },
+    "product": {
+      "const": "NOOP",
+      "type": "string"
+    },
+    "releaseVersion": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1,
+      "type": "integer"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "repository": {
+          "const": "https://github.com/Dhanunjay-Divi/Noop",
+          "type": "string"
+        },
+        "tree": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "commit",
+        "tree"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "product",
+    "releaseVersion",
+    "source",
+    "policy",
+    "manifestSchema",
+    "artifacts",
+    "checks"
+  ],
+  "type": "object",
+  "$defs": {
+    "sourceFile": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,199}$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "type": "object"
+    }
+  }
+}

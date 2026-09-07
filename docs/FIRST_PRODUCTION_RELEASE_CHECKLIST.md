@@ -1,6 +1,6 @@
 # NOOP first production release checklist
 
-- **Status date:** 2026-09-06
+- **Status date:** 2026-09-07
 - **Purpose:** one editable, ordered list of everything still required for the
   first public production release
 - **Confirmed market sequence:** India first, then the USA
@@ -132,21 +132,34 @@ position without changing its ID. This inbox intentionally starts empty.
   merge or tag.
 - [ ] CI-110 [ENG] Create separately approved staging and production
   environments in source control.
-- [ ] CI-120 [ENG] Create a release evidence directory and manifest format that
-  contains no private data.
+- [x] CI-120 [ENG] Create a release evidence directory and manifest format that
+  contains no private data. (Evidence: `release/evidence/`,
+  `Tools/release-evidence.py`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 - [ ] CI-130 [ENG] Generate an SBOM and artifact provenance tied to one commit.
-- [ ] CI-140 [ENG] Verify dependency locks, pinned actions, container digests,
-  and vulnerability policy.
-- [ ] CI-150 [ENG] Define build reproducibility checks for iOS, Android,
-  firmware, server, and tools.
-- [ ] CI-160 [ENG] Define rollback-compatible database and API migration rules.
+- [x] CI-140 [ENG] Verify dependency locks, pinned actions, container digests,
+  and vulnerability policy. (Evidence: `Tools/release-control-gate.py`,
+  `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
+- [x] CI-150 [ENG] Define build reproducibility checks for iOS, Android,
+  firmware, server, and tools. (Evidence: `docs/RELEASE_CONTROLS.md`,
+  `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
+- [x] CI-160 [ENG] Define rollback-compatible database and API migration rules.
+  (Evidence: `docs/RELEASE_CONTROLS.md`, `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 - [ ] CI-170 [ENG] Rotate every production-capable credential previously
   exposed in chat, logs, screenshots, or local scripts.
-- [ ] CI-180 [ENG] Verify no production credential, key, token, certificate, or
-  private export is tracked by Git.
-- [ ] CI-190 [ENG] Define release branch, tag, artifact, and hotfix naming.
-- [ ] CI-200 [ENG] Record exact local and hosted commands required for the
-  final release gate.
+- [x] CI-180 [ENG] Verify no production credential, key, token, certificate, or
+  private export is tracked by Git. (Evidence:
+  `Tools/release-control-gate.py`, `Tools/check-private-data.py`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
+- [x] CI-190 [ENG] Define release branch, tag, artifact, and hotfix naming.
+  (Evidence: `docs/RELEASE_CONTROLS.md`, `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
+- [x] CI-200 [ENG] Record exact local and hosted commands required for the
+  final release gate. (Evidence: `docs/RELEASE_CONTROLS.md`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 
 ## 3. NOOP Band hardware and protocol intake
 
@@ -583,8 +596,11 @@ position without changing its ID. This inbox intentionally starts empty.
   and evidence gates.
 - [ ] MOB-270 [ENG] Validate shake-to-report during lag, collection, history,
   OTA, storage pressure, and managed sync.
-- [ ] MOB-280 [ENG] Ensure app reports show optional user context and reviewed
-  attachments without automatic upload.
+- [x] MOB-280 [ENG] Ensure app reports show optional user context and reviewed
+  attachments without automatic upload. (Evidence:
+  `StrandiOS/System/ShakeDiagnosticReport.swift`,
+  `android/app/src/main/java/com/noop/ui/AppDiagnosticReport.kt`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 - [ ] MOB-290 [ENG] Add a disclosed isolated Review Sample Mode for store
   reviewers without hardware.
 - [ ] MOB-300 [ENG] Ensure Review Sample Mode never touches BLE, production
@@ -651,8 +667,11 @@ position without changing its ID. This inbox intentionally starts empty.
   protocol with held-out participants and devices.
 - [ ] MET-130 [ENG] Validate workout detection precision, recall, latency,
   confusion matrix, and false prompts per day.
-- [ ] MET-140 [ENG] Keep automatic workout detection in Ask mode until its
-  unattended-save evidence passes.
+- [x] MET-140 [ENG] Keep automatic workout detection in Ask mode until its
+  unattended-save evidence passes. (Evidence:
+  `Strand/BLE/PuffinExperiment.swift`,
+  `android/app/src/main/java/com/noop/ui/MainActivity.kt`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 - [ ] MET-150 [ENG] Validate steps, daily movement, standing, and activity
   classification.
 - [ ] MET-160 [ENG] Validate Charge, Effort, Rest, stress, and related
@@ -754,8 +773,10 @@ position without changing its ID. This inbox intentionally starts empty.
   market-specific compliance.
 - [ ] SEC-190 [JOINT] Review app, store, packaging, notifications, support, and
   marketing claims for general-wellness accuracy.
-- [ ] SEC-200 [ENG] Keep all clinical and automatic emergency claims disabled
-  unless separately authorized.
+- [x] SEC-200 [ENG] Keep all clinical and automatic emergency claims disabled
+  unless separately authorized. (Evidence: `server/app/main.py`,
+  `Tools/health_claims_gate.py`,
+  `ops/rounds/2026-09-07-production-checklist-execution.md`)
 - [ ] SEC-210 [ENG] Pass exact release SBOM, license, dependency notice, owner
   rights, and distribution gates.
 
@@ -809,8 +830,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] STO-100 [JOINT] Complete encryption/export, wellness/medical, age/content,
   category, territory, trader, contact, copyright, and pricing answers.
 - [ ] STO-110 [OWNER] Provide monitored review contact and support channels.
-- [ ] STO-120 [ENG] Keep public privacy and support URLs available without
-  authentication.
+- [x] STO-120 [ENG] Keep public privacy and support URLs available without
+  authentication. (Evidence:
+  `ops/rounds/2026-09-07-production-checklist-execution.md`, anonymous HTTP
+  200 checks on 2026-09-07)
 - [ ] STO-130 [ENG] Capture final iPhone media from the exact signed release
   candidate using fictional data.
 - [ ] STO-140 [ENG] Capture final iPad media or deliberately remove unsupported

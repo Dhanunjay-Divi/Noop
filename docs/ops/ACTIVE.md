@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-06**
+Last updated: **2026-09-07**
 
 ## Repository
 
@@ -18,11 +18,21 @@ Last updated: **2026-09-06**
 
 ## Active work
 
+Post-release local cleanup is complete. Four local HTTP relays, three Cloud SQL
+proxies, two OpenGym previews, the NOOP Gradle daemon, one Android emulator,
+three iOS simulators, and a 313 MB synthetic PostgreSQL test cluster were
+stopped; the test cluster was removed. All nine scoped ports are closed.
+Simulator definitions and the Android AVD were retained without erasure, the
+unrelated PostgreSQL service on port 5432 remains healthy, and retained
+IAM-only GCP staging was not changed. No application source, build, deploy, or
+release state changed. Evidence is recorded in
+[Post-release resource cleanup](rounds/2026-09-07-post-release-resource-cleanup.md).
+
 The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 397 stable actions: 31 evidenced complete and 366 pending. New owner
+with 396 stable actions: 42 evidenced complete and 354 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -38,6 +48,18 @@ tracked lines in 1,313 files; active customer/core removal must use a reviewed
 allowlist and additive migration rather than destructive replacement. Evidence
 is recorded in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
+
+The current checklist-execution round adds fail-closed source release controls,
+a deterministic CycloneDX SBOM generator, and commit/tree-bound privacy-safe
+evidence manifests. Dependency locks, full-SHA Actions, OCI digests, immutable
+migrations, runtime inventory, tracked private-artifact names, and
+high-confidence token formats are checked before release mutation. Focused
+Apple, Android, and server evidence also closes the existing Ask-only workout,
+reviewed app-report, disabled automatic-emergency, and anonymous public-policy
+URL actions. Hosted evidence on the exact committed source remains pending, as
+do protected `main`, reviewed environments, credential rotation, and every
+external release gate. Evidence is recorded in
+[Production checklist execution](rounds/2026-09-07-production-checklist-execution.md).
 
 The hosted release-gate closeout is complete for code-verifiable source gates.
 The server failure on ownership readiness was not a runtime privilege defect:

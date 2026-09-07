@@ -1,0 +1,264 @@
+{
+  "environments": {
+    "production": {
+      "approvalRequired": true,
+      "status": "owner-approval-required"
+    },
+    "staging": {
+      "approvalRequired": true,
+      "status": "owner-approval-required"
+    }
+  },
+  "evidence": {
+    "artifactFields": [
+      "name",
+      "sha256",
+      "size",
+      "mediaType"
+    ],
+    "checkFields": [
+      "name",
+      "status"
+    ],
+    "directory": "release/evidence",
+    "manifestSchema": "release/evidence/manifest.schema.json",
+    "sbomFormat": "CycloneDX-1.5"
+  },
+  "migrations": {
+    "destructiveDownMigration": "forbidden",
+    "immutableAppliedFiles": true,
+    "requiredStages": [
+      "expand",
+      "migrate",
+      "verify",
+      "contract"
+    ],
+    "strategy": "expand-migrate-verify-contract"
+  },
+  "naming": {
+    "artifactPattern": "^NOOP-(android|ios|macos|server|firmware|source)-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?\\.(apk|aab|ipa|zip|tar\\.zst|oci\\.tar|bin|cdx\\.json|manifest\\.json|sha256)$",
+    "hotfixBranchPattern": "^hotfix/[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+    "invalidExamples": {
+      "artifact": "../NOOP.apk",
+      "hotfixBranch": "fix/latest",
+      "releaseBranch": "release/latest",
+      "tag": "latest"
+    },
+    "releaseBranchPattern": "^release/[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+    "tagPattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+    "validExamples": {
+      "artifact": "NOOP-android-v1.0.0.aab",
+      "hotfixBranch": "hotfix/1.0.1",
+      "releaseBranch": "release/1.0.0",
+      "tag": "v1.0.0"
+    }
+  },
+  "product": "NOOP",
+  "repository": "https://github.com/Dhanunjay-Divi/Noop",
+  "reproducibility": {
+    "android": {
+      "commands": [
+        "cd android && ./gradlew --no-daemon --dependency-verification=strict dependencies",
+        "cd android && ./gradlew --no-daemon clean bundleFullRelease",
+        "python3 Tools/release-evidence.py manifest --help"
+      ],
+      "comparison": "Same source, JDK 17, Gradle wrapper, dependency lock, verification metadata, build variant, signing identity, and normalized AAB entry digests.",
+      "status": "enforced"
+    },
+    "firmware": {
+      "commands": [
+        "supplier-defined clean bootloader build",
+        "supplier-defined clean application build",
+        "supplier-defined signed-image manifest comparison"
+      ],
+      "comparison": "Exact compiler/container, board revision, bootloader, application source, configuration, signing-key identifier, image digest, and compatibility manifest; blocked until the supplier dossier and firmware repository exist.",
+      "status": "blocked-external-input"
+    },
+    "ios": {
+      "commands": [
+        "xcodegen generate",
+        "xcodebuild -project Strand.xcodeproj -scheme NOOPiOS -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build",
+        "bash Tools/verify-ios-release-contract.sh /path/to/NOOP.app"
+      ],
+      "comparison": "Same source, Xcode build, SDK, Package.resolved, Release settings, entitlements, bundle graph, executable architectures, and normalized unsigned bundle contents; signed bytes additionally require the same approved signing pipeline.",
+      "status": "enforced"
+    },
+    "macos": {
+      "commands": [
+        "xcodegen generate",
+        "xcodebuild -project Strand.xcodeproj -scheme Strand -configuration Release -destination generic/platform=macOS ARCHS='x86_64 arm64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build",
+        "lipo -archs /path/to/NOOP.app/Contents/MacOS/NOOP"
+      ],
+      "comparison": "Same source, Xcode build, SDK, Package.resolved, Release settings, architectures, and normalized unsigned bundle contents; notarized bytes additionally require the same approved signing pipeline.",
+      "status": "enforced"
+    },
+    "server": {
+      "commands": [
+        "python3 Tools/release-legal-gate.py distribution",
+        "cd server && python -m pip install --require-hashes -r requirements.lock",
+        "docker build --pull=false --no-cache -t noop-server:release server",
+        "docker build --pull=false --no-cache -t noop-backup:release server/backup"
+      ],
+      "comparison": "Same source tree, digest-pinned bases, hash-locked Python graph, Docker build frontend, target platform, configuration, and resulting OCI config/layer digests.",
+      "status": "enforced"
+    },
+    "tools": {
+      "commands": [
+        "python3 -m unittest Tools.tests.test_release_control_gate Tools.tests.test_release_evidence",
+        "python3 Tools/release-control-gate.py check",
+        "python3 Tools/release-legal-gate.py distribution"
+      ],
+      "comparison": "Same Python major/minor, source tree, machine-readable policy, dependency locks, fixtures, and byte-identical generated JSON.",
+      "status": "enforced"
+    }
+  },
+  "requiredChecks": [
+    "container-digests",
+    "dependency-locks",
+    "github-actions-pinned",
+    "migration-integrity",
+    "release-policy",
+    "required-release-inputs",
+    "runtime-inventory",
+    "tracked-credential-exclusion"
+  ],
+  "schemaVersion": 1,
+  "sourceControls": {
+    "blockedCredentialBasenames": [
+      "GoogleService-Info.plist",
+      "credentials.json",
+      "google-services.json",
+      "id_ed25519",
+      "id_rsa",
+      "service-account.json"
+    ],
+    "blockedCredentialSuffixes": [
+      ".aab",
+      ".apk",
+      ".cer",
+      ".db",
+      ".der",
+      ".env",
+      ".ipa",
+      ".jks",
+      ".key",
+      ".keystore",
+      ".mobileprovision",
+      ".noopbak",
+      ".p12",
+      ".pem",
+      ".pfx",
+      ".sqlite",
+      ".sqlite3",
+      ".tfstate",
+      ".tfvars"
+    ],
+    "credentialExampleAllowlist": [
+      "Config/BundleIdSecrets.example.xcconfig",
+      "Config/LaunchGateSecrets.example.xcconfig",
+      "Config/ManagedCloudSecrets.example.xcconfig",
+      "Config/StrengthMediaSecrets.example.xcconfig",
+      "Strand/Oura/OuraSecrets.example.xcconfig",
+      "android/managed-cloud.properties.example",
+      "infra/gcp/staging.tfvars.example",
+      "server/.env.example"
+    ],
+    "dockerfiles": [
+      "server/Dockerfile",
+      "server/backup/Dockerfile"
+    ],
+    "imageReferenceFiles": [
+      ".github/workflows/server.yml",
+      "server/compose.yaml"
+    ],
+    "lockfiles": [
+      {
+        "kind": "swiftpm",
+        "path": "Packages/NoopLocalAccess/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Packages/NoopRemoteSync/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Packages/StrandAnalytics/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Packages/StrandImport/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Packages/WhoopStore/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Strand.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Tools/Backfill/Package.resolved"
+      },
+      {
+        "kind": "npm",
+        "path": "Tools/StrengthMotion/package-lock.json"
+      },
+      {
+        "kind": "swiftpm",
+        "path": "Tools/StudyHarness/Package.resolved"
+      },
+      {
+        "kind": "gradle",
+        "path": "android/app/gradle.lockfile"
+      },
+      {
+        "kind": "gradle-verification",
+        "path": "android/gradle/verification-metadata.xml"
+      },
+      {
+        "kind": "python-hashes",
+        "path": "server/requirements.lock"
+      }
+    ],
+    "migrationDirectory": "server/migrations",
+    "migrationManifest": "server/backup/migration-manifest.sha256",
+    "requiredPaths": [
+      ".github/workflows/release-controls.yml",
+      "ThirdPartyNotices/runtime-inventory.json",
+      "Tools/check-private-data.py",
+      "Tools/release-control-gate.py",
+      "Tools/release-evidence.py",
+      "Tools/release-legal-gate.py",
+      "docs/RELEASE_CONTROLS.md",
+      "release/evidence/README.md",
+      "release/evidence/manifest.schema.json",
+      "release/release-policy.json"
+    ],
+    "requiredPinnedImageText": [
+      "@sha256:[0-9a-f]{64}",
+      "runtime_image must be an asia-south1/2 Artifact Registry sha256 digest URI."
+    ],
+    "workflowDirectory": ".github/workflows"
+  },
+  "vulnerabilityPolicy": {
+    "criticalMaximum": 0,
+    "exceptionRequirements": [
+      "named owner",
+      "affected artifact and dependency",
+      "exploitability assessment",
+      "expiry date",
+      "compensating control",
+      "release approver"
+    ],
+    "highMaximum": 0,
+    "mediumDisposition": "review-required",
+    "requiredCommands": [
+      "cd server && pip-audit --requirement requirements.lock",
+      "cd server && pip-audit --requirement requirements-dev.txt",
+      "python3 Tools/release-legal-gate.py distribution",
+      "review Artifact Registry scan for every production image digest",
+      "review platform dependency advisories for the exact SwiftPM and Gradle locks"
+    ]
+  }
+}

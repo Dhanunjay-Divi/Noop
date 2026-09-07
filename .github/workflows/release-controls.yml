@@ -1,0 +1,82 @@
+name: Release Controls
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-controls-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source release controls
+        run: >-
+          python3 Tools/release-control-gate.py check
+          --report "$RUNNER_TEMP/release-controls.json"
+
+      - name: Test release controls and evidence
+        run: >-
+          python3 -m unittest
+          Tools.tests.test_release_control_gate
+          Tools.tests.test_release_evidence
+
+      - name: Verify distribution rights and private-data boundary
+        run: |
+          python3 Tools/release-legal-gate.py distribution
+          python3 Tools/check-private-data.py
+
+      - name: Resolve matching source version
+        run: |
+          set -euo pipefail
+          ANDROID_VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' \
+            android/app/build.gradle.kts | head -1)
+          APPLE_VERSION=$(sed -n 's/.*MARKETING_VERSION: "\([^"]*\)".*/\1/p' \
+            project.yml | head -1)
+          test -n "$ANDROID_VERSION"
+          test "$ANDROID_VERSION" = "$APPLE_VERSION"
+          echo "VERSION=$ANDROID_VERSION" >> "$GITHUB_ENV"
+
+      - name: Generate and verify source evidence
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/noop-release-evidence"
+          mkdir -p "$OUT"
+          cp "$RUNNER_TEMP/release-controls.json" "$OUT/release-controls.json"
+          python3 Tools/release-evidence.py sbom \
+            --source-ref "$GITHUB_SHA" \
+            --version "$VERSION" \
+            --output "$OUT/NOOP-source-v$VERSION.cdx.json"
+          python3 Tools/release-evidence.py manifest \
+            --source-ref "$GITHUB_SHA" \
+            --version "$VERSION" \
+            --artifact "$OUT/NOOP-source-v$VERSION.cdx.json" \
+            --artifact "$OUT/release-controls.json" \
+            --checks "$OUT/release-controls.json" \
+            --output "$OUT/NOOP-source-v$VERSION.manifest.json"
+          python3 Tools/release-evidence.py verify \
+            --manifest "$OUT/NOOP-source-v$VERSION.manifest.json" \
+            --artifact-directory "$OUT" \
+            --expect-ref "$GITHUB_SHA"
+
+      - name: Retain bounded release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/noop-release-evidence/
+          if-no-files-found: error
+          retention-days: 14
