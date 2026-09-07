@@ -34,6 +34,60 @@ final class NOOPiOSUITests: XCTestCase {
         return app
     }
 
+    func testReviewSampleIsVisibleNavigableAndExitableWithoutHardware() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--review-sample",
+            "-noop.acceptedTermsVersion", "",
+        ]
+        app.launch()
+
+        let explore = app.buttons["noop.review.entry.explore"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 20))
+        attachScreenshot(named: "review-entry")
+        explore.tap()
+
+        let enter = app.buttons["noop.review.disclosure.enter"]
+        XCTAssertTrue(enter.waitForExistence(timeout: 10))
+        enter.tap()
+
+        let sampleLabel = app.staticTexts["noop.review.root"]
+        let exit = app.buttons["noop.review.exit"]
+        let todayHeading = app.staticTexts["noop.review.today.heading"]
+        XCTAssertTrue(sampleLabel.waitForExistence(timeout: 10))
+        XCTAssertTrue(exit.waitForExistence(timeout: 10))
+        XCTAssertTrue(todayHeading.waitForExistence(timeout: 10))
+        XCTAssertGreaterThan(
+            todayHeading.frame.minY,
+            exit.frame.maxY,
+            "The first content heading must render below the Review Sample banner."
+        )
+        attachScreenshot(named: "review-dashboard")
+        let recovery = app.descendants(matching: .any)["noop.review.metric.recovery"]
+        XCTAssertTrue(recovery.waitForExistence(timeout: 10))
+        recovery.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["noop.review.metric.detail"]
+                .waitForExistence(timeout: 10)
+        )
+        let back = app.buttons["noop.review.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10))
+        XCTAssertTrue(back.isHittable)
+        attachScreenshot(named: "review-metric-detail")
+
+        XCTAssertTrue(exit.waitForExistence(timeout: 10))
+        exit.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["noop.review.root"].exists)
+        XCTAssertTrue(app.staticTexts["noop.terms.title"].waitForExistence(timeout: 10))
+    }
+
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testPrimaryTabsNavigateAndExposeSelection() {
         let app = launchApp()
         let today = app.buttons["noop.tab.0"]

@@ -142,12 +142,15 @@ struct StrandiOSApp: App {
         )
         #if DEBUG
         let demoFixtureRequested = CommandLine.arguments.contains("--demo-seed")
+        let reviewSampleFixtureRequested = CommandLine.arguments.contains("--review-sample")
         #else
         let demoFixtureRequested = false
+        let reviewSampleFixtureRequested = false
         #endif
         // Screenshot/UI-test fixtures own synthetic transport state. Never let a simulator's stale
         // launch-access receipt start CoreBluetooth or background services that can overwrite it.
         let operationallyAllowed = !demoFixtureRequested
+            && !reviewSampleFixtureRequested
             && access.isUnlocked
             && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
                 == Terms.currentVersion
@@ -822,6 +825,9 @@ private struct iOSRootView: View {
     @AppStorage(TrialNoticePolicy.acknowledgedBuildStorageKey)
     private var acknowledgedTrialBuild = ""
     @State private var showWhatsNew = false
+    /// Process-only App Review journey. No sample state or value is written to defaults, the production
+    /// database, HealthKit, or a network service; leaving the mode drops the entire view hierarchy.
+    @State private var reviewSamplePhase: ReviewSamplePhase = .entry
 
     var body: some View {
         #if DEBUG
@@ -847,12 +853,18 @@ private struct iOSRootView: View {
         ZStack {
             // Do not mount the operational shell before clickwrap acceptance. RootTabView starts repository
             // refresh, backup catch-up and optional remote sync from its task modifier.
-            if hasLaunchAccess && (acceptedTerms == Terms.currentVersion || demoBypass) {
+            if hasLaunchAccess
+                && !reviewSampleBlocksStandardLaunch
+                && (acceptedTerms == Terms.currentVersion || demoBypass) {
                 RootTabView()
             } else {
                 StrandPalette.surfaceBase.ignoresSafeArea()
             }
-            if hasLaunchAccess && acceptedTerms == Terms.currentVersion && !onboarded && !demoBypass {
+            if hasLaunchAccess
+                && !reviewSampleBlocksStandardLaunch
+                && acceptedTerms == Terms.currentVersion
+                && !onboarded
+                && !demoBypass {
                 OnboardingWizard(onFinished: {
                     onboarded = true
                     model.refreshAgeMetricsIfProfileChanged()
@@ -862,7 +874,10 @@ private struct iOSRootView: View {
             }
             // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
-            if hasLaunchAccess && acceptedTerms != Terms.currentVersion && !demoBypass {
+            if hasLaunchAccess
+                && !reviewSampleBlocksStandardLaunch
+                && acceptedTerms != Terms.currentVersion
+                && !demoBypass {
                 TermsGateView(onAccept: {
                     acceptedTermsAt = ISO8601DateFormatter().string(from: Date())
                     acceptedTerms = Terms.currentVersion
@@ -872,7 +887,9 @@ private struct iOSRootView: View {
             }
             // Trial disclosure sits above Terms/onboarding so it is the first thing a tester sees on a
             // fresh install or newer build. The DEBUG demo harness bypasses it for deterministic captures.
-            if hasLaunchAccess && TrialNoticePolicy.shouldPresent(
+            if hasLaunchAccess
+                && !reviewSampleBlocksStandardLaunch
+                && TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: acknowledgedTrialBuild,
                 currentBuildIdentifier: TrialNoticePolicy.currentBuildIdentifier(),
                 demoBypass: demoBypass
@@ -890,11 +907,38 @@ private struct iOSRootView: View {
                     .transition(.opacity)
                     .zIndex(4)
             }
+            if hasLaunchAccess && reviewSampleOffered {
+                switch reviewSamplePhase {
+                case .entry:
+                    ReviewSampleEntryView(
+                        onExplore: { reviewSamplePhase = .disclosure },
+                        onContinueSetup: { reviewSamplePhase = .continueSetup }
+                    )
+                    .transition(.opacity)
+                    .zIndex(5)
+                case .disclosure:
+                    ReviewSampleDisclosureView(
+                        onBack: { reviewSamplePhase = .entry },
+                        onEnter: { reviewSamplePhase = .active }
+                    )
+                    .transition(.opacity)
+                    .zIndex(5)
+                case .active:
+                    ReviewSampleRootView(
+                        onExit: { reviewSamplePhase = .continueSetup }
+                    )
+                    .transition(.opacity)
+                    .zIndex(5)
+                case .continueSetup:
+                    EmptyView()
+                }
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: launchAccess.state)
         .animation(.easeInOut(duration: 0.35), value: onboarded)
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
         .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
+        .animation(.easeInOut(duration: 0.2), value: reviewSamplePhase)
         .sheet(isPresented: $showWhatsNew, onDismiss: completeWhatsNewPresentation) {
             WhatsNewView(
                 presentation: .welcome(firstInstall: firstInstallWelcomePending),
@@ -906,16 +950,13 @@ private struct iOSRootView: View {
         // combined terms+version update. Gate on terms being current, and re-check when they're
         // accepted (onAppear already fired before acceptance), so What's New shows right after.
         .onAppear {
-            prepareFirstInstallExperience()
-            showWhatsNewIfDue()
-            // Seed the current What's New into the Updates inbox (idempotent per version) so the bell
-            // collects it even if the user dismisses the auto sheet.
-            UpdateStore.shared.seedWhatsNewIfNeeded()
+            activateStandardLaunchIfNeeded()
         }
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }
         .onChange(of: acknowledgedTrialBuild) { _, _ in showWhatsNewIfDue() }
         .onChange(of: launchAccess.state) { _, _ in showWhatsNewIfDue() }
         .onChange(of: onboarded) { _, _ in showWhatsNewIfDue() }
+        .onChange(of: reviewSamplePhase) { _, _ in activateStandardLaunchIfNeeded() }
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the
@@ -928,12 +969,28 @@ private struct iOSRootView: View {
         #endif
     }
 
+    private var forceReviewSample: Bool {
+        #if DEBUG
+        return CommandLine.arguments.contains("--review-sample")
+        #else
+        return false
+        #endif
+    }
+
     private var hasLaunchAccess: Bool {
-        launchAccess.isUnlocked || demoBypass
+        launchAccess.isUnlocked || demoBypass || forceReviewSample
+    }
+
+    private var reviewSampleOffered: Bool {
+        !demoBypass && (forceReviewSample || acceptedTerms != Terms.currentVersion)
+    }
+
+    private var reviewSampleBlocksStandardLaunch: Bool {
+        reviewSampleOffered && reviewSamplePhase.blocksStandardLaunch
     }
 
     private func showWhatsNewIfDue() {
-        if demoBypass || !launchAccess.isUnlocked { return }
+        if demoBypass || reviewSampleBlocksStandardLaunch || !launchAccess.isUnlocked { return }
         // Existing users who updated, plus a brand-new user after onboarding: their last-seen release is
         // genuinely behind the current one. A swipe/back dismissal is acknowledged by the sheet's
         // onDismiss callback; a process killed before dismissal correctly offers the unread notes again.
@@ -948,6 +1005,15 @@ private struct iOSRootView: View {
                than: lastSeenChangelog
            ) else { return }
         showWhatsNew = true
+    }
+
+    private func activateStandardLaunchIfNeeded() {
+        guard !reviewSampleBlocksStandardLaunch else { return }
+        prepareFirstInstallExperience()
+        showWhatsNewIfDue()
+        // Seed only after the user chooses the real setup path. Review Sample must not write to the
+        // production Updates inbox merely because its process-only view hierarchy was mounted.
+        UpdateStore.shared.seedWhatsNewIfNeeded()
     }
 
     private func prepareFirstInstallExperience() {

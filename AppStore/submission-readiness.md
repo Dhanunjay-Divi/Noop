@@ -8,11 +8,14 @@ Review.
 
 ## Current disposition
 
-**No-go for upload or submission.** The reviewer sample path, App Store Connect
-answers, iPad/Watch media, distribution signing, and physical-device release
-validation are not complete. The source-rights and dependency gate passes. The
-existing iPhone screenshots have valid dimensions and are now opaque, but show
-an older UI and are only provisional layout references.
+**No-go for upload or submission.** The disclosed reviewer sample path is now
+implemented in shipping source and passes focused simulator tests plus an iOS
+Release-simulator build, but it has not yet been exercised in the exact signed
+archive or entered in App Review Information. App Store Connect answers,
+iPad/Watch media, distribution signing, and physical-device release validation
+are also incomplete. The source-rights and dependency gate passes. The existing
+iPhone screenshots have valid dimensions and are now opaque, but show an older
+UI and are only provisional layout references.
 
 ## Submission matrix
 
@@ -34,7 +37,7 @@ an older UI and are only provisional layout references.
 | Copyright | Use the current legal owner and year, not a repository handle. | Account holder/legal owner. | Value required |
 | Review contact | Enter a monitored name, telephone number, and email directly in App Store Connect. | Release owner. | Value required |
 | Review credential | Put the current launch-gate credential only in App Review Information. Never put it in Git, screenshots, metadata, or reviewer video. Explain that it is a temporary preview gate, not an account or security boundary. | Release owner. | Required at submission |
-| Hardware requirements | Review must not depend solely on an Apple reviewer owning a WHOOP 5/MG strap. Provide the disclosed sample path below; add optional physical-device steps and video as supporting evidence. | Product/release owner. | **Blocked on sample path** |
+| Hardware requirements | Review must not depend solely on an Apple reviewer owning a compatible strap. Use the disclosed sample path below; add optional physical-device steps and video as supporting evidence. | Shipping source, focused simulator tests, and Release-simulator build; product/release owner verifies the signed archive and App Review record. | Source path complete; signed-archive evidence pending |
 | Background modes | Bluetooth restoration/history sync, HealthKit delivery, manual outdoor-workout route continuation, and best-effort BG refresh/diagnostic export are mapped in `privacy-and-compliance-draft.md`. State that iOS schedules background execution and NOOP cannot guarantee continuous delivery. | Final signed entitlements and physical-device test evidence. | Source audit complete; archive/device validation pending |
 | Health permissions | Explain each HealthKit read/write request in the review notes and purpose strings; verify the app remains useful when optional access is denied. | Final archive and privacy review. | Pending |
 | Release control | Use manual release for the first version so approval cannot publish an unverified build automatically. | Account holder. | Recommended |
@@ -105,12 +108,13 @@ submitted build.
 ### Preferred path: disclosed Review Sample Mode
 
 This is the safest reviewer option because Apple cannot be expected to own a
-compatible wearable or existing biometric history. It is **not implemented
-yet**, and must not be hidden behind an undocumented gesture, date, account, or
-reviewer-only server flag.
+compatible wearable or existing biometric history. It is implemented in the
+shipping source as a disclosed first-run choice after launch access, not behind
+an undocumented gesture, date, account, or reviewer-only server flag. The exact
+signed archive still must repeat this journey before submission.
 
-Before submission, implement and test a clearly labeled **Review Sample Mode**
-in the same Release binary, then give Apple this exact path:
+Before submission, repeat the clearly labeled **Review Sample Mode** journey in
+the exact signed Release archive, then give Apple this path:
 
 1. Install and launch NOOP.
 2. Enter the credential supplied privately in **App Review Information**.
@@ -120,21 +124,28 @@ in the same Release binary, then give Apple this exact path:
 5. Navigate **Today → each daily signal → metric detail** to see today first,
    then baseline and comparisons.
 6. Navigate **Trends**, change the interval, and open a metric.
-7. Navigate **Sleep** and inspect the fictional detected night.
-8. Navigate **Friends** only if it ships; the sample must not contact or expose
+7. Navigate **Workouts** and inspect the fictional session.
+8. Navigate **Sleep** and inspect the fictional interval, stages, and wake
+   events.
+9. Navigate **Friends** only if it ships; the sample does not contact or expose
    real people.
-9. Navigate **More → Data Sources & Privacy** to inspect optional permissions,
+10. Navigate **More → Data Sources & Privacy** to inspect optional permissions,
    local storage, export, and deletion controls.
-10. Navigate **More → Devices** to see the no-hardware state and compatibility
+11. Navigate **More → Devices** to see the no-hardware state and compatibility
     disclosure.
-11. Tap **Exit Review Sample** to erase the in-memory/sample store and return to
-    the real empty state.
+12. Tap **Exit Review Sample** to discard the process-only fictional view tree
+    and continue into the normal Terms/setup journey.
 
-The sample path must be read-only or use an isolated ephemeral store, must not
-write sample values to Apple Health or the production database, and must disable
-BLE commands, uploads, Friends network calls, AI/provider calls, notifications,
-and emergency/medical behavior. The UI must remain visibly labeled while sample
-data is active. App Review notes must disclose the mode and its exact controls.
+The current sample path is a deterministic in-memory presentation tree. It
+does not write sample values to Apple Health or the production database and
+does not invoke BLE commands, uploads, Friends network calls, AI/provider
+calls, notifications, or emergency/medical behavior. The UI remains visibly
+labeled while sample data is active. Android additionally defers its
+operational Room/BLE/cloud/worker runtime until current Terms are accepted and
+uses lazy WorkManager initialization instead of the pre-application AndroidX
+Startup initializer. Apple constructs its normal inert bootstrap objects at
+process launch but does not start operational work or pass sample values into
+them. App Review notes must disclose the mode and its exact controls.
 
 ### Optional compatible WHOOP 5/MG hardware path
 
@@ -164,7 +175,9 @@ or accompanying note:
 1. Fresh launch, launch-gate access, and the Review Sample disclosure.
 2. Today, one metric detail with today/comparison hierarchy, Trends, Sleep, and
    the Data Sources & Privacy screen.
-3. Exit the sample and show the genuine empty/no-hardware state.
+3. Exit the sample and show the normal Terms/setup journey; separately show the
+   genuine empty/no-hardware state after setup if that state is part of the
+   submitted reviewer video.
 4. On a separate sanitized segment, show a compatible WHOOP 5/MG entering
    pairing mode, the NOOP connection path, verified model/firmware, Live Heart
    Rate start, current value, and stop.
@@ -183,9 +196,9 @@ app or copyrighted marketing assets unless use is authorized.
       Organizer with every embedded target/profile/capability.
 - [ ] In-place upgrade preserves the existing local database, settings,
       widgets, and shared App Group data.
-- [ ] Review Sample Mode is disclosed, isolated, deterministic, and tested in a
-      Release build; or Apple has an equally deterministic, non-personal,
-      hardware-independent review path.
+- [ ] Review Sample Mode is disclosed, isolated, deterministic, and retested in
+      the exact signed archive supplied to App Review. Shipping-source,
+      simulator, and unsigned Release-simulator evidence is already complete.
 - [ ] Exact App Privacy and export-compliance answers are approved for the
       uploaded binary.
 - [ ] Age rating, medical declaration, categories, copyright, content rights,

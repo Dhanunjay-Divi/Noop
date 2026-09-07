@@ -13,18 +13,28 @@ import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
 import com.noop.sync.RemoteSyncService
+import com.noop.sync.RemoteSyncScheduler
+import com.noop.ui.BackupSync
 import com.noop.ui.BiofeedbackPrefs
+import com.noop.ui.DebugExportScheduler
 import com.noop.ui.NoopPrefs
 import com.noop.ui.AppearanceMode
 import com.noop.ui.AppearancePrefs
+import com.noop.ui.Terms
 import com.noop.widget.WidgetSnapshotStore
 import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
+import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
+import com.noop.notif.DailyReviewReminders
+import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
 import com.noop.safety.SafetyContactSetupReminderScheduler
+import com.noop.safety.SafetyIncidentStatusMonitor
+import com.noop.safety.SafetyLiveLocationSession
 import com.noop.social.FriendsSyncScheduler
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,13 +56,28 @@ import kotlinx.coroutines.launch
  * macOS app gets the same outcome for free — its `AppModel` is an app-level `@StateObject` kept alive
  * by the menu-bar extra.
  */
-class NoopApplication : Application() {
+class NoopApplication : Application(), androidx.work.Configuration.Provider {
 
     private var lastWidgetNightMode: Boolean? = null
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableActiveDeviceId = MutableStateFlow(WhoopBleClient.DEFAULT_DEVICE_ID)
     private val activeDeviceLock = Any()
     private var activeDeviceRevision = 0L
+    private val operationalRuntime = AtomicBoolean(false)
+
+    /** True after the consent-gated Room/BLE/cloud/worker runtime has started for this process. */
+    val operationalRuntimeStarted: Boolean get() = operationalRuntime.get()
+
+    /**
+     * WorkManager is initialized lazily on the first consent-gated scheduler call.
+     *
+     * The manifest removes only WorkManager's AndroidX Startup initializer, leaving the other Startup
+     * components intact. This keeps a fresh Review Sample/Terms process from opening WorkManager's
+     * database before [startOperationalRuntime] while preserving normal returning-user and worker
+     * execution through WorkManager's documented [androidx.work.Configuration.Provider] path.
+     */
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder().build()
 
     /** Process-wide active-device projection. It starts at the legacy single-band id, then the Room
      *  registry resolves it off the main thread. Consumers that outlive startup observe the correction
@@ -79,6 +104,23 @@ class NoopApplication : Application() {
         // Install immediately after the bounded recorder so a failure in the initialization below keeps
         // its stack trace as well as the unmatched launch breadcrumb.
         CrashCapture.install(this)
+        lastWidgetNightMode = resources.configuration.isNightMode()
+        if (hasAcceptedCurrentTerms()) {
+            startOperationalRuntime()
+        }
+    }
+
+    /**
+     * Start the production runtime exactly once, after current Terms have been accepted.
+     *
+     * A fresh Review Sample process never calls this method, so that path cannot open Room, construct BLE,
+     * reconcile cloud identity, restore Safety location, or schedule notifications/workers. Returning
+     * consented users call it from [onCreate]; a first-run acceptance calls it from the UI before the
+     * operational ViewModel is constructed.
+     */
+    fun startOperationalRuntime() {
+        if (!operationalRuntime.compareAndSet(false, true)) return
+        AppDiagnosticsRecorder.record("runtime.operational_started")
         resolveActiveDeviceId()
         // Canonicalize the stress-check-in choices against this build's evidence capability before
         // BLE/background readers observe them. The live path still fails closed per event.
@@ -96,6 +138,9 @@ class NoopApplication : Application() {
         RemoteSyncService.initialize(this)
         deferProcessMaintenance()
     }
+
+    private fun hasAcceptedCurrentTerms(): Boolean =
+        NoopPrefs.of(this).getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, null) == Terms.CURRENT_VERSION
 
     override fun onTrimMemory(level: Int) {
         AppDiagnosticsRecorder.record(
@@ -117,6 +162,10 @@ class NoopApplication : Application() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         val currentNightMode = newConfig.isNightMode()
+        if (!operationalRuntimeStarted) {
+            lastWidgetNightMode = currentNightMode
+            return
+        }
         if (
             shouldRefreshSystemWidgetsForNightMode(
                 previousDark = lastWidgetNightMode,
@@ -226,6 +275,21 @@ class NoopApplication : Application() {
             // Account state reconciliation is local unless this build explicitly enables the
             // ownership authority. It never starts BLE, uploads health data, or grants NOOP+.
             runCatching { ownership.bootstrap() }
+
+            // Activity-independent schedule repair. Keeping all of it behind startOperationalRuntime
+            // prevents a fresh Review Sample process from touching production workers or storage.
+            runCatching { DebugExportScheduler.reschedule(this@NoopApplication) }
+            runCatching { BackupSync.reschedule(this@NoopApplication) }
+            runCatching { BackupSync.catchUpIfDue(this@NoopApplication) }
+            runCatching { RemoteSyncScheduler.reschedule(this@NoopApplication) }
+            runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
+            runCatching { HealthConnectSyncScheduler.reconcile(this@NoopApplication) }
+            runCatching { DailyReviewReminders.reconcile(this@NoopApplication) }
+            runCatching { HydrationReminderScheduler.reconcile(this@NoopApplication) }
+            runCatching {
+                SafetyLiveLocationSession.initialize(this@NoopApplication)
+                SafetyIncidentStatusMonitor.reconcile(this@NoopApplication)
+            }
         }
     }
 

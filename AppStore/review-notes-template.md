@@ -14,9 +14,10 @@ this repository.
 - Provide these exact steps: launch NOOP, enter the credential, tap **Explore
   Review Sample**, acknowledge the fictional-data disclosure, follow the paths
   below, then tap **Exit Review Sample**.
-- Do not include those steps until the disclosed Review Sample Mode described in
-  `submission-readiness.md` is implemented and verified in the uploaded Release
-  build. Never use a hidden gesture, date, account, or reviewer-only server flag.
+- The disclosed mode is implemented in shipping source. Include these steps
+  only after the exact signed archive repeats the journey and the private
+  credential is entered in App Review Information. Never use a hidden gesture,
+  date, account, or reviewer-only server flag.
 
 ## Core behavior
 
@@ -33,8 +34,9 @@ this repository.
   **Sleep**, **Friends** (only if it ships), **More → Data Sources & Privacy**,
   and **More → Devices**.
 - State that Review Sample Mode is clearly labeled, uses fictional wellness
-  data, is isolated from the production database, and disables Bluetooth
-  commands, Health writes, uploads, Friends/AI/provider calls, and notifications.
+  data, never writes sample values to the production database, and does not
+  invoke Bluetooth commands, Health writes, uploads, Friends/AI/provider calls,
+  notifications, or Safety actions.
 - Attach a current sanitized screen recording. A Debug-only data seeder is not
   available to App Review and is not an acceptable review path.
 
@@ -76,12 +78,13 @@ this repository.
 >
 > Hardware-independent review: tap Explore Review Sample and acknowledge the
 > clearly labeled fictional-data disclosure. Then inspect Today → daily signal
-> → metric detail; Trends → interval → metric; Sleep; [Friends, IF SHIPPING];
-> More → Data Sources & Privacy; and More → Devices. Tap Exit Review Sample when
-> finished. Sample data is isolated and the mode disables Bluetooth commands,
-> Health writes, uploads, Friends/AI/provider calls, and notifications. [USE
-> THIS PARAGRAPH ONLY AFTER THE EXACT RELEASE BUILD PASSES THE SAMPLE-MODE
-> SECURITY AND RESET TESTS.]
+> → metric detail; Trends → interval → metric; Workouts; Sleep; [Friends, IF
+> SHIPPING]; More → Data Sources & Privacy; and More → Devices. Tap Exit Review
+> Sample when finished to continue into normal setup. Fictional values remain
+> in the sample presentation tree; the mode does not invoke Bluetooth commands,
+> Health writes, uploads, Friends/AI/provider calls, notifications, or Safety
+> actions. [USE THIS PARAGRAPH ONLY AFTER THE EXACT SIGNED ARCHIVE PASSES THE
+> SAMPLE-MODE SECURITY, EXIT, AND RESET TESTS.]
 >
 > Optional compatible-strap test: a WHOOP 5/MG may be bonded to one phone app at
 > a time. Release/unpair it from the official app, fully close that app, put the

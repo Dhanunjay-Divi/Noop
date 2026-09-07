@@ -162,6 +162,21 @@
         tools:targetApi="34">
 
         <!--
+          Keep WorkManager out of the pre-Terms process boundary. NoopApplication supplies its
+          Configuration lazily; the first consent-gated scheduler call initializes WorkManager.
+          Other AndroidX Startup initializers remain merged and unchanged.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+        </provider>
+
+        <!--
           MainActivity no longer carries the LAUNCHER intent-filter itself. The home-screen entry
           point is split into two <activity-alias> elements below (.IconDefault / .IconNavy), each
           carrying the LAUNCHER filter and a different launcher icon. Settings → "App Icon" enables

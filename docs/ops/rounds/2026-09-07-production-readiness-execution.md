@@ -111,6 +111,26 @@ external approval, signing authority, or elapsed production operation.
   compacting without blocking the app; each month-calendar metric opens its
   own category-scoped day overview; and reselecting the active bottom tab
   returns nested metric/calendar routes to that tab's root.
+- Added a disclosed deterministic Review Sample Mode to the shipping Apple and
+  Android source. It appears before Terms on a fresh install, keeps fictional
+  values inside a visibly labeled process-only presentation tree, covers
+  Today, metric detail, Trends, Workouts, Sleep, Friends, privacy, and Devices,
+  and exits into the normal Terms/setup journey. Android defers Room, BLE,
+  cloud, ownership, workers, notifications, and the operational ViewModel until
+  current Terms are accepted. Apple constructs its existing inert bootstrap
+  objects but starts `AppModel` with operational work disabled and never passes
+  sample values into the production repository, HealthKit, cloud, Friends,
+  notification, or Safety paths.
+- Corrected the Android consent transition found by the final source review:
+  returning consented users no longer repeat activity route, scheduler,
+  profile, or sensor repair, while a genuine first-acceptance transition still
+  resumes those hooks exactly once. Pre-consent configuration changes also no
+  longer request a widget refresh.
+- Removed WorkManager's AndroidX Startup initializer and supplied its
+  configuration lazily from `NoopApplication`. A fresh API 35 sample journey
+  now proves WorkManager remains uninitialized before entry and after exit to
+  Terms, while the merged manifest retains the unrelated Emoji, lifecycle, and
+  profile startup components.
 - Passed the staged release-control, health-claims, localization, runtime
   license, distribution-rights, private-data, operations-record, workflow
   syntax, and exact-diff whitespace gates.
@@ -164,6 +184,11 @@ external approval, signing authority, or elapsed production operation.
   records only invalidate/stamp phase, result, and range count. Apple score and
   active-minute persistence failures expose only the bounded failure kind and
   deliberately clear the analysis watermark so the next idle pass retries.
+  Review Sample adds no high-frequency or payload evidence because it has no
+  long-running, persistence, device, or network operation. Existing Apple
+  launch evidence records the fixed `operational=false` state; Android records
+  only the bounded `runtime.operational_started` and
+  `activity.operational_runtime_available` transitions after consent.
 - Redaction, retention, and high-frequency controls: no raw health values,
   sensor rows, user text, credentials, identifiers, dynamic URLs, payloads, or
   arbitrary errors enter diagnostics.
@@ -180,14 +205,16 @@ external approval, signing authority, or elapsed production operation.
 | Swift package matrix | Nine package build/test lanes green; StudyHarness 12 tests and HistoryHarness 2 tests green | Shared analytics, storage, import, design, remote-sync, study, and history source behavior | Physical app behavior |
 | Calibration parity gate | 12 metrics, 3 revisions, 13 thresholds, and 16 critical guards match on Apple and Android; 15 audit/release-gate tests pass | Machine-enforced cross-platform calibration contract and fail-closed drift detection | Physiological accuracy on production hardware |
 | macOS application suite | 1,652 tests completed with one external-fixture skip and 0 failures | Current application source and backup/calibration contracts on macOS | Signing, notarization, or phone behavior |
-| iOS simulator application suite | 34 UI tests completed with one private-pilot skip and 0 failures | Current production shell, navigation, onboarding, settings, calendar, body-map, updates, and scroll behavior on the simulator | Physical iPhone, signing, background radio, thermal, or battery behavior |
-| Android source gate | Full debug assemble, unit, lint, and instrumentation compile succeeded in 6m 07s | Current Android source, resources, and lint contract | Physical OEM/background/BLE behavior |
-| Android API 35 managed device | 53 selected tests completed with 2 private-pilot skips and 0 failures | Production-shell, persistence, rollback, navigation, and emulator behavior | Physical phone, radio, battery, or attestation |
+| iOS simulator application suite | 34 UI tests completed with one private-pilot skip and 0 failures; Review Sample also passed standard and compact layout runs plus the final 18.348-second entry/disclosure/detail/exit-to-Terms journey | Current production shell, navigation, onboarding, settings, calendar, body-map, updates, Review Sample isolation/presentation, and scroll behavior on the simulator | Physical iPhone, signing, background radio, thermal, or battery behavior |
+| iOS Release simulator build | Complete app, widgets, Watch app, complications, and launch-gate script built successfully in Release configuration | Shipping-source graph and Release compilation include Review Sample | Distribution signing, Organizer validation, or exact App Review archive |
+| Android source gate | Final post-review full debug assemble, unit, lint, and instrumentation compile completed 70 tasks successfully in 2m 36s; the merged manifest contains no WorkManager initializer while retaining the other AndroidX Startup components | Current Android source, resources, consent/runtime deferral, lazy worker initialization, and lint contract | Physical OEM/background/BLE behavior |
+| Android API 35 managed device | 53 selected tests completed with 2 private-pilot skips and 0 failures; the final focused Review Sample journey passed 1/1 in 29s, ended on Terms, and asserted WorkManager remained uninitialized throughout | Production-shell, persistence, rollback, navigation, Review Sample presentation/exit, pre-consent worker isolation, and emulator behavior | Physical phone, radio, battery, or attestation |
+| Android Release build | Final `assembleFullRelease` completed 54 tasks successfully in 1m 14s, including lint-vital and signing validation, using a one-use locally generated certificate removed immediately after the build | Final shipping source compiles, dexes, packages, and passes Release-vital checks | Production upload key, Play App Signing, signed RC identity, or store acceptance |
 | Server Python 3.12 | Ruff and runtime/dev dependency audits green; 296 passed and 63 environment-gated skips | Source behavior and dependency policy in the isolated local environment | Container, PostgreSQL, public topology, or production operations |
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | Release controls 9/9; release-policy tests 25/25; health-claims 1,191 files clear; i18n audit and 49 tests pass; legal inventory 213 runtime plus 3 container inputs and 9 tests pass; private-data and all 36 operations records pass; 11 workflows parse | The exact staged source satisfies repository release, privacy, claims, localization, legal, and operations contracts | Hosted execution or store approval |
+| Staged repository policy matrix | Release controls 9/9; release-policy tests 25/25; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n audit and 49 tests pass; legal inventory 213 runtime plus 3 container inputs and 9 tests pass; private-data and all 36 operations records pass; 11 workflows parse | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, and operations contracts | Hosted execution or store approval |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment
@@ -207,8 +234,9 @@ external approval, signing authority, or elapsed production operation.
 - Changed paths: calibration, import provenance, Apple and Android score
   reconciliation and validity, Apple analysis retry semantics,
   comparison/export UI, compatibility labels, long-history tooling,
-  localization, metric rollback, key/security operations, release
-  workflows/policy, validation evidence, and release documentation.
+  localization, metric rollback, key/security operations, disclosed Apple and
+  Android Review Sample presentation/runtime gates, release workflows/policy,
+  validation evidence, and release documentation.
 - Commits: pending.
 - Branch and remote state: clean synchronized `main` at round start; the exact
   candidate is staged locally and passes all current local release gates.
@@ -226,10 +254,12 @@ external approval, signing authority, or elapsed production operation.
 
 - A complete source pass cannot close supplier, physical, participant,
   regulatory, carrier, signing, store, or elapsed production-operation gates.
-- Review Sample Mode remains open: Android has a separate demo application and
-  Apple has a debug-only fixture, but neither proves a disclosed production
-  review path isolated from the released app's BLE, storage, health, cloud,
-  Friends, notification, and Safety boundaries.
+- Review Sample source implementation is complete, but the exact
+  distribution-signed archive/AAB, private App Review/store-console record,
+  sanitized reviewer video, and store-operated journey remain open. Apple also
+  retains its pre-existing inert bootstrap construction before the sample
+  screen; source and simulator evidence proves operational work and sample
+  values stay isolated, not that the process constructs no local objects.
 - Seven-day raw and 30-day essential managed retention remains a measured,
   implemented candidate rather than the final owner-approved all-class policy.
 - The measured retained 365-day database is about 444 MB and exact
@@ -239,8 +269,8 @@ external approval, signing authority, or elapsed production operation.
 
 ## Next round
 
-1. Continue from the first remaining dependency after this execution round
-   closes.
+1. Continue from the first remaining external or signed-release dependency
+   after this execution round closes.
 
 ## Privacy check
 

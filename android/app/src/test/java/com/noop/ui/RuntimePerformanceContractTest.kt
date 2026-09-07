@@ -11,11 +11,10 @@ class RuntimePerformanceContractTest {
     fun launchDoesNotOpenWorkManagerOrRoomOnTheMainThreadBeforeCompose() {
         val main = source("com/noop/ui/MainActivity.kt")
         val application = source("com/noop/NoopApplication.kt")
+        val manifest = projectFile("src/main/AndroidManifest.xml")
 
         val setContent = main.indexOf("setContent {")
-        val deferredCall = main.indexOf("deferLaunchMaintenance()", startIndex = setContent)
         assertTrue("setContent must exist", setContent >= 0)
-        assertTrue("maintenance must begin after setContent", deferredCall > setContent)
 
         val preCompose = main.substring(0, setContent)
         assertFalse(preCompose.contains("DebugExportScheduler.reschedule"))
@@ -32,10 +31,29 @@ class RuntimePerformanceContractTest {
 
         val onCreate = application.substring(
             application.indexOf("override fun onCreate()"),
-            application.indexOf("override fun onConfigurationChanged"),
+            application.indexOf("fun startOperationalRuntime()"),
         )
+        assertTrue(onCreate.contains("if (hasAcceptedCurrentTerms())"))
+        assertFalse(onCreate.contains("resolveActiveDeviceId()"))
+        assertFalse(onCreate.contains("deferProcessMaintenance()"))
         assertFalse(onCreate.contains("SafetyContactSetupReminderScheduler.reconcile(this)"))
         assertFalse(onCreate.contains("FriendsSyncScheduler.reconcile(this)"))
+
+        val operational = application.substring(
+            application.indexOf("fun startOperationalRuntime()"),
+            application.indexOf("override fun onTrimMemory"),
+        )
+        assertTrue(operational.contains("resolveActiveDeviceId()"))
+        assertTrue(operational.contains("deferProcessMaintenance()"))
+
+        assertTrue(application.contains("androidx.work.Configuration.Provider"))
+        assertTrue(application.contains("override val workManagerConfiguration"))
+        assertTrue(manifest.contains("androidx.work.WorkManagerInitializer"))
+        assertTrue(
+            Regex(
+                """android:name="androidx\.work\.WorkManagerInitializer"\s+tools:node="remove"""",
+            ).containsMatchIn(manifest),
+        )
     }
 
     @Test
@@ -56,6 +74,16 @@ class RuntimePerformanceContractTest {
             File(userDir, "src/main/java/$relative"),
             File(userDir, "app/src/main/java/$relative"),
             File(userDir, "android/app/src/main/java/$relative"),
+        ).firstOrNull(File::isFile) ?: error("Could not locate $relative from $userDir")
+        return file.readText()
+    }
+
+    private fun projectFile(relative: String): String {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val file = listOf(
+            File(userDir, relative),
+            File(userDir, "app/$relative"),
+            File(userDir, "android/app/$relative"),
         ).firstOrNull(File::isFile) ?: error("Could not locate $relative from $userDir")
         return file.readText()
     }

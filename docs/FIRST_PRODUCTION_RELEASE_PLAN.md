@@ -759,7 +759,7 @@ updated, and recalled without improvising around user data or keys.
 |---|---|---|---|
 | A11.1 | PARTIAL | Keep the existing Apple bundle/App Group identities and prove paid distribution capabilities for app, widgets, Watch, and complications. | Valid signed archive and in-place upgrade |
 | A11.2 | OPEN | Create and protect Android upload key, Play App Signing identity, production package record, and recovery custody. | Signed AAB and key runbook |
-| A11.3 | OPEN | Implement a disclosed isolated Review Sample Mode that never touches production data, BLE, health stores, notifications, Friends, cloud, or Safety. | Release-build review journey |
+| A11.3 | PARTIAL | The shipping Apple and Android source now provides a disclosed deterministic Review Sample Mode whose fictional values remain in its presentation tree; operational work is blocked while it is active. Exercise the exact signed archive/AAB, record the sanitized reviewer journey, and enter private review information before closing. | Signed release-build review journey and store-console record |
 | A11.4 | OPEN | Complete App Privacy/Data Safety, export/encryption, medical/wellness, age/content, territory, trader, contact, pricing, tax/banking, and review answers. | Owner-approved store records |
 | A11.5 | OPEN | Capture final iPhone, iPad, Watch, and Android media from the exact signed release candidate using fictional data. | Validated, rights-reviewed media |
 | A11.6 | OPEN | Complete native-speaker review for every shipped locale and final accessibility acceptance. | Locale/accessibility sign-off |

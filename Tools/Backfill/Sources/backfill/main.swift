@@ -54,8 +54,12 @@ if let whoopExport, FileManager.default.fileExists(atPath: whoopExport.path) {
     var sessions: [CachedSleepSession] = []
     for sl in r.sleeps where !sl.isNap {
         guard let onset = sl.sleepOnset, let wake = sl.wakeOnset else { continue }
-        let stages = ["light": sl.lightSleepDurationMin ?? 0, "deep": sl.deepSleepDurationMin ?? 0,
-                      "rem": sl.remDurationMin ?? 0, "awake": sl.awakeDurationMin ?? 0]
+        let stages: [String: Double] = [
+            "light": sl.lightSleepDurationMin ?? 0,
+            "deep": sl.deepSleepDurationMin ?? 0,
+            "rem": sl.remDurationMin ?? 0,
+            "awake": sl.awakeDurationMin ?? 0,
+        ]
         let json = (try? JSONSerialization.data(withJSONObject: stages)).flatMap { String(data: $0, encoding: .utf8) }
         sessions.append(CachedSleepSession(startTs: Int(onset.timeIntervalSince1970), endTs: Int(wake.timeIntervalSince1970),
             efficiency: sl.sleepEfficiencyPct, restingHr: nil, avgHrv: nil, stagesJSON: json))

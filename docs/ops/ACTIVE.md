@@ -24,14 +24,21 @@ presentation calibration on Apple and Android, atomic cross-platform
 score-window publication, fail-closed import manifests, generic metric validity
 guards, Apple retry-on-persistence-failure semantics, a deterministic
 10/30/90/365-day history and exact-restore harness, neutral compatibility
-labels, and a machine-readable terminology ratchet. The current ledger has 396
-stable actions: 62 evidenced complete and 334 pending, split into 33 owner, 234
-engineering, 33 joint, and 34 external actions. Full local Android, server,
-package, macOS, localization, claims, legal, private-data, OpenTofu, and
-private-runtime checks pass; the final Apple simulator suite also passes.
-Release controls and scoped local cleanup pass; commit, push, exact-main hosted
-evidence, and repository protection remain in progress. The retained
-365-day synthetic profile is about 444 MB with a 1.33 GB temporary
+labels, a machine-readable terminology ratchet, and a disclosed deterministic
+Review Sample Mode in the shipping Apple and Android source. The current ledger
+has 396 stable actions: 64 evidenced complete and 332 pending, split into 33
+owner, 232 engineering, 33 joint, and 34 external actions. Full local Android,
+server, package, macOS, localization, claims, legal, private-data, OpenTofu,
+and private-runtime checks pass; the final Apple simulator suite also passes.
+Review Sample passes focused Apple standard/compact/exit-to-Terms simulator
+journeys, Android API 35 instrumentation, source-isolation contracts, and
+an iOS Release-simulator graph plus a one-use locally signed Android Release
+build. Android also removes WorkManager's pre-application initializer and the
+API 35 journey proves it remains uninitialized until Terms. Those are not
+production signing evidence. Exact signed-archive/store-console review evidence
+remains open. Release controls and scoped local cleanup pass; commit, push,
+exact-main hosted evidence, and repository protection remain in progress. The
+retained 365-day synthetic profile is about 444 MB with a 1.33 GB temporary
 backup/restore peak, so phone memory, thermal, background, collection, and
 low-storage budgets remain physical release gates. Evidence is being recorded
 in
@@ -80,7 +87,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 62 evidenced complete and 334 pending. New owner
+with 396 stable actions: 64 evidenced complete and 332 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and

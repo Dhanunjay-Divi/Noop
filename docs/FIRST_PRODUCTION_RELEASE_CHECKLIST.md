@@ -635,10 +635,24 @@ position without changing its ID. This inbox intentionally starts empty.
   `StrandiOS/System/ShakeDiagnosticReport.swift`,
   `android/app/src/main/java/com/noop/ui/AppDiagnosticReport.kt`,
   `ops/rounds/2026-09-07-production-checklist-execution.md`)
-- [ ] MOB-290 [ENG] Add a disclosed isolated Review Sample Mode for store
-  reviewers without hardware.
-- [ ] MOB-300 [ENG] Ensure Review Sample Mode never touches BLE, production
-  storage, health stores, cloud, Friends, notifications, or Safety.
+- [x] MOB-290 [ENG] Add a disclosed isolated Review Sample Mode for store
+  reviewers without hardware. (Evidence:
+  `StrandiOS/App/ReviewSampleMode.swift`,
+  `android/app/src/main/java/com/noop/ui/ReviewSampleMode.kt`,
+  `NOOPiOSUITests/NOOPiOSUITests.swift`,
+  `android/app/src/androidTest/java/com/noop/ui/ReviewSampleInstrumentedTest.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] MOB-300 [ENG] Ensure Review Sample Mode never touches BLE, production
+  storage, health stores, cloud, Friends, notifications, or Safety. (Evidence:
+  the sample presentation trees contain no operational dependencies or
+  persistence/network tasks; Android defers Room, BLE, cloud, and workers until
+  current Terms are accepted, removes WorkManager's pre-application AndroidX
+  Startup initializer, and proves on API 35 that WorkManager stays
+  uninitialized through sample exit to Terms; Apple starts `AppModel` with
+  operational work disabled and never writes sample values to its constructed
+  inert bootstrap objects; source contracts, focused simulator/device tests,
+  and Release builds are recorded in
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 
 ## 9. Storage, performance, backup, and recovery
 
@@ -908,7 +922,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] STO-180 [ENG] Record a sanitized reviewer video for hardware setup and
   truthful unavailable states.
 - [ ] STO-190 [ENG] Provide the disclosed Review Sample Mode path and private
-  review information.
+  review information. (Source path complete on Apple and Android; exact signed
+  archive/AAB exercise, sanitized reviewer video, and private App Review/store
+  console information remain pending. Evidence:
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] STO-200 [JOINT] Approve final names, descriptions, keywords, release
   notes, screenshots, limitations, and support copy.
 - [ ] STO-210 [OWNER] Keep first storefront release under manual release

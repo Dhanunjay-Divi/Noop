@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -147,6 +148,7 @@ fun TermsGateScreen(onAccept: () -> Unit) {
                     style = NoopType.title1,
                     color = Palette.textPrimary,
                     textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("noop.terms.title"),
                 )
                 Text(
                     stringResource(R.string.terms_subtitle),

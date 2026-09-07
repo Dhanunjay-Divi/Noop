@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fixed English App Review copy. This private pre-release path is supplied to store reviewers. -->
+    <string name="review_sample_label" translatable="false">REVIEW SAMPLE · FICTIONAL DATA</string>
+    <string name="review_sample_entry_title" translatable="false">Explore NOOP without hardware</string>
+    <string name="review_sample_entry_body" translatable="false">Review a complete fictional day before pairing a band or granting permissions.</string>
+    <string name="review_sample_card_title" translatable="false">Review Sample</string>
+    <string name="review_sample_card_body" translatable="false">Runs in memory with fictional wellness values. Bluetooth, Health Connect, cloud, Friends, notifications, and Safety actions stay off.</string>
+    <string name="review_sample_explore" translatable="false">Explore Review Sample</string>
+    <string name="review_sample_continue_setup" translatable="false">Continue setup</string>
+    <string name="review_sample_disclosure_title" translatable="false">Fictional sample wellness data</string>
+    <string name="review_sample_disclosure_warning" translatable="false">No sensor or medical reading is being taken.</string>
+    <string name="review_sample_in_memory_title" translatable="false">In memory only</string>
+    <string name="review_sample_in_memory_body" translatable="false">The sample is deterministic and is discarded when you exit.</string>
+    <string name="review_sample_external_title" translatable="false">No external activity</string>
+    <string name="review_sample_external_body" translatable="false">No Bluetooth scan, Health Connect access, upload, Friends request, notification, or Safety action can start.</string>
+    <string name="review_sample_wellness_title" translatable="false">General wellness illustration</string>
+    <string name="review_sample_wellness_body" translatable="false">Values demonstrate product presentation only and are not medical advice.</string>
+    <string name="review_sample_enter" translatable="false">Enter Review Sample</string>
+    <string name="review_sample_back" translatable="false">Back</string>
+    <string name="review_sample_exit" translatable="false">Exit Review Sample</string>
+    <string name="review_sample_good_morning" translatable="false">Good morning</string>
+    <string name="review_sample_fictional_monday" translatable="false">Fictional Monday · updated 8:12 AM</string>
+    <string name="review_sample_steady_capacity" translatable="false">Steady capacity</string>
+    <string name="review_sample_balanced_day" translatable="false">A balanced day is appropriate in this fictional example.</string>
+    <string name="review_sample_recovery" translatable="false">Recovery</string>
+    <string name="review_sample_effort" translatable="false">Effort</string>
+    <string name="review_sample_hrv" translatable="false">HRV</string>
+    <string name="review_sample_resting_hr" translatable="false">Resting HR</string>
+    <string name="review_sample_blood_oxygen" translatable="false">Blood oxygen</string>
+    <string name="review_sample_open_detail" translatable="false">Open detail</string>
+    <string name="review_sample_next_action" translatable="false">Next useful action</string>
+    <string name="review_sample_next_action_body" translatable="false">Take a short walk after lunch and keep tonight’s 10:35 PM wind-down.</string>
+    <string name="review_sample_last_seven_days" translatable="false">Last 7 fictional days</string>
+    <string name="review_sample_day_1" translatable="false">T</string>
+    <string name="review_sample_day_2" translatable="false">W</string>
+    <string name="review_sample_day_3" translatable="false">T</string>
+    <string name="review_sample_day_4" translatable="false">F</string>
+    <string name="review_sample_day_5" translatable="false">S</string>
+    <string name="review_sample_day_6" translatable="false">S</string>
+    <string name="review_sample_day_7" translatable="false">M</string>
+    <string name="review_sample_how_to_read" translatable="false">How to read this</string>
+    <string name="review_sample_how_to_read_body" translatable="false">NOOP compares a day with the person’s own recent baseline. A real value appears only when its required evidence is available.</string>
+    <string name="review_sample_recovery_summary" translatable="false">Ready for a productive day with moderate training.</string>
+    <string name="review_sample_effort_summary" translatable="false">Daily movement and the sample workout both contribute.</string>
+    <string name="review_sample_sleep_summary" translatable="false">92% of the fictional sleep need was met.</string>
+    <string name="review_sample_hrv_summary" translatable="false">Inside the fictional 30-day baseline of 58–67 ms.</string>
+    <string name="review_sample_rhr_summary" translatable="false">Stable against the fictional baseline of 53–57 bpm.</string>
+    <string name="review_sample_spo2_summary" translatable="false">A fictional overnight estimate, not a medical measurement.</string>
+    <string name="review_sample_interval" translatable="false">Interval</string>
+    <string name="review_sample_strength_training" translatable="false">Strength training</string>
+    <string name="review_sample_workout_duration" translatable="false">42 min</string>
+    <string name="review_sample_fictional_session" translatable="false">Fictional session · 6:10 PM</string>
+    <string name="review_sample_average_hr" translatable="false">Average heart rate</string>
+    <string name="review_sample_peak_hr" translatable="false">Peak heart rate</string>
+    <string name="review_sample_active_energy" translatable="false">Active energy</string>
+    <string name="review_sample_workout_effort" translatable="false">Workout effort</string>
+    <string name="review_sample_weekly_plan" translatable="false">Weekly plan</string>
+    <string name="review_sample_weekly_plan_body" translatable="false">2 of 3 fictional sessions complete</string>
+    <string name="review_sample_wake_events" translatable="false">Wake events</string>
+    <string name="review_sample_sleep_duration" translatable="false">7h 42m</string>
+    <string name="review_sample_sleep_span" translatable="false">10:48 PM – 6:46 AM</string>
+    <string name="review_sample_wake_events_body" translatable="false">3 brief fictional events · 18 minutes awake after sleep onset</string>
+    <string name="review_sample_awake" translatable="false">Awake</string>
+    <string name="review_sample_light" translatable="false">Light</string>
+    <string name="review_sample_deep" translatable="false">Deep</string>
+    <string name="review_sample_rem" translatable="false">REM</string>
+    <string name="review_sample_friends" translatable="false">Friends</string>
+    <string name="review_sample_privacy" translatable="false">Data Sources &amp; Privacy</string>
+    <string name="review_sample_devices" translatable="false">Devices</string>
+    <string name="review_sample_isolation" translatable="false">Review isolation</string>
+    <string name="review_sample_isolation_body" translatable="false">No sample value is written to the NOOP database, Health Connect, cloud storage, or a notification schedule.</string>
+    <string name="review_sample_friends_body" translatable="false">The review sample never contacts real people. A fictional circle is shown only to demonstrate consent-first sharing.</string>
+    <string name="review_sample_privacy_body" translatable="false">All permissions and network lanes remain off. The fictional values live only in this view hierarchy and disappear on exit.</string>
+    <string name="review_sample_devices_body" translatable="false">No hardware is connected. Scanning, pairing, commands, and background collection are disabled in Review Sample.</string>
+    <string name="review_sample_circle" translatable="false">Sample circle</string>
+    <string name="review_sample_three_members" translatable="false">3 fictional members</string>
+    <string name="review_sample_pokes" translatable="false">Pokes</string>
+    <string name="review_sample_location" translatable="false">Location</string>
+    <string name="review_sample_not_shared" translatable="false">Not shared</string>
+    <string name="review_sample_disabled" translatable="false">Disabled</string>
+    <string name="review_sample_not_requested" translatable="false">Not requested</string>
+    <string name="review_sample_off" translatable="false">Off</string>
+    <string name="review_sample_connected_device" translatable="false">Connected device</string>
+    <string name="review_sample_none" translatable="false">None</string>
+    <string name="review_sample_bluetooth_scan" translatable="false">Bluetooth scan</string>
+    <string name="review_sample_stored_hardware_data" translatable="false">Stored hardware data</string>
+</resources>

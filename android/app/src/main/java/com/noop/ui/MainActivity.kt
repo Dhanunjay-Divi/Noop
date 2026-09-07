@@ -2,6 +2,7 @@ package com.noop.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.SharedPreferences
 import android.hardware.Sensor
@@ -35,14 +36,8 @@ import com.noop.NoopApplication
 import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
-import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.managed.ManagedCloudScheduler
-import com.noop.notif.DailyReviewReminders
-import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.StaleSyncReminderScheduler
-import com.noop.safety.SafetyIncidentStatusMonitor
-import com.noop.safety.SafetyLiveLocationSession
-import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,7 +77,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         stageManagedFriendsLink(intent)
         // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
         // trusted route now; AppRoot consumes it once its navigation host mounts.
-        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        }
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Load the saved "Card transparency" so every frosted card renders at the chosen opacity from launch.
         CardAppearance.init(this)
@@ -121,7 +118,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         ChartStylePrefs.load(this)
         // Decode the optional on-device profile photo (if set) before first composition so the Today
         // header + Settings avatars show it from the first frame. No-op when no photo is set.
-        ProfileAvatarStore.load(this)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            ProfileAvatarStore.load(this)
+        }
 
         setContent {
             NoopTheme {
@@ -137,7 +136,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             }
         }
         requestDemoReportIfNeeded()
-        deferLaunchMaintenance()
     }
 
     override fun onStart() {
@@ -145,14 +143,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         com.noop.AppDiagnosticsRecorder.setApplicationActive(true)
         com.noop.AppDiagnosticsRecorder.attachWindow(window)
         com.noop.AppDiagnosticsRecorder.record("activity.started")
-        StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
-        ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
+            ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext)
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        accelerometer?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            accelerometer?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
         }
         com.noop.AppDiagnosticsRecorder.record("activity.resumed")
     }
@@ -164,7 +166,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     override fun onStop() {
-        StaleSyncReminderScheduler.onAppBackgrounded(applicationContext)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            StaleSyncReminderScheduler.onAppBackgrounded(applicationContext)
+        }
         com.noop.AppDiagnosticsRecorder.detachWindow()
         com.noop.AppDiagnosticsRecorder.setApplicationActive(false)
         com.noop.AppDiagnosticsRecorder.record(
@@ -186,11 +190,14 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         stageManagedFriendsLink(intent)
         // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
         // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
-        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        if ((application as NoopApplication).operationalRuntimeStarted) {
+            NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        }
         requestDemoReportIfNeeded()
     }
 
     private fun stageManagedFriendsLink(intent: Intent) {
+        if (!(application as NoopApplication).operationalRuntimeStarted) return
         val service = (application as NoopApplication).managedCloud
         val staged = service.stageSocialProfileLink(intent.data) ||
             service.stageSocialInviteLink(intent.data)
@@ -202,7 +209,25 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         )
     }
 
+    internal fun resumeAfterOperationalRuntimeStarted() {
+        if (!(application as NoopApplication).operationalRuntimeStarted) return
+        stageManagedFriendsLink(intent)
+        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
+        ProfileAvatarStore.load(this)
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+            StaleSyncReminderScheduler.onAppForegrounded(applicationContext)
+            ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext)
+        }
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            accelerometer?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+        }
+        com.noop.AppDiagnosticsRecorder.record("activity.operational_runtime_available")
+    }
+
     override fun onSensorChanged(event: SensorEvent) {
+        if (!(application as NoopApplication).operationalRuntimeStarted) return
         if (event.sensor.type != Sensor.TYPE_ACCELEROMETER || event.values.size < 3) return
         if (
             shakeDetector.sample(
@@ -245,42 +270,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         if (needed.isNotEmpty()) permissionLauncher.launch(needed)
     }
 
-    /**
-     * Repair opt-in schedules only after the Compose root is installed. WorkManager initialization opens
-     * its own database and previously ran seven times on the main thread before [setContent], adding
-     * avoidable cold-start latency even when every feature was off. These calls are restart-safe and
-     * idempotent; moving them to IO changes no schedule or privacy gate.
-     */
-    private fun deferLaunchMaintenance() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            // Daily debug export and folder backup schedules self-heal after reboot/update.
-            runCatching { DebugExportScheduler.reschedule(applicationContext) }
-            runCatching { BackupSync.reschedule(applicationContext) }
-            runCatching { BackupSync.catchUpIfDue(applicationContext) }
-
-            // Optional self-hosted delivery remains default-off and network constrained.
-            runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
-            runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
-            runCatching { ManagedCloudScheduler.reconcile(applicationContext) }
-            runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(applicationContext) }
-
-            // Health Connect and hydration automation remain independently opt-in.
-            runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
-            runCatching { DailyReviewReminders.reconcile(applicationContext) }
-            runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
-
-            // Restore only an already-open Safety incident; this never creates one.
-            runCatching {
-                SafetyLiveLocationSession.initialize(applicationContext)
-                SafetyIncidentStatusMonitor.reconcile(applicationContext)
-            }
-        }
-    }
 }
 
 internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
 internal const val DEMO_RELEASE_WELCOME_ROUTE = "release_welcome"
 internal const val DEMO_APP_REPORT_ROUTE = "app-report"
+internal const val DEMO_REVIEW_SAMPLE_ROUTE = "review-sample"
 
 internal fun appLaunchIntent(context: Context): Intent =
     context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -1262,8 +1257,10 @@ object NoopPrefs {
 @Composable
 fun NoopRoot(demoRoute: String? = null) {
     val context = LocalContext.current
+    val application = context.applicationContext as NoopApplication
     val prefs = remember { NoopPrefs.of(context) }
-    val demoBypass = BuildConfig.DEBUG && demoRoute != null
+    val forceReviewSample = BuildConfig.DEBUG && demoRoute == DEMO_REVIEW_SAMPLE_ROUTE
+    val demoBypass = BuildConfig.DEBUG && demoRoute != null && !forceReviewSample
     if (BuildConfig.DEBUG && demoRoute == DEMO_RELEASE_WELCOME_ROUTE) {
         WhatsNewSheet(
             onClose = {},
@@ -1271,6 +1268,50 @@ fun NoopRoot(demoRoute: String? = null) {
             showFirstInstallGlow = true,
             onSkip = {},
         )
+        return
+    }
+
+    // Review Sample is offered before Terms on a fresh install and remains entirely process-only. No
+    // production ViewModel, Room store, BLE client, worker, permission, cloud service, or notification
+    // scheduler is constructed while any of these three phases is visible.
+    var acceptedTerms by remember {
+        mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
+    }
+    var reviewSamplePhase by remember { mutableStateOf(ReviewSamplePhase.ENTRY) }
+    val reviewSampleOffered =
+        !demoBypass && (forceReviewSample || acceptedTerms != Terms.CURRENT_VERSION)
+    if (reviewSampleOffered && reviewSamplePhase != ReviewSamplePhase.CONTINUE_SETUP) {
+        when (reviewSamplePhase) {
+            ReviewSamplePhase.ENTRY -> ReviewSampleEntry(
+                onExplore = { reviewSamplePhase = ReviewSamplePhase.DISCLOSURE },
+                onContinueSetup = { reviewSamplePhase = ReviewSamplePhase.CONTINUE_SETUP },
+            )
+            ReviewSamplePhase.DISCLOSURE -> ReviewSampleDisclosure(
+                onBack = { reviewSamplePhase = ReviewSamplePhase.ENTRY },
+                onEnter = { reviewSamplePhase = ReviewSamplePhase.ACTIVE },
+            )
+            ReviewSamplePhase.ACTIVE -> ReviewSampleRoot(
+                onExit = { reviewSamplePhase = ReviewSamplePhase.CONTINUE_SETUP },
+            )
+            ReviewSamplePhase.CONTINUE_SETUP -> Unit
+        }
+        return
+    }
+
+    // Terms acknowledgment gate, over EVERYTHING (before onboarding/pairing/Bluetooth) until the
+    // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
+    if (acceptedTerms != Terms.CURRENT_VERSION && !demoBypass) {
+        TermsGateScreen(onAccept = {
+            val stored = prefs.edit()
+                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
+                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_AT, java.time.Instant.now().toString())
+                .commit()
+            if (stored) {
+                application.startOperationalRuntime()
+                context.mainActivityOrNull()?.resumeAfterOperationalRuntimeStarted()
+                acceptedTerms = Terms.CURRENT_VERSION
+            }
+        })
         return
     }
 
@@ -1310,22 +1351,25 @@ fun NoopRoot(demoRoute: String? = null) {
         if (onboarded) UpdateStore.from(context).seedWhatsNewIfNeeded()
     }
 
-    // Terms acknowledgment gate, over EVERYTHING (before onboarding/pairing/Bluetooth) until the
-    // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
-    var acceptedTerms by remember {
-        mutableStateOf(prefs.getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, "") ?: "")
+    // Defensive process-restoration edge: current Terms normally start the runtime in Application.onCreate,
+    // and first acceptance starts it above. If either process edge was interrupted, start once here and
+    // hold the operational tree unmounted until the idempotent bootstrap returns.
+    var operationalRuntimeReady by remember {
+        mutableStateOf(application.operationalRuntimeStarted)
     }
-    if (acceptedTerms != Terms.CURRENT_VERSION && !demoBypass) {
-        TermsGateScreen(onAccept = {
-            prefs.edit()
-                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
-                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_AT, java.time.Instant.now().toString())
-                .apply()
-            acceptedTerms = Terms.CURRENT_VERSION
-        })
+    LaunchedEffect(application, acceptedTerms) {
+        if (!operationalRuntimeReady && (acceptedTerms == Terms.CURRENT_VERSION || demoBypass)) {
+            application.startOperationalRuntime()
+            operationalRuntimeReady = application.operationalRuntimeStarted
+            if (operationalRuntimeReady) {
+                context.mainActivityOrNull()?.resumeAfterOperationalRuntimeStarted()
+            }
+        }
+    }
+    if (!operationalRuntimeReady && !demoBypass) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {}
         return
     }
-
     // Construct the operational model only after clickwrap acceptance. AppViewModel owns BLE clients
     // and long-lived jobs, so creating it above the gate would make the visual consent screen a lie.
     val appViewModel: AppViewModel = viewModel()
@@ -1402,4 +1446,10 @@ fun NoopRoot(demoRoute: String? = null) {
             }
         }
     }
+}
+
+private tailrec fun Context.mainActivityOrNull(): MainActivity? = when (this) {
+    is MainActivity -> this
+    is ContextWrapper -> baseContext.mainActivityOrNull()
+    else -> null
 }
