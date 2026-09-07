@@ -14,6 +14,14 @@ CDSCO, or India in any doc or server file. No Indian locale ships. Every complia
 > V1 has no user-facing unpair; remote terms and a still-undecided 14- or
 > 30-day return policy now require India-specific consumer and operations
 > review.
+>
+> **2026-09-07 update:** the owner has placed manual, user-confirmed app
+> SOS trusted-contact paging in the first-release target, including
+> latest-location-only sharing for the selected 8- or 12-hour incident
+> window. That supersedes the older local-only recommendation for this one
+> feature and makes DLT registration, provider delivery, physical-phone,
+> legal, monitoring, and on-call evidence launch gates. Band-triggered and
+> automatic paging remain separate later gates.
 > The original assessment below is retained as historical rationale; its
 > statement that the repository has no India coverage is no longer current.
 

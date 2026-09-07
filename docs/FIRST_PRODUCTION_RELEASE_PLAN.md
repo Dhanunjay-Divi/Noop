@@ -68,6 +68,11 @@ remains manual until the final go/no-go review.
 - Automatic medical, anomaly, Rhythm, SpO2, temperature, stress, or fall
   paging remains unavailable without its separate validated and regulatory
   program.
+- The first release targets explicit, user-confirmed app SOS paging to accepted
+  trusted contacts. The app initiates the incident; the server performs
+  acknowledged SMS/voice delivery. Responder links expose only the latest
+  location during the selected 8- or 12-hour incident window and no route
+  history.
 - Mobile diagnostics remain bounded, local, and user-reviewed. Backend events
   remain payload-free. Neither may contain health values, user text,
   credentials, dynamic identifiers, raw frames, or arbitrary errors.
@@ -180,11 +185,11 @@ blockers:
 | Terms delivery | **Confirmed:** canonical terms load from NOOP-controlled remote storage and the full document is not persisted in the app | Claim must bind to one immutable verified version while remaining auditable and publicly accessible. |
 | Pre-home plan choice | **Confirmed:** show NOOP and an accessible gold NOOP+ option before Home | Both platforms need one honest, non-coercive product boundary. |
 | Payment | **Pending:** show no working checkout until India gateway, store billing, tax, refund, and receipt behavior are approved | A placeholder cannot charge, grant entitlement, or imply production billing. |
-| First release network scope | Band ownership claim is required; enable NOOP+ data services only after every production gate passes | Ownership identity must not silently become managed health-data consent. |
+| First release network scope | Band ownership claim and manual app SOS trusted-contact paging are targeted; enable NOOP+ data services only after every production gate passes | Ownership identity must not silently become managed health-data consent, and provider credentials cannot live in a mobile client. |
 | Legacy direct-band support | Keep during bring-up; remove from the public first-party release after NOOP Band physical parity, while preserving old data and import provenance | Removing it earlier destroys the only hardware development path; retaining it as `Noop Band` is false. |
 | Public version | Validate `1.0.0` with monotonic platform build numbers | Current source version is an internal development sequence, not necessarily the correct first storefront identity. |
 | Launch languages | English plus professionally reviewed launch-market locales | Machine completeness does not establish native-speaker quality. |
-| Safety paging at launch | Disabled unless carrier, operations, legal, and physical evidence all pass | A partially reliable safety claim is worse than an unavailable one. |
+| Safety paging at launch | **Confirmed target:** manual, user-confirmed app SOS with latest-only location; provider delivery remains unavailable until carrier, operations, legal, and physical evidence all pass | App initiation does not remove the need for reliable server delivery, acknowledgement, and an honest failure path. |
 | Medical posture | General wellness only | Clinical claims trigger separate evidence, quality-system, and regulatory work. |
 
 ## 5. First-party NOOP Band input dossier
@@ -554,7 +559,7 @@ Statuses:
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| R0.1 | PARTIAL | India-first and USA-second are recorded; territories, languages, network features, pricing, NOOP+, and contact paging remain open. | Signed product scope in the release record |
+| R0.1 | PARTIAL | India-first, USA-second, and manual app SOS trusted-contact paging are recorded; territories, languages, pricing, and NOOP+ enablement remain open. | Signed product scope in the release record |
 | R0.2 | OPEN | Name accountable owners for firmware, hardware, mobile, backend, security, privacy, metric validation, manufacturing, support, and release. | Owner/RACI table with backups |
 | R0.3 | OPEN | Decide the legacy direct-band compatibility end state. | Written migration and support policy |
 | R0.4 | OPEN | Select public marketing version and monotonic Apple/Android build numbers. | Upgrade-tested version map |
@@ -712,7 +717,7 @@ reference protocol, confidence/coverage rule, and honest failure state.
 | C8.7 | OPEN | Add production HTTPS universal/app links and opaque minimal APNs/FCM wake delivery with token lifecycle and abuse controls. | Closed-app physical delivery matrix |
 | C8.8 | PARTIAL | Migrate the current phone-OTP-only staging identity to the approved release account: verified email/password plus optional linked phone, without embedding provider credentials. | Email, optional controlled-number, rate-limit, recovery, and support evidence |
 | C8.9 | PARTIAL | Complete Friends invite, consent, removal, block, badge, poke, haptic, deletion, and abuse/support operations. | Two-user physical and backend matrix |
-| C8.10 | OPEN | If contact paging ships, complete country-specific sender registration, dual-provider strategy, SMS/voice/DTMF/callback/retry/cancel evidence, and 24/7 operations. | Carrier IDs, latency, failover, and on-call evidence |
+| C8.10 | OPEN | Complete country-specific sender registration, dual-provider strategy, SMS/voice/DTMF/callback/retry/cancel evidence, and 24/7 operations for manual app SOS paging. | Carrier IDs, latency, failover, and on-call evidence |
 
 **Exit:** every enabled managed feature is production-operated and disclosed.
 Otherwise its enrollment and store claims stay disabled.

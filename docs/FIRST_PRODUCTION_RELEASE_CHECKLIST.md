@@ -62,8 +62,12 @@ position without changing its ID. This inbox intentionally starts empty.
   (Evidence:
   `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
 - [ ] DEC-050 [OWNER] Confirm whether Friends is enabled in the first release.
-- [ ] DEC-060 [OWNER] Confirm that contact paging is disabled unless every
-  carrier, legal, physical, and operations gate passes.
+- [x] DEC-060 [OWNER] Include manual, user-confirmed app SOS paging to accepted
+  trusted contacts in the first public release. Share only the newest location
+  for the user's selected 8- or 12-hour incident window, and stop sharing when
+  the incident is cancelled, resolved, or expires. Band-triggered and automatic
+  origins follow their separate gates. (Evidence:
+  `ops/rounds/2026-09-07-launch-owner-decisions.md`, 2026-09-07)
 - [ ] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
   temperature, stress, and fall paging remains unavailable.
 - [ ] DEC-080 [OWNER] Confirm the public product and band names after trademark
@@ -734,9 +738,9 @@ position without changing its ID. This inbox intentionally starts empty.
   block, delete, badges, pokes, push, and eligible haptics.
 - [ ] CLD-210 [ENG] Add Friends abuse reporting, support, throttling, and
   incident operations before broader discovery.
-- [ ] CLD-220 [EXT] If paging ships, complete country-specific sender,
-  template, carrier, and provider registration.
-- [ ] CLD-230 [ENG] If paging ships, prove SMS, voice, DTMF, callback, retry,
+- [ ] CLD-220 [EXT] Complete country-specific sender, template, carrier, and
+  provider registration for manual app SOS paging.
+- [ ] CLD-230 [ENG] Prove SMS, voice, DTMF, callback, retry,
   cancellation, provider failover, worker restart, and all-contact failure.
 - [ ] CLD-240 [OWNER] Keep NOOP+ and paging enrollment disabled until every
   applicable point above is complete.

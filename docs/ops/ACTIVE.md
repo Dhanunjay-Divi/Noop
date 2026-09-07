@@ -18,6 +18,20 @@ Last updated: **2026-09-07**
 
 ## Active work
 
+The launch owner-decision round is in progress. Source review confirms that
+Firebase Identity Platform handles managed account and phone-OTP identity;
+Twilio is used only for optional Safety contact SMS/voice paging, DTMF
+acknowledgement, and provider callbacks. The current shell has no Twilio CLI,
+standard profile, or Twilio-named environment configuration, and the configured
+private GCP project has no Twilio- or paging-named secret binding. A browser
+login therefore does not yet constitute deployable paging configuration. The
+owner has now placed manual, user-confirmed app SOS paging with latest-location-
+only sharing in the first-release target. Existing server, Android, and Apple
+focused contracts pass, but real provider traffic remains unavailable while
+India TRAI DLT, carrier, legal, physical-phone, monitoring, failover, and
+operations gates remain open. Evidence is recorded in
+[Launch owner decisions](rounds/2026-09-07-launch-owner-decisions.md).
+
 Post-release local cleanup is complete. Four local HTTP relays, three Cloud SQL
 proxies, two OpenGym previews, the NOOP Gradle daemon, one Android emulator,
 three iOS simulators, and a 313 MB synthetic PostgreSQL test cluster were
@@ -32,7 +46,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 43 evidenced complete and 353 pending. New owner
+with 396 stable actions: 44 evidenced complete and 352 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
