@@ -1,12 +1,12 @@
-# Release workflow: bump the version and cut a proper release (not a rolling snapshot) so the in-app
+# Release workflow: cut a proper release from an already reviewed version commit (not a rolling
+# snapshot) so the in-app
 # "Check for updates" — which reads GitHub `releases/latest`, and GitHub excludes prereleases —
 # points at the canonical project release.
 #
-# The `bump` input (patch / minor / major / none) increments the version IN SOURCE — both
-# android/app/build.gradle.kts (versionName + versionCode) and project.yml (MARKETING_VERSION +
-# CURRENT_PROJECT_VERSION) — and commits that to the dispatched branch, so the built app actually
-# REPORTS the new version. Then it publishes a fixed, non-prerelease `v<VERSION>` release with the
-# version-stamped artifacts. A new release remains a draft until every platform
+# The version, build numbers, localized What's New entry, and release notes must already be committed
+# through protected `main`. This workflow verifies every required check on that exact commit before it
+# creates a draft, then publishes a fixed, non-prerelease `v<VERSION>` release with version-stamped
+# artifacts. A new release remains a draft until every platform
 # artifact is attached and a publicly fetchable AltStore source is verified on `main`; only then
 # is it published as latest, so a failed build cannot strand users on an
 # empty/incomplete release. UpdateCheck finds the
@@ -20,17 +20,12 @@ name: Community release build
 on:
   workflow_dispatch:
     inputs:
-      bump:
-        description: "Version bump (patch = 0.0.x, minor = 0.x.0, major = x.0.0)"
-        type: choice
-        options: [patch, minor, major, none]
-        default: patch
       version:
-        description: "Explicit version override, e.g. 8.3.0 (blank = apply the bump above)"
-        required: false
-        default: ""
+        description: "Confirm the reviewed version already committed on main, e.g. 8.3.0"
+        required: true
 
 permissions:
+  checks: read
   contents: write
 
 concurrency:
@@ -48,13 +43,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
-          # A workflow re-run keeps its original event SHA. Build from the
-          # latest requested branch instead, while retaining full history so
-          # the original SHA can determine the idempotent target version below.
-          ref: ${{ github.ref_name }}
+          # A re-run must use the same immutable, reviewed source commit.
+          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact protected-main source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - name: Enforce repository release controls
         run: python3 Tools/release-control-gate.py check
+      - name: Require every merge check on the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 Tools/required-ci-gate.py verify-github
+          --repository "$GITHUB_REPOSITORY"
+          --sha "$GITHUB_SHA"
       - name: Enforce redistribution provenance and notices
         run: python3 Tools/release-legal-gate.py distribution
       - name: Reject unsupported health and delivery claims
@@ -83,78 +89,45 @@ jobs:
       - id: b
         env:
           GH_TOKEN: ${{ github.token }}
-          BUMP: ${{ github.event.inputs.bump }}
-          OVERRIDE: ${{ github.event.inputs.version }}
+          CONFIRMED_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
           GRADLE=android/app/build.gradle.kts
 
-          # Android versionName is the source of truth UpdateCheck compares
-          # against. Compute the requested version from the immutable dispatch
-          # SHA, not the latest checkout: GitHub's one-click re-run keeps that
-          # original SHA, so a retry targets the same version instead of
-          # accidentally incrementing twice.
+          # Android versionName is the source of truth UpdateCheck compares against.
+          # Apple and the operator confirmation must match the exact reviewed commit.
           CUR=$(grep -m1 'versionName = "' "$GRADLE" | sed -E 's/.*"([^"]+)".*/\1/')
-          BASE_GRADLE=$(git show "${GITHUB_SHA}:${GRADLE}") || {
-            echo "::error::Cannot read ${GRADLE} at dispatch SHA ${GITHUB_SHA}."
-            exit 1
-          }
-          BASE_CUR=$(grep -m1 'versionName = "' <<<"$BASE_GRADLE" | sed -E 's/.*"([^"]+)".*/\1/')
-          IFS=. read -r MA MI PA <<< "$BASE_CUR"; MA=${MA:-0}; MI=${MI:-0}; PA=${PA:-0}
-          case "${BUMP:-patch}" in
-            major) NEW="$((MA+1)).0.0" ;;
-            minor) NEW="${MA}.$((MI+1)).0" ;;
-            patch) NEW="${MA}.${MI}.$((PA+1))" ;;
-            none|"") NEW="$BASE_CUR" ;;
-            *) echo "Unknown bump: $BUMP" >&2; exit 1 ;;
-          esac
-          [ -n "${OVERRIDE:-}" ] && NEW="$OVERRIDE"
+          APPLE=$(grep -m1 'MARKETING_VERSION:' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
+          NEW="${CONFIRMED_VERSION:-}"
           [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "::error::Invalid release version: ${NEW}"
             exit 1
           }
-          if [ "$CUR" != "$BASE_CUR" ] && [ "$CUR" != "$NEW" ]; then
-            echo "::error::This run targets ${NEW}, but ${GITHUB_REF_NAME} is already ${CUR}. Dispatch a fresh release run."
+          if [ "$CUR" != "$NEW" ] || [ "$APPLE" != "$NEW" ]; then
+            echo "::error::Confirmed version ${NEW} does not match the reviewed Apple and Android source version."
             exit 1
           fi
           TAG="v${NEW}"
           echo "ver=$NEW" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Version: dispatch base $BASE_CUR; branch $CUR -> target $NEW (tag $TAG)"
+          echo "Version: reviewed source ${NEW} (tag ${TAG})"
 
-          if [ "$NEW" != "$CUR" ]; then
-            # Bump BOTH platforms' version + build number in source, then commit to the branch so the
-            # built artifacts report $NEW (each build number is an independent monotonic counter).
-            ACODE=$(grep -m1 'versionCode = ' "$GRADLE" | sed -E 's/.*versionCode = ([0-9]+).*/\1/')
-            ICODE=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*"([0-9]+)".*/\1/')
-            sed -i -E "s/versionName = \"[^\"]+\"/versionName = \"$NEW\"/" "$GRADLE"
-            sed -i -E "s/versionCode = [0-9]+/versionCode = $((ACODE+1))/" "$GRADLE"
-            sed -i -E "s/MARKETING_VERSION: \"[^\"]+\"/MARKETING_VERSION: \"$NEW\"/" project.yml
-            sed -i -E "s/CURRENT_PROJECT_VERSION: \"[0-9]+\"/CURRENT_PROJECT_VERSION: \"$((ICODE+1))\"/" project.yml
-            # In-app "What's New": generate the AppChangelog entry (both platforms) + bump its constant
-            # from docs/releases/<TAG>.md's whatsnew: front-matter, so the in-app card ships in sync with
-            # this version. Release notes and localization are mandatory: stop before committing/pushing
-            # if either gate fails, rather than publishing an app whose visible version and changelog differ.
-            NOTES_MD="docs/releases/${TAG}.md"
-            if [ ! -f "$NOTES_MD" ]; then
-              echo "::error::Missing ${NOTES_MD}; prepare and localize the release entry before dispatching."
-              exit 1
-            fi
-            python3 -m pip install --quiet pyyaml
-            python3 Tools/appchangelog-gen.py "$NOTES_MD"
-            python3 Tools/i18n_audit.py --ci HEAD
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -am "Release ${NEW}: bump version (${BUMP}) + build numbers + What's New"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+          NOTES_MD="docs/releases/${TAG}.md"
+          if [ ! -f "$NOTES_MD" ]; then
+            echo "::error::Missing ${NOTES_MD}; prepare and localize it in the release PR."
+            exit 1
           fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # The iOS build number (CURRENT_PROJECT_VERSION as it now stands in project.yml, bumped or not),
-          # for the AltStore manifest's buildVersion.
+          python3 -m pip install --quiet pyyaml
+          python3 Tools/appchangelog-gen.py "$NOTES_MD"
+          git diff --exit-code
+          python3 Tools/i18n_audit.py --ci HEAD
+
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          # The reviewed iOS build number for the AltStore manifest.
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
-          # Keep the immutable release as a DRAFT at the (possibly bumped)
-          # commit until all three platform artifacts and the AltStore source
+          # Keep the immutable release as a DRAFT at the reviewed commit until
+          # all three platform artifacts and the AltStore source
           # are complete. A retry may refresh an existing draft, but it must
           # never pull an already-published immutable release back into draft.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -165,7 +138,7 @@ jobs:
             fi
             echo "Release $TAG already exists as a draft — refreshing its target and assets."
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --draft --target "$(git rev-parse HEAD)"
+              --draft --target "$GITHUB_SHA"
           else
             # Release body = the required per-version changelog docs/releases/<TAG>.md, plus a
             # downloads footer. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source
@@ -211,7 +184,7 @@ jobs:
               printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (unsigned community artifact for authorized development installation)\n' "$NEW"
             } >> "$BODY"
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
-              --target "$(git rev-parse HEAD)" \
+              --target "$GITHUB_SHA" \
               --title "NOOP ${NEW}" --notes-file "$BODY"
           fi
 
@@ -224,7 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
-          ref: ${{ needs.bump.outputs.sha }}   # build the bumped commit
+          ref: ${{ needs.bump.outputs.sha }}   # build the reviewed commit
           persist-credentials: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0, pinned 2026-08-11
         with:
@@ -244,7 +217,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
-          ref: ${{ needs.bump.outputs.sha }}   # build the bumped commit
+          ref: ${{ needs.bump.outputs.sha }}   # build the reviewed commit
           persist-credentials: false
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0, pinned 2026-08-11
         with:
@@ -420,6 +393,19 @@ jobs:
     needs: [bump, android, macos, ios, altstore]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout exact reviewed source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+          persist-credentials: false
+      - name: Reverify required checks before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.bump.outputs.sha }}
+        run: >-
+          python3 Tools/required-ci-gate.py verify-github
+          --repository "$GITHUB_REPOSITORY"
+          --sha "$RELEASE_SHA"
       - name: Verify assets and publish as latest
         env:
           GH_TOKEN: ${{ github.token }}

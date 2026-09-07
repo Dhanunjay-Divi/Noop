@@ -10,30 +10,8 @@ name: Swift Packages CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'Packages/**'
-      - 'Tools/Backfill/**'
-      - 'Tools/StudyHarness/**'
-      - 'Tools/check-private-data.py'
-      - '**/*.zip'
-      - '**/*.csv'
-      - '**/*.noopbak'
-      - '**/*.sqlite'
-      - '**/*.db'
-      - '.github/workflows/swift-packages.yml'
   push:
     branches: [main]
-    paths:
-      - 'Packages/**'
-      - 'Tools/Backfill/**'
-      - 'Tools/StudyHarness/**'
-      - 'Tools/check-private-data.py'
-      - '**/*.zip'
-      - '**/*.csv'
-      - '**/*.noopbak'
-      - '**/*.sqlite'
-      - '**/*.db'
-      - '.github/workflows/swift-packages.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,8 +22,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: swift-packages-applicability
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine whether Swift package checks apply
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [[ "$BASE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA" "$GITHUB_SHA" |
+             grep -Eq '(^Packages/|^Tools/(Backfill|StudyHarness)/|^Tools/check-private-data\.py$|\.github/workflows/swift-packages\.yml$|\.(zip|csv|noopbak|sqlite|db)$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   swift-packages:
     name: swift-packages (${{ matrix.package }})
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -76,6 +91,8 @@ jobs:
 
   study-harness:
     name: study-harness
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: macos-15
     steps:
       - name: Checkout
@@ -96,6 +113,8 @@ jobs:
 
   history-harness:
     name: history-harness
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: macos-15
     steps:
       - name: Checkout
@@ -110,3 +129,30 @@ jobs:
       - name: Test synthetic history harness
         run: swift test
         working-directory: Tools/Backfill
+
+  swift-packages-required:
+    name: swift-packages-required
+    needs: [changes, swift-packages, study-harness, history-harness]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable Swift package job
+        env:
+          APPLICABILITY_RESULT: ${{ needs.changes.result }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          PACKAGES_RESULT: ${{ needs.swift-packages.result }}
+          STUDY_RESULT: ${{ needs.study-harness.result }}
+          HISTORY_RESULT: ${{ needs.history-harness.result }}
+        run: |
+          set -euo pipefail
+          test "$APPLICABILITY_RESULT" = "success"
+          if [ "$RUN_REQUIRED" = "true" ]; then
+            test "$PACKAGES_RESULT" = "success"
+            test "$STUDY_RESULT" = "success"
+            test "$HISTORY_RESULT" = "success"
+          else
+            test "$RUN_REQUIRED" = "false"
+            test "$PACKAGES_RESULT" = "skipped"
+            test "$STUDY_RESULT" = "skipped"
+            test "$HISTORY_RESULT" = "skipped"
+          fi

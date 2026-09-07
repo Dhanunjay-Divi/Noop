@@ -134,6 +134,18 @@ external approval, signing authority, or elapsed production operation.
 - Passed the staged release-control, health-claims, localization, runtime
   license, distribution-rights, private-data, operations-record, workflow
   syntax, and exact-diff whitespace gates.
+- The final release-control review found that path-filtered platform workflows
+  could not be configured as stable protected-branch requirements. Android,
+  Apple, Swift-package, and server CI now run an always-present applicability
+  job and publish one fail-closed required result. Expensive jobs still skip
+  irrelevant changes, but applicability errors, skipped applicable work, or
+  any failed heavy job make the stable result fail.
+- Added a machine-readable eight-context merge and release contract with
+  repository tests. The production release workflow now builds only the exact
+  reviewed `main` commit, cannot bump or commit a version inside CI, validates
+  that Apple, Android, release notes, localization, and in-app What's New
+  already match, and verifies every required check on the exact SHA before
+  draft creation and again before publication.
 - Reverified retained private GCP staging: OpenTofu format, validation, all
   three configuration tests, IAM-only runtime checks, and detailed live plan
   exit `0` pass with no drift.
@@ -188,7 +200,9 @@ external approval, signing authority, or elapsed production operation.
   long-running, persistence, device, or network operation. Existing Apple
   launch evidence records the fixed `operational=false` state; Android records
   only the bounded `runtime.operational_started` and
-  `activity.operational_runtime_available` transitions after consent.
+  `activity.operational_runtime_available` transitions after consent. Required
+  CI and release verification records only fixed workflow context names and
+  bounded missing, running, failed, skipped, or successful states.
 - Redaction, retention, and high-frequency controls: no raw health values,
   sensor rows, user text, credentials, identifiers, dynamic URLs, payloads, or
   arbitrary errors enter diagnostics.
@@ -215,6 +229,7 @@ external approval, signing authority, or elapsed production operation.
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
 | Staged repository policy matrix | Release controls 9/9; release-policy tests 25/25; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n audit and 49 tests pass; legal inventory 213 runtime plus 3 container inputs and 9 tests pass; private-data and all 36 operations records pass; 11 workflows parse | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, and operations contracts | Hosted execution or store approval |
+| Required merge and tag contract | Four platform workflow contracts and eight stable contexts pass local structural tests; release source mutation is rejected and exact-SHA verification is required twice | Applicable platform failures cannot be hidden by event path filters, and a production tag cannot be published from an unchecked source SHA | Hosted branch-protection state or a completed release |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment
@@ -236,10 +251,13 @@ external approval, signing authority, or elapsed production operation.
   comparison/export UI, compatibility labels, long-history tooling,
   localization, metric rollback, key/security operations, disclosed Apple and
   Android Review Sample presentation/runtime gates, release workflows/policy,
-  validation evidence, and release documentation.
+  stable required-check enforcement, exact-SHA tag verification, validation
+  evidence, and release documentation.
 - Commits: pending.
-- Branch and remote state: clean synchronized `main` at round start; the exact
-  candidate is staged locally and passes all current local release gates.
+- Branch and remote state: clean synchronized `main` at round start; the
+  protected closeout branch contains the staged required-check implementation
+  and passes its current local release gates. Hosted PR and exact-main evidence
+  remain pending.
 - Repository visibility verified: inherited from current release evidence.
 - Version/build impact: none at round start.
 - Release or distribution impact: none at round start.

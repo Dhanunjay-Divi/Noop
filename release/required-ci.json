@@ -1,0 +1,51 @@
+{
+  "requiredContexts": [
+    "android-ci-required",
+    "apple-ci-required",
+    "health-claims",
+    "i18n-coverage",
+    "operations-record",
+    "release-controls",
+    "server-ci-required",
+    "swift-packages-required"
+  ],
+  "schemaVersion": 1,
+  "sourceBranch": "main",
+  "workflows": [
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "build-and-test",
+        "production-shell"
+      ],
+      "path": ".github/workflows/android.yml",
+      "requiredJob": "android-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "build"
+      ],
+      "path": ".github/workflows/app-build.yml",
+      "requiredJob": "apple-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "server-ci"
+      ],
+      "path": ".github/workflows/server.yml",
+      "requiredJob": "server-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "history-harness",
+        "study-harness",
+        "swift-packages"
+      ],
+      "path": ".github/workflows/swift-packages.yml",
+      "requiredJob": "swift-packages-required"
+    }
+  ]
+}
