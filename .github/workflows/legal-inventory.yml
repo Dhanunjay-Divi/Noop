@@ -44,7 +44,8 @@ jobs:
             exit 0
           fi
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
-          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
           if grep -Eq '(^|/)(Package\.resolved)$|^android/app/gradle\.lockfile$|^server/(requirements.*\.txt|requirements\.lock|Dockerfile|backup/Dockerfile|compose\.yaml)$|^ThirdPartyNotices/|^(LICENSE|NOTICE|ATTRIBUTION\.md|DISCLAIMER\.md|README\.md|TERMS\.md)$|^Strand/App/Terms\.swift$|^android/app/src/main/java/com/noop/ui/TermsGate\.kt$|^docs/provenance/|^Tools/(release-legal-gate\.py|tests/test_release_legal_gate\.py)$|^\.github/workflows/legal-inventory\.yml$' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"

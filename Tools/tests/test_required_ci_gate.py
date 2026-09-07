@@ -93,19 +93,40 @@ class RequiredCIGateTests(unittest.TestCase):
         ):
             self.assertIn(marker, text)
 
-    def test_applicability_consumes_the_complete_diff_before_matching(self) -> None:
+    def test_applicability_consumes_both_rename_paths_before_matching(self) -> None:
         for workflow in self.config["workflows"]:
             text = (ROOT / workflow["path"]).read_text(encoding="utf-8")
             section = GATE._job_section(text, workflow["applicabilityJob"])
             self.assertIn(
-                'git diff --name-only "$BASE_SHA" "$GITHUB_SHA" '
-                '> "$CHANGED_FILES"',
+                'git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA"',
                 section,
             )
+            self.assertIn('> "$CHANGED_FILES"', section)
             self.assertNotRegex(
                 section,
-                r"git diff --name-only[^\n]*\|\s*\n\s*grep\s+-[A-Za-z]*q",
+                r"git diff[^\n]*--name-only[^\n]*\|\s*\n\s*grep\s+-[A-Za-z]*q",
             )
+
+    def test_release_dispatch_is_bound_to_the_verified_source_sha(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
+        self.assertIn("release_sha:", workflow)
+        self.assertIn(
+            "EXPECTED_RELEASE_SHA: ${{ github.event.inputs.release_sha }}",
+            workflow,
+        )
+        self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA"', workflow)
+        self.assertIn('--field "release_sha=$SOURCE_SHA"', dispatcher)
+
+    def test_altstore_channel_recovers_a_missing_initial_asset(self) -> None:
+        text = (ROOT / ".github/workflows/altstore-source.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('select(.name == "altstore-source.json")', text)
+        self.assertIn('elif [ "$SOURCE_ASSET_COUNT" = "0" ]', text)
+        self.assertIn('cp altstore-source.json "$MANIFEST"', text)
 
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
         workflow = self.config["workflows"][0]

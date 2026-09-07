@@ -23,6 +23,9 @@ on:
       version:
         description: "Confirm the reviewed version already committed on main, e.g. 8.3.0"
         required: true
+      release_sha:
+        description: "Exact protected-main commit already verified by the dispatcher"
+        required: true
 
 permissions:
   checks: read
@@ -48,10 +51,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Require exact protected-main source
+        env:
+          EXPECTED_RELEASE_SHA: ${{ github.event.inputs.release_sha }}
         run: |
           set -euo pipefail
+          [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::A full lowercase reviewed release SHA is required."
+            exit 1
+          }
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA" || {
+            echo "::error::Protected main advanced after release verification; review and dispatch the new exact commit."
+            exit 1
+          }
       - name: Enforce repository release controls
         run: python3 Tools/release-control-gate.py check
       - name: Require every merge check on the exact release commit

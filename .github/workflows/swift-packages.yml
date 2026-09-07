@@ -51,7 +51,8 @@ jobs:
             exit 0
           fi
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
-          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
           if grep -Eq '(^Packages/|^Tools/(Backfill|StudyHarness)/|^Tools/check-private-data\.py$|\.github/workflows/swift-packages\.yml$|\.(zip|csv|noopbak|sqlite|db)$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"

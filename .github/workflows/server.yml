@@ -45,7 +45,8 @@ jobs:
             exit 0
           fi
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
-          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
           if grep -Eq '^(server/|Tools/release-legal-gate\.py$|ThirdPartyNotices/|\.github/workflows/server\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"

@@ -50,7 +50,8 @@ jobs:
             exit 0
           fi
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
-          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
           if grep -Eq '^((Strand|StrandTests|StrandiOS|NOOPiOSUITests|StrandiOSShared|StrandiOSWidgets|NOOPWatch|NOOPWatchComplications|Packages|Config)/|Strand\.xcodeproj/project\.xcworkspace/xcshareddata/swiftpm/Package\.resolved$|(LICENSE|NOTICE|ATTRIBUTION\.md|DISCLAIMER\.md|TERMS\.md)$|project\.yml$|Tools/(validate-launch-gate-isolation\.py|tests/test_launch_gate_isolation\.py)$|\.github/workflows/app-build\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"

@@ -166,17 +166,25 @@ external approval, signing authority, or elapsed production operation.
   manually repairable workflow updates an anonymously verified stable
   prerelease asset only after the exact checked production release is
   published. Existing channel history is mandatory once the channel exists,
-  and a tested semantic-version guard rejects rollback to an older feed.
+  and a tested semantic-version guard rejects rollback to an older feed. If a
+  first publication created the channel release but failed before uploading
+  its initial manifest, a retry now recovers from the reviewed template;
+  existing manifest history remains mandatory once the asset is present.
 - Closed the final applicability defect found by protected review. All five
   conditional workflows now write the complete changed-path list before
   matching it, so `grep -q` cannot close a `pipefail` pipeline early and turn a
-  relevant large change into `run=false`. The repository contract requires
-  this complete-consumption shape.
+  relevant large change into `run=false`. Rename detection is disabled for this
+  path inventory, so both the removed source and added destination are checked
+  and a move out of a scoped directory cannot bypass its required build. The
+  repository contract requires this complete-consumption shape.
 - Removed the legacy local release publisher and checked-in AltStore mutator.
   `Tools/release.sh` now accepts only a version, requires a clean exact
   `origin/main`, rechecks release controls and exact-SHA hosted contexts,
   preserves the cadence guard, and dispatches the canonical production
-  workflow. It cannot create, edit, upload, or push a release directly.
+  workflow with the already verified source SHA as a required input. If `main`
+  advances before GitHub resolves the dispatch, the workflow fails closed
+  instead of building the newer commit. The dispatcher cannot create, edit,
+  upload, or push a release directly.
 - Fixed the intermittent Android diagnostic-report test at the product
   boundary. While screenshot compression was pending, Android supplied a null
   switch callback, which removed `ToggleableState` instead of exposing a

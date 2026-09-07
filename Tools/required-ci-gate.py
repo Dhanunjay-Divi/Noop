@@ -194,7 +194,8 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         "fetch-depth: 0",
         'EVENT_NAME: ${{ github.event_name }}',
         'CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"',
-        'git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"',
+        'git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA"',
+        '> "$CHANGED_FILES"',
         '"$CHANGED_FILES"',
         '"run=true"',
         '"run=false"',
@@ -282,7 +283,10 @@ def check_release_workflow(root: Path) -> None:
     required_text = (
         "checks: read",
         "ref: ${{ github.sha }}",
+        "release_sha:",
+        "EXPECTED_RELEASE_SHA: ${{ github.event.inputs.release_sha }}",
         'test "$GITHUB_REF" = "refs/heads/main"',
+        'test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA"',
         "Tools/required-ci-gate.py verify-github",
         "Tools/release-version-gate.py check",
         "--release-sha \"$GITHUB_SHA\"",
@@ -329,6 +333,9 @@ def check_altstore_workflow(root: Path) -> None:
         "releases/download/${CHANNEL_TAG}/altstore-source.json",
         "gh release upload \"$CHANNEL_TAG\" \"$MANIFEST\"",
         "curl --fail --silent --show-error --location",
+        'select(.name == "altstore-source.json")',
+        'if [ "$SOURCE_ASSET_COUNT" = "1" ]',
+        'elif [ "$SOURCE_ASSET_COUNT" = "0" ]',
         'test "$APPLE_VERSION" = "$VERSION"',
         'test "$ANDROID_VERSION" = "$VERSION"',
     )
@@ -354,6 +361,7 @@ def check_local_release_entrypoint(root: Path) -> None:
         "git fetch --quiet origin main --tags",
         'gh workflow run release.yml',
         "--ref main",
+        '--field "release_sha=$SOURCE_SHA"',
     )
     for item in required_text:
         if item not in text:

@@ -101,6 +101,7 @@ fi
 GH_TOKEN="$TOKEN" gh workflow run release.yml \
   --repo "$REPOSITORY" \
   --ref main \
-  --field "version=$VERSION"
+  --field "version=$VERSION" \
+  --field "release_sha=$SOURCE_SHA"
 
 echo "Dispatched the protected production release for v${VERSION} at ${SOURCE_SHA}."

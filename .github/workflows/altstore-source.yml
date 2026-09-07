@@ -104,17 +104,31 @@ jobs:
             >/dev/null 2>&1; then
             CHANNEL_EXISTS=true
             CHANNEL=$(gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
-              --json isDraft,isPrerelease)
+              --json isDraft,isPrerelease,assets)
             [ "$(jq -r '.isDraft' <<<"$CHANNEL")" = "false" ]
             [ "$(jq -r '.isPrerelease' <<<"$CHANNEL")" = "true" ] || {
               echo "::error::The stable AltStore source release must remain a prerelease."
               exit 1
             }
-            curl --fail --silent --show-error --location \
-              "${SOURCE_URL}?source=${GITHUB_RUN_ID}" --output "$EXISTING"
-            jq -e '.apps | type == "array" and length > 0' \
-              "$EXISTING" >/dev/null
-            cp "$EXISTING" "$MANIFEST"
+            SOURCE_ASSET_COUNT=$(jq -r \
+              '[.assets[]? | select(.name == "altstore-source.json")] | length' \
+              <<<"$CHANNEL")
+            if [ "$SOURCE_ASSET_COUNT" = "1" ]; then
+              curl --fail --silent --show-error --location \
+                "${SOURCE_URL}?source=${GITHUB_RUN_ID}" --output "$EXISTING"
+              jq -e '.apps | type == "array" and length > 0' \
+                "$EXISTING" >/dev/null
+              cp "$EXISTING" "$MANIFEST"
+            elif [ "$SOURCE_ASSET_COUNT" = "0" ]; then
+              # A previous first publication may have created the channel
+              # release before its initial asset upload failed. Recover from
+              # the reviewed template while preserving strict history once an
+              # asset exists.
+              cp altstore-source.json "$MANIFEST"
+            else
+              echo "::error::The AltStore channel has duplicate source assets."
+              exit 1
+            fi
           else
             cp altstore-source.json "$MANIFEST"
           fi
