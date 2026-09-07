@@ -341,6 +341,7 @@ def check_altstore_workflow(root: Path) -> None:
         'select(.name == "altstore-source.json")',
         'select(.name == "altstore-source.previous.json")',
         'if [ "$SOURCE_ASSET_COUNT" = "1" ]',
+        'elif [ "$SOURCE_ASSET_COUNT" = "0" ] &&',
         'BASE_SOURCE="backup"',
         'INITIALIZING_MARKER="NOOP_ALTSTORE_STATE=initializing"',
         'READY_MARKER="NOOP_ALTSTORE_STATE=ready"',

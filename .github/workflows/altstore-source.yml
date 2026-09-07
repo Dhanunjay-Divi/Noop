@@ -147,7 +147,8 @@ jobs:
                fetch_manifest "$SOURCE_URL" "$EXISTING"; then
               cp "$EXISTING" "$MANIFEST"
               BASE_SOURCE="stable"
-            elif [ "$BACKUP_ASSET_COUNT" = "1" ] &&
+            elif [ "$SOURCE_ASSET_COUNT" = "0" ] &&
+                 [ "$BACKUP_ASSET_COUNT" = "1" ] &&
                  fetch_manifest "$BACKUP_URL" "$BACKUP"; then
               # The stable asset may have been removed by a failed replacement.
               # Its durable predecessor carries the complete channel history.

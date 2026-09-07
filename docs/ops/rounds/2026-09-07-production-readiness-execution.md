@@ -185,11 +185,13 @@ external approval, signing authority, or elapsed production operation.
   advances before GitHub resolves the dispatch, the workflow fails closed
   instead of building the newer commit. The dispatcher cannot create, edit,
   upload, or push a release directly.
-- Closed the two post-release defects found by the final protected review.
+- Closed the three post-release defects found across the final protected reviews.
   AltStore replacement now preserves the complete current manifest as a
   separate durable release asset before `--clobber`; an interrupted
-  replacement restores from that asset, while template recovery is permitted
-  only for a release explicitly marked as an unfinished first publication.
+  replacement restores from that asset only when the stable asset is absent.
+  A transient stable-asset fetch failure now fails closed instead of selecting
+  older history, while template recovery is permitted only for a release
+  explicitly marked as an unfinished first publication.
   Both AltStore and Homebrew repair paths require their production tag to be
   contained in protected `main` and to retain the exact required check set.
 - Restored the documented Homebrew opt-in as a retryable reusable/manual

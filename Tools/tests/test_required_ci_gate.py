@@ -138,6 +138,7 @@ class RequiredCIGateTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('select(.name == "altstore-source.previous.json")', text)
+        self.assertIn('elif [ "$SOURCE_ASSET_COUNT" = "0" ] &&', text)
         self.assertIn('BASE_SOURCE="backup"', text)
         backup_upload = text.index(
             'gh release upload "$CHANNEL_TAG" "$BACKUP"'
