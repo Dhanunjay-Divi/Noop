@@ -136,7 +136,9 @@ position without changing its ID. This inbox intentionally starts empty.
   contains no private data. (Evidence: `release/evidence/`,
   `Tools/release-evidence.py`,
   `ops/rounds/2026-09-07-production-checklist-execution.md`)
-- [ ] CI-130 [ENG] Generate an SBOM and artifact provenance tied to one commit.
+- [x] CI-130 [ENG] Generate an SBOM and artifact provenance tied to one commit.
+  (Evidence: exact-main GitHub Actions run `34084340375`, source commit
+  `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`)
 - [x] CI-140 [ENG] Verify dependency locks, pinned actions, container digests,
   and vulnerability policy. (Evidence: `Tools/release-control-gate.py`,
   `release/release-policy.json`,

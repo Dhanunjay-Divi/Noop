@@ -1,6 +1,6 @@
 # NOOP production readiness
 
-Last reviewed: **2026-09-06**
+Last reviewed: **2026-09-07**
 
 This is the release decision record for NOOP. A compiled screen or passing unit
 test proves code behavior only. It does not prove carrier delivery, wearable
@@ -36,6 +36,14 @@ localization, health-claims, runtime-license, private-data, and
 operations-record matrices pass. Apple and Android release evidence remains
 bounded by the signed physical-device and storefront gates below; a green
 hosted source matrix is not a public-release decision.
+
+At source commit `b5caec52`, hosted run `34084340375` additionally passes the
+fail-closed source release controls and retains a deterministic 216-component
+CycloneDX SBOM plus commit/tree-bound evidence manifest. The downloaded
+manifest independently verifies against that exact commit. `main` remains
+unprotected, the repository still has no reviewed GitHub environments, and
+credential rotation, signed artifacts, external evidence, and go-live approval
+remain open.
 
 | Area | Status | Current evidence and boundary |
 |---|---|---|
@@ -80,7 +88,7 @@ hosted source matrix is not a public-release decision.
 | Hosted vendor integrations | Approved OAuth applications, secret/token operations, webhook/backfill/deletion behavior, rate-limit handling, provider terms, and end-to-end tests for each of Strava, Garmin, Fitbit, or another service. |
 | Broader social product | Teams, challenges, ranking rules, abuse/reporting controls, moderation operations, and product-scale load/authorization tests. Private Friends itself is available on Apple and Android; this gate applies only to a broader competitive/community product. |
 | 10,000-user shared infrastructure | Deploy and prove the regional-cell design in `PLATFORM_ARCHITECTURE.md`: identity/recovery, DNS/TLS/WAF, digest-pinned deploys, HA PostgreSQL with bounded pools, immutable objects, queues, managed secrets/keys, off-region recovery, observability/on-call, independent isolation review, and reconnect/soak/failover/restore/mixed-workload evidence. Source and synthetic foundation exist, but no production topology has been provisioned or load-tested. |
-| Hosted release controls | At `1443acb1`, server run `34078811154`, Apple run `34080116658`, Android run `34079190997`, Swift/study run `34078979831`, localization run `34078811190`, claims run `34078811160`, legal-inventory run `34078979957`, and operations run `34078811177` pass. `main` is still unprotected, the repository has no reviewed GitHub environments, and the four present Android credentials are staging-only; production signing/deployment credentials and required-check policy remain open. This Mac has no valid Apple distribution identity or Android production release keystore. |
+| Hosted release controls | At `1443acb1`, server run `34078811154`, Apple run `34080116658`, Android run `34079190997`, Swift/study run `34078979831`, localization run `34078811190`, claims run `34078811160`, legal-inventory run `34078979957`, and operations run `34078811177` pass. At `b5caec52`, Release Controls run `34084340375` passes and retains a reverified commit/tree-bound SBOM manifest; localization run `34084340416`, claims run `34084340413`, and operations run `34084340476` pass. `main` is still unprotected, the repository has no reviewed GitHub environments, and the four present Android credentials are staging-only; production signing/deployment credentials, credential rotation, and required-check policy remain open. This Mac has no valid Apple distribution identity or Android production release keystore. |
 | Remote push posture | Local reminders and managed Friends pokes currently depend on background/foreground catch-up. Ordinary App Store/Play builds cannot safely give APNs/FCM provider credentials to user-operated servers. Cloud-grade delivery requires a deliberate managed relay with an opaque minimal wake payload, token deletion/key rotation, privacy review, abuse controls, and real delivery evidence; otherwise the product must disclose the non-immediate local-only reliability boundary. |
 | Managed account portability | The native snapshot exporter now covers all managed-history data classes, cloud-only chunks, derived summaries, current user-authored records, and provenance in a verified manifest-backed ZIP. Before public enrollment, prove it live with large accounts, cancellation, auth refresh, snapshot expiry, cross-tenant denial, and corrupted-object cases; add resumable continuation and successful documented import. The client-upload `/exports` control plane remains a separate encrypted-archive facility. |
 

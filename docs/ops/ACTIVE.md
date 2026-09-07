@@ -32,7 +32,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 42 evidenced complete and 354 pending. New owner
+with 396 stable actions: 43 evidenced complete and 353 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -49,16 +49,17 @@ allowlist and additive migration rather than destructive replacement. Evidence
 is recorded in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
 
-The current checklist-execution round adds fail-closed source release controls,
+The completed checklist-execution round adds fail-closed source release controls,
 a deterministic CycloneDX SBOM generator, and commit/tree-bound privacy-safe
 evidence manifests. Dependency locks, full-SHA Actions, OCI digests, immutable
 migrations, runtime inventory, tracked private-artifact names, and
 high-confidence token formats are checked before release mutation. Focused
 Apple, Android, and server evidence also closes the existing Ask-only workout,
 reviewed app-report, disabled automatic-emergency, and anonymous public-policy
-URL actions. Hosted evidence on the exact committed source remains pending, as
-do protected `main`, reviewed environments, credential rotation, and every
-external release gate. Evidence is recorded in
+URL actions. Exact-main `Release Controls` run `34084340375` passes on
+`b5caec52`; its retained 216-component SBOM manifest independently verifies
+after download. Protected `main`, reviewed environments, credential rotation,
+and every external release gate remain open. Evidence is recorded in
 [Production checklist execution](rounds/2026-09-07-production-checklist-execution.md).
 
 The hosted release-gate closeout is complete for code-verifiable source gates.

@@ -1,7 +1,7 @@
 # NOOP first production release master plan
 
 - **Plan date:** 2026-09-05
-- **Last evidence update:** 2026-09-06
+- **Last evidence update:** 2026-09-07
 - **Target:** first public production release of the NOOP mobile apps and the
   first-party NOOP Band
 - **Launch sequence:** India first, then the USA
@@ -135,6 +135,11 @@ At commit `1443acb1` on 2026-09-06:
 - Phase-R1 source/workflow defects are closed without waivers. `main` remains
   unprotected and reviewed environments, production credentials, signed
   artifacts, and external launch evidence remain open.
+- Exact-main commit `b5caec52` passes the new `Release Controls` workflow.
+  Its retained evidence artifact contains a deterministic 216-component
+  CycloneDX SBOM and a commit/tree-bound manifest that was independently
+  reverified after download. Branch protection, reviewed environments,
+  credential rotation, signing, and production release approval remain open.
 - Source versions are iOS `9.2.1 (231)` and Android `9.2.1 (304)`. The owner
   must choose and validate the first storefront version. `1.0.0` is the
   recommended public product version, but existing installed-build upgrade

@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `in progress`
+- State: `completed`
 - Owner: project team
 - Branch: `main`
 - Start commit: `c4d2039c`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`
+- Record commit or PR: `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`
+  plus the commit containing this hosted-evidence closeout
 
 ## Objective
 
@@ -94,9 +95,12 @@ health-data upload, unsigned release claims, or unchecked external gates.
   before a user-reviewed native share sheet; automated/anomaly paging is
   rejected and validated-fall transport remains fail-closed; and both public
   policy URLs answer unauthenticated requests.
+- Generated the evidence set in exact-main GitHub Actions run `34084340375`,
+  downloaded it, and independently reverified its manifest against source
+  commit `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`.
 - Corrected the ledger total from 397 to 396 by excluding the documented
-  `PHASE-000` copy template. The ledger now has 42 evidenced-complete and 354
-  pending actions: 34 owner, 253 engineering, 33 joint, and 34 external.
+  `PHASE-000` copy template. The ledger now has 43 evidenced-complete and 353
+  pending actions: 34 owner, 252 engineering, 33 joint, and 34 external.
 
 ## Data, privacy, and medical truth
 
@@ -152,6 +156,9 @@ health-data upload, unsigned release claims, or unchecked external gates.
 | `python3 Tools/health_claims_gate.py` | 1,184 files scanned; passed | Current source does not introduce forbidden unsupported health/delivery claims | Clinical validation |
 | `python3 Tools/release-legal-gate.py check` and `distribution` | 213 libraries and three container inputs verified; passed | Runtime inventory, notices, source rights, and redistribution gate remain intact | External counsel approval |
 | Anonymous `curl -L` checks for the recorded privacy and support URLs | Both returned HTTP 200 on 2026-09-07 | Both pages were publicly reachable without application authentication at the check time | Long-term uptime, content approval, or final submission-time availability |
+| Exact-main `Release Controls` run `34084340375` on `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25` | Passed all eight steps and retained one bounded evidence artifact for 14 days | Hosted checkout, source controls, tests, legal/private-data boundary, version parity, SBOM/manifest generation, verification, and retention pass on the exact commit | Signed app/server/firmware artifact provenance or release approval |
+| Downloaded hosted evidence plus `Tools/release-evidence.py verify --expect-ref b5caec527496bb0eedbac27bf35eb9b1fa7fbf25` | Passed; 216 components and two manifest artifacts | The retained hosted SBOM, static-check report, and manifest are intact and bound to the exact source commit/tree | Completeness of future signed production artifacts |
+| Exact-main localization, health-claims, and operations runs `34084340416`, `34084340413`, and `34084340476` | Passed | The documentation/source follow the existing localization, claim, and durable-record gates | Mobile/server build matrices or external evidence |
 
 ## Physical device and deployment
 
@@ -167,10 +174,13 @@ health-data upload, unsigned release claims, or unchecked external gates.
 - Changed paths: release-control and evidence tools/tests/policy/schema/docs,
   two workflows, the production checklist, this round record, the round index,
   and active handoff, plus the preserved cleanup documentation.
-- Commits: none in this round.
-- Branch and remote state: `main` at `c4d2039c`, equal to `origin/main` at
-  round start, with the documented cleanup changes uncommitted.
-- Repository visibility verified: not repeated at round start.
+- Commits: implementation and initial-record commit
+  `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`; hosted-evidence closeout in the
+  commit containing this record revision.
+- Branch and remote state: implementation commit `b5caec52` is on
+  `origin/main`; the closeout is staged for direct `main` publication.
+- Repository visibility verified: GitHub reports a private standalone
+  repository with `main` as the default branch.
 - Version/build impact: no application version or build number changed.
 - Release or distribution impact: none; production release remains blocked.
 
@@ -181,8 +191,6 @@ health-data upload, unsigned release claims, or unchecked external gates.
 
 ## Open risks and honest limitations
 
-- Hosted `CI-130` evidence remains open until the new workflow succeeds on the
-  exact committed source.
 - Protected `main`, separately reviewed GitHub environments, and rotation of
   every previously exposed production-capable credential remain open.
 - The checklist cannot truthfully reach all-complete without owner decisions,
@@ -193,13 +201,9 @@ health-data upload, unsigned release claims, or unchecked external gates.
 
 ## Next round
 
-1. Commit and push the source-control slice, then verify `Release Controls` on
-   the exact commit.
-2. Close `CI-130` only after downloading/verifying the hosted evidence manifest
-   from that run.
-3. Configure protected `main`, reviewed environments, and credential rotation
+1. Configure protected `main`, reviewed environments, and credential rotation
    with the repository owner.
-4. Continue at the first remaining supplier-independent engineering
+2. Continue at the first remaining supplier-independent engineering
    dependency while the owner and external input ledger advances.
 
 ## Privacy check

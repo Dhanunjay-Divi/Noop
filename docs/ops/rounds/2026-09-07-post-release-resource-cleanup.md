@@ -7,7 +7,7 @@
 - Branch: `main`
 - Start commit: `c4d2039c`
 - End implementation commit: `c4d2039c` (no source implementation change)
-- Record commit or PR: pending
+- Record commit or PR: `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`
 
 ## Objective
 
@@ -138,8 +138,10 @@ physical-device, and external-service evidence.
 
 - Changed paths: this operations record, `docs/ops/rounds/INDEX.md`, and
   `docs/ops/ACTIVE.md`.
-- Commits: none.
-- Branch and remote state: clean `main` matched `origin/main` at round start.
+- Commits: no implementation commit; the durable record was published in
+  `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`.
+- Branch and remote state: clean `main` matched `origin/main` at round start;
+  the record commit is now on `origin/main`.
 - Repository visibility verified: not re-queried; unchanged by this round.
 - Version/build impact: none.
 - Release or distribution impact: none.
