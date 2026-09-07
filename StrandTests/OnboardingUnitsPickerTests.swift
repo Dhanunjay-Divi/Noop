@@ -110,13 +110,87 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
-    func testDailyRhythmAppearsBeforeDoneAndUsesLocalizedCopy() throws {
+    func testDailyRhythmAndPlanAppearBeforeDoneAndUseLocalizedCopy() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
 
         XCTAssertTrue(onboarding.contains("case .dailyRhythm: DailyRhythmStep()"))
+        XCTAssertTrue(onboarding.contains("case .plan:"))
+        XCTAssertTrue(onboarding.contains("ProductPlanStep("))
         XCTAssertTrue(onboarding.contains("case .dailyRhythm: return String(localized: \"Continue\")"))
+        XCTAssertTrue(onboarding.contains("String(localized: \"Continue with NOOP\")"))
+        XCTAssertTrue(onboarding.contains("String(localized: \"Save NOOP+ preference\")"))
+        XCTAssertTrue(onboarding.contains("case .ownership:"))
+        XCTAssertTrue(onboarding.contains("OwnershipAccountView()"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "$0 != .ownership || ownershipRequired"
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "forKey: Self.progressStorageKey"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("var initialStep = Step.welcome"))
+        XCTAssertTrue(onboarding.contains("initialStep = restored"))
+        XCTAssertTrue(onboarding.contains("initialStep = requestedStep"))
+        XCTAssertEqual(
+            onboarding.components(
+                separatedBy: "_step = State(initialValue: initialStep)"
+            ).count - 1,
+            1,
+            "Persisted progress and debug demos must resolve before State is initialized once."
+        )
+        XCTAssertTrue(onboarding.contains("\"onboarding.progress\""))
+        XCTAssertTrue(onboarding.contains("return ownershipClaimed"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "guard await ownershipService.selectPlan(selectedPlan) else"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("guard step == .plan else { return }"))
+        XCTAssertGreaterThanOrEqual(
+            onboarding.components(
+                separatedBy: "guard postClaimOwnershipReady else"
+            ).count - 1,
+            2
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "return !planSubmissionBusy && postClaimOwnershipReady"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("reconcileOwnershipRequirement()"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "ownershipCanAccessPostClaimOnboarding("
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "candidate.rawValue > Step.ownership.rawValue"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("guard ownershipAllows(.done) else"))
+        XCTAssertTrue(
+            onboarding.contains(
+                "removeObject(forKey: Self.progressStorageKey)"
+            )
+        )
+        XCTAssertTrue(
+            onboarding.contains(
+                "if step == .scan && ownershipRequired { return bandBonded }"
+            )
+        )
+        XCTAssertTrue(onboarding.contains("title: LocalizedStringKey"))
+        XCTAssertTrue(onboarding.contains("subtitle: LocalizedStringKey"))
+        XCTAssertTrue(onboarding.contains("detail: LocalizedStringKey"))
         XCTAssertLessThan(
-            try XCTUnwrap(onboarding.range(of: "appearance, dailyRhythm, done")?.lowerBound),
+            try XCTUnwrap(onboarding.range(of: "appearance, dailyRhythm, plan, done")?.lowerBound),
+            try XCTUnwrap(onboarding.range(of: "private struct DoneStep")?.lowerBound)
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(onboarding.range(of: "private struct ProductPlanStep")?.lowerBound),
             try XCTUnwrap(onboarding.range(of: "private struct DoneStep")?.lowerBound)
         )
         for key in [
@@ -139,5 +213,49 @@ final class OnboardingDiscoveryContractTests: XCTestCase {
         XCTAssertFalse(step.contains("setEnabled("))
         XCTAssertFalse(step.contains("requestAuthorization"))
         XCTAssertFalse(step.contains("Toggle("))
+    }
+
+    func testLocalFirstCopyDoesNotPromiseOptionalCloudCanNeverBeUsed() throws {
+        let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
+        let settings = try source("Strand/Screens/SettingsView.swift")
+        let catalogURL = repoRoot.appendingPathComponent(
+            "Strand/Resources/Localizable.xcstrings"
+        )
+        let catalogData = try Data(contentsOf: catalogURL)
+        let catalog = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: catalogData)
+                as? [String: Any]
+        )
+        let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
+
+        XCTAssertFalse(onboarding.contains("all your data, none of the cloud"))
+        XCTAssertFalse(settings.contains("all your data, none of the cloud"))
+        XCTAssertTrue(onboarding.contains("your health data, local by default"))
+        XCTAssertTrue(onboarding.contains("cloud features are optional"))
+        XCTAssertTrue(
+            settings.contains("core health data stays local by default")
+        )
+
+        let activeKeys = [
+            "your health data, local by default",
+            "A private window into your recovery, sleep and effort. Core data is read from NOOP Band and processed on %@; cloud features are optional.",
+            "NOOP: core health data stays local by default.",
+        ]
+        let supportedLocales = [
+            "de", "en", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant",
+        ]
+        for key in activeKeys {
+            let entry = try XCTUnwrap(strings[key] as? [String: Any], key)
+            let localizations = try XCTUnwrap(
+                entry["localizations"] as? [String: Any],
+                key
+            )
+            for locale in supportedLocales {
+                XCTAssertNotNil(
+                    localizations[locale],
+                    "\(key) is missing \(locale)"
+                )
+            }
+        }
     }
 }

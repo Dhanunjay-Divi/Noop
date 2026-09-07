@@ -500,6 +500,159 @@ resource "google_cloud_run_v2_service_iam_member" "managed_api_public" {
   member   = "allUsers"
 }
 
+resource "google_cloud_run_v2_service" "ownership_api" {
+  count = var.enable_ownership_runtime ? 1 : 0
+
+  project  = var.project_id
+  name     = "${local.prefix}-ownership-api"
+  location = var.region
+  # The first-party mobile client must not receive this URL until an approved
+  # supplier verifier replaces the fail-closed runtime and every public gate
+  # passes. IAM remains the only Cloud Run invoker in this stack.
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    service_account                  = google_service_account.ownership_api[0].email
+    timeout                          = "30s"
+    max_instance_request_concurrency = 20
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [google_sql_database_instance.primary[0].connection_name]
+      }
+    }
+
+    containers {
+      image   = var.runtime_image
+      command = ["sh", "-c"]
+      args = [
+        "exec uvicorn app.ownership_main:app --host 0.0.0.0 --port 8080 --no-access-log",
+      ]
+
+      ports {
+        container_port = 8080
+      }
+
+      env {
+        name  = "NOOP_DATABASE_ENGINE"
+        value = "postgresql"
+      }
+      env {
+        name  = "NOOP_RUN_MIGRATIONS"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_DASHBOARD_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_SAFETY_WORKER_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "NOOP_DB_POOL_MIN_SIZE"
+        value = "1"
+      }
+      env {
+        name  = "NOOP_DB_POOL_MAX_SIZE"
+        value = "4"
+      }
+      env {
+        name  = "NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE"
+        value = "600"
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_SERVICE_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_PROJECT_NUMBER"
+        value = data.google_project.current.number
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_IDENTITY_API_KEY"
+        value = google_apikeys_key.managed_identity_lookup[0].key_string
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_APPLE_APP_ID"
+        value = google_firebase_apple_app.staging[0].app_id
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_ANDROID_APP_ID"
+        value = google_firebase_android_app.staging[0].app_id
+      }
+      env {
+        name  = "NOOP_OWNERSHIP_APP_CHECK_CACHE_SECONDS"
+        value = "21600"
+      }
+      env {
+        name = "NOOP_DATABASE_URL"
+        value_source {
+          secret_key_ref {
+            secret  = data.google_secret_manager_secret.ownership_database_url[0].secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 2
+        period_seconds        = 2
+        failure_threshold     = 30
+
+        http_get {
+          path = "/readyz"
+          port = 8080
+        }
+      }
+
+      liveness_probe {
+        initial_delay_seconds = 10
+        timeout_seconds       = 2
+        period_seconds        = 10
+        failure_threshold     = 3
+
+        http_get {
+          path = "/healthz"
+          port = 8080
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_v2_job.migrate,
+    google_project_iam_member.ownership_api_cloud_sql_client,
+    google_secret_manager_secret_iam_member.ownership_api_database_url,
+  ]
+}
+
 resource "google_cloud_run_v2_service" "managed_processor" {
   count = var.enable_managed_runtime ? 1 : 0
 

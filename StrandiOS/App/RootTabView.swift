@@ -862,6 +862,7 @@ struct RootTabView: View {
                     // Profile is a first-class body destination, not a form hidden near the top of the
                     // much longer Settings page. It reuses SettingsView's exact ProfileStore-backed editor.
                     MoreRow("Profile", "person.crop.circle.fill", .profile)
+                    MoreRow("Band Account", "person.badge.key.fill", .bandAccount)
                     MoreRow("Friends", "person.2.fill", .friends)
                     MoreRow("Devices", "applewatch.side.right", .devices)
                     MoreRow("Band", "waveform.path.ecg", .live)
@@ -1276,7 +1277,7 @@ private final class StatusBarContrastOverlayView: UIView {
 /// registration in `moreTab`.
 private enum MoreDestination: Hashable {
     case calendar, insightsHub, intelligence, coach, insights, explore, compare
-    case profile, friends, devices, live, workouts, nutrition, health, labBook, stress, breathe, intervals, rhythm
+    case profile, bandAccount, friends, devices, live, workouts, nutrition, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, noopPlus, backupSync, shortcutsExport
     case safety, alarms, automations, widgets, updates, testCentre, siriShortcuts, settings
 
@@ -1293,6 +1294,7 @@ private enum MoreDestination: Hashable {
         case .explore:         MetricExplorerView()
         case .compare:         CompareView()
         case .profile:         SettingsView(focus: .profile)
+        case .bandAccount:     OwnershipAccountView()
         case .friends:         FriendsView()
         case .devices:         DevicesView()
         case .live:            LiveView()
@@ -1331,6 +1333,7 @@ private enum MoreDestination: Hashable {
         case "intelligence": return .intelligence
         case "coach": return .coach
         case "profile": return .profile
+        case "bandaccount", "band_account": return .bandAccount
         case "friends": return .friends
         case "devices": return .devices
         case "live": return .live

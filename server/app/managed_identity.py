@@ -35,6 +35,9 @@ class ManagedIdentityClaims:
     auth_time: datetime
     expires_at: datetime
     managed_pilot: bool = False
+    email_verified: bool = False
+    phone_verified: bool = False
+    sign_in_provider: str = ""
 
     @property
     def subject_hash(self) -> str:
@@ -245,6 +248,7 @@ class IdentityToolkitTokenVerifier:
                 )
         firebase = payload.get("firebase")
         tenant = ""
+        sign_in_provider = ""
         if isinstance(firebase, dict):
             candidate = firebase.get("tenant")
             if candidate is not None:
@@ -253,7 +257,30 @@ class IdentityToolkitTokenVerifier:
                         "managed identity token was rejected"
                     )
                 tenant = candidate
+            provider = firebase.get("sign_in_provider")
+            if provider is not None:
+                if (
+                    not isinstance(provider, str)
+                    or not 1 <= len(provider) <= 128
+                    or any(character.isspace() for character in provider)
+                ):
+                    raise ManagedIdentityRejectedError(
+                        "managed identity token was rejected"
+                    )
+                sign_in_provider = provider
         managed_pilot = self._managed_pilot_claim(user)
+        email_verified = user.get("emailVerified", False)
+        if not isinstance(email_verified, bool):
+            raise ManagedIdentityUnavailableError(
+                "managed identity verification returned an invalid response"
+            )
+        phone_number = user.get("phoneNumber")
+        if phone_number is not None and (
+            not isinstance(phone_number, str) or not phone_number
+        ):
+            raise ManagedIdentityUnavailableError(
+                "managed identity verification returned an invalid response"
+            )
         return ManagedIdentityClaims(
             issuer=expected_issuer,
             subject=subject,
@@ -262,6 +289,9 @@ class IdentityToolkitTokenVerifier:
             auth_time=auth_time,
             expires_at=expires_at,
             managed_pilot=managed_pilot,
+            email_verified=email_verified,
+            phone_verified=phone_number is not None,
+            sign_in_provider=sign_in_provider,
         )
 
     @staticmethod

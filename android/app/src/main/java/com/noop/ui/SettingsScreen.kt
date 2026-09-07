@@ -2837,7 +2837,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Info,
             title = uiString(R.string.l10n_settings_screen_about_6b21fb79),
-            blurb = "NOOP: all your data, none of the cloud.",
+            blurb = "NOOP: core health data stays local by default.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(

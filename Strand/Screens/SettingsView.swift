@@ -2227,7 +2227,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "info.circle.fill",
             title: "About",
-            blurb: "NOOP: all your data, none of the cloud."
+            blurb: "NOOP: core health data stays local by default."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {

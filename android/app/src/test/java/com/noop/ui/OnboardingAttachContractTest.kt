@@ -77,6 +77,49 @@ class OnboardingAttachContractTest {
         assertTrue(footer.contains("Brush.horizontalGradient("))
     }
 
+    @Test fun everyPostClaimPageAndCompletionRequireCurrentOwnership() {
+        val userDir = checkNotNull(System.getProperty("user.dir"))
+        val onboarding = source(userDir, "OnboardingScreen.kt").readText()
+        val planAction = onboarding
+            .substringAfter("OnboardingPage.Plan -> {")
+            .substringBefore("OnboardingPage.Bluetooth ->")
+
+        assertTrue(
+            onboarding.contains(
+                "OnboardingPage.Plan ->\n" +
+                    "                        !ownershipState.busy && postClaimOwnershipReady",
+            ),
+        )
+        assertTrue(
+            onboarding.contains(
+                "requested.requiresCurrentOwnershipClaim &&\n" +
+                    "            !postClaimOwnershipReady",
+            ),
+        )
+        assertTrue(
+            onboarding.contains(
+                "page.requiresCurrentOwnershipClaim &&\n" +
+                    "            !postClaimOwnershipReady",
+            ),
+        )
+        assertTrue(
+            onboarding.contains(
+                "val requiresCurrentOwnershipClaim: Boolean\n" +
+                    "        get() = ordinal > Ownership.ordinal",
+            ),
+        )
+        assertTrue(onboarding.contains("fun complete() {"))
+        assertTrue(onboarding.contains("if (!postClaimOwnershipReady) {"))
+        assertTrue(
+            planAction.indexOf("ownershipCanAccessPostClaimOnboarding(") <
+                planAction.indexOf("ownership.selectPlan(selectedPlan)"),
+        )
+        assertTrue(
+            planAction.lastIndexOf("ownershipCanAccessPostClaimOnboarding(") >
+                planAction.indexOf("ownership.selectPlan(selectedPlan)"),
+        )
+    }
+
     private fun source(userDir: String, name: String): File =
         listOf(
             File(userDir, "src/main/java/com/noop/ui/$name"),

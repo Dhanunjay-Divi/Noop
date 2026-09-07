@@ -13,20 +13,22 @@ import UIKit
 // that fills as you advance, Back always available, and a forward CTA per step.
 //
 // Steps:
-//  1 Welcome           - NOOP + "all your data, none of the cloud"
+//  1 Welcome           - NOOP + local-first health-data boundary
 //  2 What it does      - 3 calm value slides
 //  3 Expectations      - what scores need and what NOOP does not claim
 //  4 Bluetooth priming - explain BEFORE the OS prompt
 //  5 Wear & wake       - put your strap on, make sure it is charged
 //  6 Scan              - radar sweep; auto-scans, Scan retries via model.scan()
 //  7 Bonding           - celebration when live.bonded
-//  8 Profile           - age / sex / weight / height bound to ProfileStore
-//  9 Import (optional) - wearable / Apple Health history
-// 10 Notifications     - explicit, default-off daily guidance choice
-// 11 Safety contacts   - optional contact setup
-// 12 Appearance        - app finish
-// 13 Daily rhythm      - where everyday reviews, logs, and automations live
-// 14 Done              - "Your thread starts here." -> onFinished()
+//  8 Ownership         - first-party builds only; claim must finish before profile
+//  9 Profile           - age / sex / weight / height bound to ProfileStore
+// 10 Import (optional) - wearable / Apple Health history
+// 11 Notifications     - explicit, default-off daily guidance choice
+// 12 Safety contacts   - optional contact setup
+// 13 Appearance        - app finish
+// 14 Daily rhythm      - where everyday reviews, logs, and automations live
+// 15 Plan              - choose NOOP or save a NOOP+ preference without payment
+// 16 Done              - "Your thread starts here." -> onFinished()
 //
 // Presentation is wired centrally; this view only calls onFinished() when complete.
 
@@ -37,15 +39,31 @@ public struct OnboardingWizard: View {
 
     public init(onFinished: @escaping () -> Void) {
         self.onFinished = onFinished
+        var initialStep = Step.welcome
+        if let stored = UserDefaults.standard.string(
+            forKey: Self.progressStorageKey
+        ),
+           let restored = Step.allCases.first(where: {
+               $0.storageValue == stored
+           }) {
+            initialStep = restored
+        }
         #if DEBUG
         let args = CommandLine.arguments
-        if let index = args.firstIndex(of: "--demo-onboarding-step"),
+        if let index = args.firstIndex(of: "--demo-onboarding-page"),
+           args.indices.contains(index + 1),
+           let requestedStep = Step.allCases.first(where: {
+               $0.storageValue == args[index + 1]
+           }) {
+            initialStep = requestedStep
+        } else if let index = args.firstIndex(of: "--demo-onboarding-step"),
            args.indices.contains(index + 1),
            let rawValue = Int(args[index + 1]),
            let requestedStep = Step(rawValue: rawValue) {
-            _step = State(initialValue: requestedStep)
+            initialStep = requestedStep
         }
         #endif
+        _step = State(initialValue: initialStep)
     }
 
     // NOTE: the root deliberately does NOT observe the fast-updating model/live/profile
@@ -54,18 +72,48 @@ public struct OnboardingWizard: View {
     // handles the bond→celebration transition without re-rendering the root.
 
     private enum Step: Int, CaseIterable {
-        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, safetyContacts, appearance, dailyRhythm, done
+        case welcome, what, expectations, bluetooth, wear, scan, bonded,
+             ownership, profile, importData, notifications, safetyContacts,
+             appearance, dailyRhythm, plan, done
 
         var isFirst: Bool { self == .welcome }
         var isLast: Bool { self == .done }
+
+        var storageValue: String {
+            switch self {
+            case .welcome: return "welcome"
+            case .what: return "what"
+            case .expectations: return "expectations"
+            case .bluetooth: return "bluetooth"
+            case .wear: return "wear"
+            case .scan: return "scan"
+            case .bonded: return "bonded"
+            case .ownership: return "ownership"
+            case .profile: return "profile"
+            case .importData: return "import"
+            case .notifications: return "notifications"
+            case .safetyContacts: return "safety_contacts"
+            case .appearance: return "appearance"
+            case .dailyRhythm: return "daily_rhythm"
+            case .plan: return "plan"
+            case .done: return "done"
+            }
+        }
     }
 
+    private static let progressStorageKey = "noop.onboarding.progress.v1"
     @State private var step: Step = .welcome
     @State private var glow = false
     @State private var profileEditing = false
+    @State private var bandBonded = false
     /// Notification permission is never bundled into a generic Continue tap. This explicit, default-off
     /// choice is explained on the Notifications step and only then passed to the scheduler.
     @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
+    @State private var selectedPlan = NoopProductPlan.stored()
+    @State private var planSubmissionAttempted = false
+    #if os(iOS)
+    @StateObject private var ownershipService = OwnershipService.shared
+    #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
@@ -89,12 +137,24 @@ public struct OnboardingWizard: View {
                     case .wear:       WearStep()
                     case .scan:       ScanStep(advance: advance)
                     case .bonded:     BondedStep()
+                    case .ownership:
+                        #if os(iOS)
+                        OwnershipAccountView()
+                        #else
+                        EmptyView()
+                        #endif
                     case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
                     case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
                     case .safetyContacts: SafetyContactsStep()
                     case .appearance: AppearanceStep()
                     case .dailyRhythm: DailyRhythmStep()
+                    case .plan:
+                        ProductPlanStep(
+                            selection: $selectedPlan,
+                            status: planSubmissionStatus,
+                            isBusy: planSubmissionBusy
+                        )
                     case .done:       DoneStep()
                     }
                 }
@@ -126,14 +186,25 @@ public struct OnboardingWizard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
-        .onAppear { if !reduceMotion { glow = true } }
+        .onAppear {
+            normalizeCurrentStep()
+            if !reduceMotion { glow = true }
+        }
         // Isolated live observation — a hidden watcher slides Scan → celebration on bond
         // without subscribing the whole wizard to per-tick updates.
-        .background(BondWatcher(onBonded: handleBond))
+        .background(BondWatcher(onBondState: handleBondState))
+        #if os(iOS)
+        .onChange(of: ownershipService.phase) { _, _ in
+            reconcileOwnershipRequirement()
+        }
+        #endif
     }
 
-    private func handleBond() {
-        if step == .scan { withAnimation(StrandMotion.hero) { step = .bonded } }
+    private func handleBondState(_ bonded: Bool) {
+        bandBonded = bonded
+        if bonded && step == .scan {
+            move(to: .bonded, direction: "automatic")
+        }
     }
 
     // MARK: Backgrounds
@@ -180,12 +251,13 @@ public struct OnboardingWizard: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                 }
                 .buttonStyle(.plain)
+                .disabled(planSubmissionBusy)
                 .accessibilityLabel("Back")
             }
 
             Spacer()
 
-            Text("\(step.rawValue + 1) / \(Step.allCases.count)")
+            Text("\(currentStepIndex + 1) / \(activeSteps.count)")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
@@ -201,7 +273,12 @@ public struct OnboardingWizard: View {
                 .frame(maxWidth: 620)
 
             HStack(spacing: 14) {
-                PrimaryButton(title: ctaTitle, systemImage: ctaIcon, action: primaryAction)
+                PrimaryButton(
+                    title: ctaTitle,
+                    systemImage: ctaIcon,
+                    enabled: primaryActionEnabled,
+                    action: primaryAction
+                )
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("noop.onboarding.primary")
             }
@@ -210,11 +287,14 @@ public struct OnboardingWizard: View {
     }
 
     private var progress: Double {
-        guard Step.allCases.count > 1 else { return 1 }
-        return Double(step.rawValue) / Double(Step.allCases.count - 1)
+        guard activeSteps.count > 1 else { return 1 }
+        return Double(currentStepIndex) / Double(activeSteps.count - 1)
     }
 
     private var ctaTitle: String {
+        if step == .plan && planSubmissionBusy {
+            return String(localized: "Saving…")
+        }
         switch step {
         case .welcome:    return String(localized: "Get Started")
         case .what:       return String(localized: "Continue")
@@ -223,6 +303,10 @@ public struct OnboardingWizard: View {
         case .wear:       return String(localized: "I'm wearing it")
         case .scan:       return String(localized: "Continue")
         case .bonded:     return String(localized: "Continue")
+        case .ownership:
+            return ownershipClaimed
+                ? String(localized: "Continue")
+                : String(localized: "Claim band to continue")
         case .profile:    return String(localized: "Save & Continue")
         case .importData: return String(localized: "Continue")
         case .notifications:
@@ -232,8 +316,21 @@ public struct OnboardingWizard: View {
         case .safetyContacts: return String(localized: "Finish later")
         case .appearance: return String(localized: "Continue")
         case .dailyRhythm: return String(localized: "Continue")
+        case .plan:
+            return selectedPlan == .noop
+                ? String(localized: "Continue with NOOP")
+                : String(localized: "Save NOOP+ preference")
         case .done:       return String(localized: "Enter NOOP")
         }
+    }
+
+    private var primaryActionEnabled: Bool {
+        if step == .ownership { return ownershipClaimed }
+        if step == .scan && ownershipRequired { return bandBonded }
+        if step == .plan {
+            return !planSubmissionBusy && postClaimOwnershipReady
+        }
+        return ownershipAllows(step)
     }
 
     private var ctaIcon: String? {
@@ -245,8 +342,9 @@ public struct OnboardingWizard: View {
     }
 
     private func primaryAction() {
+        guard primaryActionEnabled else { return }
         if step.isLast {
-            onFinished()
+            finishOnboarding()
         } else {
             advance()
         }
@@ -258,6 +356,34 @@ public struct OnboardingWizard: View {
     /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
     /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
+        if step == .plan {
+            planSubmissionAttempted = true
+            #if os(iOS)
+            guard postClaimOwnershipReady else {
+                reconcileOwnershipRequirement()
+                return
+            }
+            Task { @MainActor in
+                guard await ownershipService.selectPlan(selectedPlan) else {
+                    return
+                }
+                guard step == .plan else { return }
+                guard postClaimOwnershipReady else {
+                    reconcileOwnershipRequirement()
+                    return
+                }
+                advanceStep()
+            }
+            #else
+            selectedPlan.persist()
+            AppDiagnosticsRecorder.shared.record(
+                "ownership.plan_local",
+                fields: ["selection": selectedPlan.rawValue]
+            )
+            advanceStep()
+            #endif
+            return
+        }
         if step == .profile {
             // The editor is seeded with neutral defaults for layout, but age-shaped estimates must not
             // treat those as user-provided. Tapping the explicitly labelled Save & Continue accepts both
@@ -280,13 +406,148 @@ public struct OnboardingWizard: View {
     }
 
     private func advanceStep() {
-        guard let next = Step(rawValue: step.rawValue + 1) else { onFinished(); return }
-        withAnimation(StrandMotion.gentle) { step = next }
+        let index = currentStepIndex
+        guard activeSteps.indices.contains(index + 1) else {
+            finishOnboarding()
+            return
+        }
+        move(to: activeSteps[index + 1], direction: "forward")
+    }
+
+    private func finishOnboarding() {
+        guard ownershipAllows(.done) else {
+            reconcileOwnershipRequirement()
+            return
+        }
+        UserDefaults.standard.removeObject(forKey: Self.progressStorageKey)
+        AppDiagnosticsRecorder.shared.record(
+            "onboarding.progress",
+            fields: [
+                "step": "complete",
+                "direction": "finished",
+            ]
+        )
+        onFinished()
     }
 
     private func back() {
-        guard let prev = Step(rawValue: step.rawValue - 1) else { return }
-        withAnimation(StrandMotion.gentle) { step = prev }
+        let index = currentStepIndex
+        guard activeSteps.indices.contains(index - 1) else { return }
+        move(to: activeSteps[index - 1], direction: "back")
+    }
+
+    private var activeSteps: [Step] {
+        Step.allCases.filter { $0 != .ownership || ownershipRequired }
+    }
+
+    private var currentStepIndex: Int {
+        activeSteps.firstIndex(of: step) ?? 0
+    }
+
+    private var ownershipRequired: Bool {
+        #if os(iOS)
+        return ownershipService.isAvailable
+        #else
+        return false
+        #endif
+    }
+
+    private var ownershipClaimed: Bool {
+        #if os(iOS)
+        return ownershipService.phase == .claimed
+            || ownershipService.phase == .complete
+        #else
+        return true
+        #endif
+    }
+
+    private var planSubmissionBusy: Bool {
+        #if os(iOS)
+        return planSubmissionAttempted && ownershipService.isBusy
+        #else
+        return false
+        #endif
+    }
+
+    private var postClaimOwnershipReady: Bool {
+        #if os(iOS)
+        return ownershipCanAccessPostClaimOnboarding(
+            isAvailable: ownershipService.isAvailable,
+            phase: ownershipService.phase
+        )
+        #else
+        return true
+        #endif
+    }
+
+    private var planSubmissionStatus: String {
+        #if os(iOS)
+        guard planSubmissionAttempted, !ownershipService.isBusy else {
+            return ""
+        }
+        return ownershipService.status
+        #else
+        return ""
+        #endif
+    }
+
+    private func normalizeCurrentStep() {
+        if !ownershipAllows(step) {
+            reconcileOwnershipRequirement()
+            return
+        }
+        guard !activeSteps.contains(step) else { return }
+        move(to: .profile, direction: "reconciled")
+    }
+
+    private func ownershipAllows(_ candidate: Step) -> Bool {
+        guard candidate.rawValue > Step.ownership.rawValue else {
+            return true
+        }
+        return postClaimOwnershipReady
+    }
+
+    private func reconcileOwnershipRequirement() {
+        #if os(iOS)
+        guard !ownershipAllows(step),
+              ownershipService.isAvailable else {
+            return
+        }
+        guard let ownershipIndex = activeSteps.firstIndex(of: .ownership) else {
+            return
+        }
+        move(to: activeSteps[ownershipIndex], direction: "reconciled")
+        #endif
+    }
+
+    private func move(to next: Step, direction: String) {
+        let destination: Step
+        let effectiveDirection: String
+        if ownershipAllows(next) {
+            destination = next
+            effectiveDirection = direction
+        } else {
+            destination = .ownership
+            effectiveDirection = "reconciled"
+        }
+        UserDefaults.standard.set(
+            destination.storageValue,
+            forKey: Self.progressStorageKey
+        )
+        AppDiagnosticsRecorder.shared.record(
+            "onboarding.progress",
+            fields: [
+                "step": destination.storageValue,
+                "direction": effectiveDirection,
+            ]
+        )
+        withAnimation(
+            effectiveDirection == "automatic"
+                ? StrandMotion.hero
+                : StrandMotion.gentle
+        ) {
+            step = destination
+        }
     }
 
     private var stepTransition: AnyTransition {
@@ -297,14 +558,158 @@ public struct OnboardingWizard: View {
     }
 }
 
+private struct ProductPlanStep: View {
+    @Binding var selection: NoopProductPlan
+    let status: String
+    let isBusy: Bool
+
+    var body: some View {
+        StepShell {
+            VStack(spacing: 18) {
+                Spacer(minLength: 12)
+                Image(systemName: "checkmark.seal")
+                    .font(.system(size: 38, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .accessibilityHidden(true)
+                Text("Choose your NOOP")
+                    .font(StrandFont.title1)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .multilineTextAlignment(.center)
+                Text(
+                    "Core metrics, workouts, Journal, Coach, automations, local backup and exports stay available with NOOP. This choice never changes band ownership."
+                )
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 480)
+
+                VStack(spacing: 12) {
+                    planButton(
+                        .noop,
+                        symbol: "iphone",
+                        title: "NOOP",
+                        subtitle: "Local-first",
+                        detail: "Continue immediately. No payment or subscription is required."
+                    )
+                    planButton(
+                        .noopPlus,
+                        symbol: "sparkles",
+                        title: "NOOP+",
+                        subtitle: "Optional continuity",
+                        detail: "Save your interest in managed storage and multi-device restore. Payment and entitlement are not available yet."
+                    )
+                }
+                .frame(maxWidth: 500)
+
+                Text(
+                    "Selecting NOOP+ does not upload data, open checkout or unlock an entitlement."
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                if isBusy {
+                    ProgressView(String(localized: "Saving…"))
+                        .tint(StrandPalette.accent)
+                } else if !status.isEmpty {
+                    Text(status)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier(
+                            "noop.onboarding.plan.status"
+                        )
+                }
+                Spacer(minLength: 8)
+            }
+        }
+    }
+
+    private func planButton(
+        _ plan: NoopProductPlan,
+        symbol: String,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        let selected = selection == plan
+        let tint = plan == .noopPlus
+            ? StrandPalette.metricAmber
+            : StrandPalette.textPrimary
+        return Button {
+            selection = plan
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        tint.opacity(0.10),
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(
+                                plan == .noopPlus
+                                    ? StrandPalette.metricAmber
+                                    : StrandPalette.textPrimary
+                            )
+                        Text(subtitle)
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Text(detail)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(selected ? tint : StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                StrandPalette.surfaceRaised,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        selected ? tint : StrandPalette.hairline,
+                        lineWidth: selected ? 1.5 : 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy)
+        .accessibilityLabel(
+            Text(title) + Text(", ") + Text(subtitle) + Text(". ") + Text(detail)
+        )
+        .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
 /// Hidden, isolated observer — re-renders on live updates (it's just Color.clear, so no
 /// visible cost) and fires `onBonded` when the strap bonds, keeping the main wizard body
 /// out of the per-tick re-render path that caused flicker.
 private struct BondWatcher: View {
     @EnvironmentObject private var live: LiveState
-    let onBonded: () -> Void
+    let onBondState: (Bool) -> Void
     var body: some View {
-        Color.clear.onChangeCompat(of: live.bonded) { newValue in if newValue { onBonded() } }
+        Color.clear
+            .onAppear { onBondState(live.bonded) }
+            .onChangeCompat(of: live.bonded) { onBondState($0) }
     }
 }
 
@@ -322,11 +727,11 @@ private struct WelcomeStep: View {
                 BrandMark(size: 120)
                     .scaleEffect(appear ? 1 : 0.92)
                     .opacity(appear ? 1 : 0)
-                Text("all your data, none of the cloud")
+                Text("your health data, local by default")
                     .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .opacity(appear ? 1 : 0)
-                Text("A private window into your recovery, sleep and strain. Read straight from Noop Band and kept only on \(Platform.deviceNounPhrase).")
+                Text("A private window into your recovery, sleep and effort. Core data is read from NOOP Band and processed on \(Platform.deviceNounPhrase); cloud features are optional.")
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -1971,6 +2376,7 @@ private struct ImportActionButton: View {
 private struct PrimaryButton: View {
     let title: String
     var systemImage: String? = nil
+    var enabled = true
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -1982,6 +2388,8 @@ private struct PrimaryButton: View {
             }
         }
         .buttonStyle(PrimaryButtonStyle())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.55)
     }
 }
 

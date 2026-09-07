@@ -79,6 +79,77 @@ def test_managed_storage_requires_project_bound_app_check_ids() -> None:
         ).validate_for_startup(needs_database=True)
 
 
+def test_ownership_service_requires_project_bound_apps_and_bounded_freshness() -> None:
+    project_number = "123456789012"
+    settings = Settings(
+        api_token=None,
+        database_url="postgresql://noop:test@db/noop",
+        ownership_service_enabled=True,
+        ownership_project_id="noop-test-project",
+        ownership_project_number=project_number,
+        ownership_identity_api_key="identity-api-key",
+        ownership_apple_app_id=f"1:{project_number}:ios:0123456789abcdef",
+        ownership_android_app_id=(f"1:{project_number}:android:fedcba9876543210"),
+    )
+
+    settings.validate_for_startup(
+        needs_database=True,
+        needs_api_token=False,
+    )
+
+    with pytest.raises(RuntimeError, match="ANDROID_APP_ID"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "ownership_android_app_id"
+            },
+            ownership_android_app_id=(f"1:{project_number}:ios:fedcba9876543210"),
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+    with pytest.raises(RuntimeError, match="FRESH_AUTH_SECONDS"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "ownership_fresh_auth_seconds"
+            },
+            ownership_fresh_auth_seconds=59,
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+    with pytest.raises(RuntimeError, match="IDENTITY_CACHE_SECONDS"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "ownership_identity_cache_seconds"
+            },
+            ownership_identity_cache_seconds=301,
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+    with pytest.raises(RuntimeError, match="IDENTITY_CACHE_ENTRIES"):
+        Settings(
+            **{
+                field: getattr(settings, field)
+                for field in settings.__dataclass_fields__
+                if field != "ownership_identity_cache_entries"
+            },
+            ownership_identity_cache_entries=100_001,
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+
 def test_delivery_lease_must_outlast_provider_timeout_with_poll_margin() -> None:
     settings = Settings(
         api_token="a" * 32,

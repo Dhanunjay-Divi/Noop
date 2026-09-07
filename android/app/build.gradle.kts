@@ -102,6 +102,18 @@ val managedDisablePhoneAppVerification = managedDebugBoolean(
 )
 val managedTestPhone =
     managedBuildValue("noopManagedTestPhone", "NOOP_MANAGED_TEST_PHONE")
+val ownershipApiUrl =
+    managedBuildValue("noopOwnershipApiUrl", "NOOP_OWNERSHIP_API_URL")
+val ownershipTermsHost =
+    managedBuildValue("noopOwnershipTermsHost", "NOOP_OWNERSHIP_TERMS_HOST")
+val ownershipActivationEnabled = managedDebugBoolean(
+    "noopOwnershipActivationEnabled",
+    "NOOP_OWNERSHIP_ACTIVATION_ENABLED",
+)
+val ownershipAllowLocalHttp = managedDebugBoolean(
+    "noopOwnershipAllowLocalHttp",
+    "NOOP_OWNERSHIP_ALLOW_LOCAL_HTTP",
+)
 if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
@@ -171,6 +183,18 @@ android {
             managedDisablePhoneAppVerification.toString(),
         )
         buildConfigField("String", "MANAGED_TEST_PHONE", "\"$managedTestPhone\"")
+        buildConfigField("String", "OWNERSHIP_API_URL", "\"$ownershipApiUrl\"")
+        buildConfigField("String", "OWNERSHIP_TERMS_HOST", "\"$ownershipTermsHost\"")
+        buildConfigField(
+            "boolean",
+            "OWNERSHIP_ACTIVATION_ENABLED",
+            ownershipActivationEnabled.toString(),
+        )
+        buildConfigField(
+            "boolean",
+            "OWNERSHIP_ALLOW_LOCAL_HTTP",
+            ownershipAllowLocalHttp.toString(),
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

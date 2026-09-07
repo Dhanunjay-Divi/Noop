@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `in progress`
+- State: `completed for the CI repair slice; ownership continued in a separate
+  evidenced round`
 - Owner: project team
 - Branch: `main`
 - Start commit: `ea78d5eb`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `2c234840`
+- Record commit or PR: `2c234840`
 
 ## Objective
 
@@ -79,11 +80,16 @@ policy, support, and storefront facts are stable.
   scrolls the complete map into view and proves simultaneous Chest and Back
   state plus rendered selection pixels without changing production behavior.
 - Completed the local repair gates before publishing the CI slice.
+- Published the CI repair as `2c234840`. The supplier-independent ownership
+  implementation continued in
+  [`2026-09-05-ownership-account-foundation.md`](2026-09-05-ownership-account-foundation.md)
+  so this record does not mix its later schema, runtime, and mobile evidence
+  into the earlier CI slice.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: none in the CI repair slice. The ownership
-  implementation review remains pending.
+- Schema or migration impact: none in the CI repair slice. Ownership schema
+  evidence is recorded in the separate ownership foundation round.
 - Existing-data retention impact: no destructive migration is authorized.
 - Source/provenance or formula impact: none planned in this round.
 - Permissions/network disclosure impact: ownership identity and NOOP+ consent
@@ -140,16 +146,16 @@ policy, support, and storefront facts are stable.
 - Changed paths: Android and server workflows, Android managed-device ABI,
   server PostgreSQL-overlay fixture, iOS strength production-shell test and its
   debug-only selection seam, and this round record.
-- Commits: pending.
-- Branch and remote state: clean `main` at `ea78d5eb`, equal to `origin/main`.
+- Commits: `2c234840`.
+- Branch and remote state: the CI repair was published to `main`.
 - Repository visibility verified: not repeated.
-- Version/build impact: pending.
+- Version/build impact: no version change.
 - Release or distribution impact: none at round start.
 
 ## Decisions
 
-- Durable decision added or changed: pending.
-- Decision-log entry: pending.
+- Durable decision added or changed: none.
+- Decision-log entry: none.
 
 ## Open risks and honest limitations
 
@@ -163,9 +169,10 @@ policy, support, and storefront facts are stable.
 
 ## Next round
 
-1. Publish the CI repair slice and verify the three hosted workflows.
-2. Implement and verify the supplier-independent ownership/account control
-   plane, virtual possession verifier, and matched resumable mobile flow.
+1. Continue supplier-independent ownership work in
+   [`2026-09-05-ownership-account-foundation.md`](2026-09-05-ownership-account-foundation.md).
+2. Keep supplier and physical-band behavior open until the approved dossier and
+   representative hardware exist.
 
 ## Privacy check
 

@@ -24,8 +24,8 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        if FirebaseApp.app() != nil {
-            _ = Auth.auth().canHandleNotification(userInfo)
+        _ = Self.configuredAuths().contains {
+            $0.canHandleNotification(userInfo)
         }
         completionHandler(.noData)
     }
@@ -39,8 +39,10 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
     }
 
     func forwardPendingAPNSTokenIfPossible() {
-        guard FirebaseApp.app() != nil, let pendingAPNSToken else { return }
-        Auth.auth().setAPNSToken(pendingAPNSToken, type: .unknown)
+        guard let pendingAPNSToken else { return }
+        Self.configuredAuths().forEach {
+            $0.setAPNSToken(pendingAPNSToken, type: .unknown)
+        }
     }
 
     static func forwardPendingAPNSTokenIfPossible() {
@@ -49,8 +51,20 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
     }
 
     static func handleOpenURL(_ url: URL) -> Bool {
-        guard FirebaseApp.app() != nil else { return false }
-        return Auth.auth().canHandle(url)
+        configuredAuths().contains { $0.canHandle(url) }
+    }
+
+    private static func configuredAuths() -> [Auth] {
+        var values: [Auth] = []
+        if FirebaseApp.app() != nil {
+            values.append(Auth.auth())
+        }
+        if let ownershipApp = FirebaseApp.app(
+            name: noopOwnershipFirebaseAppName
+        ) {
+            values.append(Auth.auth(app: ownershipApp))
+        }
+        return values
     }
 }
 

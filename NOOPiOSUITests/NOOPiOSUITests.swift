@@ -640,7 +640,7 @@ final class NOOPiOSUITests: XCTestCase {
     func testOnboardingDailyRhythmKeepsAutomationsReachableAboveFooter() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "12"]
+            extraArguments: ["--demo-onboarding-page", "daily_rhythm"]
         )
         let primaryAction = app.buttons["noop.onboarding.primary"]
         let footer = app.descendants(matching: .any)["noop.onboarding.footer"]
@@ -677,7 +677,7 @@ final class NOOPiOSUITests: XCTestCase {
     func testOnboardingCompletionFitsAndCentersOnCompactScreen() {
         let app = launchDemoScreen(
             "onboarding",
-            extraArguments: ["--demo-onboarding-step", "13"]
+            extraArguments: ["--demo-onboarding-page", "done"]
         )
         let title = app.staticTexts["noop.onboarding.done.title"]
         let body = app.staticTexts["noop.onboarding.done.body"]

@@ -12,6 +12,15 @@ resource "google_service_account" "managed_api" {
   description  = "Firebase-authenticated synthetic storage API"
 }
 
+resource "google_service_account" "ownership_api" {
+  count = var.enable_ownership_runtime ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "${local.prefix}-ownership"
+  display_name = "NOOP Band ownership staging API"
+  description  = "Identity and ownership authority without health-data access"
+}
+
 resource "google_service_account" "processor" {
   project      = var.project_id
   account_id   = "${local.prefix}-processor"
@@ -134,6 +143,14 @@ resource "google_project_iam_member" "managed_api_cloud_sql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
   member  = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_project_iam_member" "ownership_api_cloud_sql_client" {
+  count = var.enable_ownership_runtime ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.ownership_api[0].email}"
 }
 
 resource "google_project_iam_member" "migration_cloud_sql_client" {
@@ -272,6 +289,26 @@ resource "google_secret_manager_secret_iam_member" "managed_api_database_url" {
   secret_id = google_secret_manager_secret.database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+data "google_secret_manager_secret" "ownership_database_url" {
+  count = var.enable_ownership_runtime ? 1 : 0
+
+  project = var.project_id
+  secret_id = (
+    var.ownership_database_url_secret_id != null
+    ? var.ownership_database_url_secret_id
+    : "ownership-database-url-required"
+  )
+}
+
+resource "google_secret_manager_secret_iam_member" "ownership_api_database_url" {
+  count = var.enable_ownership_runtime ? 1 : 0
+
+  project   = var.project_id
+  secret_id = data.google_secret_manager_secret.ownership_database_url[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.ownership_api[0].email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "managed_api_replay_secret" {

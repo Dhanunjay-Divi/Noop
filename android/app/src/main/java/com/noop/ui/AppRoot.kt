@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Cloud
@@ -162,6 +163,7 @@ private enum class Destination(
     Intelligence("intelligence", R.string.nav_intelligence, Icons.Filled.Psychology),
     Calendar("calendar", R.string.appwide_calendar_your_month, Icons.Filled.CalendarMonth),
     Profile("profile", R.string.l10n_settings_screen_profile_ff4fc027, Icons.Filled.AccountCircle),
+    BandAccount("band_account", R.string.ownership_screen_title, Icons.Filled.Badge),
     // Optional, default-OFF (task #43): the Coupled view (WHOOP-style day read). Reached ONLY via the
     // Today dashboard "Coupled view" card tap-through, so it is deliberately NOT in any [DrawerGroup].
     CoupledView("coupled_view", R.string.nav_coupled_view, Icons.Filled.Hexagon),
@@ -267,7 +269,8 @@ private val drawerGroups: List<DrawerGroup> = listOf(
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Profile, Destination.Friends, Destination.Devices, Destination.Live, Destination.Nutrition,
+        Destination.Profile, Destination.BandAccount, Destination.Friends, Destination.Devices,
+        Destination.Live, Destination.Nutrition,
         Destination.Health, Destination.VitalSigns,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
         Destination.Rhythm,
@@ -608,6 +611,7 @@ fun AppRoot(
                         profileEntry = true,
                     )
                 }
+                composable(Destination.BandAccount.route) { OwnershipAccountScreen() }
                 composable(Destination.DataSources.route) { DataSourcesScreen(viewModel) }
                 composable(Destination.NoopPlus.route) { NoopPlusScreen() }
                 composable(Destination.BackupSync.route) { BackupSyncScreen() }

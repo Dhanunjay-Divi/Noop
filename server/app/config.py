@@ -109,6 +109,17 @@ class Settings:
     managed_identity_cache_seconds: int = 5 * 60
     managed_identity_cache_entries: int = 10_000
     managed_app_check_cache_seconds: int = 6 * 60 * 60
+    ownership_service_enabled: bool = False
+    ownership_project_id: str | None = None
+    ownership_project_number: str | None = None
+    ownership_identity_api_key: str | None = None
+    ownership_apple_app_id: str | None = None
+    ownership_android_app_id: str | None = None
+    ownership_identity_cache_seconds: int = 5 * 60
+    ownership_identity_cache_entries: int = 10_000
+    ownership_app_check_cache_seconds: int = 6 * 60 * 60
+    ownership_challenge_ttl_seconds: int = 3 * 60
+    ownership_fresh_auth_seconds: int = 10 * 60
     public_base_url: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
@@ -257,6 +268,35 @@ class Settings:
             managed_app_check_cache_seconds=_positive_int(
                 "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS",
                 6 * 60 * 60,
+            ),
+            ownership_service_enabled=_boolean(
+                "NOOP_OWNERSHIP_SERVICE_ENABLED",
+                False,
+            ),
+            ownership_project_id=os.getenv("NOOP_OWNERSHIP_PROJECT_ID"),
+            ownership_project_number=os.getenv("NOOP_OWNERSHIP_PROJECT_NUMBER"),
+            ownership_identity_api_key=os.getenv("NOOP_OWNERSHIP_IDENTITY_API_KEY"),
+            ownership_apple_app_id=os.getenv("NOOP_OWNERSHIP_APPLE_APP_ID"),
+            ownership_android_app_id=os.getenv("NOOP_OWNERSHIP_ANDROID_APP_ID"),
+            ownership_identity_cache_seconds=_positive_int(
+                "NOOP_OWNERSHIP_IDENTITY_CACHE_SECONDS",
+                5 * 60,
+            ),
+            ownership_identity_cache_entries=_positive_int(
+                "NOOP_OWNERSHIP_IDENTITY_CACHE_ENTRIES",
+                10_000,
+            ),
+            ownership_app_check_cache_seconds=_positive_int(
+                "NOOP_OWNERSHIP_APP_CHECK_CACHE_SECONDS",
+                6 * 60 * 60,
+            ),
+            ownership_challenge_ttl_seconds=_positive_int(
+                "NOOP_OWNERSHIP_CHALLENGE_TTL_SECONDS",
+                3 * 60,
+            ),
+            ownership_fresh_auth_seconds=_positive_int(
+                "NOOP_OWNERSHIP_FRESH_AUTH_SECONDS",
+                10 * 60,
             ),
             public_base_url=os.getenv("NOOP_PUBLIC_BASE_URL"),
             twilio_account_sid=os.getenv("NOOP_TWILIO_ACCOUNT_SID"),
@@ -497,6 +537,81 @@ class Settings:
             if not 300 <= self.managed_app_check_cache_seconds <= 21_600:
                 raise RuntimeError(
                     "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS must be between 300 and 21600"
+                )
+        if self.ownership_service_enabled:
+            required_ownership = {
+                "NOOP_OWNERSHIP_PROJECT_ID": self.ownership_project_id,
+                "NOOP_OWNERSHIP_PROJECT_NUMBER": self.ownership_project_number,
+                "NOOP_OWNERSHIP_IDENTITY_API_KEY": (self.ownership_identity_api_key),
+                "NOOP_OWNERSHIP_APPLE_APP_ID": self.ownership_apple_app_id,
+                "NOOP_OWNERSHIP_ANDROID_APP_ID": (self.ownership_android_app_id),
+            }
+            missing_ownership = [
+                name for name, value in required_ownership.items() if not value
+            ]
+            if missing_ownership:
+                raise RuntimeError(
+                    "ownership service requires: " + ", ".join(missing_ownership)
+                )
+            if not re.fullmatch(
+                r"[a-z][a-z0-9-]{4,28}[a-z0-9]",
+                self.ownership_project_id or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_PROJECT_ID must be a valid project ID"
+                )
+            if not re.fullmatch(
+                r"[1-9][0-9]{5,19}",
+                self.ownership_project_number or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_PROJECT_NUMBER must be a valid project number"
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9_-]{8,256}",
+                self.ownership_identity_api_key or "",
+            ):
+                raise RuntimeError("NOOP_OWNERSHIP_IDENTITY_API_KEY is invalid")
+            expected_app_prefix = f"1:{self.ownership_project_number}:"
+            for name, app_id, platform in (
+                (
+                    "NOOP_OWNERSHIP_APPLE_APP_ID",
+                    self.ownership_apple_app_id,
+                    "ios",
+                ),
+                (
+                    "NOOP_OWNERSHIP_ANDROID_APP_ID",
+                    self.ownership_android_app_id,
+                    "android",
+                ),
+            ):
+                if not re.fullmatch(
+                    rf"{re.escape(expected_app_prefix)}{platform}:[0-9a-f]{{8,64}}",
+                    app_id or "",
+                ):
+                    raise RuntimeError(
+                        f"{name} must belong to the configured project and platform"
+                    )
+            if not 60 <= self.ownership_challenge_ttl_seconds <= 10 * 60:
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_CHALLENGE_TTL_SECONDS must be between 60 and 600"
+                )
+            if not 60 <= self.ownership_fresh_auth_seconds <= 30 * 60:
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_FRESH_AUTH_SECONDS must be between 60 and 1800"
+                )
+            if not 1 <= self.ownership_identity_cache_seconds <= 5 * 60:
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_IDENTITY_CACHE_SECONDS must be between 1 and 300"
+                )
+            if not 1 <= self.ownership_identity_cache_entries <= 100_000:
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_IDENTITY_CACHE_ENTRIES must be between 1 and 100000"
+                )
+            if not 300 <= self.ownership_app_check_cache_seconds <= 21_600:
+                raise RuntimeError(
+                    "NOOP_OWNERSHIP_APP_CHECK_CACHE_SECONDS must be between "
+                    "300 and 21600"
                 )
         if self.pool_min_size > self.pool_max_size:
             raise RuntimeError(

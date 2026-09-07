@@ -113,6 +113,17 @@ variable "enable_managed_identity" {
   default     = false
 }
 
+variable "enable_ownership_identity" {
+  description = "Enable verified email/password on the existing synthetic Firebase apps for the separate band-ownership authority."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_ownership_identity || var.enable_managed_identity
+    error_message = "enable_ownership_identity requires enable_managed_identity."
+  }
+}
+
 variable "managed_apple_bundle_id" {
   description = "Exact iOS bundle identifier registered for synthetic NOOP+ staging."
   type        = string
@@ -254,6 +265,42 @@ variable "enable_managed_runtime" {
       )
     )
     error_message = "enable_managed_runtime requires enforced managed identity/App Check, Cloud SQL, and a digest-pinned image."
+  }
+}
+
+variable "enable_ownership_runtime" {
+  description = "Deploy the IAM-only first-party band ownership authority with possession verification still fail-closed."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.enable_ownership_runtime
+      || (
+        var.enable_ownership_identity
+        && var.enable_managed_identity
+        && var.enable_managed_app_check
+        && var.managed_auth_app_check_enforcement == "ENFORCED"
+        && var.enable_managed_database
+        && var.runtime_image != null
+        && var.ownership_database_url_secret_id != null
+      )
+    )
+    error_message = "enable_ownership_runtime requires ownership email identity, enforced App Check, Cloud SQL, a digest-pinned image, and a separate least-privilege database credential secret."
+  }
+}
+
+variable "ownership_database_url_secret_id" {
+  description = "Existing Secret Manager secret containing a PostgreSQL URL for a role restricted to ownership_* tables and required sequence/schema access."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.ownership_database_url_secret_id == null
+      || can(regex("^[A-Za-z0-9_-]{1,255}$", var.ownership_database_url_secret_id))
+    )
+    error_message = "ownership_database_url_secret_id must be a Secret Manager secret ID, not a URL or secret value."
   }
 }
 

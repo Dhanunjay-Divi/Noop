@@ -45,7 +45,13 @@ class PrimaryNavigationContractTest {
             "Friends(\"friends\", R.string.nav_friends, Icons.Filled.People)"
         ))
         assertTrue(text.contains(
-            "Destination.Profile, Destination.Friends, Destination.Devices, Destination.Live"
+            "Destination.Profile, Destination.BandAccount, Destination.Friends, Destination.Devices"
+        ))
+        assertTrue(text.contains(
+            "BandAccount(\"band_account\", R.string.ownership_screen_title, Icons.Filled.Badge)"
+        ))
+        assertTrue(text.contains(
+            "composable(Destination.BandAccount.route) { OwnershipAccountScreen() }"
         ))
         assertTrue(text.contains("composable(Destination.Friends.route)"))
         assertTrue(text.contains("FriendsScreen("))

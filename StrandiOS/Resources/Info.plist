@@ -91,6 +91,14 @@
 	<string>$(NOOP_MANAGED_PROJECT_ID)</string>
 	<key>NOOPManagedTestPhone</key>
 	<string>$(NOOP_MANAGED_TEST_PHONE)</string>
+	<key>NOOPOwnershipAPIURL</key>
+	<string>$(NOOP_OWNERSHIP_API_URL)</string>
+	<key>NOOPOwnershipActivationEnabled</key>
+	<string>$(NOOP_OWNERSHIP_ACTIVATION_ENABLED)</string>
+	<key>NOOPOwnershipAllowLocalHTTP</key>
+	<string>$(NOOP_OWNERSHIP_ALLOW_LOCAL_HTTP)</string>
+	<key>NOOPOwnershipTermsHost</key>
+	<string>$(NOOP_OWNERSHIP_TERMS_HOST)</string>
 	<key>NOOPStrengthMediaURLTemplate</key>
 	<string>$(NOOP_STRENGTH_MEDIA_URL_TEMPLATE)</string>
 	<key>NOOPStrengthVideoURLTemplate</key>

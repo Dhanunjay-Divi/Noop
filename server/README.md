@@ -6,6 +6,11 @@ the URL and Bearer token that the user configures. An optional invitation-only
 Friends API can create local profiles on this server; it has no public directory
 and limits those credentials to computed daily-summary upload and social reads.
 
+The separate, default-off first-party band ownership authority stores identity
+and control records but no health data. Its fail-closed runtime, terms, claim,
+installation, and deployment contract is documented in
+[OWNERSHIP.md](OWNERSHIP.md).
+
 This service is not affiliated with or endorsed by WHOOP. It does not log in to,
 scrape, or bypass WHOOP services. Imported WHOOP subscription exports remain a
 separate `official_reference` namespace; transparent Noop estimates remain

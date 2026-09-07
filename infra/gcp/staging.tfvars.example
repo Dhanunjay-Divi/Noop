@@ -27,8 +27,17 @@ enable_private_api = false
 enable_managed_identity             = false
 enable_managed_app_check            = false
 managed_auth_app_check_enforcement  = "UNENFORCED"
+# Ownership uses the same Firebase apps but a separate named client session and
+# backend. This flag enables email/password only; it does not enable a runtime.
+enable_ownership_identity           = false
 # Put only Firebase synthetic test credentials here in the ignored local
 # staging.auto.tfvars. Never use or commit a real person's phone number.
 managed_test_phone_numbers          = {}
 enable_managed_runtime              = false
 enable_public_managed_api           = false
+# The ownership runtime remains IAM-only and its production possession verifier
+# intentionally returns unavailable until the supplier SDK is integrated.
+enable_ownership_runtime            = false
+# Existing secret ID only, never a URL or password. Its PostgreSQL role must
+# have access to ownership_* objects and no managed-health or Safety tables.
+ownership_database_url_secret_id    = null

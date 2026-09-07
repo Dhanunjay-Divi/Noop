@@ -103,8 +103,8 @@ action:
 | Capability | Current evidence | Target or remaining gate |
 |---|---|---|
 | Local BLE capture and durable SQLite | Implemented on Apple and Android | Physical-device reconnect, suspension, battery, and upgrade matrix remains |
-| First-party band ownership account | Not implemented; the current compatible-device path has no ownership account | Verified email/password plus optional phone, printed-label match, authenticated physical confirmation, atomic single-owner claim, replacement-phone recovery, controlled release, and India/USA legal review |
-| Remote terms and returns | Not implemented; return duration is undecided between 14 and 30 days | Immutable signed terms, no persistent app copy, exact acceptance evidence, public historical versions, approved return clock, objective condition grades, lawful refund deductions, appeals, and operator-only wipe/release |
+| First-party band ownership account | Supplier-independent schema, isolated runtime, verified email/password flow, optional phone linking, atomic claim, replacement-installation authorization, revocation, and matched mobile state machines are implemented default-off; possession always returns unavailable | Supplier printed-label mapping, approved cryptographic possession provider, owner-key provisioning, controlled release, physical validation, production identity/abuse operations, and India/USA legal review |
+| Remote terms and returns | Digest-verified no-cache terms fetch, exact acceptance metadata, and static mobile rendering are implemented default-off; no approved document is published and return duration remains undecided between 14 and 30 days | Immutable signed publication and historical availability, approved return clock, objective condition grades, lawful refund deductions, appeals, and operator-only wipe/release |
 | Local scoring and source provenance | Implemented with pure Swift/Kotlin engines and explicit missing-data behavior | Held-out accuracy and subgroup validation remains metric-specific |
 | Stress breathing cue | Local, opt-in, freshness/corroboration/cooldown/quiet-hour gated | Physical delivery and false-interruption evidence remains |
 | Morning Sleep and evening Journal prompts | Local, opt-in, private copy, completion aware | One shared cross-domain arbiter is not yet implemented |
@@ -599,9 +599,9 @@ insights.
 
 ### Phase 0: current code completion
 
-- Define the first-party account, claim, release, and entitlement schemas and
-  prove them with a deterministic virtual-band possession flow before supplier
-  bytes are implemented.
+- Keep the implemented first-party ownership foundation disabled until an
+  approved supplier possession provider replaces the fail-closed unavailable
+  provider; then prove its virtual-band and physical-band claim matrices.
 - Finish NOOP+ source review and full local test/build matrix.
 - Accept Firebase terms and deploy identity/App Check to synthetic staging.
 - Generate ignored environment configuration and register debug attestation.

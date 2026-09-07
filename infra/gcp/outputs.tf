@@ -57,6 +57,16 @@ output "service_accounts" {
   }
 }
 
+output "ownership_api" {
+  description = "IAM-only first-party band ownership authority when enabled; possession verification remains unavailable."
+  value = var.enable_ownership_runtime ? {
+    name            = google_cloud_run_v2_service.ownership_api[0].name
+    uri             = google_cloud_run_v2_service.ownership_api[0].uri
+    service_account = google_service_account.ownership_api[0].email
+    public          = false
+  } : null
+}
+
 output "managed_identity" {
   description = "Synthetic Firebase app identifiers, or null while managed identity is disabled."
   value = var.enable_managed_identity ? {

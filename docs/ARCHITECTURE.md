@@ -2,8 +2,14 @@
 
 NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and 5.0). It talks
 directly to the strap over Bluetooth Low Energy, stores everything on-device in SQLite (GRDB on Mac/iOS, Room on Android), and computes
-recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, no account —
-the app interoperates with **your own device and your own data**. It can also import data you already
+recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, and the
+current compatible-device path requires no account. The app interoperates with
+**your own device and your own data**. A future first-party NOOP Band has one
+narrow ownership-account exception for claim and replacement-phone
+authorization; post-activation collection, scoring, history, export, and local
+control remain account-service and subscription independent. That control
+plane is implemented default-off and cannot complete possession until the
+approved supplier SDK exists. NOOP can also import data you already
 own: WHOOP CSV exports and Apple Health exports. An explicit opt-in can replicate
 the supported v1 subset to a user-operated server. NOOP+ managed-sync source is
 also implemented under the same local-first rule: it uses separate identity and

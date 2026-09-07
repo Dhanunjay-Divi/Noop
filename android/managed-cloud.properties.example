@@ -12,3 +12,9 @@ noopManagedPolicySha256=00000000000000000000000000000000000000000000000000000000
 noopManagedAllowLocalHttp=false
 noopManagedDisablePhoneAppVerification=false
 noopManagedTestPhone=
+# Separate first-party ownership authority. Keep disabled until the approved
+# supplier possession verifier and physical-band release gates pass.
+noopOwnershipApiUrl=https://ownership-api.example.invalid
+noopOwnershipTermsHost=terms.example.invalid
+noopOwnershipActivationEnabled=false
+noopOwnershipAllowLocalHttp=false

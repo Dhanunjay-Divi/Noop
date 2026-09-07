@@ -1321,7 +1321,6 @@ struct StrengthBodyMapView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Select \(muscle)")
         .accessibilityIdentifier("noop.strength.body-map.test-select.\(muscle)")
     }
     #endif

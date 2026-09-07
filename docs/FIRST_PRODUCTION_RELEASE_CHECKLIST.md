@@ -260,10 +260,12 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 6. Band claim, account, and plan onboarding
 
-- [ ] ACC-010 [JOINT] Freeze the activation boundary: app exploration, imports,
+- [x] ACC-010 [JOINT] Freeze the activation boundary: app exploration, imports,
   local metrics, and exports remain available without NOOP+, a first-party band
   requires one ownership claim, and an activated band keeps working locally
   without a subscription or continuous network.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-020 [EXT] Obtain the supplier contract mapping the public identifier
   printed on each band to its opaque provisioned identity, hardware revision,
   and per-unit cryptographic material.
@@ -290,18 +292,24 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] ACC-120 [JOINT] Approve a concise ownership disclosure explaining that a
   successful claim binds the band to one account and describing all supported
   recovery and release paths.
-- [ ] ACC-130 [ENG] Require an explicit versioned `I agree` action before
+- [x] ACC-130 [ENG] Require an explicit versioned `I agree` action before
   account creation or ownership claim; persist policy version, locale, and
   server time without storing the rendered copy in diagnostics.
-- [ ] ACC-140 [ENG] Implement account creation and existing-account sign-in
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-140 [ENG] Implement account creation and existing-account sign-in
   with email, password, and password confirmation where applicable using native
   password-manager and autofill support.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-150 [ENG] Verify the email address before final ownership claim and
   define safe resend, expiry, correction, and already-used-email behavior.
 - [ ] ACC-160 [ENG] Keep mobile number optional; if supplied, verify it by OTP
   and support resend, expiry, attempt limits, country code, and number change.
-- [ ] ACC-170 [ENG] Use a managed identity provider and never store, proxy, or
+- [x] ACC-170 [ENG] Use a managed identity provider and never store, proxy, or
   log plaintext passwords or OTPs in NOOP application databases or services.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-180 [ENG] Add password policy, breached-password controls where
   supported, rate limits, enumeration resistance, App Check/attestation, and
   abuse monitoring.
@@ -310,14 +318,20 @@ position without changing its ID. This inbox intentionally starts empty.
   and account recovery.
 - [ ] ACC-200 [ENG] Give every identity, network, verification, consent, and
   claim failure a private actionable state without revealing another account.
-- [ ] ACC-210 [ENG] Implement an atomic backend claim that links one opaque
+- [x] ACC-210 [ENG] Implement an atomic backend claim that links one opaque
   account tenant to one provisioned band identity.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-220 [ENG] Require valid app attestation and a fresh band-signed
   possession challenge before the claim transaction can commit.
-- [ ] ACC-230 [ENG] Make claim creation idempotent and concurrency-safe so two
+- [x] ACC-230 [ENG] Make claim creation idempotent and concurrency-safe so two
   phones or accounts cannot both succeed.
-- [ ] ACC-240 [ENG] Return the same privacy-preserving already-claimed response
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-240 [ENG] Return the same privacy-preserving already-claimed response
   regardless of the current owner's identity or account state.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-250 [ENG] Recover safely when account creation, server claim, band
   provisioning, local persistence, or final acknowledgement succeeds only
   partially.
@@ -331,8 +345,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] ACC-290 [ENG] On a replacement phone, require sign-in to the same account,
   fresh physical possession proof, and installation authorization without
   creating a second ownership claim.
-- [ ] ACC-300 [ENG] Let the owner revoke a lost or replaced phone installation
+- [x] ACC-300 [ENG] Let the owner revoke a lost or replaced phone installation
   without deleting band history or disabling other authorized installations.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-310 [JOINT] Disclose before purchase and claim that v1 has no general
   self-service unpair or transfer and remains bound to the claiming account for
   its ordinary lifetime, subject only to approved operator and legal exits.
@@ -353,36 +369,52 @@ position without changing its ID. This inbox intentionally starts empty.
   records, and prove factory-ready state.
 - [ ] ACC-370 [JOINT] Define proof-of-purchase, stolen-band, inheritance,
   chargeback, closed-account, and ownership-dispute procedures.
-- [ ] ACC-380 [ENG] Add additive schemas for accounts, bands, claims,
+- [x] ACC-380 [ENG] Add additive schemas for accounts, bands, claims,
   ownership events, installations, challenges, releases, and entitlement state
   without storing raw health data in the ownership control plane.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-390 [ENG] Prove tenant isolation, least-privilege support access,
   immutable security audit, backup/PITR, restoration, retention, and erasure
   for the ownership control plane.
 - [ ] ACC-400 [ENG] Add bounded lifecycle evidence for discovery, selection,
   vibration, possession confirmation, consent, identity, claim, provisioning,
   conflict, recovery, and release without identifiers or payloads.
-- [ ] ACC-410 [ENG] Show the NOOP versus NOOP+ chooser after remaining
+- [x] ACC-410 [ENG] Show the NOOP versus NOOP+ chooser after remaining
   onboarding and before the first Home presentation on Apple and Android.
-- [ ] ACC-420 [ENG] Let NOOP continue immediately without payment while keeping
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-420 [ENG] Let NOOP continue immediately without payment while keeping
   every core local metric, workout, Journal, Coach, automation, backup, and
   export promised for the free product.
-- [ ] ACC-430 [ENG] Give NOOP+ a restrained gold mark and highlight with text,
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-430 [ENG] Give NOOP+ a restrained gold mark and highlight with text,
   shape, contrast, screen-reader labels, and non-color selection state.
-- [ ] ACC-440 [ENG] Until billing is approved, render NOOP+ payment as clearly
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-440 [ENG] Until billing is approved, render NOOP+ payment as clearly
   unavailable or coming later; do not open a fake checkout, collect payment, or
   grant an entitlement.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-450 [OWNER] Select India hardware checkout, Apple/Google digital
   subscription billing, gateway, tax, refund, receipt, renewal, and support
   ownership before enabling payment.
-- [ ] ACC-460 [ENG] Keep band ownership separate from NOOP+ entitlement so
+- [x] ACC-460 [ENG] Keep band ownership separate from NOOP+ entitlement so
   cancellation, payment failure, or downgrade never deactivates the band or
   removes core local capability.
-- [ ] ACC-470 [ENG] Let users inspect and change plan later from a stable
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-470 [ENG] Let users inspect and change plan later from a stable
   account destination without repeating pairing or base onboarding.
-- [ ] ACC-480 [ENG] Resume the remaining existing initial pages after a claim,
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-480 [ENG] Resume the remaining existing initial pages after a claim,
   persist each completion boundary idempotently, and never strand a user after
   process death or network loss.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-06)
 - [ ] ACC-490 [ENG] Pass virtual-band, backend, Apple, Android, accessibility,
   two-phone/two-account race, offline, recovery, support-release, and
   representative physical-band end-to-end matrices.
@@ -412,21 +444,27 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] ACC-590 [ENG] Store every Terms and Conditions version as an immutable,
   content-addressed, locale-specific document and signed manifest in
   NOOP-controlled object storage.
-- [ ] ACC-600 [ENG] Fetch terms over authenticated TLS with an ephemeral,
+- [x] ACC-600 [ENG] Fetch terms over authenticated TLS with an ephemeral,
   no-persistent-cache client; do not bundle or write the full terms document to
   the app container, preferences, database, diagnostics, or report archive.
-- [ ] ACC-610 [ENG] Fail claim closed if the exact terms version cannot be
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
+- [x] ACC-610 [ENG] Fail claim closed if the exact terms version cannot be
   fetched or verified, and retain server-side acceptance evidence containing
   only account scope, document version/hash, locale, policy version, and time.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-620 [ENG] Retain every accepted historical terms version remotely,
   expose its public immutable URL, and require reacceptance only under a
   reviewed version/effective-date policy.
 - [ ] ACC-630 [ENG] Make the remotely loaded terms readable without login on
   the public website and accessible in-app with screen readers, text scaling,
   localization, copy/share, and an explicit return to the claim flow.
-- [ ] ACC-640 [ENG] Render only sanitized static terms content with no arbitrary
+- [x] ACC-640 [ENG] Render only sanitized static terms content with no arbitrary
   script, third-party tracker, advertising, fingerprinting, or credential
   capture.
+  (Evidence:
+  `ops/rounds/2026-09-05-ownership-account-foundation.md`, 2026-09-05)
 - [ ] ACC-650 [ENG] Add version, integrity, availability, latency, publication,
   rollback, and acceptance monitoring without logging document contents,
   account identifiers, contact data, or band identifiers.

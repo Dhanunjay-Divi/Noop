@@ -24,6 +24,12 @@ NOOP_MANAGED_POLICY_SHA256 =
 NOOP_MANAGED_ALLOW_LOCAL_HTTP = NO
 NOOP_MANAGED_DISABLE_PHONE_APP_VERIFICATION = NO
 NOOP_MANAGED_TEST_PHONE =
+// First-party ownership is separate from NOOP+ health storage. It remains
+// disabled unless all values are supplied by an ignored environment file.
+NOOP_OWNERSHIP_API_URL =
+NOOP_OWNERSHIP_TERMS_HOST =
+NOOP_OWNERSHIP_ACTIVATION_ENABLED = NO
+NOOP_OWNERSHIP_ALLOW_LOCAL_HTTP = NO
 #include? "ManagedCloudSecrets.xcconfig"
 
 // Xcode resolves the entitlement value from the active configuration. Release

@@ -22,6 +22,8 @@ flags can add:
 - a CMEK PostgreSQL 16 Cloud SQL instance and migration job;
 - Firebase phone identity, iOS/Android app registration, App Attest, Play
   Integrity, and enforced Authentication App Check;
+- verified email/password identity and a separate IAM-only first-party band
+  ownership authority with possession verification fail-closed;
 - an IAM-only managed API plus processor, lifecycle, scheduler, and Pub/Sub push;
 - a public Cloud Run invoker grant only through the final
   `enable_public_managed_api` gate.
@@ -157,6 +159,42 @@ change. Each successful step is evidence required by the next:
 
 15. `enable_public_managed_api` remains false until signed physical clients,
     privacy/legal, abuse, security, recovery, load, and support gates pass.
+
+The ownership authority is staged separately. Set
+`enable_ownership_identity = true` only after the email/password and recovery
+contract is ready. `enable_ownership_runtime = true` then creates an IAM-only
+service using `app.ownership_main`; it does not create a public invoker and its
+default possession verifier returns `503`. The service also stays unready until
+an approved immutable terms manifest has been inserted. Enabling the runtime
+also requires `ownership_database_url_secret_id`, an existing Secret Manager
+secret whose PostgreSQL role can use only the `ownership_*` control-plane
+objects. The ownership service is deliberately denied the shared managed
+database credential. Do not connect a released mobile client until the
+least-privilege role, supplier verifier, and every ownership release gate pass.
+
+After migration `026` exists and while `enable_ownership_runtime` is still
+false, install Cloud SQL Auth Proxy v2 and run:
+
+```sh
+./scripts/configure-ownership-database.sh
+```
+
+The guarded command reads the existing migration credential directly from
+Secret Manager, creates or narrows `noop_ownership`, removes role memberships,
+schema creation, column grants, table grants, sequence grants, and unrelated
+access, then applies only the table privileges enforced by ownership
+readiness. It rotates the password through the Cloud SQL API, reconnects as
+that exact principal to verify the effective privilege set, and only then
+adds a version to `noop-staging-ownership-database-url`. Passwords and database
+URLs never enter arguments, Terraform state, command output, or committed
+files. The command refuses to run while the ownership runtime is planned.
+
+Set `ownership_database_url_secret_id` to
+`noop-staging-ownership-database-url` only after that verification succeeds.
+Keep the runtime IAM-only and disabled until an approved terms document and
+supplier possession verifier exist. A failed password rotation is recovered by
+rerunning the same command before enabling the runtime; do not substitute the
+broad migration credential to make readiness pass.
 
 The database has a public IP only as a Cloud SQL connector endpoint. It has no
 authorized source networks, requires encrypted transport, and Cloud Run access

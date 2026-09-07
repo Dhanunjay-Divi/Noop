@@ -483,9 +483,13 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
 
     func testSafetySetupIsPartOfOnboardingBeforeAppearance() throws {
         let onboarding = try source("Strand/Onboarding/OnboardingWizard.swift")
-        XCTAssertTrue(onboarding.contains(
-            "notifications, safetyContacts, appearance, dailyRhythm, done"
-        ))
+        let notifications = try XCTUnwrap(
+            onboarding.range(of: "notifications, safetyContacts,")
+        )
+        let appearance = try XCTUnwrap(
+            onboarding.range(of: "appearance, dailyRhythm, plan, done")
+        )
+        XCTAssertLessThan(notifications.lowerBound, appearance.lowerBound)
         XCTAssertTrue(onboarding.contains(
             "case .safetyContacts: SafetyContactsStep()"
         ))

@@ -22,6 +22,7 @@ import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
+import com.noop.ownership.OwnershipService
 import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.social.FriendsSyncScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -139,6 +140,10 @@ class NoopApplication : Application() {
     /** Optional managed backup owner. It stays dormant when this build has no NOOP+ configuration. */
     val managedCloud: ManagedCloudService by lazy { ManagedCloudService.get(this) }
 
+    /** First-party band ownership authority. It is independent of NOOP+ and remains fail-closed
+     *  until an approved supplier possession provider is installed. */
+    val ownership: OwnershipService by lazy { OwnershipService.get(this) }
+
     /**
      * Publish a registry selection immediately after a user-driven device switch. The Room transaction
      * remains the source of truth; this projection removes the old process-lifetime stale value and lets
@@ -218,6 +223,9 @@ class NoopApplication : Application() {
             runCatching { managedCloud.bootstrap() }
             runCatching { ManagedCloudScheduler.reconcile(this@NoopApplication) }
             runCatching { ManagedCloudScheduler.enqueueCatchUpIfDue(this@NoopApplication) }
+            // Account state reconciliation is local unless this build explicitly enables the
+            // ownership authority. It never starts BLE, uploads health data, or grants NOOP+.
+            runCatching { ownership.bootstrap() }
         }
     }
 

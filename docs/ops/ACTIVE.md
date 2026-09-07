@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-05**
+Last updated: **2026-09-06**
 
 ## Repository
 
@@ -22,8 +22,8 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 391 currently pending points and stable IDs for inserting owner requests
-without renumbering the plan.
+with 397 stable actions: 24 evidenced complete and 373 pending. New owner
+requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
 performance, metric evidence, optional NOOP+ productionization, security,
@@ -60,10 +60,20 @@ no-persistent-cache path and stores no full local terms document; the server
 retains exact acceptance metadata and historical versions. The owner intends a
 voluntary return period but has not selected 14 versus 30 days or its start
 event. Condition grading, lawful disclosed refund deductions, appeals, wipe,
-unlink, quarantine, and India/USA approval remain open. None of this flow is
-implemented or physically validated.
-Evidence is recorded in
-[Band ownership and onboarding contract](rounds/2026-09-05-band-ownership-onboarding.md).
+unlink, quarantine, and India/USA approval remain open.
+
+The supplier-independent ownership foundation is now implemented default-off
+across PostgreSQL/FastAPI, Apple, Android, and guarded GCP IaC. It includes
+verified email/password identity mechanics, optional phone linking, immutable
+remote-terms verification, Keychain/Keystore-backed installation credentials,
+atomic single-owner claim and replacement-installation authorization,
+installation revocation, resumable onboarding, and the pre-Home NOOP/NOOP+
+choice. The production possession provider intentionally returns unavailable,
+the runtime has no public invoker, and released mobile configuration remains
+disabled. Supplier protocol, printed-label mapping, cryptographic possession,
+owner-key provisioning, approved terms/returns, physical validation, signing,
+and public deployment remain open. Evidence is recorded in
+[Ownership account foundation](rounds/2026-09-05-ownership-account-foundation.md).
 
 The private native NOOP+ simulator pilot is complete. One fictional Firebase
 identity remains for repeat operator testing with only the exact

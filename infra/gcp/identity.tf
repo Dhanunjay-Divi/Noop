@@ -173,7 +173,7 @@ resource "google_identity_platform_config" "managed" {
       enabled = false
     }
     email {
-      enabled           = false
+      enabled           = var.enable_ownership_identity
       password_required = true
     }
     phone_number {

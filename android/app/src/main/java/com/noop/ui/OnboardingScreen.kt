@@ -64,8 +64,11 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.WbSunny
@@ -98,6 +101,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -108,6 +113,11 @@ import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.WhoopCsvImporter
 import com.noop.notif.DailyReviewReminders
+import com.noop.NoopApplication
+import com.noop.ownership.NoopProductPlan
+import com.noop.ownership.OwnershipPhase
+import com.noop.ownership.OwnershipService
+import com.noop.ownership.ownershipCanAccessPostClaimOnboarding
 import com.noop.safety.SafetyPagingController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -130,28 +140,115 @@ import kotlin.math.roundToInt
 @Composable
 fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     val context = LocalContext.current
-    val pages = remember { OnboardingPage.entries }
+    val prefs = remember(context) { NoopPrefs.of(context) }
+    val ownership = remember(context) {
+        (context.applicationContext as? NoopApplication)?.ownership
+            ?: OwnershipService.get(context)
+    }
+    val ownershipState by ownership.state.collectAsState()
+    val postClaimOwnershipReady = ownershipCanAccessPostClaimOnboarding(
+        isAvailable = ownership.isAvailable,
+        phase = ownershipState.phase,
+    )
+    val pages = remember(ownership.isAvailable) {
+        OnboardingPage.entries.filter {
+            it != OnboardingPage.Ownership || ownership.isAvailable
+        }
+    }
     // rememberSaveable so a config change (rotation, dark-mode, font-scale, locale,
     // multi-window) doesn't recreate the Activity and throw the user back to page 1.
-    var pageIndex by rememberSaveable { mutableIntStateOf(0) }
+    // The stable string checkpoint also survives process death.
+    var pageIndex by rememberSaveable {
+        val restored = prefs.getString(ONBOARDING_PROGRESS_KEY, null)
+        mutableIntStateOf(
+            pages.indexOfFirst { it.storageValue == restored }
+                .takeIf { it >= 0 }
+                ?: 0,
+        )
+    }
     val page = pages[pageIndex]
     var dailyReviewOptIn by rememberSaveable {
         mutableStateOf(DailyReviewReminders.isEnabled(context))
     }
+    var selectedPlan by rememberSaveable {
+        mutableStateOf(NoopProductPlan.stored(context))
+    }
+    var planSubmissionAttempted by rememberSaveable {
+        mutableStateOf(false)
+    }
+    val scope = rememberCoroutineScope()
     // Onboarding can compose while Activity attachment is still wiring its lifecycle owner.
     // These are cheap hot StateFlows, so avoid the lifecycle-owner-dependent collector here.
     val live by viewModel.live.collectAsState()
+
+    fun moveTo(target: Int, direction: String) {
+        if (!pages.indices.contains(target)) return
+        val requested = pages[target]
+        val next = if (
+            requested.requiresCurrentOwnershipClaim &&
+            !postClaimOwnershipReady
+        ) {
+            OnboardingPage.Ownership
+        } else {
+            requested
+        }
+        val destination = pages.indexOf(next)
+        if (destination < 0) return
+        val effectiveDirection = if (next == requested) {
+            direction
+        } else {
+            "reconciled"
+        }
+        prefs.edit()
+            .putString(ONBOARDING_PROGRESS_KEY, next.storageValue)
+            .apply()
+        com.noop.AppDiagnosticsRecorder.record(
+            "onboarding.progress",
+            fields = mapOf(
+                "step" to next.storageValue,
+                "direction" to effectiveDirection,
+            ),
+        )
+        pageIndex = destination
+    }
 
     // The bonded celebration only makes sense once a strap is actually bonded. Auto-advance to it
     // the moment that happens on the Connect step (mirrors macOS's scan → celebration), and skip
     // it in both directions when nothing is bonded so it never shows a false "You're connected".
     LaunchedEffect(live.bonded) {
-        if (live.bonded && page == OnboardingPage.Connect) pageIndex++
+        if (live.bonded && page == OnboardingPage.Connect) {
+            moveTo(pageIndex + 1, "automatic")
+        }
+    }
+    LaunchedEffect(
+        page,
+        ownership.isAvailable,
+        ownershipState.phase,
+        ownershipState.busy,
+    ) {
+        if (
+            page.requiresCurrentOwnershipClaim &&
+            !postClaimOwnershipReady
+        ) {
+            moveTo(pageIndex, "reconciled")
+        }
     }
 
     fun complete() {
+        if (!postClaimOwnershipReady) {
+            moveTo(pageIndex, "reconciled")
+            return
+        }
         // Onboarding deferred the foreground promotion; do it now if a strap is live.
         viewModel.promoteBackgroundConnectionIfActive()
+        prefs.edit().remove(ONBOARDING_PROGRESS_KEY).apply()
+        com.noop.AppDiagnosticsRecorder.record(
+            "onboarding.progress",
+            fields = mapOf(
+                "step" to "complete",
+                "direction" to "finished",
+            ),
+        )
         onFinished()
     }
 
@@ -162,23 +259,73 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     val blePerms = remember { blePermissions() }
     val bleAdvanceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { pageIndex++ }
+    ) { moveTo(pageIndex + 1, "forward") }
     val notifAdvanceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         dailyReviewOptIn = dailyReviewOptIn && granted &&
             DailyReviewReminders.setEnabled(context, true)
         if (!dailyReviewOptIn) DailyReviewReminders.setEnabled(context, false)
-        pageIndex++
+        moveTo(pageIndex + 1, "forward")
     }
 
     fun advance() {
+        if (
+            page.requiresCurrentOwnershipClaim &&
+            !postClaimOwnershipReady
+        ) {
+            moveTo(pageIndex, "reconciled")
+            return
+        }
         if (page == OnboardingPage.Profile) {
             // Save & Continue explicitly accepts both visible inputs, including intentionally keeping
             // the seeded editor values. Until this tap, age-shaped estimates remain unavailable.
             ProfileStore.from(context).confirmFitnessInputs()
         }
         when (page) {
+            OnboardingPage.Plan -> {
+                if (
+                    !ownershipCanAccessPostClaimOnboarding(
+                        isAvailable = ownership.isAvailable,
+                        phase = ownership.state.value.phase,
+                    )
+                ) {
+                    moveTo(
+                        pages.indexOf(OnboardingPage.Ownership),
+                        "reconciled",
+                    )
+                    return
+                }
+                val submittedPage = pageIndex
+                planSubmissionAttempted = true
+                scope.launch {
+                    val saved = ownership.selectPlan(selectedPlan)
+                    if (
+                        saved &&
+                        ownershipCanAccessPostClaimOnboarding(
+                            isAvailable = ownership.isAvailable,
+                            phase = ownership.state.value.phase,
+                        ) &&
+                        pageIndex == submittedPage &&
+                        pages.getOrNull(pageIndex) == OnboardingPage.Plan
+                    ) {
+                        moveTo(submittedPage + 1, "forward")
+                    } else if (
+                        pageIndex == submittedPage &&
+                        pages.getOrNull(pageIndex) == OnboardingPage.Plan &&
+                        !ownershipCanAccessPostClaimOnboarding(
+                            isAvailable = ownership.isAvailable,
+                            phase = ownership.state.value.phase,
+                        )
+                    ) {
+                        moveTo(
+                            pages.indexOf(OnboardingPage.Ownership),
+                            "reconciled",
+                        )
+                    }
+                }
+                return
+            }
             OnboardingPage.Bluetooth -> {
                 val granted = blePerms.all {
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -187,7 +334,19 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             }
             OnboardingPage.Connect -> {
                 // No strap bonded → skip the celebration and go straight to Profile.
-                if (!live.bonded) { pageIndex = pages.indexOf(OnboardingPage.Profile); return }
+                if (!live.bonded) {
+                    if (ownership.isAvailable) return
+                    moveTo(pages.indexOf(OnboardingPage.Profile), "forward")
+                    return
+                }
+            }
+            OnboardingPage.Ownership -> {
+                if (
+                    ownershipState.phase != OwnershipPhase.CLAIMED &&
+                    ownershipState.phase != OwnershipPhase.COMPLETE
+                ) {
+                    return
+                }
             }
             OnboardingPage.Notifications -> {
                 val needsNotif = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -200,7 +359,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
             }
             else -> {}
         }
-        pageIndex++
+        moveTo(pageIndex + 1, "forward")
     }
 
     Surface(
@@ -223,12 +382,12 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     var target = pageIndex - 1
                     // Skip the bonded celebration going back when nothing is bonded.
                     if (target >= 0 && pages[target] == OnboardingPage.Bonded && !live.bonded) target--
-                    if (target >= 0) pageIndex = target
+                    if (target >= 0) moveTo(target, "back")
                 }
                 OnboardingTopBar(
                     page = pageIndex + 1,
                     total = pages.size,
-                    canGoBack = pageIndex > 0,
+                    canGoBack = pageIndex > 0 && !ownershipState.busy,
                     onBack = goBack,
                 )
 
@@ -250,14 +409,17 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                         .widthIn(max = 620.dp),
                     label = onboardingPageLabel,
                 ) { targetPage ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(top = 6.dp, bottom = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        when (targetPage) {
+                    if (targetPage == OnboardingPage.Ownership) {
+                        OwnershipAccountScreen()
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(top = 6.dp, bottom = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            when (targetPage) {
                             OnboardingPage.Welcome -> WelcomeStep()
                             OnboardingPage.WhatItDoes -> WhatItDoesStep()
                             OnboardingPage.Expectations -> ExpectationsStep()
@@ -265,6 +427,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                             OnboardingPage.Wear -> WearStep()
                             OnboardingPage.Connect -> ConnectStep(viewModel)
                             OnboardingPage.Bonded -> BondedStep(viewModel)
+                            OnboardingPage.Ownership -> Unit
                             OnboardingPage.Profile -> ProfileStep()
                             OnboardingPage.Import -> ImportStep(viewModel)
                             OnboardingPage.Notifications -> NotificationsStep(
@@ -274,14 +437,51 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                             OnboardingPage.SafetyContacts -> SafetyContactsStep()
                             OnboardingPage.Appearance -> AppearanceStep()
                             OnboardingPage.DailyRhythm -> DailyRhythmStep()
+                            OnboardingPage.Plan -> ProductPlanStep(
+                                selection = selectedPlan,
+                                onSelection = { selectedPlan = it },
+                                status = if (
+                                    planSubmissionAttempted &&
+                                    !ownershipState.busy
+                                ) {
+                                    ownershipState.status
+                                } else {
+                                    ""
+                                },
+                                busy = ownershipState.busy,
+                            )
                             OnboardingPage.Done -> DoneStep()
+                            }
                         }
                     }
                 }
 
+                val ownershipClaimed =
+                    ownershipState.phase == OwnershipPhase.CLAIMED ||
+                        ownershipState.phase == OwnershipPhase.COMPLETE
+                val primaryEnabled = when (page) {
+                    OnboardingPage.Connect ->
+                        !ownership.isAvailable || live.bonded
+                    OnboardingPage.Ownership -> ownershipClaimed
+                    OnboardingPage.Plan ->
+                        !ownershipState.busy && postClaimOwnershipReady
+                    else ->
+                        !page.requiresCurrentOwnershipClaim ||
+                            postClaimOwnershipReady
+                }
                 OnboardingFooter(
                     progress = if (pages.size <= 1) 1f else pageIndex.toFloat() / pages.lastIndex.toFloat(),
-                    cta = page.cta,
+                    cta = when {
+                        page == OnboardingPage.Plan && ownershipState.busy ->
+                            stringResource(R.string.ownership_plan_saving)
+                        page == OnboardingPage.Ownership && !ownershipClaimed ->
+                            stringResource(R.string.ownership_onboarding_continue_locked)
+                        page != OnboardingPage.Plan -> page.cta
+                        selectedPlan == NoopProductPlan.NOOP ->
+                            stringResource(R.string.ownership_plan_continue_noop)
+                        else -> stringResource(R.string.ownership_plan_save_plus)
+                    },
+                    enabled = primaryEnabled,
                     onNext = {
                         if (pageIndex == pages.lastIndex) {
                             complete()
@@ -303,13 +503,192 @@ private enum class OnboardingPage(val cta: String) {
     Wear("I'm wearing it"),
     Connect("Continue"),
     Bonded("Continue"),
+    Ownership("Continue"),
     Profile("Save & Continue"),
     Import("Continue"),
     Notifications("Continue"),
     SafetyContacts("Finish later"),
     Appearance("Continue"),
     DailyRhythm("Continue"),
+    Plan("Continue"),
     Done("Enter NOOP");
+
+    val storageValue: String
+        get() = when (this) {
+            Welcome -> "welcome"
+            WhatItDoes -> "what"
+            Expectations -> "expectations"
+            Bluetooth -> "bluetooth"
+            Wear -> "wear"
+            Connect -> "scan"
+            Bonded -> "bonded"
+            Ownership -> "ownership"
+            Profile -> "profile"
+            Import -> "import"
+            Notifications -> "notifications"
+            SafetyContacts -> "safety_contacts"
+            Appearance -> "appearance"
+            DailyRhythm -> "daily_rhythm"
+            Plan -> "plan"
+            Done -> "done"
+        }
+
+    val requiresCurrentOwnershipClaim: Boolean
+        get() = ordinal > Ownership.ordinal
+}
+
+private const val ONBOARDING_PROGRESS_KEY = "noop.onboarding.progress.v1"
+
+@Composable
+private fun ProductPlanStep(
+    selection: NoopProductPlan,
+    onSelection: (NoopProductPlan) -> Unit,
+    status: String,
+    busy: Boolean,
+) {
+    StepShell {
+        Spacer(Modifier.height(12.dp))
+        Icon(
+            Icons.Filled.CheckCircle,
+            contentDescription = null,
+            tint = Palette.textPrimary,
+            modifier = Modifier.size(38.dp),
+        )
+        Text(
+            stringResource(R.string.ownership_plan_title),
+            style = NoopType.title1,
+            color = Palette.textPrimary,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            stringResource(R.string.ownership_plan_detail),
+            style = NoopType.body,
+            color = Palette.textSecondary,
+            textAlign = TextAlign.Center,
+        )
+        ProductPlanChoice(
+            selected = selection == NoopProductPlan.NOOP,
+            icon = Icons.Filled.Smartphone,
+            title = stringResource(R.string.ownership_plan_noop_title),
+            subtitle = stringResource(R.string.ownership_plan_noop_subtitle),
+            detail = stringResource(R.string.ownership_plan_noop_detail),
+            tint = Palette.textPrimary,
+            enabled = !busy,
+            onClick = { onSelection(NoopProductPlan.NOOP) },
+        )
+        ProductPlanChoice(
+            selected = selection == NoopProductPlan.NOOP_PLUS,
+            icon = Icons.Filled.Star,
+            title = stringResource(R.string.ownership_plan_plus_title),
+            subtitle = stringResource(R.string.ownership_plan_plus_subtitle),
+            detail = stringResource(R.string.ownership_plan_plus_detail),
+            tint = Palette.metricAmber,
+            enabled = !busy,
+            onClick = { onSelection(NoopProductPlan.NOOP_PLUS) },
+        )
+        Text(
+            stringResource(R.string.ownership_plan_notice),
+            style = NoopType.caption,
+            color = Palette.textTertiary,
+            textAlign = TextAlign.Center,
+        )
+        if (status.isNotBlank()) {
+            Text(
+                text = status,
+                style = NoopType.caption,
+                color = Palette.textSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics {
+                    contentDescription = status
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProductPlanChoice(
+    selected: Boolean,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    detail: String,
+    tint: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val choiceDescription = stringResource(
+        R.string.ownership_plan_choice_description,
+        title,
+        subtitle,
+        detail,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Palette.surfaceRaised)
+            .border(
+                width = if (selected) 1.5.dp else 1.dp,
+                color = if (selected) tint else Palette.hairline,
+                shape = RoundedCornerShape(8.dp),
+            )
+            .clickable(
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .semantics {
+                this.selected = selected
+                contentDescription = choiceDescription
+            }
+            .padding(16.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(tint.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    title,
+                    style = NoopType.headline,
+                    color = tint,
+                )
+                Text(
+                    subtitle,
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+            Text(
+                detail,
+                style = NoopType.subhead,
+                color = Palette.textSecondary,
+            )
+        }
+        Icon(
+            if (selected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (selected) tint else Palette.textTertiary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
 }
 
 // MARK: - Shell
@@ -397,6 +776,7 @@ private fun OnboardingTopBar(
 private fun OnboardingFooter(
     progress: Float,
     cta: String,
+    enabled: Boolean,
     onNext: () -> Unit,
 ) {
     val animated by animateFloatAsState(
@@ -469,6 +849,7 @@ private fun OnboardingFooter(
         }
         Button(
             onClick = onNext,
+            enabled = enabled,
             colors = ButtonDefaults.buttonColors(
                 containerColor = Palette.accent,
                 contentColor = Palette.surfaceBase,
