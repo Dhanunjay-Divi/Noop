@@ -22,7 +22,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 397 stable actions: 24 evidenced complete and 373 pending. New owner
+with 397 stable actions: 31 evidenced complete and 366 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -30,20 +30,25 @@ performance, metric evidence, optional NOOP+ productionization, security,
 certification, manufacturing, signing, stores, physical release-candidate
 validation, and launch operations. The plan does not claim readiness. There is
 currently no NOOP firmware or first-party protocol in the repository, and
-current `main` has red Apple app, Android managed-emulator, and server database
-workflow results. The terminology audit found 15,451 matching tracked lines in
-1,313 files; active customer/core removal must use a reviewed allowlist and
-additive migration rather than destructive replacement. Evidence is recorded
-in
+current source commit `1443acb1` has green exact-main Apple, Android, server,
+Swift-package/study, localization, health-claims, runtime-license, private-data,
+and operations workflow evidence. `main` remains unprotected and external
+release controls remain open. The terminology audit found 15,451 matching
+tracked lines in 1,313 files; active customer/core removal must use a reviewed
+allowlist and additive migration rather than destructive replacement. Evidence
+is recorded in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
 
-The hosted release-gate closeout is active. The server failure on ownership
-readiness was not a runtime privilege defect: the PostgreSQL-overlay database
-was cloned from TimescaleDB's modified `template1` and inherited extension-wide
-`PUBLIC` privileges that the restricted ownership principal correctly rejects.
-The workflow now clones the plain-PostgreSQL lane from pristine `template0` and
-fails early if a non-core extension appears. PostgreSQL 14 and 16 local gates
-pass without weakening readiness; final hosted evidence is being recorded in
+The hosted release-gate closeout is complete for code-verifiable source gates.
+The server failure on ownership readiness was not a runtime privilege defect:
+the PostgreSQL-overlay database was cloned from TimescaleDB's modified
+`template1` and inherited extension-wide `PUBLIC` privileges that the
+restricted ownership principal correctly rejects. The workflow now clones the
+plain-PostgreSQL lane from pristine `template0` and fails early if a non-core
+extension appears. Exact-main server run `34078811154`, Android run
+`34079190997`, Apple run `34080116658`, Swift/study run `34078979831`, and the
+localization, claims, legal-inventory, and operations runs pass without
+weakening readiness. Evidence is recorded in
 [Hosted release gates](rounds/2026-09-06-hosted-release-gates.md).
 
 The owner has fixed the public market sequence as India first and the USA
@@ -305,16 +310,18 @@ participant, and native-speaker gates remain separate.
 
 ## Next priorities after this round
 
-1. Repair the red Apple, Android managed-emulator, and server hosted workflows;
-   make the complete release gate green on current `main`.
+1. Preserve the green hosted source matrix and establish protected `main`,
+   required-check policy, reviewed environments, credential rotation, and
+   artifact provenance.
 2. Finish the launch-language, NOOP+, Safety, pricing, public-version, owner,
    transfer/legal, payment, and legacy-support decisions; India-first and
    USA-second are already recorded.
 3. Obtain the supplier SDK, license, printed-label/identity mapping, pairing and
    gesture contract, versioned NOOP Band hardware/firmware dossier, and
    representative engineering units. Do not infer the protocol.
-4. Define the ownership account, claim, release, installation, entitlement,
-   observability, and partial-failure contracts with a virtual band.
+4. Integrate the implemented ownership foundation with the supplier-backed
+   printed-label, identify-haptic, authenticated-possession, owner-key, and
+   controlled-release contracts after those inputs are approved.
 5. Build the terminology classifier/allowlist, correct the false
    legacy-to-first-party display mapping, and introduce neutral core boundaries
    with old-data migration fixtures.
@@ -335,3 +342,5 @@ participant, and native-speaker gates remain separate.
    signed physical release-candidate matrix.
 11. Keep automatic emergency inference unavailable until its separate
     validation and regulatory program is complete.
+12. Refresh the public landing page only after product names, claims, pricing,
+    policies, supported hardware, and launch evidence are approved.

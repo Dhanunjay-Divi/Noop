@@ -1,6 +1,7 @@
 # NOOP first production release master plan
 
 - **Plan date:** 2026-09-05
+- **Last evidence update:** 2026-09-06
 - **Target:** first public production release of the NOOP mobile apps and the
   first-party NOOP Band
 - **Launch sequence:** India first, then the USA
@@ -86,15 +87,23 @@ remains manual until the final go/no-go review.
 - Local app reports already cover bounded lifecycle, responsiveness, storage,
   navigation, database, analysis, device connection, history, and managed sync
   evidence.
+- A default-off supplier-independent ownership foundation now provides an
+  isolated account/control schema and service, verified email/password
+  mechanics with optional phone linking, immutable remote-terms verification,
+  secure installation credentials, atomic single-owner claim and
+  replacement-installation primitives, resumable Apple/Android onboarding,
+  and a NOOP/NOOP+ preference without enabling payment or upload.
 
 ### Missing or unproven foundations
 
 - There is no first-party NOOP firmware, GATT contract, packet schema, device
   identity, provisioning flow, secure boot, DFU contract, manufacturing test
   interface, or NOOP Band SDK in this repository.
-- There is no first-party band ownership account, email/password flow,
-  printed-label discovery contract, authenticated tap confirmation, atomic
-  claim service, release workflow, or ownership database in the repository.
+- There is no supplier-backed printed-label discovery, identify haptic,
+  cryptographically authenticated tap confirmation, owner-key provisioning,
+  approved operator release/return workflow, production ownership deployment,
+  or physical-band evidence. The production possession provider therefore
+  remains deliberately unavailable.
 - The current `Noop Band` presentation can label a legacy third-party source
   with the persisted ID `my-whoop`. This false identity must not reach the
   first-party hardware release.
@@ -110,16 +119,22 @@ remains manual until the final go/no-go review.
 
 ### Current mainline health
 
-At commit `d3d05095` on 2026-09-05:
+At commit `1443acb1` on 2026-09-06:
 
-- Swift packages, health-claim policy, localization, and operations-record
-  workflows pass.
-- The Apple application builds, but the iOS production-shell test job fails.
-- Android build, unit tests, and instrumentation compilation pass, but the
-  managed-emulator production-shell step is cancelled.
-- Server CI reports 272 passing tests and three failures because a reused
-  PostgreSQL fixture contains a different checksum for applied migration
-  `001_init.sql`.
+- The exact-main Apple matrix passes the universal macOS app build and tests,
+  the complete iOS simulator build, launch-gate isolation, and the iOS
+  production-shell tests.
+- Android build, unit, lint, instrumentation compilation, and the API 35
+  managed-emulator production-shell matrix pass with retained diagnostics.
+- Server legal lock, lint, dependency audits, extension-free PostgreSQL
+  overlay, complete database/API suite, Compose validation, production and
+  backup container builds, encrypted backup, and disposable restore pass.
+- Swift packages and the study harness, localization, health claims, runtime
+  license inventory, private-data rejection, and operations-record workflows
+  pass.
+- Phase-R1 source/workflow defects are closed without waivers. `main` remains
+  unprotected and reviewed environments, production credentials, signed
+  artifacts, and external launch evidence remain open.
 - Source versions are iOS `9.2.1 (231)` and Android `9.2.1 (304)`. The owner
   must choose and validate the first storefront version. `1.0.0` is the
   recommended public product version, but existing installed-build upgrade
@@ -549,10 +564,10 @@ contract, certification plan, or store disclosure.
 
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
-| R1.1 | OPEN | Fix the iOS production-shell test failure rather than suppressing it. | Current hosted Apple workflow green |
-| R1.2 | OPEN | Make Android production-shell instrumentation deterministic within CI resources and retain artifacts on failure. | Current hosted Android workflow green |
-| R1.3 | OPEN | Isolate PostgreSQL fixtures or databases so immutable migration checks do not inherit another test engine's ledger. | Current hosted server workflow green with database tests |
-| R1.4 | OPEN | Require Apple, Android, Swift, server, localization, claims, legal, dependency, privacy, and operations gates before release merge. | Protected main or equivalent reviewed release control |
+| R1.1 | DONE | The iOS production-shell defect is fixed without suppressing the test. | Exact-main Apple run `34080116658` |
+| R1.2 | DONE | Android production-shell instrumentation is deterministic in hosted CI and retains managed-device diagnostics. | Exact-main Android run `34079190997` |
+| R1.3 | DONE | PostgreSQL fixtures are isolated; the plain lane starts from `template0` and rejects inherited extensions. | Exact-main server run `34078811154` |
+| R1.4 | PARTIAL | Apple, Android, Swift, server, localization, claims, legal, dependency, privacy, and operations gates pass on current main; protected-main required-check policy remains open. | Protected main or equivalent reviewed release control |
 | R1.5 | OPEN | Create staging and production environments with least-privilege secrets and approvals. Rotate any credential previously pasted into chat or logs. | Secret inventory and rotation evidence |
 | R1.6 | OPEN | Establish clean build reproducibility, dependency lock review, SBOM, artifact provenance, and vulnerability policy. | Signed/checksummed artifacts tied to commit |
 | R1.7 | OPEN | Measure cold launch, scrolling, database work, sync, memory, storage, and battery on representative release devices. | Versioned performance budgets and baselines |
@@ -854,13 +869,15 @@ Provide these through the appropriate secure or account-owned channel:
 
 Work can start before bands arrive:
 
-1. Repair all three red hosted workflows and establish protected release
-   controls.
+1. Preserve the green hosted source matrix and establish protected release
+   controls, reviewed environments, credential rotation, and artifact
+   provenance.
 2. Finish the remaining phase-zero owner, legal, transfer, support, and payment
    decisions now that India-first, USA-second, and the ownership flow are
    recorded.
-3. Define the account/claim schemas, state machine, API contract, virtual-band
-   possession proof, and failure matrix without guessing supplier bytes.
+3. Complete the supplier-backed label, identify, cryptographic-possession,
+   owner-key, return/release, legal, and signed physical-client gates for the
+   implemented ownership foundation without guessing supplier bytes.
 4. Build the terminology classifier/allowlist and remove the false
    legacy-to-first-party display mapping.
 5. Introduce neutral core stream/store/source boundaries and old-data

@@ -1,6 +1,6 @@
 # NOOP first production release checklist
 
-- **Status date:** 2026-09-05
+- **Status date:** 2026-09-06
 - **Purpose:** one editable, ordered list of everything still required for the
   first public production release
 - **Confirmed market sequence:** India first, then the USA
@@ -100,19 +100,30 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 2. Mainline, CI, and release controls
 
-- [ ] CI-010 [ENG] Reproduce and fix the current iOS production-shell test
-  failure on current `main`.
-- [ ] CI-020 [ENG] Make the Android managed-emulator production-shell test
-  deterministic and retain diagnostics on failure.
-- [ ] CI-030 [ENG] Isolate PostgreSQL test databases or migration ledgers so
+- [x] CI-010 [ENG] Reproduce and fix the current iOS production-shell test
+  failure on current `main`. (Evidence:
+  `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions run
+  `34080116658`)
+- [x] CI-020 [ENG] Make the Android managed-emulator production-shell test
+  deterministic and retain diagnostics on failure. (Evidence:
+  `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions run
+  `34079190997`)
+- [x] CI-030 [ENG] Isolate PostgreSQL test databases or migration ledgers so
   immutable migration checks cannot inherit another test engine's state.
-- [ ] CI-040 [ENG] Make Apple application CI green on the release commit.
-- [ ] CI-050 [ENG] Make Android build, unit, lint, and instrumentation CI green
-  on the release commit.
-- [ ] CI-060 [ENG] Make server lint, dependency, migration, database, backup,
-  restore, and container CI green on the release commit.
-- [ ] CI-070 [ENG] Keep Swift package, localization, health-claims, legal,
-  privacy, dependency, and operations-record gates green.
+  (Evidence: `ops/rounds/2026-09-06-hosted-release-gates.md`, GitHub Actions
+  run `34078811154`)
+- [x] CI-040 [ENG] Make Apple application CI green on the release commit.
+  (Evidence: exact-main GitHub Actions run `34080116658`)
+- [x] CI-050 [ENG] Make Android build, unit, lint, and instrumentation CI green
+  on the release commit. (Evidence: exact-main GitHub Actions run
+  `34079190997`)
+- [x] CI-060 [ENG] Make server lint, dependency, migration, database, backup,
+  restore, and container CI green on the release commit. (Evidence: exact-main
+  GitHub Actions run `34078811154`)
+- [x] CI-070 [ENG] Keep Swift package, localization, health-claims, legal,
+  privacy, dependency, and operations-record gates green. (Evidence:
+  exact-main GitHub Actions runs `34078979831`, `34078811190`, `34078811160`,
+  `34078979957`, `34078811177`, and `34078811154`)
 - [ ] CI-080 [OWNER] Restore or fund hosted CI capacity sufficient for all
   required release gates.
 - [ ] CI-090 [OWNER] Enable protected `main` or an equivalent reviewed release
