@@ -58,13 +58,15 @@ Source builds remain the most auditable option. See [BUILD.md](BUILD.md) and
 4. Let NOOP independently compute the same calendar days from its supported
    input. Imported official scores remain reference-only and are not fed into
    NOOP's raw formulas.
-5. In the iPhone or Mac app, open **Compare → Official reference** and select
-   Charge, Effort, or Rest. Android currently supports general metric overlays
-   and correlations, but its provenance-gated official-reference card has not
-   been ported yet.
-6. Use at least seven paired days for an early observation. Twenty-eight or more
-   paired days is much more useful; personal presentation calibration also
-   reserves untouched chronological holdout days.
+5. On iPhone, Mac, or Android, open **Compare → Official reference** and select
+   Charge, Effort, or Rest. These are the three independently recomputed score
+   families eligible for personal presentation calibration. The comparison
+   engine can also pair nine raw or directly mapped fields, including RHR, HRV,
+   respiration, SpO2, sleep duration/stages, and sleep efficiency, but it does
+   not fit an "official-like" score transform for those measurements.
+6. Use at least seven paired days for an early observation. Personal
+   presentation calibration requires at least 28 paired days: at least 21
+   earlier training days and seven untouched later holdout days.
 7. Report the paired-day count, comparison-window length, bias, MAE, RMSE, and
    correlation shown by NOOP. Correlation describes co-movement, not agreement.
    Also describe any relevant context, such as a source change, travel, illness,

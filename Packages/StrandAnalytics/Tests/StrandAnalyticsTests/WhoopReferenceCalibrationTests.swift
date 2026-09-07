@@ -252,6 +252,30 @@ final class WhoopReferenceCalibrationTests: XCTestCase {
                        .noopOnDevice(algorithmVersion: "rest-v1"))
     }
 
+    func testStoreLoaderComparesSleepEfficiencyOnPercentScale() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertMetricSeries([
+            MetricPoint(day: day(0), key: "sleep_efficiency", value: 0.91),
+        ], deviceId: "my-whoop")
+        try await store.upsertDailyMetrics([
+            DailyMetric(day: day(0), totalSleepMin: 420, efficiency: 0.91, deepMin: 75,
+                        remMin: 90, lightMin: 255, disturbances: nil, restingHr: nil,
+                        avgHrv: nil, recovery: nil, strain: nil, exerciseCount: nil),
+        ], deviceId: "my-whoop-noop")
+
+        let result = try await WhoopReferenceCalibration.report(
+            store: store, metric: .sleepEfficiencyPercent,
+            importedDeviceId: "my-whoop", computedDeviceId: "my-whoop-noop",
+            from: day(0), to: day(0), noopAlgorithmVersion: "rest-v1",
+            verifiedOfficialReferenceDays: [day(0)],
+            verifiedCurrentNoopDays: [day(0)])
+
+        XCTAssertEqual(result.pairs.count, 1)
+        XCTAssertEqual(result.pairs[0].official.value, 91, accuracy: 1e-12)
+        XCTAssertEqual(result.pairs[0].noop.value, 91, accuracy: 1e-12)
+        XCTAssertEqual(result.statistics!.bias, 0, accuracy: 1e-12)
+    }
+
     func testStoreLoaderRejectsSameNamespace() async throws {
         let store = try await WhoopStore.inMemory()
         do {

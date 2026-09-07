@@ -2944,7 +2944,8 @@ struct LiquidTodayView: View {
     }
 
     /// Pure aggregation seam for the Liquid hero. The existing Today mapper turns computed siblings into
-    /// "On-device", the Apple Health source into "Apple Watch", and imported strap rows into "Whoop".
+    /// "On-device", the Apple Health source into "Apple Watch", and imported strap rows into
+    /// "Compatible band".
     static func heroSourceLabel(rawSources: [String], deviceId: String) -> String? {
         var seen = Set<String>()
         var labels: [String] = []
@@ -2958,10 +2959,10 @@ struct LiquidTodayView: View {
     }
 
     /// A mixed hero provenance label still includes the live band and must retain sync feedback.
-    static func sourceLabelIncludesNoopBand(_ label: String) -> Bool {
+    static func sourceLabelIncludesCompatibleBand(_ label: String) -> Bool {
         label.split(separator: "+").contains { component in
             component.trimmingCharacters(in: .whitespacesAndNewlines)
-                .caseInsensitiveCompare("Noop Band") == .orderedSame
+                .caseInsensitiveCompare(WhoopModel.customerName) == .orderedSame
         }
     }
 
@@ -3913,7 +3914,7 @@ private struct DailySignalHeader: View {
     }
 }
 
-/// Score provenance stays neutral at rest. During a real band-history offload, the Noop Band source gets
+/// Score provenance stays neutral at rest. During a real band-history offload, the compatible-band source gets
 /// an indeterminate sweep because the protocol exposes chunks pulled but no total; a percentage would lie.
 /// Completion turns the label green briefly, then returns it to the same quiet provenance treatment.
 ///
@@ -3934,7 +3935,7 @@ private struct DailySignalSourceChip: View {
     private static let demoSyncing = CommandLine.arguments.contains("--demo-band-syncing")
 
     private var isBand: Bool {
-        LiquidTodayView.sourceLabelIncludesNoopBand(text)
+        LiquidTodayView.sourceLabelIncludesCompatibleBand(text)
     }
 
     private var syncingRaw: Bool {

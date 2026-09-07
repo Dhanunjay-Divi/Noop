@@ -22,7 +22,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  server-ci:
+    name: server-ci
     runs-on: ubuntu-latest
     services:
       timescaledb:

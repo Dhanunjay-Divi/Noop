@@ -113,6 +113,7 @@
     }
   },
   "requiredChecks": [
+    "calibration-parity",
     "container-digests",
     "dependency-locks",
     "github-actions-pinned",
@@ -225,15 +226,25 @@
     "migrationManifest": "server/backup/migration-manifest.sha256",
     "requiredPaths": [
       ".github/workflows/release-controls.yml",
+      "SECURITY.md",
       "ThirdPartyNotices/runtime-inventory.json",
+      "Tools/calibration-parity-audit.py",
       "Tools/check-private-data.py",
       "Tools/release-control-gate.py",
       "Tools/release-evidence.py",
       "Tools/release-legal-gate.py",
+      "Tools/terminology-audit.py",
+      "docs/KEY_MANAGEMENT.md",
+      "docs/METRIC_REPROCESSING_AND_ROLLBACK.md",
       "docs/RELEASE_CONTROLS.md",
+      "docs/SECURITY_OPERATIONS.md",
       "release/evidence/README.md",
       "release/evidence/manifest.schema.json",
-      "release/release-policy.json"
+      "release/metrics/reference-calibration-v1.json",
+      "release/release-policy.json",
+      "release/terminology/README.md",
+      "release/terminology/active-allowlist.json",
+      "release/terminology/legacy-inventory.json"
     ],
     "requiredPinnedImageText": [
       "@sha256:[0-9a-f]{64}",

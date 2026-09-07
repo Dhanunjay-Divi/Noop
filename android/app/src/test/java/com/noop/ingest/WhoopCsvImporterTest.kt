@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import com.noop.data.DailyMetric
 import com.noop.data.DailyHrvMethod
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -21,6 +22,26 @@ import org.junit.Test
  * across two daily rows (import day-shift, v8.2.1).
  */
 class WhoopCsvImporterTest {
+
+    @Test
+    fun diagnosticFailureKindsStayBoundedAndPayloadFree() {
+        assertEquals(
+            "permission",
+            WhoopCsvImporter.diagnosticFailureKind(SecurityException("private path and token")),
+        )
+        assertEquals(
+            "io",
+            WhoopCsvImporter.diagnosticFailureKind(IOException("private filename")),
+        )
+        assertEquals(
+            "invalid_data",
+            WhoopCsvImporter.diagnosticFailureKind(IllegalArgumentException("raw payload")),
+        )
+        assertEquals(
+            "unexpected",
+            WhoopCsvImporter.diagnosticFailureKind(IllegalStateException("database details")),
+        )
+    }
 
     @Test
     fun csvDoubleRejectsNonFiniteValues() {

@@ -1,0 +1,650 @@
+{
+  "fixtureEndExclusiveUTC" : "2026-09-07T00:00:00Z",
+  "generatedAt" : "2026-09-07T15:19:21Z",
+  "limitations" : [
+    "All values and identities are deterministic synthetic fixtures.",
+    "Host timings do not prove iPhone or Android physical-device performance, memory, thermal, battery, background survival, or BLE reliability.",
+    "The retention profile measures existing managed-sync policy; it does not authorize pruning unless the exact server window is validated and unchanged.",
+    "Population accuracy and sensor calibration require approved physical references and held-out participants."
+  ],
+  "profile" : "managed-validation-candidate: 7-day raw, 30-day essential, full compact history",
+  "scenarios" : [
+    {
+      "availableVolumeBytes" : 28159422464,
+      "backupBytes" : 236412928,
+      "backupIntegrityPassed" : true,
+      "databaseBytesAfterCheckpoint" : 236445696,
+      "databaseBytesBeforeCheckpoint" : 236478688,
+      "decodedRows" : 1718880,
+      "exportBytes" : 12387388,
+      "insertedRows" : 1866130,
+      "plan" : {
+        "aggregateHistoryDays" : 10,
+        "essentialHistoryDays" : 10,
+        "rawHistoryDays" : 7,
+        "requestedDays" : 10
+      },
+      "rawOutboxBatches" : 12,
+      "rawOutboxLogicalBytes" : 50331648,
+      "restoreContentChecks" : [
+        "storage-stats",
+        "daily-metrics",
+        "selected-day-metric-series",
+        "metric-series-keys",
+        "metric-series-all-values",
+        "sleep-sessions",
+        "journal-entries",
+        "workouts",
+        "apple-daily",
+        "battery-samples",
+        "ppg-waveform-samples",
+        "raw-outbox-metadata",
+        "raw-outbox-all-frame-bytes",
+        "raw-csv-24h-bytes"
+      ],
+      "restoreVerificationPassed" : true,
+      "temporaryDatabaseRemoved" : true,
+      "temporaryPeakBytes" : 709337088,
+      "timings" : [
+        {
+          "milliseconds" : 136.891041,
+          "operation" : "aggregate-write",
+          "resultCount" : 370
+        },
+        {
+          "milliseconds" : 17250.468792,
+          "operation" : "stream-write",
+          "resultCount" : 1865760
+        },
+        {
+          "milliseconds" : 1760.017167,
+          "operation" : "raw-outbox-write-and-prune",
+          "resultCount" : 2
+        },
+        {
+          "milliseconds" : 0.428958,
+          "operation" : "calendar-daily-history-read",
+          "resultCount" : 10
+        },
+        {
+          "milliseconds" : 0.166,
+          "operation" : "calendar-selected-day-read",
+          "resultCount" : 24
+        },
+        {
+          "milliseconds" : 0.102292,
+          "operation" : "metric-trend-read",
+          "resultCount" : 10
+        },
+        {
+          "milliseconds" : 24.824875,
+          "operation" : "day-heart-rate-bucket-read",
+          "resultCount" : 288
+        },
+        {
+          "milliseconds" : 8.657125,
+          "operation" : "analysis-fingerprint-read",
+          "resultCount" : 208896
+        },
+        {
+          "milliseconds" : 780.239208,
+          "operation" : "storage-breakdown-read",
+          "resultCount" : 50
+        },
+        {
+          "milliseconds" : 942.648334,
+          "operation" : "raw-csv-export-24h",
+          "resultCount" : 12387388
+        },
+        {
+          "milliseconds" : 4.27125,
+          "operation" : "wal-checkpoint"
+        },
+        {
+          "milliseconds" : 743.648458,
+          "operation" : "verified-backup-copy",
+          "resultCount" : 236412928
+        },
+        {
+          "milliseconds" : 972.22075,
+          "operation" : "restore-stage"
+        },
+        {
+          "milliseconds" : 3019.621,
+          "operation" : "restore-open-and-verify",
+          "resultCount" : 1772326
+        }
+      ],
+      "topStorageObjects" : [
+        {
+          "bytes" : 66383872,
+          "table" : "hrSample"
+        },
+        {
+          "bytes" : 65101824,
+          "table" : "gravitySample"
+        },
+        {
+          "bytes" : 50438144,
+          "table" : "rawBatch"
+        },
+        {
+          "bytes" : 26988544,
+          "table" : "rrInterval"
+        },
+        {
+          "bytes" : 6647808,
+          "table" : "ppgHrSample"
+        },
+        {
+          "bytes" : 6635520,
+          "table" : "ppgWaveformSample"
+        },
+        {
+          "bytes" : 1220608,
+          "table" : "stepSample"
+        },
+        {
+          "bytes" : 876544,
+          "table" : "spo2Sample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "skinTempSample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "respSample"
+        },
+        {
+          "bytes" : 831488,
+          "table" : "sleepStateSample"
+        },
+        {
+          "bytes" : 253952,
+          "table" : "battery"
+        }
+      ],
+      "walBytesAfterCheckpoint" : 0,
+      "walBytesBeforeCheckpoint" : 32992
+    },
+    {
+      "availableVolumeBytes" : 27749060608,
+      "backupBytes" : 440528896,
+      "backupIntegrityPassed" : true,
+      "databaseBytesAfterCheckpoint" : 440561664,
+      "databaseBytesBeforeCheckpoint" : 440594656,
+      "decodedRows" : 3886560,
+      "exportBytes" : 12387388,
+      "insertedRows" : 4207350,
+      "plan" : {
+        "aggregateHistoryDays" : 30,
+        "essentialHistoryDays" : 30,
+        "rawHistoryDays" : 7,
+        "requestedDays" : 30
+      },
+      "rawOutboxBatches" : 12,
+      "rawOutboxLogicalBytes" : 50331648,
+      "restoreContentChecks" : [
+        "storage-stats",
+        "daily-metrics",
+        "selected-day-metric-series",
+        "metric-series-keys",
+        "metric-series-all-values",
+        "sleep-sessions",
+        "journal-entries",
+        "workouts",
+        "apple-daily",
+        "battery-samples",
+        "ppg-waveform-samples",
+        "raw-outbox-metadata",
+        "raw-outbox-all-frame-bytes",
+        "raw-csv-24h-bytes"
+      ],
+      "restoreVerificationPassed" : true,
+      "temporaryDatabaseRemoved" : true,
+      "temporaryPeakBytes" : 1321684992,
+      "timings" : [
+        {
+          "milliseconds" : 369.245792,
+          "operation" : "aggregate-write",
+          "resultCount" : 1110
+        },
+        {
+          "milliseconds" : 40091.043375,
+          "operation" : "stream-write",
+          "resultCount" : 4206240
+        },
+        {
+          "milliseconds" : 1727.654,
+          "operation" : "raw-outbox-write-and-prune",
+          "resultCount" : 2
+        },
+        {
+          "milliseconds" : 0.879292,
+          "operation" : "calendar-daily-history-read",
+          "resultCount" : 30
+        },
+        {
+          "milliseconds" : 0.210792,
+          "operation" : "calendar-selected-day-read",
+          "resultCount" : 24
+        },
+        {
+          "milliseconds" : 0.16,
+          "operation" : "metric-trend-read",
+          "resultCount" : 30
+        },
+        {
+          "milliseconds" : 26.950917,
+          "operation" : "day-heart-rate-bucket-read",
+          "resultCount" : 288
+        },
+        {
+          "milliseconds" : 10.722917,
+          "operation" : "analysis-fingerprint-read",
+          "resultCount" : 208896
+        },
+        {
+          "milliseconds" : 1552.930209,
+          "operation" : "storage-breakdown-read",
+          "resultCount" : 50
+        },
+        {
+          "milliseconds" : 940.727875,
+          "operation" : "raw-csv-export-24h",
+          "resultCount" : 12387388
+        },
+        {
+          "milliseconds" : 2.383083,
+          "operation" : "wal-checkpoint"
+        },
+        {
+          "milliseconds" : 1523.195792,
+          "operation" : "verified-backup-copy",
+          "resultCount" : 440528896
+        },
+        {
+          "milliseconds" : 1739.222,
+          "operation" : "restore-stage"
+        },
+        {
+          "milliseconds" : 4224.570792,
+          "operation" : "restore-open-and-verify",
+          "resultCount" : 3946026
+        }
+      ],
+      "topStorageObjects" : [
+        {
+          "bytes" : 199598080,
+          "table" : "hrSample"
+        },
+        {
+          "bytes" : 81063936,
+          "table" : "rrInterval"
+        },
+        {
+          "bytes" : 65101824,
+          "table" : "gravitySample"
+        },
+        {
+          "bytes" : 50438144,
+          "table" : "rawBatch"
+        },
+        {
+          "bytes" : 20054016,
+          "table" : "ppgHrSample"
+        },
+        {
+          "bytes" : 6635520,
+          "table" : "ppgWaveformSample"
+        },
+        {
+          "bytes" : 3678208,
+          "table" : "stepSample"
+        },
+        {
+          "bytes" : 876544,
+          "table" : "spo2Sample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "skinTempSample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "respSample"
+        },
+        {
+          "bytes" : 831488,
+          "table" : "sleepStateSample"
+        },
+        {
+          "bytes" : 741376,
+          "table" : "battery"
+        }
+      ],
+      "walBytesAfterCheckpoint" : 0,
+      "walBytesBeforeCheckpoint" : 32992
+    },
+    {
+      "availableVolumeBytes" : 27766206464,
+      "backupBytes" : 441139200,
+      "backupIntegrityPassed" : true,
+      "databaseBytesAfterCheckpoint" : 441171968,
+      "databaseBytesBeforeCheckpoint" : 441204960,
+      "decodedRows" : 3886560,
+      "exportBytes" : 12387388,
+      "insertedRows" : 4209570,
+      "plan" : {
+        "aggregateHistoryDays" : 90,
+        "essentialHistoryDays" : 30,
+        "rawHistoryDays" : 7,
+        "requestedDays" : 90
+      },
+      "rawOutboxBatches" : 12,
+      "rawOutboxLogicalBytes" : 50331648,
+      "restoreContentChecks" : [
+        "storage-stats",
+        "daily-metrics",
+        "selected-day-metric-series",
+        "metric-series-keys",
+        "metric-series-all-values",
+        "sleep-sessions",
+        "journal-entries",
+        "workouts",
+        "apple-daily",
+        "battery-samples",
+        "ppg-waveform-samples",
+        "raw-outbox-metadata",
+        "raw-outbox-all-frame-bytes",
+        "raw-csv-24h-bytes"
+      ],
+      "restoreVerificationPassed" : true,
+      "temporaryDatabaseRemoved" : true,
+      "temporaryPeakBytes" : 1323515904,
+      "timings" : [
+        {
+          "milliseconds" : 1098.672833,
+          "operation" : "aggregate-write",
+          "resultCount" : 3330
+        },
+        {
+          "milliseconds" : 39137.410958,
+          "operation" : "stream-write",
+          "resultCount" : 4206240
+        },
+        {
+          "milliseconds" : 1737.47425,
+          "operation" : "raw-outbox-write-and-prune",
+          "resultCount" : 2
+        },
+        {
+          "milliseconds" : 2.2375,
+          "operation" : "calendar-daily-history-read",
+          "resultCount" : 90
+        },
+        {
+          "milliseconds" : 0.301791,
+          "operation" : "calendar-selected-day-read",
+          "resultCount" : 24
+        },
+        {
+          "milliseconds" : 0.277417,
+          "operation" : "metric-trend-read",
+          "resultCount" : 90
+        },
+        {
+          "milliseconds" : 29.031375,
+          "operation" : "day-heart-rate-bucket-read",
+          "resultCount" : 288
+        },
+        {
+          "milliseconds" : 9.179125,
+          "operation" : "analysis-fingerprint-read",
+          "resultCount" : 208896
+        },
+        {
+          "milliseconds" : 1530.778875,
+          "operation" : "storage-breakdown-read",
+          "resultCount" : 50
+        },
+        {
+          "milliseconds" : 948.673667,
+          "operation" : "raw-csv-export-24h",
+          "resultCount" : 12387388
+        },
+        {
+          "milliseconds" : 9.113833,
+          "operation" : "wal-checkpoint"
+        },
+        {
+          "milliseconds" : 1549.900167,
+          "operation" : "verified-backup-copy",
+          "resultCount" : 441139200
+        },
+        {
+          "milliseconds" : 1722.110333,
+          "operation" : "restore-stage"
+        },
+        {
+          "milliseconds" : 4150.382125,
+          "operation" : "restore-open-and-verify",
+          "resultCount" : 3946806
+        }
+      ],
+      "topStorageObjects" : [
+        {
+          "bytes" : 199598080,
+          "table" : "hrSample"
+        },
+        {
+          "bytes" : 81063936,
+          "table" : "rrInterval"
+        },
+        {
+          "bytes" : 65101824,
+          "table" : "gravitySample"
+        },
+        {
+          "bytes" : 50438144,
+          "table" : "rawBatch"
+        },
+        {
+          "bytes" : 20054016,
+          "table" : "ppgHrSample"
+        },
+        {
+          "bytes" : 6635520,
+          "table" : "ppgWaveformSample"
+        },
+        {
+          "bytes" : 3678208,
+          "table" : "stepSample"
+        },
+        {
+          "bytes" : 876544,
+          "table" : "spo2Sample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "skinTempSample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "respSample"
+        },
+        {
+          "bytes" : 831488,
+          "table" : "sleepStateSample"
+        },
+        {
+          "bytes" : 741376,
+          "table" : "battery"
+        }
+      ],
+      "walBytesAfterCheckpoint" : 0,
+      "walBytesBeforeCheckpoint" : 32992
+    },
+    {
+      "availableVolumeBytes" : 27715043328,
+      "backupBytes" : 443990016,
+      "backupIntegrityPassed" : true,
+      "databaseBytesAfterCheckpoint" : 444022784,
+      "databaseBytesBeforeCheckpoint" : 444055776,
+      "decodedRows" : 3886560,
+      "exportBytes" : 12387388,
+      "insertedRows" : 4219745,
+      "plan" : {
+        "aggregateHistoryDays" : 365,
+        "essentialHistoryDays" : 30,
+        "rawHistoryDays" : 7,
+        "requestedDays" : 365
+      },
+      "rawOutboxBatches" : 12,
+      "rawOutboxLogicalBytes" : 50331648,
+      "restoreContentChecks" : [
+        "storage-stats",
+        "daily-metrics",
+        "selected-day-metric-series",
+        "metric-series-keys",
+        "metric-series-all-values",
+        "sleep-sessions",
+        "journal-entries",
+        "workouts",
+        "apple-daily",
+        "battery-samples",
+        "ppg-waveform-samples",
+        "raw-outbox-metadata",
+        "raw-outbox-all-frame-bytes",
+        "raw-csv-24h-bytes"
+      ],
+      "restoreVerificationPassed" : true,
+      "temporaryDatabaseRemoved" : true,
+      "temporaryPeakBytes" : 1332068352,
+      "timings" : [
+        {
+          "milliseconds" : 4417.977417,
+          "operation" : "aggregate-write",
+          "resultCount" : 13505
+        },
+        {
+          "milliseconds" : 41701.698625,
+          "operation" : "stream-write",
+          "resultCount" : 4206240
+        },
+        {
+          "milliseconds" : 1759.816209,
+          "operation" : "raw-outbox-write-and-prune",
+          "resultCount" : 2
+        },
+        {
+          "milliseconds" : 7.84025,
+          "operation" : "calendar-daily-history-read",
+          "resultCount" : 365
+        },
+        {
+          "milliseconds" : 0.58875,
+          "operation" : "calendar-selected-day-read",
+          "resultCount" : 24
+        },
+        {
+          "milliseconds" : 0.916792,
+          "operation" : "metric-trend-read",
+          "resultCount" : 365
+        },
+        {
+          "milliseconds" : 26.620834,
+          "operation" : "day-heart-rate-bucket-read",
+          "resultCount" : 288
+        },
+        {
+          "milliseconds" : 9.017292,
+          "operation" : "analysis-fingerprint-read",
+          "resultCount" : 208896
+        },
+        {
+          "milliseconds" : 1576.677167,
+          "operation" : "storage-breakdown-read",
+          "resultCount" : 50
+        },
+        {
+          "milliseconds" : 957.12025,
+          "operation" : "raw-csv-export-24h",
+          "resultCount" : 12387388
+        },
+        {
+          "milliseconds" : 3.976542,
+          "operation" : "wal-checkpoint"
+        },
+        {
+          "milliseconds" : 1514.872958,
+          "operation" : "verified-backup-copy",
+          "resultCount" : 443990016
+        },
+        {
+          "milliseconds" : 1732.036,
+          "operation" : "restore-stage"
+        },
+        {
+          "milliseconds" : 4213.199417,
+          "operation" : "restore-open-and-verify",
+          "resultCount" : 3950381
+        }
+      ],
+      "topStorageObjects" : [
+        {
+          "bytes" : 199598080,
+          "table" : "hrSample"
+        },
+        {
+          "bytes" : 81063936,
+          "table" : "rrInterval"
+        },
+        {
+          "bytes" : 65101824,
+          "table" : "gravitySample"
+        },
+        {
+          "bytes" : 50438144,
+          "table" : "rawBatch"
+        },
+        {
+          "bytes" : 20054016,
+          "table" : "ppgHrSample"
+        },
+        {
+          "bytes" : 6635520,
+          "table" : "ppgWaveformSample"
+        },
+        {
+          "bytes" : 3678208,
+          "table" : "stepSample"
+        },
+        {
+          "bytes" : 1695744,
+          "table" : "metricSeries"
+        },
+        {
+          "bytes" : 1331200,
+          "table" : "managedDocumentDirty"
+        },
+        {
+          "bytes" : 876544,
+          "table" : "spo2Sample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "skinTempSample"
+        },
+        {
+          "bytes" : 843776,
+          "table" : "respSample"
+        }
+      ],
+      "walBytesAfterCheckpoint" : 0,
+      "walBytesBeforeCheckpoint" : 32992
+    }
+  ],
+  "schemaVersion" : 2
+}

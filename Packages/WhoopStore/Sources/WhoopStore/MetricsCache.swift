@@ -162,6 +162,18 @@ public struct DailyMetric: Equatable, Codable, Sendable {
     }
 }
 
+public enum ComputedScoreReconciliationError: Error, Equatable, Sendable {
+    case missingDeviceIdentifier
+    case invalidDayRange
+    case missingDailyRows
+    case invalidDailyRow
+    case duplicateDailyDay
+    case missingManagedMetricKeys
+    case invalidManagedMetricKey
+    case invalidMetricRow
+    case duplicateMetricRow
+}
+
 extension WhoopStore {
 
     // MARK: - Upserts (idempotent by natural key; latest server value wins on conflict)
@@ -462,43 +474,153 @@ extension WhoopStore {
         try syncWrite { db in
             var n = 0
             for d in days {
-                try db.execute(sql: """
-                    INSERT INTO dailyMetric
-                        (deviceId, day, totalSleepMin, efficiency, deepMin, remMin, lightMin,
-                         disturbances, restingHr, avgHrv, recovery, strain, exerciseCount,
-                         spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst,
-                         spo2Red, spo2Ir, hrvMethod)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(deviceId, day) DO UPDATE SET
-                        totalSleepMin = excluded.totalSleepMin,
-                        efficiency = excluded.efficiency,
-                        deepMin = excluded.deepMin,
-                        remMin = excluded.remMin,
-                        lightMin = excluded.lightMin,
-                        disturbances = excluded.disturbances,
-                        restingHr = excluded.restingHr,
-                        avgHrv = excluded.avgHrv,
-                        recovery = excluded.recovery,
-                        strain = excluded.strain,
-                        exerciseCount = excluded.exerciseCount,
-                        spo2Pct = excluded.spo2Pct,
-                        skinTempDevC = excluded.skinTempDevC,
-                        respRateBpm = excluded.respRateBpm,
-                        steps = excluded.steps,
-                        activeKcalEst = excluded.activeKcalEst,
-                        spo2Red = excluded.spo2Red,
-                        spo2Ir = excluded.spo2Ir,
-                        hrvMethod = excluded.hrvMethod
-                    """, arguments: [deviceId, d.day, d.totalSleepMin, d.efficiency, d.deepMin,
-                                     d.remMin, d.lightMin, d.disturbances, d.restingHr, d.avgHrv,
-                                     d.recovery, d.strain, d.exerciseCount,
-                                     d.spo2Pct, d.skinTempDevC, d.respRateBpm,
-                                     d.steps, d.activeKcalEst,
-                                     d.spo2Red, d.spo2Ir,
-                                     d.hrvMethod?.rawValue])
-                n += db.changesCount
+                n += try Self.upsertDailyMetric(d, deviceId: deviceId, in: db)
             }
             return n
+        }
+    }
+
+    /// Atomically replace one complete computed-score window and its Rest evidence projection.
+    ///
+    /// Validation occurs before the transaction. Once the write starts, range deletion, daily upsert,
+    /// and managed-series replacement commit together, so readers never observe a partial score window
+    /// and a late failure preserves the prior complete state. The returned day set is a post-commit
+    /// receipt suitable for provenance-gated comparison.
+    public func reconcileComputedScoreRange(
+        deviceId: String,
+        from: String,
+        to: String,
+        dailyRows: [DailyMetric],
+        managedMetricKeys: Set<String>,
+        metricRows: [MetricPoint]
+    ) async throws -> Set<String> {
+        try reconcileComputedScoreRangeImpl(
+            deviceId: deviceId,
+            from: from,
+            to: to,
+            dailyRows: dailyRows,
+            managedMetricKeys: managedMetricKeys,
+            metricRows: metricRows,
+            beforeMetricSeriesWrite: nil
+        )
+    }
+
+    /// Test-only failure seam used to prove the GRDB transaction rolls back after daily rows were written.
+    func reconcileComputedScoreRangeForTesting(
+        deviceId: String,
+        from: String,
+        to: String,
+        dailyRows: [DailyMetric],
+        managedMetricKeys: Set<String>,
+        metricRows: [MetricPoint],
+        beforeMetricSeriesWrite: @escaping () throws -> Void
+    ) async throws -> Set<String> {
+        try reconcileComputedScoreRangeImpl(
+            deviceId: deviceId,
+            from: from,
+            to: to,
+            dailyRows: dailyRows,
+            managedMetricKeys: managedMetricKeys,
+            metricRows: metricRows,
+            beforeMetricSeriesWrite: beforeMetricSeriesWrite
+        )
+    }
+
+    private func reconcileComputedScoreRangeImpl(
+        deviceId: String,
+        from: String,
+        to: String,
+        dailyRows: [DailyMetric],
+        managedMetricKeys: Set<String>,
+        metricRows: [MetricPoint],
+        beforeMetricSeriesWrite: (() throws -> Void)?
+    ) throws -> Set<String> {
+        guard !deviceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ComputedScoreReconciliationError.missingDeviceIdentifier
+        }
+        guard Self.validComputedDay(from), Self.validComputedDay(to), from <= to else {
+            throw ComputedScoreReconciliationError.invalidDayRange
+        }
+        guard !dailyRows.isEmpty else {
+            throw ComputedScoreReconciliationError.missingDailyRows
+        }
+
+        let orderedDailyRows = dailyRows.sorted { $0.day < $1.day }
+        var retainedDays = Set<String>()
+        for row in orderedDailyRows {
+            guard Self.validComputedDay(row.day), row.day >= from, row.day <= to else {
+                throw ComputedScoreReconciliationError.invalidDailyRow
+            }
+            guard retainedDays.insert(row.day).inserted else {
+                throw ComputedScoreReconciliationError.duplicateDailyDay
+            }
+        }
+
+        let keys = managedMetricKeys.sorted()
+        guard !keys.isEmpty else {
+            throw ComputedScoreReconciliationError.missingManagedMetricKeys
+        }
+        guard keys.allSatisfy(Self.validComputedMetricKey) else {
+            throw ComputedScoreReconciliationError.invalidManagedMetricKey
+        }
+        let allowedKeys = Set(keys)
+        var seenMetricRows = Set<String>()
+        var normalizedMetricRows: [MetricPoint] = []
+        normalizedMetricRows.reserveCapacity(metricRows.count)
+        for row in metricRows {
+            guard Self.validComputedDay(row.day),
+                  row.day >= from,
+                  row.day <= to,
+                  retainedDays.contains(row.day),
+                  allowedKeys.contains(row.key),
+                  let value = Self.normalizedMetricSeriesValue(row.value, forKey: row.key)
+            else {
+                throw ComputedScoreReconciliationError.invalidMetricRow
+            }
+            guard seenMetricRows.insert("\(row.day)|\(row.key)").inserted else {
+                throw ComputedScoreReconciliationError.duplicateMetricRow
+            }
+            normalizedMetricRows.append(MetricPoint(day: row.day, key: row.key, value: value))
+        }
+
+        return try syncWrite { db in
+            try db.execute(
+                sql: """
+                    DELETE FROM dailyMetric
+                    WHERE deviceId = ? AND day >= ? AND day <= ?
+                    """,
+                arguments: [deviceId, from, to]
+            )
+            for row in orderedDailyRows {
+                _ = try Self.upsertDailyMetric(row, deviceId: deviceId, in: db)
+            }
+
+            try beforeMetricSeriesWrite?()
+
+            for start in stride(from: 0, to: keys.count, by: Self.inClauseChunk) {
+                let chunk = Array(keys[start..<min(start + Self.inClauseChunk, keys.count)])
+                let placeholders = Array(repeating: "?", count: chunk.count)
+                    .joined(separator: ", ")
+                try db.execute(
+                    sql: """
+                        DELETE FROM metricSeries
+                        WHERE deviceId = ? AND day >= ? AND day <= ?
+                          AND key IN (\(placeholders))
+                        """,
+                    arguments: StatementArguments([deviceId, from, to] + chunk)
+                )
+            }
+            for row in normalizedMetricRows {
+                try db.execute(
+                    sql: """
+                        INSERT INTO metricSeries (deviceId, day, key, value)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(deviceId, day, key) DO UPDATE SET value = excluded.value
+                        """,
+                    arguments: [deviceId, row.day, row.key, row.value]
+                )
+            }
+            return retainedDays
         }
     }
 
@@ -517,6 +639,81 @@ extension WhoopStore {
                 """, arguments: [deviceId, from, to])
             return db.changesCount
         }
+    }
+
+    private static func upsertDailyMetric(
+        _ d: DailyMetric,
+        deviceId: String,
+        in db: Database
+    ) throws -> Int {
+        try db.execute(sql: """
+            INSERT INTO dailyMetric
+                (deviceId, day, totalSleepMin, efficiency, deepMin, remMin, lightMin,
+                 disturbances, restingHr, avgHrv, recovery, strain, exerciseCount,
+                 spo2Pct, skinTempDevC, respRateBpm, steps, activeKcalEst,
+                 spo2Red, spo2Ir, hrvMethod)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(deviceId, day) DO UPDATE SET
+                totalSleepMin = excluded.totalSleepMin,
+                efficiency = excluded.efficiency,
+                deepMin = excluded.deepMin,
+                remMin = excluded.remMin,
+                lightMin = excluded.lightMin,
+                disturbances = excluded.disturbances,
+                restingHr = excluded.restingHr,
+                avgHrv = excluded.avgHrv,
+                recovery = excluded.recovery,
+                strain = excluded.strain,
+                exerciseCount = excluded.exerciseCount,
+                spo2Pct = excluded.spo2Pct,
+                skinTempDevC = excluded.skinTempDevC,
+                respRateBpm = excluded.respRateBpm,
+                steps = excluded.steps,
+                activeKcalEst = excluded.activeKcalEst,
+                spo2Red = excluded.spo2Red,
+                spo2Ir = excluded.spo2Ir,
+                hrvMethod = excluded.hrvMethod
+            """, arguments: [deviceId, d.day, d.totalSleepMin, d.efficiency, d.deepMin,
+                             d.remMin, d.lightMin, d.disturbances, d.restingHr, d.avgHrv,
+                             d.recovery, d.strain, d.exerciseCount,
+                             d.spo2Pct, d.skinTempDevC, d.respRateBpm,
+                             d.steps, d.activeKcalEst,
+                             d.spo2Red, d.spo2Ir,
+                             d.hrvMethod?.rawValue])
+        return db.changesCount
+    }
+
+    private static func validComputedMetricKey(_ key: String) -> Bool {
+        !key.isEmpty && key.count <= 80
+            && key.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "_"
+            }
+    }
+
+    private static func validComputedDay(_ day: String) -> Bool {
+        let parts = day.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let dayOfMonth = Int(parts[2])
+        else { return false }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: year,
+            month: month,
+            day: dayOfMonth
+        )
+        guard let date = calendar.date(from: components) else { return false }
+        let roundTrip = calendar.dateComponents([.year, .month, .day], from: date)
+        return roundTrip.year == year
+            && roundTrip.month == month
+            && roundTrip.day == dayOfMonth
     }
 
     // MARK: - Reads

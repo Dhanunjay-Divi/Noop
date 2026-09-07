@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'Packages/**'
+      - 'Tools/Backfill/**'
       - 'Tools/StudyHarness/**'
       - 'Tools/check-private-data.py'
       - '**/*.zip'
@@ -24,6 +25,7 @@ on:
     branches: [main]
     paths:
       - 'Packages/**'
+      - 'Tools/Backfill/**'
       - 'Tools/StudyHarness/**'
       - 'Tools/check-private-data.py'
       - '**/*.zip'
@@ -42,7 +44,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  swift-packages:
+    name: swift-packages (${{ matrix.package }})
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -72,6 +75,7 @@ jobs:
         working-directory: Packages/${{ matrix.package }}
 
   study-harness:
+    name: study-harness
     runs-on: macos-15
     steps:
       - name: Checkout
@@ -89,3 +93,20 @@ jobs:
       - name: Test private study harness
         run: swift test
         working-directory: Tools/StudyHarness
+
+  history-harness:
+    name: history-harness
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          persist-credentials: false
+
+      - name: Build synthetic history harness
+        run: swift build
+        working-directory: Tools/Backfill
+
+      - name: Test synthetic history harness
+        run: swift test
+        working-directory: Tools/Backfill

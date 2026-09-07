@@ -109,10 +109,10 @@ struct MetricDescriptor: Identifiable, Hashable {
         case "xiaomi-band":  return "Mi Band"
         case "nutrition-log", "nutrition-csv": return String(localized: "Nutrition")
         case "noop-mood":    return String(localized: "Mood")
-        // `my-whoop` is the local strap namespace. Its series can resolve to directly measured
-        // strap rows OR to a sibling `-noop` series calculated on-device; calling the whole namespace
-        // "Whoop" made independent Charge/Effort/Rest values look official. Keep that boundary visible.
-        case "my-whoop":     return String(localized: "Noop Band")
+        // `my-whoop` is a persisted legacy wearable namespace. It can contain imported rows or rows
+        // measured through the compatibility adapter, so it must not be relabelled as first-party
+        // NOOP Band evidence.
+        case "my-whoop":     return String(localized: "Compatible band")
         case let s where s.hasSuffix("-noop"):
             return "NOOP"
         case "whoop", "whoop-official-reference":

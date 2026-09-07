@@ -24,11 +24,13 @@ import com.noop.data.WorkoutRow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.zip.ZipInputStream
+import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
 /**
@@ -56,6 +58,10 @@ import kotlin.math.roundToInt
  */
 object WhoopCsvImporter {
 
+    /** Keep aligned with Apple's WhoopImporter.importerVersion/schemaRevision contract. */
+    internal const val IMPORTER_VERSION = 5
+    internal const val SCHEMA_REVISION = "whoop-csv-import-v5"
+
     private const val WHOOP_DEVICE = WHOOP_CSV_IMPORTED_WORKOUT_SOURCE
     private const val SOURCE_LABEL = "Wearable export"
 
@@ -63,6 +69,24 @@ object WhoopCsvImporter {
     private const val SLEEPS_NAME = "sleeps.csv"
     private const val WORKOUTS_NAME = "workouts.csv"
     private const val JOURNAL_NAME = "journal_entries.csv"
+
+    internal fun diagnosticFailureKind(error: Throwable): String = when (error) {
+        is SecurityException -> "permission"
+        is IOException -> "io"
+        is IllegalArgumentException, is org.json.JSONException -> "invalid_data"
+        else -> "unexpected"
+    }
+
+    private fun recordFailure(phase: String, error: Throwable) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "import.wearable_export",
+            fields = mapOf(
+                "phase" to phase,
+                "outcome" to "failed",
+                "failure_kind" to diagnosticFailureKind(error),
+            ),
+        )
+    }
 
     private val CYCLE_SERIES_KEYS = setOf(
         "recovery", "strain", "rhr", "hrv", "spo2", "skin_temp", "resp_rate",
@@ -179,17 +203,26 @@ object WhoopCsvImporter {
     ): ImportSummary {
         val loaded = try {
             loadCsvData(context, uri)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            return ImportSummary.failure(SOURCE_LABEL, "Could not read export: ${e.message ?: "unknown error"}")
+            recordFailure("read", e)
+            return ImportSummary.failure(
+                SOURCE_LABEL,
+                "Could not read this export. Check the file and try again.",
+            )
         }
         val csvData = loaded.csvData
         val truncated = loaded.truncated
         val portable: PortableUserData? = try {
             loaded.portableData?.let(PortableUserDataCodec::decode)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            recordFailure("validate", e)
             return ImportSummary.failure(
                 SOURCE_LABEL,
-                "NOOP user data could not be validated: ${e.message ?: "invalid portable data"}",
+                "NOOP user data could not be validated. Export it again and retry.",
             )
         }
 
@@ -353,10 +386,35 @@ object WhoopCsvImporter {
             fillOnlyWorkouts = localWorkouts,
         )
         val devices = buildList {
-            if (hasOfficialRows) add(WhoopCsvDeviceRegistration(deviceId, "Noop Band"))
+            if (hasOfficialRows) add(WhoopCsvDeviceRegistration(deviceId, "Wearable import"))
             if (hasLocalRows) {
                 add(WhoopCsvDeviceRegistration(computedDeviceId, "NOOP (Approximate)"))
             }
+        }
+
+        val referenceManifest = WhoopReferenceImportManifest.from(context)
+        val referencePrepared = officialReplacements.all { replacement ->
+            referenceManifest.invalidateOfficialMetrics(
+                deviceId = replacement.deviceId,
+                schemaRevision = SCHEMA_REVISION,
+                from = replacement.fromDay,
+                to = replacement.toDay,
+                managedKeys = replacement.managedKeys.toSet(),
+            )
+        }
+        if (!referencePrepared) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "import.reference_manifest",
+                fields = mapOf(
+                    "phase" to "invalidate",
+                    "outcome" to "failed",
+                    "range_count" to officialReplacements.size.toString(),
+                ),
+            )
+            return ImportSummary.failure(
+                SOURCE_LABEL,
+                "Export could not be imported safely; no archive rows were saved.",
+            )
         }
 
         // Every Room-backed projection commits together. The SAF read above and caller-side UI
@@ -368,11 +426,37 @@ object WhoopCsvImporter {
                 devices = devices,
                 csvBatch = csvBatch,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            recordFailure("persist", e)
             return ImportSummary.failure(
                 SOURCE_LABEL,
-                "Export could not be imported; no archive rows were saved: " +
-                    (e.message ?: "database error"),
+                "Export could not be imported; no archive rows were saved.",
+            )
+        }
+
+        // The affected manifest ranges were synchronously invalidated before SQLite replacement.
+        // Stamp only rows that completed the provenance-aware transaction. A crash or persistence
+        // failure between these phases therefore leaves the new rows unverified, never falsely verified.
+        val referenceStamped = officialReplacements.all { replacement ->
+            referenceManifest.replaceOfficialMetrics(
+                entries = replacement.rows.map { it.day to it.key },
+                deviceId = replacement.deviceId,
+                schemaRevision = SCHEMA_REVISION,
+                from = replacement.fromDay,
+                to = replacement.toDay,
+                managedKeys = replacement.managedKeys.toSet(),
+            )
+        }
+        if (!referenceStamped) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "import.reference_manifest",
+                fields = mapOf(
+                    "phase" to "stamp",
+                    "outcome" to "failed",
+                    "range_count" to officialReplacements.size.toString(),
+                ),
             )
         }
 

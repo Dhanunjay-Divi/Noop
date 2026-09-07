@@ -267,6 +267,39 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         )
     }
 
+    func testAnalysisWatermarkRequiresEveryCorePersistenceBoundary() {
+        XCTAssertTrue(
+            IntelligenceEngine.analysisPassCanAdvanceWatermark(
+                scorePersistenceSucceeded: true,
+                activeZonePersistenceSucceeded: true,
+                repairHasFailures: false
+            )
+        )
+        XCTAssertFalse(
+            IntelligenceEngine.analysisPassCanAdvanceWatermark(
+                scorePersistenceSucceeded: false,
+                activeZonePersistenceSucceeded: true,
+                repairHasFailures: false
+            ),
+            "a failed atomic score transaction must leave the next idle pass eligible to retry"
+        )
+        XCTAssertFalse(
+            IntelligenceEngine.analysisPassCanAdvanceWatermark(
+                scorePersistenceSucceeded: true,
+                activeZonePersistenceSucceeded: false,
+                repairHasFailures: false
+            ),
+            "failed active-minute persistence must not be hidden behind an unchanged-input watermark"
+        )
+        XCTAssertFalse(
+            IntelligenceEngine.analysisPassCanAdvanceWatermark(
+                scorePersistenceSucceeded: true,
+                activeZonePersistenceSucceeded: true,
+                repairHasFailures: true
+            )
+        )
+    }
+
     // MARK: - #316 / @63 step activity-class union (the Steps tile icon)
 
     /// Pure union pick: `latestActivityClass` returns the non-nil class on the greatest-ts sample across the

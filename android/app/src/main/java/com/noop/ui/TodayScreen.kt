@@ -4153,7 +4153,7 @@ private fun DailySignalSourceBadge(
     bandLastSyncAt: Long?,
     modifier: Modifier = Modifier,
 ) {
-    val isBand = sourceLabelIncludesNoopBand(text)
+    val isBand = sourceLabelIncludesCompatibleBand(text)
     val syncingRaw = isBand && bandBackfilling
     var presentingSync by remember(isBand) { mutableStateOf(false) }
     var justSynced by remember(isBand) { mutableStateOf(false) }

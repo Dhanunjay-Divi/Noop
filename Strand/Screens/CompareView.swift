@@ -275,11 +275,25 @@ struct CompareView: View {
     }
 
     private func loadOfficialReference() async {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "comparison.reference",
+            fields: ["metric": referenceMetric.rawValue]
+        )
+        var diagnosticOutcome = "completed"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: diagnosticOutcome,
+                fields: diagnosticFields
+            )
+        }
         referenceError = nil
         referenceExportStatus = nil
         referenceReport = nil
         referenceEstimate = nil
         guard let store = await repo.storeHandle() else {
+            diagnosticOutcome = "unavailable"
             referenceReport = nil
             referenceError = String(localized: "The local data store is unavailable.")
             return
@@ -292,10 +306,14 @@ struct CompareView: View {
             referenceIsRescoring = true
             defer { referenceIsRescoring = false }
             for _ in 0..<120 where intelligence.computing {
-                if Task.isCancelled { return }
+                if Task.isCancelled {
+                    diagnosticOutcome = "canceled"
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
             guard !intelligence.computing else {
+                diagnosticOutcome = "unavailable"
                 referenceReport = nil
                 referenceError = String(localized: "Current on-device scoring is still running. Reopen Compare when it finishes.")
                 return
@@ -303,11 +321,15 @@ struct CompareView: View {
             guard let receipt = await intelligence.analyzeRecent(
                 maxDays: referenceRescoreDays, force: true)
             else {
+                diagnosticOutcome = "unavailable"
                 referenceReport = nil
                 referenceError = String(localized: "No completed on-device score pass was available. Reopen Compare after scoring finishes.")
                 return
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                diagnosticOutcome = "canceled"
+                return
+            }
             // The completed score run—not the dashboard's display winner—proves which rows came from a
             // dense WHOOP raw-HR window. Import-only folds can share the computed namespace but never enter
             // this receipt. The calibration loader intersects these days with the metric-specific official
@@ -336,15 +358,27 @@ struct CompareView: View {
                 verifiedCurrentNoopDays: verifiedCurrentNoopDays ?? [],
                 whoopImportSchemaRevision: WhoopImporter.schemaRevision
             )
-            _ = personalCalibrationStore.saveValidated(report: report)
+            let calibrationPersisted = personalCalibrationStore.saveValidated(report: report)
             referenceEstimate = personalCalibrationStore.load(
                 metric: referenceMetric.metric,
                 noopAlgorithmVersion: referenceMetric.algorithmVersion)?.latestEstimate
             referenceReport = report
+            diagnosticFields = [
+                "paired_days": String(report.audit.pairedDays),
+                "calibration": report.calibration.decision.rawValue,
+                "calibration_persisted": String(calibrationPersisted),
+            ]
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            return
         } catch {
             referenceReport = nil
             referenceEstimate = nil
-            referenceError = error.localizedDescription
+            diagnosticOutcome = "failed"
+            diagnosticFields = [
+                "failure_kind": AppDiagnosticsRecorder.failureKind(error)
+            ]
+            referenceError = String(localized: "The local comparison is unavailable.")
         }
     }
 
@@ -374,10 +408,7 @@ struct CompareView: View {
 
                     if let stats = referenceReport?.statistics {
                         LazyVGrid(
-                            columns: [
-                                GridItem(.flexible()), GridItem(.flexible()),
-                                GridItem(.flexible()), GridItem(.flexible()),
-                            ],
+                            columns: [GridItem(.adaptive(minimum: 110), spacing: 12)],
                             spacing: 12
                         ) {
                             referenceStat("Paired", "\(stats.sampleCount)")

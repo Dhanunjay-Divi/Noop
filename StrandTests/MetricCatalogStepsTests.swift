@@ -85,7 +85,7 @@ final class MetricCatalogStepsTests: XCTestCase {
     func testSourceLabelsKeepIndependentAndOfficialSeriesDistinct() {
         XCTAssertEqual(
             MetricCatalog.metric(key: "recovery", source: "my-whoop")?.sourceLabel,
-            "Noop Band"
+            "Compatible band"
         )
 
         let official = MetricDescriptor(

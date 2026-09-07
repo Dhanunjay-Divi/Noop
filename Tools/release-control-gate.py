@@ -63,9 +63,7 @@ TOKEN_PATTERNS = (
     ),
     (
         "private-key",
-        re.compile(
-            r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
-        ),
+        re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
     ),
 )
 
@@ -238,7 +236,10 @@ def validate_policy(policy: dict[str, Any]) -> None:
 
     reproducibility = policy["reproducibility"]
     expected_platforms = {"android", "firmware", "ios", "macos", "server", "tools"}
-    if not isinstance(reproducibility, dict) or set(reproducibility) != expected_platforms:
+    if (
+        not isinstance(reproducibility, dict)
+        or set(reproducibility) != expected_platforms
+    ):
         raise GateError("reproducibility must define every release platform")
     for platform, definition in reproducibility.items():
         if not isinstance(definition, dict) or set(definition) != {
@@ -250,7 +251,10 @@ def validate_policy(policy: dict[str, Any]) -> None:
         if definition["status"] not in {"enforced", "blocked-external-input"}:
             raise GateError(f"invalid reproducibility status: {platform}")
         _string_list(definition["commands"], f"reproducibility.{platform}.commands")
-        if not isinstance(definition["comparison"], str) or not definition["comparison"]:
+        if (
+            not isinstance(definition["comparison"], str)
+            or not definition["comparison"]
+        ):
             raise GateError(f"missing reproducibility comparison: {platform}")
 
     migrations = policy["migrations"]
@@ -279,7 +283,9 @@ def validate_policy(policy: dict[str, Any]) -> None:
     }:
         raise GateError("vulnerability policy is incomplete")
     if vulnerabilities["criticalMaximum"] != 0 or vulnerabilities["highMaximum"] != 0:
-        raise GateError("critical and high release vulnerability thresholds must be zero")
+        raise GateError(
+            "critical and high release vulnerability thresholds must be zero"
+        )
     if vulnerabilities["mediumDisposition"] != "review-required":
         raise GateError("medium vulnerabilities must require review")
     _string_list(vulnerabilities["requiredCommands"], "vulnerability requiredCommands")
@@ -340,9 +346,7 @@ def tracked_files(root: Path) -> list[str]:
     )
 
 
-def check_required_paths(
-    root: Path, policy: dict[str, Any], tracked: set[str]
-) -> None:
+def check_required_paths(root: Path, policy: dict[str, Any], tracked: set[str]) -> None:
     controls = policy["sourceControls"]
     required = list(controls["requiredPaths"])
     required.extend(item["path"] for item in controls["lockfiles"])
@@ -355,10 +359,14 @@ def check_required_paths(
         ]
     )
     missing = sorted(
-        path for path in set(required) if path not in tracked or not (root / path).is_file()
+        path
+        for path in set(required)
+        if path not in tracked or not (root / path).is_file()
     )
     if missing:
-        raise GateError("required release inputs are absent from Git: " + ", ".join(missing))
+        raise GateError(
+            "required release inputs are absent from Git: " + ", ".join(missing)
+        )
 
 
 def _check_swift_lock(path: Path) -> None:
@@ -372,7 +380,10 @@ def _check_swift_lock(path: Path) -> None:
     for pin in pins:
         state = pin.get("state", {}) if isinstance(pin, dict) else {}
         revision = state.get("revision")
-        if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        if (
+            not isinstance(revision, str)
+            or re.fullmatch(r"[0-9a-f]{40}", revision) is None
+        ):
             raise GateError(f"SwiftPM dependency is not revision pinned: {path.name}")
 
 
@@ -557,7 +568,9 @@ def _is_blocked_credential_path(
         return False
     item = PurePosixPath(path)
     lowered_name = item.name.lower()
-    if lowered_name in {name.lower() for name in controls["blockedCredentialBasenames"]}:
+    if lowered_name in {
+        name.lower() for name in controls["blockedCredentialBasenames"]
+    }:
         return True
     suffixes = "".join(item.suffixes).lower()
     if any(
@@ -661,6 +674,24 @@ def check_runtime_inventory(root: Path) -> None:
         raise GateError("runtime inventory/license gate failed")
 
 
+def check_calibration_parity(root: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "Tools/calibration-parity-audit.py",
+            "check",
+            "--root",
+            str(root),
+        ],
+        cwd=root,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0:
+        raise GateError("cross-platform calibration parity gate failed")
+
+
 def run_checks(root: Path, policy_path: Path) -> list[dict[str, str]]:
     policy = load_policy(policy_path)
     tracked = tracked_files(root)
@@ -671,6 +702,7 @@ def run_checks(root: Path, policy_path: Path) -> list[dict[str, str]]:
             "required-release-inputs",
             lambda: check_required_paths(root, policy, tracked_set),
         ),
+        ("calibration-parity", lambda: check_calibration_parity(root)),
         ("dependency-locks", lambda: check_lockfiles(root, policy)),
         (
             "github-actions-pinned",
@@ -698,9 +730,14 @@ def run_checks(root: Path, policy_path: Path) -> list[dict[str, str]]:
 
 
 def write_report(path: Path, checks: list[dict[str, str]]) -> None:
-    report = {"schemaVersion": 1, "checks": sorted(checks, key=lambda item: item["name"])}
+    report = {
+        "schemaVersion": 1,
+        "checks": sorted(checks, key=lambda item: item["name"]),
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

@@ -140,8 +140,8 @@ internal fun heroSourceLabel(
     return labels.takeIf { it.isNotEmpty() }?.joinToString(" + ")
 }
 
-/** A mixed hero label still represents a live Noop Band source and must retain sync feedback. */
-internal fun sourceLabelIncludesNoopBand(label: String): Boolean =
+/** A mixed hero label still represents a live compatible-band source and must retain sync feedback. */
+internal fun sourceLabelIncludesCompatibleBand(label: String): Boolean =
     label.split("+").any { it.trim().equals(WhoopModel.CUSTOMER_NAME, ignoreCase = true) }
 
 /** Transfer activity ending can also mean timeout or disconnect. Confirm only when completion advanced. */

@@ -520,7 +520,10 @@ public enum WhoopReferenceCalibration {
 
         let series = try await store.metricSeries(deviceId: deviceId, key: metric.seriesKey,
                                                   from: from, to: to)
-        var byDay = Dictionary(series.map { ($0.day, $0.value) },
+        var byDay = Dictionary(series.map {
+            let value = metric == .sleepEfficiencyPercent ? $0.value * 100.0 : $0.value
+            return ($0.day, value)
+        },
                                uniquingKeysWith: { _, latest in latest })
 
         // metricSeries is the lossless imported surface. Daily columns fill only absent days, mainly for

@@ -27,21 +27,36 @@ The repository gate verifies:
 - tracked credential/private-artifact filenames and high-confidence token
   formats;
 - release naming, reproducibility, migration, vulnerability, environment, and
-  evidence policy structure.
+  evidence policy structure;
+- exact Apple/Android reference-calibration revisions, metric keys/ranges,
+  thresholds, and critical chronological holdout guards;
+- presence of the metric reprocessing/rollback, key lifecycle, and coordinated
+  vulnerability/security-update contracts.
 
 Run it from the repository root:
 
 ```bash
 python3 Tools/release-control-gate.py check
+python3 Tools/calibration-parity-audit.py check
 python3 -m unittest \
   Tools.tests.test_release_control_gate \
-  Tools.tests.test_release_evidence
+  Tools.tests.test_release_evidence \
+  Tools.tests.test_calibration_parity_audit
 ```
 
 The `Release Controls` workflow runs on every pull request and every push to
 `main`. The release workflow invokes the same gate before it mutates a version
 or creates a draft. Branch protection and reviewed GitHub environments are
 still owner-controlled settings and remain mandatory before production use.
+
+Metric publication and rollback must also follow
+[`METRIC_REPROCESSING_AND_ROLLBACK.md`](METRIC_REPROCESSING_AND_ROLLBACK.md).
+Credential and signing material must follow
+[`KEY_MANAGEMENT.md`](KEY_MANAGEMENT.md), and security reports/updates follow
+[`../SECURITY.md`](../SECURITY.md) plus
+[`SECURITY_OPERATIONS.md`](SECURITY_OPERATIONS.md). Their presence is enforced
+as a release input; production drills and external evidence remain separate
+gates.
 
 ## Naming
 

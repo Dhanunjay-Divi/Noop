@@ -45,8 +45,9 @@ internal object SleepEfficiencyUnits {
     /** Percentage for presentation while preserving the fraction-only persistence contract. */
     fun displayPercent(value: Double?): Double? = canonicalFraction(value)?.times(100.0)
 
-    /** Normalize the one unit-sensitive generic series; leave every unrelated key unchanged. */
+    /** Reject non-finite generic values, then normalize the one unit-sensitive series. */
     fun normalizedSeriesRow(row: MetricSeriesRow): MetricSeriesRow? {
+        if (!row.value.isFinite()) return null
         if (row.key != SERIES_KEY) return row
         val value = canonicalFraction(row.value) ?: return null
         return if (value == row.value) row else row.copy(value = value)

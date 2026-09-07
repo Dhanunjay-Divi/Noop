@@ -69,5 +69,15 @@ class SleepEfficiencyUnitsTest {
                 legacy.copy(value = Double.NaN),
             ),
         )
+        assertNull(
+            SleepEfficiencyUnits.normalizedSeriesRow(
+                unrelated.copy(value = Double.NaN),
+            ),
+        )
+        assertNull(
+            SleepEfficiencyUnits.normalizedSeriesRow(
+                unrelated.copy(value = Double.POSITIVE_INFINITY),
+            ),
+        )
     }
 }

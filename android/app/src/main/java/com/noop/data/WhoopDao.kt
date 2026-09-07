@@ -1298,12 +1298,18 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT COUNT(*) FROM metricSeries WHERE deviceId = :deviceId AND key = :key")
     suspend fun metricSeriesKeyCount(deviceId: String, key: String): Int
 
-    /** The NEWEST row of a (deviceId, key) series, or null — the ORDER BY day DESC LIMIT 1 twin of
-     *  [metricSeries] for latest-value tiles (day is yyyy-MM-dd, so lexicographic MAX(day) = newest).
-     *  Rides the same idx_metricSeries_device_key_day index, so the read stops at one row instead of
-     *  materializing the whole series for a `.lastOrNull()`. */
-    @Query("SELECT * FROM metricSeries WHERE deviceId = :deviceId AND key = :key ORDER BY day DESC LIMIT 1")
-    suspend fun latestMetricSeriesRow(deviceId: String, key: String): MetricSeriesRow?
+    /** The newest valid stored row for a source/key. Bounds exclude non-finite generic values and
+     *  out-of-contract legacy unit rows without materializing the full history. */
+    @Query(
+        "SELECT * FROM metricSeries WHERE deviceId = :deviceId AND key = :key " +
+            "AND value >= :minimum AND value <= :maximum ORDER BY day DESC LIMIT 1"
+    )
+    suspend fun latestMetricSeriesRowInRange(
+        deviceId: String,
+        key: String,
+        minimum: Double,
+        maximum: Double,
+    ): MetricSeriesRow?
 
     /** Delete one projected day for a key (used when a Lab Book reading's last numeric value
      *  for a (markerKey, day) cell is removed). Swift LabMarkerStore.reprojectCells delete branch. */

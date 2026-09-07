@@ -45,12 +45,12 @@ final class DevicePillStateTests: XCTestCase {
                                   nickname: nil, peripheralId: nil, sourceKind: .liveBLE,
                                   capabilities: [.hr, .hrv], status: .active,
                                   addedAt: 0, lastSeenAt: 0)
-        XCTAssertEqual(DeviceCapabilityProfile.make(for: device).displayModel, "Noop Band")
+        XCTAssertEqual(DeviceCapabilityProfile.make(for: device).displayModel, "Compatible band")
     }
 
     func testBandCustomerNameAndVisibleDiagnosticsHideVendorBrand() {
-        XCTAssertEqual(WhoopModel.whoop4.displayName, "Noop Band")
-        XCTAssertEqual(WhoopModel.whoop5mg.displayName, "Noop Band")
+        XCTAssertEqual(WhoopModel.whoop4.displayName, "Compatible band")
+        XCTAssertEqual(WhoopModel.whoop5mg.displayName, "Compatible band")
         XCTAssertEqual(WhoopModel.whoop4.transportName, "legacy band")
         XCTAssertEqual(WhoopModel.whoop5mg.transportName, "newer band")
     }

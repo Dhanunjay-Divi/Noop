@@ -962,29 +962,29 @@ struct DeviceCapabilityProfile {
                 displayModel: String(localized: "Heart-rate strap"),
                 captures: String(localized: "Heart rate · HRV (live)* · Strain"),
                 powers: String(localized: "Powers the live console + Effort. No Recovery or Sleep Score"),
-                footnote: String(localized: "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery (those require Noop Band or another compatible source)."))
+                footnote: String(localized: "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery (those require another compatible source)."))
         }
         let whoopPowers = String(localized: "Powers Recovery, Effort, Sleep Score, sleep details + Health Monitor")
         let model = d.model.lowercased()
         // Newer transport family adds a raw motion count that can support an estimated step series.
         if model.contains("5") || model.contains("mg") {
             return DeviceCapabilityProfile(
-                displayModel: "Noop Band",
+                displayModel: "Compatible band",
                 captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Steps* · Sleep · Strain · Battery"),
                 powers: whoopPowers,
-                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw motion count. No SpO₂ percentage comes directly from Noop Band; use Apple Health or a supported file import for that."))
+                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw motion count. This compatible band does not provide a direct SpO₂ percentage; use Apple Health or a supported file import for that."))
         }
         // Older transport family does not expose a usable step stream.
         if model.contains("4") {
             return DeviceCapabilityProfile(
-                displayModel: "Noop Band",
+                displayModel: "Compatible band",
                 captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery"),
                 powers: whoopPowers,
-                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); steps are unavailable on this firmware. No SpO₂ percentage comes directly from Noop Band; use Apple Health or a supported file import for that."))
+                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); steps are unavailable on this firmware. This compatible band does not provide a direct SpO₂ percentage; use Apple Health or a supported file import for that."))
         }
-        // Unknown family: show only the capability set common to supported Noop Band transports.
+        // Unknown family: show only the capability set common to supported compatibility transports.
         return DeviceCapabilityProfile(
-            displayModel: "Noop Band",
+            displayModel: "Compatible band",
             captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery"),
             powers: whoopPowers,
             footnote: String(localized: "Hardware details are still being identified, so this shows only common signals. * indicates an on-device estimate. SpO₂ percentage requires another compatible source."))

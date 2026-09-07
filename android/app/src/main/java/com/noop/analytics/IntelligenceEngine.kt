@@ -307,6 +307,8 @@ object IntelligenceEngine {
         val hrv: Double?,
         val rhr: Int?,
         val restConfidence: ScoreConfidence = ScoreConfidence.CALIBRATING,
+        /** True only when this day was independently scored from a compatible band's raw HR stream. */
+        val rawStrapEvidence: Boolean = true,
     )
 
     /**
@@ -1304,12 +1306,13 @@ object IntelligenceEngine {
                         sleepMin = scored.totalSleepMin,
                         hrv = scored.avgHrv,
                         rhr = scored.restingHr,
+                        rawStrapEvidence = false,
                     ),
                 )
             }
         }
 
-        // Snapshot the persisted/merged daily history BEFORE the delete+re-upsert below rewrites the
+        // Snapshot the persisted/merged daily history BEFORE the atomic reconciliation below rewrites the
         // computed window. This is the accumulated view the readiness card + dashboard read ("N of 7
         // nights"); captured here so the Fitness Age gate (further down) can't be undercut by this pass's
         // OWN pruning , a recompute only re-scores nights whose raw HR still lives in the store, so reading
@@ -1320,23 +1323,18 @@ object IntelligenceEngine {
         // #1196: a transient empty scoring pass is not an instruction to erase the persisted window.
         // This can occur while an offload/reconnect is incomplete or the active source briefly resolves
         // empty. Keep the last complete scores until a non-empty pass can replace them.
+        var persistedScoreDays: Set<String> = emptySet()
         if (dailies.isNotEmpty()) {
-            repo.deleteComputedDailyInRange(computedId, oldestDay, newestDay)
-
-            // Persist the computed scores under the dedicated "-noop" source so the WHOLE
-            // dashboard (Today / Recovery / Strain / Sleep / Trends) reads them. The repository
-            // merges these UNDER any imported "my-whoop" rows, so a real WHOOP import always wins;
-            // this only fills the days the strap collected but no import covered.
-            repo.upsertDailyMetrics(dailies)
-
-            // A transient empty read during reconnect/offload is not authoritative absence. Reconcile
-            // Rest only with a complete non-empty scoring pass, matching the computed-daily guard above.
-            repo.replaceMetricSeriesRange(
+            // Persist daily scores and their Rest evidence in one transaction. Its internal range
+            // replacement is invisible until commit, so cancellation or failure keeps the prior complete
+            // window. The returned exact day set is the post-commit provenance receipt.
+            persistedScoreDays = repo.reconcileComputedScoreRange(
                 deviceId = computedId,
                 fromDay = oldestDay,
                 toDay = newestDay,
-                managedKeys = ScoreConfidence.managedRestSeriesKeys,
-                rows = restRows,
+                dailyRows = dailies,
+                managedRestKeys = ScoreConfidence.managedRestSeriesKeys,
+                restRows = restRows,
             )
         }
         if (activeZoneRows.isNotEmpty()) {
@@ -1630,7 +1628,14 @@ object IntelligenceEngine {
         // under-sampled ones from that denser data.
         rescoreManualWorkouts(repo, profile, importedDeviceId, maxHROverride, nowSeconds)
 
-        return out to healDropped.size
+        val persistedOut = out.map { computed ->
+            if (computed.rawStrapEvidence && computed.day !in persistedScoreDays) {
+                computed.copy(rawStrapEvidence = false)
+            } else {
+                computed
+            }
+        }
+        return persistedOut to healDropped.size
     }
 
     /**

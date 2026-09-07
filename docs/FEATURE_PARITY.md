@@ -1,6 +1,6 @@
 # Noop and WHOOP feature map
 
-Last reviewed: **2026-08-22**
+Last reviewed: **2026-09-07**
 
 This document is the honest answer to “does Noop have everything WHOOP has?”
 Noop aims for **data ownership and useful independent equivalents**, not a
@@ -9,6 +9,12 @@ names, membership tiers, hardware capabilities, and regional availability can
 change; the source links at the bottom are the reference point for this review.
 The cross-vendor measured/derived/regulatory comparison and completion gates live in
 [`COMPETITIVE_CAPABILITY_AUDIT.md`](COMPETITIVE_CAPABILITY_AUDIT.md).
+The release calibration contract in
+[`../release/metrics/reference-calibration-v1.json`](../release/metrics/reference-calibration-v1.json)
+and `Tools/calibration-parity-audit.py` fail CI if Apple and Android drift on
+comparable metric keys/ranges, algorithm/model revisions, conservative
+thresholds, chronological holdout behavior, duplicate rejection, or namespace
+separation.
 
 ## Status key
 
@@ -160,11 +166,18 @@ without surrendering the independent Noop series:
    installation-scoped producer IDs, with `logical_source_id` metadata preserving
    the readable name. The two series are never silently merged.
 4. Compare uses exact overlapping calendar days to report bias, MAE, RMSE, and
-   correlation.
-5. Once enough paired history exists, Noop may fit a personal display calibration
-   on earlier days and accept it only when it improves untouched chronological
-   holdout days. The original official and independent values remain unchanged and
-   visible.
+   correlation on Apple and Android. The engine supports 12 unit-compatible
+   fields: the three score families plus RHR, HRV, respiration, SpO2, total,
+   deep, REM and light sleep, and sleep efficiency.
+5. Only Charge, Effort, and Rest are independently recomputed score families
+   eligible for personal presentation calibration. Noop fits an affine display
+   transform on earlier days only after at least 28 pairs, and accepts it only
+   when at least seven untouched later days improve by at least 5% MAE without
+   worsening RMSE. The original official and independent values remain
+   unchanged and visible. An algorithm-revision change invalidates the model.
+   Apple and Android publish the recomputed daily window and Rest evidence in
+   one transaction, reject malformed input before mutation, and withhold
+   comparison provenance unless that transaction commits.
 
 The comparison is periodic, not a private WHOOP API integration. The official app
 and Noop may also compete for the same BLE connection, so “parallel” means

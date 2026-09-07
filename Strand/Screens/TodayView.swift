@@ -1113,12 +1113,12 @@ struct TodayView: View {
     }
 
     /// PURE (unit-testable), the Today chip label for a resolved source, relabelling the Apple-Health
-    /// source as "Apple Watch" (the device the audience knows), the supported first-party wearable lane
-    /// as "Noop Band", and otherwise deferring to the shared provenance label.
+    /// source as "Apple Watch" (the device the audience knows), the legacy compatibility lane using its
+    /// customer-facing adapter name, and otherwise deferring to the shared provenance label.
     static func todayProvenanceChipLabel(rawSource: String, deviceId: String, appleHealthSource: String) -> String {
         if rawSource == appleHealthSource { return "Apple Watch" }
         let shared = provenanceDisplayLabel(rawSource: rawSource, deviceId: deviceId)
-        return shared == "Imported" ? "Noop Band" : shared
+        return shared == "Imported" ? WhoopModel.customerName : shared
     }
 
     /// True for a watch-context user with no strap supplying scores (Apple-Health days present and no WHOOP
@@ -4066,12 +4066,13 @@ struct TodayView: View {
     }
 
     /// PURE: the "Synced from: …" summary string for the collapsed footer (S5). Names the sources with
-    /// data using the audience-facing words ("Noop Band", "Apple Watch" for Apple Health, "Mi Band"); "No
-    /// sources yet" when nothing is banked. Unit-testable so the collapsed copy can't drift. The expanded
-    /// card still uses the existing per-source rows, so the Apple-Health provenance footer is unchanged.
+    /// data using audience-facing words (the compatibility adapter name, "Apple Watch" for Apple Health,
+    /// "Mi Band"); "No sources yet" when nothing is banked. Unit-testable so the collapsed copy can't
+    /// drift. The expanded card still uses the existing per-source rows, so the Apple-Health provenance
+    /// footer is unchanged.
     static func syncedFromSummary(hasWhoop: Bool, hasApple: Bool, hasXiaomi: Bool) -> String {
         var names: [String] = []
-        if hasWhoop { names.append("Noop Band") }
+        if hasWhoop { names.append(WhoopModel.customerName) }
         if hasApple { names.append("Apple Watch") }
         if hasXiaomi { names.append("Mi Band") }
         guard !names.isEmpty else { return String(localized: "No sources yet") }

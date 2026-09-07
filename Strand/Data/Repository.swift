@@ -1151,7 +1151,7 @@ final class Repository: ObservableObject {
                 failureKind = AppDiagnosticsRecorder.failureKind(error)
                 return nil
             }
-            try? await s.upsertDevice(id: deviceId, mac: nil, name: "Noop Band")
+            try? await s.upsertDevice(id: deviceId, mac: nil, name: "Compatible band")
             outcome = "opened"
             return s
         }

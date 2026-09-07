@@ -1,6 +1,8 @@
 package com.noop.ui
 
+import com.noop.BuildConfig
 import com.noop.R
+import com.noop.AppDiagnosticsRecorder
 import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.foundation.background
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,11 +26,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -35,6 +41,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,9 +62,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.data.DailyMetric
 import com.noop.data.NutritionLogContract
 import com.noop.data.MoodStore
+import com.noop.data.WhoopRepository
+import com.noop.analytics.CalibratedMetricEstimate
+import com.noop.analytics.IntelligenceEngine
+import com.noop.analytics.NoopScoreAlgorithmRevision
+import com.noop.analytics.PersonalCalibrationDecision
+import com.noop.analytics.PersonalCalibrationModelStore
+import com.noop.analytics.WhoopComparableMetric
+import com.noop.analytics.WhoopReferenceCalibration
+import com.noop.analytics.WhoopReferenceComparisonReport
 import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.WhoopCsvImporter
+import com.noop.ingest.WhoopReferenceImportManifest
+import java.time.LocalDate
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 // MARK: - Compare
@@ -308,6 +330,35 @@ private object ComparePrefs {
     }
 }
 
+private enum class ReferenceMetricChoice(
+    val labelRes: Int,
+    val metric: WhoopComparableMetric,
+    val algorithmVersion: String,
+) {
+    Recovery(
+        R.string.compare_reference_recovery,
+        WhoopComparableMetric.RECOVERY_SCORE,
+        NoopScoreAlgorithmRevision.CHARGE,
+    ),
+    Effort(
+        R.string.compare_reference_effort,
+        WhoopComparableMetric.EFFORT_SCORE,
+        NoopScoreAlgorithmRevision.EFFORT,
+    ),
+    Sleep(
+        R.string.compare_reference_sleep_score,
+        WhoopComparableMetric.REST_SCORE,
+        NoopScoreAlgorithmRevision.REST,
+    ),
+}
+
+private data class ReferenceUiState(
+    val loading: Boolean = true,
+    val report: WhoopReferenceComparisonReport? = null,
+    val estimate: CalibratedMetricEstimate? = null,
+    val error: String? = null,
+)
+
 // MARK: - Per-series model
 
 /** Distinct, high-legibility categorical series colors (avoid the recovery/strain ramps). */
@@ -434,6 +485,80 @@ fun CompareScreen(vm: AppViewModel) {
     // Full-history series per selected metric id (ascending by day).
     val fullSeries = remember { mutableStateMapOf<String, List<Pair<String, Double>>>() }
     var loadedOnce by remember { mutableStateOf(false) }
+    var referenceMetric by remember { mutableStateOf(ReferenceMetricChoice.Recovery) }
+    var verifiedCurrentNoopDays by remember(vm.activeStrapId) {
+        mutableStateOf<Set<String>?>(null)
+    }
+    var referenceState by remember(vm.activeStrapId) { mutableStateOf(ReferenceUiState()) }
+
+    // Match Apple's evidence boundary: one bounded raw-stream score receipt per Compare visit, then
+    // intersect its exact day set with the post-transaction official-import manifest for each metric.
+    LaunchedEffect(referenceMetric, vm.activeStrapId) {
+        val diagnostic = AppDiagnosticsRecorder.beginOperation(
+            "comparison.reference",
+            fields = mapOf("metric" to referenceMetric.metric.name.lowercase(Locale.US)),
+        )
+        referenceState = ReferenceUiState(loading = true)
+        referenceState = try {
+            val verifiedDays = verifiedCurrentNoopDays ?: IntelligenceEngine.analyzeRecent(
+                repo = vm.repo,
+                profile = vm.analysisProfileSnapshot(),
+                maxDays = 120,
+                importedDeviceId = vm.activeStrapId,
+            ).filter { it.rawStrapEvidence }.mapTo(linkedSetOf()) { it.day }.also {
+                verifiedCurrentNoopDays = it
+            }
+            val today = LocalDate.now()
+            val report = WhoopReferenceCalibration.report(
+                repo = vm.repo,
+                metric = referenceMetric.metric,
+                importedDeviceId = WhoopRepository.WHOOP_SOURCE,
+                computedDeviceId = vm.repo.computedDeviceId(vm.activeStrapId),
+                from = today.minusDays(119).toString(),
+                to = today.toString(),
+                noopAlgorithmVersion = referenceMetric.algorithmVersion,
+                verifiedOfficialReferenceDays = WhoopReferenceImportManifest.from(context)
+                    .verifiedDays(
+                        deviceId = WhoopRepository.WHOOP_SOURCE,
+                        schemaRevision = WhoopCsvImporter.SCHEMA_REVISION,
+                        metricKey = referenceMetric.metric.seriesKey,
+                    ),
+                verifiedCurrentNoopDays = verifiedDays,
+                whoopImportSchemaRevision = WhoopCsvImporter.SCHEMA_REVISION,
+            )
+            val calibrationStore = PersonalCalibrationModelStore.from(context)
+            val calibrationPersisted = calibrationStore.saveValidated(report)
+            AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                fields = mapOf(
+                    "paired_days" to report.audit.pairedDays.toString(),
+                    "calibration" to report.calibration.decision.name.lowercase(Locale.US),
+                    "calibration_persisted" to calibrationPersisted.toString(),
+                ),
+            )
+            ReferenceUiState(
+                loading = false,
+                report = report,
+                estimate = calibrationStore.load(
+                    referenceMetric.metric,
+                    referenceMetric.algorithmVersion,
+                )?.latestEstimate,
+            )
+        } catch (error: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "canceled")
+            throw error
+        } catch (error: Exception) {
+            AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "failed",
+                fields = mapOf("failure_kind" to error.javaClass.simpleName),
+            )
+            ReferenceUiState(
+                loading = false,
+                error = context.getString(R.string.compare_reference_unavailable),
+            )
+        }
+    }
 
     // Load the full history for any selected metric not yet fetched, whenever the
     // selection set or the daily cache changes. Mirrors macOS `.task(id: selectionKey)`.
@@ -580,6 +705,14 @@ fun CompareScreen(vm: AppViewModel) {
         }
         }
 
+        item {
+            OfficialReferenceSection(
+                choice = referenceMetric,
+                state = referenceState,
+                onChoice = { referenceMetric = it },
+            )
+        }
+
         if (selected.size < minSelection) {
             item {
                 EmptyNote("Pick at least two metrics above to overlay them and read how they move together.")
@@ -607,6 +740,347 @@ fun CompareScreen(vm: AppViewModel) {
 }
 
 private val AGE_SERIES_KEYS = setOf("fitness_age", "vo2max_est", "vitality", "body_age")
+
+@Composable
+private fun OfficialReferenceSection(
+    choice: ReferenceMetricChoice,
+    state: ReferenceUiState,
+    onChoice: (ReferenceMetricChoice) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        SectionHeader(
+            uiString(R.string.compare_reference_title),
+            overline = uiString(R.string.compare_reference_overline),
+        )
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SegmentedPillControl(
+                    items = ReferenceMetricChoice.entries,
+                    selection = choice,
+                    label = { uiString(it.labelRes) },
+                    onSelect = onChoice,
+                )
+                Text(
+                    uiString(R.string.compare_reference_explanation),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+
+                when {
+                    state.loading -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            color = Palette.accent,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            uiString(R.string.compare_reference_verifying),
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    state.error != null -> Text(
+                        state.error,
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                    state.report?.statistics != null -> {
+                        val report = state.report
+                        val stats = report.statistics
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_paired),
+                                    stats.sampleCount.toString(),
+                                    Modifier.weight(1f),
+                                )
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_bias),
+                                    signedReference(stats.bias),
+                                    Modifier.weight(1f),
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_mae),
+                                    decimalReference(stats.meanAbsoluteError),
+                                    Modifier.weight(1f),
+                                )
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_correlation),
+                                    stats.correlation?.let(::decimalReference) ?: "-",
+                                    Modifier.weight(1f),
+                                )
+                            }
+                        }
+                        Text(
+                            uiString(
+                                R.string.compare_reference_period,
+                                stats.firstDay,
+                                stats.lastDay,
+                                decimalReference(stats.rootMeanSquaredError),
+                            ),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                        HorizontalDivider(color = Palette.hairline)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Text(
+                                    if (report.calibration.decision ==
+                                        PersonalCalibrationDecision.VALIDATED
+                                    ) {
+                                        uiString(R.string.compare_reference_calibration_validated)
+                                    } else {
+                                        uiString(R.string.compare_reference_calibration_not_applied)
+                                    },
+                                    style = NoopType.body,
+                                    color = Palette.textPrimary,
+                                )
+                                Text(
+                                    report.calibration.reason,
+                                    style = NoopType.footnote,
+                                    color = Palette.textTertiary,
+                                )
+                            }
+                            if (report.calibration.decision ==
+                                PersonalCalibrationDecision.VALIDATED
+                            ) {
+                                StatePill(
+                                    title = report.calibration.confidence.name.lowercase()
+                                        .replaceFirstChar(Char::uppercase),
+                                    tone = StrandTone.Accent,
+                                    showsDot = false,
+                                )
+                            }
+                        }
+                        report.calibration.validation?.let { validation ->
+                            Text(
+                                uiString(
+                                    R.string.compare_reference_holdout,
+                                    validation.trainingCount,
+                                    validation.holdoutCount,
+                                    (validation.relativeMAEImprovement * 100.0).roundToInt(),
+                                ),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                        state.estimate?.let { estimate ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                            ) {
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_raw),
+                                    decimalReference(estimate.rawNoopValue),
+                                    Modifier.weight(1f),
+                                )
+                                ReferenceStat(
+                                    uiString(R.string.compare_reference_personal),
+                                    decimalReference(estimate.calibratedValue),
+                                    Modifier.weight(1f),
+                                )
+                            }
+                            Text(
+                                uiString(
+                                    R.string.compare_reference_estimate_note,
+                                    estimate.day,
+                                ),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                        Text(
+                            uiString(
+                                R.string.compare_reference_evidence,
+                                WhoopCsvImporter.SCHEMA_REVISION,
+                                choice.algorithmVersion,
+                                report.audit.unverifiedStoredOfficialDays,
+                                report.audit.unverifiedStoredNoopDays,
+                            ),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                        HorizontalDivider(color = Palette.hairline)
+                        ReferenceExportActions(
+                            report = report,
+                            metricName = uiString(choice.labelRes),
+                        )
+                    }
+                    else -> {
+                        val report = state.report
+                        val paired = report?.audit?.pairedDays ?: 0
+                        val unstamped = report?.audit?.unverifiedStoredOfficialDays ?: 0
+                        Text(
+                            referenceAvailabilitySummary(paired, unstamped),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                }
+
+                Text(
+                    uiString(R.string.compare_reference_disclaimer),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReferenceExportActions(
+    report: WhoopReferenceComparisonReport,
+    metricName: String,
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var pendingScope by remember { mutableStateOf<ReferenceComparisonExport.Scope?>(null) }
+    var status by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        NoopButton(
+            text = uiString(R.string.compare_reference_export_summary),
+            kind = NoopButtonKind.Secondary,
+            fullWidth = true,
+        ) {
+            status = null
+            pendingScope = ReferenceComparisonExport.Scope.SUMMARY_ONLY
+        }
+        NoopButton(
+            text = uiString(R.string.compare_reference_export_exact),
+            kind = NoopButtonKind.Tertiary,
+            fullWidth = true,
+        ) {
+            status = null
+            pendingScope = ReferenceComparisonExport.Scope.EXACT_DAILY_PAIRS
+        }
+        Text(
+            uiString(R.string.compare_reference_export_note),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+        status?.let { (message, succeeded) ->
+            Text(
+                message,
+                style = NoopType.footnote,
+                color = if (succeeded) Palette.statusPositive else Palette.statusWarning,
+            )
+        }
+    }
+
+    pendingScope?.let { exportScope ->
+        val exact = exportScope == ReferenceComparisonExport.Scope.EXACT_DAILY_PAIRS
+        AlertDialog(
+            onDismissRequest = { pendingScope = null },
+            title = {
+                Text(
+                    uiString(
+                        if (exact) R.string.compare_reference_export_exact_title
+                        else R.string.compare_reference_export_summary_title,
+                    ),
+                )
+            },
+            text = {
+                Text(
+                    uiString(
+                        if (exact) R.string.compare_reference_export_exact_body
+                        else R.string.compare_reference_export_summary_body,
+                    ),
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingScope = null }) {
+                    Text(uiString(R.string.compare_reference_export_cancel))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingScope = null
+                        coroutineScope.launch {
+                            val exported = ReferenceComparisonExport.makePackage(
+                                report = report,
+                                metricName = metricName,
+                                units = context.getString(R.string.compare_reference_units),
+                                appVersion = BuildConfig.VERSION_NAME,
+                                platform = "Android",
+                                importerRevision = WhoopCsvImporter.SCHEMA_REVISION,
+                                scope = exportScope,
+                            )?.let { packageData ->
+                                LogExport.exportBundle(
+                                    context,
+                                    packageData.entries,
+                                    packageData.suggestedName,
+                                )
+                            }
+                            status = if (exported != null) {
+                                context.getString(R.string.compare_reference_export_ready) to true
+                            } else {
+                                context.getString(R.string.compare_reference_export_failed) to false
+                            }
+                        }
+                    },
+                ) {
+                    Text(uiString(R.string.compare_reference_export_confirm))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ReferenceStat(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            label,
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.heightIn(min = 30.dp),
+        )
+        Text(
+            value,
+            style = NoopType.body,
+            color = Palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun referenceAvailabilitySummary(paired: Int, unstamped: Int): String = when {
+    unstamped == 1 -> uiString(R.string.compare_reference_one_unstamped)
+    unstamped > 1 -> uiString(R.string.compare_reference_many_unstamped, unstamped)
+    paired == 0 -> uiString(R.string.compare_reference_no_pairs)
+    else -> uiString(R.string.compare_reference_few_pairs, paired)
+}
+
+private fun decimalReference(value: Double): String =
+    java.lang.String.format(Locale.US, "%.2f", value)
+
+private fun signedReference(value: Double): String =
+    java.lang.String.format(Locale.US, "%+.2f", value)
 
 // MARK: - Series loading
 

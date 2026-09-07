@@ -398,6 +398,27 @@ enum WhoopImporter {
             return WhoopCSVTimestampRange(from: first, to: last)
         }()
 
+        let referenceManifest = WhoopReferenceImportManifest()
+        for replacement in officialSeriesReplacements {
+            guard referenceManifest.invalidateOfficialMetrics(
+                deviceId: deviceId,
+                schemaRevision: schemaRevision,
+                from: replacement.from,
+                to: replacement.to,
+                managedKeys: replacement.managedKeys
+            ) else {
+                AppDiagnosticsRecorder.shared.record(
+                    "import.reference_manifest",
+                    fields: [
+                        "phase": "invalidate",
+                        "outcome": "failed",
+                        "range_count": String(officialSeriesReplacements.count),
+                    ]
+                )
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+
         // Commit the complete relational CSV projection together. Official rows remain authoritative.
         // Local daily rows fill missing fields/rows; other approximate projections remain insert-only
         // in the analytics-owned `-noop` namespace.
@@ -430,11 +451,11 @@ enum WhoopImporter {
             portableSummary = nil
         }
 
-        // Stamp only rows that actually traversed the provenance-aware official path. Legacy rows already
-        // in the namespace remain untouched but unverified, so Compare cannot silently relabel them.
-        let referenceManifest = WhoopReferenceImportManifest()
+        // The affected manifest ranges were invalidated before relational replacement. Stamp only rows
+        // that completed the provenance-aware transaction. A crash or persistence failure between these
+        // phases leaves new rows unverified rather than attaching stale proof to changed values.
         for replacement in officialSeriesReplacements {
-            referenceManifest.replaceOfficialMetrics(
+            let persisted = referenceManifest.replaceOfficialMetrics(
                 replacement.rows.map { (day: $0.day, metricKey: $0.key) },
                 deviceId: deviceId,
                 schemaRevision: schemaRevision,
@@ -442,6 +463,16 @@ enum WhoopImporter {
                 to: replacement.to,
                 managedKeys: replacement.managedKeys
             )
+            if !persisted {
+                AppDiagnosticsRecorder.shared.record(
+                    "import.reference_manifest",
+                    fields: [
+                        "phase": "stamp",
+                        "outcome": "failed",
+                        "range_count": String(officialSeriesReplacements.count),
+                    ]
+                )
+            }
         }
 
         // Import & Data Ingest test mode (Test Centre): emit the per-stage / reject / day-delta trace iff

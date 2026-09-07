@@ -262,7 +262,7 @@ object DemoSeeder {
         val zone = ZoneId.systemDefault()
         val startDay = LocalDate.now().minusDays((DAYS - 1).toLong())
 
-        repo.upsertDevice(WHOOP, name = "Noop Band (demo)")
+        repo.upsertDevice(WHOOP, name = "Demo wearable")
 
         val daily = ArrayList<DailyMetric>(DAYS)
         val sleeps = ArrayList<SleepSession>(DAYS)

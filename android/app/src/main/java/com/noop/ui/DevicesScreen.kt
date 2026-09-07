@@ -1167,16 +1167,17 @@ private fun devicesFieldColors() = OutlinedTextFieldDefaults.colors(
 
 /**
  * Collapsed display name (mirrors Swift `PairedDevice.displayName`): user-assigned nicknames win, while
- * compatible-band advertising identifiers remain in diagnostics and product UI reads "Noop Band".
+ * compatible-band advertising identifiers remain in diagnostics and product UI reads
+ * "Compatible band". This legacy adapter is not first-party NOOP Band hardware.
  */
 internal fun displayName(device: PairedDeviceRow): String {
-    val isNoopBand = SourceCoordinator.isWhoop(device)
+    val isLegacyCompatibleBand = SourceCoordinator.isWhoop(device)
     device.nickname?.trim()?.takeIf { nickname ->
-        nickname.isNotEmpty() && !(isNoopBand &&
+        nickname.isNotEmpty() && !(isLegacyCompatibleBand &&
             (nickname.equals("WHOOP", ignoreCase = true) ||
                 nickname.startsWith("WHOOP ", ignoreCase = true)))
     }?.let { return CustomerFacingBrand.text(it) }
-    if (isNoopBand) return "Noop Band"
+    if (isLegacyCompatibleBand) return "Compatible band"
     val raw = if (device.model.contains(device.brand, ignoreCase = true)) device.model
     else "${device.brand} ${device.model}"
     return CustomerFacingBrand.text(raw)
@@ -1263,7 +1264,7 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
             captures = "Heart rate · HRV (live)* · Strain",
             powers = "Powers the live console + Effort. No Recovery or Sleep Score",
             footnote = "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery " +
-                "(those require Noop Band or another compatible source).",
+                "(those require another compatible source).",
         )
     }
     val whoopPowers = "Powers Recovery, Effort, Sleep Score, sleep data + Health Monitor"
@@ -1271,28 +1272,28 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
     // Newer transport family adds a raw motion count that can support an estimated step series.
     if (model.contains("5") || model.contains("mg")) {
         return DeviceCapabilityProfile(
-            displayModel = "Noop Band",
+            displayModel = "Compatible band",
             captures = "Heart rate · HRV · Skin temp* · Resp rate* · Steps* · Sleep · Strain · Battery",
             powers = whoopPowers,
             footnote = "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw " +
-                "motion count. No SpO₂ percentage comes directly from Noop Band; use Apple Health " +
-                "or a supported file import for that.",
+                "motion count. This compatible band does not provide a direct SpO₂ percentage; " +
+                "use Apple Health or a supported file import for that.",
         )
     }
     // Older transport family does not expose a usable step stream.
     if (model.contains("4")) {
         return DeviceCapabilityProfile(
-            displayModel = "Noop Band",
+            displayModel = "Compatible band",
             captures = "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery",
             powers = whoopPowers,
             footnote = "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); " +
-                "steps are unavailable on this firmware. No SpO₂ percentage comes directly from " +
-                "Noop Band; use Apple Health or a supported file import for that.",
+                "steps are unavailable on this firmware. This compatible band does not provide a " +
+                "direct SpO₂ percentage; use Apple Health or a supported file import for that.",
         )
     }
-    // Unknown family: show only the capability set common to supported Noop Band transports.
+    // Unknown family: show only the capability set common to supported compatibility transports.
     return DeviceCapabilityProfile(
-        displayModel = "Noop Band",
+        displayModel = "Compatible band",
         captures = "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery",
         powers = whoopPowers,
         footnote = "Hardware details are still being identified, so this shows only common signals. " +

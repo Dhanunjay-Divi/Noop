@@ -202,8 +202,10 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] HW-160 [OWNER] Obtain firmware builds, symbols, changelogs, known issues,
   and approved debug access.
 - [ ] HW-170 [JOINT] Approve one versioned hardware/firmware input dossier.
-- [ ] HW-180 [ENG] Reject guessed production protocol behavior until the
-  corresponding dossier section is approved.
+- [x] HW-180 [ENG] Reject guessed production protocol behavior until the
+  corresponding dossier section is approved. (Evidence:
+  `Tools/terminology-audit.py`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 
 ## 4. Band firmware foundation
 
@@ -504,15 +506,25 @@ position without changing its ID. This inbox intentionally starts empty.
 
 ## 7. Terminology, identity, and existing-data migration
 
-- [ ] MIG-010 [ENG] Generate a tracked classification of every legacy-name
-  occurrence.
+- [x] MIG-010 [ENG] Generate a tracked classification of every legacy-name
+  occurrence. (Evidence: `release/terminology/legacy-inventory.json`,
+  `Tools/terminology-audit.py`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MIG-020 [JOINT] Approve categories for customer, core, persisted, import,
   compatibility, legal, fixture, generated, and historical references.
-- [ ] MIG-030 [ENG] Create a machine-readable exception allowlist with reason,
-  owner, and removal condition.
-- [ ] MIG-040 [ENG] Fail CI on every new unapproved customer or core reference.
-- [ ] MIG-050 [ENG] Stop displaying the seeded legacy source as a first-party
-  NOOP Band.
+- [x] MIG-030 [ENG] Create a machine-readable exception allowlist with reason,
+  owner, and removal condition. (Evidence:
+  `release/terminology/active-allowlist.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] MIG-040 [ENG] Fail CI on every new unapproved customer or core reference.
+  (Evidence: `Tools/terminology-audit.py`,
+  `.github/workflows/release-controls.yml`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] MIG-050 [ENG] Stop displaying the seeded legacy source as a first-party
+  NOOP Band. (Evidence: `Packages/WhoopStore/Sources/WhoopStore/PairedDevice.swift`,
+  `Strand/BLE/WhoopModel.swift`,
+  `android/app/src/main/java/com/noop/ble/WhoopModel.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MIG-060 [ENG] Introduce neutral stream, store, repository, device, and
   protocol abstractions.
 - [ ] MIG-070 [ENG] Give each first-party band a new opaque local identity.
@@ -558,7 +570,12 @@ position without changing its ID. This inbox intentionally starts empty.
   live, history, and error states.
 - [ ] MOB-050 [ENG] Show battery, charging, wear, storage, backlog, firmware,
   and capability state.
-- [ ] MOB-060 [ENG] Show sync progress briefly without blocking normal app use.
+- [x] MOB-060 [ENG] Show sync progress briefly without blocking normal app use.
+  (Evidence: `Strand/BLE/LiveState.swift`,
+  `StrandTests/HistorySyncProgressTests.swift`,
+  `android/app/src/main/java/com/noop/ble/BackfillBurstProgress.kt`,
+  `android/app/src/test/java/com/noop/ble/BackfillBurstProgressTest.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MOB-070 [ENG] Continue eligible history work in the background and
   disclose OS limits honestly.
 - [ ] MOB-080 [ENG] Distinguish no history, completed-empty history,
@@ -579,10 +596,21 @@ position without changing its ID. This inbox intentionally starts empty.
   haptic, finish, and recovery flows.
 - [ ] MOB-160 [ENG] Validate every metric card and detail route against actual
   NOOP Band capabilities.
-- [ ] MOB-170 [ENG] Ensure a calendar day shows category-relevant detail rather
-  than the same aggregate panel everywhere.
-- [ ] MOB-180 [ENG] Ensure bottom navigation returns from nested metric and
-  calendar routes correctly.
+- [x] MOB-170 [ENG] Ensure a calendar day shows category-relevant detail rather
+  than the same aggregate panel everywhere. (Evidence:
+  `Strand/Screens/CalendarMonthView.swift`,
+  `StrandTests/WorkoutEffortCellTests.swift`,
+  `android/app/src/main/java/com/noop/ui/CalendarMonthScreen.kt`,
+  `android/app/src/test/java/com/noop/ui/CalendarMonthPresentationTest.kt`,
+  `StrandTests/ScreenStateContractTests.swift`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] MOB-180 [ENG] Ensure bottom navigation returns from nested metric and
+  calendar routes correctly. (Evidence:
+  `StrandiOS/App/RootTabView.swift`,
+  `android/app/src/main/java/com/noop/ui/AppRoot.kt`,
+  `android/app/src/test/java/com/noop/ui/PrimaryNavigationContractTest.kt`,
+  `android/app/src/androidTest/java/com/noop/ui/AppShellInstrumentedTest.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MOB-190 [ENG] Audit every screen, modal, empty state, error state, and
   loading state for Apple/Android behavioral parity.
 - [ ] MOB-200 [ENG] Audit Apple/Android visual parity with platform-appropriate
@@ -619,12 +647,22 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] DAT-020 [ENG] Keep compact derived and user-authored records local for
   their documented lifetime.
 - [ ] DAT-030 [ENG] Bound raw frames and high-rate sample retention.
-- [ ] DAT-040 [ENG] Prune managed windows only after exact server validation.
-- [ ] DAT-050 [ENG] Never prune dirty, changed, partial, failed, or unverified
-  data.
-- [ ] DAT-060 [ENG] Generate worst-case 10-, 30-, 90-, and 365-day datasets.
-- [ ] DAT-070 [ENG] Measure database, WAL, backup, temporary, and available
-  storage across those datasets.
+- [x] DAT-040 [ENG] Prune managed windows only after exact server validation.
+  (Evidence: `ops/rounds/2026-09-05-noop-plus-live-staging.md`,
+  `Tools/Backfill/HISTORY-HARNESS.md`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] DAT-050 [ENG] Never prune dirty, changed, partial, failed, or unverified
+  data. (Evidence: `ops/rounds/2026-09-05-noop-plus-live-staging.md`,
+  `Tools/Backfill/HISTORY-HARNESS.md`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] DAT-060 [ENG] Generate worst-case 10-, 30-, 90-, and 365-day datasets.
+  (Evidence: `Tools/Backfill/`,
+  `validation/HISTORY-HARNESS-2026-09-07.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] DAT-070 [ENG] Measure database, WAL, backup, temporary, and available
+  storage across those datasets. (Evidence:
+  `validation/HISTORY-HARNESS-2026-09-07.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] DAT-080 [ENG] Measure cold launch, scrolling, calendar, metrics, analysis,
   sync, backup, export, and restore latency.
 - [ ] DAT-090 [ENG] Measure process memory, background survival, thermal state,
@@ -639,8 +677,11 @@ position without changing its ID. This inbox intentionally starts empty.
   loss.
 - [ ] DAT-140 [ENG] Prove WAL growth, corruption, failed migration, process
   death, and concurrent read/write recovery.
-- [ ] DAT-150 [ENG] Complete same-platform backup and restore for the final
-  schema.
+- [x] DAT-150 [ENG] Complete same-platform backup and restore for the final
+  schema. (Evidence: `StrandTests/BackupSyncRoundTripTests.swift`,
+  `android/app/src/main/java/com/noop/data/DataBackup.kt`,
+  `Tools/Backfill/`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] DAT-160 [ENG] Complete portable Apple-to-Android and Android-to-Apple
   import for documented data classes.
 - [ ] DAT-170 [ENG] Complete managed-history export, resume, corruption
@@ -684,16 +725,27 @@ position without changing its ID. This inbox intentionally starts empty.
   dependency behavior.
 - [ ] MET-170 [ENG] Validate Fitness Age, Vitality, and Wellness Age only as
   transparent wellness estimates.
-- [ ] MET-180 [ENG] Require sufficient tracking history and bounded weekly
-  changes before longitudinal age movement.
-- [ ] MET-190 [ENG] Prevent unsupported abrupt multi-year age changes.
+- [x] MET-180 [ENG] Require sufficient tracking history and bounded weekly
+  changes before longitudinal age movement. (Evidence:
+  `Packages/StrandAnalytics/Sources/StrandAnalytics/FitnessAgeEngine.swift`,
+  `Strand/Data/IntelligenceEngine.swift`,
+  `android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] MET-190 [ENG] Prevent unsupported abrupt multi-year age changes.
+  (Evidence:
+  `Packages/StrandAnalytics/Sources/StrandAnalytics/FitnessAgeEngine.swift`,
+  `android/app/src/test/java/com/noop/analytics/FitnessAgeEngineTest.kt`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MET-200 [ENG] Audit every metric dependency when a sensor is missing,
   stale, changed, imported, or replaced.
 - [ ] MET-210 [ENG] Ensure related calendar, Coach, notification, export, and
   trend views use the same missing-data contract.
 - [ ] MET-220 [ENG] Publish confidence, coverage, provenance, known failure,
   subgroup, and revision limitations.
-- [ ] MET-230 [ENG] Define safe reprocessing and metric rollback rules.
+- [x] MET-230 [ENG] Define safe reprocessing and metric rollback rules.
+  (Evidence: `METRIC_REPROCESSING_AND_ROLLBACK.md`,
+  `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] MET-240 [EXT] Obtain independent statistical and claims review.
 
 ## 11. NOOP+ production services, if enabled
@@ -753,10 +805,14 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] SEC-030 [EXT] Run independent band/firmware security assessment.
 - [ ] SEC-040 [EXT] Run independent mobile/API/cloud penetration testing.
 - [ ] SEC-050 [ENG] Remediate and retest every release-severity finding.
-- [ ] SEC-060 [ENG] Define key generation, custody, access, backup, rotation,
-  compromise, revocation, and destruction.
-- [ ] SEC-070 [ENG] Define coordinated vulnerability disclosure and security
-  update policy.
+- [x] SEC-060 [ENG] Define key generation, custody, access, backup, rotation,
+  compromise, revocation, and destruction. (Evidence: `KEY_MANAGEMENT.md`,
+  `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
+- [x] SEC-070 [ENG] Define coordinated vulnerability disclosure and security
+  update policy. (Evidence: `../SECURITY.md`, `SECURITY_OPERATIONS.md`,
+  `release/release-policy.json`,
+  `ops/rounds/2026-09-07-production-readiness-execution.md`)
 - [ ] SEC-080 [EXT] Complete trademark and product-name review.
 - [ ] SEC-090 [EXT] Complete launch-market privacy, consumer-health,
   cross-border, processor, and breach analysis.

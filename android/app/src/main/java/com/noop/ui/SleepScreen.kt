@@ -1676,7 +1676,7 @@ private fun HypnogramWithAxis(
                 }
             }
         }
-        if (showsAxis && onsetTs != null && wakeTs != null) {
+        if (showsAxis) {
             ClockLabelRow(onsetTs, wakeTs)
         }
     }
@@ -1888,8 +1888,7 @@ private fun StageRowTrack(spans: List<Pair<Float, Float>>, color: Color) {
 /**
  * Fixed-height per-stage insight slot under the axis: with a stage selected, that stage tonight;
  * otherwise the quiet "tap a row" hint. Fixed height so selection never reflows the card. The
- * 30-day typical-range compare is a follow-up — no such repo call exists on Android yet (design
- * §Real-stage nights item 6).
+ * separate StagesVsTypical section compares this night with the personal 30-day range.
  */
 @Composable
 private fun StageInsight(selectedStage: String?, s: Stages) {

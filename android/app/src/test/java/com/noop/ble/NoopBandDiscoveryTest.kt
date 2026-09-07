@@ -18,8 +18,8 @@ class NoopBandDiscoveryTest {
 
     @Test
     fun customerNameAndVisibleDiagnosticsHideVendorBrand() {
-        assertEquals("Noop Band", WhoopModel.WHOOP4.displayName)
-        assertEquals("Noop Band", WhoopModel.WHOOP5_MG.displayName)
+        assertEquals("Compatible band", WhoopModel.WHOOP4.displayName)
+        assertEquals("Compatible band", WhoopModel.WHOOP5_MG.displayName)
         assertEquals("legacy band", WhoopModel.WHOOP4.transportName)
         assertEquals("newer band", WhoopModel.WHOOP5_MG.transportName)
     }
@@ -50,7 +50,7 @@ class NoopBandDiscoveryTest {
         assertEquals(1, discovered.size)
         assertEquals(WhoopModel.WHOOP5_MG, discovered.single().model)
         assertEquals("5.0 MG", discovered.single().model.registryModel)
-        assertEquals("Noop Band", discovered.single().model.displayName)
+        assertEquals("Compatible band", discovered.single().model.displayName)
     }
 
     @Test

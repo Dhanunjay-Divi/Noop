@@ -42,10 +42,10 @@ struct WhoopReferenceImportManifest {
         defaults.set(data, forKey: key(deviceId: deviceId))
     }
 
-    /// Replace provenance over the same day/key range the relational import replaced.
-    ///
-    /// This intentionally runs after the SQLite transaction. A crash between the two leaves a newly
-    /// imported row unverified rather than letting a deleted or changed row retain stale verification.
+    /// Replace provenance over the same day/key range the relational import replaced. The importer calls
+    /// this once with no entries before SQLite replacement, then again with committed entries afterward.
+    /// Interruption at either boundary can only leave rows unverified; it cannot preserve stale proof.
+    @discardableResult
     func replaceOfficialMetrics(
         _ entries: [(day: String, metricKey: String)],
         deviceId: String,
@@ -53,14 +53,14 @@ struct WhoopReferenceImportManifest {
         from: String,
         to: String,
         managedKeys: Set<String>
-    ) {
+    ) -> Bool {
         guard !deviceId.isEmpty,
               !schemaRevision.isEmpty,
               Self.validDay(from),
               Self.validDay(to),
-              from <= to else { return }
+              from <= to else { return false }
         let keys = Set(managedKeys.filter(Self.validMetricKey))
-        guard !keys.isEmpty else { return }
+        guard !keys.isEmpty else { return false }
 
         var state = loadState(deviceId: deviceId)
         state.revisionByMetricDay = state.revisionByMetricDay.filter { metricDay, _ in
@@ -73,8 +73,30 @@ struct WhoopReferenceImportManifest {
                 Self.metricDayKey(day: entry.day, metricKey: entry.metricKey)
             ] = schemaRevision
         }
-        guard let data = try? JSONEncoder().encode(state) else { return }
+        guard let data = try? JSONEncoder().encode(state) else { return false }
         defaults.set(data, forKey: key(deviceId: deviceId))
+        // Imports are rare and this manifest is tiny. Persist synchronously because the importer clears
+        // the affected range before replacing SQLite rows; interruption can then only cause a safe false
+        // negative that asks for re-import, never stale verification on changed values.
+        return defaults.synchronize()
+    }
+
+    @discardableResult
+    func invalidateOfficialMetrics(
+        deviceId: String,
+        schemaRevision: String,
+        from: String,
+        to: String,
+        managedKeys: Set<String>
+    ) -> Bool {
+        replaceOfficialMetrics(
+            [],
+            deviceId: deviceId,
+            schemaRevision: schemaRevision,
+            from: from,
+            to: to,
+            managedKeys: managedKeys
+        )
     }
 
     func verifiedDays(

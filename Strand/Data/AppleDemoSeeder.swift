@@ -518,7 +518,7 @@ enum AppleDemoSeeder {
         let zone = TimeZone.current
         let startDay = cal.date(byAdding: .day, value: -(DAYS - 1), to: cal.startOfDay(for: Date()))!
 
-        try? await store.upsertDevice(id: whoop, mac: nil, name: "Noop Band (demo)")
+        try? await store.upsertDevice(id: whoop, mac: nil, name: "Demo wearable")
 
         var daily: [DailyMetric] = []
         var sleeps: [CachedSleepSession] = []

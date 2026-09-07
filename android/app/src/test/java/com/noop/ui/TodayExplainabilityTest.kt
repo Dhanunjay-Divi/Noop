@@ -330,7 +330,7 @@ class TodayExplainabilityTest {
     @Test
     fun liquidHeroSourceLabel_capsMixedWinnersAtTwoInScoreOrder() {
         assertEquals(
-            "Noop Band + On-device",
+            "Compatible band + On-device",
             heroSourceLabel(listOf("my-whoop", "my-whoop-noop", "health-connect")),
         )
     }
@@ -346,10 +346,10 @@ class TodayExplainabilityTest {
     }
 
     @Test
-    fun mixedNoopBandSourceStillQualifiesForSyncFeedback() {
-        assertTrue(sourceLabelIncludesNoopBand("Noop Band"))
-        assertTrue(sourceLabelIncludesNoopBand("Noop Band + Apple Watch"))
-        assertFalse(sourceLabelIncludesNoopBand("Apple Watch"))
+    fun mixedCompatibleBandSourceStillQualifiesForSyncFeedback() {
+        assertTrue(sourceLabelIncludesCompatibleBand("Compatible band"))
+        assertTrue(sourceLabelIncludesCompatibleBand("Compatible band + Apple Watch"))
+        assertFalse(sourceLabelIncludesCompatibleBand("Apple Watch"))
     }
 
     @Test
@@ -376,7 +376,7 @@ class TodayExplainabilityTest {
     @Test
     fun liquidHeroSourceLabel_keepsCurrentDayRecoveryAheadOfCarriedFallback() {
         assertEquals(
-            "Noop Band",
+            "Compatible band",
             scoreHeroSourceLabel(
                 provenanceByMetric = mapOf("recovery" to "my-whoop"),
                 carriedRecoverySource = "my-whoop-noop",

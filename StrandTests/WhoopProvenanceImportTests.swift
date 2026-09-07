@@ -594,5 +594,25 @@ final class WhoopProvenanceImportTests: XCTestCase {
             Set(["2026-01-02"]),
             "replacement must not remove provenance for unmanaged metric keys"
         )
+
+        XCTAssertTrue(
+            manifest.invalidateOfficialMetrics(
+                deviceId: "my-whoop",
+                schemaRevision: "import-v3",
+                from: "2026-01-02",
+                to: "2026-01-02",
+                managedKeys: ["recovery"]
+            )
+        )
+        XCTAssertTrue(
+            manifest.verifiedDays(
+                deviceId: "my-whoop", schemaRevision: "import-v3", metricKey: "recovery").isEmpty
+        )
+        XCTAssertEqual(
+            manifest.verifiedDays(
+                deviceId: "my-whoop", schemaRevision: "import-v2", metricKey: "strain"),
+            Set(["2026-01-02"]),
+            "invalidation must remain range and managed-key scoped"
+        )
     }
 }

@@ -20,7 +20,7 @@ final class PairedDeviceSourceKindTests: XCTestCase {
             lastSeenAt: 0
         )
 
-        XCTAssertEqual(device.displayName, "Noop Band")
+        XCTAssertEqual(device.displayName, "Compatible band")
     }
 
     func testUserAssignedBandNameStillWins() {

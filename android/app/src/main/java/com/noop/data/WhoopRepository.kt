@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import com.noop.analytics.DetailedSleepStagePublication
 import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.SleepStageTotals
+import com.noop.analytics.WhoopReferenceCalibration
 import com.noop.protocol.DroppedRtcEvent
 import com.noop.protocol.RrSourceChannel
 import kotlinx.coroutines.flow.Flow
@@ -546,11 +547,85 @@ class WhoopRepository private constructor(
         }
     }
 
-    /** Delete the computed source's cached daily rows whose day-key is in [from, to] (inclusive,
-     *  yyyy-MM-dd). The #277 local-day re-bucketing migration clears the computed UTC-keyed rows over
-     *  the recompute window before re-upserting LOCAL-keyed rows. Imported rows are never touched. */
-    suspend fun deleteComputedDailyInRange(deviceId: String, from: String, to: String) =
-        dao.deleteDailyMetricsInRange(deviceId, from, to)
+    /**
+     * Atomically publish one complete computed-score window.
+     *
+     * Daily rows and the Rest evidence projection are replaced in the same Room transaction. Readers never
+     * observe the internal delete/reinsert sequence, and a cancellation, database failure, or process
+     * interruption rolls the whole transaction back to the prior complete window. Avoiding a `NOT IN`
+     * retained-day bind list also keeps the existing 4,000-day migration/heal paths below SQLite's variable
+     * limit. The returned days are a post-commit receipt used by reference comparison provenance.
+     */
+    suspend fun reconcileComputedScoreRange(
+        deviceId: String,
+        fromDay: String,
+        toDay: String,
+        dailyRows: List<DailyMetric>,
+        managedRestKeys: Set<String>,
+        restRows: List<MetricSeriesRow>,
+    ): Set<String> {
+        require(deviceId.isNotBlank()) { "computed score device id is required" }
+        require(
+            WhoopReferenceCalibration.validDay(fromDay) &&
+                WhoopReferenceCalibration.validDay(toDay) &&
+                fromDay <= toDay
+        ) { "invalid computed score day range" }
+        require(dailyRows.isNotEmpty()) { "computed score reconciliation requires daily rows" }
+
+        val orderedDailyRows = dailyRows.sortedBy(DailyMetric::day)
+        val retainedDays = LinkedHashSet<String>(orderedDailyRows.size)
+        for (row in orderedDailyRows) {
+            require(row.deviceId == deviceId) { "computed score row belongs to another device" }
+            require(
+                WhoopReferenceCalibration.validDay(row.day) &&
+                    row.day in fromDay..toDay
+            ) { "computed score row is outside the managed range" }
+            require(retainedDays.add(row.day)) { "duplicate computed score day" }
+        }
+
+        val keys = managedRestKeys.sorted()
+        require(keys.isNotEmpty()) { "computed score Rest keys are required" }
+        require(keys.all(::validComputedMetricKey)) { "computed score Rest key is invalid" }
+        val allowedKeys = keys.toHashSet()
+        val normalizedRestRows = restRows.map { row ->
+            require(row.deviceId == deviceId) { "computed Rest row belongs to another device" }
+            require(
+                WhoopReferenceCalibration.validDay(row.day) &&
+                    row.day in fromDay..toDay
+            ) { "computed Rest row is outside the managed range" }
+            require(row.day in retainedDays) { "computed Rest row has no retained daily owner" }
+            require(row.key in allowedKeys) { "computed Rest row uses an unmanaged key" }
+            require(row.value.isFinite()) { "computed Rest row is not finite" }
+            requireNotNull(SleepEfficiencyUnits.normalizedSeriesRow(row)) {
+                "computed Rest row is invalid"
+            }
+        }
+        require(
+            normalizedRestRows
+                .map { Triple(it.day, it.key, it.deviceId) }
+                .toSet()
+                .size == normalizedRestRows.size
+        ) { "duplicate computed Rest row" }
+
+        transactor.run {
+            dao.deleteDailyMetricsInRange(deviceId, fromDay, toDay)
+            dao.upsertDailyMetrics(orderedDailyRows)
+            dao.replaceMetricSeriesRange(
+                deviceId = deviceId,
+                fromDay = fromDay,
+                toDay = toDay,
+                managedKeys = keys,
+                rows = normalizedRestRows,
+            )
+        }
+        noteMetricsChanged()
+        return retainedDays
+    }
+
+    private fun validComputedMetricKey(key: String): Boolean =
+        key.isNotEmpty() &&
+            key.length <= 80 &&
+            key.all { it.isLetterOrDigit() || it == '_' }
 
     /** Hand-correct the bed (onset) / wake (end) time of an existing sleep session, DURABLY , port
      *  of iOS PR #395 (Repository.editSleepTimes + MetricsCache.applySleepEdit).
@@ -1860,10 +1935,16 @@ class WhoopRepository private constructor(
      * indexed row per source id; the newest day wins, and on a shared newest day the ACTIVE strap
      * wins (ids are active-first) — byte-identical to `metricSeriesComputedUnion(...).lastOrNull()`.
      */
-    suspend fun latestMetricComputedUnion(activeStrapId: String, key: String): MetricSeriesRow? =
-        latestFromPerSourceLatest(
-            computedSourceIds(activeStrapId).map { dao.latestMetricSeriesRow(it, key) },
+    suspend fun latestMetricComputedUnion(activeStrapId: String, key: String): MetricSeriesRow? {
+        val minimum = if (key == SleepEfficiencyUnits.SERIES_KEY) 0.0 else -Double.MAX_VALUE
+        val maximum = if (key == SleepEfficiencyUnits.SERIES_KEY) 100.0 else Double.MAX_VALUE
+        return latestFromPerSourceLatest(
+            computedSourceIds(activeStrapId).map { source ->
+                dao.latestMetricSeriesRowInRange(source, key, minimum, maximum)
+                    ?.let(SleepEfficiencyUnits::normalizedSeriesRow)
+            },
         )
+    }
 
     /** Scalar row count for one (deviceId, key) series — the COUNT twin of [metricSeries]. */
     suspend fun metricSeriesKeyCount(deviceId: String, key: String): Int =

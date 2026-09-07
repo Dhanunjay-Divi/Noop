@@ -37,11 +37,18 @@ class VitalityUpgradeInvalidationTest {
                 "days" -> daily.filter { it.deviceId == args!![0] as String }
                 "editedSleepSessions" -> emptyList<Any>()
                 "sleepSessionsForSources" -> emptyList<Any>()
-                "latestMetricSeriesRow" -> {
+                "latestMetricSeriesRowInRange" -> {
                     val source = args!![0] as String
                     val key = args[1] as String
+                    val minimum = args[2] as Double
+                    val maximum = args[3] as Double
                     rows.values
-                        .filter { it.deviceId == source && it.key == key }
+                        .filter {
+                            it.deviceId == source &&
+                                it.key == key &&
+                                it.value.isFinite() &&
+                                it.value in minimum..maximum
+                        }
                         .maxByOrNull { it.day }
                 }
                 "deleteMetricSeries" -> {

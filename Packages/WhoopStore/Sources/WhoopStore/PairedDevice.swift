@@ -27,19 +27,20 @@ public struct PairedDevice: Equatable, Sendable, Identifiable {
 
     /// A user nickname wins; otherwise "Brand Model". Compatible-band advertising identifiers such as
     /// "WHOOP 5AG0146459" are transport names, not names the user chose, so they remain behind technical
-    /// diagnostics while the product surface reads "Noop Band".
+    /// diagnostics while the product surface reads "Compatible band". A legacy adapter must never
+    /// impersonate future first-party NOOP Band hardware.
     public var displayName: String {
-        let isNoopBand = id == "my-whoop"
+        let isLegacyCompatibleBand = id == "my-whoop"
             || id.hasPrefix("whoop-")
             || brand.caseInsensitiveCompare("WHOOP") == .orderedSame
         if let nickname {
             let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isTransportName = isNoopBand
+            let isTransportName = isLegacyCompatibleBand
                 && (trimmed.caseInsensitiveCompare("WHOOP") == .orderedSame
                     || trimmed.uppercased().hasPrefix("WHOOP "))
             if !trimmed.isEmpty && !isTransportName { return Self.customerFacingName(trimmed) }
         }
-        if isNoopBand { return "Noop Band" }
+        if isLegacyCompatibleBand { return "Compatible band" }
         if model.isEmpty || model == brand { return Self.customerFacingName(brand) }
         if model.localizedCaseInsensitiveContains(brand) { return Self.customerFacingName(model) }
         return Self.customerFacingName("\(brand) \(model)")

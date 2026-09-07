@@ -152,10 +152,11 @@ At commit `1443acb1` on 2026-09-06:
 
 ### Terminology footprint
 
-The tracked repository currently contains 15,451 matching lines across 1,313
-files for `WHOOP`, `Whoop`, `whoop`, `OpenWhoop`, or `my-whoop`. The largest
-areas are Android, Swift packages, Apple application source, tests, and
-documentation. The footprint includes:
+The frozen terminology inventory currently classifies 17,368 legacy-name
+occurrences across 1,356 tracked paths (1,508 path/category groups) for
+`WHOOP`, `Whoop`, `whoop`, `OpenWhoop`, or `my-whoop`. The largest areas are
+Android, Swift packages, Apple application source, tests, and documentation.
+The footprint includes:
 
 - active third-party protocol and transport implementation;
 - general storage and analytics types named after that transport;
@@ -645,8 +646,8 @@ claim it; and controlled release paths do not expose the previous owner.
 | ID | Status | Work | Exit evidence |
 |---|---|---|---|
 | T4.1 | PARTIAL | Retain the existing customer text scrubber until native naming is complete. | Customer-facing audit remains green |
-| T4.2 | OPEN | Generate the classified terminology manifest and reviewed exception allowlist. | New-match CI gate |
-| T4.3 | OPEN | Remove the false legacy-to-`Noop Band` display mapping. | Existing source renders truthfully |
+| T4.2 | DONE | Generate the classified terminology manifest and reviewed exception allowlist. | `release/terminology/` plus the fail-closed release-control gate |
+| T4.3 | DONE | Remove the false legacy-to-`Noop Band` display mapping. | Existing compatibility hardware renders as `Compatible band` |
 | T4.4 | OPEN | Add neutral packages/types and a distinct NOOP Band source identity. | New hardware writes only neutral identities |
 | T4.5 | OPEN | Implement dual-read, new-write database/path/backup/cloud migration in the order in section 7. | Old-install upgrade and rollback matrix |
 | T4.6 | OPEN | Rename active Apple, Android, package, resource, generated-schema, build, and current-doc surfaces. | Zero unallowlisted customer/core matches |
@@ -680,7 +681,7 @@ export without understanding BLE or waiting on an unexplained blocking screen.
 |---|---|---|---|
 | D6.1 | PARTIAL | Keep compact derived and user-authored records local; bound raw frame/sample retention by explicit policy. | Retention tests and UI disclosure |
 | D6.2 | PARTIAL | For validated NOOP+ windows, keep seven days of high-rate raw and 30 days of essential local time series; never prune dirty or unverified data. | Physical long-history prune/restore evidence |
-| D6.3 | OPEN | Reproduce 10, 30, 90, and 365 days at worst-case cadence and measure DB size, WAL, memory, scroll, analysis, sync, startup, backup, and battery. | Device-specific budgets with no hang or collection dropout |
+| D6.3 | PARTIAL | Reproduce 10, 30, 90, and 365 days at worst-case cadence and measure DB size, WAL, backup, temporary space, calendar, metric, analysis, export, and restore behavior. Host synthetic evidence is complete; phone memory, startup, scroll, thermal, battery, and background survival remain. | Device-specific budgets with no hang or collection dropout |
 | D6.4 | OPEN | Add compaction/index/query work only from measured profiles and preserve write throughput under backfill. | Before/after traces and regression tests |
 | D6.5 | OPEN | Prove low-storage, full-disk, WAL growth, corrupt DB, failed migration, restore, process death, and concurrent read/write recovery. | Fault matrix with no silent loss |
 | D6.6 | PARTIAL | Complete same-platform and portable backup/import coverage for the final schema and NOOP Band provenance. | Old/new/cross-platform restore fixtures |
@@ -697,9 +698,9 @@ space-reclaiming action has a verified backup, exact eligibility, and rollback.
 | V7.2 | OPEN | Validate HR and R-R against reference devices across rest, sleep, motion, skin tone, fit, sweat, temperature, and battery states. | Error, coverage, and failure distributions |
 | V7.3 | OPEN | Validate SpO2 and temperature only against an approved protocol; otherwise keep them raw/unavailable and make no clinical claim. | Frozen claim-specific report |
 | V7.4 | OPEN | Validate sleep interval/staging, workout detection, steps/activity, respiration, Charge, Effort, Rest, stress, and age metrics with participant/device-held-out data. | Preregistered methods, revisions, confidence, subgroup and failure results |
-| V7.5 | OPEN | Stabilize longitudinal metrics with minimum evidence windows, bounded weekly movement, provenance changes, and no abrupt unsupported age jumps. | Synthetic and longitudinal cohort tests |
+| V7.5 | PARTIAL | Stabilize longitudinal metrics with minimum evidence windows, bounded weekly movement, provenance changes, and no abrupt unsupported age jumps. Fitness Age now uses a 13-day history, up to seven trailing-week estimates, Saturday publication, and a three-month weekly movement cap on both platforms; longitudinal cohort evidence remains. | Synthetic and longitudinal cohort tests |
 | V7.6 | OPEN | Audit every metric dependency so a new band capability or missing signal propagates honestly through related metrics, calendar detail, Coach, notifications, and exports. | Dependency matrix and missing-data tests |
-| V7.7 | OPEN | Freeze algorithm and calibration revisions for release; record reprocessing and rollback rules. | Signed metric release manifest |
+| V7.7 | PARTIAL | Freeze algorithm and calibration revisions for release; record reprocessing and rollback rules. Charge, Effort, Rest, importer, and personal-calibration revisions are explicit, stale models fail closed, and deterministic atomic reprocessing/rollback is now defined in `METRIC_REPROCESSING_AND_ROLLBACK.md`; a signed release manifest remains. | Signed metric release manifest |
 
 **Exit:** each release claim maps to a frozen implementation, known inputs,
 reference protocol, confidence/coverage rule, and honest failure state.
@@ -733,7 +734,7 @@ Otherwise its enrollment and store claims stay disabled.
 | G9.5 | EXTERNAL | Complete DPDP and applicable US/state privacy analysis, consent, rights, grievance, breach, deletion, processor, and data-transfer documents. | Approved public policies and contracts |
 | G9.6 | EXTERNAL | Complete BIS, WPC/ETA, FCC, Bluetooth SIG, UN38.3, IEC 62133, and other required market certification for the exact production design. | Certificate pack and labeling |
 | G9.7 | OPEN | Review packaging, app/store copy, metric education, notifications, Safety, and support language for general-wellness accuracy. | Claims/legal sign-off |
-| G9.8 | OPEN | Define vulnerability intake, coordinated disclosure, security updates, key compromise, firmware revocation, and end-of-support policy. | Public policy and internal runbooks |
+| G9.8 | PARTIAL | Vulnerability intake, coordinated disclosure, security updates, key lifecycle/compromise, and end-of-support are defined in `SECURITY.md`, `KEY_MANAGEMENT.md`, and `SECURITY_OPERATIONS.md`. A staffed confidential intake, response exercise, and supplier-backed firmware signing/revocation path remain. | Activated intake, response drill, and firmware runbooks |
 
 **Exit:** the exact hardware, firmware, binaries, backend, packaging, and claims
 have the required approvals and no unresolved release-severity finding.

@@ -496,7 +496,7 @@ class WhoopCsvImportStoreInstrumentedTest {
         try {
             repository.importWhoopArchive(
                 portableUserData = portable,
-                devices = listOf(WhoopCsvDeviceRegistration(deviceId, "Noop Band")),
+                devices = listOf(WhoopCsvDeviceRegistration(deviceId, "Wearable import")),
                 csvBatch = WhoopCsvImportBatch(
                     officialDailyMetrics = listOf(
                         DailyMetric(deviceId, "2026-04-25", recovery = 90.0),

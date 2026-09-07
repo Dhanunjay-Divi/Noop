@@ -1337,6 +1337,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
     )
 
+    /** Bounded analysis surfaces reuse the exact profile snapshot the background scorer consumes. */
+    internal fun analysisProfileSnapshot(): UserProfile = currentProfile()
+
     // MARK: - HR smoothing (median filter)
 
     private fun ingestHr(raw: Int) {

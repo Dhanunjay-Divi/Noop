@@ -2,12 +2,12 @@
 
 ## Status
 
-- State: `in progress`
+- State: `completed`
 - Owner: project team
 - Branch: `main`
 - Start commit: `14ba100f6393e3c6c89165ac16778eca86f8232a`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `dddeafeea4910d7370a91ee68d0729c65f3e918a`
+- Record commit or PR: `dddeafeea4910d7370a91ee68d0729c65f3e918a`
 
 ## Objective
 
@@ -158,7 +158,9 @@ live.
 
 ## Next round
 
-1. Obtain and record the next unresolved owner decision.
+1. Keep real paging traffic disabled until fresh provider credentials, approved
+   senders and templates, physical-phone carrier evidence, monitoring,
+   failover, legal review, and an operating owner are all available.
 
 ## Privacy check
 

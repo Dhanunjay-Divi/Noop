@@ -10,7 +10,7 @@ enum class WhoopModel(val service: UUID) {
     WHOOP4(WhoopBleClient.WHOOP4_SERVICE),
     WHOOP5_MG(WhoopBleClient.WHOOP5_SERVICE);
 
-    /** Hardware generation stays internal; the product name is stable across compatible transports. */
+    /** Hardware generation stays internal; this adapter is not first-party NOOP Band hardware. */
     val displayName: String get() = CUSTOMER_NAME
 
     /** Diagnostic transport identity that is safe to show in the customer-visible strap log. */
@@ -41,7 +41,7 @@ enum class WhoopModel(val service: UUID) {
         }
 
     companion object {
-        const val CUSTOMER_NAME = "Noop Band"
+        const val CUSTOMER_NAME = "Compatible band"
 
         /** Every compatible service used by the generation-agnostic setup scan. */
         val compatibleServices: List<UUID>

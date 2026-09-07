@@ -19,7 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
+  operations-record:
+    name: operations-record
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout

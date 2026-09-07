@@ -1012,10 +1012,6 @@
     ],
     [
       "Strand/Onboarding/OnboardingWizard.swift",
-      "A private window into your recovery, sleep and strain. Read straight from Noop Band and kept only on \\(Platform.deviceNounPhrase)."
-    ],
-    [
-      "Strand/Onboarding/OnboardingWizard.swift",
       "When the system prompt appears, choose Allow so NOOP can find Noop Band."
     ],
     [

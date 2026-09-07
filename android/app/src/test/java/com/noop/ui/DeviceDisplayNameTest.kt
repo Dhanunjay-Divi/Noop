@@ -9,8 +9,8 @@ import org.junit.Test
 class DeviceDisplayNameTest {
     @Test
     fun transportAssignedBandNameStaysOutOfProductUi() {
-        assertEquals("Noop Band", displayName(band(nickname = "WHOOP 5AG0146459")))
-        assertEquals("Noop Band", displayName(band(nickname = "whoop")))
+        assertEquals("Compatible band", displayName(band(nickname = "WHOOP 5AG0146459")))
+        assertEquals("Compatible band", displayName(band(nickname = "whoop")))
     }
 
     @Test

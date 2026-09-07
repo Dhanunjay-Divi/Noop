@@ -1748,54 +1748,32 @@ final class IntelligenceEngine: ObservableObject {
         // Fitness Age gate can't be undercut by this pass's own scoring/eviction. Windowed to the range.
         let faPriorDaily = await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay)
 
-        // Upsert FIRST so the row count never transiently dips (#521). Comparison evidence is promoted
-        // only after this transaction succeeds: a freshly computed in-memory day paired with an old stored
-        // row after a failed write would otherwise mislabel that stale row as the current algorithm.
+        // Publish daily scores, stale-row eviction, and Rest evidence in one store transaction. Comparison
+        // evidence is promoted only after that complete window commits: a freshly computed in-memory day
+        // paired with an old or partially written stored row must never be labeled as the current algorithm.
         var persistedWhoopStrapDays = Set<String>()
+        var scorePersistenceSucceeded = dailies.isEmpty
         if !dailies.isEmpty {
             do {
-                _ = try await store.upsertDailyMetrics(dailies, deviceId: computedId)
-                persistedWhoopStrapDays = freshlyScoredWhoopStrapDays
-                    .intersection(dailies.lazy.map(\.day))
-            } catch {
-                diagnosticSink?(
-                    "score persist failed; official-reference comparison receipt withheld", nil)
-            }
-        }
-
-        // Now evict only the STALE computed rows in the window , those a prior (e.g. UTC-keyed) run left
-        // behind that the current local-keyed run no longer produces. Read the window, diff against the
-        // keys we just upserted, and delete each leftover day individually (from == to == key). This
-        // removes #277's UTC/local duplicates WITHOUT the wide delete-then-reinsert dip. No-op in steady
-        // state (the new keys cover the window), so it adds nothing once the migration has settled.
-        // #1196: an empty pass is not evidence that every persisted day became stale. It can happen while
-        // a reconnect/offload is still incomplete or while the active source is momentarily unresolved.
-        // Never turn that transient read into a destructive whole-window eviction.
-        if !dailies.isEmpty {
-            let freshKeys = Set(dailies.map { $0.day })
-            let existingWindow = (try? await store.dailyMetrics(
-                deviceId: computedId, from: oldestDay, to: newestDay)) ?? []
-            for stale in existingWindow where !freshKeys.contains(stale.day) {
-                _ = try? await store.deleteDailyMetrics(
-                    deviceId: computedId, from: stale.day, to: stale.day)
-            }
-        }
-        // Reconcile Rest only after a complete, non-empty scoring pass. A transient empty read during
-        // reconnect/offload is not authoritative absence and must preserve the last known Rest series,
-        // matching the computed-daily eviction guard above.
-        if !dailies.isEmpty {
-            do {
-                _ = try await store.replaceMetricSeriesRange(
-                    restPoints,
+                let persistedDays = try await store.reconcileComputedScoreRange(
                     deviceId: computedId,
                     from: oldestDay,
                     to: newestDay,
-                    managedKeys: ScoreConfidence.managedRestSeriesKeys)
+                    dailyRows: dailies,
+                    managedMetricKeys: ScoreConfidence.managedRestSeriesKeys,
+                    metricRows: restPoints
+                )
+                persistedWhoopStrapDays = freshlyScoredWhoopStrapDays
+                    .intersection(persistedDays)
+                scorePersistenceSucceeded = true
             } catch {
-                diagnosticSink?("Rest series reconciliation failed: \(error.localizedDescription)", nil)
+                diagnosticSink?(
+                    "score persist failed; official-reference comparison receipt withheld; "
+                        + "kind=\(AppDiagnosticsRecorder.failureKind(error))", nil)
             }
         }
         var activeZonePersisted = false
+        var activeZonePersistenceSucceeded = activeZonePoints.isEmpty
         if !activeZonePoints.isEmpty {
             do {
                 _ = try await store.replaceMetricSeriesRange(
@@ -1805,9 +1783,11 @@ final class IntelligenceEngine: ObservableObject {
                     to: newestDay,
                     managedKeys: ActiveZoneMinutesCalculator.managedSeriesKeys)
                 activeZonePersisted = true
+                activeZonePersistenceSucceeded = true
             } catch {
                 diagnosticSink?(
-                    "Active-minute series reconciliation failed: \(error.localizedDescription)", nil)
+                    "Active-minute series reconciliation failed; "
+                        + "kind=\(AppDiagnosticsRecorder.failureKind(error))", nil)
             }
         }
 
@@ -2174,7 +2154,12 @@ final class IntelligenceEngine: ObservableObject {
         // early guard-return), so an interrupted/failed run can't advance the watermark past unscored data.
         // A repair I/O failure leaves the input fingerprint unchanged. Clear even an older matching watermark
         // so the next idle pass retries instead of treating the incomplete destructive repair as complete.
-        if healResult.hasFailures {
+        let canAdvanceWatermark = Self.analysisPassCanAdvanceWatermark(
+            scorePersistenceSucceeded: scorePersistenceSucceeded,
+            activeZonePersistenceSucceeded: activeZonePersistenceSucceeded,
+            repairHasFailures: healResult.hasFailures
+        )
+        if !canAdvanceWatermark {
             UserDefaults.standard.removeObject(forKey: Self.analyzeWatermarkKey)
         } else if !wmKey.isEmpty {
             UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey)
@@ -2190,6 +2175,14 @@ final class IntelligenceEngine: ObservableObject {
     /// `analyzeRecent` scored against. A non-forced tick whose current fingerprint equals this skips the
     /// 21-day rescore.
     private static let analyzeWatermarkKey = "noop.analyzeWatermark"
+
+    nonisolated static func analysisPassCanAdvanceWatermark(
+        scorePersistenceSucceeded: Bool,
+        activeZonePersistenceSucceeded: Bool,
+        repairHasFailures: Bool
+    ) -> Bool {
+        scorePersistenceSucceeded && activeZonePersistenceSucceeded && !repairHasFailures
+    }
 
     /// Stable source set for the idle scoring watermark. Archived devices cannot own a new day; active and
     /// paired sources can. `readIds` keeps the active/canonical union covered even if the registry read fails.

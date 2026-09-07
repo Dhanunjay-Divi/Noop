@@ -1,0 +1,110 @@
+{
+  "algorithmRevisions": {
+    "charge": "noop-charge-v2",
+    "effort": "noop-effort-v2",
+    "rest": "noop-rest-v1"
+  },
+  "configuration": {
+    "holdoutFraction": 0.25,
+    "holdoutFractionMaximum": 0.5,
+    "holdoutFractionMinimum": 0.05,
+    "maximumSlope": 4.0,
+    "minimumHoldoutPairs": 7,
+    "minimumPairs": 28,
+    "minimumRelativeMAEImprovement": 0.05,
+    "minimumSlope": 0.25,
+    "minimumTrainingCorrelation": 0.35,
+    "minimumTrainingPairs": 21,
+    "strongConfidenceCorrelation": 0.75,
+    "strongConfidenceMAEImprovement": 0.1,
+    "strongConfidencePairs": 90
+  },
+  "metrics": [
+    {
+      "kotlin": "RECOVERY_SCORE",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "seriesKey": "recovery",
+      "swift": "recoveryScore"
+    },
+    {
+      "kotlin": "EFFORT_SCORE",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "seriesKey": "strain",
+      "swift": "effortScore"
+    },
+    {
+      "kotlin": "REST_SCORE",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_performance",
+      "swift": "restScore"
+    },
+    {
+      "kotlin": "RESTING_HEART_RATE",
+      "maximum": 250.0,
+      "minimum": 25.0,
+      "seriesKey": "rhr",
+      "swift": "restingHeartRate"
+    },
+    {
+      "kotlin": "HRV_RMSSD",
+      "maximum": 500.0,
+      "minimum": 1.0,
+      "seriesKey": "hrv",
+      "swift": "hrvRMSSD"
+    },
+    {
+      "kotlin": "RESPIRATORY_RATE",
+      "maximum": 60.0,
+      "minimum": 4.0,
+      "seriesKey": "resp_rate",
+      "swift": "respiratoryRate"
+    },
+    {
+      "kotlin": "BLOOD_OXYGEN_PERCENT",
+      "maximum": 100.0,
+      "minimum": 50.0,
+      "seriesKey": "spo2",
+      "swift": "bloodOxygenPercent"
+    },
+    {
+      "kotlin": "TOTAL_SLEEP_MINUTES",
+      "maximum": 1440.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_total_min",
+      "swift": "totalSleepMinutes"
+    },
+    {
+      "kotlin": "DEEP_SLEEP_MINUTES",
+      "maximum": 1440.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_deep_min",
+      "swift": "deepSleepMinutes"
+    },
+    {
+      "kotlin": "REM_SLEEP_MINUTES",
+      "maximum": 1440.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_rem_min",
+      "swift": "remSleepMinutes"
+    },
+    {
+      "kotlin": "LIGHT_SLEEP_MINUTES",
+      "maximum": 1440.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_light_min",
+      "swift": "lightSleepMinutes"
+    },
+    {
+      "kotlin": "SLEEP_EFFICIENCY_PERCENT",
+      "maximum": 100.0,
+      "minimum": 0.0,
+      "seriesKey": "sleep_efficiency",
+      "swift": "sleepEfficiencyPercent"
+    }
+  ],
+  "modelVersion": "noop-personal-affine-v1",
+  "schemaVersion": 1
+}

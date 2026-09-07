@@ -63,9 +63,20 @@ public final class PersonalCalibrationModelStore {
         }
 
         guard let data = try? JSONEncoder().encode(record) else { return false }
-        defaults.set(data, forKey: key(metric: report.metric,
-                                       noopAlgorithmVersion: report.noopAlgorithmVersion))
-        return true
+        let storageKey = key(
+            metric: report.metric,
+            noopAlgorithmVersion: report.noopAlgorithmVersion)
+        // Invalidate first so interruption can only remove calibration, never preserve an older
+        // same-revision model after new validation evidence failed to persist.
+        defaults.removeObject(forKey: storageKey)
+        guard defaults.synchronize() else { return false }
+        defaults.set(data, forKey: storageKey)
+        let persisted = defaults.synchronize()
+        if !persisted {
+            defaults.removeObject(forKey: storageKey)
+            _ = defaults.synchronize()
+        }
+        return persisted
     }
 
     public func load(
@@ -79,6 +90,7 @@ public final class PersonalCalibrationModelStore {
                            noopAlgorithmVersion: noopAlgorithmVersion)
         else {
             defaults.removeObject(forKey: storageKey)
+            _ = defaults.synchronize()
             return nil
         }
         return record
@@ -87,6 +99,7 @@ public final class PersonalCalibrationModelStore {
     public func remove(metric: WhoopComparableMetric, noopAlgorithmVersion: String) {
         defaults.removeObject(
             forKey: key(metric: metric, noopAlgorithmVersion: noopAlgorithmVersion))
+        _ = defaults.synchronize()
     }
 
     private func key(metric: WhoopComparableMetric, noopAlgorithmVersion: String) -> String {

@@ -136,10 +136,10 @@ class LocalDayBucketingTest {
 
     // --- windowed computed-daily delete predicate (migration, test d) -------
     //
-    // Mirrors the SQL the new WhoopDao.deleteComputedDailyInRange runs:
+    // Mirrors the delete phase of WhoopRepository.reconcileComputedScoreRange:
     //   DELETE FROM dailyMetric WHERE deviceId = :deviceId AND day >= :from AND day <= :to
-    // (yyyy-MM-dd sorts chronologically, so a string BETWEEN is a date BETWEEN). A pure-logic mirror
-    // because the project's unit tests don't spin up Room; the DAO @Query is the production path.
+    // It executes inside the same Room transaction as the fresh upsert, so readers cannot observe an
+    // empty window. yyyy-MM-dd sorts chronologically, so a string BETWEEN is a date BETWEEN.
 
     private data class Row(val deviceId: String, val day: String)
 
@@ -159,7 +159,7 @@ class LocalDayBucketingTest {
             Row(imported, "2026-05-11"), // imported, in range — MUST survive
         )
         val after = applyDelete(rows, computed, "2026-05-10", "2026-05-12")
-        // The 3 in-range computed rows are removed; out-of-range computed + the imported row survive.
+        // The three in-range computed rows are removed; out-of-range rows and the imported row survive.
         assertEquals(
             listOf(
                 Row(computed, "2026-05-09"),
@@ -172,12 +172,12 @@ class LocalDayBucketingTest {
 
     @Test
     fun windowedDelete_doesNotWipeAllHistory() {
-        // A BLE-only user with no import: only the recompute window is cleared; older computed days
-        // (their cosmetic off-by-one UTC keys) are kept — there is no import fallback.
+        // A BLE-only user with no import: only the recompute window is cleared before its atomic reinsert;
+        // older computed days survive — there is no import fallback.
         val computed = "my-whoop-noop"
         val rows = (1..20).map { Row(computed, "2026-05-%02d".format(it)) }
         val after = applyDelete(rows, computed, "2026-05-10", "2026-05-20")
-        assertEquals(9, after.size) // days 01..09 survive
+        assertEquals(9, after.size)
         assertEquals("2026-05-09", after.last().day)
     }
 

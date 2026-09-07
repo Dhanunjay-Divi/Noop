@@ -410,7 +410,7 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertEqual(
             TodayView.todayProvenanceChipLabel(rawSource: "my-whoop", deviceId: "my-whoop",
                                                appleHealthSource: "apple-health"),
-            "Noop Band")
+            "Compatible band")
         XCTAssertEqual(
             TodayView.todayProvenanceChipLabel(rawSource: "my-whoop-noop", deviceId: "my-whoop",
                                                appleHealthSource: "apple-health"),
@@ -434,17 +434,17 @@ final class TodayExplainabilityTests: XCTestCase {
             LiquidTodayView.heroSourceLabel(
                 rawSources: ["my-whoop", "my-whoop-noop", "apple-health"],
                 deviceId: "my-whoop"),
-            "Noop Band + On-device")
+            "Compatible band + On-device")
     }
 
     func testLiquidHeroSourceLabel_hidesWhenNoScoreHasAResolvedSource() {
         XCTAssertNil(LiquidTodayView.heroSourceLabel(rawSources: [], deviceId: "my-whoop"))
     }
 
-    func testMixedNoopBandSourceStillQualifiesForSyncFeedback() {
-        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesNoopBand("Noop Band"))
-        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesNoopBand("Noop Band + Apple Watch"))
-        XCTAssertFalse(LiquidTodayView.sourceLabelIncludesNoopBand("Apple Watch"))
+    func testMixedCompatibleBandSourceStillQualifiesForSyncFeedback() {
+        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesCompatibleBand("Compatible band"))
+        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesCompatibleBand("Compatible band + Apple Watch"))
+        XCTAssertFalse(LiquidTodayView.sourceLabelIncludesCompatibleBand("Apple Watch"))
     }
 
     func testBandSyncConfirmationRequiresAdvancedCompletionEvidence() {

@@ -18,9 +18,28 @@ Last updated: **2026-09-07**
 
 ## Active work
 
-The status and resource audit is complete. The first-release ledger has 396
-stable actions: 44 evidenced complete and 352 pending, split into 33 owner, 252
-engineering, 33 joint, and 34 external actions. Known local relay, proxy,
+The production-readiness execution round is in progress. Current source adds
+provenance-gated official-reference comparison and chronological personal
+presentation calibration on Apple and Android, atomic cross-platform
+score-window publication, fail-closed import manifests, generic metric validity
+guards, Apple retry-on-persistence-failure semantics, a deterministic
+10/30/90/365-day history and exact-restore harness, neutral compatibility
+labels, and a machine-readable terminology ratchet. The current ledger has 396
+stable actions: 62 evidenced complete and 334 pending, split into 33 owner, 234
+engineering, 33 joint, and 34 external actions. Full local Android, server,
+package, macOS, localization, claims, legal, private-data, OpenTofu, and
+private-runtime checks pass; the final Apple simulator suite also passes.
+Release controls and scoped local cleanup pass; commit, push, exact-main hosted
+evidence, and repository protection remain in progress. The retained
+365-day synthetic profile is about 444 MB with a 1.33 GB temporary
+backup/restore peak, so phone memory, thermal, background, collection, and
+low-storage budgets remain physical release gates. Evidence is being recorded
+in
+[Production readiness execution](rounds/2026-09-07-production-readiness-execution.md).
+
+The status and resource audit is complete. Its starting first-release ledger
+had 396 stable actions: 44 evidenced complete and 352 pending, split into 33
+owner, 252 engineering, 33 joint, and 34 external actions. Known local relay, proxy,
 preview, temporary-database, simulator, and Gradle runtimes remain stopped.
 Sixteen inactive temporary PostgreSQL, proxy-probe, and OpenGym paths were
 removed, and approximately 245 MB of generated OpenTofu plans/provider and tool
@@ -33,7 +52,7 @@ for unfinished NOOP+, ownership, restore, isolation, and deployment work.
 Evidence is recorded in
 [Status and resource audit](rounds/2026-09-07-status-and-resource-audit.md).
 
-The launch owner-decision round is in progress. Source review confirms that
+The launch owner-decision round is complete. Source review confirms that
 Firebase Identity Platform handles managed account and phone-OTP identity;
 Twilio is used only for optional Safety contact SMS/voice paging, DTMF
 acknowledgement, and provider callbacks. The current shell has no Twilio CLI,
@@ -61,7 +80,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 44 evidenced complete and 352 pending. New owner
+with 396 stable actions: 62 evidenced complete and 334 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -72,10 +91,11 @@ currently no NOOP firmware or first-party protocol in the repository, and
 current source commit `1443acb1` has green exact-main Apple, Android, server,
 Swift-package/study, localization, health-claims, runtime-license, private-data,
 and operations workflow evidence. `main` remains unprotected and external
-release controls remain open. The terminology audit found 15,451 matching
-tracked lines in 1,313 files; active customer/core removal must use a reviewed
-allowlist and additive migration rather than destructive replacement. Evidence
-is recorded in
+release controls remain open. The frozen terminology inventory classifies
+17,368 legacy-name occurrences across 1,356 tracked paths (1,508 path/category
+groups); active customer/core removal must use a reviewed allowlist and
+additive migration rather than destructive replacement. Evidence is recorded
+in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
 
 The completed checklist-execution round adds fail-closed source release controls,

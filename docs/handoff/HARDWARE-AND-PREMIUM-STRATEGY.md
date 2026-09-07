@@ -19,7 +19,8 @@ There is no Noop hardware in this repository, and the app does not yet know what
 
 ```swift
 // Packages/WhoopStore/Sources/WhoopStore/PairedDevice.swift:32
-let isNoopBand = id == "my-whoop"          // "Noop Band" is a LABEL on a WHOOP strap
+let isLegacyCompatibleBand = id == "my-whoop"
+return isLegacyCompatibleBand ? "Compatible band" : name
 
 // Strand/BLE/WhoopModel.swift
 case whoop4   = "WHOOP 4.0"

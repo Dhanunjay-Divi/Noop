@@ -9,7 +9,10 @@ public enum WhoopModel: String, CaseIterable, Identifiable, Hashable {
     case whoop4   = "WHOOP 4.0"
     case whoop5mg = "WHOOP 5.0 / MG"
 
-    public static let customerName = "Noop Band"
+    /// This adapter targets legacy compatible hardware, not the future first-party NOOP Band.
+    /// Keeping the distinction visible prevents compatibility evidence from being presented as
+    /// first-party protocol or hardware evidence.
+    public static let customerName = "Compatible band"
 
     public var id: String { rawValue }
     /// Hardware generation is an internal transport detail. Setup and status surfaces use one product name.

@@ -26,7 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  i18n-coverage:
+    name: i18n-coverage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

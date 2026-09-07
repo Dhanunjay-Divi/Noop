@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 import GRDB
 @testable import WhoopStore
@@ -618,6 +619,195 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(imported.map { $0.day }, ["2026-05-11"])
     }
 
+    // MARK: - atomic computed-score reconciliation
+
+    func testComputedScoreReconciliationAtomicallyReplacesDailyAndManagedSeries() async throws {
+        let store = try await WhoopStore.inMemory()
+        let computed = "my-whoop-noop"
+        let imported = "my-whoop"
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-09", recovery: 49),
+            computedDay("2026-05-10", recovery: 50),
+            computedDay("2026-05-11", recovery: 51),
+            computedDay("2026-05-12", recovery: 52),
+            computedDay("2026-05-13", recovery: 53),
+        ], deviceId: computed)
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-11", recovery: 91),
+        ], deviceId: imported)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-09", key: "sleep_performance", value: 69),
+            MetricPoint(day: "2026-05-10", key: "sleep_performance", value: 70),
+            MetricPoint(day: "2026-05-11", key: "rest_confidence", value: 1),
+            MetricPoint(day: "2026-05-12", key: "rest_evidence_flags", value: 12),
+            MetricPoint(day: "2026-05-11", key: "sleep_debt_min", value: 30),
+            MetricPoint(day: "2026-05-13", key: "sleep_performance", value: 73),
+        ], deviceId: computed)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: computed,
+            from: "2026-05-10",
+            to: "2026-05-12",
+            dailyRows: [
+                computedDay("2026-05-10", recovery: 80),
+                computedDay("2026-05-12", recovery: 82),
+            ],
+            managedMetricKeys: [
+                "sleep_performance",
+                "rest_confidence",
+                "rest_evidence_flags",
+            ],
+            metricRows: [
+                MetricPoint(day: "2026-05-10", key: "sleep_performance", value: 90),
+                MetricPoint(day: "2026-05-10", key: "rest_confidence", value: 2),
+                MetricPoint(day: "2026-05-12", key: "sleep_performance", value: 92),
+            ]
+        )
+
+        XCTAssertEqual(receipt, ["2026-05-10", "2026-05-12"])
+        let computedRows = try await store.dailyMetrics(
+            deviceId: computed, from: "2026-05-01", to: "2026-05-31")
+        XCTAssertEqual(
+            computedRows.map(\.day),
+            ["2026-05-09", "2026-05-10", "2026-05-12", "2026-05-13"])
+        XCTAssertEqual(computedRows.map { $0.recovery ?? -1 }, [49, 80, 82, 53])
+        let importedRows = try await store.dailyMetrics(
+            deviceId: imported, from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(importedRows.map(\.recovery), [91])
+
+        let performance = try await store.metricSeries(
+            deviceId: computed, key: "sleep_performance",
+            from: "2026-05-01", to: "2026-05-31")
+        XCTAssertEqual(
+            performance.map(\.day),
+            ["2026-05-09", "2026-05-10", "2026-05-12", "2026-05-13"])
+        XCTAssertEqual(performance.map(\.value), [69, 90, 92, 73])
+        let confidence = try await store.metricSeries(
+            deviceId: computed, key: "rest_confidence",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(confidence.map(\.day), ["2026-05-10"])
+        XCTAssertEqual(confidence.map(\.value), [2])
+        let staleEvidence = try await store.metricSeries(
+            deviceId: computed, key: "rest_evidence_flags",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertTrue(staleEvidence.isEmpty)
+        let unmanaged = try await store.metricSeries(
+            deviceId: computed, key: "sleep_debt_min",
+            from: "2026-05-10", to: "2026-05-12")
+        XCTAssertEqual(unmanaged.map(\.value), [30])
+    }
+
+    func testComputedScoreReconciliationRollsBackAfterLateFailure() async throws {
+        enum InjectedFailure: Error { case stop }
+
+        let store = try await WhoopStore.inMemory()
+        let device = "my-whoop-noop"
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-10", recovery: 60),
+        ], deviceId: device)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-10", key: "sleep_performance", value: 75),
+        ], deviceId: device)
+
+        do {
+            _ = try await store.reconcileComputedScoreRangeForTesting(
+                deviceId: device,
+                from: "2026-05-10",
+                to: "2026-05-11",
+                dailyRows: [computedDay("2026-05-11", recovery: 88)],
+                managedMetricKeys: ["sleep_performance"],
+                metricRows: [
+                    MetricPoint(day: "2026-05-11", key: "sleep_performance", value: 93),
+                ],
+                beforeMetricSeriesWrite: { throw InjectedFailure.stop }
+            )
+            XCTFail("expected the injected transaction failure")
+        } catch InjectedFailure.stop {
+            // Expected.
+        }
+
+        let daily = try await store.dailyMetrics(
+            deviceId: device, from: "2026-05-10", to: "2026-05-11")
+        XCTAssertEqual(daily.map(\.day), ["2026-05-10"])
+        XCTAssertEqual(daily.map { $0.recovery ?? -1 }, [60])
+        let performance = try await store.metricSeries(
+            deviceId: device, key: "sleep_performance",
+            from: "2026-05-10", to: "2026-05-11")
+        XCTAssertEqual(performance.map(\.day), ["2026-05-10"])
+        XCTAssertEqual(performance.map(\.value), [75])
+    }
+
+    func testComputedScoreReconciliationRejectsInvalidInputBeforeMutation() async throws {
+        let store = try await WhoopStore.inMemory()
+        let device = "my-whoop-noop"
+        try await store.upsertDailyMetrics([
+            computedDay("2026-05-10", recovery: 60),
+        ], deviceId: device)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-05-10", key: "sleep_performance", value: 75),
+        ], deviceId: device)
+
+        do {
+            _ = try await store.reconcileComputedScoreRange(
+                deviceId: device,
+                from: "2026-05-10",
+                to: "2026-05-11",
+                dailyRows: [computedDay("2026-05-11", recovery: 88)],
+                managedMetricKeys: ["sleep_performance"],
+                metricRows: [
+                    MetricPoint(day: "2026-05-10", key: "sleep_performance", value: .infinity),
+                ]
+            )
+            XCTFail("expected invalid metric input to be rejected")
+        } catch let error as ComputedScoreReconciliationError {
+            XCTAssertEqual(error, .invalidMetricRow)
+        }
+
+        let daily = try await store.dailyMetrics(
+            deviceId: device, from: "2026-05-10", to: "2026-05-11")
+        XCTAssertEqual(daily.map(\.day), ["2026-05-10"])
+        XCTAssertEqual(daily.map { $0.recovery ?? -1 }, [60])
+        let performance = try await store.metricSeries(
+            deviceId: device, key: "sleep_performance",
+            from: "2026-05-10", to: "2026-05-11")
+        XCTAssertEqual(performance.map(\.day), ["2026-05-10"])
+        XCTAssertEqual(performance.map(\.value), [75])
+    }
+
+    func testComputedScoreReconciliationSupportsTwelveHundredDays() async throws {
+        let store = try await WhoopStore.inMemory()
+        let calendar = Calendar(identifier: .gregorian)
+        let start = try XCTUnwrap(calendar.date(
+            from: DateComponents(year: 2022, month: 1, day: 1)))
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        let days = (0..<1_200).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: start).map(formatter.string)
+        }
+        XCTAssertEqual(days.count, 1_200)
+
+        let receipt = try await store.reconcileComputedScoreRange(
+            deviceId: "my-whoop-noop",
+            from: try XCTUnwrap(days.first),
+            to: try XCTUnwrap(days.last),
+            dailyRows: days.map { computedDay($0, recovery: 70) },
+            managedMetricKeys: ["sleep_performance"],
+            metricRows: days.map {
+                MetricPoint(day: $0, key: "sleep_performance", value: 80)
+            }
+        )
+
+        XCTAssertEqual(receipt.count, 1_200)
+        let stored = try await store.dailyMetrics(
+            deviceId: "my-whoop-noop",
+            from: try XCTUnwrap(days.first),
+            to: try XCTUnwrap(days.last))
+        XCTAssertEqual(stored.count, 1_200)
+    }
+
     // MARK: - v7 in-sleep signal columns (spo2Pct / skinTempDevC / respRateBpm)
 
     func testV7ColumnsRoundTrip() async throws {
@@ -727,5 +917,22 @@ final class MetricsCacheTests: XCTestCase {
         // Raw rows are stored under the distinct prefix.
         let raw = try await store.cursor("read:hr")
         XCTAssertEqual(raw, 1_716_400_000)
+    }
+
+    private func computedDay(_ day: String, recovery: Double) -> DailyMetric {
+        DailyMetric(
+            day: day,
+            totalSleepMin: 420,
+            efficiency: 0.9,
+            deepMin: 80,
+            remMin: 100,
+            lightMin: 240,
+            disturbances: 2,
+            restingHr: 54,
+            avgHrv: 60,
+            recovery: recovery,
+            strain: 40,
+            exerciseCount: 1
+        )
     }
 }

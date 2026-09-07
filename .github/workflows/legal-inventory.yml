@@ -59,7 +59,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  runtime-license-inventory:
+    name: runtime-license-inventory
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
