@@ -37,6 +37,15 @@ additive migration rather than destructive replacement. Evidence is recorded
 in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
 
+The hosted release-gate closeout is active. The server failure on ownership
+readiness was not a runtime privilege defect: the PostgreSQL-overlay database
+was cloned from TimescaleDB's modified `template1` and inherited extension-wide
+`PUBLIC` privileges that the restricted ownership principal correctly rejects.
+The workflow now clones the plain-PostgreSQL lane from pristine `template0` and
+fails early if a non-core extension appears. PostgreSQL 14 and 16 local gates
+pass without weakening readiness; final hosted evidence is being recorded in
+[Hosted release gates](rounds/2026-09-06-hosted-release-gates.md).
+
 The owner has fixed the public market sequence as India first and the USA
 second. The first-party band target now has a narrow ownership-account
 exception: the user matches the printed band number, receives an identify

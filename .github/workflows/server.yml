@@ -73,7 +73,24 @@ jobs:
           --host 127.0.0.1
           --port 5432
           --username noop
+          --template template0
           noop_postgresql
+
+      - name: Verify PostgreSQL overlay is extension-free
+        env:
+          PGPASSWORD: noop-ci-database-password
+        run: |
+          extension_count="$(
+            psql \
+              --host 127.0.0.1 \
+              --port 5432 \
+              --username noop \
+              --dbname noop_postgresql \
+              --no-align \
+              --tuples-only \
+              --command "SELECT count(*) FROM pg_extension WHERE extname <> 'plpgsql'"
+          )"
+          test "$extension_count" = "0"
 
       - name: Lint
         run: |
