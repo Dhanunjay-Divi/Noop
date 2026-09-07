@@ -8,7 +8,7 @@
 - Start commit: `c4d2039c`
 - End implementation commit: `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`
 - Record commit or PR: `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`
-  plus the commit containing this hosted-evidence closeout
+  plus its subsequent closeout record commits on `main`
 
 ## Objective
 
@@ -177,8 +177,8 @@ health-data upload, unsigned release claims, or unchecked external gates.
 - Commits: implementation and initial-record commit
   `b5caec527496bb0eedbac27bf35eb9b1fa7fbf25`; hosted-evidence closeout in the
   commit containing this record revision.
-- Branch and remote state: implementation commit `b5caec52` is on
-  `origin/main`; the closeout is staged for direct `main` publication.
+- Branch and remote state: implementation and closeout records are on
+  `origin/main`; this record revision does not alter product source.
 - Repository visibility verified: GitHub reports a private standalone
   repository with `main` as the default branch.
 - Version/build impact: no application version or build number changed.
@@ -187,7 +187,7 @@ health-data upload, unsigned release claims, or unchecked external gates.
 ## Decisions
 
 - Durable decision added or changed: none at round start.
-- Decision-log entry: pending only if a durable decision changes.
+- Decision-log entry: not required; no durable product decision changed.
 
 ## Open risks and honest limitations
 
