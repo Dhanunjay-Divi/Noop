@@ -51,7 +51,7 @@ jobs:
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
           git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
             > "$CHANGED_FILES"
-          if grep -Eq '^(android/|\.github/workflows/android\.yml$)' \
+          if grep -Eq '^(android/|Tools/android-managed-device-retry\.py$|\.github/workflows/android\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

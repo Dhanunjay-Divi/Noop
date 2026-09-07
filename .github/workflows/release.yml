@@ -31,6 +31,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_forgejo:
+        description: "Mirror the verified canonical release to the configured Forgejo repository"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   checks: read
@@ -490,6 +495,20 @@ jobs:
       checks: read
       contents: read
     uses: ./.github/workflows/homebrew-cask.yml
+    with:
+      version: ${{ needs.bump.outputs.ver }}
+    secrets: inherit
+
+  # Forgejo is an explicit optional mirror. GitHub remains canonical, and the
+  # called workflow is manually retryable without rebuilding the immutable
+  # production release.
+  forgejo:
+    needs: [bump, publish]
+    if: ${{ inputs.publish_forgejo }}
+    permissions:
+      checks: read
+      contents: read
+    uses: ./.github/workflows/forgejo-release.yml
     with:
       version: ${{ needs.bump.outputs.ver }}
     secrets: inherit

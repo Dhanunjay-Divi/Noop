@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPOSITORY="${NOOP_RELEASE_GITHUB_REPO:-Dhanunjay-Divi/Noop}"
 VERSION="${1:-}"
 PUBLISH_HOMEBREW=false
+PUBLISH_FORGEJO=false
 
 if [ "$#" -ne 1 ] || [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "usage: Tools/release.sh <version>" >&2
@@ -22,6 +23,17 @@ case "${NOOP_RELEASE_HOMEBREW:-0}" in
     ;;
   *)
     echo "NOOP_RELEASE_HOMEBREW must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+case "${NOOP_RELEASE_FORGE:-0}" in
+  0 | "")
+    ;;
+  1)
+    PUBLISH_FORGEJO=true
+    ;;
+  *)
+    echo "NOOP_RELEASE_FORGE must be 0 or 1" >&2
     exit 2
     ;;
 esac
@@ -115,6 +127,7 @@ GH_TOKEN="$TOKEN" gh workflow run release.yml \
   --ref main \
   --field "version=$VERSION" \
   --field "release_sha=$SOURCE_SHA" \
-  --field "publish_homebrew=$PUBLISH_HOMEBREW"
+  --field "publish_homebrew=$PUBLISH_HOMEBREW" \
+  --field "publish_forgejo=$PUBLISH_FORGEJO"
 
 echo "Dispatched the protected production release for v${VERSION} at ${SOURCE_SHA}."

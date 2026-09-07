@@ -34,6 +34,16 @@ or the last was less than 20 minutes ago, unless the operator deliberately sets
 an accident. Tune the local guard with `CADENCE_LIMIT` and
 `CADENCE_MIN_GAP_MIN`.
 
+An optional Forgejo release mirror follows the same guarded dispatch. Set
+`NOOP_RELEASE_FORGE=1` only after configuring repository variables
+`NOOP_FORGEJO_DOMAIN`, `NOOP_FORGEJO_ORG`, and `NOOP_FORGEJO_REPO` plus the
+repository-scoped `NOOP_FORGEJO_TOKEN` secret. The post-publication workflow
+reverifies the canonical production tag, exact protected-main checks, platform
+versions, asset names, sizes, and Android checksum before creating the mirror
+tag at the same exact commit. A failed mirror never mutates the canonical
+GitHub release and can be retried through the `Forgejo release mirror`
+workflow.
+
 **3. No mass-identical comments.**
 When replying across many issues/PRs (e.g. a board sweep), vary the wording and/or space the posts out. A flood of identical comments reads as inauthentic activity.
 

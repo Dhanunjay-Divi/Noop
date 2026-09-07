@@ -26,7 +26,9 @@ class RequiredCIGateTests(unittest.TestCase):
     def test_release_build_uses_only_exact_green_main_source(self) -> None:
         GATE.check_release_workflow(ROOT)
         GATE.check_altstore_workflow(ROOT)
+        GATE.check_forgejo_workflow(ROOT)
         GATE.check_homebrew_workflow(ROOT)
+        GATE.check_release_control_test_suite(ROOT)
         GATE.check_local_release_entrypoint(ROOT)
 
     def test_required_contexts_are_the_protected_merge_contract(self) -> None:
@@ -172,6 +174,36 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         self.assertIn("Tools/homebrew-version-gate.py", helper)
 
+    def test_forgejo_opt_in_reaches_a_retryable_verified_workflow(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
+        forgejo = (ROOT / ".github/workflows/forgejo-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("publish_forgejo:", release)
+        self.assertIn("uses: ./.github/workflows/forgejo-release.yml", release)
+        self.assertIn("if: ${{ inputs.publish_forgejo }}", release)
+        self.assertIn(
+            '--field "publish_forgejo=$PUBLISH_FORGEJO"',
+            dispatcher,
+        )
+        self.assertIn("workflow_dispatch:", forgejo)
+        self.assertIn("Tools/required-ci-gate.py verify-github", forgejo)
+        self.assertIn("Tools/forgejo-release.sh", forgejo)
+
+    def test_release_controls_run_publication_safety_tests(self) -> None:
+        workflow = (ROOT / ".github/workflows/release-controls.yml").read_text(
+            encoding="utf-8"
+        )
+        for module in (
+            "Tools.tests.test_forgejo_release_helper",
+            "Tools.tests.test_homebrew_helper",
+            "Tools.tests.test_homebrew_version_gate",
+        ):
+            self.assertIn(module, workflow)
+
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
         workflow = self.config["workflows"][0]
         source = (ROOT / workflow["path"]).read_text(encoding="utf-8")
@@ -204,6 +236,10 @@ class RequiredCIGateTests(unittest.TestCase):
             source,
         )
         self.assertEqual(source.count("--rerun-tasks"), 1)
+        self.assertIn(
+            "Tools/android-managed-device-retry\\.py$",
+            source,
+        )
 
     def test_latest_check_run_must_be_completed_success(self) -> None:
         runs = []

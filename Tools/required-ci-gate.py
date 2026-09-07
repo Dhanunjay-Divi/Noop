@@ -293,8 +293,11 @@ def check_release_workflow(root: Path) -> None:
         "--sha \"$GITHUB_SHA\"",
         "git diff --exit-code",
         "uses: ./.github/workflows/altstore-source.yml",
+        "uses: ./.github/workflows/forgejo-release.yml",
         "uses: ./.github/workflows/homebrew-cask.yml",
+        "publish_forgejo:",
         "publish_homebrew:",
+        "if: ${{ inputs.publish_forgejo }}",
         "if: ${{ inputs.publish_homebrew }}",
         "secrets: inherit",
         "Reverify required checks before publication",
@@ -398,6 +401,53 @@ def check_homebrew_workflow(root: Path) -> None:
             raise GateError(f"Homebrew cask workflow lacks {item}")
 
 
+def check_forgejo_workflow(root: Path) -> None:
+    path = root / ".github" / "workflows" / "forgejo-release.yml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("Forgejo release workflow is missing") from error
+    required_text = (
+        "workflow_call:",
+        "workflow_dispatch:",
+        'test "$GITHUB_REF" = "refs/heads/main"',
+        "Tools/required-ci-gate.py verify-github",
+        'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
+        "FORGE_DOMAIN: ${{ vars.NOOP_FORGEJO_DOMAIN }}",
+        "FORGE_ORG: ${{ vars.NOOP_FORGEJO_ORG }}",
+        "FORGE_REPO: ${{ vars.NOOP_FORGEJO_REPO }}",
+        "NOOP_FORGEJO_TOKEN: ${{ secrets.NOOP_FORGEJO_TOKEN }}",
+        'gh release download "$TAG"',
+        'test "$(stat -c %s "$DOWNLOAD_DIR/$asset")" = "$SIZE"',
+        'sha256sum --check "NOOP-android-v${VERSION}.apk.sha256"',
+        'test "$APPLE_VERSION" = "$VERSION"',
+        'test "$ANDROID_VERSION" = "$VERSION"',
+        'export FORGE_TARGET_COMMITISH="$RELEASE_SHA"',
+        'Tools/forgejo-release.sh "$VERSION"',
+    )
+    for item in required_text:
+        if item not in text:
+            raise GateError(f"Forgejo release workflow lacks {item}")
+
+
+def check_release_control_test_suite(root: Path) -> None:
+    path = root / ".github" / "workflows" / "release-controls.yml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("release controls workflow is missing") from error
+    required_modules = (
+        "Tools.tests.test_forgejo_release_helper",
+        "Tools.tests.test_homebrew_helper",
+        "Tools.tests.test_homebrew_version_gate",
+    )
+    for module in required_modules:
+        if module not in text:
+            raise GateError(
+                f"release controls workflow does not run {module}"
+            )
+
+
 def check_local_release_entrypoint(root: Path) -> None:
     path = root / "Tools" / "release.sh"
     try:
@@ -414,6 +464,7 @@ def check_local_release_entrypoint(root: Path) -> None:
         'gh workflow run release.yml',
         "--ref main",
         '--field "release_sha=$SOURCE_SHA"',
+        '--field "publish_forgejo=$PUBLISH_FORGEJO"',
         '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
     )
     for item in required_text:
@@ -443,7 +494,9 @@ def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> N
         check_workflow(root, workflow)
     check_release_workflow(root)
     check_altstore_workflow(root)
+    check_forgejo_workflow(root)
     check_homebrew_workflow(root)
+    check_release_control_test_suite(root)
     check_local_release_entrypoint(root)
 
 
