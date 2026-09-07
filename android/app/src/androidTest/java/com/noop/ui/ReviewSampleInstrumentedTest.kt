@@ -11,6 +11,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.WorkManager
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -32,7 +33,13 @@ class ReviewSampleInstrumentedTest {
     @Test
     fun reviewSampleIsVisibleNavigableAndExitableWithoutHardware() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        assertFalse(WorkManager.isInitialized())
+        val workManagerWasInitialized = WorkManager.isInitialized()
+        val requireFreshWorkManager =
+            InstrumentationRegistry.getArguments()
+                .getString("requireFreshWorkManager") == "true"
+        if (requireFreshWorkManager) {
+            assertFalse(workManagerWasInitialized)
+        }
         NoopPrefs.of(context)
             .edit()
             .remove(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION)
@@ -50,6 +57,6 @@ class ReviewSampleInstrumentedTest {
         compose.onNodeWithTag("noop.review.exit").assertIsDisplayed().performClick()
         assertTrue(compose.onAllNodesWithTag("noop.review.root").fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("noop.terms.title").assertIsDisplayed()
-        assertFalse(WorkManager.isInitialized())
+        assertEquals(workManagerWasInitialized, WorkManager.isInitialized())
     }
 }

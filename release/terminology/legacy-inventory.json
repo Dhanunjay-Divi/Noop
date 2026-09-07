@@ -1,7 +1,7 @@
 {
   "categoryCounts": {
     "compatibility": 1694,
-    "core": 4968,
+    "core": 4969,
     "customer": 813,
     "fixture": 5316,
     "generated": 13,
@@ -16943,21 +16943,22 @@
         3,
         143,
         163,
-        342,
-        617,
-        725,
-        747,
-        786,
-        859
+        403,
+        420,
+        655,
+        763,
+        785,
+        824,
+        897
       ],
-      "occurrenceCount": 10,
+      "occurrenceCount": 11,
       "path": "Tools/Backfill/Sources/HistoryHarnessCore/HistoryHarness.swift",
-      "sha256": "1b4a2acd43b8eb344d6d93c394105ab7e44349bbe42d6b664f4ca95cba56be5b",
+      "sha256": "53fcfefe31d499e7bf5d640a2316ad6c11c4a3de6bd064942a8bbbf9c9b1edc5",
       "tokenCounts": {
         "whoop-replaced-history-": 1,
         "whoopevent": 2,
         "whoopprotocol": 1,
-        "whoopstore": 6
+        "whoopstore": 7
       }
     },
     {
@@ -37268,7 +37269,7 @@
       }
     }
   ],
-  "occurrenceCount": 17370,
+  "occurrenceCount": 17371,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

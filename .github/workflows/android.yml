@@ -92,6 +92,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Prove Review Sample worker isolation in a fresh process
+        run: |
+          ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
+            -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            --stacktrace
+
       - name: Run production-shell instrumentation tests
         run: ./gradlew pixel2Api35FullDebugAndroidTest --stacktrace
 

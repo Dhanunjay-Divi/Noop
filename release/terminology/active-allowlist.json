@@ -2099,12 +2099,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 10,
+      "occurrenceCount": 11,
       "owner": "project team",
       "path": "Tools/Backfill/Sources/HistoryHarnessCore/HistoryHarness.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "1b4a2acd43b8eb344d6d93c394105ab7e44349bbe42d6b664f4ca95cba56be5b"
+      "sha256": "53fcfefe31d499e7bf5d640a2316ad6c11c4a3de6bd064942a8bbbf9c9b1edc5"
     },
     {
       "category": "core",

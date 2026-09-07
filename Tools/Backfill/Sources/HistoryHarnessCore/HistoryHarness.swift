@@ -335,224 +335,22 @@ public enum HistoryHarness {
         ))
         temporaryPeakBytes = max(temporaryPeakBytes, directorySize(directory))
 
-        let aggregateStart = fixedEndExclusive - plan.aggregateHistoryDays * secondsPerDay
-        let essentialStart = fixedEndExclusive - plan.essentialHistoryDays * secondsPerDay
-        let rawStart = fixedEndExclusive - plan.rawHistoryDays * secondsPerDay
+        let restoreContext = RestoreVerificationContext(
+            sourceStore: store,
+            restoredURL: restoredURL,
+            plan: plan,
+            expectedDecodedRows: stats.decodedRows,
+            expectedRawBatches: stats.rawBatches,
+            expectedRawBytes: stats.rawBytes,
+            expectedDaily: daily.value,
+            expectedDayMetrics: dayMetrics.value,
+            expectedRawExportData: sourceExportData,
+            oldestDay: oldestDay,
+            newestDay: newestDay,
+            queryStart: queryStart
+        )
         let restore = try await measured("restore-open-and-verify") {
-            let restored = try await WhoopStore(path: restoredURL.path)
-            let restoredStats = try await restored.storageStats()
-            let restoredDaily = try await restored.dailyMetrics(
-                deviceId: deviceID,
-                from: oldestDay,
-                to: newestDay
-            )
-
-            var checks: [String] = []
-            guard restoredStats.decodedRows == stats.decodedRows,
-                  restoredStats.rawBatches == stats.rawBatches,
-                  restoredStats.rawBytes == stats.rawBytes else {
-                throw HistoryHarnessError.restoreContentMismatch("storage-stats")
-            }
-            checks.append("storage-stats")
-            try requireRestoreEquality(
-                restoredDaily,
-                daily.value,
-                check: "daily-metrics",
-                completed: &checks
-            )
-
-            let restoredDayMetrics = try await restored.metricSeries(day: newestDay)
-            try requireRestoreEquality(
-                restoredDayMetrics,
-                dayMetrics.value,
-                check: "selected-day-metric-series",
-                completed: &checks
-            )
-
-            let sourceMetricKeys = try await store.metricKeys(deviceId: deviceID)
-            let restoredMetricKeys = try await restored.metricKeys(deviceId: deviceID)
-            try requireRestoreEquality(
-                restoredMetricKeys,
-                sourceMetricKeys,
-                check: "metric-series-keys",
-                completed: &checks
-            )
-            for key in sourceMetricKeys {
-                let sourcePoints = try await store.metricSeries(
-                    deviceId: deviceID,
-                    key: key,
-                    from: oldestDay,
-                    to: newestDay
-                )
-                let restoredPoints = try await restored.metricSeries(
-                    deviceId: deviceID,
-                    key: key,
-                    from: oldestDay,
-                    to: newestDay
-                )
-                guard restoredPoints == sourcePoints else {
-                    throw HistoryHarnessError.restoreContentMismatch(
-                        "metric-series:\(key)"
-                    )
-                }
-            }
-            checks.append("metric-series-all-values")
-
-            let sourceSleeps = try await store.sleepSessions(
-                deviceId: deviceID,
-                from: aggregateStart - secondsPerDay,
-                to: fixedEndExclusive - 1,
-                limit: 10_000
-            )
-            let restoredSleeps = try await restored.sleepSessions(
-                deviceId: deviceID,
-                from: aggregateStart - secondsPerDay,
-                to: fixedEndExclusive - 1,
-                limit: 10_000
-            )
-            try requireRestoreEquality(
-                restoredSleeps,
-                sourceSleeps,
-                check: "sleep-sessions",
-                completed: &checks
-            )
-
-            let sourceJournal = try await store.journalEntries(
-                deviceId: deviceID,
-                from: oldestDay,
-                to: newestDay
-            )
-            let restoredJournal = try await restored.journalEntries(
-                deviceId: deviceID,
-                from: oldestDay,
-                to: newestDay
-            )
-            try requireRestoreEquality(
-                restoredJournal,
-                sourceJournal,
-                check: "journal-entries",
-                completed: &checks
-            )
-
-            let sourceWorkouts = try await store.workouts(
-                deviceId: deviceID,
-                from: aggregateStart,
-                to: fixedEndExclusive - 1,
-                limit: 10_000
-            )
-            let restoredWorkouts = try await restored.workouts(
-                deviceId: deviceID,
-                from: aggregateStart,
-                to: fixedEndExclusive - 1,
-                limit: 10_000
-            )
-            try requireRestoreEquality(
-                restoredWorkouts,
-                sourceWorkouts,
-                check: "workouts",
-                completed: &checks
-            )
-
-            let sourceApple = try await store.appleDaily(
-                deviceId: deviceID,
-                from: oldestDay,
-                to: newestDay
-            )
-            let restoredApple = try await restored.appleDaily(
-                deviceId: deviceID,
-                from: oldestDay,
-                to: newestDay
-            )
-            try requireRestoreEquality(
-                restoredApple,
-                sourceApple,
-                check: "apple-daily",
-                completed: &checks
-            )
-
-            let sourceBattery = try await store.batterySamples(
-                deviceId: deviceID,
-                from: essentialStart,
-                to: fixedEndExclusive - 1,
-                limit: 1_000_000
-            )
-            let restoredBattery = try await restored.batterySamples(
-                deviceId: deviceID,
-                from: essentialStart,
-                to: fixedEndExclusive - 1,
-                limit: 1_000_000
-            )
-            try requireRestoreEquality(
-                restoredBattery,
-                sourceBattery,
-                check: "battery-samples",
-                completed: &checks
-            )
-
-            let sourceWaveforms = try await store.ppgWaveformSamples(
-                deviceId: deviceID,
-                from: rawStart,
-                to: fixedEndExclusive - 1,
-                limit: 1_000_000
-            )
-            let restoredWaveforms = try await restored.ppgWaveformSamples(
-                deviceId: deviceID,
-                from: rawStart,
-                to: fixedEndExclusive - 1,
-                limit: 1_000_000
-            )
-            try requireRestoreEquality(
-                restoredWaveforms,
-                sourceWaveforms,
-                check: "ppg-waveform-samples",
-                completed: &checks
-            )
-
-            let sourcePending = try await store.pendingRawBatches(limit: 1_000)
-            let restoredPending = try await restored.pendingRawBatches(limit: 1_000)
-            try requireRestoreEquality(
-                restoredPending,
-                sourcePending,
-                check: "raw-outbox-metadata",
-                completed: &checks
-            )
-            for batch in sourcePending {
-                let sourceFrames = try await store.rawFrames(batchId: batch.batchId)
-                let restoredFrames = try await restored.rawFrames(batchId: batch.batchId)
-                guard restoredFrames == sourceFrames else {
-                    throw HistoryHarnessError.restoreContentMismatch(
-                        "raw-outbox-frames:\(batch.batchId)"
-                    )
-                }
-            }
-            checks.append("raw-outbox-all-frame-bytes")
-
-            let restoredExportURL = try await restored.exportRawCSV(
-                deviceId: deviceID,
-                since: TimeInterval(queryStart)
-            )
-            defer { try? fm.removeItem(at: restoredExportURL) }
-            let restoredExportData = try Data(contentsOf: restoredExportURL)
-            try requireRestoreEquality(
-                restoredExportData,
-                sourceExportData,
-                check: "raw-csv-24h-bytes",
-                completed: &checks
-            )
-
-            return RestoreVerification(
-                resultCount: restoredStats.decodedRows
-                    + restoredDaily.count
-                    + sourceMetricKeys.count
-                    + sourceSleeps.count
-                    + sourceJournal.count
-                    + sourceWorkouts.count
-                    + sourceApple.count
-                    + sourceBattery.count
-                    + sourceWaveforms.count
-                    + sourcePending.count,
-                checks: checks
-            )
+            try await verifyRestore(context: restoreContext)
         }
         restoreVerificationPassed = true
         restoreContentChecks = restore.value.checks
@@ -599,6 +397,246 @@ public enum HistoryHarness {
     private struct RestoreVerification {
         let resultCount: Int
         let checks: [String]
+    }
+
+    private struct RestoreVerificationContext {
+        let sourceStore: WhoopStore
+        let restoredURL: URL
+        let plan: HistoryDatasetPlan
+        let expectedDecodedRows: Int
+        let expectedRawBatches: Int
+        let expectedRawBytes: Int
+        let expectedDaily: [DailyMetric]
+        let expectedDayMetrics: [SourcedMetricPoint]
+        let expectedRawExportData: Data
+        let oldestDay: String
+        let newestDay: String
+        let queryStart: Int
+    }
+
+    private static func verifyRestore(
+        context: RestoreVerificationContext
+    ) async throws -> RestoreVerification {
+        let restored = try await WhoopStore(path: context.restoredURL.path)
+        let restoredStats = try await restored.storageStats()
+        let restoredDaily = try await restored.dailyMetrics(
+            deviceId: deviceID,
+            from: context.oldestDay,
+            to: context.newestDay
+        )
+
+        var checks: [String] = []
+        guard restoredStats.decodedRows == context.expectedDecodedRows,
+              restoredStats.rawBatches == context.expectedRawBatches,
+              restoredStats.rawBytes == context.expectedRawBytes else {
+            throw HistoryHarnessError.restoreContentMismatch("storage-stats")
+        }
+        checks.append("storage-stats")
+        try requireRestoreEquality(
+            restoredDaily,
+            context.expectedDaily,
+            check: "daily-metrics",
+            completed: &checks
+        )
+
+        let restoredDayMetrics = try await restored.metricSeries(day: context.newestDay)
+        try requireRestoreEquality(
+            restoredDayMetrics,
+            context.expectedDayMetrics,
+            check: "selected-day-metric-series",
+            completed: &checks
+        )
+
+        let sourceStore = context.sourceStore
+        let sourceMetricKeys = try await sourceStore.metricKeys(deviceId: deviceID)
+        let restoredMetricKeys = try await restored.metricKeys(deviceId: deviceID)
+        try requireRestoreEquality(
+            restoredMetricKeys,
+            sourceMetricKeys,
+            check: "metric-series-keys",
+            completed: &checks
+        )
+        for key in sourceMetricKeys {
+            let sourcePoints = try await sourceStore.metricSeries(
+                deviceId: deviceID,
+                key: key,
+                from: context.oldestDay,
+                to: context.newestDay
+            )
+            let restoredPoints = try await restored.metricSeries(
+                deviceId: deviceID,
+                key: key,
+                from: context.oldestDay,
+                to: context.newestDay
+            )
+            guard restoredPoints == sourcePoints else {
+                throw HistoryHarnessError.restoreContentMismatch(
+                    "metric-series:\(key)"
+                )
+            }
+        }
+        checks.append("metric-series-all-values")
+
+        let aggregateStart =
+            fixedEndExclusive - context.plan.aggregateHistoryDays * secondsPerDay
+        let sourceSleeps = try await sourceStore.sleepSessions(
+            deviceId: deviceID,
+            from: aggregateStart - secondsPerDay,
+            to: fixedEndExclusive - 1,
+            limit: 10_000
+        )
+        let restoredSleeps = try await restored.sleepSessions(
+            deviceId: deviceID,
+            from: aggregateStart - secondsPerDay,
+            to: fixedEndExclusive - 1,
+            limit: 10_000
+        )
+        try requireRestoreEquality(
+            restoredSleeps,
+            sourceSleeps,
+            check: "sleep-sessions",
+            completed: &checks
+        )
+
+        let sourceJournal = try await sourceStore.journalEntries(
+            deviceId: deviceID,
+            from: context.oldestDay,
+            to: context.newestDay
+        )
+        let restoredJournal = try await restored.journalEntries(
+            deviceId: deviceID,
+            from: context.oldestDay,
+            to: context.newestDay
+        )
+        try requireRestoreEquality(
+            restoredJournal,
+            sourceJournal,
+            check: "journal-entries",
+            completed: &checks
+        )
+
+        let sourceWorkouts = try await sourceStore.workouts(
+            deviceId: deviceID,
+            from: aggregateStart,
+            to: fixedEndExclusive - 1,
+            limit: 10_000
+        )
+        let restoredWorkouts = try await restored.workouts(
+            deviceId: deviceID,
+            from: aggregateStart,
+            to: fixedEndExclusive - 1,
+            limit: 10_000
+        )
+        try requireRestoreEquality(
+            restoredWorkouts,
+            sourceWorkouts,
+            check: "workouts",
+            completed: &checks
+        )
+
+        let sourceApple = try await sourceStore.appleDaily(
+            deviceId: deviceID,
+            from: context.oldestDay,
+            to: context.newestDay
+        )
+        let restoredApple = try await restored.appleDaily(
+            deviceId: deviceID,
+            from: context.oldestDay,
+            to: context.newestDay
+        )
+        try requireRestoreEquality(
+            restoredApple,
+            sourceApple,
+            check: "apple-daily",
+            completed: &checks
+        )
+
+        let essentialStart =
+            fixedEndExclusive - context.plan.essentialHistoryDays * secondsPerDay
+        let sourceBattery = try await sourceStore.batterySamples(
+            deviceId: deviceID,
+            from: essentialStart,
+            to: fixedEndExclusive - 1,
+            limit: 1_000_000
+        )
+        let restoredBattery = try await restored.batterySamples(
+            deviceId: deviceID,
+            from: essentialStart,
+            to: fixedEndExclusive - 1,
+            limit: 1_000_000
+        )
+        try requireRestoreEquality(
+            restoredBattery,
+            sourceBattery,
+            check: "battery-samples",
+            completed: &checks
+        )
+
+        let rawStart = fixedEndExclusive - context.plan.rawHistoryDays * secondsPerDay
+        let sourceWaveforms = try await sourceStore.ppgWaveformSamples(
+            deviceId: deviceID,
+            from: rawStart,
+            to: fixedEndExclusive - 1,
+            limit: 1_000_000
+        )
+        let restoredWaveforms = try await restored.ppgWaveformSamples(
+            deviceId: deviceID,
+            from: rawStart,
+            to: fixedEndExclusive - 1,
+            limit: 1_000_000
+        )
+        try requireRestoreEquality(
+            restoredWaveforms,
+            sourceWaveforms,
+            check: "ppg-waveform-samples",
+            completed: &checks
+        )
+
+        let sourcePending = try await sourceStore.pendingRawBatches(limit: 1_000)
+        let restoredPending = try await restored.pendingRawBatches(limit: 1_000)
+        try requireRestoreEquality(
+            restoredPending,
+            sourcePending,
+            check: "raw-outbox-metadata",
+            completed: &checks
+        )
+        for batch in sourcePending {
+            let sourceFrames = try await sourceStore.rawFrames(batchId: batch.batchId)
+            let restoredFrames = try await restored.rawFrames(batchId: batch.batchId)
+            guard restoredFrames == sourceFrames else {
+                throw HistoryHarnessError.restoreContentMismatch(
+                    "raw-outbox-frames:\(batch.batchId)"
+                )
+            }
+        }
+        checks.append("raw-outbox-all-frame-bytes")
+
+        let restoredExportURL = try await restored.exportRawCSV(
+            deviceId: deviceID,
+            since: TimeInterval(context.queryStart)
+        )
+        defer { try? FileManager.default.removeItem(at: restoredExportURL) }
+        let restoredExportData = try Data(contentsOf: restoredExportURL)
+        try requireRestoreEquality(
+            restoredExportData,
+            context.expectedRawExportData,
+            check: "raw-csv-24h-bytes",
+            completed: &checks
+        )
+
+        return RestoreVerification(
+            resultCount: restoredStats.decodedRows
+                + restoredDaily.count
+                + sourceMetricKeys.count
+                + sourceSleeps.count
+                + sourceJournal.count
+                + sourceWorkouts.count
+                + sourceApple.count
+                + sourceBattery.count
+                + sourceWaveforms.count
+                + sourcePending.count,
+            checks: checks
+        )
     }
 
     private static func requireRestoreEquality<T: Equatable>(
