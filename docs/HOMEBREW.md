@@ -48,9 +48,12 @@ repository variables `NOOP_HOMEBREW_FORGE_DOMAIN` and
 `NOOP_HOMEBREW_FORGE_ORG`, and provision repository secret
 `NOOP_HOMEBREW_FORGE_TOKEN` with write access only to the Forgejo
 `homebrew-noop` repository. The GitHub tap remains required and canonical.
+The Forgejo coordinates and write token are not placed in the publication
+process environment unless this nested opt-in is true.
 If the optional mirror fails after the canonical tap updates, the workflow
-fails and can be retried for the same version; it never reports the requested
-mirror as successful when only GitHub was updated.
+fails and can be retried for the same version. When the GitHub cask is already
+current, that retry still pushes the exact canonical tap commit to Forgejo; it
+never reports the requested mirror as successful when only GitHub was updated.
 
 If publication fails after the immutable app release is public, manually
 dispatch `Homebrew cask publication` for the same version. The workflow

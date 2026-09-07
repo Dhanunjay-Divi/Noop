@@ -55,6 +55,39 @@ class HomebrewHelperTests(unittest.TestCase):
         )
         self.assertNotIn("⚠ Forge mirror push failed", source)
 
+    def test_already_current_github_tap_still_retries_forge_mirror(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        unchanged = source.index(
+            "Homebrew cask already current for ${VER} on GitHub."
+        )
+        forge_push = source.index(
+            'push --quiet "$FORGE_TAP_URL" HEAD:main'
+        )
+        self.assertLess(unchanged, forge_push)
+        self.assertNotIn(
+            "Homebrew cask already current for ${VER} — nothing to push.",
+            source,
+        )
+
+    def test_each_git_push_receives_only_its_host_token(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("export GH_TOKEN", source)
+        self.assertNotIn("export FORGE_TOKEN", source)
+        self.assertIn(
+            'GH_TOKEN="$GH_TOKEN" TAP_ORG="$TAP_ORG" \\\n'
+            "    git -c credential.helper=",
+            source,
+        )
+        self.assertIn(
+            'FORGE_TOKEN="$FORGE_TOKEN" FORGE_ORG="$FORGE_ORG" \\\n'
+            "    git -c credential.helper=",
+            source,
+        )
+        self.assertLess(
+            source.index("unset GH_TOKEN"),
+            source.index('push --quiet "$FORGE_TAP_URL" HEAD:main'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -210,11 +210,13 @@ external approval, signing authority, or elapsed production operation.
   secrets to the reusable workflow, and fail the requested mirror operation
   visibly if the canonical GitHub tap succeeds but the Forgejo push fails.
 - Added a bounded Forgejo semantic-version history gate before every release
-  create or update. It inspects at most 500 release records, ignores drafts,
-  prereleases, and unrelated non-semantic tags, allows an idempotent retry, and
-  rejects an older target than the latest published stable mirror. Exact-tag
-  lookup now distinguishes a missing release from transport or server failure
-  instead of treating every lookup failure as permission to create.
+  create or update. It inspects at most 500 records in each bounded published
+  and draft view, retains interrupted draft refreshes in the rollback
+  baseline, ignores prereleases and unrelated non-semantic tags, allows an
+  idempotent retry, and rejects an older target than the latest stable mirror.
+  Exact-tag lookup now distinguishes a missing release from transport or
+  server failure instead of treating every lookup failure as permission to
+  create.
 - Bound exact-SHA required-check verification to the owning GitHub Actions
   workflow as well as the Actions application. The verifier obtains each
   required check's Actions run, requires the exact requested head SHA and
@@ -222,6 +224,23 @@ external approval, signing authority, or elapsed production operation.
   workflow. A repository-wide structural guard also requires exactly one
   source workflow owner for every protected context. Release and repair jobs
   have the explicit `actions: read` permission needed for that validation.
+- Closed the final independent release-integrity findings before merge.
+  Required-check ownership now treats every dynamic job display name as a
+  wildcard and rejects it when it could resolve to any protected context;
+  inline or differently indented jobs and noncanonical property keys also fail
+  closed, as do folded, aliased, tagged, escaped, or comment-ambiguous display
+  names. A job without a display name is checked by its job ID.
+  Forgejo asset uploads have both connect and total timeouts under a bounded
+  workflow job, clear the complete attachment set returned by Forgejo's
+  non-paginated release-asset API under a 10 MiB JSON-response bound, require
+  exact hosted attachment URLs, names, sizes, types, and byte content, and
+  return a changed post-publication set or payload to a response-verified
+  draft. An already exact release is
+  idempotent without mutation. The Homebrew-to-Forgejo repair path now runs
+  even when the canonical tap is already current, and each Git host process
+  receives only its own scoped credential. Optional Forgejo variables and
+  credentials are absent from the Homebrew publication environment unless the
+  nested mirror opt-in is selected.
 - Removed the remaining legacy vendor name from generated Homebrew package
   metadata. The reviewed terminology snapshot now contains 17,370 classified
   occurrences across 1,508 path/category groups, one active/core occurrence
@@ -322,7 +341,7 @@ external approval, signing authority, or elapsed production operation.
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | 123 repository-tool tests and the exact 86-test release-control selection pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 14 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
+| Staged repository policy matrix | 135 repository-tool tests and the exact 98-test release-control selection pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 14 workflows parse and pass `actionlint`; the changed Bash helpers pass syntax and ShellCheck | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
 | Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; every protected name has one configured workflow owner; live read-only verification bound all nine checks on commit `bf77f902` to their exact Actions workflow and head SHA, then correctly reported only the two intentionally canceled platform runs as failed; release source mutation is rejected, both build counters must advance from published `v9.1.1`, exact-SHA verification is required twice, AltStore history is backed up before replacement, ambiguous channel recovery fails closed, Forgejo rollback is rejected before mutation, and nested Homebrew mirroring reaches a scoped, manually repairable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters or a same-named Actions job, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, or history-dropping source | A completed signed production release, public Homebrew/Forgejo tap, or provisioned mirror credentials |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 

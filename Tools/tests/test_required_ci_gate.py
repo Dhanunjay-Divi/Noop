@@ -90,6 +90,167 @@ class RequiredCIGateTests(unittest.TestCase):
             ):
                 GATE.check_required_context_ownership(root, self.config)
 
+    def test_dynamic_job_name_cannot_resolve_to_required_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            workflow = (
+                root / ".github" / "workflows" / "release-controls.yml"
+            )
+            source = workflow.read_text(encoding="utf-8")
+            source = source.replace(
+                "jobs:\n",
+                "jobs:\n"
+                "  dynamic-duplicate:\n"
+                "    name: ${{ 'release-controls' }}\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: true\n",
+                1,
+            )
+            workflow.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError,
+                "dynamic job name .* can resolve to required context",
+            ):
+                GATE.check_required_context_ownership(root, self.config)
+
+    def test_unrelated_matrix_job_name_remains_allowed(self) -> None:
+        self.assertFalse(
+            GATE._dynamic_name_can_resolve_to_context(
+                "swift-packages (${{ matrix.package }})",
+                "swift-packages-required",
+            )
+        )
+
+    def test_job_id_without_display_name_cannot_duplicate_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            rogue = root / ".github" / "workflows" / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\n"
+                "on: [push]\n"
+                "jobs:\n"
+                "  release-controls:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "must have exactly one workflow owner"
+            ):
+                GATE.check_required_context_ownership(root, self.config)
+
+    def test_folded_job_display_name_is_rejected_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            rogue = root / ".github" / "workflows" / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\n"
+                "on: [push]\n"
+                "jobs:\n"
+                "  folded:\n"
+                "    name: >-\n"
+                "      release-controls\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "uses an unsupported display name"
+            ):
+                GATE.check_required_context_ownership(root, self.config)
+
+    def test_inline_job_mapping_is_rejected_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            rogue = root / ".github" / "workflows" / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\n"
+                "on: [push]\n"
+                "jobs:\n"
+                "  duplicate: {name: release-controls, "
+                "runs-on: ubuntu-latest, steps: [{run: true}]}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "canonical two-space block syntax"
+            ):
+                GATE.check_required_context_ownership(root, self.config)
+
+    def test_noncanonical_job_indentation_is_rejected_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            rogue = root / ".github" / "workflows" / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\n"
+                "on: [push]\n"
+                "jobs:\n"
+                "    duplicate:\n"
+                "      name: release-controls\n"
+                "      runs-on: ubuntu-latest\n"
+                "      steps:\n"
+                "        - run: true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "canonical two-space block syntax"
+            ):
+                GATE.check_required_context_ownership(root, self.config)
+
+    def test_noncanonical_job_name_key_is_rejected_fail_closed(self) -> None:
+        for name_line in (
+            '    "name": release-controls\n',
+            "    name : release-controls\n",
+        ):
+            with self.subTest(name_line=name_line):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    shutil.copytree(
+                        ROOT / ".github" / "workflows",
+                        root / ".github" / "workflows",
+                    )
+                    rogue = root / ".github" / "workflows" / "rogue.yml"
+                    rogue.write_text(
+                        "name: Rogue\n"
+                        "on: [push]\n"
+                        "jobs:\n"
+                        "  duplicate:\n"
+                        f"{name_line}"
+                        "    runs-on: ubuntu-latest\n"
+                        "    steps:\n"
+                        "      - run: true\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        GATE.GateError,
+                        "must use canonical property key syntax",
+                    ):
+                        GATE.check_required_context_ownership(
+                            root, self.config
+                        )
+
     def test_universal_required_workflow_cannot_be_path_filtered(self) -> None:
         workflow = self.config["universalWorkflows"][2]
         source = (ROOT / workflow["path"]).read_text(encoding="utf-8")
@@ -208,7 +369,9 @@ class RequiredCIGateTests(unittest.TestCase):
             release,
         )
         self.assertIn(
-            "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
+            "NOOP_HOMEBREW_FORGE_TOKEN: ${{ "
+            "inputs.publish_homebrew_forgejo && "
+            "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
             release,
         )
         self.assertNotIn("secrets: inherit", release)
@@ -233,7 +396,12 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertIn("publish_forgejo:", homebrew)
         self.assertIn("Tools/required-ci-gate.py verify-github", homebrew)
         self.assertIn("Tools/update-homebrew-cask.sh", homebrew)
-        self.assertIn("NOOP_HOMEBREW_FORGE_TOKEN", homebrew)
+        self.assertIn(
+            "NOOP_HOMEBREW_FORGE_TOKEN: ${{ "
+            "inputs.publish_forgejo && "
+            "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
+            homebrew,
+        )
         helper = (ROOT / "Tools/update-homebrew-cask.sh").read_text(
             encoding="utf-8"
         )
@@ -255,6 +423,7 @@ class RequiredCIGateTests(unittest.TestCase):
             dispatcher,
         )
         self.assertIn("workflow_dispatch:", forgejo)
+        self.assertIn("timeout-minutes: 45", forgejo)
         self.assertIn("Tools/required-ci-gate.py verify-github", forgejo)
         self.assertIn("Tools/forgejo-release.sh", forgejo)
 

@@ -41,7 +41,6 @@ done
 GH_TOKEN_FILE="$HOME/.config/noop/gh_token"        # canonical tap host (github.com)
 [ -f "$ZIP" ] || { echo "missing release zip: $ZIP" >&2; exit 1; }
 
-export GH_TOKEN TAP_ORG
 if [ -n "${NOOP_HOMEBREW_GITHUB_TOKEN:-}" ]; then
   GH_TOKEN="$NOOP_HOMEBREW_GITHUB_TOKEN"
 elif [ -f "$GH_TOKEN_FILE" ]; then
@@ -50,6 +49,7 @@ else
   echo "missing Homebrew tap GitHub token" >&2
   exit 1
 fi
+unset NOOP_HOMEBREW_GITHUB_TOKEN
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 GH_TAP_URL="https://github.com/$TAP_ORG/homebrew-noop.git"
 
@@ -78,6 +78,7 @@ if [ "${NOOP_HOMEBREW_FORGE:-0}" = "1" ]; then
     echo "missing Homebrew Forgejo mirror token" >&2
     exit 1
   fi
+  unset NOOP_HOMEBREW_FORGE_TOKEN
   FORGE_TAP_URL="https://$DOMAIN/$FORGE_ORG/homebrew-noop.git"
 fi
 
@@ -109,25 +110,34 @@ EOF
 
 cd "$TMP/tap"
 git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" add Casks/noop.rb
+HOME_BREW_CHANGED=1
 if git rev-parse HEAD >/dev/null 2>&1 && git diff --cached --quiet; then
-  echo "Homebrew cask already current for ${VER} — nothing to push."; exit 0
+  HOME_BREW_CHANGED=0
+  echo "Homebrew cask already current for ${VER} on GitHub."
+else
+  git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" \
+    commit --quiet -m "noop ${VER}"
 fi
-git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" commit --quiet -m "noop ${VER}"
 
 # Push to the explicitly configured GitHub tap (required).
-# shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
-git -c credential.helper='!f() { echo "username=$TAP_ORG"; echo "password=$GH_TOKEN"; }; f' \
-    push --quiet "$GH_TAP_URL" HEAD:main
-echo "✓ Homebrew cask updated to ${VER} on GitHub (sha256 ${SHA:0:12}…)"
+if [ "$HOME_BREW_CHANGED" = "1" ]; then
+  # shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
+  GH_TOKEN="$GH_TOKEN" TAP_ORG="$TAP_ORG" \
+    git -c credential.helper='!f() { echo "username=$TAP_ORG"; echo "password=$GH_TOKEN"; }; f' \
+      push --quiet "$GH_TAP_URL" HEAD:main
+  echo "✓ Homebrew cask updated to ${VER} on GitHub (sha256 ${SHA:0:12}…)"
+fi
+unset GH_TOKEN
 
 if [ -n "$FORGE_TAP_URL" ]; then
-  export FORGE_TOKEN FORGE_ORG
   # shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
-  git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
-    push --quiet "$FORGE_TAP_URL" HEAD:main || {
+  FORGE_TOKEN="$FORGE_TOKEN" FORGE_ORG="$FORGE_ORG" \
+    git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
+      push --quiet "$FORGE_TAP_URL" HEAD:main || {
     echo "Forge mirror push failed; the canonical GitHub tap is current." >&2
     exit 1
   }
+  unset FORGE_TOKEN
   echo "✓ Mirrored cask to the configured Forge host."
 else
   echo "Forge mirror disabled (set NOOP_HOMEBREW_FORGE=1 plus FORGE_* to enable)."

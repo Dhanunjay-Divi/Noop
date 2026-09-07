@@ -15,10 +15,10 @@ SPEC.loader.exec_module(GATE)
 
 class ForgejoVersionGateTests(unittest.TestCase):
     def test_first_publication_has_no_existing_version(self) -> None:
-        self.assertIsNone(GATE.latest_published_version([]))
+        self.assertIsNone(GATE.latest_stable_history_version([]))
         GATE.validate("9.2.1", None)
 
-    def test_latest_stable_semantic_version_is_selected(self) -> None:
+    def test_latest_stable_history_includes_interrupted_draft_refresh(self) -> None:
         releases = [
             {"tag_name": "v9.2.1", "draft": False, "prerelease": False},
             {"tag_name": "v10.0.0", "draft": True, "prerelease": False},
@@ -26,7 +26,10 @@ class ForgejoVersionGateTests(unittest.TestCase):
             {"tag_name": "stable", "draft": False, "prerelease": False},
             {"tag_name": "v9.3.0", "draft": False, "prerelease": False},
         ]
-        self.assertEqual(GATE.latest_published_version(releases), "9.3.0")
+        self.assertEqual(
+            GATE.latest_stable_history_version(releases),
+            "10.0.0",
+        )
 
     def test_same_and_newer_versions_are_allowed(self) -> None:
         GATE.validate("9.2.1", "9.2.1")
@@ -38,9 +41,9 @@ class ForgejoVersionGateTests(unittest.TestCase):
 
     def test_release_history_must_have_typed_entries(self) -> None:
         with self.assertRaisesRegex(GATE.GateError, "JSON array"):
-            GATE.latest_published_version({})
+            GATE.latest_stable_history_version({})
         with self.assertRaisesRegex(GATE.GateError, "invalid entry"):
-            GATE.latest_published_version(
+            GATE.latest_stable_history_version(
                 [{"tag_name": "v9.2.1", "draft": "false", "prerelease": False}]
             )
 

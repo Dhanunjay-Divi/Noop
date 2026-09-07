@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject a Forgejo mirror release older than its published stable history."""
+"""Reject a Forgejo mirror release older than its stable release history."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def parse_version(value: str, label: str) -> tuple[int, int, int]:
     return int(major), int(minor), int(patch)
 
 
-def latest_published_version(releases: Any) -> str | None:
+def latest_stable_history_version(releases: Any) -> str | None:
     if not isinstance(releases, list):
         raise GateError("Forgejo release history must be a JSON array")
     latest: tuple[tuple[int, int, int], str] | None = None
@@ -41,13 +41,16 @@ def latest_published_version(releases: Any) -> str | None:
             or not isinstance(tag, str)
         ):
             raise GateError("Forgejo release history contains an invalid entry")
-        if draft or prerelease:
+        # A previously published release is changed back to draft while its
+        # canonical assets are repaired. Keep that version in the rollback
+        # baseline so an interrupted repair cannot permit an older release.
+        if prerelease:
             continue
         match = TAG.fullmatch(tag)
         if match is None:
             continue
         version = match.group(1)
-        parsed = parse_version(version, "published Forgejo version")
+        parsed = parse_version(version, "stable Forgejo version")
         if latest is None or parsed > latest[0]:
             latest = parsed, version
     return latest[1] if latest is not None else None
@@ -57,7 +60,7 @@ def validate(target: str, current: str | None) -> None:
     target_value = parse_version(target, "target version")
     if current is None:
         return
-    current_value = parse_version(current, "published Forgejo version")
+    current_value = parse_version(current, "stable Forgejo version")
     if target_value < current_value:
         raise GateError("Forgejo mirror version cannot move backward")
 
@@ -68,7 +71,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         releases = json.load(sys.stdin)
-        current = latest_published_version(releases)
+        current = latest_stable_history_version(releases)
         validate(args.target, current)
     except (json.JSONDecodeError, OSError) as error:
         print(

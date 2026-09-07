@@ -65,9 +65,9 @@ jobs:
           NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}
           NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
           PUBLISH_FORGEJO: ${{ inputs.publish_forgejo }}
-          FORGE_DOMAIN: ${{ vars.NOOP_HOMEBREW_FORGE_DOMAIN }}
-          FORGE_ORG: ${{ vars.NOOP_HOMEBREW_FORGE_ORG }}
-          NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}
+          FORGE_DOMAIN: ${{ inputs.publish_forgejo && vars.NOOP_HOMEBREW_FORGE_DOMAIN || '' }}
+          FORGE_ORG: ${{ inputs.publish_forgejo && vars.NOOP_HOMEBREW_FORGE_ORG || '' }}
+          NOOP_HOMEBREW_FORGE_TOKEN: ${{ inputs.publish_forgejo && secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}
         run: |
           set -euo pipefail
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {

@@ -22,7 +22,12 @@ SAFE_JOB = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_SHA = re.compile(r"^[0-9a-f]{40}$")
 JOB_HEADER = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_-]*):[ \t]*$", re.MULTILINE)
-JOB_NAME = re.compile(r"""^    name:\s*(['"]?)([^'"\n]+)\1\s*$""", re.MULTILINE)
+JOB_HEADER_LINE = re.compile(r"^  [A-Za-z_][A-Za-z0-9_-]*:[ \t]*$")
+JOB_PROPERTY_LINE = re.compile(
+    r"^    [A-Za-z_][A-Za-z0-9_-]*:(?:[ \t].*)?$"
+)
+JOB_NAME = re.compile(r"^    name:\s*(.*?)\s*$", re.MULTILINE)
+GITHUB_EXPRESSION = re.compile(r"\$\{\{.*?\}\}")
 
 
 class GateError(RuntimeError):
@@ -149,8 +154,39 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
 def _jobs_section(text: str) -> str:
     marker = "\njobs:\n"
     if marker not in text:
-        raise GateError("workflow has no jobs section")
-    return text.split(marker, 1)[1]
+        raise GateError("workflow must use a canonical jobs block")
+    remainder = text.split(marker, 1)[1]
+    lines = remainder.splitlines()
+    jobs: list[str] = []
+    saw_job = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            jobs.append(line)
+            continue
+        if line.startswith("\t"):
+            raise GateError("workflow jobs cannot use tab indentation")
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            break
+        if not saw_job:
+            if JOB_HEADER_LINE.fullmatch(line) is None:
+                raise GateError(
+                    "workflow jobs must use canonical two-space block syntax"
+                )
+            saw_job = True
+        if indent < 2:
+            raise GateError(
+                "workflow jobs must use canonical two-space block syntax"
+            )
+        if indent == 2 and JOB_HEADER_LINE.fullmatch(line) is None:
+            raise GateError(
+                "workflow jobs must use canonical two-space block syntax"
+            )
+        jobs.append(line)
+    if not saw_job:
+        raise GateError("workflow has no jobs")
+    return "\n".join(jobs)
 
 
 def _job_section(text: str, job_id: str) -> str:
@@ -181,6 +217,59 @@ def required_workflow_paths(config: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _job_display_name(section: str, job_id: str) -> str:
+    for line in section.splitlines()[1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 4 and JOB_PROPERTY_LINE.fullmatch(line) is None:
+            raise GateError(
+                f"job {job_id} must use canonical property key syntax"
+            )
+    match = JOB_NAME.search(section)
+    if match is None:
+        return job_id
+    name = match.group(1).strip()
+    if (
+        len(name) >= 2
+        and name[0] in {"'", '"'}
+        and name[-1] == name[0]
+    ):
+        name = name[1:-1]
+    if not name:
+        raise GateError(f"job {job_id} has an empty display name")
+    if (
+        name[0] in {"|", ">", "&", "*", "!", "{", "["}
+        or "#" in name
+        or "\\" in name
+    ):
+        raise GateError(f"job {job_id} uses an unsupported display name")
+    return name
+
+
+def _dynamic_name_can_resolve_to_context(name: str, context: str) -> bool:
+    if "${{" not in name and "}}" not in name:
+        return name == context
+    matches = list(GITHUB_EXPRESSION.finditer(name))
+    if not matches:
+        return True
+    fragments: list[str] = []
+    cursor = 0
+    for match in matches:
+        fragment = name[cursor : match.start()]
+        if "${{" in fragment or "}}" in fragment:
+            return True
+        fragments.append(fragment)
+        cursor = match.end()
+    final_fragment = name[cursor:]
+    if "${{" in final_fragment or "}}" in final_fragment:
+        return True
+    fragments.append(final_fragment)
+    pattern = "^" + ".*".join(re.escape(fragment) for fragment in fragments) + "$"
+    return re.fullmatch(pattern, context) is not None
+
+
 def check_required_context_ownership(
     root: Path, config: dict[str, Any]
 ) -> None:
@@ -203,10 +292,7 @@ def check_required_context_ownership(
             text = path.read_text(encoding="utf-8")
         except OSError as error:
             raise GateError("GitHub Actions workflow cannot be read") from error
-        try:
-            jobs = _jobs_section(text)
-        except GateError:
-            continue
+        jobs = _jobs_section(text)
         matches = list(JOB_HEADER.finditer(jobs))
         for index, match in enumerate(matches):
             end = (
@@ -215,14 +301,19 @@ def check_required_context_ownership(
                 else len(jobs)
             )
             section = jobs[match.start() : end]
-            name_match = JOB_NAME.search(section)
-            if name_match is None:
-                continue
-            name = name_match.group(2).strip()
-            if name not in owners:
-                continue
             relative = path.relative_to(root).as_posix()
-            owners[name].append((relative, match.group(1)))
+            job_id = match.group(1)
+            name = _job_display_name(section, job_id)
+            for context in owners:
+                if "${{" in name or "}}" in name:
+                    if _dynamic_name_can_resolve_to_context(name, context):
+                        raise GateError(
+                            f"dynamic job name {relative}:{job_id} can resolve "
+                            f"to required context {context}"
+                        )
+                    continue
+                if name == context:
+                    owners[context].append((relative, job_id))
 
     for context, expected_path in expected.items():
         matches = owners[context]
@@ -234,6 +325,10 @@ def check_required_context_ownership(
         if actual_path != expected_path:
             raise GateError(
                 f"required context {context} is owned by an unexpected workflow"
+            )
+        if matches[0][1] != context:
+            raise GateError(
+                f"required context {context} is owned by an unexpected job"
             )
 
 
@@ -402,7 +497,9 @@ def check_release_workflow(root: Path) -> None:
     forgejo = _job_section(text, "forgejo")
     for item in (
         "NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
-        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
+        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ "
+        "inputs.publish_homebrew_forgejo && "
+        "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
     ):
         if item not in homebrew:
             raise GateError(f"Homebrew release job lacks scoped secret {item}")
@@ -478,9 +575,13 @@ def check_homebrew_workflow(root: Path) -> None:
         'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
         "NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}",
         "NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
-        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
-        "FORGE_DOMAIN: ${{ vars.NOOP_HOMEBREW_FORGE_DOMAIN }}",
-        "FORGE_ORG: ${{ vars.NOOP_HOMEBREW_FORGE_ORG }}",
+        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ "
+        "inputs.publish_forgejo && "
+        "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
+        "FORGE_DOMAIN: ${{ inputs.publish_forgejo && "
+        "vars.NOOP_HOMEBREW_FORGE_DOMAIN || '' }}",
+        "FORGE_ORG: ${{ inputs.publish_forgejo && "
+        "vars.NOOP_HOMEBREW_FORGE_ORG || '' }}",
         'export NOOP_HOMEBREW_FORGE=1',
         'SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}"',
         'gh api "repos/${NOOP_HOMEBREW_TAP_ORG}/homebrew-noop"',
@@ -512,6 +613,7 @@ def check_forgejo_workflow(root: Path) -> None:
         "FORGE_ORG: ${{ vars.NOOP_FORGEJO_ORG }}",
         "FORGE_REPO: ${{ vars.NOOP_FORGEJO_REPO }}",
         "NOOP_FORGEJO_TOKEN: ${{ secrets.NOOP_FORGEJO_TOKEN }}",
+        "timeout-minutes: 45",
         'gh release download "$TAG"',
         'test "$(stat -c %s "$DOWNLOAD_DIR/$asset")" = "$SIZE"',
         'sha256sum --check "NOOP-android-v${VERSION}.apk.sha256"',
@@ -532,8 +634,14 @@ def check_forgejo_workflow(root: Path) -> None:
         "Tools/forgejo-version-gate.py",
         'releases?limit=50&page=$page',
         "Forgejo release history exceeded the bounded page limit",
+        "--max-filesize 10485760",
         'case "$REL_STATUS" in',
         "Forgejo release lookup returned an unexpected status",
+        "--connect-timeout 10 --max-time 600",
+        "--location -fsS --output",
+        "Forgejo release asset set is not exact",
+        '.type == "attachment"',
+        "return_release_to_draft",
     ):
         if item not in helper:
             raise GateError(f"Forgejo release helper lacks {item}")

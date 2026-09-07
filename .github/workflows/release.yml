@@ -515,7 +515,7 @@ jobs:
       publish_forgejo: ${{ inputs.publish_homebrew_forgejo }}
     secrets:
       NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
-      NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}
+      NOOP_HOMEBREW_FORGE_TOKEN: ${{ inputs.publish_homebrew_forgejo && secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}
 
   # Forgejo is an explicit optional mirror. GitHub remains canonical, and the
   # called workflow is manually retryable without rebuilding the immutable
