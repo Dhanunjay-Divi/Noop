@@ -7,18 +7,32 @@ on:
         description: Published production version to expose, for example 9.2.1
         required: true
         type: string
+      publish_forgejo:
+        description: Also mirror the cask to the configured Forgejo tap
+        required: false
+        type: boolean
+        default: false
     secrets:
       NOOP_HOMEBREW_TAP_TOKEN:
         description: Fine-grained write token scoped only to the public tap
         required: true
+      NOOP_HOMEBREW_FORGE_TOKEN:
+        description: Write token scoped only to the Forgejo tap
+        required: false
   workflow_dispatch:
     inputs:
       version:
         description: Published production version to expose, for example 9.2.1
         required: true
         type: string
+      publish_forgejo:
+        description: Also mirror the cask to the configured Forgejo tap
+        required: false
+        type: boolean
+        default: false
 
 permissions:
+  actions: read
   checks: read
   contents: read
 
@@ -50,6 +64,10 @@ jobs:
           VERSION: ${{ inputs.version }}
           NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}
           NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
+          PUBLISH_FORGEJO: ${{ inputs.publish_forgejo }}
+          FORGE_DOMAIN: ${{ vars.NOOP_HOMEBREW_FORGE_DOMAIN }}
+          FORGE_ORG: ${{ vars.NOOP_HOMEBREW_FORGE_ORG }}
+          NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}
         run: |
           set -euo pipefail
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -64,6 +82,17 @@ jobs:
             echo "::error::Repository secret NOOP_HOMEBREW_TAP_TOKEN is required."
             exit 1
           }
+          if [ "$PUBLISH_FORGEJO" = "true" ]; then
+            for name in FORGE_DOMAIN FORGE_ORG NOOP_HOMEBREW_FORGE_TOKEN; do
+              test -n "${!name:-}" || {
+                echo "::error::Missing required Homebrew Forgejo mirror configuration: ${name}."
+                exit 1
+              }
+            done
+            export NOOP_HOMEBREW_FORGE=1
+          else
+            export NOOP_HOMEBREW_FORGE=0
+          fi
 
           SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')
           [ "$SOURCE_VISIBILITY" = "public" ] || {

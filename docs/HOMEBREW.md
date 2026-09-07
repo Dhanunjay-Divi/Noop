@@ -42,6 +42,16 @@ Automated publication additionally requires:
 - repository secret `NOOP_HOMEBREW_TAP_TOKEN` scoped to **Contents: read and
   write** on only `<owner>/homebrew-noop`.
 
+To mirror that tap to Forgejo as part of the same guarded publication, also set
+`NOOP_HOMEBREW_FORGE=1` when dispatching `Tools/release.sh`, configure
+repository variables `NOOP_HOMEBREW_FORGE_DOMAIN` and
+`NOOP_HOMEBREW_FORGE_ORG`, and provision repository secret
+`NOOP_HOMEBREW_FORGE_TOKEN` with write access only to the Forgejo
+`homebrew-noop` repository. The GitHub tap remains required and canonical.
+If the optional mirror fails after the canonical tap updates, the workflow
+fails and can be retried for the same version; it never reports the requested
+mirror as successful when only GitHub was updated.
+
 If publication fails after the immutable app release is public, manually
 dispatch `Homebrew cask publication` for the same version. The workflow
 revalidates the release, exact-SHA checks, platform versions, artifact size,

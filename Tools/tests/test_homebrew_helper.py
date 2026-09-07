@@ -47,6 +47,14 @@ class HomebrewHelperTests(unittest.TestCase):
         self.assertIn("invalid Homebrew release version", result.stderr)
         self.assertNotIn("synthetic-secret", result.stdout + result.stderr)
 
+    def test_requested_forge_mirror_failure_is_not_hidden(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "Forge mirror push failed; the canonical GitHub tap is current.",
+            source,
+        )
+        self.assertNotIn("⚠ Forge mirror push failed", source)
+
 
 if __name__ == "__main__":
     unittest.main()

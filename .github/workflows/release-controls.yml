@@ -39,6 +39,7 @@ jobs:
           Tools.tests.test_android_managed_device_retry
           Tools.tests.test_calibration_parity_audit
           Tools.tests.test_forgejo_release_helper
+          Tools.tests.test_forgejo_version_gate
           Tools.tests.test_homebrew_helper
           Tools.tests.test_homebrew_version_gate
           Tools.tests.test_required_ci_gate

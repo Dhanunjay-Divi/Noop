@@ -31,6 +31,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_homebrew_forgejo:
+        description: "Also mirror the Homebrew tap to its configured Forgejo repository"
+        required: false
+        type: boolean
+        default: false
       publish_forgejo:
         description: "Mirror the verified canonical release to the configured Forgejo repository"
         required: false
@@ -38,6 +43,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   checks: read
   contents: write
 
@@ -63,6 +69,8 @@ jobs:
       - name: Require exact protected-main source
         env:
           EXPECTED_RELEASE_SHA: ${{ github.event.inputs.release_sha }}
+          PUBLISH_HOMEBREW: ${{ inputs.publish_homebrew }}
+          PUBLISH_HOMEBREW_FORGEJO: ${{ inputs.publish_homebrew_forgejo }}
         run: |
           set -euo pipefail
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -75,6 +83,11 @@ jobs:
             echo "::error::Protected main advanced after release verification; review and dispatch the new exact commit."
             exit 1
           }
+          if [ "$PUBLISH_HOMEBREW_FORGEJO" = "true" ] &&
+             [ "$PUBLISH_HOMEBREW" != "true" ]; then
+            echo "::error::The Homebrew Forgejo mirror requires Homebrew publication."
+            exit 1
+          fi
       - name: Enforce repository release controls
         run: python3 Tools/release-control-gate.py check
       - name: Require every merge check on the exact release commit
@@ -479,6 +492,7 @@ jobs:
   altstore:
     needs: [bump, publish]
     permissions:
+      actions: read
       checks: read
       contents: write
     uses: ./.github/workflows/altstore-source.yml
@@ -492,12 +506,16 @@ jobs:
     needs: [bump, publish]
     if: ${{ inputs.publish_homebrew }}
     permissions:
+      actions: read
       checks: read
       contents: read
     uses: ./.github/workflows/homebrew-cask.yml
     with:
       version: ${{ needs.bump.outputs.ver }}
-    secrets: inherit
+      publish_forgejo: ${{ inputs.publish_homebrew_forgejo }}
+    secrets:
+      NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
+      NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}
 
   # Forgejo is an explicit optional mirror. GitHub remains canonical, and the
   # called workflow is manually retryable without rebuilding the immutable
@@ -506,9 +524,11 @@ jobs:
     needs: [bump, publish]
     if: ${{ inputs.publish_forgejo }}
     permissions:
+      actions: read
       checks: read
       contents: read
     uses: ./.github/workflows/forgejo-release.yml
     with:
       version: ${{ needs.bump.outputs.ver }}
-    secrets: inherit
+    secrets:
+      NOOP_FORGEJO_TOKEN: ${{ secrets.NOOP_FORGEJO_TOKEN }}

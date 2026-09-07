@@ -22,6 +22,7 @@ SAFE_JOB = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_SHA = re.compile(r"^[0-9a-f]{40}$")
 JOB_HEADER = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_-]*):[ \t]*$", re.MULTILINE)
+JOB_NAME = re.compile(r"""^    name:\s*(['"]?)([^'"\n]+)\1\s*$""", re.MULTILINE)
 
 
 class GateError(RuntimeError):
@@ -170,6 +171,72 @@ def _needs(section: str, job_id: str) -> set[str]:
     return {item.strip() for item in match.group(1).split(",") if item.strip()}
 
 
+def required_workflow_paths(config: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for workflow in [
+        *config["universalWorkflows"],
+        *config["workflows"],
+    ]:
+        result[workflow["requiredJob"]] = workflow["path"]
+    return result
+
+
+def check_required_context_ownership(
+    root: Path, config: dict[str, Any]
+) -> None:
+    expected = required_workflow_paths(config)
+    owners: dict[str, list[tuple[str, str]]] = {
+        context: [] for context in expected
+    }
+    workflow_directory = root / ".github" / "workflows"
+    paths = sorted(
+        {
+            *workflow_directory.glob("*.yml"),
+            *workflow_directory.glob("*.yaml"),
+        }
+    )
+    if not paths:
+        raise GateError("repository has no GitHub Actions workflows")
+
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise GateError("GitHub Actions workflow cannot be read") from error
+        try:
+            jobs = _jobs_section(text)
+        except GateError:
+            continue
+        matches = list(JOB_HEADER.finditer(jobs))
+        for index, match in enumerate(matches):
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(jobs)
+            )
+            section = jobs[match.start() : end]
+            name_match = JOB_NAME.search(section)
+            if name_match is None:
+                continue
+            name = name_match.group(2).strip()
+            if name not in owners:
+                continue
+            relative = path.relative_to(root).as_posix()
+            owners[name].append((relative, match.group(1)))
+
+    for context, expected_path in expected.items():
+        matches = owners[context]
+        if len(matches) != 1:
+            raise GateError(
+                f"required context {context} must have exactly one workflow owner"
+            )
+        actual_path, _ = matches[0]
+        if actual_path != expected_path:
+            raise GateError(
+                f"required context {context} is owned by an unexpected workflow"
+            )
+
+
 def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
     path = root / workflow["path"]
     try:
@@ -281,6 +348,7 @@ def check_release_workflow(root: Path) -> None:
     except OSError as error:
         raise GateError("release workflow is missing") from error
     required_text = (
+        "actions: read",
         "checks: read",
         "ref: ${{ github.sha }}",
         "release_sha:",
@@ -297,9 +365,10 @@ def check_release_workflow(root: Path) -> None:
         "uses: ./.github/workflows/homebrew-cask.yml",
         "publish_forgejo:",
         "publish_homebrew:",
+        "publish_homebrew_forgejo:",
+        "The Homebrew Forgejo mirror requires Homebrew publication.",
         "if: ${{ inputs.publish_forgejo }}",
         "if: ${{ inputs.publish_homebrew }}",
-        "secrets: inherit",
         "Reverify required checks before publication",
         "--sha \"$RELEASE_SHA\"",
     )
@@ -323,6 +392,24 @@ def check_release_workflow(root: Path) -> None:
         text,
     ):
         raise GateError("release workflow cannot push directly to main")
+    for job_id in ("altstore", "homebrew", "forgejo"):
+        section = _job_section(text, job_id)
+        if "actions: read" not in section:
+            raise GateError(
+                f"release workflow job {job_id} cannot inspect workflow runs"
+            )
+    homebrew = _job_section(text, "homebrew")
+    forgejo = _job_section(text, "forgejo")
+    for item in (
+        "NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
+        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
+    ):
+        if item not in homebrew:
+            raise GateError(f"Homebrew release job lacks scoped secret {item}")
+    if "NOOP_FORGEJO_TOKEN: ${{ secrets.NOOP_FORGEJO_TOKEN }}" not in forgejo:
+        raise GateError("Forgejo release job lacks its scoped write secret")
+    if "secrets: inherit" in homebrew or "secrets: inherit" in forgejo:
+        raise GateError("release mirror jobs cannot inherit unrelated secrets")
 
 
 def check_altstore_workflow(root: Path) -> None:
@@ -332,6 +419,7 @@ def check_altstore_workflow(root: Path) -> None:
     except OSError as error:
         raise GateError("AltStore source workflow is missing") from error
     required_text = (
+        "actions: read",
         "workflow_call:",
         "workflow_dispatch:",
         'test "$GITHUB_REF" = "refs/heads/main"',
@@ -381,13 +469,19 @@ def check_homebrew_workflow(root: Path) -> None:
     except OSError as error:
         raise GateError("Homebrew cask workflow is missing") from error
     required_text = (
+        "actions: read",
         "workflow_call:",
         "workflow_dispatch:",
+        "publish_forgejo:",
         'test "$GITHUB_REF" = "refs/heads/main"',
         "Tools/required-ci-gate.py verify-github",
         'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
         "NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}",
         "NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
+        "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
+        "FORGE_DOMAIN: ${{ vars.NOOP_HOMEBREW_FORGE_DOMAIN }}",
+        "FORGE_ORG: ${{ vars.NOOP_HOMEBREW_FORGE_ORG }}",
+        'export NOOP_HOMEBREW_FORGE=1',
         'SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}"',
         'gh api "repos/${NOOP_HOMEBREW_TAP_ORG}/homebrew-noop"',
         'gh release download "$TAG"',
@@ -408,6 +502,7 @@ def check_forgejo_workflow(root: Path) -> None:
     except OSError as error:
         raise GateError("Forgejo release workflow is missing") from error
     required_text = (
+        "actions: read",
         "workflow_call:",
         "workflow_dispatch:",
         'test "$GITHUB_REF" = "refs/heads/main"',
@@ -428,6 +523,29 @@ def check_forgejo_workflow(root: Path) -> None:
     for item in required_text:
         if item not in text:
             raise GateError(f"Forgejo release workflow lacks {item}")
+    helper_path = root / "Tools" / "forgejo-release.sh"
+    try:
+        helper = helper_path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("Forgejo release helper is missing") from error
+    for item in (
+        "Tools/forgejo-version-gate.py",
+        'releases?limit=50&page=$page',
+        "Forgejo release history exceeded the bounded page limit",
+        'case "$REL_STATUS" in',
+        "Forgejo release lookup returned an unexpected status",
+    ):
+        if item not in helper:
+            raise GateError(f"Forgejo release helper lacks {item}")
+    gate = helper.index("Tools/forgejo-version-gate.py")
+    for mutation in (
+        'api -X POST "$API/repos/$ORG/$REPO/releases"',
+        'api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID"',
+    ):
+        if gate >= helper.index(mutation):
+            raise GateError(
+                "Forgejo version gate must run before release mutation"
+            )
 
 
 def check_release_control_test_suite(root: Path) -> None:
@@ -438,6 +556,7 @@ def check_release_control_test_suite(root: Path) -> None:
         raise GateError("release controls workflow is missing") from error
     required_modules = (
         "Tools.tests.test_forgejo_release_helper",
+        "Tools.tests.test_forgejo_version_gate",
         "Tools.tests.test_homebrew_helper",
         "Tools.tests.test_homebrew_version_gate",
     )
@@ -466,6 +585,7 @@ def check_local_release_entrypoint(root: Path) -> None:
         '--field "release_sha=$SOURCE_SHA"',
         '--field "publish_forgejo=$PUBLISH_FORGEJO"',
         '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
+        '--field "publish_homebrew_forgejo=$PUBLISH_HOMEBREW_FORGEJO"',
     )
     for item in required_text:
         if item not in text:
@@ -492,6 +612,7 @@ def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> N
         check_universal_workflow(root, workflow)
     for workflow in config["workflows"]:
         check_workflow(root, workflow)
+    check_required_context_ownership(root, config)
     check_release_workflow(root)
     check_altstore_workflow(root)
     check_forgejo_workflow(root)
@@ -505,6 +626,8 @@ def evaluate_check_runs(
 ) -> None:
     latest: dict[str, dict[str, Any]] = {}
     required_app_id = config["requiredCheckAppId"]
+    expected_paths = required_workflow_paths(config)
+    ownership_failures: set[str] = set()
     for run in check_runs:
         name = run.get("name")
         identifier = run.get("id")
@@ -516,11 +639,16 @@ def evaluate_check_runs(
             or app_id != required_app_id
         ):
             continue
+        if name not in expected_paths:
+            continue
+        if run.get("workflowPath") != expected_paths[name]:
+            ownership_failures.add(f"{name}=unexpected-workflow")
+            continue
         previous = latest.get(name)
         if previous is None or identifier > previous["id"]:
             latest[name] = run
 
-    failures: list[str] = []
+    failures = sorted(ownership_failures)
     for context in config["requiredContexts"]:
         run = latest.get(context)
         if run is None:
@@ -540,7 +668,66 @@ def evaluate_check_runs(
         raise GateError("required checks are not green: " + ", ".join(failures))
 
 
-def fetch_check_runs(repository: str, sha: str, token: str) -> list[dict[str, Any]]:
+def _github_json(url: str, token: str, failure: str) -> Any:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "noop-required-ci-gate",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+    except (OSError, urllib.error.HTTPError, json.JSONDecodeError) as error:
+        raise GateError(failure) from error
+
+
+def _workflow_run_id(details_url: Any, repository: str) -> int:
+    if not isinstance(details_url, str):
+        raise GateError("required GitHub Actions check has no valid run URL")
+    parsed = urllib.parse.urlsplit(details_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "github.com"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise GateError("required GitHub Actions check has no valid run URL")
+    owner, name = repository.split("/", 1)
+    pattern = re.compile(
+        rf"/{re.escape(owner)}/{re.escape(name)}"
+        r"/actions/runs/([1-9][0-9]*)/job/[1-9][0-9]*",
+        re.IGNORECASE,
+    )
+    match = pattern.fullmatch(parsed.path)
+    if match is None:
+        raise GateError("required GitHub Actions check has no valid run URL")
+    return int(match.group(1))
+
+
+def _workflow_path_from_run(
+    payload: Any, run_id: int, expected_sha: str
+) -> str:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("id") != run_id
+        or payload.get("head_sha") != expected_sha
+        or not isinstance(payload.get("path"), str)
+        or not payload["path"]
+    ):
+        raise GateError("GitHub Actions workflow run identity is invalid")
+    return payload["path"]
+
+
+def fetch_check_runs(
+    repository: str,
+    sha: str,
+    token: str,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
     if SAFE_REPOSITORY.fullmatch(repository) is None:
         raise GateError("repository must be owner/name")
     if SAFE_SHA.fullmatch(sha) is None:
@@ -549,30 +736,49 @@ def fetch_check_runs(repository: str, sha: str, token: str) -> list[dict[str, An
         raise GateError("GitHub token is unavailable")
 
     check_runs: list[dict[str, Any]] = []
+    workflow_runs: dict[int, str] = {}
+    required_contexts = set(config["requiredContexts"])
+    required_app_id = config["requiredCheckAppId"]
     for page in range(1, 11):
         query = urllib.parse.urlencode({"per_page": 100, "page": page})
         url = (
             f"https://api.github.com/repos/{repository}/commits/{sha}/check-runs"
             f"?{query}"
         )
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "noop-required-ci-gate",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                payload = json.load(response)
-        except (OSError, urllib.error.HTTPError, json.JSONDecodeError) as error:
-            raise GateError("GitHub check-runs query failed") from error
+        payload = _github_json(url, token, "GitHub check-runs query failed")
         page_runs = payload.get("check_runs") if isinstance(payload, dict) else None
         if not isinstance(page_runs, list):
             raise GateError("GitHub check-runs response is invalid")
-        check_runs.extend(page_runs)
+        for run in page_runs:
+            if not isinstance(run, dict):
+                raise GateError("GitHub check-runs response is invalid")
+            app = run.get("app")
+            app_id = app.get("id") if isinstance(app, dict) else None
+            if (
+                run.get("name") in required_contexts
+                and app_id == required_app_id
+            ):
+                run_id = _workflow_run_id(run.get("details_url"), repository)
+                if run_id not in workflow_runs:
+                    if len(workflow_runs) >= 100:
+                        raise GateError(
+                            "required workflow runs exceeded the bounded limit"
+                        )
+                    run_url = (
+                        f"https://api.github.com/repos/{repository}"
+                        f"/actions/runs/{run_id}"
+                    )
+                    run_payload = _github_json(
+                        run_url,
+                        token,
+                        "GitHub Actions workflow-run query failed",
+                    )
+                    workflow_runs[run_id] = _workflow_path_from_run(
+                        run_payload, run_id, sha
+                    )
+                run = dict(run)
+                run["workflowPath"] = workflow_runs[run_id]
+            check_runs.append(run)
         if len(page_runs) < 100:
             return check_runs
     raise GateError("GitHub check-runs response exceeded the bounded page limit")
@@ -592,7 +798,7 @@ def command_check(args: argparse.Namespace) -> None:
 def command_verify_github(args: argparse.Namespace) -> None:
     config = load_config(Path(args.config).resolve())
     token = os.environ.get(args.token_env, "")
-    runs = fetch_check_runs(args.repository, args.sha, token)
+    runs = fetch_check_runs(args.repository, args.sha, token, config)
     evaluate_check_runs(config, runs)
     print(
         "required-ci: "

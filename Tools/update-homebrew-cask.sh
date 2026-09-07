@@ -70,11 +70,14 @@ if [ "${NOOP_HOMEBREW_FORGE:-0}" = "1" ]; then
     echo "invalid Forge repository coordinate" >&2
     exit 2
   }
-  [ -f "$FORGE_TOKEN_FILE" ] || {
-    echo "missing Forge token: $FORGE_TOKEN_FILE" >&2
+  if [ -n "${NOOP_HOMEBREW_FORGE_TOKEN:-}" ]; then
+    FORGE_TOKEN="$NOOP_HOMEBREW_FORGE_TOKEN"
+  elif [ -f "$FORGE_TOKEN_FILE" ]; then
+    FORGE_TOKEN="$(cat "$FORGE_TOKEN_FILE")"
+  else
+    echo "missing Homebrew Forgejo mirror token" >&2
     exit 1
-  }
-  FORGE_TOKEN="$(cat "$FORGE_TOKEN_FILE")"
+  fi
   FORGE_TAP_URL="https://$DOMAIN/$FORGE_ORG/homebrew-noop.git"
 fi
 
@@ -120,12 +123,12 @@ echo "✓ Homebrew cask updated to ${VER} on GitHub (sha256 ${SHA:0:12}…)"
 if [ -n "$FORGE_TAP_URL" ]; then
   export FORGE_TOKEN FORGE_ORG
   # shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
-  if git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
-       push --quiet "$FORGE_TAP_URL" HEAD:main; then
-    echo "✓ Mirrored cask to the configured Forge host."
-  else
-    echo "⚠ Forge mirror push failed — GitHub tap is current." >&2
-  fi
+  git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
+    push --quiet "$FORGE_TAP_URL" HEAD:main || {
+    echo "Forge mirror push failed; the canonical GitHub tap is current." >&2
+    exit 1
+  }
+  echo "✓ Mirrored cask to the configured Forge host."
 else
   echo "Forge mirror disabled (set NOOP_HOMEBREW_FORGE=1 plus FORGE_* to enable)."
 fi

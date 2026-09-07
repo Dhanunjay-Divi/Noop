@@ -203,6 +203,25 @@ external approval, signing authority, or elapsed production operation.
   repository coordinate before network access, and retains its deliberate
   local token-file fallback. No tap or token is provisioned by this round, so
   the lane remains disabled by default and no release was published.
+- Closed the retained Homebrew-to-Forgejo mirror path without broadening
+  release credentials. The local and GitHub dispatchers now carry the nested
+  opt-in explicitly, reject a Forgejo-tap request when canonical Homebrew
+  publication is disabled, pass only the tap-specific GitHub and Forgejo
+  secrets to the reusable workflow, and fail the requested mirror operation
+  visibly if the canonical GitHub tap succeeds but the Forgejo push fails.
+- Added a bounded Forgejo semantic-version history gate before every release
+  create or update. It inspects at most 500 release records, ignores drafts,
+  prereleases, and unrelated non-semantic tags, allows an idempotent retry, and
+  rejects an older target than the latest published stable mirror. Exact-tag
+  lookup now distinguishes a missing release from transport or server failure
+  instead of treating every lookup failure as permission to create.
+- Bound exact-SHA required-check verification to the owning GitHub Actions
+  workflow as well as the Actions application. The verifier obtains each
+  required check's Actions run, requires the exact requested head SHA and
+  configured workflow path, and rejects same-named checks from another
+  workflow. A repository-wide structural guard also requires exactly one
+  source workflow owner for every protected context. Release and repair jobs
+  have the explicit `actions: read` permission needed for that validation.
 - Removed the remaining legacy vendor name from generated Homebrew package
   metadata. The reviewed terminology snapshot now contains 17,370 classified
   occurrences across 1,508 path/category groups, one active/core occurrence
@@ -272,7 +291,9 @@ external approval, signing authority, or elapsed production operation.
   only the bounded `runtime.operational_started` and
   `activity.operational_runtime_available` transitions after consent. Required
   CI and release verification records only fixed workflow context names and
-  bounded missing, running, failed, skipped, or successful states. Post-release
+  bounded missing, running, failed, skipped, unexpected-workflow, or successful
+  states. Workflow-run identifiers and URLs are used only for authenticated
+  lookup and are not emitted. Post-release
   channel automation records only static validation/recovery categories,
   workflow status, version, and bounded artifact presence; it does not emit
   credentials, user data, or artifact content.
@@ -301,8 +322,8 @@ external approval, signing authority, or elapsed production operation.
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | 99 repository-tool tests pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 13 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
-| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; release source mutation is rejected, both build counters must advance from published `v9.1.1`, exact-SHA verification is required twice, AltStore history is backed up before replacement, ambiguous channel recovery fails closed, and Homebrew opt-in reaches a manually repairable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, or history-dropping source | A completed signed production release, public Homebrew tap, or provisioned tap credential |
+| Staged repository policy matrix | 123 repository-tool tests and the exact 86-test release-control selection pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 14 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
+| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; every protected name has one configured workflow owner; live read-only verification bound all nine checks on commit `bf77f902` to their exact Actions workflow and head SHA, then correctly reported only the two intentionally canceled platform runs as failed; release source mutation is rejected, both build counters must advance from published `v9.1.1`, exact-SHA verification is required twice, AltStore history is backed up before replacement, ambiguous channel recovery fails closed, Forgejo rollback is rejected before mutation, and nested Homebrew mirroring reaches a scoped, manually repairable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters or a same-named Actions job, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, or history-dropping source | A completed signed production release, public Homebrew/Forgejo tap, or provisioned mirror credentials |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment

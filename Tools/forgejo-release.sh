@@ -18,6 +18,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOMAIN="${FORGE_DOMAIN:-}"
 ORG="${FORGE_ORG:-}"
 REPO="${FORGE_REPO:-}"
@@ -79,19 +80,63 @@ command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 
 AUTH_CONFIG="$(mktemp)"
-trap 'rm -f "$AUTH_CONFIG"' EXIT
+REL_JSON_FILE="$(mktemp)"
+trap 'rm -f "$AUTH_CONFIG" "$REL_JSON_FILE"' EXIT
 chmod 600 "$AUTH_CONFIG"
 printf 'header = "Authorization: token %s"\n' "$TOKEN" > "$AUTH_CONFIG"
 unset TOKEN NOOP_FORGEJO_TOKEN
 
 API="https://$DOMAIN/api/v1"
 api(){
-  curl --config "$AUTH_CONFIG" -fsS \
+  curl --config "$AUTH_CONFIG" --connect-timeout 10 --max-time 30 -fsS \
     -H 'Content-Type: application/json' "$@"
 }
 
+RELEASE_HISTORY='[]'
+for page in $(seq 1 10); do
+  PAGE_JSON="$(api \
+    "$API/repos/$ORG/$REPO/releases?limit=50&page=$page")"
+  PAGE_COUNT="$(jq -er 'if type == "array" then length else error("invalid") end' \
+    <<<"$PAGE_JSON")" || {
+    echo "Forgejo release history response is invalid" >&2
+    exit 1
+  }
+  RELEASE_HISTORY="$(
+    jq -cn --argjson history "$RELEASE_HISTORY" --argjson page "$PAGE_JSON" \
+      '$history + $page'
+  )"
+  if [ "$PAGE_COUNT" -lt 50 ]; then
+    break
+  fi
+  if [ "$page" -eq 10 ]; then
+    echo "Forgejo release history exceeded the bounded page limit" >&2
+    exit 1
+  fi
+done
+printf '%s' "$RELEASE_HISTORY" |
+  python3 "$ROOT/Tools/forgejo-version-gate.py" --target "$VER"
+
 echo "→ mirror verified release $TAG"
-REL_JSON="$(api "$API/repos/$ORG/$REPO/releases/tags/$TAG" 2>/dev/null || true)"
+REL_STATUS="$(
+  curl --config "$AUTH_CONFIG" --connect-timeout 10 --max-time 30 \
+    --silent --show-error --output "$REL_JSON_FILE" --write-out '%{http_code}' \
+    "$API/repos/$ORG/$REPO/releases/tags/$TAG"
+)" || {
+  echo "Forgejo release lookup failed" >&2
+  exit 1
+}
+case "$REL_STATUS" in
+  200)
+    REL_JSON="$(cat "$REL_JSON_FILE")"
+    ;;
+  404)
+    REL_JSON='{}'
+    ;;
+  *)
+    echo "Forgejo release lookup returned an unexpected status" >&2
+    exit 1
+    ;;
+esac
 REL_ID="$(printf '%s' "$REL_JSON" | jq -r '.id // empty')"
 if [ -z "$REL_ID" ]; then
   REL_ID="$(api -X POST "$API/repos/$ORG/$REPO/releases" \

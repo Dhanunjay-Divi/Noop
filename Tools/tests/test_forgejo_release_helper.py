@@ -68,6 +68,17 @@ class ForgejoReleaseHelperTests(unittest.TestCase):
         self.assertNotIn('Authorization: token $TOKEN"', source)
         self.assertIn("unset TOKEN NOOP_FORGEJO_TOKEN", source)
 
+    def test_version_history_is_checked_before_release_mutation(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        gate = source.index("Tools/forgejo-version-gate.py")
+        create = source.index('api -X POST "$API/repos/$ORG/$REPO/releases"')
+        update = source.index('api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID"')
+        self.assertLess(gate, create)
+        self.assertLess(gate, update)
+        self.assertIn("Forgejo release history exceeded the bounded page limit", source)
+        self.assertIn('case "$REL_STATUS" in', source)
+        self.assertNotIn("2>/dev/null || true", source)
+
 
 if __name__ == "__main__":
     unittest.main()

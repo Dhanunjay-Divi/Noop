@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,22 @@ class RequiredCIGateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.config = GATE.load_config()
+
+    def green_runs(self) -> list[dict[str, object]]:
+        workflow_paths = GATE.required_workflow_paths(self.config)
+        return [
+            {
+                "id": index,
+                "name": context,
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": self.config["requiredCheckAppId"]},
+                "workflowPath": workflow_paths[context],
+            }
+            for index, context in enumerate(
+                self.config["requiredContexts"], start=1
+            )
+        ]
 
     def test_repository_required_workflows_fail_closed(self) -> None:
         GATE.check_repository()
@@ -47,6 +64,31 @@ class RequiredCIGateTests(unittest.TestCase):
                 "swift-packages-required",
             ],
         )
+
+    def test_each_required_context_has_one_configured_workflow_owner(self) -> None:
+        GATE.check_required_context_ownership(ROOT, self.config)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                ROOT / ".github" / "workflows",
+                root / ".github" / "workflows",
+            )
+            rogue = root / ".github" / "workflows" / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\n"
+                "on: [push]\n"
+                "jobs:\n"
+                "  duplicate:\n"
+                "    name: release-controls\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "must have exactly one workflow owner"
+            ):
+                GATE.check_required_context_ownership(root, self.config)
 
     def test_universal_required_workflow_cannot_be_path_filtered(self) -> None:
         workflow = self.config["universalWorkflows"][2]
@@ -161,14 +203,37 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertIn("publish_homebrew:", release)
         self.assertIn("uses: ./.github/workflows/homebrew-cask.yml", release)
         self.assertIn("if: ${{ inputs.publish_homebrew }}", release)
-        self.assertIn("secrets: inherit", release)
+        self.assertIn(
+            "NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
+            release,
+        )
+        self.assertIn(
+            "NOOP_HOMEBREW_FORGE_TOKEN: ${{ secrets.NOOP_HOMEBREW_FORGE_TOKEN }}",
+            release,
+        )
+        self.assertNotIn("secrets: inherit", release)
         self.assertIn(
             '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
             dispatcher,
         )
+        self.assertIn(
+            '--field "publish_homebrew_forgejo=$PUBLISH_HOMEBREW_FORGEJO"',
+            dispatcher,
+        )
+        self.assertIn("publish_homebrew_forgejo:", release)
+        self.assertIn(
+            "The Homebrew Forgejo mirror requires Homebrew publication.",
+            release,
+        )
+        self.assertIn(
+            "publish_forgejo: ${{ inputs.publish_homebrew_forgejo }}",
+            release,
+        )
         self.assertIn("workflow_dispatch:", homebrew)
+        self.assertIn("publish_forgejo:", homebrew)
         self.assertIn("Tools/required-ci-gate.py verify-github", homebrew)
         self.assertIn("Tools/update-homebrew-cask.sh", homebrew)
+        self.assertIn("NOOP_HOMEBREW_FORGE_TOKEN", homebrew)
         helper = (ROOT / "Tools/update-homebrew-cask.sh").read_text(
             encoding="utf-8"
         )
@@ -199,6 +264,7 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         for module in (
             "Tools.tests.test_forgejo_release_helper",
+            "Tools.tests.test_forgejo_version_gate",
             "Tools.tests.test_homebrew_helper",
             "Tools.tests.test_homebrew_version_gate",
         ):
@@ -242,17 +308,7 @@ class RequiredCIGateTests(unittest.TestCase):
         )
 
     def test_latest_check_run_must_be_completed_success(self) -> None:
-        runs = []
-        for index, context in enumerate(self.config["requiredContexts"], start=1):
-            runs.append(
-                {
-                    "id": index,
-                    "name": context,
-                    "status": "completed",
-                    "conclusion": "success",
-                    "app": {"id": self.config["requiredCheckAppId"]},
-                }
-            )
+        runs = self.green_runs()
         GATE.evaluate_check_runs(self.config, runs)
         runs.append(
             {
@@ -261,6 +317,9 @@ class RequiredCIGateTests(unittest.TestCase):
                 "status": "completed",
                 "conclusion": "failure",
                 "app": {"id": self.config["requiredCheckAppId"]},
+                "workflowPath": GATE.required_workflow_paths(self.config)[
+                    "release-controls"
+                ],
             }
         )
         with self.assertRaisesRegex(
@@ -274,17 +333,7 @@ class RequiredCIGateTests(unittest.TestCase):
             GATE.evaluate_check_runs(config, [])
 
     def test_same_named_check_from_another_app_is_rejected(self) -> None:
-        runs = []
-        for index, context in enumerate(self.config["requiredContexts"], start=1):
-            runs.append(
-                {
-                    "id": index,
-                    "name": context,
-                    "status": "completed",
-                    "conclusion": "success",
-                    "app": {"id": self.config["requiredCheckAppId"]},
-                }
-            )
+        runs = self.green_runs()
         runs = [
             run for run in runs if run["name"] != "release-controls"
         ]
@@ -301,6 +350,48 @@ class RequiredCIGateTests(unittest.TestCase):
             GATE.GateError, "release-controls=missing"
         ):
             GATE.evaluate_check_runs(self.config, runs)
+
+    def test_required_check_from_another_workflow_is_rejected(self) -> None:
+        runs = self.green_runs()
+        for run in runs:
+            if run["name"] == "release-controls":
+                run["workflowPath"] = ".github/workflows/rogue.yml"
+        with self.assertRaisesRegex(
+            GATE.GateError, "release-controls=unexpected-workflow"
+        ):
+            GATE.evaluate_check_runs(self.config, runs)
+
+    def test_workflow_run_url_is_repository_and_job_bound(self) -> None:
+        url = (
+            "https://github.com/Dhanunjay-Divi/Noop/"
+            "actions/runs/34166917443/job/101879686504"
+        )
+        self.assertEqual(
+            GATE._workflow_run_id(url, "Dhanunjay-Divi/Noop"),
+            34166917443,
+        )
+        for invalid in (
+            "http://github.com/Dhanunjay-Divi/Noop/actions/runs/1/job/2",
+            "https://github.com/other/Noop/actions/runs/1/job/2",
+            "https://github.com/Dhanunjay-Divi/Noop/actions/runs/1",
+            "https://example.com/Dhanunjay-Divi/Noop/actions/runs/1/job/2",
+        ):
+            with self.assertRaisesRegex(GATE.GateError, "no valid run URL"):
+                GATE._workflow_run_id(invalid, "Dhanunjay-Divi/Noop")
+
+    def test_workflow_run_payload_is_bound_to_exact_sha(self) -> None:
+        sha = "a" * 40
+        payload = {
+            "id": 123,
+            "head_sha": sha,
+            "path": ".github/workflows/release-controls.yml",
+        }
+        self.assertEqual(
+            GATE._workflow_path_from_run(payload, 123, sha),
+            ".github/workflows/release-controls.yml",
+        )
+        with self.assertRaisesRegex(GATE.GateError, "identity is invalid"):
+            GATE._workflow_path_from_run(payload, 123, "b" * 40)
 
     def test_release_workflow_cannot_push_directly_to_main(self) -> None:
         source = (ROOT / ".github/workflows/release.yml").read_text(
