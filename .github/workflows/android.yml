@@ -99,7 +99,7 @@ jobs:
     needs: [changes]
     if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: android
@@ -129,10 +129,37 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Prove Review Sample worker isolation in a fresh process
+        id: review_sample_first
+        continue-on-error: true
         run: |
           ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Classify a zero-test managed-device infrastructure loss
+        if: ${{ steps.review_sample_first.outcome == 'failure' }}
+        id: review_sample_retry
+        run: |
+          python3 ../Tools/android-managed-device-retry.py \
+            app/build/outputs/androidTest-results/managedDevice \
+            --github-output "$GITHUB_OUTPUT"
+          echo "::warning title=Managed-device infrastructure retry::Android activity service disappeared before tests started; retrying once."
+
+      - name: Retry Review Sample isolation once on proven infrastructure loss
+        if: >-
+          ${{
+            steps.review_sample_first.outcome == 'failure' &&
+            steps.review_sample_retry.outputs.retry == 'true'
+          }}
+        run: |
+          ./gradlew --stop
+          ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
+            -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            --no-configuration-cache \
+            --rerun-tasks \
             --stacktrace
 
       - name: Run production-shell instrumentation tests

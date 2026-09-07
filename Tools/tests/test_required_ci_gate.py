@@ -188,6 +188,23 @@ class RequiredCIGateTests(unittest.TestCase):
             with self.assertRaisesRegex(GATE.GateError, "ignores production-shell"):
                 GATE.check_workflow(root, workflow)
 
+    def test_android_infrastructure_retry_is_bounded_and_fail_closed(self) -> None:
+        source = (ROOT / ".github/workflows/android.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("timeout-minutes: 50", source)
+        self.assertEqual(source.count("continue-on-error: true"), 1)
+        self.assertIn("Tools/android-managed-device-retry.py", source)
+        self.assertIn(
+            "steps.review_sample_first.outcome == 'failure'",
+            source,
+        )
+        self.assertIn(
+            "steps.review_sample_retry.outputs.retry == 'true'",
+            source,
+        )
+        self.assertEqual(source.count("--rerun-tasks"), 1)
+
     def test_latest_check_run_must_be_completed_success(self) -> None:
         runs = []
         for index, context in enumerate(self.config["requiredContexts"], start=1):
