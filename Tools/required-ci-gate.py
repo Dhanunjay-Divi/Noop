@@ -41,7 +41,13 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         config = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise GateError("required CI config is missing or invalid JSON") from error
-    expected = {"schemaVersion", "sourceBranch", "requiredContexts", "workflows"}
+    expected = {
+        "schemaVersion",
+        "sourceBranch",
+        "requiredContexts",
+        "universalWorkflows",
+        "workflows",
+    }
     if not isinstance(config, dict) or set(config) != expected:
         raise GateError("required CI config fields do not match schema version 1")
     if config["schemaVersion"] != 1 or config["sourceBranch"] != "main":
@@ -52,6 +58,36 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         SAFE_CONTEXT.fullmatch(context) is None for context in contexts
     ):
         raise GateError("requiredContexts must be unique, sorted, safe names")
+
+    universal_workflows = config["universalWorkflows"]
+    if not isinstance(universal_workflows, list) or not universal_workflows:
+        raise GateError("universalWorkflows must be a non-empty list")
+    universal_paths: list[str] = []
+    universal_jobs: list[str] = []
+    for index, workflow in enumerate(universal_workflows):
+        if not isinstance(workflow, dict) or set(workflow) != {
+            "path",
+            "requiredJob",
+        }:
+            raise GateError(f"universalWorkflows[{index}] fields are invalid")
+        path = workflow["path"]
+        if not isinstance(path, str) or not path:
+            raise GateError(f"universalWorkflows[{index}].path is invalid")
+        candidate = PurePosixPath(path)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise GateError(
+                f"universalWorkflows[{index}].path must stay inside the repository"
+            )
+        if SAFE_JOB.fullmatch(str(workflow["requiredJob"])) is None:
+            raise GateError(
+                f"universalWorkflows[{index}].requiredJob is invalid"
+            )
+        universal_paths.append(path)
+        universal_jobs.append(workflow["requiredJob"])
+    if universal_paths != sorted(set(universal_paths)):
+        raise GateError("universal workflow paths must be unique and sorted")
+    if universal_jobs != sorted(universal_jobs):
+        raise GateError("universal workflow jobs must be sorted by context")
 
     workflows = config["workflows"]
     if not isinstance(workflows, list) or not workflows:
@@ -94,11 +130,10 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         raise GateError("workflow paths must be unique and sorted")
     if required_jobs != sorted(required_jobs):
         raise GateError("required workflow jobs must be sorted by context")
-    missing_contexts = sorted(set(required_jobs) - set(contexts))
-    if missing_contexts:
+    configured_contexts = sorted(set(required_jobs + universal_jobs))
+    if configured_contexts != contexts:
         raise GateError(
-            "required workflow jobs are absent from requiredContexts: "
-            + ", ".join(missing_contexts)
+            "requiredContexts must exactly match universal and conditional jobs"
         )
     return config
 
@@ -206,6 +241,28 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         )
 
 
+def check_universal_workflow(root: Path, workflow: dict[str, Any]) -> None:
+    path = root / workflow["path"]
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError(f"required workflow is missing: {workflow['path']}") from error
+    before_jobs = text.split("\njobs:\n", 1)[0]
+    for event in ("pull_request", "push"):
+        if re.search(rf"^  {event}:", before_jobs, re.MULTILINE) is None:
+            raise GateError(f"{workflow['path']} must run for {event}")
+    if re.search(r"^\s+paths(?:-ignore)?:", before_jobs, re.MULTILINE):
+        raise GateError(
+            f"{workflow['path']} universal check cannot use event-level path filters"
+        )
+    required_job = workflow["requiredJob"]
+    section = _job_section(text, required_job)
+    if f"name: {required_job}" not in section:
+        raise GateError(
+            f"{workflow['path']} universal job lacks stable name {required_job}"
+        )
+
+
 def check_release_workflow(root: Path) -> None:
     path = root / ".github" / "workflows" / "release.yml"
     try:
@@ -217,6 +274,7 @@ def check_release_workflow(root: Path) -> None:
         "ref: ${{ github.sha }}",
         'test "$GITHUB_REF" = "refs/heads/main"',
         "Tools/required-ci-gate.py verify-github",
+        "Tools/release-version-gate.py check",
         "--sha \"$GITHUB_SHA\"",
         "git diff --exit-code",
         "Reverify required checks before publication",
@@ -241,6 +299,8 @@ def check_release_workflow(root: Path) -> None:
 
 def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> None:
     config = load_config(config_path)
+    for workflow in config["universalWorkflows"]:
+        check_universal_workflow(root, workflow)
     for workflow in config["workflows"]:
         check_workflow(root, workflow)
     check_release_workflow(root)
@@ -322,7 +382,8 @@ def command_check(args: argparse.Namespace) -> None:
     config = load_config(Path(args.config).resolve())
     print(
         "required-ci: "
-        f"{len(config['workflows'])} workflows, "
+        f"{len(config['workflows'])} conditional workflows, "
+        f"{len(config['universalWorkflows'])} universal workflows, "
         f"{len(config['requiredContexts'])} contexts verified"
     )
 

@@ -233,6 +233,7 @@
       "Tools/release-control-gate.py",
       "Tools/release-evidence.py",
       "Tools/release-legal-gate.py",
+      "Tools/release-version-gate.py",
       "Tools/required-ci-gate.py",
       "Tools/terminology-audit.py",
       "docs/KEY_MANAGEMENT.md",

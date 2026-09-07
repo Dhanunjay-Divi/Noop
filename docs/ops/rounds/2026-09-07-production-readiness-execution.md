@@ -140,12 +140,24 @@ external approval, signing authority, or elapsed production operation.
   job and publish one fail-closed required result. Expensive jobs still skip
   irrelevant changes, but applicability errors, skipped applicable work, or
   any failed heavy job make the stable result fail.
-- Added a machine-readable eight-context merge and release contract with
+- Added a machine-readable merge and release context contract with
   repository tests. The production release workflow now builds only the exact
   reviewed `main` commit, cannot bump or commit a version inside CI, validates
   that Apple, Android, release notes, localization, and in-app What's New
   already match, and verifies every required check on the exact SHA before
   draft creation and again before publication.
+- Protected review found and closed two additional release defects. Runtime
+  license inventory now has an always-present fail-closed required result, and
+  the lightweight health-claims, localization, operations-record, and release
+  controls are modeled as universal checks that cannot use event-level path
+  filters. The contract now covers nine exact contexts; operations validation
+  runs on every `main` commit so exact-SHA publication evidence is always
+  available.
+- Added a tested release-version gate that compares both reviewed platform
+  build numbers and the shared marketing version with the latest published
+  production tag. A reused Android `versionCode`, Apple
+  `CURRENT_PROJECT_VERSION`, non-advancing semantic version, missing prior tag,
+  or tag/source mismatch stops the workflow before draft creation.
 - Reverified retained private GCP staging: OpenTofu format, validation, all
   three configuration tests, IAM-only runtime checks, and detailed live plan
   exit `0` pass with no drift.
@@ -229,7 +241,7 @@ external approval, signing authority, or elapsed production operation.
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
 | Staged repository policy matrix | Release controls 9/9; release-policy tests 25/25; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n audit and 49 tests pass; legal inventory 213 runtime plus 3 container inputs and 9 tests pass; private-data and all 36 operations records pass; 11 workflows parse | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, and operations contracts | Hosted execution or store approval |
-| Required merge and tag contract | Four platform workflow contracts and eight stable contexts pass local structural tests; release source mutation is rejected and exact-SHA verification is required twice | Applicable platform failures cannot be hidden by event path filters, and a production tag cannot be published from an unchecked source SHA | Hosted branch-protection state or a completed release |
+| Required merge and tag contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; release source mutation is rejected, both build counters must advance from published `v9.1.1`, and exact-SHA verification is required twice | Applicable platform/license failures cannot be hidden by event path filters, and a production tag cannot be published from an unchecked or stale-build source SHA | A completed signed production release |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment

@@ -112,6 +112,23 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Version: reviewed source ${NEW} (tag ${TAG})"
 
+          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease,isDraft,publishedAt \
+            --jq 'map(select(.isPrerelease==false and .isDraft==false)) | sort_by(.publishedAt) | reverse | .[0].tagName // empty')
+          if [ -n "$PREV_TAG" ]; then
+            git cat-file -e "${PREV_TAG}^{commit}" 2>/dev/null || {
+              echo "::error::Previous published release tag is absent from the reviewed checkout."
+              exit 1
+            }
+            python3 Tools/release-version-gate.py check \
+              --expected-version "$NEW" \
+              --previous-ref "$PREV_TAG"
+          else
+            python3 Tools/release-version-gate.py check \
+              --expected-version "$NEW" \
+              --first-release
+          fi
+
           NOTES_MD="docs/releases/${TAG}.md"
           if [ ! -f "$NOTES_MD" ]; then
             echo "::error::Missing ${NOTES_MD}; prepare and localize it in the release PR."

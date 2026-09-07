@@ -6,11 +6,30 @@
     "i18n-coverage",
     "operations-record",
     "release-controls",
+    "runtime-license-required",
     "server-ci-required",
     "swift-packages-required"
   ],
   "schemaVersion": 1,
   "sourceBranch": "main",
+  "universalWorkflows": [
+    {
+      "path": ".github/workflows/health-claims.yml",
+      "requiredJob": "health-claims"
+    },
+    {
+      "path": ".github/workflows/i18n-coverage.yml",
+      "requiredJob": "i18n-coverage"
+    },
+    {
+      "path": ".github/workflows/ops-docs.yml",
+      "requiredJob": "operations-record"
+    },
+    {
+      "path": ".github/workflows/release-controls.yml",
+      "requiredJob": "release-controls"
+    }
+  ],
   "workflows": [
     {
       "applicabilityJob": "changes",
@@ -28,6 +47,14 @@
       ],
       "path": ".github/workflows/app-build.yml",
       "requiredJob": "apple-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "runtime-license-inventory"
+      ],
+      "path": ".github/workflows/legal-inventory.yml",
+      "requiredJob": "runtime-license-required"
     },
     {
       "applicabilityJob": "changes",

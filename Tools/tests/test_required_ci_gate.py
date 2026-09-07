@@ -36,10 +36,29 @@ class RequiredCIGateTests(unittest.TestCase):
                 "i18n-coverage",
                 "operations-record",
                 "release-controls",
+                "runtime-license-required",
                 "server-ci-required",
                 "swift-packages-required",
             ],
         )
+
+    def test_universal_required_workflow_cannot_be_path_filtered(self) -> None:
+        workflow = self.config["universalWorkflows"][2]
+        source = (ROOT / workflow["path"]).read_text(encoding="utf-8")
+        source = source.replace(
+            "  push:\n    branches: [main]\n",
+            "  push:\n    branches: [main]\n    paths: ['docs/ops/**']\n",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / workflow["path"]
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError, "universal check cannot use event-level path filters"
+            ):
+                GATE.check_universal_workflow(root, workflow)
 
     def test_event_level_path_filter_is_rejected(self) -> None:
         workflow = self.config["workflows"][0]

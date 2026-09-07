@@ -37,6 +37,7 @@ jobs:
           Tools.tests.test_release_evidence
           Tools.tests.test_calibration_parity_audit
           Tools.tests.test_required_ci_gate
+          Tools.tests.test_release_version_gate
           Tools.tests.test_terminology_audit
 
       - name: Verify required merge and release checks
