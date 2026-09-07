@@ -131,6 +131,36 @@ def validate_transition(
         )
 
 
+def validate_existing_tag(
+    existing_commit: str | None,
+    release_sha: str,
+) -> None:
+    if re.fullmatch(r"[0-9a-f]{40}", release_sha) is None:
+        raise GateError("release SHA must be a full lowercase commit SHA")
+    if existing_commit is None:
+        return
+    if re.fullmatch(r"[0-9a-f]{40}", existing_commit) is None:
+        raise GateError("existing release tag target is invalid")
+    if existing_commit != release_sha:
+        raise GateError("existing release tag points to a different source commit")
+
+
+def existing_tag_commit(root: Path, version: str) -> str | None:
+    tag = f"v{version}"
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{tag}^{{commit}}"],
+        cwd=root,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode == 1:
+        return None
+    if result.returncode != 0:
+        raise GateError("existing release tag could not be resolved")
+    return result.stdout.strip()
+
+
 def command_check(args: argparse.Namespace) -> None:
     root = Path(args.root).resolve()
     current = current_state(root)
@@ -140,6 +170,23 @@ def command_check(args: argparse.Namespace) -> None:
         else None
     )
     validate_transition(current, args.expected_version, previous)
+    if args.release_sha is not None:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if head.returncode != 0:
+            raise GateError("reviewed source commit could not be resolved")
+        head_sha = head.stdout.strip()
+        if head_sha != args.release_sha:
+            raise GateError("release SHA does not match the reviewed checkout")
+        validate_existing_tag(
+            existing_tag_commit(root, args.expected_version),
+            args.release_sha,
+        )
     if previous is None:
         print("release-version: first reviewed version and build numbers verified")
     else:
@@ -155,6 +202,7 @@ def parser() -> argparse.ArgumentParser:
     check = subparsers.add_parser("check")
     check.add_argument("--root", default=str(ROOT))
     check.add_argument("--expected-version", required=True)
+    check.add_argument("--release-sha")
     previous = check.add_mutually_exclusive_group(required=True)
     previous.add_argument("--previous-ref")
     previous.add_argument("--first-release", action="store_true")

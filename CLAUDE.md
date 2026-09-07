@@ -128,16 +128,17 @@ xcodegen generate && xcodebuild -project Strand.xcodeproj -scheme Strand \
 | Workflow | Covers | Runner | Default state |
 |---|---|---|---|
 | `swift-packages.yml` | `swift test` for **`Packages/**` only** (WhoopProtocol, WhoopStore, StrandAnalytics, StrandImport, StrandDesign, NoopLocalAccess) | macos-15 | **active** |
-| `app-build.yml` | **Compile-only** of the **app targets** (`Strand` macOS + `NOOPiOS` iOS). iOS leg needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **disabled** (on-demand) |
-| `android.yml` | `assembleFullDebug` + `testFullDebugUnitTest` | ubuntu | **disabled** (compile Android locally) |
+| `app-build.yml` | Builds both **app targets** (`Strand` macOS + `NOOPiOS` iOS), runs the macOS app suite and iOS production-shell suite, and publishes the stable `apple-ci-required` result. iOS needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **required on applicable PRs/pushes** |
+| `android.yml` | `assembleFullDebug`, unit tests, lint, instrumentation compilation, API 35 production-shell tests, and the stable `android-ci-required` result. | ubuntu | **required on applicable PRs/pushes** |
 | `testing-build.yml` / `release.yml` | Staging / community-release builds (apk + mac + ios) | — | on dispatch |
 
-**The trap:** `swift-packages` does **NOT** compile the app targets. So if you touch **app-target
-Swift** — anything under `Strand/`, `StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` (Views,
-`AppModel`, `BLEManager`, `Repository`, `RootTabView`, widget publish, …) — **no default CI validates
-it**, because `app-build.yml` is disabled. A compile error there (e.g. `'self' used before all stored
-properties are initialized`) will pass every green check and still be broken. If you change app-target
-Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `app-build.yml` on demand.
+**The trap:** `swift-packages` does **NOT** compile the app targets. App-target
+Swift changes under `Strand/`, `StrandiOS/`, `StrandiOSShared/`,
+`StrandiOSWidgets/`, `NOOPWatch/`, or `NOOPWatchComplications/` are covered by
+the separate required `app-build.yml` workflow. Keep its applicability contract
+current whenever a launch target or build input is added. For local handoff,
+build the affected app target explicitly; the hosted required result is the
+merge gate, not a substitute for physical-device behavior.
 
 ### Local walls (things that will *not* build where you expect)
 - **On Linux:** only `WhoopProtocol` / `OuraProtocol` (pure) build & test. Every GRDB-linked package —

@@ -1,0 +1,184 @@
+name: AltStore source publication
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Published production version to expose, for example 9.2.1
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published production version to expose, for example 9.2.1
+        required: true
+        type: string
+
+permissions:
+  checks: read
+  contents: write
+
+concurrency:
+  group: altstore-source
+  cancel-in-progress: false
+
+jobs:
+  publish-altstore-source:
+    name: publish-altstore-source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require exact protected-main source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Publish and anonymously verify the stable source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::Invalid AltStore source version."
+            exit 1
+          }
+          VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')
+          if [ "$VISIBILITY" != "public" ]; then
+            echo "::error::Repository visibility is ${VISIBILITY}. AltStore and SideStore cannot anonymously fetch private release assets."
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          IPA="NOOP-ios-unsigned-v${VERSION}.ipa"
+          RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,publishedAt,assets)
+          [ "$(jq -r '.isDraft' <<<"$RELEASE")" = "false" ] || {
+            echo "::error::Release $TAG is still a draft."
+            exit 1
+          }
+          [ "$(jq -r '.isPrerelease' <<<"$RELEASE")" = "false" ] || {
+            echo "::error::Release $TAG is a prerelease."
+            exit 1
+          }
+          DATE=$(jq -r '.publishedAt[0:10]' <<<"$RELEASE")
+          [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
+            echo "::error::Release $TAG has no stable publication date."
+            exit 1
+          }
+          SIZE=$(jq -r --arg ipa "$IPA" \
+            '.assets[] | select(.name == $ipa) | .size' <<<"$RELEASE")
+          [[ "$SIZE" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::Published release $TAG has no valid $IPA asset."
+            exit 1
+          }
+
+          RELEASE_SHA=$(git rev-parse "${TAG}^{commit}")
+          GH_TOKEN="$GH_TOKEN" python3 Tools/required-ci-gate.py verify-github \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$RELEASE_SHA"
+          APPLE_VERSION=$(git show "${TAG}:project.yml" |
+            sed -n 's/.*MARKETING_VERSION: "\([^"]*\)".*/\1/p' | head -1)
+          ANDROID_VERSION=$(git show "${TAG}:android/app/build.gradle.kts" |
+            sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' | head -1)
+          BUILD=$(git show "${TAG}:project.yml" |
+            sed -n 's/.*CURRENT_PROJECT_VERSION: "\([0-9]*\)".*/\1/p' | head -1)
+          test "$APPLE_VERSION" = "$VERSION"
+          test "$ANDROID_VERSION" = "$VERSION"
+          [[ "$BUILD" =~ ^[1-9][0-9]*$ ]]
+
+          CHANNEL_TAG="altstore-source"
+          SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL_TAG}/altstore-source.json"
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${IPA}"
+          MANIFEST="$RUNNER_TEMP/altstore-source.json"
+          EXISTING="$RUNNER_TEMP/existing-altstore-source.json"
+          CHANNEL_EXISTS=false
+          if gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
+            >/dev/null 2>&1; then
+            CHANNEL_EXISTS=true
+            CHANNEL=$(gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,isPrerelease)
+            [ "$(jq -r '.isDraft' <<<"$CHANNEL")" = "false" ]
+            [ "$(jq -r '.isPrerelease' <<<"$CHANNEL")" = "true" ] || {
+              echo "::error::The stable AltStore source release must remain a prerelease."
+              exit 1
+            }
+            curl --fail --silent --show-error --location \
+              "${SOURCE_URL}?source=${GITHUB_RUN_ID}" --output "$EXISTING"
+            jq -e '.apps | type == "array" and length > 0' \
+              "$EXISTING" >/dev/null
+            cp "$EXISTING" "$MANIFEST"
+          else
+            cp altstore-source.json "$MANIFEST"
+          fi
+
+          DESCRIPTION="NOOP ${VERSION}. See the release notes for what changed."
+          UPDATED="$RUNNER_TEMP/updated-altstore-source.json"
+          python3 Tools/altstore-source.py update \
+            --input "$MANIFEST" \
+            --output "$UPDATED" \
+            --source-url "$SOURCE_URL" \
+            --version "$VERSION" \
+            --build "$BUILD" \
+            --date "$DATE" \
+            --description "$DESCRIPTION" \
+            --download-url "$DOWNLOAD_URL" \
+            --size "$SIZE"
+          mv "$UPDATED" "$MANIFEST"
+
+          jq -e \
+            --arg source "$SOURCE_URL" \
+            --arg version "$VERSION" \
+            --arg build "$BUILD" \
+            --arg download "$DOWNLOAD_URL" \
+            --argjson size "$SIZE" \
+            '
+              .sourceURL == $source
+              and .apps[0].versions[0].version == $version
+              and .apps[0].versions[0].buildVersion == $build
+              and .apps[0].versions[0].downloadURL == $download
+              and .apps[0].versions[0].size == $size
+              and .apps[0].version == $version
+              and .apps[0].buildVersion == $build
+              and .apps[0].downloadURL == $download
+              and .apps[0].size == $size
+            ' "$MANIFEST" >/dev/null
+
+          if [ "$CHANNEL_EXISTS" = "false" ]; then
+            gh release create "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease \
+              --title "NOOP AltStore source" \
+              --notes "Mutable public distribution manifest generated from reviewed production releases."
+          fi
+          gh release upload "$CHANNEL_TAG" "$MANIFEST" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --location \
+              "${SOURCE_URL}?version=${VERSION}&attempt=${attempt}" |
+              jq -e \
+                --arg source "$SOURCE_URL" \
+                --arg version "$VERSION" \
+                --arg download "$DOWNLOAD_URL" \
+                '
+                  .sourceURL == $source
+                  and .apps[0].versions[0].version == $version
+                  and .apps[0].versions[0].downloadURL == $download
+                ' >/dev/null; then
+              ICON_URL=$(jq -r '.iconURL' "$MANIFEST")
+              curl --fail --silent --show-error --location \
+                "$ICON_URL" --output /dev/null
+              echo "AltStore source ${VERSION} is anonymously fetchable."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Stable AltStore source did not expose version ${VERSION}."
+          exit 1

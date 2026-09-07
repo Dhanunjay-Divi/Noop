@@ -1,7 +1,7 @@
 {
   "name": "NOOP",
   "identifier": "com.noopapp.noop.altstore",
-  "sourceURL": "https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json",
+  "sourceURL": "https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json",
   "subtitle": "Distribution template — public hosting required.",
   "description": "This AltStore / SideStore manifest is a release-tooling template. It is not an anonymous install channel while its source repository or release assets are private; sideloaders cannot authenticate to private GitHub raw or release URLs. Enable it only after the manifest, icon, and advertised IPA assets are intentionally public.\n\nNOOP is independent and not affiliated with WHOOP.",
   "iconURL": "https://github.com/Dhanunjay-Divi/Noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",

@@ -1,8 +1,9 @@
 # Build and test verification for the macOS and iOS app targets.
 #
 # This job compiles both app targets on every relevant change so a shared-code
-# change cannot silently break iOS or regress macOS. It is a compile-only gate:
-# CODE_SIGNING_ALLOWED=NO, no secrets, no signing identity, and no uploaded artifacts.
+# change cannot silently break iOS or regress macOS. It builds both targets and
+# runs the macOS app suite plus the iOS production-shell suite with signing
+# disabled, no secrets, no signing identity, and no uploaded app artifacts.
 name: App build (macOS + iOS)
 
 on:
@@ -48,8 +49,10 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$BASE_SHA" "$GITHUB_SHA" |
-             grep -Eq '^((Strand|StrandTests|StrandiOS|NOOPiOSUITests|StrandiOSShared|StrandiOSWidgets|Packages|Config)/|project\.yml$|Tools/(validate-launch-gate-isolation\.py|tests/test_launch_gate_isolation\.py)$|\.github/workflows/app-build\.yml$)'; then
+          CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
+          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"
+          if grep -Eq '^((Strand|StrandTests|StrandiOS|NOOPiOSUITests|StrandiOSShared|StrandiOSWidgets|NOOPWatch|NOOPWatchComplications|Packages|Config)/|Strand\.xcodeproj/project\.xcworkspace/xcshareddata/swiftpm/Package\.resolved$|(LICENSE|NOTICE|ATTRIBUTION\.md|DISCLAIMER\.md|TERMS\.md)$|project\.yml$|Tools/(validate-launch-gate-isolation\.py|tests/test_launch_gate_isolation\.py)$|\.github/workflows/app-build\.yml$)' \
+             "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

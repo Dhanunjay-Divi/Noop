@@ -33,6 +33,7 @@ jobs:
       - name: Test release controls and evidence
         run: >-
           python3 -m unittest
+          Tools.tests.test_altstore_source
           Tools.tests.test_release_control_gate
           Tools.tests.test_release_evidence
           Tools.tests.test_calibration_parity_audit

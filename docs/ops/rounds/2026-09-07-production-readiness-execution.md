@@ -4,7 +4,7 @@
 
 - State: `in progress`
 - Owner: project team
-- Branch: `main`
+- Branch: `codex/production-readiness-closeout-20260907`
 - Start commit: `52a84649c33c57b091c110e2b2912d2021ce7ffb`
 - End implementation commit: pending
 - Record commit or PR: pending
@@ -157,7 +157,35 @@ external approval, signing authority, or elapsed production operation.
   build numbers and the shared marketing version with the latest published
   production tag. A reused Android `versionCode`, Apple
   `CURRENT_PROJECT_VERSION`, non-advancing semantic version, missing prior tag,
-  or tag/source mismatch stops the workflow before draft creation.
+  prior tag/source mismatch, or an existing destination tag bound to another
+  commit stops the workflow before draft creation.
+- Bound exact-SHA publication checks to the same GitHub Actions application
+  identity enforced by protected `main`, so a same-named check from another app
+  cannot satisfy release policy. The AltStore publication lane no longer
+  pushes directly to protected `main` or advertises a draft IPA. A reusable,
+  manually repairable workflow updates an anonymously verified stable
+  prerelease asset only after the exact checked production release is
+  published. Existing channel history is mandatory once the channel exists,
+  and a tested semantic-version guard rejects rollback to an older feed.
+- Closed the final applicability defect found by protected review. All five
+  conditional workflows now write the complete changed-path list before
+  matching it, so `grep -q` cannot close a `pipefail` pipeline early and turn a
+  relevant large change into `run=false`. The repository contract requires
+  this complete-consumption shape.
+- Removed the legacy local release publisher and checked-in AltStore mutator.
+  `Tools/release.sh` now accepts only a version, requires a clean exact
+  `origin/main`, rechecks release controls and exact-SHA hosted contexts,
+  preserves the cadence guard, and dispatches the canonical production
+  workflow. It cannot create, edit, upload, or push a release directly.
+- Fixed the intermittent Android diagnostic-report test at the product
+  boundary. While screenshot compression was pending, Android supplied a null
+  switch callback, which removed `ToggleableState` instead of exposing a
+  disabled default-off control. Android now matches iOS by retaining the switch
+  semantics and disabling it until the transient capture is available. The
+  archive still proves that no screenshot is attached without explicit opt-in.
+- Reconciled the user and operator documentation with the stable release-asset
+  AltStore channel and corrected current engineering guidance that still
+  described required Apple and Android workflows as disabled.
 - Reverified retained private GCP staging: OpenTofu format, validation, all
   three configuration tests, IAM-only runtime checks, and detailed live plan
   exit `0` pass with no drift.
@@ -230,17 +258,17 @@ external approval, signing authority, or elapsed production operation.
 | Starting Git and release-ledger audit | Clean synchronized `main`; 44 complete and 352 pending actions | Exact source and planning baseline | Production readiness |
 | Swift package matrix | Nine package build/test lanes green; StudyHarness 12 tests and HistoryHarness 2 tests green | Shared analytics, storage, import, design, remote-sync, study, and history source behavior | Physical app behavior |
 | Calibration parity gate | 12 metrics, 3 revisions, 13 thresholds, and 16 critical guards match on Apple and Android; 15 audit/release-gate tests pass | Machine-enforced cross-platform calibration contract and fail-closed drift detection | Physiological accuracy on production hardware |
-| macOS application suite | 1,652 tests completed with one external-fixture skip and 0 failures | Current application source and backup/calibration contracts on macOS | Signing, notarization, or phone behavior |
-| iOS simulator application suite | 34 UI tests completed with one private-pilot skip and 0 failures; Review Sample also passed standard and compact layout runs plus the final 18.348-second entry/disclosure/detail/exit-to-Terms journey | Current production shell, navigation, onboarding, settings, calendar, body-map, updates, Review Sample isolation/presentation, and scroll behavior on the simulator | Physical iPhone, signing, background radio, thermal, or battery behavior |
+| macOS application suite | The final isolated macOS result bundle reports 1,654 passed, 1 external-fixture skip, and 0 failures after a successful universal app build | Current application source and backup/calibration contracts on macOS | Signing, notarization, or phone behavior |
+| iOS simulator application suite | The final isolated iPhone 17 Pro / iOS 26.5 result bundle reports 34 passed, 1 intentional private-pilot skip, and 0 failures after a successful simulator app build; Review Sample also passed standard and compact layout runs plus the final 18.348-second entry/disclosure/detail/exit-to-Terms journey | Current production shell, navigation, onboarding, settings, calendar, body-map, updates, Review Sample isolation/presentation, and scroll behavior on the simulator | Physical iPhone, signing, background radio, thermal, or battery behavior |
 | iOS Release simulator build | Complete app, widgets, Watch app, complications, and launch-gate script built successfully in Release configuration | Shipping-source graph and Release compilation include Review Sample | Distribution signing, Organizer validation, or exact App Review archive |
-| Android source gate | Final post-review full debug assemble, unit, lint, and instrumentation compile completed 70 tasks successfully in 2m 36s; the merged manifest contains no WorkManager initializer while retaining the other AndroidX Startup components | Current Android source, resources, consent/runtime deferral, lazy worker initialization, and lint contract | Physical OEM/background/BLE behavior |
-| Android API 35 managed device | 53 selected tests completed with 2 private-pilot skips and 0 failures; the final focused Review Sample journey passed 1/1 in 29s, ended on Terms, and asserted WorkManager remained uninitialized throughout | Production-shell, persistence, rollback, navigation, Review Sample presentation/exit, pre-consent worker isolation, and emulator behavior | Physical phone, radio, battery, or attestation |
+| Android source gate | Final post-review full debug assemble, unit, lint, and instrumentation compile completed 70 tasks successfully; the merged manifest contains no WorkManager initializer while retaining the other AndroidX Startup components | Current Android source, resources, consent/runtime deferral, lazy worker initialization, diagnostic-report accessibility/privacy, and lint contract | Physical OEM/background/BLE behavior |
+| Android API 35 managed device | The exact CI sequence passes: the fresh-process Review Sample journey passes 1/1, then the complete suite reports 54 scheduled tests plus UTP accounting, 2 intentional private-pilot skips, and 0 failures. Focused report and disabled-switch regression tests also pass together | Production-shell, persistence, rollback, navigation, Review Sample presentation/exit, pre-consent worker isolation, screenshot default-off semantics, and emulator behavior | Physical phone, radio, battery, or attestation |
 | Android Release build | Final `assembleFullRelease` completed 54 tasks successfully in 1m 14s, including lint-vital and signing validation, using a one-use locally generated certificate removed immediately after the build | Final shipping source compiles, dexes, packages, and passes Release-vital checks | Production upload key, Play App Signing, signed RC identity, or store acceptance |
 | Server Python 3.12 | Ruff and runtime/dev dependency audits green; 296 passed and 63 environment-gated skips | Source behavior and dependency policy in the isolated local environment | Container, PostgreSQL, public topology, or production operations |
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | Release controls 9/9; release-policy tests 25/25; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n audit and 49 tests pass; legal inventory 213 runtime plus 3 container inputs and 9 tests pass; private-data and all 36 operations records pass; 11 workflows parse | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, and operations contracts | Hosted execution or store approval |
+| Staged repository policy matrix | 89 repository-tool tests pass; release controls 9/9; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 12 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
 | Required merge and tag contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; release source mutation is rejected, both build counters must advance from published `v9.1.1`, and exact-SHA verification is required twice | Applicable platform/license failures cannot be hidden by event path filters, and a production tag cannot be published from an unchecked or stale-build source SHA | A completed signed production release |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
@@ -266,10 +294,12 @@ external approval, signing authority, or elapsed production operation.
   stable required-check enforcement, exact-SHA tag verification, validation
   evidence, and release documentation.
 - Commits: pending.
-- Branch and remote state: clean synchronized `main` at round start; the
-  protected closeout branch contains the staged required-check implementation
-  and passes its current local release gates. Hosted PR and exact-main evidence
-  remain pending.
+- Branch and remote state: clean synchronized `main` at round start; PR `#6`
+  carries the protected closeout branch. Two implementation commits are
+  already pushed. The final Android/privacy, applicability, release-entrypoint,
+  channel, and documentation fixes now pass the complete local Apple, Android,
+  and repository-policy evidence and remain local only until the final closeout
+  commit is created. Hosted final-head and exact-main evidence remain pending.
 - Repository visibility verified: inherited from current release evidence.
 - Version/build impact: none at round start.
 - Release or distribution impact: none at round start.

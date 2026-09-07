@@ -26,7 +26,13 @@ GitHub's AUP prohibits, and may suspend accounts for:
 The BTC/ETH/etc. addresses belong in the in-app **Support** screen and the Donations wiki page — *that's it*. **Never paste a donation or crypto address into an issue, PR, or comment.** If a reply needs to mention donating, **link** to the wiki — don't paste the address. Repeating a crypto address across many comments is the single clearest "promotional bulk content / solicitation" signal, and it's what most likely tripped the filter.
 
 **2. Batch releases — don't drip-ship.**
-Combine multiple fixes into one release and space releases out. `Tools/release.sh` has a **cadence guard**: it refuses to publish if ≥3 releases were cut today or the last was <20 min ago, unless you deliberately set `ALLOW_RAPID_RELEASE=1`. A burst should always be a conscious decision, never an accident. (Tune via `CADENCE_LIMIT` / `CADENCE_MIN_GAP_MIN`.)
+Combine multiple fixes into one release and space releases out.
+`Tools/release.sh` is a guarded dispatcher for the canonical workflow; its
+**cadence guard** refuses to dispatch if at least three releases were cut today
+or the last was less than 20 minutes ago, unless the operator deliberately sets
+`ALLOW_RAPID_RELEASE=1`. A burst should always be a conscious decision, never
+an accident. Tune the local guard with `CADENCE_LIMIT` and
+`CADENCE_MIN_GAP_MIN`.
 
 **3. No mass-identical comments.**
 When replying across many issues/PRs (e.g. a board sweep), vary the wording and/or space the posts out. A flood of identical comments reads as inauthentic activity.

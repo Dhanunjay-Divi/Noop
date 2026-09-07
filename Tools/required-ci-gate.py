@@ -44,6 +44,7 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
     expected = {
         "schemaVersion",
         "sourceBranch",
+        "requiredCheckAppId",
         "requiredContexts",
         "universalWorkflows",
         "workflows",
@@ -52,6 +53,12 @@ def load_config(path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
         raise GateError("required CI config fields do not match schema version 1")
     if config["schemaVersion"] != 1 or config["sourceBranch"] != "main":
         raise GateError("required CI config identity is invalid")
+    if (
+        not isinstance(config["requiredCheckAppId"], int)
+        or isinstance(config["requiredCheckAppId"], bool)
+        or config["requiredCheckAppId"] <= 0
+    ):
+        raise GateError("requiredCheckAppId must be a positive integer")
 
     contexts = _string_list(config["requiredContexts"], "requiredContexts")
     if contexts != sorted(set(contexts)) or any(
@@ -186,6 +193,9 @@ def check_workflow(root: Path, workflow: dict[str, Any]) -> None:
         "run: ${{ steps.scope.outputs.run }}",
         "fetch-depth: 0",
         'EVENT_NAME: ${{ github.event_name }}',
+        'CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"',
+        'git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > "$CHANGED_FILES"',
+        '"$CHANGED_FILES"',
         '"run=true"',
         '"run=false"',
     ):
@@ -275,8 +285,10 @@ def check_release_workflow(root: Path) -> None:
         'test "$GITHUB_REF" = "refs/heads/main"',
         "Tools/required-ci-gate.py verify-github",
         "Tools/release-version-gate.py check",
+        "--release-sha \"$GITHUB_SHA\"",
         "--sha \"$GITHUB_SHA\"",
         "git diff --exit-code",
+        "uses: ./.github/workflows/altstore-source.yml",
         "Reverify required checks before publication",
         "--sha \"$RELEASE_SHA\"",
     )
@@ -295,6 +307,71 @@ def check_release_workflow(root: Path) -> None:
         raise GateError(
             "release workflow must verify exact-SHA checks before draft and publish"
         )
+    if re.search(
+        r"git\s+push[^\n]*(?:HEAD:)?(?:refs/heads/)?main(?:[\s\"']|$)",
+        text,
+    ):
+        raise GateError("release workflow cannot push directly to main")
+
+
+def check_altstore_workflow(root: Path) -> None:
+    path = root / ".github" / "workflows" / "altstore-source.yml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("AltStore source workflow is missing") from error
+    required_text = (
+        "workflow_call:",
+        "workflow_dispatch:",
+        'test "$GITHUB_REF" = "refs/heads/main"',
+        "Tools/required-ci-gate.py verify-github",
+        "Tools/altstore-source.py update",
+        "releases/download/${CHANNEL_TAG}/altstore-source.json",
+        "gh release upload \"$CHANNEL_TAG\" \"$MANIFEST\"",
+        "curl --fail --silent --show-error --location",
+        'test "$APPLE_VERSION" = "$VERSION"',
+        'test "$ANDROID_VERSION" = "$VERSION"',
+    )
+    for item in required_text:
+        if item not in text:
+            raise GateError(f"AltStore source workflow lacks {item}")
+    if re.search(r"git\s+push", text):
+        raise GateError("AltStore source workflow cannot mutate Git refs")
+
+
+def check_local_release_entrypoint(root: Path) -> None:
+    path = root / "Tools" / "release.sh"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("local release dispatcher is missing") from error
+    required_text = (
+        "Tools/release-control-gate.py check",
+        "Tools/required-ci-gate.py verify-github",
+        "git status --porcelain=v1 --untracked-files=normal",
+        "git diff --quiet",
+        "git diff --cached --quiet",
+        "git fetch --quiet origin main --tags",
+        'gh workflow run release.yml',
+        "--ref main",
+    )
+    for item in required_text:
+        if item not in text:
+            raise GateError(f"local release dispatcher lacks {item}")
+    forbidden = (
+        "gh release create",
+        "gh release edit",
+        "gh release upload",
+        "update-altstore-source.sh",
+        "git push",
+    )
+    for item in forbidden:
+        if item in text:
+            raise GateError(
+                f"local release dispatcher retains direct publication: {item}"
+            )
+    if (root / "Tools" / "update-altstore-source.sh").exists():
+        raise GateError("obsolete checked-in AltStore manifest mutator remains")
 
 
 def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> None:
@@ -304,16 +381,25 @@ def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> N
     for workflow in config["workflows"]:
         check_workflow(root, workflow)
     check_release_workflow(root)
+    check_altstore_workflow(root)
+    check_local_release_entrypoint(root)
 
 
 def evaluate_check_runs(
     config: dict[str, Any], check_runs: list[dict[str, Any]]
 ) -> None:
     latest: dict[str, dict[str, Any]] = {}
+    required_app_id = config["requiredCheckAppId"]
     for run in check_runs:
         name = run.get("name")
         identifier = run.get("id")
-        if not isinstance(name, str) or not isinstance(identifier, int):
+        app = run.get("app")
+        app_id = app.get("id") if isinstance(app, dict) else None
+        if (
+            not isinstance(name, str)
+            or not isinstance(identifier, int)
+            or app_id != required_app_id
+        ):
             continue
         previous = latest.get(name)
         if previous is None or identifier > previous["id"]:

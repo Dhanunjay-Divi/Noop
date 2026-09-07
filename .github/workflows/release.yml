@@ -6,10 +6,10 @@
 # The version, build numbers, localized What's New entry, and release notes must already be committed
 # through protected `main`. This workflow verifies every required check on that exact commit before it
 # creates a draft, then publishes a fixed, non-prerelease `v<VERSION>` release with version-stamped
-# artifacts. A new release remains a draft until every platform
-# artifact is attached and a publicly fetchable AltStore source is verified on `main`; only then
-# is it published as latest, so a failed build cannot strand users on an
-# empty/incomplete release. UpdateCheck finds the
+# artifacts. A new release remains a draft until every platform artifact is
+# attached and reverified, then it is published as latest. The repairable
+# AltStore source workflow runs only after publication, so the public feed can
+# never advertise an inaccessible draft IPA. UpdateCheck finds the
 # published release (isNewer strips the `-staging` suffix, so an installed
 # staging build compares clean).
 #
@@ -122,10 +122,12 @@ jobs:
             }
             python3 Tools/release-version-gate.py check \
               --expected-version "$NEW" \
+              --release-sha "$GITHUB_SHA" \
               --previous-ref "$PREV_TAG"
           else
             python3 Tools/release-version-gate.py check \
               --expected-version "$NEW" \
+              --release-sha "$GITHUB_SHA" \
               --first-release
           fi
 
@@ -144,9 +146,10 @@ jobs:
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
           # Keep the immutable release as a DRAFT at the reviewed commit until
-          # all three platform artifacts and the AltStore source
-          # are complete. A retry may refresh an existing draft, but it must
-          # never pull an already-published immutable release back into draft.
+          # all three platform artifacts are complete. The repairable AltStore
+          # channel is updated only after publication. A retry may refresh an
+          # existing draft, but it must never pull an already-published
+          # immutable release back into draft.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
             if [ "$IS_DRAFT" != "true" ]; then
@@ -407,7 +410,7 @@ jobs:
           gh release upload "$TAG" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
   publish:
-    needs: [bump, android, macos, ios, altstore]
+    needs: [bump, android, macos, ios]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact reviewed source
@@ -446,115 +449,15 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
             --draft=false --prerelease=false --latest
 
-  # Prepend this release to the AltStore / SideStore source manifest only when GitHub reports the
-  # repository as public. AltStore cannot authenticate to private raw/release URLs. This is a
-  # required publication gate:
-  # the GitHub release remains a draft unless the manifest is updated and
-  # verified on main.
+  # Update the stable public AltStore / SideStore channel only after the
+  # versioned release is published. The called workflow is also manually
+  # dispatchable, so a transient channel-hosting failure can be repaired
+  # without rebuilding or mutating an immutable production release.
   altstore:
-    needs: [bump, android, macos, ios]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
-        with:
-          ref: main   # Public AltStore clients read the manifest from main.
-          fetch-depth: 0
-      - name: Require anonymously fetchable GitHub distribution
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')
-          if [ "$VISIBILITY" != "public" ]; then
-            echo "::error::Repository visibility is ${VISIBILITY}. AltStore/SideStore cannot authenticate to private raw GitHub files or private release assets; refusing to publish a misleading source entry. Make the repository public or move the manifest, icon, and IPA to an intentionally public HTTPS host first."
-            exit 1
-          fi
-      - name: Add this release to the AltStore source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VER: ${{ needs.bump.outputs.ver }}
-          TAG: ${{ needs.bump.outputs.tag }}
-          BUILD: ${{ needs.bump.outputs.buildVersion }}
-        run: |
-          set -euo pipefail
-          [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = "true" ] || {
-            echo "::error::Release $TAG is already published; refusing to rewrite its AltStore entry."
-            exit 1
-          }
-          if [ ! -f altstore-source.json ]; then
-            echo "::error::no altstore-source.json on main; refusing to publish without an installable source."
-            exit 1
-          fi
-          IPA="NOOP-ios-unsigned-v${VER}.ipa"
-          # The freshly-uploaded IPA's byte size, straight off the release asset (the `ios` job just pushed it).
-          SIZE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[] | select(.name=="'"$IPA"'") | .size')
-          if [ -z "${SIZE:-}" ]; then
-            echo "::error::IPA asset $IPA not found on release $TAG."
-            exit 1
-          fi
-          [ -n "${BUILD:-}" ] || BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*"([0-9]+)".*/\1/')
-          DATE=$(date -u +%Y-%m-%d)
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${IPA}"
-          DESC="NOOP ${VER}. See the release notes for what changed."
-          MINOS=$(jq -r '.apps[0].minOSVersion // "17.0"' altstore-source.json)
-
-          # Prepend to versions[] (dedup this version so a re-run is idempotent) AND mirror into the
-          # app-level legacy fields older AltStore clients read, so both source shapes point at this release.
-          tmp=$(mktemp)
-          jq \
-            --arg v "$VER" --arg b "$BUILD" --arg d "$DATE" --arg desc "$DESC" \
-            --arg url "$URL" --argjson size "$SIZE" --arg min "$MINOS" \
-            '
-            .apps[0].versions |= ([{
-                version: $v, buildVersion: $b, date: $d,
-                localizedDescription: $desc, downloadURL: $url, size: $size, minOSVersion: $min
-              }] + (map(select(.version != $v))))
-            | .apps[0].version            = $v
-            | .apps[0].buildVersion       = $b
-            | .apps[0].versionDate        = $d
-            | .apps[0].versionDescription = $desc
-            | .apps[0].downloadURL        = $url
-            | .apps[0].size               = $size
-            ' altstore-source.json > "$tmp" && mv "$tmp" altstore-source.json
-
-          jq -e \
-            --arg v "$VER" --arg b "$BUILD" --arg url "$URL" --argjson size "$SIZE" \
-            '
-              .apps[0].versions[0].version == $v
-              and .apps[0].versions[0].buildVersion == $b
-              and .apps[0].versions[0].downloadURL == $url
-              and .apps[0].versions[0].size == $size
-              and .apps[0].version == $v
-              and .apps[0].buildVersion == $b
-              and .apps[0].downloadURL == $url
-              and .apps[0].size == $size
-            ' altstore-source.json >/dev/null
-
-          if git diff --quiet altstore-source.json; then
-            echo "altstore-source.json already current for ${VER}."
-          else
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add altstore-source.json
-            git commit -m "Release ${VER}: add to AltStore source"
-            git push origin HEAD:main
-          fi
-
-          REMOTE_SHA=$(git ls-remote origin refs/heads/main | awk '{print $1}')
-          [ "$REMOTE_SHA" = "$(git rev-parse HEAD)" ] || {
-            echo "::error::main does not contain the AltStore manifest commit."
-            exit 1
-          }
-          git show "${REMOTE_SHA}:altstore-source.json" | jq -e \
-            --arg v "$VER" --arg b "$BUILD" --arg url "$URL" --argjson size "$SIZE" \
-            '
-              .apps[0].versions[0].version == $v
-              and .apps[0].versions[0].buildVersion == $b
-              and .apps[0].versions[0].downloadURL == $url
-              and .apps[0].versions[0].size == $size
-              and .apps[0].version == $v
-              and .apps[0].buildVersion == $b
-              and .apps[0].downloadURL == $url
-              and .apps[0].size == $size
-            ' >/dev/null
+    needs: [bump, publish]
+    permissions:
+      checks: read
+      contents: write
+    uses: ./.github/workflows/altstore-source.yml
+    with:
+      version: ${{ needs.bump.outputs.ver }}

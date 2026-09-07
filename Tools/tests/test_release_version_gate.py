@@ -57,6 +57,19 @@ class ReleaseVersionGateTests(unittest.TestCase):
         ):
             GATE.validate_transition(current, "9.2.0", None)
 
+    def test_existing_release_tag_must_target_exact_source(self) -> None:
+        release_sha = "a" * 40
+        GATE.validate_existing_tag(None, release_sha)
+        GATE.validate_existing_tag(release_sha, release_sha)
+        with self.assertRaisesRegex(
+            GATE.GateError, "different source commit"
+        ):
+            GATE.validate_existing_tag("b" * 40, release_sha)
+
+    def test_release_sha_must_be_full_lowercase_commit(self) -> None:
+        with self.assertRaisesRegex(GATE.GateError, "full lowercase commit SHA"):
+            GATE.validate_existing_tag(None, "A" * 40)
+
 
 if __name__ == "__main__":
     unittest.main()

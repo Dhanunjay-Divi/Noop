@@ -37,10 +37,12 @@ the same update break will recur.
 
 The checked-in `altstore-source.json` is a publication template, not a working
 private distribution channel. AltStore and SideStore cannot authenticate to a
-private `raw.githubusercontent.com` manifest or its private GitHub release URLs.
-Do not advertise or add that source URL while this repository is private. It
-becomes usable only after the manifest, icon, and IPA assets all live at
-intentionally public HTTPS URLs.
+private GitHub release manifest or its private versioned IPA URLs. Do not
+advertise or add the stable channel while this repository is private. It becomes
+usable only after the repository, manifest, icon, and IPA assets are
+intentionally public and the release workflow has published and anonymously
+verified
+`https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json`.
 
 See the [iPhone installation guide](IOS.md) for the exact setup and the
 limitations of free Apple-ID signing.
