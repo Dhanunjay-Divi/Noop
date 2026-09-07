@@ -1,7 +1,7 @@
 {
   "categoryCounts": {
     "compatibility": 1694,
-    "core": 4969,
+    "core": 4968,
     "customer": 813,
     "fixture": 5316,
     "generated": 13,
@@ -68,7 +68,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        213
+        218
       ],
       "occurrenceCount": 1,
       "path": ".github/workflows/release.yml",
@@ -17787,18 +17787,6 @@
       "sha256": "b2992935b20ef66368ceef242a1bb8e5d047c4017a18ab4ef6752da9e3e276f0",
       "tokenCounts": {
         "whoop": 49
-      }
-    },
-    {
-      "category": "core",
-      "lineNumbers": [
-        73
-      ],
-      "occurrenceCount": 1,
-      "path": "Tools/update-homebrew-cask.sh",
-      "sha256": "f44ad509998ca24dafc9295b3b892de6efacb2fd337beeb864d8a4e7f6817623",
-      "tokenCounts": {
-        "whoop": 1
       }
     },
     {
@@ -37269,7 +37257,7 @@
       }
     }
   ],
-  "occurrenceCount": 17371,
+  "occurrenceCount": 17370,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

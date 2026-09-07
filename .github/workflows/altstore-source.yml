@@ -81,6 +81,10 @@ jobs:
           }
 
           RELEASE_SHA=$(git rev-parse "${TAG}^{commit}")
+          git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA" || {
+            echo "::error::Published release $TAG is not contained in protected main."
+            exit 1
+          }
           GH_TOKEN="$GH_TOKEN" python3 Tools/required-ci-gate.py verify-github \
             --repository "$GITHUB_REPOSITORY" \
             --sha "$RELEASE_SHA"
@@ -96,15 +100,31 @@ jobs:
 
           CHANNEL_TAG="altstore-source"
           SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL_TAG}/altstore-source.json"
+          BACKUP_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL_TAG}/altstore-source.previous.json"
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${IPA}"
           MANIFEST="$RUNNER_TEMP/altstore-source.json"
           EXISTING="$RUNNER_TEMP/existing-altstore-source.json"
+          BACKUP="$RUNNER_TEMP/altstore-source.previous.json"
+          INITIALIZING_MARKER="NOOP_ALTSTORE_STATE=initializing"
+          READY_MARKER="NOOP_ALTSTORE_STATE=ready"
+          BASE_SOURCE="template"
+
+          fetch_manifest() {
+            local url="$1"
+            local output="$2"
+            curl --fail --silent --show-error --location \
+              "${url}?source=${GITHUB_RUN_ID}&attempt=${GITHUB_RUN_ATTEMPT}" \
+              --output "$output" &&
+              jq -e '.apps | type == "array" and length > 0' \
+                "$output" >/dev/null
+          }
+
           CHANNEL_EXISTS=false
           if gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
             >/dev/null 2>&1; then
             CHANNEL_EXISTS=true
             CHANNEL=$(gh release view "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
-              --json isDraft,isPrerelease,assets)
+              --json isDraft,isPrerelease,body,assets)
             [ "$(jq -r '.isDraft' <<<"$CHANNEL")" = "false" ]
             [ "$(jq -r '.isPrerelease' <<<"$CHANNEL")" = "true" ] || {
               echo "::error::The stable AltStore source release must remain a prerelease."
@@ -113,20 +133,35 @@ jobs:
             SOURCE_ASSET_COUNT=$(jq -r \
               '[.assets[]? | select(.name == "altstore-source.json")] | length' \
               <<<"$CHANNEL")
-            if [ "$SOURCE_ASSET_COUNT" = "1" ]; then
-              curl --fail --silent --show-error --location \
-                "${SOURCE_URL}?source=${GITHUB_RUN_ID}" --output "$EXISTING"
-              jq -e '.apps | type == "array" and length > 0' \
-                "$EXISTING" >/dev/null
+            BACKUP_ASSET_COUNT=$(jq -r \
+              '[.assets[]? | select(.name == "altstore-source.previous.json")] | length' \
+              <<<"$CHANNEL")
+            [ "$SOURCE_ASSET_COUNT" -le 1 ] &&
+              [ "$BACKUP_ASSET_COUNT" -le 1 ] || {
+              echo "::error::The AltStore channel has duplicate source assets."
+              exit 1
+            }
+            CHANNEL_BODY=$(jq -r '.body // ""' <<<"$CHANNEL")
+
+            if [ "$SOURCE_ASSET_COUNT" = "1" ] &&
+               fetch_manifest "$SOURCE_URL" "$EXISTING"; then
               cp "$EXISTING" "$MANIFEST"
-            elif [ "$SOURCE_ASSET_COUNT" = "0" ]; then
-              # A previous first publication may have created the channel
-              # release before its initial asset upload failed. Recover from
-              # the reviewed template while preserving strict history once an
-              # asset exists.
+              BASE_SOURCE="stable"
+            elif [ "$BACKUP_ASSET_COUNT" = "1" ] &&
+                 fetch_manifest "$BACKUP_URL" "$BACKUP"; then
+              # The stable asset may have been removed by a failed replacement.
+              # Its durable predecessor carries the complete channel history.
+              cp "$BACKUP" "$MANIFEST"
+              BASE_SOURCE="backup"
+            elif [ "$SOURCE_ASSET_COUNT" = "0" ] &&
+                 [ "$BACKUP_ASSET_COUNT" = "0" ] &&
+                 grep -Fq "$INITIALIZING_MARKER" <<<"$CHANNEL_BODY"; then
+              # Only an explicitly marked first publication may recover from
+              # the reviewed template. An established ambiguous channel fails
+              # closed instead of silently dropping release history.
               cp altstore-source.json "$MANIFEST"
             else
-              echo "::error::The AltStore channel has duplicate source assets."
+              echo "::error::The AltStore channel has no trustworthy manifest or recovery asset."
               exit 1
             fi
           else
@@ -169,7 +204,20 @@ jobs:
             gh release create "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --prerelease \
               --title "NOOP AltStore source" \
-              --notes "Mutable public distribution manifest generated from reviewed production releases."
+              --notes "$INITIALIZING_MARKER
+
+          Mutable public distribution manifest generated from reviewed production releases."
+          fi
+
+          # gh release upload --clobber removes the prior asset before sending
+          # its replacement. Preserve the complete current source under a
+          # separate durable name before allowing that destructive operation.
+          # If replacement fails, a retry restores from this backup instead of
+          # rebuilding from the checked-in first-release template.
+          if [ "$BASE_SOURCE" = "stable" ]; then
+            cp "$EXISTING" "$BACKUP"
+            gh release upload "$CHANNEL_TAG" "$BACKUP" \
+              --repo "$GITHUB_REPOSITORY" --clobber
           fi
           gh release upload "$CHANNEL_TAG" "$MANIFEST" \
             --repo "$GITHUB_REPOSITORY" --clobber
@@ -189,6 +237,10 @@ jobs:
               ICON_URL=$(jq -r '.iconURL' "$MANIFEST")
               curl --fail --silent --show-error --location \
                 "$ICON_URL" --output /dev/null
+              gh release edit "$CHANNEL_TAG" --repo "$GITHUB_REPOSITORY" \
+                --notes "$READY_MARKER
+
+          Mutable public distribution manifest generated from reviewed production releases."
               echo "AltStore source ${VERSION} is anonymously fetchable."
               exit 0
             fi

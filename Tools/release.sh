@@ -8,11 +8,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPOSITORY="${NOOP_RELEASE_GITHUB_REPO:-Dhanunjay-Divi/Noop}"
 VERSION="${1:-}"
+PUBLISH_HOMEBREW=false
 
 if [ "$#" -ne 1 ] || [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "usage: Tools/release.sh <version>" >&2
   exit 2
 fi
+case "${NOOP_RELEASE_HOMEBREW:-0}" in
+  0 | "")
+    ;;
+  1)
+    PUBLISH_HOMEBREW=true
+    ;;
+  *)
+    echo "NOOP_RELEASE_HOMEBREW must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
 
 command -v gh >/dev/null 2>&1 || {
   echo "gh CLI is required" >&2
@@ -102,6 +114,7 @@ GH_TOKEN="$TOKEN" gh workflow run release.yml \
   --repo "$REPOSITORY" \
   --ref main \
   --field "version=$VERSION" \
-  --field "release_sha=$SOURCE_SHA"
+  --field "release_sha=$SOURCE_SHA" \
+  --field "publish_homebrew=$PUBLISH_HOMEBREW"
 
 echo "Dispatched the protected production release for v${VERSION} at ${SOURCE_SHA}."

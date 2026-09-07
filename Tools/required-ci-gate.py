@@ -293,6 +293,10 @@ def check_release_workflow(root: Path) -> None:
         "--sha \"$GITHUB_SHA\"",
         "git diff --exit-code",
         "uses: ./.github/workflows/altstore-source.yml",
+        "uses: ./.github/workflows/homebrew-cask.yml",
+        "publish_homebrew:",
+        "if: ${{ inputs.publish_homebrew }}",
+        "secrets: inherit",
         "Reverify required checks before publication",
         "--sha \"$RELEASE_SHA\"",
     )
@@ -329,13 +333,19 @@ def check_altstore_workflow(root: Path) -> None:
         "workflow_dispatch:",
         'test "$GITHUB_REF" = "refs/heads/main"',
         "Tools/required-ci-gate.py verify-github",
+        'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
         "Tools/altstore-source.py update",
         "releases/download/${CHANNEL_TAG}/altstore-source.json",
         "gh release upload \"$CHANNEL_TAG\" \"$MANIFEST\"",
         "curl --fail --silent --show-error --location",
         'select(.name == "altstore-source.json")',
+        'select(.name == "altstore-source.previous.json")',
         'if [ "$SOURCE_ASSET_COUNT" = "1" ]',
-        'elif [ "$SOURCE_ASSET_COUNT" = "0" ]',
+        'BASE_SOURCE="backup"',
+        'INITIALIZING_MARKER="NOOP_ALTSTORE_STATE=initializing"',
+        'READY_MARKER="NOOP_ALTSTORE_STATE=ready"',
+        'if [ "$BASE_SOURCE" = "stable" ]',
+        'gh release upload "$CHANNEL_TAG" "$BACKUP"',
         'test "$APPLE_VERSION" = "$VERSION"',
         'test "$ANDROID_VERSION" = "$VERSION"',
     )
@@ -344,6 +354,47 @@ def check_altstore_workflow(root: Path) -> None:
             raise GateError(f"AltStore source workflow lacks {item}")
     if re.search(r"git\s+push", text):
         raise GateError("AltStore source workflow cannot mutate Git refs")
+    backup_upload = text.index('gh release upload "$CHANNEL_TAG" "$BACKUP"')
+    source_upload = text.index('gh release upload "$CHANNEL_TAG" "$MANIFEST"')
+    if backup_upload >= source_upload:
+        raise GateError(
+            "AltStore source workflow must preserve history before replacement"
+        )
+    template_fallback = text.index('cp altstore-source.json "$MANIFEST"')
+    initializing_guard = text.index(
+        'grep -Fq "$INITIALIZING_MARKER" <<<"$CHANNEL_BODY"'
+    )
+    if initializing_guard >= template_fallback:
+        raise GateError(
+            "AltStore template recovery must require first-publication state"
+        )
+
+
+def check_homebrew_workflow(root: Path) -> None:
+    path = root / ".github" / "workflows" / "homebrew-cask.yml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise GateError("Homebrew cask workflow is missing") from error
+    required_text = (
+        "workflow_call:",
+        "workflow_dispatch:",
+        'test "$GITHUB_REF" = "refs/heads/main"',
+        "Tools/required-ci-gate.py verify-github",
+        'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',
+        "NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}",
+        "NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
+        'SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}"',
+        'gh api "repos/${NOOP_HOMEBREW_TAP_ORG}/homebrew-noop"',
+        'gh release download "$TAG"',
+        'test "$(stat -c %s "$DOWNLOAD_DIR/$ZIP")" = "$SIZE"',
+        'test "$APPLE_VERSION" = "$VERSION"',
+        'test "$ANDROID_VERSION" = "$VERSION"',
+        'Tools/update-homebrew-cask.sh "$VERSION" "$DOWNLOAD_DIR/$ZIP"',
+    )
+    for item in required_text:
+        if item not in text:
+            raise GateError(f"Homebrew cask workflow lacks {item}")
 
 
 def check_local_release_entrypoint(root: Path) -> None:
@@ -362,6 +413,7 @@ def check_local_release_entrypoint(root: Path) -> None:
         'gh workflow run release.yml',
         "--ref main",
         '--field "release_sha=$SOURCE_SHA"',
+        '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
     )
     for item in required_text:
         if item not in text:
@@ -390,6 +442,7 @@ def check_repository(root: Path = ROOT, config_path: Path = DEFAULT_CONFIG) -> N
         check_workflow(root, workflow)
     check_release_workflow(root)
     check_altstore_workflow(root)
+    check_homebrew_workflow(root)
     check_local_release_entrypoint(root)
 
 

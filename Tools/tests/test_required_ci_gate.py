@@ -26,6 +26,7 @@ class RequiredCIGateTests(unittest.TestCase):
     def test_release_build_uses_only_exact_green_main_source(self) -> None:
         GATE.check_release_workflow(ROOT)
         GATE.check_altstore_workflow(ROOT)
+        GATE.check_homebrew_workflow(ROOT)
         GATE.check_local_release_entrypoint(ROOT)
 
     def test_required_contexts_are_the_protected_merge_contract(self) -> None:
@@ -120,13 +121,55 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA"', workflow)
         self.assertIn('--field "release_sha=$SOURCE_SHA"', dispatcher)
 
-    def test_altstore_channel_recovers_a_missing_initial_asset(self) -> None:
+    def test_altstore_channel_recovers_only_a_marked_initial_asset(self) -> None:
         text = (ROOT / ".github/workflows/altstore-source.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn('select(.name == "altstore-source.json")', text)
-        self.assertIn('elif [ "$SOURCE_ASSET_COUNT" = "0" ]', text)
+        self.assertIn('INITIALIZING_MARKER="NOOP_ALTSTORE_STATE=initializing"', text)
+        self.assertIn(
+            'grep -Fq "$INITIALIZING_MARKER" <<<"$CHANNEL_BODY"',
+            text,
+        )
         self.assertIn('cp altstore-source.json "$MANIFEST"', text)
+
+    def test_altstore_channel_preserves_history_before_clobber(self) -> None:
+        text = (ROOT / ".github/workflows/altstore-source.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('select(.name == "altstore-source.previous.json")', text)
+        self.assertIn('BASE_SOURCE="backup"', text)
+        backup_upload = text.index(
+            'gh release upload "$CHANNEL_TAG" "$BACKUP"'
+        )
+        source_upload = text.index(
+            'gh release upload "$CHANNEL_TAG" "$MANIFEST"'
+        )
+        self.assertLess(backup_upload, source_upload)
+
+    def test_homebrew_opt_in_reaches_a_retryable_verified_workflow(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
+        homebrew = (ROOT / ".github/workflows/homebrew-cask.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("publish_homebrew:", release)
+        self.assertIn("uses: ./.github/workflows/homebrew-cask.yml", release)
+        self.assertIn("if: ${{ inputs.publish_homebrew }}", release)
+        self.assertIn("secrets: inherit", release)
+        self.assertIn(
+            '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
+            dispatcher,
+        )
+        self.assertIn("workflow_dispatch:", homebrew)
+        self.assertIn("Tools/required-ci-gate.py verify-github", homebrew)
+        self.assertIn("Tools/update-homebrew-cask.sh", homebrew)
+        helper = (ROOT / "Tools/update-homebrew-cask.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Tools/homebrew-version-gate.py", helper)
 
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
         workflow = self.config["workflows"][0]

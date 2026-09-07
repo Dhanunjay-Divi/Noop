@@ -26,6 +26,11 @@ on:
       release_sha:
         description: "Exact protected-main commit already verified by the dispatcher"
         required: true
+      publish_homebrew:
+        description: "Update the configured public project tap after publication"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   checks: read
@@ -474,3 +479,17 @@ jobs:
     uses: ./.github/workflows/altstore-source.yml
     with:
       version: ${{ needs.bump.outputs.ver }}
+
+  # Homebrew is opt-in until the public project tap, scoped write token, and
+  # repository variable are provisioned. The called workflow is manually
+  # repairable, so a tap outage never requires rebuilding an immutable release.
+  homebrew:
+    needs: [bump, publish]
+    if: ${{ inputs.publish_homebrew }}
+    permissions:
+      checks: read
+      contents: read
+    uses: ./.github/workflows/homebrew-cask.yml
+    with:
+      version: ${{ needs.bump.outputs.ver }}
+    secrets: inherit

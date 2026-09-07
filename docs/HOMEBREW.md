@@ -31,15 +31,30 @@ NOOP_HOMEBREW_TAP_ORG=Dhanunjay-Divi \
   Tools/update-homebrew-cask.sh 9.1.1 dist/NOOP-macos-v9.1.1.zip
 ```
 
-To opt the broader manual release helper into that step, also set
-`NOOP_RELEASE_HOMEBREW=1`.
+To opt the canonical protected release into that step, set
+`NOOP_RELEASE_HOMEBREW=1` when dispatching `Tools/release.sh`. The dispatcher
+passes the decision to a retryable post-publication workflow; it never pushes
+the tap from the local release process.
+
+Automated publication additionally requires:
+
+- repository variable `NOOP_HOMEBREW_TAP_ORG` set to the public tap owner; and
+- repository secret `NOOP_HOMEBREW_TAP_TOKEN` scoped to **Contents: read and
+  write** on only `<owner>/homebrew-noop`.
+
+If publication fails after the immutable app release is public, manually
+dispatch `Homebrew cask publication` for the same version. The workflow
+revalidates the release, exact-SHA checks, platform versions, artifact size,
+source visibility, and tap visibility before pushing.
 
 The helper:
 
 - calculates the release ZIP's SHA-256 digest;
+- rejects a malformed or backward cask version before changing the tap;
 - generates `Casks/noop.rb` with downloads and homepage pointing to
   `Dhanunjay-Divi/Noop`;
-- reads the GitHub token from `~/.config/noop/gh_token`;
+- reads the GitHub token from `NOOP_HOMEBREW_GITHUB_TOKEN` in automation or
+  `~/.config/noop/gh_token` for a deliberate local run;
 - supplies credentials through a transient Git credential helper rather than a
   command-line URL; and
 - never targets a Forge mirror unless `NOOP_HOMEBREW_FORGE=1` and all `FORGE_*`

@@ -185,6 +185,26 @@ external approval, signing authority, or elapsed production operation.
   advances before GitHub resolves the dispatch, the workflow fails closed
   instead of building the newer commit. The dispatcher cannot create, edit,
   upload, or push a release directly.
+- Closed the two post-release defects found by the final protected review.
+  AltStore replacement now preserves the complete current manifest as a
+  separate durable release asset before `--clobber`; an interrupted
+  replacement restores from that asset, while template recovery is permitted
+  only for a release explicitly marked as an unfinished first publication.
+  Both AltStore and Homebrew repair paths require their production tag to be
+  contained in protected `main` and to retain the exact required check set.
+- Restored the documented Homebrew opt-in as a retryable reusable/manual
+  workflow after immutable release publication. The guarded local dispatcher
+  carries only the opt-in decision. The workflow requires a public source, a
+  public project tap, exact platform versions and artifact size, a
+  repository-scoped tap owner variable, and a tap-only write secret. The
+  helper accepts the scoped token through the environment, validates every
+  repository coordinate before network access, and retains its deliberate
+  local token-file fallback. No tap or token is provisioned by this round, so
+  the lane remains disabled by default and no release was published.
+- Removed the remaining legacy vendor name from generated Homebrew package
+  metadata. The reviewed terminology snapshot now contains 17,370 classified
+  occurrences across 1,508 path/category groups, one active/core occurrence
+  fewer than the preceding candidate, with zero forbidden mappings.
 - Fixed the intermittent Android diagnostic-report test at the product
   boundary. While screenshot compression was pending, Android supplied a null
   switch callback, which removed `ToggleableState` instead of exposing a
@@ -250,7 +270,10 @@ external approval, signing authority, or elapsed production operation.
   only the bounded `runtime.operational_started` and
   `activity.operational_runtime_available` transitions after consent. Required
   CI and release verification records only fixed workflow context names and
-  bounded missing, running, failed, skipped, or successful states.
+  bounded missing, running, failed, skipped, or successful states. Post-release
+  channel automation records only static validation/recovery categories,
+  workflow status, version, and bounded artifact presence; it does not emit
+  credentials, user data, or artifact content.
 - Redaction, retention, and high-frequency controls: no raw health values,
   sensor rows, user text, credentials, identifiers, dynamic URLs, payloads, or
   arbitrary errors enter diagnostics.
@@ -276,8 +299,8 @@ external approval, signing authority, or elapsed production operation.
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | 89 repository-tool tests pass; release controls 9/9; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 12 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
-| Required merge and tag contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; release source mutation is rejected, both build counters must advance from published `v9.1.1`, and exact-SHA verification is required twice | Applicable platform/license failures cannot be hidden by event path filters, and a production tag cannot be published from an unchecked or stale-build source SHA | A completed signed production release |
+| Staged repository policy matrix | 99 repository-tool tests pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 13 workflows parse and pass `actionlint` | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
+| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; release source mutation is rejected, both build counters must advance from published `v9.1.1`, exact-SHA verification is required twice, AltStore history is backed up before replacement, ambiguous channel recovery fails closed, and Homebrew opt-in reaches a manually repairable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, or history-dropping source | A completed signed production release, public Homebrew tap, or provisioned tap credential |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment
@@ -299,18 +322,21 @@ external approval, signing authority, or elapsed production operation.
   comparison/export UI, compatibility labels, long-history tooling,
   localization, metric rollback, key/security operations, disclosed Apple and
   Android Review Sample presentation/runtime gates, release workflows/policy,
-  stable required-check enforcement, exact-SHA tag verification, validation
-  evidence, and release documentation.
+  stable required-check enforcement, exact-SHA tag verification, failure-safe
+  AltStore history repair, retryable Homebrew publication, validation evidence,
+  and release documentation.
 - Commits: pending.
 - Branch and remote state: clean synchronized `main` at round start; PR `#6`
-  carries the protected closeout branch. Two implementation commits are
-  already pushed. The final Android/privacy, applicability, release-entrypoint,
-  channel, and documentation fixes now pass the complete local Apple, Android,
-  and repository-policy evidence and remain local only until the final closeout
-  commit is created. Hosted final-head and exact-main evidence remain pending.
+  carries the protected closeout branch. Four implementation commits are
+  already pushed. The final post-release channel fixes now pass the complete
+  local repository-policy evidence and remain local only until the next
+  closeout commit is created. Hosted final-head and exact-main evidence remain
+  pending.
 - Repository visibility verified: inherited from current release evidence.
 - Version/build impact: none at round start.
-- Release or distribution impact: none at round start.
+- Release or distribution impact: release and repair workflows changed, but no
+  production release, AltStore source, Homebrew tap, Git tag, or app artifact
+  was created or mutated.
 
 ## Decisions
 
@@ -330,6 +356,9 @@ external approval, signing authority, or elapsed production operation.
   values stay isolated, not that the process constructs no local objects.
 - Seven-day raw and 30-day essential managed retention remains a measured,
   implemented candidate rather than the final owner-approved all-class policy.
+- Homebrew automation is code-complete but remains intentionally disabled
+  until the owner creates the public project tap and provisions the scoped
+  repository variable and tap-only write secret.
 - The measured retained 365-day database is about 444 MB and exact
   backup/restore temporarily reaches about 1.33 GB. Indexed host reads are fast,
   but only representative phones can establish launch, scroll, memory,
