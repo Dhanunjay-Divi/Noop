@@ -18,6 +18,21 @@ Last updated: **2026-09-07**
 
 ## Active work
 
+The status and resource audit is complete. The first-release ledger has 396
+stable actions: 44 evidenced complete and 352 pending, split into 33 owner, 252
+engineering, 33 joint, and 34 external actions. Known local relay, proxy,
+preview, temporary-database, simulator, and Gradle runtimes remain stopped.
+Sixteen inactive temporary PostgreSQL, proxy-probe, and OpenGym paths were
+removed, and approximately 245 MB of generated OpenTofu plans/provider and tool
+caches were moved to Trash. Live GCP inspection confirms that the private
+synthetic staging stack remains provisioned: three Cloud Run services, two
+jobs, one `db-f1-micro` Cloud SQL instance, one enabled five-minute lifecycle
+schedule, three buckets, and a 381 MB container repository. The services have
+no public invoker. Cloud SQL and the schedule remain billable and were retained
+for unfinished NOOP+, ownership, restore, isolation, and deployment work.
+Evidence is recorded in
+[Status and resource audit](rounds/2026-09-07-status-and-resource-audit.md).
+
 The launch owner-decision round is in progress. Source review confirms that
 Firebase Identity Platform handles managed account and phone-OTP identity;
 Twilio is used only for optional Safety contact SMS/voice paging, DTMF
