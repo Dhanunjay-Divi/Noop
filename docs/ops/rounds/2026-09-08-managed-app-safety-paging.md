@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: `71ad5cb3a88d`
-- Record commit or PR: pending
+- End implementation commits: `71ad5cb3a88d`, `ba26eeebde81`
+- Record commit or PR: protected pull request `#10`; record commit pending
 
 ## Objective
 
@@ -187,8 +187,9 @@ rather than a prerequisite for app paging.
   the deployment-order and smoke-harness follow-up is limited to private GCP
   infrastructure, its operator documentation, deployment contracts, and this
   durable record.
-- Branch and remote state: isolated branch from exact protected `main`;
-  protected pull-request review and exact-main verification remain pending.
+- Branch and remote state: protected pull request `#10` is open from the
+  isolated branch; required review, normal merge, and exact-main verification
+  remain pending.
 - Version/build impact: no customer version increment and no signed artifact.
 - Release or distribution impact: private synthetic staging only. Public
   ingress remains disabled; no real push target, real account, real health
