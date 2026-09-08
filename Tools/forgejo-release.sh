@@ -281,7 +281,11 @@ if [ -z "$REL_ID" ]; then
     .draft == true and
     .prerelease == false
   ' <<<"$CREATED_RELEASE" >/dev/null || {
-    echo "Forgejo created a release with an invalid identity" >&2
+    return_release_to_draft || {
+      echo "Forgejo invalid creation rollback failed" >&2
+      exit 1
+    }
+    echo "Forgejo created a release with an invalid identity; release is draft" >&2
     exit 1
   }
   echo "  created draft release"
@@ -443,9 +447,14 @@ fi
   exit 1
 }
 
-REMOTE_ASSETS="$(fetch_assets)"
 POST_PUBLICATION_VALID=1
-if [ "$(normalize_assets "$REMOTE_ASSETS")" != "$EXPECTED_ASSETS" ]; then
+if ! REMOTE_ASSETS="$(fetch_assets)"; then
+  POST_PUBLICATION_VALID=0
+elif ! NORMALIZED_POST_PUBLICATION_ASSETS="$(
+  normalize_assets "$REMOTE_ASSETS"
+)"; then
+  POST_PUBLICATION_VALID=0
+elif [ "$NORMALIZED_POST_PUBLICATION_ASSETS" != "$EXPECTED_ASSETS" ]; then
   POST_PUBLICATION_VALID=0
 elif ! verify_remote_payloads; then
   POST_PUBLICATION_VALID=0
