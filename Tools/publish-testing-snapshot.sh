@@ -10,13 +10,16 @@ TAG="${1:-}"
 VERSION="${2:-}"
 
 if [ "$#" -ne 2 ] ||
-   [[ ! "$TAG" =~ ^testing-snapshot-([0-9]+)-([0-9]+)$ ]] ||
-   [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+   [[ ! "$TAG" =~ ^testing-snapshot-([0-9]+)-([0-9]+)$ ]]; then
   echo "usage: Tools/publish-testing-snapshot.sh testing-snapshot-<run>-<attempt> <version>" >&2
   exit 2
 fi
 RUN_ID="${BASH_REMATCH[1]}"
 RUN_ATTEMPT="${BASH_REMATCH[2]}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "usage: Tools/publish-testing-snapshot.sh testing-snapshot-<run>-<attempt> <version>" >&2
+  exit 2
+fi
 
 command -v gh >/dev/null 2>&1 || {
   echo "gh CLI is required" >&2

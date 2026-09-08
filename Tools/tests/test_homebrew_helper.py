@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -75,18 +76,55 @@ class HomebrewHelperTests(unittest.TestCase):
         self.assertNotIn("export FORGE_TOKEN", source)
         self.assertIn(
             'GH_TOKEN="$GH_TOKEN" TAP_ORG="$TAP_ORG" \\\n'
-            "    git -c credential.helper=",
+            '    run_git_bounded git "${GIT_HTTP_ARGS[@]}" \\\n'
+            "      -c credential.helper=",
             source,
         )
         self.assertIn(
             'FORGE_TOKEN="$FORGE_TOKEN" FORGE_ORG="$FORGE_ORG" \\\n'
-            "    git -c credential.helper=",
+            '    run_git_bounded git "${GIT_HTTP_ARGS[@]}" \\\n'
+            "      -c credential.helper=",
             source,
         )
         self.assertLess(
             source.index("unset GH_TOKEN"),
             source.index('push --quiet "$FORGE_TAP_URL" HEAD:main'),
         )
+
+    def test_git_transport_has_a_hard_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "release.zip"
+            archive.write_bytes(b"synthetic-release")
+            binary_directory = root / "bin"
+            binary_directory.mkdir()
+            fake_git = binary_directory / "git"
+            fake_git.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+            fake_git.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{binary_directory}:{environment['PATH']}",
+                    "NOOP_HOMEBREW_TAP_ORG": "safe-owner",
+                    "NOOP_HOMEBREW_GITHUB_TOKEN": "synthetic-secret",
+                    "NOOP_HOMEBREW_GIT_TIMEOUT_SECONDS": "1",
+                }
+            )
+            started = time.monotonic()
+            result = subprocess.run(
+                [str(SCRIPT), "9.2.1", str(archive)],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            elapsed = time.monotonic() - started
+            self.assertEqual(result.returncode, 1)
+            self.assertLess(elapsed, 4)
+            self.assertIn("exceeded its deadline", result.stderr)
+            self.assertNotIn("synthetic-secret", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

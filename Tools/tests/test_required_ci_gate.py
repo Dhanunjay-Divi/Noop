@@ -411,6 +411,7 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         self.assertIn("workflow_dispatch:", homebrew)
         self.assertIn("publish_forgejo:", homebrew)
+        self.assertIn("timeout-minutes: 20", homebrew)
         self.assertIn("Tools/required-ci-gate.py verify-github", homebrew)
         self.assertIn("Tools/update-homebrew-cask.sh", homebrew)
         self.assertIn(
@@ -423,6 +424,17 @@ class RequiredCIGateTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Tools/homebrew-version-gate.py", helper)
+        self.assertIn("http.lowSpeedLimit=1024", helper)
+        self.assertIn("run_git_bounded", helper)
+
+    def test_release_history_excludes_nonproduction_before_limit(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--exclude-drafts --exclude-pre-releases --limit 1", release)
+        self.assertEqual(release.count("gh release list"), 1)
+        self.assertIn('PREV="$PREV_TAG"', release)
+        self.assertNotIn("map(select(.isPrerelease", release)
 
     def test_forgejo_opt_in_reaches_a_retryable_verified_workflow(self) -> None:
         release = (ROOT / ".github/workflows/release.yml").read_text(

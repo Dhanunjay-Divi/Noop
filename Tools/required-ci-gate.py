@@ -43,13 +43,13 @@ RELEASE_SOURCE_DIGESTS = {
         "a78362c71188c47d87d6ab0b2e811cf97ab45df6c5b5478de25bd5b61fb83595"
     ),
     ".github/workflows/homebrew-cask.yml": (
-        "91107b7e9f17780671a8c10eae5dddbe60442ba3e6e3b5e1a92129a9bf60bf0e"
+        "75020df9587cc34387f41b3b9482bd71187639e39a79a3db97cb1dfd13552719"
     ),
     ".github/workflows/release-controls.yml": (
         "98f9b95510411d6c84aa3e78233c73cb8e2263b2b0d798c23104b775f1b876ce"
     ),
     ".github/workflows/release.yml": (
-        "6fab69f9d54598dbe4387e304e75040af05bf82baa6578b4227dbdec9dff9471"
+        "c79dbea991420931a246e7874b663f257fb99c53e9718a7a9d33313cc25dfc82"
     ),
     ".github/workflows/testing-build.yml": (
         "44cd2ac7ad024429fd885b02236267604207ff6e54f4199f7ae116d755041c10"
@@ -73,7 +73,7 @@ RELEASE_SOURCE_DIGESTS = {
         "fe1b6ab24a5d904d5925a491625799516333e125ec9ba5e0932a5444a829580b"
     ),
     "release/terminology/legacy-inventory.json": (
-        "b5238d760d6a85f81753a335cd3bee01eb458963a6c545c630e1924482ed8b9b"
+        "111354271cfc1beb375e3d61f6b918b881ed4aec8eaaad8a2b8ae941ee879334"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -118,7 +118,7 @@ RELEASE_SOURCE_DIGESTS = {
         "d81bf5b8086c21a648a1417afa58cbb5bb9781c1738f2ff9d1cae6950ab2f097"
     ),
     "Tools/publish-testing-snapshot.sh": (
-        "c1eab4d2562e2eda085a4ebb481e6150be02b07979c874de8ea748daeda5e5c2"
+        "b6c87c6e0c8de61c6e090a8d74e76e7e6e9d47577e0a723161881c3f37a1e420"
     ),
     "Tools/release-control-gate.py": (
         "3ee267778fccdbf6de76ca60bd08547afebebd2d19d903d1c42a1db56a7d52d3"
@@ -142,7 +142,7 @@ RELEASE_SOURCE_DIGESTS = {
         "f7966b520d989af9c7e4e18446d19bf17c41c68696b13eea6c81d938cfff81f3"
     ),
     "Tools/update-homebrew-cask.sh": (
-        "fe41aff930eada226addb90195fb0c09635b2282dfaa7b618872d5d632dcfa65"
+        "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"
     ),
 }
 
@@ -1180,6 +1180,8 @@ def check_release_workflow(root: Path) -> None:
         'test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA"',
         "Tools/required-ci-gate.py verify-github",
         "Tools/release-version-gate.py check",
+        "--exclude-drafts --exclude-pre-releases --limit 1",
+        'PREV="$PREV_TAG"',
         "--release-sha \"$GITHUB_SHA\"",
         "--sha \"$GITHUB_SHA\"",
         "git diff --exit-code",
@@ -1507,6 +1509,7 @@ def check_homebrew_workflow(root: Path) -> None:
         "workflow_call:",
         "workflow_dispatch:",
         "publish_forgejo:",
+        "timeout-minutes: 20",
         'test "$GITHUB_REF" = "refs/heads/main"',
         "Tools/required-ci-gate.py verify-github",
         'git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"',

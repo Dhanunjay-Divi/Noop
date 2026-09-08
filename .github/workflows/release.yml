@@ -113,9 +113,9 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Version: reviewed source ${NEW} (tag ${TAG})"
 
-          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-            --json tagName,isPrerelease,isDraft,publishedAt \
-            --jq 'map(select(.isPrerelease==false and .isDraft==false)) | sort_by(.publishedAt) | reverse | .[0].tagName // empty')
+          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts --exclude-pre-releases --limit 1 --order desc \
+            --json tagName --jq '.[0].tagName // empty')
           if [ -n "$PREV_TAG" ]; then
             git cat-file -e "${PREV_TAG}^{commit}" 2>/dev/null || {
               echo "::error::Previous published release tag is absent from the reviewed checkout."
@@ -151,9 +151,7 @@ jobs:
           # docs/releases/<TAG>.md, plus a downloads footer.
           awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{fm=0; next} !fm{print}' \
             "$NOTES_MD" > "$BODY"
-          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
-            --json tagName,isPrerelease,isDraft \
-            --jq 'map(select(.isPrerelease==false and .isDraft==false)) | .[0].tagName // empty' 2>/dev/null || true)
+          PREV="$PREV_TAG"
           if [ -n "$PREV" ]; then
             AUTO=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="$TAG" -f previous_tag_name="$PREV" -f target_commitish="$(git rev-parse HEAD)" \

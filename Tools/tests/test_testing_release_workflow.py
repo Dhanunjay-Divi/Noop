@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "testing-build.yml"
+PUBLISHER = ROOT / "Tools" / "publish-testing-snapshot.sh"
 
 
 class TestingReleaseWorkflowTests(unittest.TestCase):
@@ -102,6 +106,45 @@ class TestingReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("Could not inspect failed testing candidate", cleanup)
         self.assertNotIn("git/refs/tags", cleanup)
         self.assertIn("cancel-in-progress: false", self.text)
+
+    def test_testing_publisher_preserves_tag_captures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tools = root / "Tools"
+            tools.mkdir()
+            publisher = tools / PUBLISHER.name
+            publisher.write_bytes(PUBLISHER.read_bytes())
+            publisher.chmod(0o755)
+            binary_directory = root / "bin"
+            binary_directory.mkdir()
+            for name, source in {
+                "gh": "#!/bin/sh\nexit 0\n",
+                "git": (
+                    "#!/bin/sh\n"
+                    "if [ \"$1\" = \"symbolic-ref\" ]; then\n"
+                    "  printf '%s\\n' synthetic-review-branch\n"
+                    "fi\n"
+                ),
+            }.items():
+                executable = binary_directory / name
+                executable.write_text(source, encoding="utf-8")
+                executable.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = (
+                f"{binary_directory}:{environment.get('PATH', '')}"
+            )
+            result = subprocess.run(
+                [str(publisher), "testing-snapshot-123-4", "9.2.1"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("local main branch", result.stderr)
+            self.assertNotIn("BASH_REMATCH", result.stderr)
 
 
 if __name__ == "__main__":

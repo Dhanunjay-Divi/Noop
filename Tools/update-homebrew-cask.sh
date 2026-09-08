@@ -40,6 +40,43 @@ for coordinate in "$TAP_ORG" "$APP_ORG" "$APP_REPO"; do
 done
 GH_TOKEN_FILE="$HOME/.config/noop/gh_token"        # canonical tap host (github.com)
 [ -f "$ZIP" ] || { echo "missing release zip: $ZIP" >&2; exit 1; }
+GIT_TIMEOUT_SECONDS="${NOOP_HOMEBREW_GIT_TIMEOUT_SECONDS:-300}"
+[[ "$GIT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]{0,2}$ ]] &&
+  [ "$GIT_TIMEOUT_SECONDS" -le 300 ] || {
+  echo "invalid Homebrew Git timeout" >&2
+  exit 2
+}
+unset NOOP_HOMEBREW_GIT_TIMEOUT_SECONDS
+
+run_git_bounded() {
+  python3 - "$GIT_TIMEOUT_SECONDS" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_seconds = int(sys.argv[1])
+command = sys.argv[2:]
+process = subprocess.Popen(command, start_new_session=True)
+try:
+    return_code = process.wait(timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    print("Homebrew Git transport exceeded its deadline.", file=sys.stderr)
+    raise SystemExit(124)
+raise SystemExit(return_code)
+PY
+}
+
+GIT_HTTP_ARGS=(
+  -c http.lowSpeedLimit=1024
+  -c http.lowSpeedTime=30
+)
 
 if [ -n "${NOOP_HOMEBREW_GITHUB_TOKEN:-}" ]; then
   GH_TOKEN="$NOOP_HOMEBREW_GITHUB_TOKEN"
@@ -83,10 +120,11 @@ if [ "${NOOP_HOMEBREW_FORGE:-0}" = "1" ]; then
 fi
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-# Clone from the canonical GitHub tap, or initialise it when publishing the tap
-# for the first time.
-git clone --quiet "$GH_TAP_URL" "$TMP/tap" 2>/dev/null \
-  || { mkdir -p "$TMP/tap"; git -C "$TMP/tap" init -q; }
+if ! run_git_bounded git "${GIT_HTTP_ARGS[@]}" clone --quiet \
+  "$GH_TAP_URL" "$TMP/tap"; then
+  echo "Homebrew tap clone failed or exceeded its deadline." >&2
+  exit 1
+fi
 
 mkdir -p "$TMP/tap/Casks"
 python3 "$ROOT/Tools/homebrew-version-gate.py" \
@@ -123,7 +161,8 @@ fi
 if [ "$HOME_BREW_CHANGED" = "1" ]; then
   # shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
   GH_TOKEN="$GH_TOKEN" TAP_ORG="$TAP_ORG" \
-    git -c credential.helper='!f() { echo "username=$TAP_ORG"; echo "password=$GH_TOKEN"; }; f' \
+    run_git_bounded git "${GIT_HTTP_ARGS[@]}" \
+      -c credential.helper='!f() { echo "username=$TAP_ORG"; echo "password=$GH_TOKEN"; }; f' \
       push --quiet "$GH_TAP_URL" HEAD:main
   echo "✓ Homebrew cask updated to ${VER} on GitHub (sha256 ${SHA:0:12}…)"
 fi
@@ -132,7 +171,8 @@ unset GH_TOKEN
 if [ -n "$FORGE_TAP_URL" ]; then
   # shellcheck disable=SC2016 # The nested credential-helper shell expands these exported values.
   FORGE_TOKEN="$FORGE_TOKEN" FORGE_ORG="$FORGE_ORG" \
-    git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
+    run_git_bounded git "${GIT_HTTP_ARGS[@]}" \
+      -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
       push --quiet "$FORGE_TAP_URL" HEAD:main || {
     echo "Forge mirror push failed; the canonical GitHub tap is current." >&2
     exit 1
