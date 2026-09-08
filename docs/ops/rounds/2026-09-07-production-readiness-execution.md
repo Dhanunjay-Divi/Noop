@@ -2,13 +2,15 @@
 
 ## Status
 
-- State: `in progress`
+- State: `complete for supplier-independent source and repository work`
 - Owner: project team
 - Continued: `2026-09-08`
-- Branch: `codex/production-readiness-closeout-20260907`
+- Branch: `main`
 - Start commit: `52a84649c33c57b091c110e2b2912d2021ce7ffb`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `59093db492b84862c8fb282f9f6976c84c1886ea`
+- Record commit or PR: pull request `#6`, merged as
+  `c3c377abd57ab090b2ed0b5ade4461f6769a0d3a`; trust compatibility and
+  activation follow-ups `#7` and `#8`
 
 ## Objective
 
@@ -376,12 +378,23 @@ external approval, signing authority, or elapsed production operation.
   Gradle's own bounded `cleanManagedDevices` task clears the stale AVD before
   that retry. Any partial test result, malformed status, cleanup failure, or
   second failure remains terminal.
-- Completed an interim scoped cleanup after the full local matrices. The
-  isolated Python environment and earlier large build products were removed
-  without touching unrelated user files. Final verification has necessarily
-  recreated bounded Android, Swift, OpenTofu, and Python caches; those remain
-  temporary until the exact hosted head and activation sequence complete, when
-  this round performs and records its final cleanup.
+- Completed the protected merge sequence without bypass: pull request `#6`
+  passed the full Apple, Android, server, package, policy, and calibration
+  matrix; pull request `#7` repaired canonical GitHub check-link handling
+  without weakening provenance; and pull request `#8` activated the tenth
+  trusted context.
+- Verified merged protected `main` commit `d8cee4f6` with all ten exact-SHA
+  checks, including protected-main custom check `101959809854` owned by GitHub
+  Actions application `15368`. Live protection is strict, administrator
+  enforced, conversation-resolution and linear-history gated, and denies force
+  pushes and deletion.
+- Enabled immutable GitHub Releases only after the ten-context source contract,
+  live branch rule, exact-main evidence, and four active production/testing tag
+  rulesets agreed. No release, tag, draft, or artifact was created.
+- Completed scoped cleanup after the full local and hosted matrices. Generated
+  build, package, OpenTofu, and Python caches and temporary worktrees created by
+  this execution are removed after the final closeout merge; retained private
+  synthetic GCP staging is intentionally preserved.
 
 ## Data, privacy, and medical truth
 
@@ -459,16 +472,16 @@ external approval, signing authority, or elapsed production operation.
 | iOS simulator application suite | The final isolated iPhone 17 Pro / iOS 26.5 result bundle reports 34 passed, 1 intentional private-pilot skip, and 0 failures after a successful simulator app build; Review Sample also passed standard and compact layout runs plus the final 18.348-second entry/disclosure/detail/exit-to-Terms journey | Current production shell, navigation, onboarding, settings, calendar, body-map, updates, Review Sample isolation/presentation, and scroll behavior on the simulator | Physical iPhone, signing, background radio, thermal, or battery behavior |
 | iOS Release simulator build | Complete app, widgets, Watch app, complications, and launch-gate script built successfully in Release configuration | Shipping-source graph and Release compilation include Review Sample | Distribution signing, Organizer validation, or exact App Review archive |
 | Android source gate | Final post-review full debug assemble, unit, lint, and instrumentation compile completed 70 tasks successfully; the merged manifest contains no WorkManager initializer while retaining the other AndroidX Startup components | Current Android source, resources, consent/runtime deferral, lazy worker initialization, diagnostic-report accessibility/privacy, and lint contract | Physical OEM/background/BLE behavior |
-| Android API 35 managed device | The local exact CI sequence passes: the fresh-process Review Sample journey passes 1/1, then the complete suite reports 54 scheduled tests plus UTP accounting, 2 intentional private-pilot skips, and 0 failures. Focused report and disabled-switch regression tests also pass together. Hosted run `34184484478` exceeded the former outer 50-minute ceiling and retained no artifact. Exact-head run `34189356723` passed the complete Android source job, bounded the managed-device stall in about 20 minutes, retained the exact timeout status artifact, and failed closed before any test result. Its log shows compilation consumed about ten minutes before the device task stalled and left emulator/ADB processes. Preparation is now separated, exact timeout-before-result evidence permits one bounded reset/retry, and all other failures remain terminal; this final remediation awaits a new exact-head hosted run. | Current local production-shell behavior and a proven fail-closed hosted diagnostic boundary; the retained evidence isolates a hosted emulator boot/runtime stall rather than an app assertion | A green hosted exact-head managed-device run, physical phone, radio, battery, or attestation |
+| Android API 35 managed device | The local exact CI sequence passes: the fresh-process Review Sample journey passes 1/1, then the complete suite reports 54 scheduled tests plus UTP accounting, 2 intentional private-pilot skips, and 0 failures. Focused report and disabled-switch regression tests also pass together. Earlier hosted stalls proved bounded timeout retention and drove preparation/reset/retry hardening. Final pull-request run `34191194480` then passed the 13m40s production-shell lane, 22m12s full build/unit/lint/instrumentation lane, and stable required result on exact head `59093db4`. | Current local production-shell behavior, hosted Android source and emulator execution, and a fail-closed retained diagnostic boundary | A physical phone, radio, battery, or attestation |
 | Android Release build | Final `assembleFullRelease` completed 54 tasks successfully in 1m 14s, including lint-vital and signing validation, using a one-use locally generated certificate removed immediately after the build | Final shipping source compiles, dexes, packages, and passes Release-vital checks | Production upload key, Play App Signing, signed RC identity, or store acceptance |
 | Server Python 3.12 | Ruff and runtime/dev dependency audits green; 296 passed and 63 environment-gated skips | Source behavior and dependency policy in the isolated local environment | Container, PostgreSQL, public topology, or production operations |
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | The complete Tools suite passes 220/220, the exact hosted release-control selection passes 182/182, and the bounded-command plus retry-classifier tests are also required by the hosted Android build lane; release controls pass 9/9 in the bootstrap phase and the separately tested activation model is ready for 10/10; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 15 workflows parse and pass `actionlint`; the changed Bash helpers pass syntax and ShellCheck | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
+| Staged repository policy matrix | The complete Tools suite passes 222/222; the exact hosted release-control selection and bounded-command/retry-classifier tests pass; release controls pass the activated five-conditional/five-universal, ten-context contract; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims, i18n, legal inventory, private-data, operations records, workflow syntax, Bash syntax, and ShellCheck pass | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Store approval |
 | Deterministic source-release evidence | Version parity resolves to 9.2.1 on Apple and Android; the fresh source SBOM contains 216 components and its two-artifact release manifest verifies against the exact candidate source SHA | Release evidence generation and verification are reproducible before hosted publication | Signed artifact identity, immutable publication, or store acceptance |
-| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass the bootstrap structural tests; the protected-base workflow and custom exact-head check are separately verified as ready for the fifth universal workflow and tenth stable context. The live branch rule carries the same nine-context contract until this workflow merges, after which its exact-main check must pass before the activation pull request and tenth protected context. Prior live read-only verification bound all nine checks on commit `bf77f902` to their exact Actions workflow and head SHA, then correctly reported only the two intentionally canceled platform runs as failed. Release source mutation is rejected, stable history is selected before its one-result limit, both build counters must advance from published `v9.1.1`, testing run identity is parsed without mutable regex state, Actions can only produce an exact checked draft, and the owner dispatcher authenticates the exact successful run and live repository policy. Live production and testing tag controls now each use owner-admin-only creation plus no-bypass update/deletion. A cleaned private draft probe established that draft creation leaves the tag absent, and the verifier now enforces absent-before/exact-after semantics. AltStore invocation is disabled; Forgejo rejects rollback before mutation and returns an unexpected public creation, transport ambiguity, invalid publication metadata, failed post-publication asset lookup, or post-publication drift to a verified draft. Five stateful failure simulations also prove explicit fail-closed behavior when rollback itself fails; nested Homebrew mirroring reaches a scoped retryable exact-tag workflow with bounded Git transport | Applicable platform/license failures cannot be hidden by event path filters or a same-named Actions job, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, nonexclusive-writer, policy-unverified, or history-dropping source | A completed immutable production release, public Homebrew/Forgejo tap, provisioned mirror credentials, or completed environment-secret migration |
-| Scoped local cleanup | Interim cleanup removed the isolated environment and earlier large products. Final verification caches remain until the exact hosted and activation work completes. | Cleanup is scoped and does not target unrelated user files or intentionally retained private staging | Final cache/process absence, which remains pending |
+| Required merge, tag, and repair contract | Five conditional and five universal workflow contracts plus ten stable contexts pass structural tests. Pull request `#8` passed all preceding protected checks and exact-head custom trust, then merged normally. Exact merged-main commit `d8cee4f6` passes `10/10`; custom check `101959809854` is bound to protected-main run `34194674313`, exact SHA, attempt `1`, and Actions app `15368`. Live strict branch protection contains the same ten contexts; four tag rulesets are active and immutable releases are enabled. Release source mutation is rejected, both build counters must advance, Actions can only produce an exact checked draft, and the owner dispatcher authenticates exact run and repository policy. AltStore remains disabled; Forgejo/Homebrew paths retain their fail-closed rollback and scoped credential contracts. | Applicable platform/license failures cannot be hidden by path filters or a same-named check, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, nonexclusive-writer, policy-unverified, mutable-release, or history-dropping source | A completed production release, public Homebrew/Forgejo tap, provisioned mirror credentials, or completed environment-secret migration |
+| Scoped local cleanup | Earlier isolated environments, synthetic databases, relays, proxies, virtual-device runtimes, and generated products were removed or stopped. Final closeout removes the bounded caches and temporary worktrees recreated for verification while preserving the explicitly retained private GCP staging resources. | Cleanup is scoped and does not target unrelated user files or intentionally retained private staging | Destruction of intentionally retained billable staging |
 
 ## Physical device and deployment
 
@@ -492,32 +505,25 @@ external approval, signing authority, or elapsed production operation.
   stable required-check enforcement, exact-SHA tag verification, failure-safe
   AltStore history repair, retryable Homebrew publication, validation evidence,
   and release documentation.
-- Commits: pending.
-- Branch and remote state: clean synchronized `main` at round start; PR `#6`
-  carries the protected closeout branch. Its implementation commits are
-  pushed through the protected pull-request path. The final post-release
-  channel fixes pass the complete local repository-policy evidence. Hosted
-  final-head and exact-main evidence remain pending. Hosted run `34184484478`
-  passed every non-Android required context, but its Android managed-device job
-  exceeded the former outer timeout after isolated worker verification and was
-  terminated before diagnostic upload. Follow-up run `34189356723` proved the
-  bounded termination and retained artifact, then failed closed on a
-  timeout-before-results that the initial retry classifier deliberately did
-  not accept. The current remediation separates preparation from device
-  execution, bounds final post-kill waiting, and permits one reset/retry only
-  for that exact no-result infrastructure signature. It must pass on a fresh
-  exact pull-request head before merge.
+- Commits: implementation head `59093db4`; protected merge `c3c377ab`;
+  canonical-check repair `ffae30d5`; trusted-context activation `d8cee4f6`.
+- Branch and remote state: pull requests `#6`, `#7`, and `#8` all passed their
+  applicable protected contexts and merged normally to `main` without bypass.
+  Pull request `#6` final Android run `34191194480` passed production-shell,
+  full build/test, and the stable required result; final Apple run
+  `34191194505` passed the complete simulator and universal macOS graphs.
+  Merged-main run `34194674313` produced the exact protected-main trusted
+  result, and the repository verifier passed all ten exact-SHA checks on
+  `d8cee4f6`.
 - Repository visibility verified: inherited from current release evidence.
 - Version/build impact: none at round start.
 - Release or distribution impact: release and repair workflows changed. The
-  repository now rejects update/deletion of production `v*` tags and updates
-  to unique testing-snapshot tags without a bypass actor. The immutable-release
-  setting remains disabled through the bootstrap merge and the subsequent
-  ten-context activation merge; both owner publication commands fail closed
-  until source, live strict branch protection, the Actions application, tag
-  rulesets, and immutable-release setting all agree. No production release,
-  AltStore source, Homebrew tap, Git tag, or app artifact was created or
-  mutated.
+  repository rejects unauthorized production/testing tag creation and
+  update/deletion, requires ten exact app-bound contexts, and has immutable
+  releases enabled. Both owner publication commands fail closed unless source,
+  live strict branch protection, the Actions application, tag rulesets, and
+  immutable-release setting agree. No production release, AltStore source,
+  Homebrew tap, Git tag, draft, or app artifact was created or mutated.
 
 ## Decisions
 
@@ -542,16 +548,10 @@ external approval, signing authority, or elapsed production operation.
 - Homebrew automation is code-complete but remains intentionally disabled
   until the owner creates the public project tap and provisions the scoped
   repository variable and tap-only write secret.
-- Immutable GitHub Releases must remain disabled through the compatible-source
-  bootstrap and ten-context activation merges. It is enabled only after exact
-  protected-main evidence and live strict branch protection both match the
-  activated source contract; publication remains unavailable until every live
-  control is verified.
-- The tenth `trusted-release-controls` protected context can be activated only
-  after its protected-base workflow exists on `main` and produces one verified
-  exact-main check. The current pull request must therefore merge under the
-  preceding nine-context contract; a separate activation pull request will
-  prove and enforce the complete ten-context contract without a bypass.
+- Immutable GitHub Releases and the tenth `trusted-release-controls` context
+  are now active after exact protected-main evidence and live strict branch
+  protection matched the reviewed source contract. This closes repository
+  policy activation, not signing, store, or launch readiness.
 - The live testing-build and community-release workflows are intentionally
   disabled. Their four Android staging-signing values remain repository-scoped
   because GitHub does not expose existing secret values for safe migration.
@@ -569,8 +569,9 @@ external approval, signing authority, or elapsed production operation.
   backup/restore temporarily reaches about 1.33 GB. Indexed host reads are fast,
   but only representative phones can establish launch, scroll, memory,
   thermal, background-collection, and low-storage budgets.
-- The final Android preparation/reset/retry remediation is source- and
-  unit-verified but has not yet passed on a hosted exact pull-request head.
+- The final Android preparation/reset/retry remediation passed on hosted exact
+  pull-request head `59093db4`; physical OEM, radio, battery, and background
+  behavior remain open.
 
 ## Next round
 

@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `in progress`
+- State: `complete`
 - Owner: project team
-- Branch: `codex/trusted-release-control-activation`
+- Branch: `main`
 - Start commit: `ffae30d5b8072f5aa34afa2bd6f5945fdea8c8fc`
-- End implementation commit: `f13b33c7ea69d2debfe93c473d273fc963f936a9`
-- Record commit or PR: pending
+- End implementation commit: `bd336f466ff3e53cf71b945e5e098cd1d9a4c7d0`
+- Record commit or PR: pull request `#8`, merged as
+  `d8cee4f6c2caaa5a2705c94a7985fc3ac5aae819`
 
 ## Objective
 
@@ -62,6 +63,15 @@ changes can merge.
   configuration to the active contract.
 - Kept publication fail closed: a valid pull-request-scope custom check still
   cannot satisfy exact protected-main release verification.
+- Passed the activation pull request under the preceding protected rule, then
+  added the successful app-bound `trusted-release-controls` result as the
+  tenth required context without bypassing a check or administrator policy.
+- Reverified the merged commit with the repository verifier: all ten exact-SHA
+  checks passed and custom check `101959809854` was bound to protected-main run
+  `34194674313`, attempt `1`, exact merge SHA `d8cee4f6`, and GitHub Actions
+  application `15368`.
+- Enabled immutable GitHub Releases only after the source contract, live
+  branch rule, exact-main evidence, and all four active tag rulesets agreed.
 
 ## Data, privacy, and medical truth
 
@@ -87,9 +97,10 @@ changes can merge.
 |---|---|---|---|
 | Full local policy suite | Passed: 222 tool tests; five conditional workflows, five universal workflows, ten contexts; trusted-self, release-control, operations, terminology, workflow-lint, private-data, health-claims, and calibration-parity gates | Candidate source has ten uniquely owned contexts and preserves the repository safety contracts | Hosted execution or live protection |
 | Exact bootstrap `main` trusted check | Passed in run `34194149601`; custom check `101958240443` is successful on exact `ffae30d5` | Protected-base workflow validates and reports its own exact protected-main source | Candidate activation merge |
-| Activation pull-request contexts | Pending | Existing nine contexts plus the custom exact-head check pass on the reviewed candidate | Exact-main post-merge state |
-| Live ten-context branch rule | Pending | Strict `main` protection matches the activated source contract under the Actions app | Store, signing, or release readiness |
-| Immutable-release setting | Pending until exact-main activation evidence | Published GitHub releases cannot be modified after activation | A completed release |
+| Activation pull-request contexts | Passed on pull request `#8`; exact-head custom check `101959325536` and all nine preceding protected contexts succeeded | The reviewed candidate satisfied the bootstrap rule and exact-head trust contract | Exact-main post-merge state |
+| Live ten-context branch rule | Passed; strict `main` requires the ten exact source contexts under GitHub Actions application `15368`, enforces administrators, conversation resolution, and linear history, and rejects force pushes and deletion | Live branch protection matches the activated source contract without a bypass | Store, signing, or release readiness |
+| Exact merged-main verification | Passed: `10/10` exact-SHA checks on `d8cee4f6`; all ten push workflows succeeded and custom check `101959809854` has protected-main scope | The merged source and hosted evidence agree on the exact protected commit | A signed or published app |
+| Tag and release immutability | Passed; four production/testing tag rulesets are active and the repository immutable-release setting is enabled | Published GitHub releases and governed tags are protected by preventative repository controls | A completed production release |
 
 ## Physical device and deployment
 
@@ -104,17 +115,20 @@ changes can merge.
 
 - Changed paths: required-CI contract, matching repository tests, and operations
   documentation only.
-- Branch and remote state: rebased isolated activation branch; not yet pushed.
+- Branch and remote state: activation pull request `#8` merged normally to
+  protected `main` as `d8cee4f6`; no branch-protection or check bypass was
+  used.
 - Version/build impact: none.
-- Release or distribution impact: policy activation only; no artifact or
-  release mutation.
+- Release or distribution impact: repository policy activation and immutable
+  release enablement only; no tag, artifact, draft, or published release was
+  created or mutated.
 
 ## Decisions
 
 - The trusted custom context becomes required only after its protected-base
   workflow exists on `main` and one exact-main result is verified.
-- Immutable releases become enabled only after the ten-context source contract,
-  live branch rule, and exact-main hosted evidence agree.
+- Immutable releases were enabled only after the ten-context source contract,
+  live branch rule, and exact-main hosted evidence agreed.
 
 ## Open risks and honest limitations
 
@@ -128,8 +142,8 @@ changes can merge.
 
 ## Next round
 
-1. Close the production-readiness execution record after exact protected-main
-   activation and final scoped cleanup.
+1. Continue with the first supplier-independent product gap while retaining
+   the completed release-control contract and explicit external gates.
 
 ## Privacy check
 

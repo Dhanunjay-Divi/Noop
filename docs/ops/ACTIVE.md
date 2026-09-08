@@ -18,12 +18,14 @@ Last updated: **2026-09-08**
 
 ## Active work
 
-The trusted release-control activation round is in progress from repaired
-protected `main` commit `ffae30d5`. It promotes the already-proven
-`trusted-release-controls` custom check to the fifth universal workflow and
-tenth stable context. Live protection and immutable-release settings remain
-unchanged until the activation pull request passes all existing contexts plus
-the exact-head trust check. Evidence is recorded in
+The trusted release-control activation round is complete. Pull request `#8`
+passed the preceding protected rule and exact-head trust check, merged normally
+as `d8cee4f6`, and then passed all ten exact-SHA contexts on protected `main`.
+Live protection requires those ten GitHub-Actions-owned contexts, enforces
+administrators, conversation resolution, and linear history, and rejects force
+pushes and deletion. All four tag rulesets are active and immutable GitHub
+Releases are enabled. No tag, artifact, draft, or release was published.
+Evidence is recorded in
 [Trusted release-control activation](rounds/2026-09-08-trusted-release-control-activation.md).
 
 The trusted check URL compatibility round is complete. The reporter and
@@ -34,7 +36,8 @@ main run `34194149601` passed validation and publication on exact commit
 checks remain enforced. Evidence is recorded in
 [Trusted check URL compatibility](rounds/2026-09-08-trusted-check-url-compatibility.md).
 
-The production-readiness execution round is in progress. Current source adds
+The production-readiness execution round is complete for supplier-independent
+source and repository work. Current source adds
 provenance-gated official-reference comparison and chronological personal
 presentation calibration on Apple and Android, atomic cross-platform
 score-window publication, fail-closed import manifests, generic metric validity
@@ -42,8 +45,8 @@ guards, Apple retry-on-persistence-failure semantics, a deterministic
 10/30/90/365-day history and exact-restore harness, neutral compatibility
 labels, a machine-readable terminology ratchet, and a disclosed deterministic
 Review Sample Mode in the shipping Apple and Android source. The current ledger
-has 396 stable actions: 64 evidenced complete and 332 pending, split into 33
-owner, 232 engineering, 33 joint, and 34 external actions. Full local Android,
+has 396 stable actions: 66 evidenced complete and 330 pending, split into 32
+owner, 231 engineering, 33 joint, and 34 external actions. Full local Android,
 server, package, macOS, localization, claims, legal, private-data, OpenTofu,
 and private-runtime checks pass; the final Apple simulator suite also passes.
 Review Sample passes focused Apple standard/compact/exit-to-Terms simulator
@@ -52,11 +55,13 @@ an iOS Release-simulator graph plus a one-use locally signed Android Release
 build. Android also removes WorkManager's pre-application initializer and the
 API 35 journey proves it remains uninitialized until Terms. Those are not
 production signing evidence. Exact signed-archive/store-console review evidence
-remains open. Release controls and scoped local cleanup pass; commit, push,
-exact-main hosted evidence, and repository protection remain in progress. The
+remains open. Pull request `#6` passed the full protected Apple, Android,
+server, package, policy, and calibration matrix and merged normally; follow-up
+pull requests `#7` and `#8` completed exact-main trust reporting and the tenth
+protected context. The
 retained 365-day synthetic profile is about 444 MB with a 1.33 GB temporary
 backup/restore peak, so phone memory, thermal, background, collection, and
-low-storage budgets remain physical release gates. Evidence is being recorded
+low-storage budgets remain physical release gates. Evidence is recorded
 in
 [Production readiness execution](rounds/2026-09-07-production-readiness-execution.md).
 
@@ -103,7 +108,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 64 evidenced complete and 332 pending. New owner
+with 396 stable actions: 66 evidenced complete and 330 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
@@ -111,13 +116,14 @@ performance, metric evidence, optional NOOP+ productionization, security,
 certification, manufacturing, signing, stores, physical release-candidate
 validation, and launch operations. The plan does not claim readiness. There is
 currently no NOOP firmware or first-party protocol in the repository, and
-current source commit `1443acb1` has green exact-main Apple, Android, server,
-Swift-package/study, localization, health-claims, runtime-license, private-data,
-and operations workflow evidence. `main` remains unprotected and external
-release controls remain open. The frozen terminology inventory classifies
-17,368 legacy-name occurrences across 1,356 tracked paths (1,508 path/category
-groups); active customer/core removal must use a reviewed allowlist and
-additive migration rather than destructive replacement. Evidence is recorded
+protected-main commit `d8cee4f6` has green exact-SHA Apple, Android, server,
+Swift-package/study, localization, health-claims, runtime-license, operations,
+release-control, and trusted-release-control evidence. Strict branch
+protection, active tag rulesets, and immutable releases are enabled; external
+release gates remain open. The frozen terminology inventory classifies 17,370
+legacy-name occurrences across 1,508 path/category groups; active customer/core
+removal must use a reviewed allowlist and additive migration rather than
+destructive replacement. Evidence is recorded
 in
 [First production release plan](rounds/2026-09-05-first-production-release-plan.md).
 
