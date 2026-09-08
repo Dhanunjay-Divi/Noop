@@ -1,6 +1,6 @@
 # NOOP first production release checklist
 
-- **Status date:** 2026-09-07
+- **Status date:** 2026-09-08
 - **Purpose:** one editable, ordered list of everything still required for the
   first public production release
 - **Confirmed market sequence:** India first, then the USA
@@ -130,10 +130,16 @@ position without changing its ID. This inbox intentionally starts empty.
   `34078979957`, `34078811177`, and `34078811154`)
 - [ ] CI-080 [OWNER] Restore or fund hosted CI capacity sufficient for all
   required release gates.
-- [ ] CI-090 [OWNER] Enable protected `main` or an equivalent reviewed release
-  control for the private repository.
-- [ ] CI-100 [ENG] Require every applicable release check before a production
-  merge or tag.
+- [x] CI-090 [OWNER] Enable protected `main` or an equivalent reviewed release
+  control for the private repository. (Evidence: strict live branch protection
+  with administrator enforcement, conversation resolution, linear history,
+  ten app-bound required contexts, and no force-push or deletion bypass;
+  `ops/rounds/2026-09-08-trusted-release-control-activation.md`)
+- [x] CI-100 [ENG] Require every applicable release check before a production
+  merge or tag. (Evidence: exact merged-main `10/10` verification on
+  `d8cee4f6c2caaa5a2705c94a7985fc3ac5aae819`, custom protected-main check
+  `101959809854`, four active tag rulesets, and enabled immutable releases;
+  `ops/rounds/2026-09-08-trusted-release-control-activation.md`)
 - [ ] CI-110 [ENG] Create separately approved staging and production
   environments in source control.
 - [x] CI-120 [ENG] Create a release evidence directory and manifest format that
