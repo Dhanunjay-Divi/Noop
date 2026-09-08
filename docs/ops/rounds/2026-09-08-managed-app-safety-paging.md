@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `in progress`
+- State: `supplier-independent implementation and private synthetic staging completed; protected merge and signed physical delivery remain`
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: pending
+- End implementation commit: `71ad5cb3a88d`
 - Record commit or PR: pending
 
 ## Objective
@@ -96,6 +96,13 @@ rather than a prerequisite for app paging.
 - Added guarded private GCP FCM API, least-privilege sender role/bindings,
   regional Secret Manager storage for push-token encryption, and private
   managed API/lifecycle runtime wiring. Public invocation remains disabled.
+- Added a staged migration-image contract and deterministic non-secret release
+  marker. A stateful OpenTofu receipt executes and awaits the matching guarded
+  migration before dependent runtime revisions can update, and
+  image-to-revision evidence does not expose a project path or digest in logs.
+- Hardened the synthetic smoke for pilot admission by provisioning, verifying,
+  refreshing, revoking, and cleaning up disposable custom claims. Failure
+  output is bounded by subsystem and status rather than response data.
 
 ## Data, privacy, and medical truth
 
@@ -153,17 +160,21 @@ rather than a prerequisite for app paging.
 | Android full/demo matrix | Unit, lint, instrumentation compile, and API 35 device matrix passed; 55 device tests with 2 private-pilot skips | Managed session compiles, survives service restoration, shares one GPS listener, routes notification taps, and keeps diagnostics free of coordinates | OEM/physical background and notification behavior |
 | Swift packages and harnesses | All 9 packages, 406 protocol tests with 1 opt-in corpus skip, 104 remote-sync tests, 12 study-harness tests, and 2 backfill tests passed | Shared models/clients, protocol compatibility, deterministic research harnesses, and backfill contracts remain intact | Supplier firmware or physical physiology |
 | Repository policy and legal gates | 222 tool tests plus terminology, legal inventory, distribution provenance, claims, workflow, privacy, OpenTofu, and dependency-audit gates passed | Source, manifests, generated localization, notices, workflow controls, and private infrastructure remain internally consistent | External legal approval or production credentials |
-| Private synthetic staging | Prerequisite FCM/IAM/secret/runtime wiring applied; digest image, migration, and synthetic flow pending | Private internal ingress, no broad invoker, digest pinning, scale bounds, PITR, and deletion protection remain intact | New managed Safety API behavior until the new image and migration run |
+| Private synthetic staging | Passed: container scan with zero known-vulnerability findings, migration `027`, five in-place runtime updates, enforced migration execution, lifecycle execution, three-account managed smoke in 120 seconds, cleanup audit, private-boundary verification, and zero drift | Accepted Safety contacts, manual paging, latest-only location, responder state, incident resolution, storage/restore/isolation, cleanup, base private-API internal ingress, managed-API IAM-only access with no broad invoker, digest pinning, scale bounds, PITR, and deletion protection work together on the deployed digest | Provider delivery because the smoke intentionally registered no APNs/FCM target or real account |
+| Deployment-order recovery | Passed: the first concurrent rollout correctly failed new readiness while prior healthy revisions retained 100% traffic; migration then succeeded, every latest revision became ready, and the stateful release receipt was applied with no cloud-resource mutation and zero drift | Required migrations fail closed without taking healthy traffic down, and future image changes cannot update dependent runtime workloads until the guarded migration succeeds | Regional failover or production rollback under load |
 
 ## Physical device and deployment
 
-- Install/update action: no phone install. Private GCP FCM/IAM/secret/runtime
-  prerequisites were applied with zero delete, zero replacement, and zero
-  public-invoker changes; digest image and migration remain pending.
+- Install/update action: no phone install. One scanned immutable digest was
+  deployed to private GCP staging after migration `027`. The accepted saved
+  plan made five in-place updates with zero create, delete, replacement, or
+  broad/public-invoker changes. Every latest revision became ready and received
+  100% of its service traffic.
 - Generalized device and OS class: iOS simulator and Android local JVM/source
   contracts only; physical phones remain unrun.
-- Data-preservation result: additive migration and lifecycle tests pass;
-  deployed private migration and synthetic cleanup evidence remain pending.
+- Data-preservation result: additive migration, lifecycle execution, synthetic
+  object erasure, social cleanup, managed-account erasure scheduling, provider
+  identity cleanup, and a final zero-drift plan pass.
 - BLE/background/haptic/battery scenarios exercised: none in this round;
   physical band haptic remains a separate device gate.
 - Unrun hardware gates: APNs/FCM delivery, terminated-app wake, background
@@ -172,11 +183,16 @@ rather than a prerequisite for app paging.
 
 ## Git and release state
 
-- Changed paths: pending.
-- Branch and remote state: isolated branch from exact protected `main`.
-- Version/build impact: pending.
-- Release or distribution impact: none; no public traffic or release mutation
-  is authorized by this round.
+- Changed paths: implementation commit `71ad5cb3a88d` changes 105 tracked paths;
+  the deployment-order and smoke-harness follow-up is limited to private GCP
+  infrastructure, its operator documentation, deployment contracts, and this
+  durable record.
+- Branch and remote state: isolated branch from exact protected `main`;
+  protected pull-request review and exact-main verification remain pending.
+- Version/build impact: no customer version increment and no signed artifact.
+- Release or distribution impact: private synthetic staging only. Public
+  ingress remains disabled; no real push target, real account, real health
+  data, tag, store artifact, or release was created.
 
 ## Decisions
 

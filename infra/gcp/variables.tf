@@ -93,6 +93,23 @@ variable "runtime_image" {
   }
 }
 
+variable "migration_image" {
+  description = "Optional digest-pinned image staged on the migration job before runtime rollout."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.migration_image == null
+      || can(regex(
+        "^asia-south[12]-docker\\.pkg\\.dev/[a-z][a-z0-9-]{4,28}[a-z0-9]/[a-z0-9._-]+/[a-z0-9._-]+@sha256:[0-9a-f]{64}$",
+        var.migration_image,
+      ))
+    )
+    error_message = "migration_image must be an asia-south1/2 Artifact Registry sha256 digest URI."
+  }
+}
+
 variable "enable_private_api" {
   description = "Create the IAM-protected, internal-ingress staging API after migrations pass."
   type        = bool

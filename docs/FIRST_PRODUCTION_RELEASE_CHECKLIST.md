@@ -801,8 +801,9 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CLD-150 [ENG] Prove launch capacity and the documented 10,000-user target
   with a scaling plan beyond it.
 - [ ] CLD-160 [ENG] Add production HTTPS universal and Android app links.
-- [ ] CLD-170 [ENG] Implement opaque minimal APNs/FCM wake delivery with token
-  lifecycle and abuse controls.
+- [x] CLD-170 [ENG] Implement opaque minimal APNs/FCM wake delivery with token
+  lifecycle and abuse controls. (Evidence:
+  `ops/rounds/2026-09-08-managed-app-safety-paging.md`, 2026-09-08)
 - [ ] CLD-180 [ENG] Prove closed-app push delivery and deletion on physical
   Apple and Android devices.
 - [ ] CLD-190 [ENG] Prove NOOP+ OTP delivery, rate limits, retries, recovery,

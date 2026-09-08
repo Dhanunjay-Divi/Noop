@@ -49,6 +49,8 @@ class SyntheticAccount:
     id_token: str = ""
     local_id: str = ""
     profile_id: str = ""
+    pilot_claim_enabled: bool = False
+    managed_enrolled: bool = False
     account_erasure_requested: bool = False
 
 
@@ -74,6 +76,7 @@ class ManagedStagingSmoke:
     def run(self) -> None:
         started = time.monotonic()
         self._preflight()
+        body_error: BaseException | None = None
         try:
             self.access_token = self._command("gcloud", "auth", "print-access-token")
             self.iam_token = self._command(
@@ -85,6 +88,7 @@ class ManagedStagingSmoke:
             self._prepare_identities()
             self._prepare_app_check()
             self._authenticate_accounts()
+            self._provision_pilot_claims()
             self._enroll_accounts()
             self._exercise_storage()
             self._erase_raw_storage()
@@ -93,8 +97,13 @@ class ManagedStagingSmoke:
             self._delete_social_profiles()
             self._request_account_erasure()
             self._delete_provider_identities()
-        finally:
-            self._best_effort_cleanup()
+        except BaseException as error:
+            body_error = error
+        cleanup_succeeded = self._best_effort_cleanup()
+        if not cleanup_succeeded:
+            raise SmokeFailure("synthetic cleanup requires review")
+        if body_error is not None:
+            raise body_error
         elapsed = max(0, round(time.monotonic() - started))
         print(f"PASS private managed runtime smoke ({elapsed}s)")
 
@@ -226,6 +235,90 @@ class ManagedStagingSmoke:
             raise SmokeFailure("fictional phone identities are not isolated")
         print("PASS three fictional phone OTP identities")
 
+    def _provision_pilot_claims(self) -> None:
+        for account in self.accounts:
+            self._set_pilot_claim(account, enabled=True)
+            self._authenticate(account)
+        print("PASS disposable managed pilot claims")
+
+    def _set_pilot_claim(
+        self,
+        account: SyntheticAccount,
+        *,
+        enabled: bool,
+    ) -> None:
+        user = self._identity_user(account)
+        raw_attributes = user.get("customAttributes")
+        if raw_attributes in (None, ""):
+            attributes: dict[str, Any] = {}
+        elif isinstance(raw_attributes, str):
+            try:
+                decoded = json.loads(raw_attributes)
+            except json.JSONDecodeError:
+                raise SmokeFailure(
+                    "fictional identity custom attributes are invalid"
+                ) from None
+            if not isinstance(decoded, dict):
+                raise SmokeFailure("fictional identity custom attributes are invalid")
+            attributes = decoded
+        else:
+            raise SmokeFailure("fictional identity custom attributes are invalid")
+        if enabled:
+            attributes["noop_managed_pilot"] = True
+        else:
+            attributes.pop("noop_managed_pilot", None)
+        encoded = json.dumps(
+            attributes,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        if len(encoded.encode("utf-8")) > 1000:
+            raise SmokeFailure("fictional identity custom attributes are too large")
+        self._identity_admin_request(
+            "POST",
+            suffix="/accounts:update",
+            body={
+                "localId": account.local_id,
+                "customAttributes": encoded,
+            },
+            api_version="v1",
+        )
+        observed = self._identity_user(account)
+        observed_raw = observed.get("customAttributes")
+        try:
+            observed_attributes = (
+                json.loads(observed_raw)
+                if isinstance(observed_raw, str) and observed_raw
+                else {}
+            )
+        except json.JSONDecodeError:
+            raise SmokeFailure(
+                "fictional identity custom attributes are invalid"
+            ) from None
+        if (
+            not isinstance(observed_attributes, dict)
+            or bool(observed_attributes.get("noop_managed_pilot")) is not enabled
+        ):
+            raise SmokeFailure("fictional pilot claim verification failed")
+        account.pilot_claim_enabled = enabled
+
+    def _identity_user(self, account: SyntheticAccount) -> dict[str, Any]:
+        response = self._identity_admin_request(
+            "POST",
+            suffix="/accounts:lookup",
+            body={"localId": [account.local_id]},
+            api_version="v1",
+        )
+        users = response.get("users")
+        if (
+            not isinstance(users, list)
+            or len(users) != 1
+            or not isinstance(users[0], dict)
+        ):
+            raise SmokeFailure("fictional identity lookup failed")
+        return users[0]
+
     def _authenticate(self, account: SyntheticAccount) -> None:
         query = urllib.parse.urlencode({"key": self.api_key})
         sent = self._google_json_request(
@@ -274,6 +367,7 @@ class ManagedStagingSmoke:
                 include_installation=False,
                 expected={201},
             )
+            account.managed_enrolled = True
             boundary = response.get("product_boundary", {})
             if (
                 boundary.get("account_optional") is not True
@@ -291,7 +385,7 @@ class ManagedStagingSmoke:
         print("PASS enrollment and storage-only product boundary")
 
     def _exercise_storage(self) -> None:
-        owner, outsider = self.accounts
+        owner, outsider = self.accounts[:2]
         source_id = str(uuid4())
         self._managed_request(
             owner,
@@ -966,6 +1060,7 @@ class ManagedStagingSmoke:
 
     def _delete_provider_identities(self) -> None:
         for account in self.accounts:
+            self._set_pilot_claim(account, enabled=False)
             self._identity_admin_request(
                 "POST",
                 suffix="/accounts:delete",
@@ -1034,8 +1129,48 @@ class ManagedStagingSmoke:
         )
         allowed = expected or {200}
         if status_code not in allowed:
-            raise SmokeFailure(f"managed request returned HTTP {status_code}")
+            operation = self._managed_operation(path)
+            conflict = (
+                f" ({self._managed_conflict_category(payload)})"
+                if status_code == 409
+                else ""
+            )
+            raise SmokeFailure(
+                f"managed {operation} request returned HTTP {status_code}{conflict}"
+            )
         return payload
+
+    @staticmethod
+    def _managed_operation(path: str) -> str:
+        route = path.split("?", maxsplit=1)[0]
+        if route == "/v1/managed/enroll":
+            return "enrollment"
+        if route == "/v1/managed/me":
+            return "account"
+        if route.startswith("/v1/managed/safety/"):
+            return "Safety"
+        if route.startswith("/v1/managed/social/"):
+            return "social"
+        if route.startswith("/v1/managed/erasure"):
+            return "erasure"
+        if (
+            route.startswith("/v1/managed/chunks")
+            or route.startswith("/v1/managed/restores")
+            or route.startswith("/v1/managed/sources")
+        ):
+            return "storage"
+        return "control-plane"
+
+    @staticmethod
+    def _managed_conflict_category(payload: dict[str, Any]) -> str:
+        detail = payload.get("detail")
+        if isinstance(detail, dict) and "maximum_bytes" in detail:
+            return "quota_conflict"
+        if isinstance(detail, str) and detail.startswith("managed storage policy"):
+            return "policy_conflict"
+        if isinstance(detail, str) and "installation" in detail:
+            return "installation_conflict"
+        return "conflict"
 
     def _signed_bytes_request(
         self,
@@ -1203,7 +1338,8 @@ class ManagedStagingSmoke:
             raise SmokeFailure("HTTP boundary returned an invalid envelope")
         return status_code, decoded
 
-    def _best_effort_cleanup(self) -> None:
+    def _best_effort_cleanup(self) -> bool:
+        cleanup_failed = False
         for account in self.accounts:
             if account.id_token and account.profile_id:
                 try:
@@ -1215,8 +1351,12 @@ class ManagedStagingSmoke:
                         expected={204, 404},
                     )
                 except SmokeFailure:
-                    pass
-            if account.id_token and not account.account_erasure_requested:
+                    cleanup_failed = True
+            if (
+                account.id_token
+                and account.managed_enrolled
+                and not account.account_erasure_requested
+            ):
                 try:
                     self._authenticate(account)
                     self._managed_request(
@@ -1230,11 +1370,16 @@ class ManagedStagingSmoke:
                                 b"delete-noop-plus-managed-account-v1"
                             ).hexdigest(),
                         },
-                        expected={202, 403, 409},
+                        expected={202},
                     )
                     account.account_erasure_requested = True
                 except SmokeFailure:
-                    pass
+                    cleanup_failed = True
+            if account.local_id and account.pilot_claim_enabled and self.access_token:
+                try:
+                    self._set_pilot_claim(account, enabled=False)
+                except SmokeFailure:
+                    cleanup_failed = True
             if account.local_id and self.access_token:
                 try:
                     self._identity_admin_request(
@@ -1248,18 +1393,17 @@ class ManagedStagingSmoke:
                         api_version="v1",
                     )
                 except SmokeFailure:
-                    pass
-                account.local_id = ""
-                account.id_token = ""
+                    cleanup_failed = True
+                else:
+                    account.local_id = ""
+                    account.id_token = ""
         if self.identity_config_changed and self.original_test_numbers:
             try:
                 self._patch_test_numbers(self.original_test_numbers)
             except SmokeFailure:
-                print(
-                    "FAIL temporary fictional identity configuration needs review",
-                    file=sys.stderr,
-                )
-            self.identity_config_changed = False
+                cleanup_failed = True
+            else:
+                self.identity_config_changed = False
         if self.debug_resource and self.access_token:
             path = f"/v1/{urllib.parse.quote(self.debug_resource, safe='/')}"
             try:
@@ -1270,11 +1414,10 @@ class ManagedStagingSmoke:
                     oauth=True,
                 )
             except SmokeFailure:
-                print(
-                    "FAIL temporary App Check debug assertion needs review",
-                    file=sys.stderr,
-                )
-            self.debug_resource = ""
+                cleanup_failed = True
+            else:
+                self.debug_resource = ""
+        return not cleanup_failed
 
     def _apple_api_key(self) -> str:
         rows = json.loads(
@@ -1364,6 +1507,9 @@ def main() -> int:
         ManagedStagingSmoke().run()
     except SmokeFailure as error:
         print(f"FAIL {error}", file=sys.stderr)
+        return 1
+    except Exception:
+        print("FAIL unexpected managed runtime smoke failure", file=sys.stderr)
         return 1
     return 0
 

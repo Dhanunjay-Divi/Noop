@@ -36,15 +36,19 @@ main run `34194149601` passed validation and publication on exact commit
 checks remain enforced. Evidence is recorded in
 [Trusted check URL compatibility](rounds/2026-09-08-trusted-check-url-compatibility.md).
 
-The managed app Safety paging round is active on
-`codex/managed-app-safety-paging-20260908`. Current source makes accepted NOOP
-accounts the primary manual Safety contact path, uses opaque APNs/FCM wake
-payloads, fetches details only after authenticated app entry, and replaces one
-latest location for the bounded active page. Apple and Android reconcile the
-location session across foreground/background runtime changes, and Android
-shares one platform GPS stream even if the later provider fallback is also
-active. Local source, simulator, server, migration, and private-deployment
-evidence is being completed in
+The managed app Safety paging round has completed its supplier-independent
+source, simulator, server, migration, and private synthetic deployment work on
+`codex/managed-app-safety-paging-20260908`; protected-main review and merge are
+pending. Accepted NOOP accounts are the primary manual Safety contact path,
+opaque APNs/FCM wake payloads contain only a fixed event kind, opaque incident
+reference, and expiry, while authenticated app entry fetches every displayable
+detail. One latest location replaces the prior fix for the bounded active page.
+Apple and Android reconcile the location session across
+foreground/background runtime changes, and Android shares one platform GPS
+stream even if the later provider fallback is also active. A scanned digest,
+migration `027`, lifecycle execution, and a three-account private smoke pass
+with no public invoker, provider push target, real user, or real health data.
+Evidence is recorded in
 [Managed app Safety paging](rounds/2026-09-08-managed-app-safety-paging.md).
 Signed physical terminated/background push, location permission and battery
 behavior, legal/security review, monitoring, failover, and staffed operations
@@ -59,8 +63,8 @@ guards, Apple retry-on-persistence-failure semantics, a deterministic
 10/30/90/365-day history and exact-restore harness, neutral compatibility
 labels, a machine-readable terminology ratchet, and a disclosed deterministic
 Review Sample Mode in the shipping Apple and Android source. The current ledger
-has 396 stable actions: 67 evidenced complete and 329 pending, split into 31
-owner, 231 engineering, 33 joint, and 34 external actions. Full local Android,
+has 396 stable actions: 68 evidenced complete and 328 pending, split into 31
+owner, 230 engineering, 33 joint, and 34 external actions. Full local Android,
 server, package, macOS, localization, claims, legal, private-data, OpenTofu,
 and private-runtime checks pass; the final Apple simulator suite also passes.
 Review Sample passes focused Apple standard/compact/exit-to-Terms simulator
@@ -122,7 +126,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 67 evidenced complete and 329 pending. New owner
+with 396 stable actions: 68 evidenced complete and 328 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and
