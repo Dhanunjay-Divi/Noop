@@ -103,6 +103,12 @@ rather than a prerequisite for app paging.
 - Hardened the synthetic smoke for pilot admission by provisioning, verifying,
   refreshing, revoking, and cleaning up disposable custom claims. Failure
   output is bounded by subsystem and status rather than response data.
+- Hardened long hosted commands with a fixed-label, counter-only heartbeat.
+  Pull request `#10` initially completed 46 of 53 Android production-shell
+  tests with zero failures before the hosted runner terminated the silent
+  Gradle process with exit `143`, ahead of NOOP's explicit timeout and
+  diagnostic-retention path. The wrapper now keeps that bounded control path
+  active without printing commands, arguments, paths, identifiers, or data.
 
 ## Data, privacy, and medical truth
 

@@ -106,6 +106,35 @@ class RunBoundedCommandTests(unittest.TestCase):
                 "label=status-case\nstatus=failed\nexit_code=7\n",
             )
 
+    def test_heartbeat_is_bounded_and_does_not_echo_the_command(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = RUNNER.run_command(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(0.16)",
+                    "sensitive-argument",
+                ],
+                timeout_seconds=1,
+                grace_seconds=1,
+                heartbeat_seconds=0.05,
+                label="heartbeat-case",
+            )
+        self.assertEqual(exit_code, 0)
+        lines = stderr.getvalue().splitlines()
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertTrue(
+            all(
+                line.startswith(
+                    "bounded-command: label=heartbeat-case "
+                    "status=running heartbeat="
+                )
+                for line in lines
+            )
+        )
+        self.assertNotIn("sensitive", stderr.getvalue())
+
     def test_invalid_inputs_fail_before_spawning(self) -> None:
         with self.assertRaisesRegex(ValueError, "command is required"):
             RUNNER.run_command(
@@ -127,6 +156,14 @@ class RunBoundedCommandTests(unittest.TestCase):
                 timeout_seconds=0,
                 grace_seconds=1,
                 label="invalid-timeout",
+            )
+        with self.assertRaisesRegex(ValueError, "heartbeat interval is invalid"):
+            RUNNER.run_command(
+                [sys.executable, "-c", "pass"],
+                timeout_seconds=1,
+                grace_seconds=1,
+                heartbeat_seconds=0,
+                label="invalid-heartbeat",
             )
 
     def test_start_failure_is_bounded_and_does_not_echo_the_command(self) -> None:
