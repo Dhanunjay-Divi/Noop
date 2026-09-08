@@ -110,6 +110,9 @@ class ManagedCloudWorker(
             if (service.shouldRunSocialForWorker()) {
                 service.socialCatchUpForWorker()
             }
+            if (service.shouldRunSafetyForWorker()) {
+                service.safetyCatchUpForWorker()
+            }
             Result.success()
         } catch (error: ManagedStorageException.Network) {
             Result.retry()

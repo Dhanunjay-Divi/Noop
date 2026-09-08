@@ -316,6 +316,9 @@ targets:
           # launch in StrandiOSApp.init) or the submit fails gracefully and only the foreground/"Run now"
           # paths run.
           - fetch
+          # FCM delivers only an opaque managed-Safety incident reference. The app authenticates and
+          # fetches all names, response state, and latest-only location after wake.
+          - remote-notification
         # Permit both single-shot BGAppRefresh lanes. Identifiers are built from the bundle id so they
         # track BUNDLE_ID_PREFIX automatically and must exactly match their launch registrations.
         # Delivery timing remains owned by iOS; neither lane is presented as a guaranteed timer.
@@ -323,6 +326,13 @@ targets:
           - $(PRODUCT_BUNDLE_IDENTIFIER).diagnosticexport
           - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
         FirebaseAppCheckTokenAutoRefreshEnabled: true
+        # Firebase Messaging 12.18 uses the Firebase Installation ID as the
+        # opaque delivery handle. This must match register()/unregister() and
+        # messaging(_:didReceiveRegistration:) in the iOS app delegate.
+        FirebaseMessagingInstallationIdEnabled: true
+        # Registration is explicit: only an enrolled user with notification
+        # authorization enables managed Safety delivery.
+        FirebaseMessagingAutoInitEnabled: false
         NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads selected data only if you explicitly enable NOOP+ managed backup or your own self-hosted server."
         NSCameraUsageDescription: "NOOP uses the camera only while you explicitly scan a food barcode. Images and video are processed on-device and are not stored."
         NSMicrophoneUsageDescription: "NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP."
@@ -388,6 +398,8 @@ targets:
         com.apple.developer.healthkit.access: []
         com.apple.developer.weatherkit: true
         com.apple.developer.devicecheck.appattest-environment: $(NOOP_APP_ATTEST_ENVIRONMENT)
+        aps-environment: $(NOOP_APS_ENVIRONMENT)
+        com.apple.developer.usernotifications.time-sensitive: true
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
     settings:
@@ -404,11 +416,13 @@ targets:
       configs:
         Debug:
           NOOP_APP_ATTEST_ENVIRONMENT: development
+          NOOP_APS_ENVIRONMENT: development
         # Development installs keep their familiar product filename. A Release
         # archive uses the customer-facing NOOP.app filename without changing
         # the bundle identifier or application container.
         Release:
           NOOP_APP_ATTEST_ENVIRONMENT: production
+          NOOP_APS_ENVIRONMENT: production
           PRODUCT_NAME: NOOP
           # Fail closed at runtime and during Archive when the temporary access verifier is absent.
           # Change to NO only when the product decision is to retire the gate.
@@ -428,6 +442,8 @@ targets:
         product: FirebaseAppCheck
       - package: Firebase
         product: FirebaseCore
+      - package: Firebase
+        product: FirebaseMessaging
       - package: StrandAnalytics
       - package: StrandImport
       - package: StrandDesign

@@ -221,6 +221,22 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     assert "share_duration_hours" in escalation
 
 
+def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> None:
+    sql = (MIGRATIONS / "027_managed_app_safety.sql").read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_incidents" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_locations" in sql
+    assert "incident_id uuid PRIMARY KEY" in sql
+    assert "duration_hours IN (8, 12)" in sql
+    assert "attempts BETWEEN 0 AND 3" in sql
+    assert "token_hash char(64) NOT NULL UNIQUE" in sql
+    assert "token_ciphertext text NOT NULL" in sql
+    assert "managed_safety_invite_request_fk" in sql
+    assert "IF NOT EXISTS (" in sql
+
+
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:
     managed = (MIGRATIONS / "014_managed_storage_control_plane.sql").read_text(
         encoding="utf-8"

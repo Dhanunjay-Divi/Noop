@@ -156,6 +156,104 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "value = google_firebase_android_app.staging[0].app_id" in runtime
 
 
+def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    locals_file = (REPOSITORY_ROOT / "infra" / "gcp" / "locals.tf").read_text(
+        encoding="utf-8"
+    )
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    configure_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-runtime-secrets.sh"
+    ).read_text(encoding="utf-8")
+
+    assert '"fcm.googleapis.com"' in locals_file
+    assert "cloudmessaging.messages.create" in iam
+    assert "firebasecloudmessaging.admin" not in iam
+    assert "var.enable_managed_runtime ? 1 : 0" in iam
+    assert 'secret_id = "${local.prefix}-managed-push-token-secret"' in iam
+    assert "managed_api_push_token_secret" in iam
+    assert "managed_lifecycle_push_token_secret" in iam
+    assert 'name  = "NOOP_MANAGED_PUSH_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
+    assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
+    assert "managed_api_push_sender" in runtime
+    assert "managed_lifecycle_push_sender" in runtime
+    assert "managed_api_push_token_secret" in runtime
+    assert "managed_lifecycle_push_token_secret" in runtime
+    assert "managed_push_token_secret=" in configure_script
+    assert "openssl rand -hex 32" in configure_script
+    assert "--data-file=-" in configure_script
+
+
+def test_private_staging_smoke_covers_managed_safety_without_real_push_targets() -> (
+    None
+):
+    smoke = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "smoke-managed-runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "self._exercise_safety()" in smoke
+    assert "PASS three fictional phone OTP identities" in smoke
+    assert "/v1/managed/safety/invites" in smoke
+    assert "/v1/managed/safety/requests" in smoke
+    assert "/v1/managed/safety/contacts" in smoke
+    assert "/v1/managed/safety/incidents" in smoke
+    assert "latest-only location" in smoke
+    assert "/v1/managed/push/installations/current" not in smoke
+
+
+def test_mobile_managed_push_is_consent_gated_and_explicit() -> None:
+    android_manifest = (
+        REPOSITORY_ROOT / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    ).read_text(encoding="utf-8")
+    android_service = (
+        REPOSITORY_ROOT
+        / "android"
+        / "app"
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "noop"
+        / "managed"
+        / "ManagedCloudService.kt"
+    ).read_text(encoding="utf-8")
+    ios_project = (REPOSITORY_ROOT / "project.yml").read_text(encoding="utf-8")
+    ios_plist = (REPOSITORY_ROOT / "StrandiOS" / "Resources" / "Info.plist").read_text(
+        encoding="utf-8"
+    )
+    ios_service = (
+        REPOSITORY_ROOT / "StrandiOS" / "System" / "ManagedCloudService.swift"
+    ).read_text(encoding="utf-8")
+
+    firebase_provider = android_manifest.split(
+        'android:name="com.google.firebase.provider.FirebaseInitProvider"',
+        maxsplit=1,
+    )[1].split("/>", maxsplit=1)[0]
+    assert 'tools:node="remove"' in firebase_provider
+    messaging_metadata = android_manifest.split(
+        'android:name="firebase_messaging_auto_init_enabled"',
+        maxsplit=1,
+    )[1].split("/>", maxsplit=1)[0]
+    assert 'android:value="false"' in messaging_metadata
+    assert "messaging.isAutoInitEnabled = true" in android_service
+    assert "messaging.isAutoInitEnabled = false" in android_service
+    assert "FirebaseMessagingAutoInitEnabled: false" in ios_project
+    assert "<key>FirebaseMessagingAutoInitEnabled</key>" in ios_plist
+    assert (
+        ios_plist.split(
+            "<key>FirebaseMessagingAutoInitEnabled</key>",
+            maxsplit=1,
+        )[1]
+        .lstrip()
+        .startswith("<false/>")
+    )
+    assert "Messaging.messaging().isAutoInitEnabled = true" in ios_service
+    assert "Messaging.messaging().isAutoInitEnabled = false" in ios_service
+
+
 def test_gcp_managed_processor_accepts_only_authenticated_pubsub_push() -> None:
     runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
         encoding="utf-8"

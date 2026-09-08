@@ -756,11 +756,42 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
             claims=first_claims,
             enrollment=_enrollment(revoked_installation, uuid4()),
         )
+        revoked_push_hash = hashlib.sha256(
+            f"push:{revoked_installation}".encode()
+        ).hexdigest()
+        await primary._require_pool().execute(
+            """
+            INSERT INTO managed_push_installations (
+                account_id,
+                installation_id,
+                platform,
+                environment,
+                target_kind,
+                token_hash,
+                token_ciphertext
+            ) VALUES ($1, $2, 'ios', 'development', 'fid', $3, $4)
+            """,
+            first_principal.account_id,
+            revoked_installation,
+            revoked_push_hash,
+            "v1." + ("b" * 40),
+        )
         await repository.revoke_installation(
             principal=first_principal,
             requesting_installation_id=first_installation,
             installation_id=revoked_installation,
         )
+        revoked_push = await primary._require_pool().fetchrow(
+            """
+            SELECT status, token_ciphertext
+            FROM managed_push_installations
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            first_principal.account_id,
+            revoked_installation,
+        )
+        assert revoked_push["status"] == "revoked"
+        assert revoked_push["token_ciphertext"] == f"revoked.{revoked_push_hash}"
         with pytest.raises(ManagedForbiddenError):
             await repository.ensure_installation(
                 principal=first_principal,
@@ -810,6 +841,24 @@ async def test_account_erasure_blocks_reenrollment_until_identity_is_deleted() -
             enrollment=_enrollment(installation_id, uuid4()),
         )
         principal = await repository.principal_for_identity(claims)
+        push_hash = hashlib.sha256(f"push:{installation_id}".encode()).hexdigest()
+        await primary._require_pool().execute(
+            """
+            INSERT INTO managed_push_installations (
+                account_id,
+                installation_id,
+                platform,
+                environment,
+                target_kind,
+                token_hash,
+                token_ciphertext
+            ) VALUES ($1, $2, 'ios', 'development', 'fid', $3, $4)
+            """,
+            principal.account_id,
+            installation_id,
+            push_hash,
+            "v1." + ("c" * 40),
+        )
         request_id = uuid4()
         ticket = b"t" * 64
 
@@ -840,6 +889,17 @@ async def test_account_erasure_blocks_reenrollment_until_identity_is_deleted() -
                 claims=claims,
                 enrollment=_enrollment(str(uuid4()), uuid4()),
             )
+        erased_push = await primary._require_pool().fetchrow(
+            """
+            SELECT status, token_ciphertext
+            FROM managed_push_installations
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            principal.account_id,
+            installation_id,
+        )
+        assert erased_push["status"] == "revoked"
+        assert erased_push["token_ciphertext"] == f"revoked.{push_hash}"
 
         pending = await repository.pending_identity_deletions(
             now=lifecycle_now,

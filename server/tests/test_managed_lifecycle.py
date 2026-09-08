@@ -10,6 +10,7 @@ from app.managed_lifecycle import ManagedLifecycleResult, ManagedLifecycleRunner
 from app.managed_identity_deletion import ManagedIdentityDeletionError
 from app.managed_object_store import ManagedObjectStoreError
 from app.managed_repository import ManagedProcessingBusyError
+from app.managed_safety_repository import ManagedPushBatchResult
 
 
 class FakeLifecycleRepository:
@@ -155,6 +156,16 @@ class FakeChunkProcessor:
             raise ManagedProcessingBusyError("busy")
 
 
+class FakeSafetyPushService:
+    def __init__(self, result: ManagedPushBatchResult) -> None:
+        self.result = result
+        self.limits: list[int] = []
+
+    async def dispatch_due(self, *, limit: int) -> ManagedPushBatchResult:
+        self.limits.append(limit)
+        return self.result
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_replays_pending_deletes_and_releases_lease() -> None:
     repository = FakeLifecycleRepository()
@@ -285,6 +296,35 @@ async def test_lifecycle_reconciles_stranded_uploads_and_reports_retry_state() -
     assert result.chunk_reconciliation_failures == 1
     assert len(processor.processed) == 3
     assert all(len(queue_hash) == 64 for _, _, queue_hash in processor.processed)
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
+    repository = FakeLifecycleRepository()
+    push = FakeSafetyPushService(
+        ManagedPushBatchResult(
+            claimed=4,
+            provider_accepted=2,
+            retryable_failures=1,
+            terminal_failures=1,
+        )
+    )
+
+    result = await ManagedLifecycleRunner(
+        repository,  # type: ignore[arg-type]
+        FakeObjectStore(),  # type: ignore[arg-type]
+        FakeIdentityDeleter(),
+        FakeChunkProcessor(),  # type: ignore[arg-type]
+        safety_push_service=push,  # type: ignore[arg-type]
+        batch_size=250,
+    ).run_once(owner_id=uuid4())
+
+    assert push.limits == [200]
+    assert result.safety_push_claimed == 4
+    assert result.safety_push_provider_accepted == 2
+    assert result.safety_push_retryable_failures == 1
+    assert result.safety_push_terminal_failures == 1
+    assert result.safety_push_receipt_failures == 0
 
 
 def test_lifecycle_cli_emits_bounded_failure_without_traceback(

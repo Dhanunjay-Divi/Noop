@@ -20,11 +20,19 @@ from app.managed_object_store import (
     ManagedObjectStoring,
 )
 from app.managed_processing import ManagedChunkProcessor
+from app.managed_push import (
+    FirebaseCloudMessagingProvider,
+    ManagedPushTokenCodec,
+)
 from app.managed_repository import (
     ManagedConflictError,
     ManagedNotFoundError,
     ManagedProcessingBusyError,
     PostgresManagedRepository,
+)
+from app.managed_safety_repository import (
+    ManagedSafetyPushService,
+    PostgresManagedSafetyRepository,
 )
 from app.repository import PostgresRepository
 from app.observability import emit_operational_event
@@ -50,6 +58,11 @@ class ManagedLifecycleResult:
     identity_delete_failures: int = 0
     exports_deleted: int = 0
     export_delete_failures: int = 0
+    safety_push_claimed: int = 0
+    safety_push_provider_accepted: int = 0
+    safety_push_retryable_failures: int = 0
+    safety_push_terminal_failures: int = 0
+    safety_push_receipt_failures: int = 0
 
 
 class ManagedLifecycleRunner:
@@ -59,6 +72,8 @@ class ManagedLifecycleRunner:
         object_store: ManagedObjectStoring,
         identity_deleter: ManagedIdentityDeleting,
         chunk_processor: ManagedChunkProcessor,
+        safety_repository: PostgresManagedSafetyRepository | None = None,
+        safety_push_service: ManagedSafetyPushService | None = None,
         *,
         batch_size: int = 200,
         reconciliation_batch_size: int = 20,
@@ -77,6 +92,8 @@ class ManagedLifecycleRunner:
         self.object_store = object_store
         self.identity_deleter = identity_deleter
         self.chunk_processor = chunk_processor
+        self.safety_repository = safety_repository
+        self.safety_push_service = safety_push_service
         self.batch_size = batch_size
         self.reconciliation_batch_size = reconciliation_batch_size
         self.lease_seconds = lease_seconds
@@ -147,6 +164,18 @@ class ManagedLifecycleRunner:
                 now=now,
                 batch_size=self.batch_size,
             )
+            push_result = None
+            if self.safety_push_service is not None:
+                push_result = await self.safety_push_service.dispatch_due(
+                    limit=min(self.batch_size, 200),
+                )
+            if self.safety_repository is not None:
+                purged.update(
+                    await self.safety_repository.purge_expired_rows(
+                        now=now,
+                        batch_size=self.batch_size,
+                    )
+                )
             return ManagedLifecycleResult(
                 lease_acquired=True,
                 chunks_reconciled=reconciled,
@@ -164,6 +193,21 @@ class ManagedLifecycleRunner:
                 identity_delete_failures=identity_failures,
                 exports_deleted=exports_deleted,
                 export_delete_failures=export_failures,
+                safety_push_claimed=(
+                    push_result.claimed if push_result is not None else 0
+                ),
+                safety_push_provider_accepted=(
+                    push_result.provider_accepted if push_result is not None else 0
+                ),
+                safety_push_retryable_failures=(
+                    push_result.retryable_failures if push_result is not None else 0
+                ),
+                safety_push_terminal_failures=(
+                    push_result.terminal_failures if push_result is not None else 0
+                ),
+                safety_push_receipt_failures=(
+                    push_result.receipt_failures if push_result is not None else 0
+                ),
             )
         finally:
             await self.repository.release_worker_lease(
@@ -339,6 +383,7 @@ async def _run() -> ManagedLifecycleResult:
         entitlement_mode=settings.managed_entitlement_mode,
         replay_secret=settings.managed_replay_secret or "",
     )
+    safety_repository = PostgresManagedSafetyRepository(primary)
     object_store = GCSV4ObjectStore(
         bucket=settings.managed_raw_bucket or "",
         signer=IAMBlobSigner(settings.managed_signer_email or ""),
@@ -355,6 +400,17 @@ async def _run() -> ManagedLifecycleResult:
         project_id=settings.managed_project_id or "",
         ticket_codec=identity_ticket_codec,
     )
+    safety_push_service = None
+    if settings.managed_push_retry_enabled:
+        safety_push_service = ManagedSafetyPushService(
+            repository=safety_repository,
+            token_codec=ManagedPushTokenCodec(settings.managed_push_token_secret or ""),
+            provider=FirebaseCloudMessagingProvider(
+                project_id=settings.managed_project_id or "",
+                timeout_seconds=settings.managed_push_timeout_seconds,
+            ),
+            max_concurrency=settings.managed_push_max_concurrency,
+        )
     await primary.startup()
     try:
         return await ManagedLifecycleRunner(
@@ -362,6 +418,8 @@ async def _run() -> ManagedLifecycleResult:
             object_store,
             identity_deleter,
             chunk_processor,
+            safety_repository,
+            safety_push_service,
         ).run_once()
     finally:
         await primary.shutdown()
@@ -395,6 +453,7 @@ def main() -> None:
         or result.chunk_reconciliation_failures
         or result.export_delete_failures
         or result.identity_delete_failures
+        or result.safety_push_receipt_failures
     )
     emit_operational_event(
         "managed_lifecycle.run",

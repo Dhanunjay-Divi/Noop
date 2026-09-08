@@ -98,6 +98,86 @@ internal class ManagedCloudPreferences(context: Context) {
         preferences.edit().remove(KEY_SOCIAL_INVITE_CAPABILITY).apply()
     }
 
+    fun safetyInviteRequestId(): UUID =
+        stableRequestId(KEY_SAFETY_INVITE_REQUEST_ID)
+
+    fun clearSafetyInviteRequestId() {
+        preferences.edit().remove(KEY_SAFETY_INVITE_REQUEST_ID).apply()
+    }
+
+    fun safetyInviteCapability(): String = synchronized(this) {
+        preferences.getString(KEY_SAFETY_INVITE_CAPABILITY, null)
+            ?.takeIf(ManagedSafetyIdentifier.invitePattern::matches)
+            ?: ManagedSafetyIdentifier.makeInviteCapability().also { created ->
+                check(ManagedSafetyIdentifier.invitePattern.matches(created))
+                check(
+                    preferences.edit()
+                        .putString(KEY_SAFETY_INVITE_CAPABILITY, created)
+                        .commit(),
+                ) { "Could not persist the managed Safety invitation." }
+            }
+    }
+
+    fun clearSafetyInviteCapability() {
+        preferences.edit().remove(KEY_SAFETY_INVITE_CAPABILITY).apply()
+    }
+
+    var pendingSafetyInviteCapability: String?
+        get() = preferences.getString(KEY_PENDING_SAFETY_INVITE, null)
+            ?.takeIf(ManagedSafetyIdentifier.invitePattern::matches)
+        set(value) {
+            require(value == null || ManagedSafetyIdentifier.invitePattern.matches(value))
+            putString(KEY_PENDING_SAFETY_INVITE, value)
+        }
+
+    var safetyLastAttemptMs: Long
+        get() = preferences.getLong(KEY_SAFETY_LAST_ATTEMPT_MS, 0L)
+        set(value) {
+            preferences.edit()
+                .putLong(KEY_SAFETY_LAST_ATTEMPT_MS, value.coerceAtLeast(0L))
+                .apply()
+        }
+
+    var safetyEnabled: Boolean
+        get() = preferences.getBoolean(KEY_SAFETY_ENABLED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_SAFETY_ENABLED, value).apply()
+        }
+
+    fun proposedSafetyLocationSequence(incidentId: UUID): Long = synchronized(this) {
+        val key = incidentId.toString().lowercase()
+        (safetyLocationSequences()[key] ?: 0L)
+            .coerceIn(0L, Long.MAX_VALUE - 1L) + 1L
+    }
+
+    fun adoptSafetyLocationSequence(incidentId: UUID, sequence: Long) =
+        synchronized(this) {
+            require(sequence > 0L)
+            val key = incidentId.toString().lowercase()
+            val values = safetyLocationSequences().toMutableMap()
+            values[key] = maxOf(values[key] ?: 0L, sequence)
+            val retained = values.entries
+                .sortedByDescending(Map.Entry<String, Long>::value)
+                .take(MAX_SAFETY_LOCATION_SEQUENCES)
+                .associate { it.key to it.value }
+            check(
+                preferences.edit()
+                    .putString(
+                        KEY_SAFETY_LOCATION_SEQUENCES,
+                        JSONObject(retained).toString(),
+                    )
+                    .commit(),
+            ) { "Could not persist managed Safety location progress." }
+        }
+
+    fun clearSafetyLocationSequence(incidentId: UUID) = synchronized(this) {
+        val values = safetyLocationSequences().toMutableMap()
+        values.remove(incidentId.toString().lowercase())
+        preferences.edit()
+            .putString(KEY_SAFETY_LOCATION_SEQUENCES, JSONObject(values).toString())
+            .apply()
+    }
+
     var pendingSocialInviteCapability: String?
         get() = preferences.getString(KEY_PENDING_SOCIAL_INVITE, null)
             ?.takeIf(ManagedSocialIdentifier.invitePattern::matches)
@@ -211,6 +291,17 @@ internal class ManagedCloudPreferences(context: Context) {
             .apply()
     }
 
+    fun clearSafetyState() {
+        preferences.edit()
+            .remove(KEY_SAFETY_INVITE_REQUEST_ID)
+            .remove(KEY_SAFETY_INVITE_CAPABILITY)
+            .remove(KEY_PENDING_SAFETY_INVITE)
+            .remove(KEY_SAFETY_LOCATION_SEQUENCES)
+            .remove(KEY_SAFETY_LAST_ATTEMPT_MS)
+            .remove(KEY_SAFETY_ENABLED)
+            .apply()
+    }
+
     fun completeEnrollment(accountScopeHash: String, policyVersion: String) {
         check(
             preferences.edit()
@@ -287,6 +378,7 @@ internal class ManagedCloudPreferences(context: Context) {
             .putBoolean(KEY_OPTIMIZE_PHONE_STORAGE, false)
             .apply()
         clearSocialState()
+        clearSafetyState()
     }
 
     private fun stableRequestId(key: String): UUID = synchronized(this) {
@@ -297,8 +389,26 @@ internal class ManagedCloudPreferences(context: Context) {
                     preferences.edit()
                         .putString(key, it.toString().lowercase())
                         .commit(),
-                ) { "Could not persist the managed Friends request." }
+                ) { "Could not persist the managed request." }
             }
+    }
+
+    private fun safetyLocationSequences(): Map<String, Long> {
+        val raw = preferences.getString(KEY_SAFETY_LOCATION_SEQUENCES, null)
+            ?: return emptyMap()
+        return runCatching {
+            val values = JSONObject(raw)
+            buildMap {
+                values.keys().forEach { incidentId ->
+                    val sequence = values.optLong(incidentId, -1L)
+                    if (runCatching { UUID.fromString(incidentId) }.isSuccess &&
+                        sequence > 0L
+                    ) {
+                        put(incidentId.lowercase(), sequence)
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
     }
 
     private fun socialDeliveryReceipts(
@@ -368,7 +478,18 @@ internal class ManagedCloudPreferences(context: Context) {
         private const val KEY_SOCIAL_DELIVERY_RECEIPTS =
             "social_delivery_receipts"
         private const val KEY_SOCIAL_ENABLED = "social_enabled"
+        private const val KEY_SAFETY_INVITE_REQUEST_ID =
+            "safety_invite_request_id"
+        private const val KEY_SAFETY_INVITE_CAPABILITY =
+            "safety_invite_capability"
+        private const val KEY_PENDING_SAFETY_INVITE =
+            "pending_safety_invite"
+        private const val KEY_SAFETY_LOCATION_SEQUENCES =
+            "safety_location_sequences"
+        private const val KEY_SAFETY_LAST_ATTEMPT_MS = "safety_last_attempt_ms"
+        private const val KEY_SAFETY_ENABLED = "safety_enabled"
         private const val MAX_SOCIAL_DELIVERY_RECEIPTS = 64
+        private const val MAX_SAFETY_LOCATION_SEQUENCES = 8
         private const val SOCIAL_DELIVERY_RETENTION_MS = 7L * 24 * 60 * 60 * 1_000
         private val INSTALLATION_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
         private val INSTALLATION_TOKEN = Regex("^noopm_[A-Za-z0-9_-]{43}$")

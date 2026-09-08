@@ -577,27 +577,6 @@ final class OwnershipFlowStateTests: XCTestCase {
         }
     }
 
-    func testDiagnosticRequestIDAcceptsOnlyServerCorrelationFormat() {
-        let compact = "0123456789abcdef0123456789abcdef"
-
-        XCTAssertEqual(
-            OwnershipEndpointPolicy.diagnosticRequestID(compact),
-            compact
-        )
-        for candidate in [
-            "0123456789ABCDEF0123456789ABCDEF",
-            "01234567-89ab-4def-8123-456789abcdef",
-            "request-123",
-            String(repeating: "a", count: 31),
-            String(repeating: "a", count: 33),
-        ] {
-            XCTAssertNil(
-                OwnershipEndpointPolicy.diagnosticRequestID(candidate)
-            )
-        }
-        XCTAssertNil(OwnershipEndpointPolicy.diagnosticRequestID(nil))
-    }
-
     func testOwnershipHTTPClientDisablesRedirects() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -635,12 +614,7 @@ final class OwnershipFlowStateTests: XCTestCase {
         XCTAssertTrue(source.contains("case 429, 500...599:"))
         XCTAssertFalse(source.contains("session.data(for: request)"))
         XCTAssertTrue(views.contains(".textSelection(.enabled)"))
-        XCTAssertTrue(source.contains("\"server_request_id\""))
-        XCTAssertTrue(
-            source.contains(
-                "OwnershipEndpointPolicy.diagnosticRequestID("
-            )
-        )
+        XCTAssertFalse(source.contains("\"server_request_id\""))
         XCTAssertTrue(source.contains("case 412:"))
         for route in [
             "account",

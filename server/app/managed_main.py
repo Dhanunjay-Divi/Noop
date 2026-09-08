@@ -19,7 +19,16 @@ from app.managed_app_check import FirebaseAppCheckTokenVerifier
 from app.managed_identity import IdentityToolkitTokenVerifier
 from app.managed_identity_deletion import ManagedIdentityDeletionTicketCodec
 from app.managed_object_store import GCSV4ObjectStore, IAMBlobSigner
+from app.managed_push import (
+    FirebaseCloudMessagingProvider,
+    ManagedPushTokenCodec,
+    UnavailableManagedPushProvider,
+)
 from app.managed_repository import PostgresManagedRepository
+from app.managed_safety_repository import (
+    ManagedSafetyPushService,
+    PostgresManagedSafetyRepository,
+)
 from app.observability import (
     RequestObservabilityMiddleware,
     internal_server_error_response,
@@ -70,6 +79,24 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
     identity_deletion_ticket_codec = ManagedIdentityDeletionTicketCodec(
         runtime_settings.managed_replay_secret or ""
     )
+    safety_repository = PostgresManagedSafetyRepository(primary)
+    safety_push_service = None
+    if runtime_settings.managed_push_token_secret:
+        token_codec = ManagedPushTokenCodec(runtime_settings.managed_push_token_secret)
+        provider = (
+            FirebaseCloudMessagingProvider(
+                project_id=runtime_settings.managed_project_id or "",
+                timeout_seconds=(runtime_settings.managed_push_timeout_seconds),
+            )
+            if runtime_settings.managed_push_enabled
+            else UnavailableManagedPushProvider()
+        )
+        safety_push_service = ManagedSafetyPushService(
+            repository=safety_repository,
+            token_codec=token_codec,
+            provider=provider,
+            max_concurrency=(runtime_settings.managed_push_max_concurrency),
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -155,6 +182,8 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
             token_verifier=verifier,
             object_store=object_store,
             identity_deletion_ticket_codec=identity_deletion_ticket_codec,
+            safety_repository=safety_repository,
+            safety_push_service=safety_push_service,
         )
     )
     return app

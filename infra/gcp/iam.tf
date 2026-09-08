@@ -145,6 +145,35 @@ resource "google_project_iam_member" "managed_api_cloud_sql_client" {
   member  = "serviceAccount:${google_service_account.managed_api.email}"
 }
 
+resource "google_project_iam_custom_role" "managed_api_push_sender" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project     = var.project_id
+  role_id     = replace("${local.prefix}_fcm_sender", "-", "_")
+  title       = "NOOP managed FCM sender"
+  description = "Send opaque managed Safety references through FCM."
+  permissions = [
+    "cloudmessaging.messages.create",
+    "resourcemanager.projects.get",
+  ]
+}
+
+resource "google_project_iam_member" "managed_api_push_sender" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project = var.project_id
+  role    = google_project_iam_custom_role.managed_api_push_sender[0].name
+  member  = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_project_iam_member" "managed_lifecycle_push_sender" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project = var.project_id
+  role    = google_project_iam_custom_role.managed_api_push_sender[0].name
+  member  = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
 resource "google_project_iam_member" "ownership_api_cloud_sql_client" {
   count = var.enable_ownership_runtime ? 1 : 0
 
@@ -270,6 +299,22 @@ resource "google_secret_manager_secret" "managed_replay_secret" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_secret_manager_secret" "managed_push_token_secret" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-managed-push-token-secret"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_secret_manager_secret_iam_member" "api_admin_token" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.bootstrap_admin_token.secret_id
@@ -317,6 +362,25 @@ resource "google_secret_manager_secret_iam_member" "managed_api_replay_secret" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_api.email}"
 }
+
+resource "google_secret_manager_secret_iam_member" "managed_api_push_token_secret" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.managed_push_token_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "managed_lifecycle_push_token_secret" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.managed_push_token_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "processor_database_url" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.database_url.secret_id

@@ -112,6 +112,12 @@ struct SafetyCenterView: View {
         ) {
             emergencyBoundary
             fallResponseReadiness
+            #if os(iOS)
+            ManagedSafetyView(
+                locationProvider: locationProvider,
+                durationHours: shareDurationBinding
+            )
+            #endif
             emergencyContactsSection
             contactPageSection
             shareSection
@@ -220,8 +226,21 @@ struct SafetyCenterView: View {
 
     private var emergencyContactsSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            #if os(iOS)
+            SectionHeader(
+                "managed.safety.fallback.title",
+                overline: "managed.safety.fallback.overline"
+            )
+            #else
             SectionHeader("safety.contacts.section", overline: "safety.network.overline")
+            #endif
             NoopCard {
+                #if os(iOS)
+                Text("managed.safety.fallback.body")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                #endif
                 SafetyContactsSetupView(service: pagingService)
             }
         }
@@ -268,7 +287,14 @@ struct SafetyCenterView: View {
 
     private var contactPageSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            #if os(iOS)
+            SectionHeader(
+                "managed.safety.fallback.page.title",
+                overline: "managed.safety.fallback.title"
+            )
+            #else
             SectionHeader("safety.page.section", overline: "SOS")
+            #endif
             NoopCard(tint: StrandPalette.statusCritical) {
                 VStack(alignment: .leading, spacing: NoopMetrics.space3) {
                     HStack(alignment: .top, spacing: NoopMetrics.space3) {

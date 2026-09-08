@@ -28,6 +28,7 @@ locals {
     "firebase.googleapis.com",
     "firebaseappcheck.googleapis.com",
     "firebaseinstallations.googleapis.com",
+    "fcm.googleapis.com",
     "iamcredentials.googleapis.com",
     "identitytoolkit.googleapis.com",
     "logging.googleapis.com",

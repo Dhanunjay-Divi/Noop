@@ -27,6 +27,7 @@ import com.noop.location.GpsSession
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
+import com.noop.managed.ManagedSafetyLiveLocationSession
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
@@ -288,6 +289,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { HydrationReminderScheduler.reconcile(this@NoopApplication) }
             runCatching {
                 SafetyLiveLocationSession.initialize(this@NoopApplication)
+                ManagedSafetyLiveLocationSession.initialize(this@NoopApplication)
                 SafetyIncidentStatusMonitor.reconcile(this@NoopApplication)
             }
         }

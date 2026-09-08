@@ -467,17 +467,6 @@ enum OwnershipBandPossessionProviderError: Error, Equatable {
 }
 
 enum OwnershipEndpointPolicy {
-    static func diagnosticRequestID(_ raw: String?) -> String? {
-        guard let raw,
-              raw.range(
-                  of: #"^[0-9a-f]{32}$"#,
-                  options: .regularExpression
-              ) != nil else {
-            return nil
-        }
-        return raw
-    }
-
     static func isValidBaseURL(
         _ url: URL,
         allowLocalHTTP: Bool,

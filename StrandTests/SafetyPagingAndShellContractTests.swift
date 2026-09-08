@@ -8,6 +8,7 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .resolvingSymlinksInPath()
     }
 
     private func source(_ relativePath: String) throws -> String {
@@ -63,6 +64,26 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             SafetyContactReminders.needsReminder(
                 reminderRequired: true,
                 acceptedCount: 5
+            )
+        )
+    }
+
+    func testManagedSafetyLocationRetryIsBounded() {
+        XCTAssertEqual(
+            ManagedSafetyLocationRetryPolicy.delayNanoseconds(
+                afterFailedAttempt: 1
+            ),
+            2_000_000_000
+        )
+        XCTAssertEqual(
+            ManagedSafetyLocationRetryPolicy.delayNanoseconds(
+                afterFailedAttempt: 2
+            ),
+            5_000_000_000
+        )
+        XCTAssertNil(
+            ManagedSafetyLocationRetryPolicy.delayNanoseconds(
+                afterFailedAttempt: 3
             )
         )
     }
@@ -464,6 +485,54 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
     }
 
+    func testManagedSafetyKeepsOnlyLatestLocationUntilPageEnds() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+        let runtime = try source(
+            "Strand/System/SafetySOSRuntime.swift"
+        )
+        let project = try source("project.yml")
+
+        XCTAssertTrue(service.contains(
+            "private let managedSafetyLocationStreamer"
+        ))
+        XCTAssertTrue(service.contains(
+            "reconcileManagedSafetyLocationSharing()"
+        ))
+        XCTAssertTrue(service.contains(
+            #"source: "stream""#
+        ))
+        XCTAssertTrue(service.contains(
+            "stopManagedSafetyLocationSharing(reason: \"disconnect\")"
+        ))
+        XCTAssertTrue(service.contains(
+            "stopManagedSafetyLocationSharing(reason: \"presentation_cleared\")"
+        ))
+        XCTAssertTrue(service.contains(
+            "managedSafetyLocationExpiryTask"
+        ))
+        XCTAssertTrue(view.contains(
+            "locationProvider.requestBackgroundAuthorization()"
+        ))
+        XCTAssertTrue(view.contains(
+            "managed.safety.location.background.body"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "enum SubmissionDisposition"
+        ))
+        XCTAssertTrue(project.contains("- location"))
+        XCTAssertFalse(service.contains(
+            #""latitude": String"#
+        ))
+        XCTAssertFalse(service.contains(
+            #""longitude": String"#
+        ))
+    }
+
     func testAutomaticFallBoundaryRemainsVisibleAndRuntimeInert() throws {
         let center = try source("Strand/Screens/SafetyCenterView.swift")
         let appModel = try source("Strand/App/AppModel.swift")
@@ -550,10 +619,12 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
 
             for case let file as URL in files {
                 guard file.pathExtension == "swift" || file.pathExtension == "kt" else { continue }
-                let relative = file.path.replacingOccurrences(
-                    of: repoRoot.path + "/",
-                    with: ""
-                )
+                let marker = "/\(sourceRoot)/"
+                guard let markerRange = file.path.range(of: marker, options: .backwards) else {
+                    XCTFail("Could not derive repository-relative path for \(file.path)")
+                    continue
+                }
+                let relative = sourceRoot + "/" + file.path[markerRange.upperBound...]
                 guard !relative.hasPrefix("Packages/") || relative.contains("/Sources/") else { continue }
                 guard !allowedDecoders.contains(relative) else { continue }
                 scannedFiles += 1

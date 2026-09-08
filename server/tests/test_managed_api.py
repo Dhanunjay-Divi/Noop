@@ -475,6 +475,8 @@ def _managed_client(
     *,
     auth_age: timedelta = timedelta(minutes=1),
     object_store=None,
+    managed_safety_repository=None,
+    managed_safety_push_service=None,
 ) -> tuple[TestClient, FakeManagedRepository]:
     now = datetime.now(UTC)
     claims = ManagedIdentityClaims(
@@ -502,6 +504,8 @@ def _managed_client(
         ),
         managed_token_verifier=StaticManagedTokenVerifier({MANAGED_TOKEN: claims}),
         managed_object_store=object_store or UnusedObjectStore(),
+        managed_safety_repository=managed_safety_repository,
+        managed_safety_push_service=managed_safety_push_service,
     )
     return TestClient(app), managed_repository
 
@@ -1055,3 +1059,309 @@ def test_managed_social_poke_claim_is_installation_bound_and_acknowledged() -> N
     assert repository.social_claims == [("ios-test-1", 2)]
     assert acknowledged.status_code == 200
     assert repository.social_acknowledgements[0]["installation_id"] == "ios-test-1"
+
+
+class FakeManagedSafetyRepository:
+    def __init__(self) -> None:
+        self.profile_id = uuid4()
+        self.other_profile_id = uuid4()
+        self.request_id = uuid4()
+        self.invite_id = uuid4()
+        self.incident_id = uuid4()
+        self.calls: list[tuple[str, dict]] = []
+
+    def _incident(self, *, role: str = "owner", status: str = "open") -> dict:
+        now = datetime.now(UTC)
+        return {
+            "incident_id": str(self.incident_id),
+            "role": role,
+            "owner_profile_id": str(self.profile_id),
+            "owner_display_name": "Owner",
+            "trigger": "manual_sos",
+            "status": status,
+            "duration_hours": 8,
+            "share_location": True,
+            "created_at": now,
+            "expires_at": now + timedelta(hours=8),
+            "acknowledged_at": None,
+            "ended_at": None,
+            "participants": [
+                {
+                    "profile_id": str(self.other_profile_id),
+                    "display_name": "Contact",
+                    "status": "pending",
+                    "paged_at": now,
+                    "responded_at": None,
+                    "push": {"configured": True, "reached": True},
+                }
+            ],
+            "location": None,
+            "delivery": {
+                "contacts_targeted": 2,
+                "contacts_reached": 1,
+                "installations_targeted": 2,
+                "installations_reached": 1,
+            },
+        }
+
+    async def revoke_push_installation(self, **kwargs):
+        self.calls.append(("revoke_push", kwargs))
+
+    async def create_invite(self, **kwargs):
+        self.calls.append(("create_invite", kwargs))
+        now = datetime.now(UTC)
+        return {
+            "invite_id": str(self.invite_id),
+            "capability": kwargs["request"].capability.get_secret_value(),
+            "status": "active",
+            "created_at": now,
+            "expires_at": now + timedelta(hours=72),
+            "duplicate": False,
+        }
+
+    async def revoke_invite(self, **kwargs):
+        self.calls.append(("revoke_invite", kwargs))
+
+    async def redeem_invite(self, **kwargs):
+        self.calls.append(("redeem_invite", kwargs))
+        return self._request(direction="incoming")
+
+    async def create_request(self, **kwargs):
+        self.calls.append(("create_request", kwargs))
+        return self._request(direction="outgoing")
+
+    def _request(self, *, direction: str) -> dict:
+        now = datetime.now(UTC)
+        return {
+            "request_id": str(self.request_id),
+            "profile_id": str(self.other_profile_id),
+            "display_name": "Contact",
+            "direction": direction,
+            "source": "noop_id",
+            "status": "pending",
+            "created_at": now,
+            "decided_at": None,
+            "expires_at": now + timedelta(days=30),
+            "duplicate": False,
+        }
+
+    async def list_requests(self, **kwargs):
+        self.calls.append(("list_requests", kwargs))
+        return [self._request(direction="incoming")]
+
+    async def decide_request(self, **kwargs):
+        self.calls.append(("decide_request", kwargs))
+        value = self._request(direction="incoming")
+        value["status"] = "accepted" if kwargs["decision"] == "accept" else "declined"
+        value["decided_at"] = datetime.now(UTC)
+        return value
+
+    async def list_contacts(self, **kwargs):
+        self.calls.append(("list_contacts", kwargs))
+        return [
+            {
+                "profile_id": str(self.other_profile_id),
+                "display_name": "Contact",
+                "role": "contact",
+                "accepted_at": datetime.now(UTC),
+            }
+        ]
+
+    async def remove_contact(self, **kwargs):
+        self.calls.append(("remove_contact", kwargs))
+
+    async def create_incident(self, **kwargs):
+        self.calls.append(("create_incident", kwargs))
+        return {**self._incident(), "duplicate": False}
+
+    async def list_incidents(self, **kwargs):
+        self.calls.append(("list_incidents", kwargs))
+        return [self._incident()]
+
+    async def get_incident(self, **kwargs):
+        self.calls.append(("get_incident", kwargs))
+        return self._incident()
+
+    async def update_location(self, **kwargs):
+        self.calls.append(("update_location", kwargs))
+        update = kwargs["update"]
+        return {
+            "sequence": update.sequence,
+            "latitude": update.latitude,
+            "longitude": update.longitude,
+            "horizontal_accuracy_m": update.horizontal_accuracy_m,
+            "captured_at": update.captured_at,
+            "received_at": datetime.now(UTC),
+            "duplicate": False,
+        }
+
+    async def respond(self, **kwargs):
+        self.calls.append(("respond", kwargs))
+        return {
+            **self._incident(role="contact", status="acknowledged"),
+            "duplicate": False,
+        }
+
+    async def end_incident(self, **kwargs):
+        self.calls.append(("end_incident", kwargs))
+        return {
+            **self._incident(status=kwargs["outcome"]),
+            "duplicate": False,
+        }
+
+
+class FakeManagedSafetyPushService:
+    def __init__(self, repository: FakeManagedSafetyRepository) -> None:
+        self.repository = repository
+        self.registrations = []
+        self.dispatches = []
+
+    async def register(self, **kwargs):
+        self.registrations.append(kwargs)
+        registration = kwargs["registration"]
+        return {
+            "installation_id": kwargs["installation_id"],
+            "platform": registration.platform,
+            "environment": registration.environment,
+            "target_kind": registration.target_kind,
+            "status": "active",
+            "updated_at": datetime.now(UTC),
+            "duplicate": False,
+        }
+
+    async def dispatch(self, **kwargs):
+        self.dispatches.append(kwargs)
+        return {
+            "contacts_targeted": 2,
+            "contacts_reached": 1,
+            "installations_targeted": 2,
+            "installations_reached": 1,
+        }
+
+
+def test_managed_safety_routes_fail_closed_without_configured_repository() -> None:
+    client, _ = _managed_client()
+    with client:
+        response = client.get(
+            "/v1/managed/safety/contacts",
+            headers=_managed_headers(),
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "managed Safety is not configured"
+
+
+def test_managed_safety_push_registration_never_echoes_token() -> None:
+    safety = FakeManagedSafetyRepository()
+    push = FakeManagedSafetyPushService(safety)
+    client, _ = _managed_client(
+        managed_safety_repository=safety,
+        managed_safety_push_service=push,
+    )
+    token = "fcm-token:ABC_def-1234567890"
+    with client:
+        response = client.put(
+            "/v1/managed/push/installations/current",
+            headers=_managed_headers(),
+            json={
+                "platform": "ios",
+                "environment": "production",
+                "target_kind": "fid",
+                "token": token,
+            },
+        )
+        invalid = client.put(
+            "/v1/managed/push/installations/current",
+            headers=_managed_headers(),
+            json={
+                "platform": "ios",
+                "environment": "production",
+                "target_kind": "fid",
+                "token": "bad token value",
+            },
+        )
+    assert response.status_code == 200
+    assert token not in response.text
+    assert push.registrations[0]["installation_id"] == "ios-test-1"
+    assert invalid.status_code == 422
+    assert "bad token value" not in invalid.text
+
+
+def test_managed_safety_account_flow_is_identity_and_installation_bound() -> None:
+    safety = FakeManagedSafetyRepository()
+    push = FakeManagedSafetyPushService(safety)
+    client, _ = _managed_client(
+        managed_safety_repository=safety,
+        managed_safety_push_service=push,
+    )
+    capability = "noopsafety_" + ("a" * 43)
+    captured_at = datetime.now(UTC)
+    with client:
+        invite = client.post(
+            "/v1/managed/safety/invites",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "capability": capability,
+                "expires_in_hours": 72,
+            },
+        )
+        request = client.post(
+            "/v1/managed/safety/requests",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "noop_id": "noop-abcd-efgh-jklm-npqr",
+            },
+        )
+        decided = client.post(
+            f"/v1/managed/safety/requests/{safety.request_id}",
+            headers=_managed_headers(),
+            json={"decision": "accept"},
+        )
+        contacts = client.get(
+            "/v1/managed/safety/contacts",
+            headers=_managed_headers(),
+        )
+        incident = client.post(
+            "/v1/managed/safety/incidents",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "duration_hours": 8,
+                "share_location": True,
+            },
+        )
+        location = client.put(
+            f"/v1/managed/safety/incidents/{safety.incident_id}/location",
+            headers=_managed_headers(),
+            json={
+                "sequence": 1,
+                "latitude": 17.385,
+                "longitude": 78.4867,
+                "horizontal_accuracy_m": 12.5,
+                "captured_at": captured_at.isoformat(),
+            },
+        )
+        response = client.post(
+            f"/v1/managed/safety/incidents/{safety.incident_id}/response",
+            headers=_managed_headers(),
+            json={"decision": "responding"},
+        )
+        ended = client.post(
+            f"/v1/managed/safety/incidents/{safety.incident_id}:end",
+            headers=_managed_headers(),
+            json={"outcome": "resolved"},
+        )
+
+    assert invite.status_code == 201
+    assert capability in invite.json()["invite"]["capability"]
+    assert request.status_code == 201
+    assert decided.json()["request"]["status"] == "accepted"
+    assert contacts.json()["minimum_required"] == 2
+    assert incident.status_code == 202
+    assert incident.json()["push_outcome"] == "attempted"
+    assert push.dispatches[0]["incident_id"] == safety.incident_id
+    assert location.status_code == 200
+    assert location.json()["location"]["sequence"] == 1
+    assert response.json()["incident"]["status"] == "acknowledged"
+    assert ended.json()["incident"]["status"] == "resolved"

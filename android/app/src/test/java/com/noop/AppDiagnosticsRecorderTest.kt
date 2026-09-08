@@ -36,17 +36,21 @@ class AppDiagnosticsRecorderTest {
                 "authorization" to "Bearer private-value",
                 "phone_number" to "+15555550123",
                 "installation_id" to "noop-private-installation",
+                "incident_id" to "11111111-1111-4111-8111-111111111111",
                 "request_url" to "https://private.example/signed",
+                "server_request_id" to "b".repeat(32),
                 "user_note" to "private user text",
             ),
         )
 
         assertEquals("/v1/managed/chunks/{chunk_id}", sanitized["route"])
-        assertEquals("5", sanitized["redacted_fields"])
+        assertEquals("7", sanitized["redacted_fields"])
         assertTrue(!sanitized.values.any { it.contains("private-value") })
         assertTrue(!sanitized.values.any { it.contains("15555550123") })
         assertTrue(!sanitized.values.any { it.contains("noop-private-installation") })
+        assertTrue(!sanitized.containsKey("incident_id"))
         assertTrue(!sanitized.values.any { it.contains("private.example") })
+        assertTrue(!sanitized.values.any { it.contains("b".repeat(32)) })
         assertTrue(!sanitized.values.any { it.contains("private user text") })
     }
 

@@ -48,12 +48,12 @@ end
 locales.each do |locale, directory|
   path = File.join(repo_root, "android/app/src/main/res", directory, "safety.xml")
   FileUtils.mkdir_p(File.dirname(path))
-  lines = source.sort.filter_map do |key, translations|
+  lines = source.sort.map do |key, translations|
     value = translations[locale]
     next unless value
 
     %(    <string name="#{android_key(key)}">#{android_xml(value)}</string>)
-  end
+  end.compact
   File.write(
     path,
     [
@@ -69,7 +69,8 @@ end
 
 catalog_path = File.join(repo_root, "Strand/Resources/Localizable.xcstrings")
 catalog = File.read(catalog_path)
-catalog = catalog.lines.reject { |line| line.match?(/^\s+"safety\.[^"]+":/) }.join
+safety_key = /^\s+"(?:managed\.)?safety\.[^"]+":/
+catalog = catalog.lines.reject { |line| line.match?(safety_key) }.join
 marker = "\n  },\n  \"version\":"
 head, tail = catalog.split(marker, 2)
 abort("Could not find String Catalog closing marker") unless head && tail
@@ -90,9 +91,18 @@ entries = source.sort.map do |key, translations|
   %(    #{JSON.generate(key)}: #{JSON.generate({ "localizations" => localizations })})
 end
 
-File.write(
-  catalog_path,
-  "#{head},\n#{entries.join(",\n")}#{marker}#{tail}"
-)
+generated_catalog = "#{head},\n#{entries.join(",\n")}#{marker}#{tail}"
+generated_counts = generated_catalog.lines
+  .map do |line|
+    next unless line.match?(safety_key)
+
+    line.match(/^\s+"([^"]+)":/)&.captures&.first
+  end
+  .compact
+  .each_with_object(Hash.new(0)) { |key, counts| counts[key] += 1 }
+invalid_keys = source.keys.select { |key| generated_counts[key] != 1 }
+abort("Generated Safety catalog contains missing or duplicate keys: #{invalid_keys.inspect}") unless invalid_keys.empty?
+
+File.write(catalog_path, generated_catalog)
 
 puts "Generated #{source.length} Safety strings for #{locales.length} locales."

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.noop.managed.ManagedSafetyLiveLocationSession
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.ui.NoopPrefs
@@ -52,8 +53,11 @@ class WhoopReconnectBootReceiver : BroadcastReceiver() {
             intent.action != ACTION_QUICKBOOT_POWERON
         ) return
         SafetyLiveLocationSession.initialize(context)
+        ManagedSafetyLiveLocationSession.initialize(context)
         SafetyIncidentStatusMonitor.reconcile(context)
         val safetyLocationActive = SafetyLiveLocationSession.state.value.isActiveAt(
+            System.currentTimeMillis() / 1_000L,
+        ) || ManagedSafetyLiveLocationSession.state.value.isActiveAt(
             System.currentTimeMillis() / 1_000L,
         )
         if (

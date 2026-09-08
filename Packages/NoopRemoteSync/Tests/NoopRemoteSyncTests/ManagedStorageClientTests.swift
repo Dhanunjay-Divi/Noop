@@ -1077,6 +1077,150 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertTrue(invite.duplicate)
     }
 
+    func testManagedSafetyContractIsBoundedAndLocationIsLatestOnly() async throws {
+        let (client, authorization) = try makeClient()
+        let ownerID = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000103")!
+        let incidentID = UUID(uuidString: "00000000-0000-0000-0000-000000000104")!
+        let token = "fcm-token:ABC_def-1234567890"
+
+        ManagedURLProtocolStub.handler = { request in
+            let path = request.url?.path ?? ""
+            let json: String
+            switch (request.httpMethod, path) {
+            case ("PUT", "/v1/managed/push/installations/current"):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["platform"] as? String, "ios")
+                XCTAssertEqual(body["environment"] as? String, "development")
+                XCTAssertEqual(body["target_kind"] as? String, "fid")
+                XCTAssertEqual(body["token"] as? String, token)
+                json = """
+                {"registration":{
+                  "installation_id":"ios-installation",
+                  "platform":"ios",
+                  "environment":"development",
+                  "target_kind":"fid",
+                  "status":"active",
+                  "updated_at":"2026-09-08T10:00:00Z",
+                  "duplicate":false
+                }}
+                """
+            case ("GET", "/v1/managed/safety/contacts"):
+                json = """
+                {
+                  "contacts":[
+                    {
+                      "profile_id":"\(firstID)",
+                      "display_name":"First",
+                      "role":"contact",
+                      "accepted_at":"2026-09-08T09:00:00Z"
+                    },
+                    {
+                      "profile_id":"\(secondID)",
+                      "display_name":"Second",
+                      "role":"contact",
+                      "accepted_at":"2026-09-08T09:01:00Z"
+                    }
+                  ],
+                  "minimum_required":2,
+                  "maximum_allowed":5
+                }
+                """
+            case ("POST", "/v1/managed/safety/incidents"):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual(body["duration_hours"] as? Int, 8)
+                XCTAssertEqual(body["share_location"] as? Bool, true)
+                json = """
+                {
+                  "incident":\(safetyIncidentJSON(
+                    incidentID: incidentID,
+                    ownerID: ownerID,
+                    firstID: firstID,
+                    secondID: secondID,
+                    includeLocation: false
+                  )),
+                  "push_outcome":"attempted"
+                }
+                """
+            case (
+                "PUT",
+                "/v1/managed/safety/incidents/"
+                    + "\(incidentID.uuidString.lowercased())/location"
+            ):
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(
+                        with: requestBody(request)
+                    ) as? [String: Any]
+                )
+                XCTAssertEqual((body["sequence"] as? NSNumber)?.int64Value, 2)
+                json = """
+                {"location":{
+                  "sequence":3,
+                  "latitude":17.385,
+                  "longitude":78.4867,
+                  "horizontal_accuracy_m":12.5,
+                  "captured_at":"2026-09-08T10:01:00Z",
+                  "received_at":"2026-09-08T10:01:01Z",
+                  "duplicate":false
+                }}
+                """
+            default:
+                XCTFail("Unexpected managed Safety request: \(request.httpMethod ?? "") \(path)")
+                json = "{}"
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(json.utf8)
+            )
+        }
+
+        let registration = try await client.registerPushInstallation(
+            platform: .iOS,
+            environment: .development,
+            targetKind: .fid,
+            token: token,
+            authorization: authorization
+        )
+        XCTAssertEqual(registration.installationID, "ios-installation")
+        XCTAssertEqual(registration.targetKind, .fid)
+        let contacts = try await client.safetyContacts(
+            authorization: authorization
+        )
+        XCTAssertEqual(contacts.contacts.count, 2)
+        let creation = try await client.createSafetyIncident(
+            durationHours: 8,
+            shareLocation: true,
+            requestID: UUID(),
+            authorization: authorization
+        )
+        XCTAssertEqual(creation.incident.incidentID, incidentID)
+        XCTAssertEqual(creation.pushOutcome, "attempted")
+        let location = try await client.updateSafetyLocation(
+            incidentID: incidentID,
+            sequence: 2,
+            latitude: 17.385,
+            longitude: 78.4867,
+            horizontalAccuracyM: 12.5,
+            capturedAt: "2026-09-08T10:01:00Z",
+            authorization: authorization
+        )
+        XCTAssertEqual(location.sequence, 3)
+    }
+
     private func makeClient() throws -> (ManagedStorageClient, ManagedAuthorization) {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [ManagedURLProtocolStub.self]
@@ -1097,6 +1241,71 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization
         )
     }
+}
+
+private func safetyIncidentJSON(
+    incidentID: UUID,
+    ownerID: UUID,
+    firstID: UUID,
+    secondID: UUID,
+    includeLocation: Bool
+) -> String {
+    let location = includeLocation
+        ? """
+        {
+          "sequence":2,
+          "latitude":17.385,
+          "longitude":78.4867,
+          "horizontal_accuracy_m":12.5,
+          "captured_at":"2026-09-08T10:01:00Z",
+          "received_at":"2026-09-08T10:01:01Z"
+        }
+        """
+        : "null"
+    return """
+    {
+      "incident_id":"\(incidentID)",
+      "role":"owner",
+      "owner_profile_id":"\(ownerID)",
+      "owner_display_name":"Owner",
+      "trigger":"manual_sos",
+      "status":"open",
+      "duration_hours":8,
+      "share_location":true,
+      "created_at":"2026-09-08T10:00:00Z",
+      "expires_at":"2026-09-08T18:00:00Z",
+      "acknowledged_at":null,
+      "ended_at":null,
+      "participants":[
+        {
+          "profile_id":"\(firstID)",
+          "display_name":"First",
+          "status":"pending",
+          "paged_at":"2026-09-08T10:00:00Z",
+          "responded_at":null,
+          "push":{"configured":true,"reached":true}
+        },
+        {
+          "profile_id":"\(secondID)",
+          "display_name":"Second",
+          "status":"pending",
+          "paged_at":"2026-09-08T10:00:00Z",
+          "responded_at":null,
+          "push":{"configured":true,"reached":false}
+        }
+      ],
+      "location":\(location),
+      "delivery":{
+        "contacts_targeted":2,
+        "contacts_reached":1,
+        "installations_targeted":2,
+        "installations_reached":1,
+        "installations_retryable":1,
+        "installations_terminal":0
+      },
+      "duplicate":false
+    }
+    """
 }
 
 private final class LockedManagedDiagnostics: @unchecked Sendable {

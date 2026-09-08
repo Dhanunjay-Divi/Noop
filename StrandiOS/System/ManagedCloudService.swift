@@ -3,9 +3,12 @@ import Combine
 import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseCore
+import FirebaseMessaging
 import Foundation
 import NoopRemoteSync
 import Security
+import StrandAnalytics
+import UIKit
 import UserNotifications
 import WhoopStore
 
@@ -49,6 +52,12 @@ final class ManagedCloudService: ObservableObject {
     @Published private(set) var socialStatus = ""
     @Published private(set) var pendingSocialInviteCapability: String?
     @Published private(set) var pendingSocialNOOPID: String?
+    @Published private(set) var safetyContacts: ManagedSafetyContacts?
+    @Published private(set) var safetyRequests: [ManagedSafetyRequest] = []
+    @Published private(set) var safetyIncidents: [ManagedSafetyIncident] = []
+    @Published private(set) var safetyInvite: ManagedSafetyInvite?
+    @Published private(set) var safetyStatus = ""
+    @Published private(set) var pendingSafetyInviteCapability: String?
 
     var isAvailable: Bool { configuration != nil }
     var isEnrolled: Bool {
@@ -95,10 +104,17 @@ final class ManagedCloudService: ObservableObject {
         static let socialDeliveryReceipts = "managedCloud.social.deliveryReceipts.v1"
         static let socialEnabled = "managedCloud.social.enabled.v1"
         static let socialPendingNOOPID = "managedCloud.social.pendingNoopID.v1"
+        static let safetyEnabled = "managedCloud.safety.enabled.v1"
+        static let safetyLastAttempt = "managedCloud.safety.lastAttempt.v1"
+        static let safetyInviteRequestID =
+            "managedCloud.safety.inviteRequestID.v1"
+        static let safetyLocationSequences =
+            "managedCloud.safety.locationSequences.v1"
     }
 
     private static let automaticInterval: TimeInterval = 15 * 60
     private static let socialAutomaticInterval: TimeInterval = 5 * 60
+    private static let safetyAutomaticInterval: TimeInterval = 2 * 60
     private static let enrollmentDataClasses = ManagedSyncCoordinator.chunkDataClasses
     private static let accountDeletionConfirmation = Data(
         "delete-noop-plus-managed-account-v1".utf8
@@ -111,7 +127,15 @@ final class ManagedCloudService: ObservableObject {
     private var deletionVerificationID: String?
     private var running = false
     private var socialRunning = false
+    private var safetyRunning = false
+    private var safetyBootstrapTask: Task<Void, Never>?
+    private var disconnecting = false
     private var socialPokeHaptic: (() -> Bool)?
+    private let managedSafetyLocationStreamer =
+        SafetyIncidentLocationStreamer()
+    private var managedSafetyLocationIncidentID: UUID?
+    private var managedSafetyLocationUpdateInFlight = false
+    private var managedSafetyLocationExpiryTask: Task<Void, Never>?
 
     private init(bundle: Bundle = .main) {
         configuration = Self.loadConfiguration(bundle: bundle)
@@ -124,6 +148,8 @@ final class ManagedCloudService: ObservableObject {
         pendingSocialNOOPID = defaults.string(
             forKey: Key.socialPendingNOOPID
         ).flatMap(ManagedSocialIdentifier.canonicalNOOPID)
+        pendingSafetyInviteCapability =
+            ManagedCloudPendingSafetyInviteSecret.value()
         phase = configuration == nil ? .unavailable : .signedOut
     }
 
@@ -139,6 +165,7 @@ final class ManagedCloudService: ObservableObject {
                 return
             }
             reconcileAuthenticatedState()
+            scheduleManagedSafetyBootstrap()
         } catch {
             phase = .unavailable
             setStatus(Self.userMessage(for: error))
@@ -253,6 +280,7 @@ final class ManagedCloudService: ObservableObject {
             defaults.set(true, forKey: Key.automatic)
             defaults.removeObject(forKey: Key.enrollmentRequestID)
             phase = .enrolled
+            scheduleManagedSafetyBootstrap()
             setStatus(
                 String(localized:
                     "NOOP+ cloud backup is on. Your local NOOP features remain account-free."
@@ -403,6 +431,385 @@ final class ManagedCloudService: ObservableObject {
             try await refreshOverviewData()
         } catch {
             setStatus(Self.userMessage(for: error))
+        }
+    }
+
+    // MARK: - Managed Safety
+
+    @discardableResult
+    func stageSafetyInviteLink(_ url: URL) -> Bool {
+        guard let capability = ManagedSafetyIdentifier.inviteCapability(
+            from: url
+        ),
+        ManagedCloudPendingSafetyInviteSecret.store(capability) else {
+            return false
+        }
+        pendingSafetyInviteCapability = capability
+        AppDiagnosticsRecorder.shared.record(
+            "managed_safety.invite_link_staged",
+            fields: [
+                "outcome": "accepted",
+                "persistence": "keychain",
+            ]
+        )
+        return true
+    }
+
+    func clearPendingSafetyInvite() {
+        ManagedCloudPendingSafetyInviteSecret.clear()
+        pendingSafetyInviteCapability = nil
+    }
+
+    func safetyInviteURL(_ invite: ManagedSafetyInvite) -> URL? {
+        guard invite.status == "active" else { return nil }
+        return ManagedSafetyIdentifier.inviteURL(
+            capability: invite.capability
+        )
+    }
+
+    func registerManagedPushToken(_ token: String) async {
+        guard phase == .enrolled, !disconnecting else { return }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety.push_registration"
+        )
+        do {
+            #if DEBUG
+            let environment = ManagedPushEnvironment.development
+            #else
+            let environment = ManagedPushEnvironment.production
+            #endif
+            _ = try await client().registerPushInstallation(
+                platform: .iOS,
+                environment: environment,
+                targetKind: .fid,
+                token: token,
+                authorization: try await authorization(forceRefresh: false)
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    @discardableResult
+    func enableManagedSafetyNotifications() async -> Bool {
+        guard phase == .enrolled else { return false }
+        do {
+            try configureFirebaseIfNeeded()
+            let allowed = try await UNUserNotificationCenter.current()
+                .requestAuthorization(
+                    options: [.alert, .sound]
+                )
+            guard allowed else { return false }
+            UIApplication.shared.registerForRemoteNotifications()
+            ManagedFirebaseApplicationDelegate
+                .configureManagedMessagingIfPossible()
+            try await registerManagedMessagingInstallation()
+            return true
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.notification_enable",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            return false
+        }
+    }
+
+    func refreshSafety() async {
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("refresh") {
+            try await refreshSafetyData()
+        }
+    }
+
+    func createSafetyInvite() async {
+        _ = await enableManagedSafetyNotifications()
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("invite_create") {
+            let scope = try accountScopeHash()
+            let managedClient = try client()
+            let auth = try await authorization(forceRefresh: true)
+            var capability = try ManagedCloudSafetyInviteSecret.value(
+                accountScopeHash: scope
+            )
+            var invite = try await managedClient.createSafetyInvite(
+                capability: capability,
+                requestID: socialRequestID(for: Key.safetyInviteRequestID),
+                authorization: auth
+            )
+            if invite.status != "active" {
+                try ManagedCloudSafetyInviteSecret.clear(
+                    accountScopeHash: scope
+                )
+                defaults.removeObject(forKey: Key.safetyInviteRequestID)
+                capability = try ManagedCloudSafetyInviteSecret.value(
+                    accountScopeHash: scope
+                )
+                invite = try await managedClient.createSafetyInvite(
+                    capability: capability,
+                    requestID: socialRequestID(
+                        for: Key.safetyInviteRequestID
+                    ),
+                    authorization: auth
+                )
+            }
+            guard invite.status == "active" else {
+                throw ManagedStorageError.invalidResponse
+            }
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyInvite = invite
+            safetyStatus = String(
+                localized: "Safety invitation ready. It expires within 72 hours and still requires acceptance."
+            )
+        }
+    }
+
+    func revokeSafetyInvite() async {
+        guard beginSafetyAction(), let invite = safetyInvite else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("invite_revoke") {
+            try await client().revokeSafetyInvite(
+                invite.inviteID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            try? ManagedCloudSafetyInviteSecret.clear(
+                accountScopeHash: accountScopeHash()
+            )
+            defaults.removeObject(forKey: Key.safetyInviteRequestID)
+            safetyInvite = nil
+            safetyStatus = String(localized: "Safety invitation revoked.")
+        }
+    }
+
+    func redeemPendingSafetyInvite() async {
+        guard beginSafetyAction(),
+              let capability = pendingSafetyInviteCapability else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("invite_redeem") {
+            let requestID = ManagedStableIdentifier.uuid(
+                seed: Data(
+                    "noop-managed-safety-redeem-v1\0\(try accountScopeHash())\0\(capability)"
+                        .utf8
+                )
+            )
+            _ = try await client().redeemSafetyInvite(
+                capability: capability,
+                requestID: requestID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            clearPendingSafetyInvite()
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyStatus = String(
+                localized: "Safety request sent from the invitation. The other person must accept it."
+            )
+            try await refreshSafetyData()
+        }
+    }
+
+    func createSafetyRequest(noopID: String) async {
+        _ = await enableManagedSafetyNotifications()
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("request_create") {
+            _ = try await client().createSafetyRequest(
+                noopID: noopID,
+                requestID: UUID(),
+                authorization: try await authorization(forceRefresh: true)
+            )
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyStatus = String(
+                localized: "Safety contact request sent. Paging stays off until it is accepted."
+            )
+            try await refreshSafetyData()
+        }
+    }
+
+    func decideSafetyRequest(_ requestID: UUID, accept: Bool) async {
+        if accept {
+            _ = await enableManagedSafetyNotifications()
+        }
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("request_decide") {
+            _ = try await client().decideSafetyRequest(
+                requestID,
+                accept: accept,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyStatus = accept
+                ? String(localized: "Safety contact accepted.")
+                : String(localized: "Safety contact request declined.")
+            try await refreshSafetyData()
+        }
+    }
+
+    func removeSafetyContact(_ profileID: UUID) async {
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("contact_remove") {
+            try await client().removeSafetyContact(
+                profileID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            safetyStatus = String(
+                localized: "Safety relationship removed in both directions."
+            )
+            try await refreshSafetyData()
+        }
+    }
+
+    @discardableResult
+    func createSafetyIncident(
+        durationHours: Int,
+        shareLocation: Bool
+    ) async -> ManagedSafetyIncident? {
+        guard beginSafetyAction() else { return nil }
+        defer { endSafetyAction() }
+        var createdIncident: ManagedSafetyIncident?
+        await runSafetyOperation("incident_create") {
+            let creation = try await client().createSafetyIncident(
+                durationHours: durationHours,
+                shareLocation: shareLocation,
+                requestID: UUID(),
+                authorization: try await authorization(forceRefresh: true)
+            )
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyIncidents = Self.replacing(
+                creation.incident,
+                in: safetyIncidents
+            )
+            reconcileManagedSafetyLocationSharing()
+            createdIncident = creation.incident
+            safetyStatus = String(
+                localized: "Safety page started. Push delivery is best effort; call emergency services for immediate danger."
+            )
+            try await refreshSafetyData()
+        }
+        return createdIncident
+    }
+
+    func updateSafetyLocation(
+        incidentID: UUID,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyM: Double,
+        capturedAt: Date
+    ) async {
+        let location = SafetyLocation(
+            latitude: latitude,
+            longitude: longitude,
+            horizontalAccuracyMeters: horizontalAccuracyM,
+            capturedAtUnix: Int(capturedAt.timeIntervalSince1970)
+        )
+        guard location.isUsable(
+            atUnix: Int(Date().timeIntervalSince1970)
+        ) else { return }
+        _ = await submitManagedSafetyLocation(
+            incidentID: incidentID,
+            sequence: proposedSafetyLocationSequence(for: incidentID),
+            location: location,
+            source: "manual"
+        )
+    }
+
+    func respondToSafetyIncident(_ incidentID: UUID, responding: Bool) async {
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("incident_response") {
+            let incident = try await client().respondToSafetyIncident(
+                incidentID,
+                responding: responding,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            safetyIncidents = Self.replacing(incident, in: safetyIncidents)
+            safetyStatus = responding
+                ? String(localized: "The sender can see that you are responding.")
+                : String(localized: "The sender can see that you cannot respond.")
+        }
+    }
+
+    func endSafetyIncident(_ incidentID: UUID, resolved: Bool) async {
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("incident_end") {
+            let incident = try await client().endSafetyIncident(
+                incidentID,
+                resolved: resolved,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            safetyIncidents = Self.replacing(incident, in: safetyIncidents)
+            removeSafetyLocationSequence(for: incidentID)
+            reconcileManagedSafetyLocationSharing()
+            safetyStatus = resolved
+                ? String(localized: "Safety page resolved.")
+                : String(localized: "Safety page canceled.")
+        }
+    }
+
+    func retrySafetyPush(_ incidentID: UUID) async {
+        guard beginSafetyAction() else { return }
+        defer { endSafetyAction() }
+        await runSafetyOperation("push_retry") {
+            _ = try await client().retrySafetyPush(
+                incidentID,
+                authorization: try await authorization(forceRefresh: true)
+            )
+            safetyStatus = String(
+                localized: "Safety notification retry completed."
+            )
+            try await refreshSafetyData()
+        }
+    }
+
+    func handleManagedSafetyPush(incidentID: UUID?) async -> Bool {
+        guard phase == .enrolled else { return false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety.push_catch_up"
+        )
+        do {
+            if let incidentID {
+                let incident = try await client().safetyIncident(
+                    incidentID,
+                    authorization: try await authorization(forceRefresh: true)
+                )
+                safetyIncidents = Self.replacing(
+                    incident,
+                    in: safetyIncidents
+                )
+                reconcileManagedSafetyLocationSharing()
+            } else {
+                try await refreshSafetyData()
+            }
+            defaults.set(true, forKey: Key.safetyEnabled)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed"
+            )
+            return true
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            return false
         }
     }
 
@@ -777,7 +1184,10 @@ final class ManagedCloudService: ObservableObject {
               !isBusy,
               !running,
               !socialRunning,
-              automatic || defaults.bool(forKey: Key.socialEnabled)
+              !safetyRunning,
+              automatic
+                || defaults.bool(forKey: Key.socialEnabled)
+                || defaults.bool(forKey: Key.safetyEnabled)
         else { return true }
         let continuationPending = defaults.bool(
             forKey: Key.continuationPending
@@ -816,10 +1226,82 @@ final class ManagedCloudService: ObservableObject {
                 completed = false
             }
         }
+        let safetyLastAttempt = defaults.double(
+            forKey: Key.safetyLastAttempt
+        )
+        if defaults.bool(forKey: Key.safetyEnabled),
+           now - safetyLastAttempt >= Self.safetyAutomaticInterval {
+            defaults.set(now, forKey: Key.safetyLastAttempt)
+            do {
+                try await refreshSafetyData()
+            } catch {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.catch_up",
+                    fields: [
+                        "outcome": "failed",
+                        "failure_kind":
+                            Self.diagnosticSyncFailureKind(error),
+                    ]
+                )
+                completed = false
+            }
+        }
         return completed
     }
 
-    func disconnect() {
+    func disconnect() async {
+        guard !isBusy else { return }
+        disconnecting = true
+        defer { disconnecting = false }
+        safetyBootstrapTask?.cancel()
+        safetyBootstrapTask = nil
+        stopManagedSafetyLocationSharing(reason: "disconnect")
+        isBusy = true
+        defer { isBusy = false }
+        if phase == .enrolled || phase == .deletionScheduled {
+            let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+                "managed_safety.push_revocation"
+            )
+            var revokeCompleted = false
+            var tokenDeletionCompleted = false
+            do {
+                try configureFirebaseIfNeeded()
+                try await client().revokePushInstallation(
+                    authorization: try await authorization(forceRefresh: true)
+                )
+                revokeCompleted = true
+            } catch {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_revocation",
+                    fields: [
+                        "outcome": "server_failed",
+                        "failure_kind": Self.diagnosticSyncFailureKind(error),
+                    ]
+                )
+            }
+            do {
+                try await unregisterManagedMessagingInstallation()
+                tokenDeletionCompleted = true
+            } catch {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_revocation",
+                    fields: [
+                        "outcome": "provider_failed",
+                        "failure_kind": Self.diagnosticSyncFailureKind(error),
+                    ]
+                )
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: revokeCompleted || tokenDeletionCompleted
+                    ? "completed"
+                    : "failed",
+                fields: [
+                    "server": revokeCompleted ? "revoked" : "failed",
+                    "provider": tokenDeletionCompleted ? "deleted" : "failed",
+                ]
+            )
+        }
         do {
             try configureFirebaseIfNeeded()
             try Auth.auth().signOut()
@@ -834,12 +1316,28 @@ final class ManagedCloudService: ObservableObject {
         overview = nil
         installations = []
         clearSocialPresentation()
+        clearSafetyPresentation()
         phase = .signedOut
         setStatus(
             String(localized:
                 "NOOP+ is disconnected on this iPhone. Local data and cloud data were not deleted."
             )
         )
+    }
+
+    private func unregisterManagedMessagingInstallation() async throws {
+        try configureFirebaseIfNeeded()
+        Messaging.messaging().isAutoInitEnabled = false
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            Messaging.messaging().unregister { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     func sendDeletionCode() async {
@@ -961,6 +1459,358 @@ final class ManagedCloudService: ObservableObject {
         } catch {
             setStatus(Self.userMessage(for: error))
         }
+    }
+
+    private func beginSafetyAction() -> Bool {
+        guard phase == .enrolled, !isBusy, !safetyRunning else { return false }
+        isBusy = true
+        return true
+    }
+
+    private func endSafetyAction() {
+        isBusy = false
+    }
+
+    private func runSafetyOperation(
+        _ operation: String,
+        body: () async throws -> Void
+    ) async {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety",
+            fields: ["operation": operation]
+        )
+        do {
+            try await body()
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: ["operation": operation]
+            )
+        } catch {
+            safetyStatus = Self.userMessage(for: error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "operation": operation,
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    private func refreshSafetyData() async throws {
+        guard phase == .enrolled else {
+            throw ManagedCloudError.consentRequired
+        }
+        guard !safetyRunning else { return }
+        safetyRunning = true
+        defer { safetyRunning = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety_refresh"
+        )
+        do {
+            let managedClient = try client()
+            let auth = try await authorization(forceRefresh: false)
+            async let loadedContacts = managedClient.safetyContacts(
+                authorization: auth
+            )
+            async let loadedRequests = managedClient.safetyRequests(
+                authorization: auth
+            )
+            async let loadedIncidents = managedClient.safetyIncidents(
+                authorization: auth
+            )
+            let (contacts, requests, incidents) = try await (
+                loadedContacts,
+                loadedRequests,
+                loadedIncidents
+            )
+            defaults.set(true, forKey: Key.safetyEnabled)
+            safetyContacts = contacts
+            safetyRequests = requests
+            safetyIncidents = incidents
+            reconcileManagedSafetyLocationSharing()
+            if safetyStatus.isEmpty {
+                safetyStatus = String(
+                    localized: "Managed Safety is up to date."
+                )
+            }
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "contacts": String(contacts.contacts.count),
+                    "requests": String(requests.count),
+                    "incidents": String(incidents.count),
+                    "active_incidents": String(
+                        incidents.filter {
+                            ["open", "acknowledged"].contains($0.status)
+                        }.count
+                    ),
+                ]
+            )
+        } catch ManagedStorageError.notFound {
+            clearSafetyPresentation(preservingPendingInvite: true)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: [
+                    "contacts": "0",
+                    "requests": "0",
+                    "incidents": "0",
+                    "profile": "absent",
+                ]
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError ? "canceled" : "failed",
+                fields: [
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            throw error
+        }
+    }
+
+    private func reconcileManagedSafetyLocationSharing(
+        now: Date = Date()
+    ) {
+        guard phase == .enrolled,
+              let incident = safetyIncidents.first(where: {
+                  guard $0.role == "owner",
+                        $0.shareLocation,
+                        ["open", "acknowledged"].contains($0.status),
+                        let expiryMilliseconds = ManagedTimestamp.milliseconds(
+                            iso8601: $0.expiresAt
+                        )
+                  else { return false }
+                  return Date(
+                      timeIntervalSince1970:
+                          Double(expiryMilliseconds) / 1_000
+                  ) > now
+              }),
+              let expiryMilliseconds = ManagedTimestamp.milliseconds(
+                  iso8601: incident.expiresAt
+              )
+        else {
+            stopManagedSafetyLocationSharing(reason: "inactive")
+            return
+        }
+
+        let expiresAt = Date(
+            timeIntervalSince1970: Double(expiryMilliseconds) / 1_000
+        )
+        if let sequence = incident.location?.sequence {
+            adoptSafetyLocationSequence(
+                sequence,
+                for: incident.incidentID
+            )
+        }
+        let startingSequence = currentSafetyLocationSequence(
+            for: incident.incidentID
+        )
+        let isNewSession =
+            managedSafetyLocationIncidentID != incident.incidentID
+        managedSafetyLocationIncidentID = incident.incidentID
+        managedSafetyLocationExpiryTask?.cancel()
+        managedSafetyLocationExpiryTask = Task { @MainActor [weak self] in
+            let delay = max(expiresAt.timeIntervalSinceNow, 0)
+            try? await Task.sleep(
+                nanoseconds: UInt64(
+                    min(delay, 12 * 60 * 60) * 1_000_000_000
+                )
+            )
+            guard !Task.isCancelled,
+                  self?.managedSafetyLocationIncidentID
+                    == incident.incidentID else {
+                return
+            }
+            self?.stopManagedSafetyLocationSharing(reason: "expired")
+        }
+        managedSafetyLocationStreamer.start(
+            dispatchId: incident.incidentID,
+            expiresAt: expiresAt,
+            startingSequence: startingSequence
+        ) { [weak self] location, sequence in
+            guard let self,
+                  self.managedSafetyLocationIncidentID
+                    == incident.incidentID else {
+                return .stop
+            }
+            return await self.submitManagedSafetyLocation(
+                incidentID: incident.incidentID,
+                sequence: sequence,
+                location: location,
+                source: "stream"
+            )
+        }
+        if isNewSession {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_session",
+                fields: [
+                    "outcome": "started",
+                    "duration_class":
+                        incident.durationHours == 12 ? "12_hours" : "8_hours",
+                ]
+            )
+        }
+    }
+
+    private func stopManagedSafetyLocationSharing(reason: String) {
+        let hadSession = managedSafetyLocationIncidentID != nil
+        managedSafetyLocationIncidentID = nil
+        managedSafetyLocationExpiryTask?.cancel()
+        managedSafetyLocationExpiryTask = nil
+        managedSafetyLocationStreamer.stop()
+        guard hadSession else { return }
+        AppDiagnosticsRecorder.shared.record(
+            "managed_safety.location_session",
+            fields: [
+                "outcome": "stopped",
+                "reason": reason,
+            ]
+        )
+    }
+
+    private func submitManagedSafetyLocation(
+        incidentID: UUID,
+        sequence: Int64,
+        location: SafetyLocation,
+        source: String
+    ) async -> SafetyIncidentLocationStreamer.SubmissionDisposition {
+        guard phase == .enrolled,
+              managedSafetyLocationIncidentID == incidentID else {
+            return .stop
+        }
+        guard !managedSafetyLocationUpdateInFlight else {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_replace",
+                fields: [
+                    "outcome": "deferred",
+                    "source": source,
+                ]
+            )
+            return .retry
+        }
+        managedSafetyLocationUpdateInFlight = true
+        defer { managedSafetyLocationUpdateInFlight = false }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "managed_safety.location_replace",
+            fields: ["source": source]
+        )
+        do {
+            let stored = try await client().updateSafetyLocation(
+                incidentID: incidentID,
+                sequence: sequence,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                horizontalAccuracyM:
+                    location.horizontalAccuracyMeters ?? 10_000,
+                capturedAt: ManagedTimestamp.iso8601(
+                    milliseconds: Int64(location.capturedAtUnix) * 1_000
+                ),
+                authorization: try await authorization(forceRefresh: false)
+            )
+            adoptSafetyLocationSequence(
+                stored.sequence,
+                for: incidentID
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "completed",
+                fields: ["source": source]
+            )
+            return .accepted
+        } catch {
+            let terminal = Self.isTerminalManagedSafetyLocationError(error)
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: error is CancellationError
+                    ? "canceled"
+                    : (terminal ? "terminal" : "failed"),
+                fields: [
+                    "source": source,
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+            if terminal {
+                stopManagedSafetyLocationSharing(reason: "server_terminal")
+                return .stop
+            }
+            return .retry
+        }
+    }
+
+    private static func isTerminalManagedSafetyLocationError(
+        _ error: Error
+    ) -> Bool {
+        switch error {
+        case ManagedStorageError.authentication,
+             ManagedStorageError.forbidden,
+             ManagedStorageError.notFound,
+             ManagedStorageError.policyChanged,
+             ManagedStorageError.cursorExpired:
+            return true
+        case ManagedStorageError.server(let status):
+            return [401, 403, 404, 410].contains(status)
+        default:
+            return false
+        }
+    }
+
+    private func proposedSafetyLocationSequence(for incidentID: UUID) -> Int64 {
+        min(
+            currentSafetyLocationSequence(for: incidentID),
+            Int64.max - 1
+        ) + 1
+    }
+
+    private func currentSafetyLocationSequence(
+        for incidentID: UUID
+    ) -> Int64 {
+        let values = defaults.dictionary(
+            forKey: Key.safetyLocationSequences
+        ) as? [String: Int] ?? [:]
+        let key = incidentID.uuidString.lowercased()
+        return Int64(max(0, values[key] ?? 0))
+    }
+
+    private func adoptSafetyLocationSequence(
+        _ sequence: Int64,
+        for incidentID: UUID
+    ) {
+        guard sequence > 0, sequence <= Int64(Int.max) else { return }
+        var values = defaults.dictionary(
+            forKey: Key.safetyLocationSequences
+        ) as? [String: Int] ?? [:]
+        let key = incidentID.uuidString.lowercased()
+        values[key] = max(values[key] ?? 0, Int(sequence))
+        values = Dictionary(
+            uniqueKeysWithValues: values
+                .sorted { $0.value > $1.value }
+                .prefix(8)
+                .map { ($0.key, $0.value) }
+        )
+        defaults.set(values, forKey: Key.safetyLocationSequences)
+    }
+
+    private func removeSafetyLocationSequence(for incidentID: UUID) {
+        var values = defaults.dictionary(
+            forKey: Key.safetyLocationSequences
+        ) as? [String: Int] ?? [:]
+        values.removeValue(forKey: incidentID.uuidString.lowercased())
+        defaults.set(values, forKey: Key.safetyLocationSequences)
+    }
+
+    private static func replacing(
+        _ incident: ManagedSafetyIncident,
+        in values: [ManagedSafetyIncident]
+    ) -> [ManagedSafetyIncident] {
+        var result = values.filter { $0.incidentID != incident.incidentID }
+        result.append(incident)
+        return result.sorted { $0.createdAt > $1.createdAt }
     }
 
     private func beginSocialAction() -> Bool {
@@ -1622,7 +2472,9 @@ final class ManagedCloudService: ObservableObject {
 
     /// Stable, privacy-safe failure category for the shake report. Associated response text, account
     /// scope, installation ids, phone details, request payloads and authorization values never enter it.
-    private static func diagnosticSyncFailureKind(_ error: Error) -> String {
+    nonisolated private static func diagnosticSyncFailureKind(
+        _ error: Error
+    ) -> String {
         if error is CancellationError { return "canceled" }
         if let urlError = error as? URLError {
             switch urlError.code {
@@ -1714,7 +2566,9 @@ final class ManagedCloudService: ObservableObject {
         return "other"
     }
 
-    private static func diagnosticOperationOutcome(_ error: Error) -> String {
+    nonisolated private static func diagnosticOperationOutcome(
+        _ error: Error
+    ) -> String {
         switch diagnosticSyncFailureKind(error) {
         case "input", "authentication", "forbidden", "consent",
              "identity_input", "app_verification", "identity_provider_disabled",
@@ -1892,9 +2746,6 @@ final class ManagedCloudService: ObservableObject {
                 if let status = diagnostic.statusCode {
                     fields["status_code"] = String(status)
                 }
-                if let requestID = diagnostic.requestID {
-                    fields["server_request_id"] = requestID
-                }
                 AppDiagnosticsRecorder.shared.record(
                     "managed_http.request",
                     fields: fields
@@ -1950,6 +2801,7 @@ final class ManagedCloudService: ObservableObject {
 
     private func reconcileAuthenticatedState() {
         guard Auth.auth().currentUser != nil else {
+            stopManagedSafetyLocationSharing(reason: "signed_out")
             phase = .signedOut
             return
         }
@@ -1981,11 +2833,17 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.socialDeliveryReceipts)
         defaults.removeObject(forKey: Key.socialEnabled)
         defaults.removeObject(forKey: Key.socialPendingNOOPID)
+        defaults.removeObject(forKey: Key.safetyEnabled)
+        defaults.removeObject(forKey: Key.safetyLastAttempt)
+        defaults.removeObject(forKey: Key.safetyInviteRequestID)
+        defaults.removeObject(forKey: Key.safetyLocationSequences)
         ManagedCloudSocialInviteSecret.clearAll()
+        ManagedCloudSafetyInviteSecret.clearAll()
         deletionNotBefore = nil
         overview = nil
         installations = []
         clearSocialPresentation()
+        clearSafetyPresentation()
     }
 
     private func clearSocialPresentation() {
@@ -2014,7 +2872,22 @@ final class ManagedCloudService: ObservableObject {
         clearSocialPresentation()
     }
 
+    private func clearSafetyPresentation(
+        preservingPendingInvite: Bool = false
+    ) {
+        stopManagedSafetyLocationSharing(reason: "presentation_cleared")
+        safetyContacts = nil
+        safetyRequests = []
+        safetyIncidents = []
+        safetyInvite = nil
+        if !preservingPendingInvite {
+            clearPendingSafetyInvite()
+        }
+        safetyStatus = ""
+    }
+
     private func completeLocalErasureState() {
+        disableManagedMessagingLocally()
         try? Auth.auth().signOut()
         clearEnrollment()
         phase = .signedOut
@@ -2026,6 +2899,7 @@ final class ManagedCloudService: ObservableObject {
     }
 
     private func completeLocalDeletionHandoff() {
+        disableManagedMessagingLocally()
         try? Auth.auth().signOut()
         clearEnrollment()
         phase = .signedOut
@@ -2060,7 +2934,68 @@ final class ManagedCloudService: ObservableObject {
         defaults.set(true, forKey: Key.automatic)
         deletionNotBefore = nil
         phase = .enrolled
+        scheduleManagedSafetyBootstrap()
         setStatus(String(localized: "NOOP+ account deletion was canceled."))
+    }
+
+    private func scheduleManagedSafetyBootstrap() {
+        guard phase == .enrolled, safetyBootstrapTask == nil else { return }
+        safetyBootstrapTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.safetyBootstrapTask = nil }
+            guard !Task.isCancelled, self.phase == .enrolled else { return }
+            await self.registerManagedSafetyIfAuthorized()
+            guard !Task.isCancelled, self.phase == .enrolled else { return }
+            do {
+                try await self.refreshSafetyData()
+            } catch {
+                // refreshSafetyData records only a bounded failure class.
+            }
+        }
+    }
+
+    private func registerManagedSafetyIfAuthorized() async {
+        let settings = await UNUserNotificationCenter.current()
+            .notificationSettings()
+        let authorized: Bool
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            authorized = true
+        case .notDetermined, .denied:
+            authorized = false
+        @unknown default:
+            authorized = false
+        }
+        guard authorized, phase == .enrolled else { return }
+        do {
+            try configureFirebaseIfNeeded()
+            UIApplication.shared.registerForRemoteNotifications()
+            ManagedFirebaseApplicationDelegate
+                .configureManagedMessagingIfPossible()
+            try await registerManagedMessagingInstallation()
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.notification_bootstrap",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    private func registerManagedMessagingInstallation() async throws {
+        Messaging.messaging().isAutoInitEnabled = true
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            Messaging.messaging().register { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
 
     private func configureFirebaseIfNeeded() throws {
@@ -2089,9 +3024,27 @@ final class ManagedCloudService: ObservableObject {
             options.bundleID = Bundle.main.bundleIdentifier ?? options.bundleID
             FirebaseApp.configure(options: options)
         }
+        Messaging.messaging().isAutoInitEnabled = false
         ManagedFirebaseApplicationDelegate.forwardPendingAPNSTokenIfPossible()
+        ManagedFirebaseApplicationDelegate
+            .configureManagedMessagingIfPossible()
         _ = configuration
         firebaseConfigured = true
+    }
+
+    private func disableManagedMessagingLocally() {
+        guard FirebaseApp.app() != nil else { return }
+        Messaging.messaging().isAutoInitEnabled = false
+        Messaging.messaging().unregister { error in
+            guard let error else { return }
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_revocation",
+                fields: [
+                    "outcome": "provider_failed",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
     }
 
     private struct FirebaseValues {
@@ -2614,6 +3567,79 @@ private enum ManagedCloudSocialInviteSecret {
     }
 }
 
+private enum ManagedCloudSafetyInviteSecret {
+    private static let service = "com.noop.managed-safety-invite"
+    private static let accountPrefix = "capability-v1-"
+
+    static func value(accountScopeHash: String) throws -> String {
+        let account = accountPrefix + accountScopeHash
+        if let existing = read(account: account) { return existing }
+        let capability = ManagedSafetyIdentifier.makeInviteCapability()
+        guard ManagedSafetyIdentifier.valid(capability) else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data(capability.utf8),
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        if status == errSecDuplicateItem, let existing = read(account: account) {
+            return existing
+        }
+        guard status == errSecSuccess else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        return capability
+    }
+
+    static func clear(accountScopeHash: String) throws {
+        let status = SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: accountPrefix + accountScopeHash,
+            ] as CFDictionary
+        )
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+    }
+
+    static func clearAll() {
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+            ] as CFDictionary
+        )
+    }
+
+    private static func read(account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(
+            query as CFDictionary,
+            &item
+        ) == errSecSuccess,
+        let data = item as? Data,
+        let value = String(data: data, encoding: .utf8),
+        ManagedSafetyIdentifier.valid(value) else {
+            return nil
+        }
+        return value
+    }
+}
+
 private enum ManagedCloudPendingSocialInviteSecret {
     private static let service = "com.noop.managed-social-pending-invite"
     private static let account = "capability-v1"
@@ -2667,6 +3693,65 @@ private enum ManagedCloudPendingSocialInviteSecret {
         guard status == errSecItemNotFound else {
             return false
         }
+        return SecItemAdd(
+            query.merging(update) { _, replacement in replacement }
+                as CFDictionary,
+            nil
+        ) == errSecSuccess
+    }
+
+    static func clear() {
+        SecItemDelete(
+            [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ] as CFDictionary
+        )
+    }
+}
+
+private enum ManagedCloudPendingSafetyInviteSecret {
+    private static let service = "com.noop.managed-safety-pending-invite"
+    private static let account = "capability-v1"
+
+    static func value() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let value = String(data: data, encoding: .utf8),
+              ManagedSafetyIdentifier.valid(value) else {
+            return nil
+        }
+        return value
+    }
+
+    @discardableResult
+    static func store(_ capability: String) -> Bool {
+        guard ManagedSafetyIdentifier.valid(capability) else { return false }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        let update: [String: Any] = [
+            kSecValueData as String: Data(capability.utf8),
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(
+            query as CFDictionary,
+            update as CFDictionary
+        )
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
         return SecItemAdd(
             query.merging(update) { _, replacement in replacement }
                 as CFDictionary,

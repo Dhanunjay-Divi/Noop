@@ -52,7 +52,16 @@ from app.managed_object_store import (
     IAMBlobSigner,
     ManagedObjectStoring,
 )
+from app.managed_push import (
+    FirebaseCloudMessagingProvider,
+    ManagedPushTokenCodec,
+    UnavailableManagedPushProvider,
+)
 from app.managed_repository import PostgresManagedRepository
+from app.managed_safety_repository import (
+    ManagedSafetyPushService,
+    PostgresManagedSafetyRepository,
+)
 from app.models import (
     FriendInviteCreate,
     FriendInviteJoin,
@@ -993,6 +1002,8 @@ def create_app(
     managed_identity_deletion_ticket_codec: (
         ManagedIdentityDeletionTicketCodec | None
     ) = None,
+    managed_safety_repository: (PostgresManagedSafetyRepository | None) = None,
+    managed_safety_push_service: ManagedSafetyPushService | None = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     runtime_repository: Repository
@@ -1035,6 +1046,8 @@ def create_app(
     runtime_managed_identity_deletion_ticket_codec = (
         managed_identity_deletion_ticket_codec
     )
+    runtime_managed_safety_repository = managed_safety_repository
+    runtime_managed_safety_push_service = managed_safety_push_service
     if runtime_settings.managed_storage_enabled:
         if runtime_managed_repository is None:
             if not isinstance(runtime_repository, PostgresRepository):
@@ -1079,6 +1092,33 @@ def create_app(
             runtime_managed_object_store = GCSV4ObjectStore(
                 bucket=runtime_settings.managed_raw_bucket or "",
                 signer=signer,
+            )
+        if runtime_managed_safety_repository is None and isinstance(
+            runtime_repository, PostgresRepository
+        ):
+            runtime_managed_safety_repository = PostgresManagedSafetyRepository(
+                runtime_repository
+            )
+        if (
+            runtime_managed_safety_push_service is None
+            and runtime_managed_safety_repository is not None
+            and runtime_settings.managed_push_token_secret
+        ):
+            push_provider = (
+                FirebaseCloudMessagingProvider(
+                    project_id=runtime_settings.managed_project_id or "",
+                    timeout_seconds=(runtime_settings.managed_push_timeout_seconds),
+                )
+                if runtime_settings.managed_push_enabled
+                else UnavailableManagedPushProvider()
+            )
+            runtime_managed_safety_push_service = ManagedSafetyPushService(
+                repository=runtime_managed_safety_repository,
+                token_codec=ManagedPushTokenCodec(
+                    runtime_settings.managed_push_token_secret
+                ),
+                provider=push_provider,
+                max_concurrency=(runtime_settings.managed_push_max_concurrency),
             )
         if runtime_managed_identity_deletion_ticket_codec is None:
             runtime_managed_identity_deletion_ticket_codec = (
@@ -1214,6 +1254,8 @@ def create_app(
     app.state.managed_identity_deletion_ticket_codec = (
         runtime_managed_identity_deletion_ticket_codec
     )
+    app.state.managed_safety_repository = runtime_managed_safety_repository
+    app.state.managed_safety_push_service = runtime_managed_safety_push_service
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -3717,6 +3759,8 @@ def create_app(
                 identity_deletion_ticket_codec=(
                     runtime_managed_identity_deletion_ticket_codec
                 ),
+                safety_repository=runtime_managed_safety_repository,
+                safety_push_service=runtime_managed_safety_push_service,
             )
         )
 

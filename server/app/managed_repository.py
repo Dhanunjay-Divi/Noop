@@ -1086,6 +1086,21 @@ class PostgresManagedRepository:
                         installation_id,
                         now,
                     )
+                    await connection.execute(
+                        """
+                        UPDATE managed_push_installations
+                        SET status = 'revoked',
+                            token_ciphertext = 'revoked.' || token_hash,
+                            revoked_at = COALESCE(revoked_at, $3),
+                            updated_at = GREATEST(updated_at, $3)
+                        WHERE account_id = $1
+                          AND installation_id = $2
+                          AND status <> 'revoked'
+                        """,
+                        principal.account_id,
+                        installation_id,
+                        now,
+                    )
         public = {
             key: target[key]
             for key in (
@@ -3629,6 +3644,18 @@ class PostgresManagedRepository:
                             SET status = 'revoked',
                                 revoked_at = COALESCE(revoked_at, $2),
                                 token_valid_after = $2
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_push_installations
+                            SET status = 'revoked',
+                                token_ciphertext = 'revoked.' || token_hash,
+                                revoked_at = COALESCE(revoked_at, $2),
+                                updated_at = GREATEST(updated_at, $2)
                             WHERE account_id = $1
                             """,
                             account_id,
@@ -6653,6 +6680,91 @@ class PostgresManagedRepository:
                     """,
                     profile["profile_id"],
                     blocked_profile_id,
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM managed_safety_contacts
+                    WHERE (
+                        owner_profile_id = $1
+                        AND contact_profile_id = $2
+                    ) OR (
+                        owner_profile_id = $2
+                        AND contact_profile_id = $1
+                    )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_requests
+                    SET status = 'canceled', decided_at = $3
+                    WHERE status = 'pending'
+                      AND (
+                          (
+                            owner_profile_id = $1
+                            AND contact_profile_id = $2
+                          ) OR (
+                            owner_profile_id = $2
+                            AND contact_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_participants participant
+                    SET status = 'revoked', responded_at = $3
+                    FROM managed_safety_incidents incident
+                    WHERE participant.incident_id = incident.incident_id
+                      AND incident.status IN ('open', 'acknowledged')
+                      AND (
+                          (
+                            incident.owner_profile_id = $1
+                            AND participant.contact_profile_id = $2
+                          ) OR (
+                            incident.owner_profile_id = $2
+                            AND participant.contact_profile_id = $1
+                          )
+                      )
+                      AND participant.status <> 'revoked'
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_push_deliveries delivery
+                    SET status = 'rejected',
+                        claim_id = NULL,
+                        claim_expires_at = NULL,
+                        updated_at = $3
+                    FROM managed_safety_incidents incident
+                    WHERE delivery.incident_id = incident.incident_id
+                      AND incident.status IN ('open', 'acknowledged')
+                      AND (
+                          (
+                            incident.owner_profile_id = $1
+                            AND delivery.contact_profile_id = $2
+                          ) OR (
+                            incident.owner_profile_id = $2
+                            AND delivery.contact_profile_id = $1
+                          )
+                      )
+                      AND delivery.status IN (
+                          'pending',
+                          'sending',
+                          'transient_failure',
+                          'unavailable'
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
                 )
                 for owner_profile_id in (
                     profile["profile_id"],

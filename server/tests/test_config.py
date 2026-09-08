@@ -79,6 +79,30 @@ def test_managed_storage_requires_project_bound_app_check_ids() -> None:
         ).validate_for_startup(needs_database=True)
 
 
+def test_managed_push_retry_can_run_in_private_lifecycle_job() -> None:
+    Settings(
+        api_token=None,
+        database_url="postgresql://noop:test@db/noop",
+        managed_project_id="noop-test-project",
+        managed_push_retry_enabled=True,
+        managed_push_token_secret="managed-push-secret-at-least-32-bytes",
+    ).validate_for_startup(
+        needs_database=True,
+        needs_api_token=False,
+    )
+
+    with pytest.raises(RuntimeError, match="PUSH_TOKEN_SECRET"):
+        Settings(
+            api_token=None,
+            database_url="postgresql://noop:test@db/noop",
+            managed_project_id="noop-test-project",
+            managed_push_retry_enabled=True,
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+
 def test_ownership_service_requires_project_bound_apps_and_bounded_freshness() -> None:
     project_number = "123456789012"
     settings = Settings(

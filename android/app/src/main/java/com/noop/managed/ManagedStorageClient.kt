@@ -135,6 +135,394 @@ class ManagedStorageClient(
         )
     }
 
+    suspend fun registerPushInstallation(
+        authorization: ManagedAuthorization,
+        environment: ManagedPushEnvironment,
+        token: String,
+    ): ManagedPushRegistrationInfo = withContext(Dispatchers.IO) {
+        if (!token.matches(PUSH_TOKEN)) {
+            throw IllegalArgumentException("Invalid managed push token")
+        }
+        val row = executeJson(
+            apiRequest("v1/managed/push/installations/current", authorization)
+                .put(
+                    JSONObject()
+                        .put("platform", "android")
+                        .put("environment", environment.wireValue)
+                        .put("target_kind", ManagedPushTargetKind.TOKEN.wireValue)
+                        .put("token", token)
+                        .toString()
+                        .toRequestBody(JSON),
+                )
+                .build(),
+        ).requireObject("registration")
+        val registration = ManagedPushRegistrationInfo(
+            installationId = row.optString("installation_id"),
+            platform = row.optString("platform"),
+            environment = row.optString("environment"),
+            targetKind = row.optString("target_kind"),
+            status = row.optString("status"),
+            updatedAt = row.optString("updated_at").requiredInstant(),
+            duplicate = row.optBoolean("duplicate", false),
+        )
+        if (registration.installationId != authorization.installationId ||
+            registration.platform != "android" ||
+            registration.environment != environment.wireValue ||
+            registration.targetKind != ManagedPushTargetKind.TOKEN.wireValue ||
+            registration.status != "active"
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        registration
+    }
+
+    suspend fun revokePushInstallation(
+        authorization: ManagedAuthorization,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest("v1/managed/push/installations/current", authorization)
+                .delete()
+                .build(),
+        )
+    }
+
+    suspend fun createSafetyInvite(
+        authorization: ManagedAuthorization,
+        capability: String,
+        requestId: UUID,
+        expiresInHours: Int = 72,
+    ): ManagedSafetyInvite = withContext(Dispatchers.IO) {
+        if (!ManagedSafetyIdentifier.invitePattern.matches(capability) ||
+            expiresInHours !in 1..168
+        ) {
+            throw IllegalArgumentException("Invalid managed Safety invitation")
+        }
+        val invite = parseSafetyInvite(
+            executeJson(
+                apiRequest("v1/managed/safety/invites", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("capability", capability)
+                            .put("expires_in_hours", expiresInHours)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("invite"),
+        )
+        if (invite.capability != capability) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        invite
+    }
+
+    suspend fun revokeSafetyInvite(
+        authorization: ManagedAuthorization,
+        inviteId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/safety/invites/${inviteId.toString().lowercase()}",
+                authorization,
+            ).delete().build(),
+        )
+    }
+
+    suspend fun redeemSafetyInvite(
+        authorization: ManagedAuthorization,
+        capability: String,
+        requestId: UUID,
+    ): ManagedSafetyRequest = withContext(Dispatchers.IO) {
+        if (!ManagedSafetyIdentifier.invitePattern.matches(capability)) {
+            throw IllegalArgumentException("Invalid managed Safety invitation")
+        }
+        parseSafetyRequest(
+            executeJson(
+                apiRequest("v1/managed/safety/invites:redeem", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("capability", capability)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun createSafetyRequest(
+        authorization: ManagedAuthorization,
+        noopId: String,
+        requestId: UUID,
+    ): ManagedSafetyRequest = withContext(Dispatchers.IO) {
+        val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+            ?: throw IllegalArgumentException("Invalid NOOP ID")
+        parseSafetyRequest(
+            executeJson(
+                apiRequest("v1/managed/safety/requests", authorization)
+                    .post(
+                        JSONObject()
+                            .put("request_id", requestId.toString())
+                            .put("noop_id", canonical)
+                            .toString()
+                            .toRequestBody(JSON),
+                    )
+                    .build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun safetyRequests(
+        authorization: ManagedAuthorization,
+    ): List<ManagedSafetyRequest> = withContext(Dispatchers.IO) {
+        val rows = executeJson(
+            apiRequest("v1/managed/safety/requests", authorization)
+                .get()
+                .build(),
+        ).requireArray("requests")
+        if (rows.length() > 100) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSafetyRequest(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun decideSafetyRequest(
+        authorization: ManagedAuthorization,
+        requestId: UUID,
+        accept: Boolean,
+    ): ManagedSafetyRequest = withContext(Dispatchers.IO) {
+        parseSafetyRequest(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/requests/${requestId.toString().lowercase()}",
+                    authorization,
+                ).post(
+                    JSONObject()
+                        .put("decision", if (accept) "accept" else "decline")
+                        .toString()
+                        .toRequestBody(JSON),
+                ).build(),
+            ).requireObject("request"),
+        )
+    }
+
+    suspend fun safetyContacts(
+        authorization: ManagedAuthorization,
+    ): ManagedSafetyContacts = withContext(Dispatchers.IO) {
+        val response = executeJson(
+            apiRequest("v1/managed/safety/contacts", authorization)
+                .get()
+                .build(),
+        )
+        val rows = response.requireArray("contacts")
+        if (rows.length() > 25 ||
+            response.requiredNonnegativeInt("minimum_required") != 2 ||
+            response.requiredNonnegativeInt("maximum_allowed") != 5
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        ManagedSafetyContacts(
+            contacts = buildList {
+                for (index in 0 until rows.length()) {
+                    add(parseSafetyContact(rows.requireObject(index)))
+                }
+            },
+            minimumRequired = 2,
+            maximumAllowed = 5,
+        )
+    }
+
+    suspend fun removeSafetyContact(
+        authorization: ManagedAuthorization,
+        profileId: UUID,
+    ): Unit = withContext(Dispatchers.IO) {
+        executeNoContent(
+            apiRequest(
+                "v1/managed/safety/contacts/${profileId.toString().lowercase()}",
+                authorization,
+            ).delete().build(),
+        )
+    }
+
+    suspend fun createSafetyIncident(
+        authorization: ManagedAuthorization,
+        requestId: UUID,
+        durationHours: Int,
+        shareLocation: Boolean,
+    ): ManagedSafetyIncidentCreation = withContext(Dispatchers.IO) {
+        if (durationHours !in setOf(8, 12)) {
+            throw IllegalArgumentException("Invalid managed Safety duration")
+        }
+        val response = executeJson(
+            apiRequest("v1/managed/safety/incidents", authorization)
+                .post(
+                    JSONObject()
+                        .put("request_id", requestId.toString())
+                        .put("duration_hours", durationHours)
+                        .put("share_location", shareLocation)
+                        .toString()
+                        .toRequestBody(JSON),
+                )
+                .build(),
+        )
+        val pushOutcome = response.optString("push_outcome")
+        if (pushOutcome !in PUSH_OUTCOMES) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        ManagedSafetyIncidentCreation(
+            incident = parseSafetyIncident(response.requireObject("incident")),
+            pushOutcome = pushOutcome,
+        )
+    }
+
+    suspend fun safetyIncidents(
+        authorization: ManagedAuthorization,
+    ): List<ManagedSafetyIncident> = withContext(Dispatchers.IO) {
+        val rows = executeJson(
+            apiRequest("v1/managed/safety/incidents", authorization)
+                .get()
+                .build(),
+        ).requireArray("incidents")
+        if (rows.length() > 30) throw ManagedStorageException.InvalidResponse()
+        buildList {
+            for (index in 0 until rows.length()) {
+                add(parseSafetyIncident(rows.requireObject(index)))
+            }
+        }
+    }
+
+    suspend fun safetyIncident(
+        authorization: ManagedAuthorization,
+        incidentId: UUID,
+    ): ManagedSafetyIncident = withContext(Dispatchers.IO) {
+        parseSafetyIncident(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/incidents/${incidentId.toString().lowercase()}",
+                    authorization,
+                ).get().build(),
+            ).requireObject("incident"),
+        ).also {
+            if (it.incidentId != incidentId) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+    }
+
+    suspend fun updateSafetyLocation(
+        authorization: ManagedAuthorization,
+        incidentId: UUID,
+        sequence: Long,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyM: Double,
+        capturedAt: String,
+    ): ManagedSafetyLocation = withContext(Dispatchers.IO) {
+        if (sequence <= 0L ||
+            !latitude.isFinite() || latitude !in -90.0..90.0 ||
+            !longitude.isFinite() || longitude !in -180.0..180.0 ||
+            !horizontalAccuracyM.isFinite() ||
+            horizontalAccuracyM !in 0.0..10_000.0 ||
+            runCatching { Instant.parse(capturedAt) }.isFailure
+        ) {
+            throw IllegalArgumentException("Invalid managed Safety location")
+        }
+        parseSafetyLocation(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/incidents/" +
+                        "${incidentId.toString().lowercase()}/location",
+                    authorization,
+                ).put(
+                    JSONObject()
+                        .put("sequence", sequence)
+                        .put("latitude", latitude)
+                        .put("longitude", longitude)
+                        .put("horizontal_accuracy_m", horizontalAccuracyM)
+                        .put("captured_at", capturedAt)
+                        .toString()
+                        .toRequestBody(JSON),
+                ).build(),
+            ).requireObject("location"),
+        ).also {
+            if (it.sequence < sequence) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+    }
+
+    suspend fun respondToSafetyIncident(
+        authorization: ManagedAuthorization,
+        incidentId: UUID,
+        responding: Boolean,
+    ): ManagedSafetyIncident = withContext(Dispatchers.IO) {
+        parseSafetyIncident(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/incidents/" +
+                        "${incidentId.toString().lowercase()}/response",
+                    authorization,
+                ).post(
+                    JSONObject()
+                        .put(
+                            "decision",
+                            if (responding) "responding" else "cannot_respond",
+                        )
+                        .toString()
+                        .toRequestBody(JSON),
+                ).build(),
+            ).requireObject("incident"),
+        ).also {
+            if (it.incidentId != incidentId) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+    }
+
+    suspend fun endSafetyIncident(
+        authorization: ManagedAuthorization,
+        incidentId: UUID,
+        resolved: Boolean,
+    ): ManagedSafetyIncident = withContext(Dispatchers.IO) {
+        parseSafetyIncident(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/incidents/" +
+                        "${incidentId.toString().lowercase()}:end",
+                    authorization,
+                ).post(
+                    JSONObject()
+                        .put("outcome", if (resolved) "resolved" else "canceled")
+                        .toString()
+                        .toRequestBody(JSON),
+                ).build(),
+            ).requireObject("incident"),
+        ).also {
+            if (it.incidentId != incidentId) {
+                throw ManagedStorageException.InvalidResponse()
+            }
+        }
+    }
+
+    suspend fun retrySafetyPush(
+        authorization: ManagedAuthorization,
+        incidentId: UUID,
+    ): ManagedSafetyDelivery = withContext(Dispatchers.IO) {
+        parseSafetyDelivery(
+            executeJson(
+                apiRequest(
+                    "v1/managed/safety/incidents/" +
+                        "${incidentId.toString().lowercase()}:retry-push",
+                    authorization,
+                ).post(EMPTY_BODY).build(),
+            ).requireObject("delivery"),
+        )
+    }
+
     suspend fun createSocialProfile(
         authorization: ManagedAuthorization,
         displayName: String,
@@ -1382,6 +1770,203 @@ class ManagedStorageClient(
         )
     }
 
+    private fun parseSafetyInvite(value: JSONObject): ManagedSafetyInvite {
+        val invite = ManagedSafetyInvite(
+            inviteId = uuidOrThrow(value.optString("invite_id")),
+            capability = value.optString("capability"),
+            status = value.optString("status"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (!ManagedSafetyIdentifier.invitePattern.matches(invite.capability) ||
+            invite.status !in setOf("active", "revoked", "redeemed", "expired")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return invite
+    }
+
+    private fun parseSafetyRequest(value: JSONObject): ManagedSafetyRequest {
+        val request = ManagedSafetyRequest(
+            requestId = uuidOrThrow(value.optString("request_id")),
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            direction = value.optString("direction"),
+            source = value.optString("source"),
+            status = value.optString("status"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            decidedAt = value.optionalText("decided_at")?.requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (request.displayName.length > 64 ||
+            request.direction !in setOf("incoming", "outgoing") ||
+            request.source !in setOf("noop_id", "invite") ||
+            request.status !in SAFETY_REQUEST_STATUSES ||
+            (request.status == "pending") != (request.decidedAt == null)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return request
+    }
+
+    private fun parseSafetyContact(value: JSONObject): ManagedSafetyContact {
+        val contact = ManagedSafetyContact(
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            role = value.optString("role"),
+            acceptedAt = value.optString("accepted_at").requiredInstant(),
+        )
+        if (contact.displayName.length > 64 ||
+            contact.role !in setOf("contact", "owner")
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return contact
+    }
+
+    private fun parseSafetyLocation(value: JSONObject): ManagedSafetyLocation {
+        val location = ManagedSafetyLocation(
+            sequence = value.requiredLong("sequence"),
+            latitude = value.optionalFiniteDouble("latitude")
+                ?: throw ManagedStorageException.InvalidResponse(),
+            longitude = value.optionalFiniteDouble("longitude")
+                ?: throw ManagedStorageException.InvalidResponse(),
+            horizontalAccuracyM = value.optionalFiniteDouble(
+                "horizontal_accuracy_m",
+            ) ?: throw ManagedStorageException.InvalidResponse(),
+            capturedAt = value.optString("captured_at").requiredInstant(),
+            receivedAt = value.optString("received_at").requiredInstant(),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        if (location.sequence <= 0L ||
+            location.latitude !in -90.0..90.0 ||
+            location.longitude !in -180.0..180.0 ||
+            location.horizontalAccuracyM !in 0.0..10_000.0
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return location
+    }
+
+    private fun parseSafetyParticipant(value: JSONObject): ManagedSafetyParticipant {
+        val push = value.requireObject("push")
+        val participant = ManagedSafetyParticipant(
+            profileId = uuidOrThrow(value.optString("profile_id")),
+            displayName = value.optString("display_name").requiredText(),
+            status = value.optString("status"),
+            pagedAt = value.optString("paged_at").requiredInstant(),
+            respondedAt = value.optionalText("responded_at")?.requiredInstant(),
+            push = ManagedSafetyPushStatus(
+                configured = push.requiredBoolean("configured"),
+                reached = push.requiredBoolean("reached"),
+            ),
+        )
+        if (participant.displayName.length > 64 ||
+            participant.status !in SAFETY_PARTICIPANT_STATUSES ||
+            (participant.status == "pending") !=
+            (participant.respondedAt == null) ||
+            participant.push.reached && !participant.push.configured
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return participant
+    }
+
+    private fun parseSafetyDelivery(value: JSONObject): ManagedSafetyDelivery {
+        val installationsTargeted = value.requiredNonnegativeInt(
+            "installations_targeted",
+        )
+        val installationsReached = value.requiredNonnegativeInt(
+            "installations_reached",
+        )
+        val delivery = ManagedSafetyDelivery(
+            contactsTargeted = value.requiredNonnegativeInt("contacts_targeted"),
+            contactsReached = value.requiredNonnegativeInt("contacts_reached"),
+            installationsTargeted = installationsTargeted,
+            installationsReached = installationsReached,
+            installationsRetryable = if (value.has("installations_retryable")) {
+                value.requiredNonnegativeInt("installations_retryable")
+            } else {
+                (installationsTargeted - installationsReached).coerceAtLeast(0)
+            },
+            installationsTerminal = if (value.has("installations_terminal")) {
+                value.requiredNonnegativeInt("installations_terminal")
+            } else {
+                0
+            },
+        )
+        if (delivery.contactsReached > delivery.contactsTargeted ||
+            delivery.installationsReached > delivery.installationsTargeted ||
+            delivery.contactsReached > delivery.installationsReached ||
+            delivery.installationsReached + delivery.installationsRetryable +
+            delivery.installationsTerminal > delivery.installationsTargeted
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return delivery
+    }
+
+    private fun parseSafetyIncident(value: JSONObject): ManagedSafetyIncident {
+        val participantsJson = value.requireArray("participants")
+        val participants = buildList {
+            for (index in 0 until participantsJson.length()) {
+                add(parseSafetyParticipant(participantsJson.requireObject(index)))
+            }
+        }
+        val incident = ManagedSafetyIncident(
+            incidentId = uuidOrThrow(value.optString("incident_id")),
+            role = value.optString("role"),
+            ownerProfileId = uuidOrThrow(value.optString("owner_profile_id")),
+            ownerDisplayName = value.optString("owner_display_name").requiredText(),
+            trigger = value.optString("trigger"),
+            status = value.optString("status"),
+            durationHours = value.requiredNonnegativeInt("duration_hours"),
+            shareLocation = value.requiredBoolean("share_location"),
+            createdAt = value.optString("created_at").requiredInstant(),
+            expiresAt = value.optString("expires_at").requiredInstant(),
+            acknowledgedAt = value.optionalText("acknowledged_at")
+                ?.requiredInstant(),
+            endedAt = value.optionalText("ended_at")?.requiredInstant(),
+            participants = participants,
+            location = value.optJSONObject("location")?.let(::parseSafetyLocation),
+            delivery = value.optJSONObject("delivery")?.let(::parseSafetyDelivery),
+            duplicate = value.optBoolean("duplicate", false),
+        )
+        val active = incident.status in setOf("open", "acknowledged")
+        val terminal = incident.status in setOf(
+            "resolved",
+            "canceled",
+            "expired",
+        )
+        val countIsValid = if (incident.role == "owner") {
+            incident.participants.size in 2..5
+        } else {
+            incident.participants.size == 1
+        }
+        if (incident.role !in setOf("owner", "contact") ||
+            incident.ownerDisplayName.length > 64 ||
+            incident.trigger != "manual_sos" ||
+            (!active && !terminal) ||
+            incident.durationHours !in setOf(8, 12) ||
+            !countIsValid ||
+            incident.participants.map { it.profileId }.toSet().size !=
+            incident.participants.size ||
+            (!incident.shareLocation && incident.location != null) ||
+            (terminal && incident.location != null) ||
+            (incident.status == "open" && incident.acknowledgedAt != null) ||
+            (incident.status == "acknowledged" &&
+                incident.acknowledgedAt == null) ||
+            active != (incident.endedAt == null) ||
+            (incident.role == "owner" && incident.delivery == null) ||
+            (incident.role == "contact" && incident.delivery != null)
+        ) {
+            throw ManagedStorageException.InvalidResponse()
+        }
+        return incident
+    }
+
     private fun parseSocialProfile(value: JSONObject): ManagedSocialProfile {
         val badges = parseSocialBadges(value.optJSONArray("badges") ?: JSONArray())
         val profile = ManagedSocialProfile(
@@ -1812,6 +2397,13 @@ class ManagedStorageClient(
         private val DATA_CLASS = Regex("^[a-z][a-z0-9_]{1,63}$")
         private val INSTALLATION_ID =
             Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+        private val PUSH_TOKEN = Regex("^[A-Za-z0-9:_-]{16,4096}$")
+        private val PUSH_OUTCOMES =
+            setOf("attempted", "deferred", "not_configured")
+        private val SAFETY_REQUEST_STATUSES =
+            setOf("pending", "accepted", "declined", "canceled", "expired")
+        private val SAFETY_PARTICIPANT_STATUSES =
+            setOf("pending", "responding", "cannot_respond", "revoked")
         private val SOCIAL_BADGES = setOf("connected", "steady_week", "steady_month")
         private val NOTIFICATION_OUTCOMES =
             setOf("scheduled", "not_authorized", "failed")

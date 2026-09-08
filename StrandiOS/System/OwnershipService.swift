@@ -2283,22 +2283,17 @@ private final class OwnershipAPIClient {
                     routeGroup: "terms_document",
                     method: "GET",
                     statusCode: nil,
-                    requestID: nil,
                     started: started,
                     outcome: "failed"
                 )
                 requestRecorded = true
                 throw OwnershipClientError.invalidResponse
             }
-            let requestID = http.value(
-                forHTTPHeaderField: "X-Noop-Request-ID"
-            )
             guard (200...299).contains(http.statusCode) else {
                 recordRequest(
                     routeGroup: "terms_document",
                     method: "GET",
                     statusCode: http.statusCode,
-                    requestID: requestID,
                     started: started,
                     outcome: "rejected"
                 )
@@ -2324,7 +2319,6 @@ private final class OwnershipAPIClient {
                     routeGroup: "terms_document",
                     method: "GET",
                     statusCode: http.statusCode,
-                    requestID: requestID,
                     started: started,
                     outcome: "failed"
                 )
@@ -2335,7 +2329,6 @@ private final class OwnershipAPIClient {
                 routeGroup: "terms_document",
                 method: "GET",
                 statusCode: http.statusCode,
-                requestID: requestID,
                 started: started,
                 outcome: "completed"
             )
@@ -2354,7 +2347,6 @@ private final class OwnershipAPIClient {
                     routeGroup: "terms_document",
                     method: "GET",
                     statusCode: nil,
-                    requestID: nil,
                     started: started,
                     outcome: canceled ? "canceled" : "failed"
                 )
@@ -2733,22 +2725,17 @@ private final class OwnershipAPIClient {
                     routeGroup: routeGroup,
                     method: method,
                     statusCode: nil,
-                    requestID: nil,
                     started: started,
                     outcome: "failed"
                 )
                 requestRecorded = true
                 throw OwnershipClientError.invalidResponse
             }
-            let requestID = http.value(
-                forHTTPHeaderField: "X-Noop-Request-ID"
-            )
             guard (200...299).contains(http.statusCode) else {
                 recordRequest(
                     routeGroup: routeGroup,
                     method: method,
                     statusCode: http.statusCode,
-                    requestID: requestID,
                     started: started,
                     outcome: "rejected"
                 )
@@ -2798,7 +2785,6 @@ private final class OwnershipAPIClient {
                     routeGroup: routeGroup,
                     method: method,
                     statusCode: http.statusCode,
-                    requestID: requestID,
                     started: started,
                     outcome: "failed"
                 )
@@ -2809,7 +2795,6 @@ private final class OwnershipAPIClient {
                 routeGroup: routeGroup,
                 method: method,
                 statusCode: http.statusCode,
-                requestID: requestID,
                 started: started,
                 outcome: "completed"
             )
@@ -2822,7 +2807,6 @@ private final class OwnershipAPIClient {
                     routeGroup: routeGroup,
                     method: method,
                     statusCode: nil,
-                    requestID: nil,
                     started: started,
                     outcome: canceled ? "canceled" : "failed"
                 )
@@ -2868,7 +2852,6 @@ private final class OwnershipAPIClient {
         routeGroup: String,
         method: String,
         statusCode: Int?,
-        requestID: String?,
         started: ContinuousClock.Instant,
         outcome: String
     ) {
@@ -2891,11 +2874,6 @@ private final class OwnershipAPIClient {
             "outcome": outcome,
         ]
         if let statusCode { fields["status_code"] = String(statusCode) }
-        if let requestID = OwnershipEndpointPolicy.diagnosticRequestID(
-            requestID
-        ) {
-            fields["server_request_id"] = requestID
-        }
         AppDiagnosticsRecorder.shared.record(
             "ownership_http.request",
             fields: fields

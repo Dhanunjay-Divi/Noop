@@ -1,4 +1,5 @@
 import Foundation
+import NoopRemoteSync
 import UserNotifications
 
 enum LocalNotificationLifecycleState: String, Codable, CaseIterable, Sendable {
@@ -305,6 +306,14 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         LocalNotificationLifecycle.presented(notification.request)
+        if ManagedSafetyPushPayload.incidentID(
+            from: notification.request.content.userInfo
+        ) != nil {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_presented",
+                fields: ["outcome": "foreground"]
+            )
+        }
         Task { @MainActor in
             ContextualActionCenter.shared.capture(notification.request)
         }
@@ -324,11 +333,31 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         Task { @MainActor in
             ContextualActionCenter.shared.capture(response.notification.request)
         }
+        #if os(iOS)
+        if let incidentID = ManagedSafetyPushPayload.incidentID(
+            from: response.notification.request.content.userInfo
+        ) {
+            NotificationRouteBridge.recordPending(.safety)
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_opened",
+                fields: ["outcome": "accepted"]
+            )
+            Task { @MainActor in
+                _ = await ManagedCloudService.shared
+                    .handleManagedSafetyPush(incidentID: incidentID)
+            }
+        } else if let route = NotificationRouteBridge.route(
+            from: response.notification.request.content.userInfo
+        ) {
+            NotificationRouteBridge.recordPending(route)
+        }
+        #else
         if let route = NotificationRouteBridge.route(
             from: response.notification.request.content.userInfo
         ) {
             NotificationRouteBridge.recordPending(route)
         }
+        #endif
         completionHandler()
     }
 }

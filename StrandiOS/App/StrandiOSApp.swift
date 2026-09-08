@@ -1,6 +1,8 @@
 #if os(iOS)
 import FirebaseAuth
 import FirebaseCore
+import FirebaseMessaging
+import NoopRemoteSync
 import SwiftUI
 import StrandAnalytics
 import StrandDesign
@@ -8,7 +10,8 @@ import UserNotifications
 import UIKit
 import WidgetKit
 
-final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate {
+final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
+    MessagingDelegate {
     private var pendingAPNSToken: Data?
 
     func application(
@@ -27,7 +30,18 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         _ = Self.configuredAuths().contains {
             $0.canHandleNotification(userInfo)
         }
-        completionHandler(.noData)
+        guard let incidentID = ManagedSafetyPushPayload.incidentID(
+            from: userInfo
+        ) else {
+            completionHandler(.noData)
+            return
+        }
+        Task { @MainActor in
+            NotificationRouteBridge.recordPending(.safety)
+            let updated = await ManagedCloudService.shared
+                .handleManagedSafetyPush(incidentID: incidentID)
+            completionHandler(updated ? .newData : .failed)
+        }
     }
 
     func application(
@@ -43,11 +57,36 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         Self.configuredAuths().forEach {
             $0.setAPNSToken(pendingAPNSToken, type: .unknown)
         }
+        if FirebaseApp.app() != nil {
+            Messaging.messaging().apnsToken = pendingAPNSToken
+        }
     }
 
     static func forwardPendingAPNSTokenIfPossible() {
         (UIApplication.shared.delegate as? ManagedFirebaseApplicationDelegate)?
             .forwardPendingAPNSTokenIfPossible()
+    }
+
+    static func configureManagedMessagingIfPossible() {
+        guard FirebaseApp.app() != nil,
+              let delegate = UIApplication.shared.delegate
+                as? ManagedFirebaseApplicationDelegate else {
+            return
+        }
+        Messaging.messaging().delegate = delegate
+        delegate.forwardPendingAPNSTokenIfPossible()
+    }
+
+    func messaging(
+        _ messaging: Messaging,
+        didReceiveRegistration registrationID: String?
+    ) {
+        guard let registrationID, !registrationID.isEmpty else { return }
+        Task { @MainActor in
+            await ManagedCloudService.shared.registerManagedPushToken(
+                registrationID
+            )
+        }
     }
 
     static func handleOpenURL(_ url: URL) -> Bool {
@@ -66,6 +105,7 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         }
         return values
     }
+
 }
 
 /// iOS entry point. Unlike the macOS app (which adds a `MenuBarExtra` scene), iOS uses a single
@@ -523,6 +563,14 @@ struct StrandiOSApp: App {
                             return
                         }
                         router.openFriends()
+                        return
+                    }
+                    if ManagedCloudService.shared.stageSafetyInviteLink(url) {
+                        guard launchAccess.isUnlocked,
+                              acceptedTermsVersion == Terms.currentVersion else {
+                            return
+                        }
+                        NotificationRouteBridge.recordPending(.safety)
                         return
                     }
                     guard launchAccess.isUnlocked,

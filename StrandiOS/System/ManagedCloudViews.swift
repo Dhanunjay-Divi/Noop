@@ -275,7 +275,7 @@ private struct ManagedCloudSetupSheet: View {
 
                     Button("Use a different number") {
                         code = ""
-                        service.disconnect()
+                        Task { await service.disconnect() }
                     }
                     .buttonStyle(.plain)
                     .font(StrandFont.caption)
@@ -348,7 +348,7 @@ private struct ManagedCloudSetupSheet: View {
             .accessibilityIdentifier("noop.noop-plus.enroll")
 
             Button("Sign out without enabling cloud backup") {
-                service.disconnect()
+                Task { await service.disconnect() }
             }
             .buttonStyle(.plain)
             .font(StrandFont.caption)
@@ -469,7 +469,7 @@ private struct ManagedCloudSetupSheet: View {
                 kind: .secondary,
                 fullWidth: true
             ) {
-                service.disconnect()
+                Task { await service.disconnect() }
             }
             .disabled(service.isBusy)
             .accessibilityIdentifier("noop.noop-plus.sign-out")

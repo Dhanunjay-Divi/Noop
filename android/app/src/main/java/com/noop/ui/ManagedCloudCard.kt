@@ -309,7 +309,7 @@ private fun ManagedCloudSetupSheet(
                             enabled = !state.busy,
                             onClick = {
                                 code = ""
-                                service.disconnect()
+                                scope.launch { service.disconnect() }
                             },
                         )
                     } else {
@@ -385,7 +385,7 @@ private fun ManagedCloudSetupSheet(
                         kind = NoopButtonKind.Tertiary,
                         fullWidth = true,
                         enabled = !state.busy,
-                        onClick = service::disconnect,
+                        onClick = { scope.launch { service.disconnect() } },
                     )
                     ManagedCloudStatus(state.status)
                     ManagedCloudBoundary()
@@ -533,7 +533,7 @@ private fun ManagedCloudSetupSheet(
                         kind = NoopButtonKind.Secondary,
                         fullWidth = true,
                         enabled = !state.busy,
-                        onClick = service::disconnect,
+                        onClick = { scope.launch { service.disconnect() } },
                     )
                     NoopButton(
                         text = stringResource(R.string.managed_cloud_delete_account),

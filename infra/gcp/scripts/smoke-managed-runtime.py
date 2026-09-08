@@ -89,6 +89,7 @@ class ManagedStagingSmoke:
             self._exercise_storage()
             self._erase_raw_storage()
             self._exercise_social()
+            self._exercise_safety()
             self._delete_social_profiles()
             self._request_account_erasure()
             self._delete_provider_identities()
@@ -146,8 +147,14 @@ class ManagedStagingSmoke:
         self.original_test_numbers = dict(original)
         first_phone, first_code = next(iter(original.items()))
         second_phone = self._new_synthetic_phone(set(original))
+        third_phone = self._new_synthetic_phone({*original, second_phone})
         second_code = f"{secrets.randbelow(1_000_000):06d}"
-        updated = {**original, second_phone: second_code}
+        third_code = f"{secrets.randbelow(1_000_000):06d}"
+        updated = {
+            **original,
+            second_phone: second_code,
+            third_phone: third_code,
+        }
         self._patch_test_numbers(updated)
         self.identity_config_changed = True
         suffix = secrets.token_hex(4)
@@ -164,6 +171,13 @@ class ManagedStagingSmoke:
                 code=second_code,
                 platform="ios",
                 installation_id=f"ios-staging-peer-{suffix}",
+                installation_token=self._installation_token(),
+            ),
+            SyntheticAccount(
+                phone=third_phone,
+                code=third_code,
+                platform="ios",
+                installation_id=f"ios-staging-contact-{suffix}",
                 installation_token=self._installation_token(),
             ),
         ]
@@ -208,9 +222,9 @@ class ManagedStagingSmoke:
     def _authenticate_accounts(self) -> None:
         for account in self.accounts:
             self._authenticate(account)
-        if len({account.local_id for account in self.accounts}) != 2:
+        if len({account.local_id for account in self.accounts}) != 3:
             raise SmokeFailure("fictional phone identities are not isolated")
-        print("PASS two fictional phone OTP identities")
+        print("PASS three fictional phone OTP identities")
 
     def _authenticate(self, account: SyntheticAccount) -> None:
         query = urllib.parse.urlencode({"key": self.api_key})
@@ -487,8 +501,12 @@ class ManagedStagingSmoke:
         raise SmokeFailure("raw storage erasure did not complete")
 
     def _exercise_social(self) -> None:
-        first, second = self.accounts
-        for account, label in ((first, "Synthetic One"), (second, "Synthetic Two")):
+        first, second, third = self.accounts
+        for account, label in (
+            (first, "Synthetic One"),
+            (second, "Synthetic Two"),
+            (third, "Synthetic Three"),
+        ):
             profile = self._managed_request(
                 account,
                 "POST",
@@ -732,6 +750,186 @@ class ManagedStagingSmoke:
             expected={204},
         )
         print("PASS exact IDs, invites, consent, badges, feed, pokes, and blocks")
+
+    def _exercise_safety(self) -> None:
+        owner, first_contact, second_contact = self.accounts
+
+        capability = "noopsafety_" + secrets.token_urlsafe(32)
+        invite_request_id = str(uuid4())
+        invite_body = {
+            "request_id": invite_request_id,
+            "capability": capability,
+            "expires_in_hours": 1,
+        }
+        invite = self._managed_request(
+            owner,
+            "POST",
+            "/v1/managed/safety/invites",
+            body=invite_body,
+            expected={201},
+        ).get("invite", {})
+        replayed_invite = self._managed_request(
+            owner,
+            "POST",
+            "/v1/managed/safety/invites",
+            body=invite_body,
+            expected={201},
+        ).get("invite", {})
+        if not invite.get("invite_id") or replayed_invite.get("duplicate") is not True:
+            raise SmokeFailure("Safety invite idempotency failed")
+
+        invite_request = self._managed_request(
+            first_contact,
+            "POST",
+            "/v1/managed/safety/invites:redeem",
+            body={
+                "request_id": str(uuid4()),
+                "capability": capability,
+            },
+        ).get("request", {})
+        accepted_invite = self._managed_request(
+            first_contact,
+            "POST",
+            f"/v1/managed/safety/requests/{invite_request.get('request_id', '')}",
+            body={"decision": "accept"},
+        ).get("request", {})
+        if accepted_invite.get("status") != "accepted":
+            raise SmokeFailure("Safety invitation acceptance failed")
+
+        second_profile = self._managed_request(
+            second_contact,
+            "GET",
+            "/v1/managed/social/profile",
+        ).get("profile", {})
+        direct_request = self._managed_request(
+            owner,
+            "POST",
+            "/v1/managed/safety/requests",
+            body={
+                "request_id": str(uuid4()),
+                "noop_id": second_profile.get("noop_id"),
+            },
+            expected={201},
+        ).get("request", {})
+        accepted_direct = self._managed_request(
+            second_contact,
+            "POST",
+            f"/v1/managed/safety/requests/{direct_request.get('request_id', '')}",
+            body={"decision": "accept"},
+        ).get("request", {})
+        if accepted_direct.get("status") != "accepted":
+            raise SmokeFailure("Safety direct-request acceptance failed")
+
+        contacts = self._managed_request(
+            owner,
+            "GET",
+            "/v1/managed/safety/contacts",
+        )
+        if (
+            len(contacts.get("contacts", [])) != 2
+            or contacts.get("minimum_required") != 2
+            or contacts.get("maximum_allowed") != 5
+        ):
+            raise SmokeFailure("Safety accepted-contact boundary is incorrect")
+
+        incident_request_id = str(uuid4())
+        incident_body = {
+            "request_id": incident_request_id,
+            "duration_hours": 8,
+            "share_location": True,
+        }
+        created = self._managed_request(
+            owner,
+            "POST",
+            "/v1/managed/safety/incidents",
+            body=incident_body,
+            expected={202},
+        ).get("incident", {})
+        replayed = self._managed_request(
+            owner,
+            "POST",
+            "/v1/managed/safety/incidents",
+            body=incident_body,
+            expected={202},
+        ).get("incident", {})
+        incident_id = str(created.get("incident_id") or "")
+        if (
+            not incident_id
+            or created.get("status") != "open"
+            or created.get("delivery", {}).get("contacts_targeted") != 2
+            or replayed.get("duplicate") is not True
+        ):
+            raise SmokeFailure("Safety incident creation or idempotency failed")
+
+        captured_at = datetime.now(UTC).replace(microsecond=0)
+        first_location = self._managed_request(
+            owner,
+            "PUT",
+            f"/v1/managed/safety/incidents/{incident_id}/location",
+            body={
+                "sequence": 1,
+                "latitude": 17.385,
+                "longitude": 78.4867,
+                "horizontal_accuracy_m": 12.5,
+                "captured_at": captured_at.isoformat(),
+            },
+        ).get("location", {})
+        latest_location = self._managed_request(
+            owner,
+            "PUT",
+            f"/v1/managed/safety/incidents/{incident_id}/location",
+            body={
+                "sequence": 2,
+                "latitude": 17.3851,
+                "longitude": 78.4868,
+                "horizontal_accuracy_m": 10.0,
+                "captured_at": (captured_at + timedelta(seconds=1)).isoformat(),
+            },
+        ).get("location", {})
+        contact_view = self._managed_request(
+            first_contact,
+            "GET",
+            f"/v1/managed/safety/incidents/{incident_id}",
+        ).get("incident", {})
+        visible_location = contact_view.get("location") or {}
+        if (
+            first_location.get("sequence") != 1
+            or latest_location.get("sequence") != 2
+            or visible_location.get("sequence") != 2
+            or contact_view.get("role") != "contact"
+        ):
+            raise SmokeFailure("Safety latest-only location replacement failed")
+
+        responding = self._managed_request(
+            first_contact,
+            "POST",
+            f"/v1/managed/safety/incidents/{incident_id}/response",
+            body={"decision": "responding"},
+        ).get("incident", {})
+        unavailable = self._managed_request(
+            second_contact,
+            "POST",
+            f"/v1/managed/safety/incidents/{incident_id}/response",
+            body={"decision": "cannot_respond"},
+        ).get("incident", {})
+        if (
+            responding.get("status") != "acknowledged"
+            or unavailable.get("status") != "acknowledged"
+        ):
+            raise SmokeFailure("Safety responder state failed")
+
+        ended = self._managed_request(
+            owner,
+            "POST",
+            f"/v1/managed/safety/incidents/{incident_id}:end",
+            body={"outcome": "resolved"},
+        ).get("incident", {})
+        if ended.get("status") != "resolved" or ended.get("location") is not None:
+            raise SmokeFailure("Safety resolution did not purge latest location")
+        print(
+            "PASS Safety invites, accepted contacts, manual paging, "
+            "latest-only location, responder state, and resolution"
+        )
 
     def _delete_social_profiles(self) -> None:
         for account in self.accounts:

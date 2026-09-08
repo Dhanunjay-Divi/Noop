@@ -38,6 +38,7 @@ internal object NotificationPlatformIdentity {
         const val ADAPTIVE_DAY = 4_323
         const val WORKOUT_CAUTION = 4_324
         const val MANAGED_FRIENDS_POKE = 4_325
+        const val MANAGED_SAFETY = 4_326
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -66,6 +67,7 @@ internal object NotificationPlatformIdentity {
             ADAPTIVE_DAY,
             WORKOUT_CAUTION,
             MANAGED_FRIENDS_POKE,
+            MANAGED_SAFETY,
         )
     }
 
@@ -104,6 +106,7 @@ internal object NotificationPlatformIdentity {
         val ADAPTIVE_DAY = identity(5_126, "adaptive_day")
         val WORKOUT_CAUTION = identity(5_127, "workout_caution")
         val MANAGED_FRIENDS_POKE = identity(5_128, "managed_friends_poke")
+        val MANAGED_SAFETY = identity(5_129, "managed_safety")
 
         internal val all = listOf(
             CONNECTION_SERVICE,
@@ -134,6 +137,7 @@ internal object NotificationPlatformIdentity {
             ADAPTIVE_DAY,
             WORKOUT_CAUTION,
             MANAGED_FRIENDS_POKE,
+            MANAGED_SAFETY,
         )
     }
 
@@ -141,12 +145,25 @@ internal object NotificationPlatformIdentity {
         context: Context,
         identity: ActivityIntentIdentity,
         launchIntent: Intent,
+        instanceKey: String? = null,
     ): PendingIntent = PendingIntent.getActivity(
         context,
         identity.requestCode,
-        launchIntent.setAction(identity.action),
+        launchIntent.setAction(
+            instanceKey?.let {
+                instanceIdentity(identity, it).action
+            } ?: identity.action,
+        ),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
+
+    internal fun instanceIdentity(
+        identity: ActivityIntentIdentity,
+        instanceKey: String,
+    ): ActivityIntentIdentity {
+        require(instanceKey.matches(Regex("^[a-z0-9-]{1,64}$")))
+        return identity.copy(action = "${identity.action}.instance.$instanceKey")
+    }
 
     private fun identity(requestCode: Int, name: String) = ActivityIntentIdentity(
         requestCode = requestCode,

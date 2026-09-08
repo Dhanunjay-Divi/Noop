@@ -357,6 +357,18 @@ resource "google_cloud_run_v2_service" "managed_api" {
         value = "true"
       }
       env {
+        name  = "NOOP_MANAGED_PUSH_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
+        value = "5"
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_MAX_CONCURRENCY"
+        value = "6"
+      }
+      env {
         name  = "NOOP_MANAGED_ENTITLEMENT_MODE"
         value = var.managed_entitlement_mode
       }
@@ -438,6 +450,15 @@ resource "google_cloud_run_v2_service" "managed_api" {
           }
         }
       }
+      env {
+        name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed_push_token_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
 
       resources {
         limits = {
@@ -482,7 +503,9 @@ resource "google_cloud_run_v2_service" "managed_api" {
   depends_on = [
     google_cloud_run_v2_job.migrate,
     google_project_iam_member.managed_api_cloud_sql_client,
+    google_project_iam_member.managed_api_push_sender,
     google_secret_manager_secret_iam_member.managed_api_database_url,
+    google_secret_manager_secret_iam_member.managed_api_push_token_secret,
     google_secret_manager_secret_iam_member.managed_api_replay_secret,
     google_storage_bucket_iam_member.managed_api_raw_creator,
     google_storage_bucket_iam_member.managed_api_raw_reader,
@@ -849,6 +872,18 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = var.project_id
         }
         env {
+          name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
+          value = "5"
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_MAX_CONCURRENCY"
+          value = "6"
+        }
+        env {
           name  = "NOOP_MANAGED_SIGNER_EMAIL"
           value = google_service_account.managed_lifecycle.email
         }
@@ -866,6 +901,15 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.managed_replay_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed_push_token_secret.secret_id
               version = "latest"
             }
           }
@@ -890,9 +934,11 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
     google_cloud_run_v2_job.migrate,
     google_project_iam_member.managed_lifecycle_cloud_sql_client,
     google_secret_manager_secret_iam_member.managed_lifecycle_database_url,
+    google_secret_manager_secret_iam_member.managed_lifecycle_push_token_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_replay_secret,
     google_storage_bucket_iam_member.managed_lifecycle_raw_deleter,
     google_project_iam_member.managed_lifecycle_identity_deleter,
+    google_project_iam_member.managed_lifecycle_push_sender,
   ]
 }
 
