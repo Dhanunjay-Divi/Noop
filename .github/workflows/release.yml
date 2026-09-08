@@ -448,6 +448,7 @@ jobs:
   publish:
     needs: [bump, android, macos, ios]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout exact reviewed source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
@@ -467,23 +468,108 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.bump.outputs.tag }}
           VER: ${{ needs.bump.outputs.ver }}
+          RELEASE_SHA: ${{ needs.bump.outputs.sha }}
         run: |
           set -euo pipefail
-          ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-          for expected in \
-            "NOOP-android-v${VER}.apk" \
-            "NOOP-android-v${VER}.apk.sha256" \
-            "NOOP-android-v${VER}.cdx.json" \
-            "NOOP-macos-v${VER}.zip" \
-            "NOOP-ios-unsigned-v${VER}.ipa"
-          do
-            if ! grep -Fxq "$expected" <<<"$ASSETS"; then
-              echo "::error::release $TAG is missing $expected"
-              exit 1
-            fi
-          done
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease=false --latest
+          RELEASE=$(
+            timeout 30s gh api \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+          )
+          RELEASE_ID=$(jq -er '.id | select(type == "number" and . > 0)' \
+            <<<"$RELEASE")
+          [ "$(jq -r '.tag_name' <<<"$RELEASE")" = "$TAG" ]
+          [ "$(jq -r '.draft' <<<"$RELEASE")" = "true" ] || {
+            echo "::error::Release $TAG is not the expected draft."
+            exit 1
+          }
+          [ "$(jq -r '.prerelease' <<<"$RELEASE")" = "false" ]
+
+          EXPECTED_ASSETS=$(
+            printf '%s\n' \
+              "NOOP-android-v${VER}.apk" \
+              "NOOP-android-v${VER}.apk.sha256" \
+              "NOOP-android-v${VER}.cdx.json" \
+              "NOOP-macos-v${VER}.zip" \
+              "NOOP-ios-unsigned-v${VER}.ipa" |
+              sort
+          )
+          ACTUAL_ASSETS=$(
+            jq -er '
+              if all(.assets[];
+                (.name | type == "string") and
+                (.size | type == "number") and
+                (.size > 0))
+              then [.assets[].name] | sort | .[]
+              else error("invalid release asset")
+              end
+            ' <<<"$RELEASE"
+          )
+          [ "$ACTUAL_ASSETS" = "$EXPECTED_ASSETS" ] || {
+            echo "::error::Release $TAG does not contain the exact verified asset set."
+            exit 1
+          }
+
+          python3 Tools/github-release-tag-gate.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$TAG" \
+            --expected-sha "$RELEASE_SHA"
+
+          return_release_to_draft() {
+            local rolled_back
+            rolled_back=$(
+              timeout 30s gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+                -F draft=true -F prerelease=false
+            ) || {
+              echo "::error::Published release validation failed and automatic draft rollback failed."
+              return 1
+            }
+            [ "$(jq -r '.id' <<<"$rolled_back")" = "$RELEASE_ID" ] &&
+              [ "$(jq -r '.draft' <<<"$rolled_back")" = "true" ] &&
+              [ "$(jq -r '.prerelease' <<<"$rolled_back")" = "false" ] || {
+              echo "::error::Published release validation failed and draft rollback was not verified."
+              return 1
+            }
+          }
+
+          if ! PUBLISHED=$(
+            timeout 30s gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F draft=false -F prerelease=false -f make_latest=true
+          ); then
+            return_release_to_draft || exit 1
+            echo "::error::Release publication request failed; release returned to draft."
+            exit 1
+          fi
+
+          if
+            [ "$(jq -r '.id' <<<"$PUBLISHED")" = "$RELEASE_ID" ] &&
+            [ "$(jq -r '.tag_name' <<<"$PUBLISHED")" = "$TAG" ] &&
+            [ "$(jq -r '.draft' <<<"$PUBLISHED")" = "false" ] &&
+            [ "$(jq -r '.prerelease' <<<"$PUBLISHED")" = "false" ] &&
+            PUBLISHED_ASSETS=$(
+              jq -er '
+                if all(.assets[];
+                  (.name | type == "string") and
+                  (.size | type == "number") and
+                  (.size > 0))
+                then [.assets[].name] | sort | .[]
+                else error("invalid release asset")
+                end
+              ' <<<"$PUBLISHED"
+            ) &&
+            [ "$PUBLISHED_ASSETS" = "$EXPECTED_ASSETS" ] &&
+            python3 Tools/github-release-tag-gate.py \
+              --repository "$GITHUB_REPOSITORY" \
+              --tag "$TAG" \
+              --expected-sha "$RELEASE_SHA"
+          then
+            :
+          else
+            return_release_to_draft || exit 1
+            echo "::error::Published release validation failed; release returned to draft."
+            exit 1
+          fi
 
   # Update the stable public AltStore / SideStore channel only after the
   # versioned release is published. The called workflow is also manually

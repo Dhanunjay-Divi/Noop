@@ -466,6 +466,14 @@ def check_release_workflow(root: Path) -> None:
         "if: ${{ inputs.publish_homebrew }}",
         "Reverify required checks before publication",
         "--sha \"$RELEASE_SHA\"",
+        "Tools/github-release-tag-gate.py",
+        'RELEASE_SHA: ${{ needs.bump.outputs.sha }}',
+        "return_release_to_draft",
+        "Release publication request failed; release returned to draft.",
+        "Published release validation failed; release returned to draft.",
+        "NOOP-android-v${VER}.apk.sha256",
+        "NOOP-android-v${VER}.cdx.json",
+        "NOOP-ios-unsigned-v${VER}.ipa",
     )
     for item in required_text:
         if item not in text:
@@ -481,6 +489,40 @@ def check_release_workflow(root: Path) -> None:
     if text.count("Tools/required-ci-gate.py verify-github") < 2:
         raise GateError(
             "release workflow must verify exact-SHA checks before draft and publish"
+        )
+    if text.count("Tools/github-release-tag-gate.py") < 2:
+        raise GateError(
+            "release workflow must verify the live tag before and after publication"
+        )
+    publish_section = _job_section(text, "publish")
+    before_publish = publish_section.index(
+        'if ! PUBLISHED=$(\n            timeout 30s gh api --method PATCH'
+    )
+    first_tag_gate = publish_section.index(
+        "python3 Tools/github-release-tag-gate.py"
+    )
+    second_tag_gate = publish_section.index(
+        "python3 Tools/github-release-tag-gate.py",
+        first_tag_gate + 1,
+    )
+    request_rollback = publish_section.index(
+        "return_release_to_draft || exit 1",
+        before_publish,
+    )
+    validation_rollback = publish_section.index(
+        "return_release_to_draft || exit 1",
+        second_tag_gate,
+    )
+    if not (
+        first_tag_gate
+        < before_publish
+        < request_rollback
+        < second_tag_gate
+        < validation_rollback
+    ):
+        raise GateError(
+            "release workflow must gate immediately around publication and "
+            "roll back post-publication validation failures"
         )
     if re.search(
         r"git\s+push[^\n]*(?:HEAD:)?(?:refs/heads/)?main(?:[\s\"']|$)",
@@ -665,6 +707,7 @@ def check_release_control_test_suite(root: Path) -> None:
     required_modules = (
         "Tools.tests.test_forgejo_release_helper",
         "Tools.tests.test_forgejo_version_gate",
+        "Tools.tests.test_github_release_tag_gate",
         "Tools.tests.test_homebrew_helper",
         "Tools.tests.test_homebrew_version_gate",
     )

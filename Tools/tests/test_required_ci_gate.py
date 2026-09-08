@@ -434,10 +434,65 @@ class RequiredCIGateTests(unittest.TestCase):
         for module in (
             "Tools.tests.test_forgejo_release_helper",
             "Tools.tests.test_forgejo_version_gate",
+            "Tools.tests.test_github_release_tag_gate",
             "Tools.tests.test_homebrew_helper",
             "Tools.tests.test_homebrew_version_gate",
         ):
             self.assertIn(module, workflow)
+
+    def test_release_publication_is_bound_to_live_tag_and_rollback(self) -> None:
+        source = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        publish = GATE._job_section(source, "publish")
+        mutation = publish.index(
+            'if ! PUBLISHED=$(\n'
+            "            timeout 30s gh api --method PATCH"
+        )
+        first_gate = publish.index(
+            "python3 Tools/github-release-tag-gate.py"
+        )
+        second_gate = publish.index(
+            "python3 Tools/github-release-tag-gate.py",
+            first_gate + 1,
+        )
+        request_rollback = publish.index(
+            "return_release_to_draft || exit 1",
+            mutation,
+        )
+        validation_rollback = publish.index(
+            "return_release_to_draft || exit 1",
+            second_gate,
+        )
+        self.assertLess(first_gate, mutation)
+        self.assertLess(mutation, request_rollback)
+        self.assertLess(request_rollback, second_gate)
+        self.assertLess(second_gate, validation_rollback)
+        self.assertIn(
+            "Release publication request failed; release returned to draft.",
+            publish,
+        )
+        self.assertIn(
+            "Published release validation failed; release returned to draft.",
+            publish,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / ".github/workflows/release.yml"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                source.replace(
+                    "python3 Tools/github-release-tag-gate.py",
+                    "python3 Tools/release-version-gate.py",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "before and after publication"
+            ):
+                GATE.check_release_workflow(root)
 
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
         workflow = self.config["workflows"][0]
