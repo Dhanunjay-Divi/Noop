@@ -448,11 +448,7 @@ class ManagedStorageClient(
                         .toRequestBody(JSON),
                 ).build(),
             ).requireObject("location"),
-        ).also {
-            if (it.sequence < sequence) {
-                throw ManagedStorageException.InvalidResponse()
-            }
-        }
+        )
     }
 
     suspend fun respondToSafetyIncident(
@@ -1941,7 +1937,7 @@ class ManagedStorageClient(
             "expired",
         )
         val countIsValid = if (incident.role == "owner") {
-            incident.participants.size in 2..5
+            incident.participants.size in 0..5
         } else {
             incident.participants.size == 1
         }
@@ -2257,7 +2253,8 @@ class ManagedStorageClient(
     }
 
     private fun serverError(statusCode: Int, body: String): ManagedStorageException = when (statusCode) {
-        401, 403 -> ManagedStorageException.Authentication()
+        401 -> ManagedStorageException.Authentication()
+        403 -> ManagedStorageException.Forbidden()
         404 -> ManagedStorageException.NotFound()
         409 -> when {
             body.contains("policy", ignoreCase = true) -> ManagedStorageException.PolicyChanged()

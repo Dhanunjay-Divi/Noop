@@ -2503,6 +2503,7 @@
     <string name="managed_cloud_error_network">Não foi possível contactar o NOOP+.</string>
     <string name="managed_cloud_error_invalid_response">O NOOP+ devolveu uma resposta inválida.</string>
     <string name="managed_cloud_error_authentication">A autenticação do NOOP+ expirou. Inicie novamente sessão.</string>
+    <string name="managed_cloud_error_forbidden">O NOOP+ não permitiu essa ação.</string>
     <string name="managed_cloud_error_policy_changed">A política de armazenamento do NOOP+ mudou. Reveja-a antes de sincronizar.</string>
     <string name="managed_cloud_error_cursor_expired">O cursor na nuvem deste dispositivo expirou. É necessário um restauro completo.</string>
     <string name="managed_cloud_error_not_found">O recurso NOOP+ pedido já não existe.</string>
@@ -2652,7 +2653,7 @@
     <string name="managed_friends_rotate_body">O seu ID atual deixará de aceitar novos pedidos. Os amigos existentes não são alterados.</string>
     <string name="managed_friends_rotate_action">Substituir ID NOOP</string>
     <string name="managed_friends_delete_title">Eliminar Amigos geridos?</string>
-    <string name="managed_friends_delete_body">Amizades, convites, resumos partilhados, emblemas e toques pendentes serão eliminados. A cópia de segurança NOOP+ e os dados no dispositivo não são alterados.</string>
+    <string name="managed_friends_delete_body">Amizades, convites, resumos partilhados, emblemas, toques pendentes, contactos Safety, convites Safety e o histórico de incidentes Safety serão eliminados. Qualquer alerta Safety ativo e a partilha de localização terminarão. A cópia de segurança NOOP+ e os dados no dispositivo não são alterados.</string>
     <string name="managed_friends_delete_action">Eliminar Amigos geridos</string>
     <string name="managed_friends_invite_title">Ligação de convite privada</string>
     <string name="managed_friends_invite_body">A ligação expira no prazo de 72 horas e cria um pedido, nunca uma amizade automática.</string>

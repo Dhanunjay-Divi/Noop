@@ -1161,7 +1161,7 @@ final class ManagedStorageClientTests: XCTestCase {
                         with: requestBody(request)
                     ) as? [String: Any]
                 )
-                XCTAssertEqual((body["sequence"] as? NSNumber)?.int64Value, 2)
+                XCTAssertEqual((body["sequence"] as? NSNumber)?.int64Value, 99)
                 json = """
                 {"location":{
                   "sequence":3,
@@ -1211,7 +1211,7 @@ final class ManagedStorageClientTests: XCTestCase {
         XCTAssertEqual(creation.pushOutcome, "attempted")
         let location = try await client.updateSafetyLocation(
             incidentID: incidentID,
-            sequence: 2,
+            sequence: 99,
             latitude: 17.385,
             longitude: 78.4867,
             horizontalAccuracyM: 12.5,
@@ -1219,6 +1219,80 @@ final class ManagedStorageClientTests: XCTestCase {
             authorization: authorization
         )
         XCTAssertEqual(location.sequence, 3)
+    }
+
+    func testManagedSafetyRetainedOwnerIncidentAllowsErasedParticipants() async throws {
+        let (client, authorization) = try makeClient()
+        let incidentID = UUID()
+        let ownerID = UUID()
+        let participantID = UUID()
+
+        for participantCount in 0...1 {
+            let participants = participantCount == 0
+                ? ""
+                : """
+                  {
+                    "profile_id":"\(participantID)",
+                    "display_name":"Former contact",
+                    "status":"revoked",
+                    "paged_at":"2026-09-08T10:00:00Z",
+                    "responded_at":"2026-09-08T10:05:00Z",
+                    "push":{"configured":false,"reached":false}
+                  }
+                  """
+            ManagedURLProtocolStub.handler = { request in
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/managed/safety/incidents"
+                )
+                let json = """
+                {"incidents":[{
+                  "incident_id":"\(incidentID)",
+                  "role":"owner",
+                  "owner_profile_id":"\(ownerID)",
+                  "owner_display_name":"Owner",
+                  "trigger":"manual_sos",
+                  "status":"expired",
+                  "duration_hours":8,
+                  "share_location":false,
+                  "created_at":"2026-09-08T10:00:00Z",
+                  "expires_at":"2026-09-08T18:00:00Z",
+                  "acknowledged_at":null,
+                  "ended_at":"2026-09-08T18:00:00Z",
+                  "participants":[\(participants)],
+                  "location":null,
+                  "delivery":{
+                    "contacts_targeted":0,
+                    "contacts_reached":0,
+                    "installations_targeted":0,
+                    "installations_reached":0,
+                    "installations_retryable":0,
+                    "installations_terminal":0
+                  },
+                  "duplicate":false
+                }]}
+                """
+                return (
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data(json.utf8)
+                )
+            }
+
+            let incidents = try await client.safetyIncidents(
+                authorization: authorization
+            )
+
+            XCTAssertEqual(incidents.count, 1)
+            XCTAssertEqual(
+                incidents[0].participants.count,
+                participantCount
+            )
+        }
     }
 
     private func makeClient() throws -> (ManagedStorageClient, ManagedAuthorization) {

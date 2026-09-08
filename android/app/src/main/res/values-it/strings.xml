@@ -360,4 +360,6 @@
     <string name="strength_signal_honesty">La frequenza cardiaca descrive la risposta cardiovascolare. Ripetizioni e carico derivano solo da ciò che registri.</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">Aggiornamenti più chiari e rapporti che ci aiutano a risolvere i problemi</string>
     <string name="whats_new_welcome_version">Ti diamo il benvenuto nella versione %1$s</string>
+    <string name="managed_friends_delete_body">Amicizie, inviti, riepiloghi condivisi, badge, poke in sospeso, contatti Safety, inviti Safety e cronologia degli incidenti Safety verranno eliminati. Qualsiasi allerta Safety attiva e condivisione della posizione termineranno. Il backup NOOP+ e i dati sul dispositivo non cambiano.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ non ha consentito questa azione.</string>
 </resources>

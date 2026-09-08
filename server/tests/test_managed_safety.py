@@ -858,6 +858,16 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
             principal=first,
             installation_id=f"ios-safety-first-{run_id}",
         )
+        retained_delivery_id = await primary._require_pool().fetchval(
+            """
+            SELECT delivery_id
+            FROM managed_safety_push_deliveries
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            first.account_id,
+            f"ios-safety-first-{run_id}",
+        )
+        assert retained_delivery_id is not None
         revoked = await primary._require_pool().fetchrow(
             """
             SELECT status, token_hash, token_ciphertext
@@ -882,6 +892,29 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
         )
         assert transferred["status"] == "active"
         assert transferred["target_kind"] == "fid"
+        retired = await primary._require_pool().fetchrow(
+            """
+            SELECT status, token_hash, token_ciphertext
+            FROM managed_push_installations
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            first.account_id,
+            f"ios-safety-first-{run_id}",
+        )
+        assert retired["status"] == "revoked"
+        assert retired["token_hash"] != codec.token_hash(first_token)
+        assert retired["token_ciphertext"] == f"retired.{retired['token_hash']}"
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_push_deliveries
+                WHERE delivery_id = $1
+                """,
+                retained_delivery_id,
+            )
+            == 1
+        )
         assert (
             await primary._require_pool().fetchval(
                 """
@@ -1271,17 +1304,22 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             installation_id=second_installation,
             registration=registration,
         )
+        old_claim_id = uuid4()
         await primary._require_pool().execute(
             """
             UPDATE managed_safety_push_deliveries
-            SET status = 'invalid',
+            SET status = 'sending',
                 attempts = 1,
+                claim_id = $3,
+                claim_expires_at = clock_timestamp() + interval '1 minute',
+                last_attempt_at = clock_timestamp(),
                 updated_at = clock_timestamp()
             WHERE incident_id = $1
               AND installation_id = $2
             """,
             incident_id,
             second_installation,
+            old_claim_id,
         )
         duplicate = await push.register(
             principal=second,
@@ -1300,7 +1338,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
                 incident_id,
                 second_installation,
             )
-            == "invalid"
+            == "sending"
         )
 
         new_second_token = f"fcm-token:late_second_new_{run_id}"
@@ -1327,6 +1365,34 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
         )
         assert reset["status"] == "pending"
         assert reset["attempts"] == 0
+        with pytest.raises(ManagedConflictError):
+            await safety.complete_push_delivery(
+                delivery_id=await primary._require_pool().fetchval(
+                    """
+                    SELECT delivery_id
+                    FROM managed_safety_push_deliveries
+                    WHERE incident_id = $1
+                      AND installation_id = $2
+                    """,
+                    incident_id,
+                    second_installation,
+                ),
+                claim_id=old_claim_id,
+                outcome="invalid",
+                provider_reference_hash=None,
+            )
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT status
+                FROM managed_push_installations
+                WHERE account_id = $1 AND installation_id = $2
+                """,
+                second.account_id,
+                second_installation,
+            )
+            == "active"
+        )
 
         await safety.respond(
             principal=second,
@@ -1388,6 +1454,180 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
                 UUID(first_profile["profile_id"]),
             )
             == 0
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_managed_safety_read_expiry_is_always_transactional() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        principal = await _principal(primary, label=f"transaction-{uuid4()}")
+        await _profile(managed, principal, display_name="Transaction")
+        original_expire = safety._expire
+        transaction_checks: list[bool] = []
+
+        async def checked_expire(connection, now):
+            transaction_checks.append(connection.is_in_transaction())
+            await original_expire(connection, now)
+
+        safety._expire = checked_expire
+        await safety.list_requests(principal=principal)
+        await safety.list_incidents(principal=principal)
+        with pytest.raises(ManagedNotFoundError):
+            await safety.get_incident(
+                principal=principal,
+                incident_id=uuid4(),
+            )
+
+        assert transaction_checks == [True, True, True]
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        provider = _RecordingPushProvider()
+        push = ManagedSafetyPushService(
+            repository=safety,
+            token_codec=ManagedPushTokenCodec(PUSH_SECRET),
+            provider=provider,
+        )
+        owner = await _principal(primary, label=f"inactive-owner-{uuid4()}")
+        first = await _principal(primary, label=f"inactive-first-{uuid4()}")
+        second = await _principal(primary, label=f"inactive-second-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'suspended', updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            second.account_id,
+        )
+        assert len(await safety.list_contacts(principal=owner)) == 1
+        with pytest.raises(ManagedConflictError):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'active', updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            second.account_id,
+        )
+        installation_id = f"android-inactive-{uuid4().hex}"
+        await _installation(
+            primary,
+            second,
+            installation_id=installation_id,
+            platform="android",
+        )
+        await push.register(
+            principal=second,
+            installation_id=installation_id,
+            registration=ManagedPushRegistration(
+                platform="android",
+                environment="development",
+                target_kind="token",
+                token=f"fcm-token:inactive_{uuid4().hex}",
+            ),
+        )
+        incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        incident_id = UUID(incident["incident_id"])
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'erasure_pending',
+                erasure_requested_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            second.account_id,
+        )
+
+        summary = await push.dispatch(
+            principal=owner,
+            incident_id=incident_id,
+        )
+
+        assert provider.tokens == []
+        assert summary["installations_reached"] == 0
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1 AND installation_id = $2
+                """,
+                incident_id,
+                installation_id,
+            )
+            == "rejected"
         )
     finally:
         await primary.shutdown()

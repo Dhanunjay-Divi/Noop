@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from datetime import UTC, datetime, timedelta
@@ -65,6 +66,7 @@ class _DeliveryRepository:
         self.target_kind = target_kind
         self.token_ciphertext = token_ciphertext
         self.completed = []
+        self.due_claimed = False
 
     async def claim_push_deliveries(self, **_):
         return [
@@ -82,6 +84,9 @@ class _DeliveryRepository:
         ]
 
     async def claim_due_push_deliveries(self, **_):
+        if self.due_claimed:
+            return []
+        self.due_claimed = True
         return await self.claim_push_deliveries()
 
     async def complete_push_delivery(self, **values):
@@ -94,6 +99,44 @@ class _DeliveryRepository:
             "installations_targeted": 1,
             "installations_reached": 0,
         }
+
+
+class _WaveDeliveryRepository:
+    def __init__(self, deliveries: list[dict]) -> None:
+        self.pending = list(deliveries)
+        self.claim_limits: list[int] = []
+        self.completed: list[dict] = []
+
+    async def claim_due_push_deliveries(self, *, limit: int):
+        self.claim_limits.append(limit)
+        claimed = self.pending[:limit]
+        self.pending = self.pending[limit:]
+        return claimed
+
+    async def complete_push_delivery(self, **values):
+        self.completed.append(values)
+
+
+class _ConcurrentAcceptingProvider:
+    def __init__(self) -> None:
+        self.active = 0
+        self.maximum_active = 0
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    async def send_safety_incident(self, **_) -> ManagedPushResult:
+        self.active += 1
+        self.maximum_active = max(self.maximum_active, self.active)
+        try:
+            await asyncio.sleep(0.01)
+        finally:
+            self.active -= 1
+        return ManagedPushResult(
+            outcome="sent",
+            provider_reference_hash="a" * 64,
+        )
 
 
 def test_managed_push_token_codec_binds_ciphertext_to_installation() -> None:
@@ -181,6 +224,51 @@ async def test_due_push_retry_reports_only_bounded_outcomes() -> None:
     assert result.claimed == 1
     assert result.provider_accepted == 0
     assert result.retryable_failures == 1
+    assert result.terminal_failures == 0
+    assert result.receipt_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_due_push_dispatch_claims_only_one_concurrency_wave_at_a_time() -> None:
+    codec = ManagedPushTokenCodec("managed-push-secret-" + ("x" * 32))
+    account_id = uuid4()
+    deliveries = []
+    for index in range(7):
+        installation_id = f"android-wave-{index}"
+        deliveries.append(
+            {
+                "delivery_id": uuid4(),
+                "claim_id": uuid4(),
+                "incident_id": uuid4(),
+                "account_id": account_id,
+                "installation_id": installation_id,
+                "target_kind": "token",
+                "token_ciphertext": codec.seal(
+                    f"fcm-token:wave_{index}_1234567890",
+                    account_id=account_id,
+                    installation_id=installation_id,
+                ),
+                "expires_at": datetime.now(UTC) + timedelta(hours=8),
+                "attempt": 1,
+            }
+        )
+    repository = _WaveDeliveryRepository(deliveries)
+    provider = _ConcurrentAcceptingProvider()
+    service = ManagedSafetyPushService(
+        repository=repository,
+        token_codec=codec,
+        provider=provider,
+        max_concurrency=3,
+    )
+
+    result = await service.dispatch_due(limit=7)
+
+    assert repository.claim_limits == [3, 3, 1]
+    assert provider.maximum_active == 3
+    assert len(repository.completed) == 7
+    assert result.claimed == 7
+    assert result.provider_accepted == 7
+    assert result.retryable_failures == 0
     assert result.terminal_failures == 0
     assert result.receipt_failures == 0
 

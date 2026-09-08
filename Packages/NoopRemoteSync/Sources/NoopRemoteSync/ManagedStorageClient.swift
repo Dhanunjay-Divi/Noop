@@ -623,9 +623,6 @@ public actor ManagedStorageClient {
             authorization: authorization
         )
         try Self.validate(response.location)
-        guard response.location.sequence >= sequence else {
-            throw ManagedStorageError.invalidResponse
-        }
         return response.location
     }
 
@@ -1845,7 +1842,7 @@ public actor ManagedStorageClient {
             incident.status
         )
         let participantCountIsValid = incident.role == "owner"
-            ? (2...5).contains(incident.participants.count)
+            ? (0...5).contains(incident.participants.count)
             : incident.participants.count == 1
         guard ["owner", "contact"].contains(incident.role),
               !incident.ownerDisplayName.isEmpty,

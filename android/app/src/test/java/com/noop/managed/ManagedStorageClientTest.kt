@@ -852,7 +852,7 @@ class ManagedStorageClientTest {
                     "/v1/managed/safety/incidents/" +
                         "${incidentId.toString().lowercase()}/location" -> {
                         val requestBody = request.jsonBody()
-                        assertEquals(2L, requestBody.getLong("sequence"))
+                        assertEquals(99L, requestBody.getLong("sequence"))
                         JSONObject().put(
                             "location",
                             JSONObject()
@@ -890,13 +890,91 @@ class ManagedStorageClientTest {
         val location = client.updateSafetyLocation(
             authorization = authorization,
             incidentId = incidentId,
-            sequence = 2,
+            sequence = 99,
             latitude = 17.385,
             longitude = 78.4867,
             horizontalAccuracyM = 12.5,
             capturedAt = "2026-09-08T10:01:00Z",
         )
         assertEquals(3L, location.sequence)
+    }
+
+    @Test
+    fun retainedOwnerIncidentAllowsErasedParticipants() = runTest {
+        val incidentId = UUID.fromString("00000000-0000-0000-0000-000000000204")
+        val ownerId = UUID.fromString("00000000-0000-0000-0000-000000000205")
+        val participantId =
+            UUID.fromString("00000000-0000-0000-0000-000000000206")
+
+        for (participantCount in 0..1) {
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    assertEquals(
+                        "/v1/managed/safety/incidents",
+                        request.url.encodedPath,
+                    )
+                    val participants = org.json.JSONArray()
+                    if (participantCount == 1) {
+                        participants.put(
+                            JSONObject()
+                                .put("profile_id", participantId.toString())
+                                .put("display_name", "Former contact")
+                                .put("status", "revoked")
+                                .put("paged_at", "2026-09-08T10:00:00Z")
+                                .put("responded_at", "2026-09-08T10:05:00Z")
+                                .put(
+                                    "push",
+                                    JSONObject()
+                                        .put("configured", false)
+                                        .put("reached", false),
+                                ),
+                        )
+                    }
+                    val incident = JSONObject()
+                        .put("incident_id", incidentId.toString())
+                        .put("role", "owner")
+                        .put("owner_profile_id", ownerId.toString())
+                        .put("owner_display_name", "Owner")
+                        .put("trigger", "manual_sos")
+                        .put("status", "expired")
+                        .put("duration_hours", 8)
+                        .put("share_location", false)
+                        .put("created_at", "2026-09-08T10:00:00Z")
+                        .put("expires_at", "2026-09-08T18:00:00Z")
+                        .put("acknowledged_at", JSONObject.NULL)
+                        .put("ended_at", "2026-09-08T18:00:00Z")
+                        .put("participants", participants)
+                        .put("location", JSONObject.NULL)
+                        .put(
+                            "delivery",
+                            JSONObject()
+                                .put("contacts_targeted", 0)
+                                .put("contacts_reached", 0)
+                                .put("installations_targeted", 0)
+                                .put("installations_reached", 0)
+                                .put("installations_retryable", 0)
+                                .put("installations_terminal", 0),
+                        )
+                        .put("duplicate", false)
+                    response(
+                        request,
+                        200,
+                        JSONObject()
+                            .put(
+                                "incidents",
+                                org.json.JSONArray().put(incident),
+                            )
+                            .toString(),
+                    )
+                },
+            )
+
+            val incidents = client.safetyIncidents(authorization)
+
+            assertEquals(1, incidents.size)
+            assertEquals(participantCount, incidents.single().participants.size)
+        }
     }
 
     private fun safetyContact(profileId: UUID, name: String): JSONObject =

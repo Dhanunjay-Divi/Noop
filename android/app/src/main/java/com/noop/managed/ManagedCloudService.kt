@@ -496,18 +496,22 @@ class ManagedCloudService private constructor(context: Context) {
         nowMs: Long = System.currentTimeMillis(),
     ): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED ||
-            !preferences.safetyEnabled ||
-            nowMs - preferences.safetyLastAttemptMs < SAFETY_CATCH_UP_INTERVAL_MS
+            !preferences.safetyEnabled
         ) {
             return false
         }
-        preferences.safetyLastAttemptMs = nowMs
+        val previousAttempt = preferences.beginSafetyAttempt(
+            nowMs,
+            SAFETY_CATCH_UP_INTERVAL_MS,
+        ) ?: return false
         return try {
             refreshSafetyData()
             true
         } catch (error: CancellationException) {
+            preferences.rollbackSafetyAttempt(nowMs, previousAttempt)
             throw error
         } catch (error: Throwable) {
+            preferences.rollbackSafetyAttempt(nowMs, previousAttempt)
             com.noop.AppDiagnosticsRecorder.record(
                 "managed_safety.catch_up",
                 fields = mapOf(
@@ -609,6 +613,17 @@ class ManagedCloudService private constructor(context: Context) {
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
             "managed_safety.push_registration",
         )
+        if (!managedSafetyNotificationPermissionGranted()) {
+            runCatching { runtime().messaging.isAutoInitEnabled = false }
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "rejected",
+                fields = mapOf(
+                    "failure_kind" to "notification_not_authorized",
+                ),
+            )
+            return false
+        }
         return try {
             client().registerPushInstallation(
                 authorization = authorization(forceRefresh = false),
@@ -645,6 +660,17 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun registerCurrentManagedPushToken(): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED) return false
+        if (!managedSafetyNotificationPermissionGranted()) {
+            runCatching { runtime().messaging.isAutoInitEnabled = false }
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.notification_enable",
+                fields = mapOf(
+                    "outcome" to "rejected",
+                    "failure_kind" to "notification_not_authorized",
+                ),
+            )
+            return false
+        }
         return try {
             ManagedSafetyNotifier.prepare(appContext)
             val messaging = runtime().messaging
@@ -797,12 +823,25 @@ class ManagedCloudService private constructor(context: Context) {
     ): ManagedSafetyIncident? {
         var created: ManagedSafetyIncident? = null
         safetyAction("incident_create") {
-            val creation = client().createSafetyIncident(
-                authorization = authorization(forceRefresh = true),
-                requestId = UUID.randomUUID(),
+            val request = preferences.safetyIncidentRequest(
+                accountScopeHash = accountScopeHash(),
                 durationHours = durationHours,
                 shareLocation = shareLocation,
             )
+            val creation = try {
+                client().createSafetyIncident(
+                    authorization = authorization(forceRefresh = true),
+                    requestId = request.requestId,
+                    durationHours = durationHours,
+                    shareLocation = shareLocation,
+                )
+            } catch (error: Throwable) {
+                if (shouldRetireSafetyIncidentRequest(error)) {
+                    preferences.clearSafetyIncidentRequest(request.requestId)
+                }
+                throw error
+            }
+            preferences.clearSafetyIncidentRequest(request.requestId)
             created = creation.incident
             preferences.safetyEnabled = true
             ManagedCloudScheduler.reconcile(appContext)
@@ -1563,6 +1602,22 @@ class ManagedCloudService private constructor(context: Context) {
                     }.toString(),
                 ),
             )
+        } catch (_: ManagedStorageException.NotFound) {
+            val pendingInvite = preferences.pendingSafetyInviteCapability
+            preferences.clearSafetyState()
+            preferences.pendingSafetyInviteCapability = pendingInvite
+            ManagedCloudScheduler.reconcile(appContext)
+            clearSafetyPresentation()
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "completed",
+                fields = mapOf(
+                    "contacts" to "0",
+                    "requests" to "0",
+                    "incidents" to "0",
+                    "profile" to "absent",
+                ),
+            )
         } catch (error: CancellationException) {
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
@@ -1738,6 +1793,7 @@ class ManagedCloudService private constructor(context: Context) {
         error: Throwable,
     ): Boolean =
         error is ManagedStorageException.Authentication ||
+            error is ManagedStorageException.Forbidden ||
             error is ManagedStorageException.NotFound ||
             error is ManagedStorageException.PolicyChanged ||
             error is ManagedStorageException.CursorExpired ||
@@ -2265,6 +2321,7 @@ class ManagedCloudService private constructor(context: Context) {
         is ManagedStorageException.Network -> "network_transport"
         is ManagedStorageException.InvalidResponse -> "invalid_response"
         is ManagedStorageException.Authentication -> "authentication"
+        is ManagedStorageException.Forbidden -> "forbidden"
         is ManagedStorageException.PolicyChanged -> "policy_changed"
         is ManagedStorageException.CursorExpired -> "cursor_expired"
         is ManagedStorageException.NotFound -> "not_found"
@@ -2669,6 +2726,20 @@ class ManagedCloudService private constructor(context: Context) {
             "noop-managed-account-v1\u0000${user.uid}".toByteArray(StandardCharsets.UTF_8),
         )
 
+    private fun managedSafetyNotificationPermissionGranted(): Boolean =
+        ManagedSafetyNotificationPermission.canRegister(
+            sdkInt = Build.VERSION.SDK_INT,
+            permissionGranted = ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED,
+        )
+
+    private fun shouldRetireSafetyIncidentRequest(error: Throwable): Boolean =
+        ManagedSafetyIncidentRequestPolicy.shouldRetire(error) ||
+            error is ManagedCloudException.Unavailable ||
+            error is ManagedCloudException.FirebaseProjectConflict
+
     private fun runtime(): FirebaseRuntime {
         firebaseRuntime?.let { return it }
         return synchronized(firebaseLock) {
@@ -2899,6 +2970,8 @@ class ManagedCloudService private constructor(context: Context) {
             text(R.string.managed_cloud_error_invalid_response)
         is ManagedStorageException.Authentication ->
             text(R.string.managed_cloud_error_authentication)
+        is ManagedStorageException.Forbidden ->
+            text(R.string.managed_cloud_error_forbidden)
         is ManagedStorageException.PolicyChanged ->
             text(R.string.managed_cloud_error_policy_changed)
         is ManagedStorageException.CursorExpired ->
@@ -2997,6 +3070,11 @@ class ManagedCloudService private constructor(context: Context) {
         }
 
     }
+}
+
+internal object ManagedSafetyNotificationPermission {
+    fun canRegister(sdkInt: Int, permissionGranted: Boolean): Boolean =
+        sdkInt < Build.VERSION_CODES.TIRAMISU || permissionGranted
 }
 
 internal fun managedDeletionDeadlinePassed(

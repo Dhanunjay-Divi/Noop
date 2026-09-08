@@ -97,7 +97,7 @@ struct ManagedFriendsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Friendships, invitations, shared summaries, badges, and pending pokes will be deleted. NOOP+ backup and on-device data are unchanged.")
+            Text("Friendships, invitations, shared summaries, badges, pending pokes, Safety contacts, Safety invitations, and Safety incident history will be deleted. Any active Safety page and location sharing will end. NOOP+ backup and on-device data are unchanged.")
         }
         .confirmationDialog(
             requestToBlock.map { "Block \($0.displayName)?" }

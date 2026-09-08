@@ -16862,14 +16862,14 @@
       "category": "core",
       "lineNumbers": [
         13,
-        2011,
-        2587,
-        2592,
-        2606,
-        2613,
-        2615,
-        2691,
-        2697
+        2047,
+        2693,
+        2698,
+        2712,
+        2719,
+        2721,
+        2797,
+        2803
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -22139,14 +22139,14 @@
         26,
         27,
         113,
-        1707,
-        2418,
-        2418,
-        2427,
-        2427,
-        2440,
-        2441,
-        2442
+        1762,
+        2475,
+        2475,
+        2484,
+        2484,
+        2497,
+        2498,
+        2499
       ],
       "occurrenceCount": 12,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -35052,8 +35052,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        31,
-        31
+        32,
+        32
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/INDEX.md",

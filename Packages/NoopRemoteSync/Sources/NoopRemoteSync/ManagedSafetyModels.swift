@@ -99,7 +99,9 @@ public struct ManagedSafetyContact: Codable, Equatable, Sendable, Identifiable {
     public let role: String
     public let acceptedAt: String
 
-    public var id: UUID { profileID }
+    public var id: String {
+        "\(profileID.uuidString.lowercased()):\(role)"
+    }
 
     private enum CodingKeys: String, CodingKey {
         case profileID = "profileId"
@@ -302,8 +304,12 @@ public enum ManagedSafetyPushPayload {
               values["schema"] == schema,
               values["route"] == route,
               let rawExpiry = values["expires_at"],
-              let expiry = ISO8601DateFormatter().date(from: rawExpiry),
-              expiry > now,
+              let expiry = ManagedTimestamp.milliseconds(
+                  iso8601: rawExpiry
+              ),
+              expiry > Int64(
+                  (now.timeIntervalSince1970 * 1_000).rounded()
+              ),
               let rawIncidentID = values["incident_id"] else {
             return nil
         }

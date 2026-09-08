@@ -54,7 +54,7 @@ final class ManagedSafetyModelsTests: XCTestCase {
             "kind": "managed_safety_incident",
             "schema": "1",
             "route": "safety",
-            "expires_at": "2026-09-08T18:30:00Z",
+            "expires_at": "2026-09-08T18:30:00.123456+00:00",
             "incident_id": incidentID.uuidString.lowercased(),
         ]
 
@@ -118,5 +118,28 @@ final class ManagedSafetyModelsTests: XCTestCase {
                 "accepted expired payload at \(expiry)"
             )
         }
+    }
+
+    func testContactIdentityIncludesRelationshipRole() {
+        let profileID = UUID()
+        let acceptedAt = "2026-09-08T09:00:00Z"
+        let owner = ManagedSafetyContact(
+            profileID: profileID,
+            displayName: "Owner",
+            role: "owner",
+            acceptedAt: acceptedAt
+        )
+        let contact = ManagedSafetyContact(
+            profileID: profileID,
+            displayName: "Owner",
+            role: "contact",
+            acceptedAt: acceptedAt
+        )
+
+        XCTAssertNotEqual(owner.id, contact.id)
+        XCTAssertEqual(
+            owner.id,
+            "\(profileID.uuidString.lowercased()):owner"
+        )
     }
 }

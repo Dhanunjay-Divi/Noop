@@ -2665,6 +2665,7 @@
     <string name="managed_cloud_error_network">NOOP+ could not be reached.</string>
     <string name="managed_cloud_error_invalid_response">NOOP+ returned an invalid response.</string>
     <string name="managed_cloud_error_authentication">NOOP+ authentication expired. Sign in again.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ did not allow that action.</string>
     <string name="managed_cloud_error_policy_changed">The NOOP+ storage policy changed. Review it before syncing.</string>
     <string name="managed_cloud_error_cursor_expired">This device’s cloud cursor expired. A full restore is required.</string>
     <string name="managed_cloud_error_not_found">The requested NOOP+ resource no longer exists.</string>
@@ -2814,7 +2815,7 @@
     <string name="managed_friends_rotate_body">Your current ID will stop accepting new requests. Existing friends are unchanged.</string>
     <string name="managed_friends_rotate_action">Replace NOOP ID</string>
     <string name="managed_friends_delete_title">Delete managed Friends?</string>
-    <string name="managed_friends_delete_body">Friendships, invitations, shared summaries, badges, and pending pokes will be deleted. NOOP+ backup and on-device data are unchanged.</string>
+    <string name="managed_friends_delete_body">Friendships, invitations, shared summaries, badges, pending pokes, Safety contacts, Safety invitations, and Safety incident history will be deleted. Any active Safety page and location sharing will end. NOOP+ backup and on-device data are unchanged.</string>
     <string name="managed_friends_delete_action">Delete managed Friends</string>
     <string name="managed_friends_invite_title">Private invitation link</string>
     <string name="managed_friends_invite_body">The link expires within 72 hours and creates a request, never an automatic friendship.</string>

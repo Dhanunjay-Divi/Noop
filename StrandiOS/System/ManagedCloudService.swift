@@ -108,6 +108,8 @@ final class ManagedCloudService: ObservableObject {
         static let safetyLastAttempt = "managedCloud.safety.lastAttempt.v1"
         static let safetyInviteRequestID =
             "managedCloud.safety.inviteRequestID.v1"
+        static let safetyIncidentRequest =
+            "managedCloud.safety.incidentRequest.v1"
         static let safetyLocationSequences =
             "managedCloud.safety.locationSequences.v1"
     }
@@ -507,7 +509,7 @@ final class ManagedCloudService: ObservableObject {
             try configureFirebaseIfNeeded()
             let allowed = try await UNUserNotificationCenter.current()
                 .requestAuthorization(
-                    options: [.alert, .sound]
+                    options: [.alert, .sound, .timeSensitive]
                 )
             guard allowed else { return false }
             UIApplication.shared.registerForRemoteNotifications()
@@ -543,12 +545,16 @@ final class ManagedCloudService: ObservableObject {
             let scope = try accountScopeHash()
             let managedClient = try client()
             let auth = try await authorization(forceRefresh: true)
-            var capability = try ManagedCloudSafetyInviteSecret.value(
-                accountScopeHash: scope
+            var binding = try ManagedCloudSafetyInviteSecret.binding(
+                accountScopeHash: scope,
+                legacyRequestID: defaults.string(
+                    forKey: Key.safetyInviteRequestID
+                ).flatMap(UUID.init(uuidString:))
             )
+            defaults.removeObject(forKey: Key.safetyInviteRequestID)
             var invite = try await managedClient.createSafetyInvite(
-                capability: capability,
-                requestID: socialRequestID(for: Key.safetyInviteRequestID),
+                capability: binding.capability,
+                requestID: binding.requestID,
                 authorization: auth
             )
             if invite.status != "active" {
@@ -556,14 +562,13 @@ final class ManagedCloudService: ObservableObject {
                     accountScopeHash: scope
                 )
                 defaults.removeObject(forKey: Key.safetyInviteRequestID)
-                capability = try ManagedCloudSafetyInviteSecret.value(
-                    accountScopeHash: scope
+                binding = try ManagedCloudSafetyInviteSecret.binding(
+                    accountScopeHash: scope,
+                    legacyRequestID: nil
                 )
                 invite = try await managedClient.createSafetyInvite(
-                    capability: capability,
-                    requestID: socialRequestID(
-                        for: Key.safetyInviteRequestID
-                    ),
+                    capability: binding.capability,
+                    requestID: binding.requestID,
                     authorization: auth
                 )
             }
@@ -682,12 +687,25 @@ final class ManagedCloudService: ObservableObject {
         defer { endSafetyAction() }
         var createdIncident: ManagedSafetyIncident?
         await runSafetyOperation("incident_create") {
-            let creation = try await client().createSafetyIncident(
+            let request = try safetyIncidentRequest(
                 durationHours: durationHours,
-                shareLocation: shareLocation,
-                requestID: UUID(),
-                authorization: try await authorization(forceRefresh: true)
+                shareLocation: shareLocation
             )
+            let creation: ManagedSafetyIncidentCreation
+            do {
+                creation = try await client().createSafetyIncident(
+                    durationHours: durationHours,
+                    shareLocation: shareLocation,
+                    requestID: request.requestID,
+                    authorization: try await authorization(forceRefresh: true)
+                )
+            } catch {
+                if Self.shouldRetireSafetyIncidentRequest(error) {
+                    clearSafetyIncidentRequest(request.requestID)
+                }
+                throw error
+            }
+            clearSafetyIncidentRequest(request.requestID)
             defaults.set(true, forKey: Key.safetyEnabled)
             safetyIncidents = Self.replacing(
                 creation.incident,
@@ -1235,6 +1253,14 @@ final class ManagedCloudService: ObservableObject {
             do {
                 try await refreshSafetyData()
             } catch {
+                if safetyLastAttempt > 0 {
+                    defaults.set(
+                        safetyLastAttempt,
+                        forKey: Key.safetyLastAttempt
+                    )
+                } else {
+                    defaults.removeObject(forKey: Key.safetyLastAttempt)
+                }
                 AppDiagnosticsRecorder.shared.record(
                     "managed_safety.catch_up",
                     fields: [
@@ -1551,6 +1577,16 @@ final class ManagedCloudService: ObservableObject {
                 ]
             )
         } catch ManagedStorageError.notFound {
+            defaults.set(false, forKey: Key.safetyEnabled)
+            defaults.removeObject(forKey: Key.safetyLastAttempt)
+            defaults.removeObject(forKey: Key.safetyInviteRequestID)
+            defaults.removeObject(forKey: Key.safetyIncidentRequest)
+            defaults.removeObject(forKey: Key.safetyLocationSequences)
+            if let scope = try? accountScopeHash() {
+                try? ManagedCloudSafetyInviteSecret.clear(
+                    accountScopeHash: scope
+                )
+            }
             clearSafetyPresentation(preservingPendingInvite: true)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
@@ -2272,6 +2308,76 @@ final class ManagedCloudService: ObservableObject {
         return created
     }
 
+    private func safetyIncidentRequest(
+        durationHours: Int,
+        shareLocation: Bool
+    ) throws -> ManagedCloudSafetyIncidentRequest {
+        guard [8, 12].contains(durationHours) else {
+            throw ManagedStorageError.conflict
+        }
+        let scope = try accountScopeHash()
+        if let data = defaults.data(forKey: Key.safetyIncidentRequest),
+           let existing = try? JSONDecoder().decode(
+               ManagedCloudSafetyIncidentRequest.self,
+               from: data
+           ),
+           existing.accountScopeHash == scope {
+            guard existing.durationHours == durationHours,
+                  existing.shareLocation == shareLocation else {
+                throw ManagedStorageError.conflict
+            }
+            return existing
+        }
+        let created = ManagedCloudSafetyIncidentRequest(
+            requestID: UUID(),
+            accountScopeHash: scope,
+            durationHours: durationHours,
+            shareLocation: shareLocation
+        )
+        guard let data = try? JSONEncoder().encode(created) else {
+            throw ManagedStorageError.encoding
+        }
+        defaults.set(data, forKey: Key.safetyIncidentRequest)
+        return created
+    }
+
+    private func clearSafetyIncidentRequest(_ requestID: UUID) {
+        guard let data = defaults.data(forKey: Key.safetyIncidentRequest),
+              let existing = try? JSONDecoder().decode(
+                  ManagedCloudSafetyIncidentRequest.self,
+                  from: data
+              ),
+              existing.requestID == requestID else {
+            return
+        }
+        defaults.removeObject(forKey: Key.safetyIncidentRequest)
+    }
+
+    private static func shouldRetireSafetyIncidentRequest(
+        _ error: Error
+    ) -> Bool {
+        guard let managed = error as? ManagedStorageError else {
+            if case ManagedCloudError.firebaseProjectConflict = error {
+                return true
+            }
+            return false
+        }
+        switch managed {
+        case .invalidConfiguration,
+             .encoding,
+             .forbidden,
+             .notFound,
+             .policyChanged,
+             .conflict:
+            return true
+        case let .server(status):
+            return (400..<500).contains(status)
+                && ![408, 429].contains(status)
+        default:
+            return false
+        }
+    }
+
     private static func socialVisibilityUnion(
         _ friends: [ManagedSocialFriend]
     ) -> ManagedSocialVisibility {
@@ -2836,6 +2942,7 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.safetyEnabled)
         defaults.removeObject(forKey: Key.safetyLastAttempt)
         defaults.removeObject(forKey: Key.safetyInviteRequestID)
+        defaults.removeObject(forKey: Key.safetyIncidentRequest)
         defaults.removeObject(forKey: Key.safetyLocationSequences)
         ManagedCloudSocialInviteSecret.clearAll()
         ManagedCloudSafetyInviteSecret.clearAll()
@@ -3338,6 +3445,13 @@ final class ManagedCloudService: ObservableObject {
     }
 }
 
+private struct ManagedCloudSafetyIncidentRequest: Codable, Equatable {
+    let requestID: UUID
+    let accountScopeHash: String
+    let durationHours: Int
+    let shareLocation: Bool
+}
+
 private enum ManagedCloudError: LocalizedError {
     case invalidPhone
     case invalidCode
@@ -3571,29 +3685,92 @@ private enum ManagedCloudSafetyInviteSecret {
     private static let service = "com.noop.managed-safety-invite"
     private static let accountPrefix = "capability-v1-"
 
-    static func value(accountScopeHash: String) throws -> String {
+    struct Binding: Codable, Equatable {
+        let capability: String
+        let requestID: UUID
+    }
+
+    static func binding(
+        accountScopeHash: String,
+        legacyRequestID: UUID?
+    ) throws -> Binding {
         let account = accountPrefix + accountScopeHash
-        if let existing = read(account: account) { return existing }
-        let capability = ManagedSafetyIdentifier.makeInviteCapability()
-        guard ManagedSafetyIdentifier.valid(capability) else {
+        if let data = read(account: account) {
+            if let existing = try? JSONDecoder().decode(
+                Binding.self,
+                from: data
+            ),
+            ManagedSafetyIdentifier.valid(existing.capability) {
+                return existing
+            }
+            if let legacyCapability = String(data: data, encoding: .utf8),
+               ManagedSafetyIdentifier.valid(legacyCapability) {
+                let migrated = Binding(
+                    capability: legacyCapability,
+                    requestID: legacyRequestID ?? UUID()
+                )
+                return try store(
+                    migrated,
+                    account: account,
+                    replacing: true
+                )
+            }
             throw ManagedStorageError.invalidAuthorization
+        }
+        let created = Binding(
+            capability: ManagedSafetyIdentifier.makeInviteCapability(),
+            requestID: UUID()
+        )
+        guard ManagedSafetyIdentifier.valid(created.capability) else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        return try store(created, account: account, replacing: false)
+    }
+
+    private static func store(
+        _ binding: Binding,
+        account: String,
+        replacing: Bool
+    ) throws -> Binding {
+        guard let data = try? JSONEncoder().encode(binding) else {
+            throw ManagedStorageError.invalidAuthorization
+        }
+        if replacing {
+            let status = SecItemUpdate(
+                [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecAttrAccount as String: account,
+                ] as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary
+            )
+            guard status == errSecSuccess else {
+                throw ManagedStorageError.invalidAuthorization
+            }
+            return binding
         }
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: Data(capability.utf8),
+            kSecValueData as String: data,
             kSecAttrAccessible as String:
                 kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         let status = SecItemAdd(attributes as CFDictionary, nil)
-        if status == errSecDuplicateItem, let existing = read(account: account) {
+        if status == errSecDuplicateItem,
+           let existingData = read(account: account),
+           let existing = try? JSONDecoder().decode(
+               Binding.self,
+               from: existingData
+           ),
+           ManagedSafetyIdentifier.valid(existing.capability) {
             return existing
         }
         guard status == errSecSuccess else {
             throw ManagedStorageError.invalidAuthorization
         }
-        return capability
+        return binding
     }
 
     static func clear(accountScopeHash: String) throws {
@@ -3618,7 +3795,7 @@ private enum ManagedCloudSafetyInviteSecret {
         )
     }
 
-    private static func read(account: String) -> String? {
+    private static func read(account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -3631,12 +3808,10 @@ private enum ManagedCloudSafetyInviteSecret {
             query as CFDictionary,
             &item
         ) == errSecSuccess,
-        let data = item as? Data,
-        let value = String(data: data, encoding: .utf8),
-        ManagedSafetyIdentifier.valid(value) else {
+        let data = item as? Data else {
             return nil
         }
-        return value
+        return data
     }
 }
 

@@ -60,6 +60,20 @@ class PostgresManagedSafetyRepository:
             raise ManagedForbiddenError("managed account is not active")
 
     @staticmethod
+    def _retired_token_hash(
+        *,
+        account_id: UUID,
+        installation_id: str,
+        token_hash: str,
+    ) -> str:
+        return hashlib.sha256(
+            (
+                "noop-managed-retired-push-v1\0"
+                f"{account_id}\0{installation_id}\0{token_hash}"
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
     async def _profile(
         connection: Any,
         *,
@@ -240,12 +254,23 @@ class PostgresManagedSafetyRepository:
                         raise ManagedConflictError(
                             "push token is already registered to another installation"
                         )
+                    retired_hash = self._retired_token_hash(
+                        account_id=conflict["account_id"],
+                        installation_id=str(conflict["installation_id"]),
+                        token_hash=token_hash,
+                    )
                     await connection.execute(
                         """
-                        DELETE FROM managed_push_installations
+                        UPDATE managed_push_installations
+                        SET token_hash = $2::char(64),
+                            token_ciphertext = $3,
+                            updated_at = $4
                         WHERE token_hash = $1 AND status <> 'active'
                         """,
                         token_hash,
+                        retired_hash,
+                        f"retired.{retired_hash}",
+                        now,
                     )
                 current = await connection.fetchrow(
                     """
@@ -369,6 +394,9 @@ class PostgresManagedSafetyRepository:
                            $3,
                            $3
                     FROM managed_push_installations push
+                    JOIN managed_accounts account
+                      ON account.account_id = push.account_id
+                     AND account.status = 'active'
                     JOIN managed_social_profiles profile
                       ON profile.account_id = push.account_id
                      AND profile.status = 'active'
@@ -396,10 +424,7 @@ class PostgresManagedSafetyRepository:
                         provider_reference_hash = NULL,
                         updated_at = EXCLUDED.updated_at
                     WHERE NOT $4::boolean
-                      AND managed_safety_push_deliveries.status IN (
-                          'invalid',
-                          'rejected'
-                      )
+                      AND managed_safety_push_deliveries.status <> 'sent'
                     """,
                     principal.account_id,
                     installation_id,
@@ -777,6 +802,9 @@ class PostgresManagedSafetyRepository:
                     SELECT profile.profile_id
                     FROM managed_social_aliases alias
                     JOIN managed_social_profiles profile USING (profile_id)
+                    JOIN managed_accounts account
+                      ON account.account_id = profile.account_id
+                     AND account.status = 'active'
                     WHERE alias.alias_value = $1
                       AND alias.status = 'active'
                       AND profile.status = 'active'
@@ -881,35 +909,36 @@ class PostgresManagedSafetyRepository:
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
         async with self._pool().acquire() as connection:
-            profile = await self._profile(
-                connection,
-                account_id=principal.account_id,
-            )
-            now = await connection.fetchval("SELECT clock_timestamp()")
-            await self._expire(connection, now)
-            rows = await connection.fetch(
-                """
-                SELECT request.*,
-                       other.display_name AS other_display_name
-                FROM managed_safety_requests request
-                JOIN managed_social_profiles other
-                  ON other.profile_id = CASE
-                      WHEN request.owner_profile_id = $1
-                      THEN request.contact_profile_id
-                      ELSE request.owner_profile_id
-                  END
-                WHERE (
-                        request.owner_profile_id = $1
-                        OR request.contact_profile_id = $1
-                      )
-                  AND request.status = 'pending'
-                  AND request.expires_at > $2
-                ORDER BY request.created_at DESC, request.request_id
-                LIMIT 50
-                """,
-                profile["profile_id"],
-                now,
-            )
+            async with connection.transaction():
+                profile = await self._profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await self._expire(connection, now)
+                rows = await connection.fetch(
+                    """
+                    SELECT request.*,
+                           other.display_name AS other_display_name
+                    FROM managed_safety_requests request
+                    JOIN managed_social_profiles other
+                      ON other.profile_id = CASE
+                          WHEN request.owner_profile_id = $1
+                          THEN request.contact_profile_id
+                          ELSE request.owner_profile_id
+                      END
+                    WHERE (
+                            request.owner_profile_id = $1
+                            OR request.contact_profile_id = $1
+                          )
+                      AND request.status = 'pending'
+                      AND request.expires_at > $2
+                    ORDER BY request.created_at DESC, request.request_id
+                    LIMIT 50
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
         return [self._public_request(row, profile["profile_id"]) for row in rows]
 
     async def decide_request(
@@ -1095,6 +1124,9 @@ class PostgresManagedSafetyRepository:
                   THEN contact.contact_profile_id
                   ELSE contact.owner_profile_id
               END
+            JOIN managed_accounts other_account
+              ON other_account.account_id = other.account_id
+             AND other_account.status = 'active'
             WHERE contact.owner_profile_id = $1
                OR contact.contact_profile_id = $1
             ORDER BY other.display_name, other.profile_id
@@ -1290,6 +1322,9 @@ class PostgresManagedSafetyRepository:
                     JOIN managed_social_profiles profile
                       ON profile.profile_id = contact.contact_profile_id
                      AND profile.status = 'active'
+                    JOIN managed_accounts account
+                      ON account.account_id = profile.account_id
+                     AND account.status = 'active'
                     WHERE contact.owner_profile_id = $1
                       AND NOT EXISTS (
                           SELECT 1
@@ -1406,6 +1441,10 @@ class PostgresManagedSafetyRepository:
               ON incident.incident_id = participant.incident_id
             JOIN managed_social_profiles profile
               ON profile.profile_id = participant.contact_profile_id
+             AND profile.status = 'active'
+            JOIN managed_accounts account
+              ON account.account_id = profile.account_id
+             AND account.status = 'active'
             JOIN managed_push_installations push
               ON push.account_id = profile.account_id
              AND push.status = 'active'
@@ -1591,46 +1630,47 @@ class PostgresManagedSafetyRepository:
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
         async with self._pool().acquire() as connection:
-            profile = await self._profile(
-                connection,
-                account_id=principal.account_id,
-            )
-            now = await connection.fetchval("SELECT clock_timestamp()")
-            await self._expire(connection, now)
-            rows = await connection.fetch(
-                """
-                SELECT incident.incident_id
-                FROM managed_safety_incidents incident
-                WHERE incident.purge_after > $2
-                  AND (
-                        incident.owner_profile_id = $1
-                        OR EXISTS (
-                            SELECT 1
-                            FROM managed_safety_participants participant
-                            WHERE participant.incident_id =
-                                    incident.incident_id
-                              AND participant.contact_profile_id = $1
-                              AND participant.status <> 'revoked'
-                        )
-                      )
-                ORDER BY
-                    (incident.status IN ('open', 'acknowledged')) DESC,
-                    incident.created_at DESC,
-                    incident.incident_id
-                LIMIT 30
-                """,
-                profile["profile_id"],
-                now,
-            )
-            return [
-                await self._incident_detail(
+            async with connection.transaction():
+                profile = await self._profile(
                     connection,
-                    caller_profile_id=profile["profile_id"],
-                    incident_id=row["incident_id"],
-                    now=now,
+                    account_id=principal.account_id,
                 )
-                for row in rows
-            ]
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await self._expire(connection, now)
+                rows = await connection.fetch(
+                    """
+                    SELECT incident.incident_id
+                    FROM managed_safety_incidents incident
+                    WHERE incident.purge_after > $2
+                      AND (
+                            incident.owner_profile_id = $1
+                            OR EXISTS (
+                                SELECT 1
+                                FROM managed_safety_participants participant
+                                WHERE participant.incident_id =
+                                        incident.incident_id
+                                  AND participant.contact_profile_id = $1
+                                  AND participant.status <> 'revoked'
+                            )
+                          )
+                    ORDER BY
+                        (incident.status IN ('open', 'acknowledged')) DESC,
+                        incident.created_at DESC,
+                        incident.incident_id
+                    LIMIT 30
+                    """,
+                    profile["profile_id"],
+                    now,
+                )
+                return [
+                    await self._incident_detail(
+                        connection,
+                        caller_profile_id=profile["profile_id"],
+                        incident_id=row["incident_id"],
+                        now=now,
+                    )
+                    for row in rows
+                ]
 
     async def get_incident(
         self,
@@ -1640,18 +1680,19 @@ class PostgresManagedSafetyRepository:
     ) -> dict[str, Any]:
         self._require_active(principal)
         async with self._pool().acquire() as connection:
-            profile = await self._profile(
-                connection,
-                account_id=principal.account_id,
-            )
-            now = await connection.fetchval("SELECT clock_timestamp()")
-            await self._expire(connection, now)
-            return await self._incident_detail(
-                connection,
-                caller_profile_id=profile["profile_id"],
-                incident_id=incident_id,
-                now=now,
-            )
+            async with connection.transaction():
+                profile = await self._profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await self._expire(connection, now)
+                return await self._incident_detail(
+                    connection,
+                    caller_profile_id=profile["profile_id"],
+                    incident_id=incident_id,
+                    now=now,
+                )
 
     async def update_location(
         self,
@@ -2018,6 +2059,27 @@ class PostgresManagedSafetyRepository:
                     incident_id,
                     now,
                 )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_push_deliveries delivery
+                    SET status = 'rejected',
+                        claim_id = NULL,
+                        claim_expires_at = NULL,
+                        updated_at = $2
+                    FROM managed_accounts account
+                    WHERE delivery.incident_id = $1
+                      AND delivery.account_id = account.account_id
+                      AND account.status <> 'active'
+                      AND delivery.status IN (
+                          'pending',
+                          'sending',
+                          'transient_failure',
+                          'unavailable'
+                      )
+                    """,
+                    incident_id,
+                    now,
+                )
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
@@ -2030,6 +2092,9 @@ class PostgresManagedSafetyRepository:
                       ON push.account_id = delivery.account_id
                      AND push.installation_id = delivery.installation_id
                      AND push.status = 'active'
+                    JOIN managed_accounts account
+                      ON account.account_id = delivery.account_id
+                     AND account.status = 'active'
                     JOIN managed_safety_incidents incident
                       ON incident.incident_id = delivery.incident_id
                     JOIN managed_safety_participants participant
@@ -2091,6 +2156,25 @@ class PostgresManagedSafetyRepository:
                     """,
                     now,
                 )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_push_deliveries delivery
+                    SET status = 'rejected',
+                        claim_id = NULL,
+                        claim_expires_at = NULL,
+                        updated_at = $1
+                    FROM managed_accounts account
+                    WHERE delivery.account_id = account.account_id
+                      AND account.status <> 'active'
+                      AND delivery.status IN (
+                          'pending',
+                          'sending',
+                          'transient_failure',
+                          'unavailable'
+                      )
+                    """,
+                    now,
+                )
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
@@ -2103,6 +2187,9 @@ class PostgresManagedSafetyRepository:
                       ON push.account_id = delivery.account_id
                      AND push.installation_id = delivery.installation_id
                      AND push.status = 'active'
+                    JOIN managed_accounts account
+                      ON account.account_id = delivery.account_id
+                     AND account.status = 'active'
                     JOIN managed_safety_incidents incident
                       ON incident.incident_id = delivery.incident_id
                      AND incident.status IN ('open', 'acknowledged')
@@ -2439,10 +2526,29 @@ class ManagedSafetyPushService:
         *,
         limit: int = 100,
     ) -> ManagedPushBatchResult:
-        deliveries = await self.repository.claim_due_push_deliveries(
-            limit=limit,
-        )
-        return await self._send_claimed(deliveries)
+        if not 1 <= limit <= 200:
+            raise ValueError("push retry dispatch limit must be 1 through 200")
+        remaining = limit
+        total = ManagedPushBatchResult()
+        while remaining > 0:
+            wave_limit = min(self.max_concurrency, remaining)
+            deliveries = await self.repository.claim_due_push_deliveries(
+                limit=wave_limit,
+            )
+            if not deliveries:
+                break
+            wave = await self._send_claimed(deliveries)
+            total = ManagedPushBatchResult(
+                claimed=total.claimed + wave.claimed,
+                provider_accepted=(total.provider_accepted + wave.provider_accepted),
+                retryable_failures=(total.retryable_failures + wave.retryable_failures),
+                terminal_failures=(total.terminal_failures + wave.terminal_failures),
+                receipt_failures=(total.receipt_failures + wave.receipt_failures),
+            )
+            remaining -= len(deliveries)
+            if len(deliveries) < wave_limit:
+                break
+        return total
 
     async def _send_claimed(
         self,
