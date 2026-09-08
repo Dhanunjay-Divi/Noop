@@ -106,7 +106,7 @@ jobs:
     needs: [changes]
     if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: android
@@ -135,13 +135,76 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Prepare production-shell APKs without starting an emulator
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 1200 \
+            --grace-seconds 30 \
+            --label production-shell-preparation \
+            --status-file app/build/noop-managed-device-status/production-shell-preparation.status \
+            -- \
+            ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
+
       - name: Run production-shell instrumentation tests
+        id: production_shell_first
+        continue-on-error: true
         run: |
           python3 ../Tools/run-bounded-command.py \
             --timeout-seconds 600 \
             --grace-seconds 30 \
             --label production-shell-instrumentation \
             --status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Classify a zero-test production-shell infrastructure loss
+        if: ${{ steps.production_shell_first.outcome == 'failure' }}
+        id: production_shell_retry
+        run: |
+          python3 ../Tools/android-managed-device-retry.py \
+            app/build/outputs/androidTest-results/managedDevice \
+            --bounded-status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
+            --expected-label production-shell-instrumentation \
+            --github-output "$GITHUB_OUTPUT"
+          echo "::warning title=Managed-device infrastructure retry::Android production-shell infrastructure failed before tests started; resetting and retrying once."
+
+      - name: Reset production-shell managed device before the approved retry
+        if: >-
+          ${{
+            steps.production_shell_first.outcome == 'failure' &&
+            steps.production_shell_retry.outputs.retry == 'true'
+          }}
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 180 \
+            --grace-seconds 15 \
+            --label production-shell-reset \
+            --status-file app/build/noop-managed-device-status/production-shell-reset.status \
+            -- \
+            ./gradlew cleanManagedDevices \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Retry production-shell once on proven infrastructure loss
+        if: >-
+          ${{
+            steps.production_shell_first.outcome == 'failure' &&
+            steps.production_shell_retry.outputs.retry == 'true'
+          }}
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 600 \
+            --grace-seconds 30 \
+            --label production-shell-infrastructure-retry \
+            --status-file app/build/noop-managed-device-status/production-shell-infrastructure-retry.status \
             -- \
             ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
@@ -165,7 +228,7 @@ jobs:
     needs: [changes]
     if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: android
@@ -193,6 +256,19 @@ jobs:
             sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+
+      - name: Prepare Review Sample APKs without starting an emulator
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 1200 \
+            --grace-seconds 30 \
+            --label review-sample-preparation \
+            --status-file app/build/noop-managed-device-status/review-sample-preparation.status \
+            -- \
+            ./gradlew assembleFullDebug assembleFullDebugAndroidTest \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace
 
       - name: Prove Review Sample worker isolation in a fresh process
         id: review_sample_first
@@ -231,8 +307,8 @@ jobs:
           python3 ../Tools/run-bounded-command.py \
             --timeout-seconds 180 \
             --grace-seconds 15 \
-            --label managed-device-reset \
-            --status-file app/build/noop-managed-device-status/managed-device-reset.status \
+            --label review-sample-reset \
+            --status-file app/build/noop-managed-device-status/review-sample-reset.status \
             -- \
             ./gradlew cleanManagedDevices \
             --no-daemon \

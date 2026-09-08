@@ -30,10 +30,15 @@ class AndroidManagedDeviceRetryTests(unittest.TestCase):
         (results / "utp.0.log").write_text(log, encoding="utf-8")
         return root
 
-    def _timeout_status(self, root: Path) -> Path:
-        path = root / "review-sample.status"
+    def _timeout_status(
+        self,
+        root: Path,
+        *,
+        label: str = RETRY.DEFAULT_EXPECTED_LABEL,
+    ) -> Path:
+        path = root / f"{label}.status"
         path.write_text(
-            "label=review-sample-fresh-process\n"
+            f"label={label}\n"
             "status=timeout\n"
             "exit_code=124\n",
             encoding="utf-8",
@@ -116,6 +121,21 @@ issue {
                 "managed-device-timeout-before-results",
             )
 
+    def test_bounded_timeout_supports_a_reviewed_broad_suite_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            label = "production-shell-instrumentation"
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=self._timeout_status(root, label=label),
+                expected_label=label,
+            )
+            self.assertTrue(decision.retry)
+            self.assertEqual(
+                decision.category,
+                "managed-device-timeout-before-results",
+            )
+
     def test_timeout_never_retries_after_a_test_result_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -137,6 +157,26 @@ test_result {
             )
             self.assertFalse(decision.retry)
             self.assertEqual(decision.category, "test-results-present")
+
+    def test_mismatched_expected_label_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=self._timeout_status(root),
+                expected_label="production-shell-instrumentation",
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "invalid-bounded-status")
+
+    def test_invalid_expected_label_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            decision = RETRY.classify(
+                Path(temporary) / "missing",
+                expected_label="../unsafe",
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "invalid-expected-label")
 
     def test_invalid_bounded_status_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

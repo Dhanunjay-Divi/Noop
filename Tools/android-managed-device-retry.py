@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,11 +13,8 @@ from pathlib import Path
 MAX_EVIDENCE_FILES = 32
 MAX_EVIDENCE_BYTES = 1_000_000
 MAX_STATUS_BYTES = 4_096
-TIMEOUT_STATUS = {
-    "label": "review-sample-fresh-process",
-    "status": "timeout",
-    "exit_code": "124",
-}
+DEFAULT_EXPECTED_LABEL = "review-sample-fresh-process"
+SAFE_LABEL = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 
 
 @dataclass(frozen=True)
@@ -40,7 +38,11 @@ def _read_bounded(paths: list[Path]) -> tuple[str | None, str | None]:
     return "\n".join(chunks), None
 
 
-def _read_status(path: Path | None) -> tuple[dict[str, str] | None, str | None]:
+def _read_status(
+    path: Path | None,
+    *,
+    expected_label: str,
+) -> tuple[dict[str, str] | None, str | None]:
     if path is None or not path.exists():
         return None, None
     try:
@@ -59,7 +61,7 @@ def _read_status(path: Path | None) -> tuple[dict[str, str] | None, str | None]:
         fields[key] = value
     if set(fields) != {"label", "status", "exit_code"}:
         return None, "invalid-bounded-status"
-    if fields["label"] != "review-sample-fresh-process":
+    if fields["label"] != expected_label:
         return None, "invalid-bounded-status"
     if fields["status"] not in {"success", "failed", "timeout", "start-error"}:
         return None, "invalid-bounded-status"
@@ -74,11 +76,21 @@ def classify(
     results_root: Path,
     *,
     bounded_status_file: Path | None = None,
+    expected_label: str = DEFAULT_EXPECTED_LABEL,
 ) -> RetryDecision:
-    bounded_status, status_error = _read_status(bounded_status_file)
+    if not SAFE_LABEL.fullmatch(expected_label):
+        return RetryDecision(False, "invalid-expected-label", 0)
+    bounded_status, status_error = _read_status(
+        bounded_status_file,
+        expected_label=expected_label,
+    )
     if status_error is not None:
         return RetryDecision(False, status_error, 0)
-    timeout_before_results = bounded_status == TIMEOUT_STATUS
+    timeout_before_results = bounded_status == {
+        "label": expected_label,
+        "status": "timeout",
+        "exit_code": "124",
+    }
 
     if not results_root.is_dir():
         if timeout_before_results:
@@ -144,12 +156,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("results_root", type=Path)
     parser.add_argument("--bounded-status-file", type=Path)
+    parser.add_argument(
+        "--expected-label",
+        default=DEFAULT_EXPECTED_LABEL,
+    )
     parser.add_argument("--github-output", type=Path)
     arguments = parser.parse_args(argv)
 
     decision = classify(
         arguments.results_root,
         bounded_status_file=arguments.bounded_status_file,
+        expected_label=arguments.expected_label,
     )
     if arguments.github_output is not None:
         _write_github_output(arguments.github_output, decision)

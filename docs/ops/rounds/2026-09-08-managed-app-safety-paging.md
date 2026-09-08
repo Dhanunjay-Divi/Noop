@@ -7,7 +7,7 @@
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
 - End implementation commits: `71ad5cb3a88d`, `ba26eeebde81`,
-  `f3c60bf2c93d`, `ea1ff2ecb125`
+  `f3c60bf2c93d`, `ea1ff2ecb125`, `f711a6a6149e`
 - Record commit or PR: protected pull request `#10`; record commit pending
 
 ## Objective
@@ -121,9 +121,18 @@ rather than a prerequisite for app paging.
 - Split the isolated Review Sample proof and the broad production-shell suite
   into independently required fresh-runner jobs. Each job now performs one
   no-daemon Gradle test invocation, has its own bounded deadline and retained
-  diagnostics, and is checked by `android-ci-required`. The only automatic
-  retry remains a single fail-closed retry after evidence proves that the
-  isolated runner failed before any test result existed.
+  diagnostics, and is checked by `android-ci-required`. Each test phase permits
+  at most one fail-closed retry after evidence proves that its runner failed
+  before any test result existed.
+- Exact-head run `34264150217` then proved that a fresh hosted runner can spend
+  more than ten minutes compiling the APK graph before starting an emulator.
+  The broad job exited through NOOP's explicit `124` timeout and retained its
+  bounded status; no test had begun. Compilation and emulator execution are now
+  separately bounded on both fresh runners. The preparation phase builds only
+  the app and test APKs and never starts an emulator, while each test phase may
+  retry once only after the retained status and UTP evidence prove zero tests
+  ran. Any assertion, partial test run, malformed status, cleanup failure, or
+  second failure remains terminal.
 
 ## Data, privacy, and medical truth
 
@@ -178,9 +187,9 @@ rather than a prerequisite for app paging.
 | macOS app suite and universal Release build | 1,656 passed with 1 external-fixture skip; build passed | Shared Apple source, localization, privacy, diagnostics, shell, and contract coverage compiles for both desktop architectures | iOS notification delivery or phone background behavior |
 | Apple Release graph and iOS simulator suite | Release graph passed; 35 UI tests executed with 34 passes, 1 intentional private-pilot skip, and 0 failures | The iOS target compiles with managed push/location integration; latest-only session, relaunch, privacy, shell, tab responsiveness, calendar, complete metric catalog, and scrolling contracts execute | Signed physical-phone background execution |
 | iOS scroll performance | Passed; five swipe runs averaged 5.247 seconds including XCTest idle waits, 0.220 seconds CPU time, and about 68.3 MB peak physical memory with 0.077% variation | No simulator-reproducible scroll-lag regression appeared in the current Today journey | Physical-phone frame pacing, thermal pressure, large real databases, or background BLE contention |
-| Android full/demo matrix | Unit, lint, instrumentation compile, and API 35 device matrix passed; exact-source fresh-process rerun completed 53 broad tests plus 2 private-pilot skips in 70 seconds and the isolated Review Sample test in 39 seconds | Managed session compiles, survives service restoration, shares one GPS listener, routes notification taps, keeps diagnostics free of coordinates, and does not reproduce the hosted 46-test stall when each phase owns one emulator lifecycle | OEM/physical background and notification behavior; fresh hosted-runner proof remains a protected-check gate |
+| Android full/demo matrix | Unit, lint, instrumentation compile, and API 35 device matrix passed; exact-source fresh-process rerun completed 53 broad tests plus 2 private-pilot skips in 70 seconds and the isolated Review Sample test in 39 seconds; the final separately bounded APK preparation, broad test, and isolated test sequence also passed locally | Managed session compiles, survives service restoration, shares one GPS listener, routes notification taps, keeps diagnostics free of coordinates, and does not reproduce the hosted 46-test stall when each phase owns one emulator lifecycle | OEM/physical background and notification behavior; fresh hosted-runner proof remains a protected-check gate |
 | Swift packages and harnesses | All 9 packages, 406 protocol tests with 1 opt-in corpus skip, 104 remote-sync tests, 12 study-harness tests, and 2 backfill tests passed | Shared models/clients, protocol compatibility, deterministic research harnesses, and backfill contracts remain intact | Supplier firmware or physical physiology |
-| Repository policy and legal gates | 223 tool tests plus terminology, legal inventory, distribution provenance, claims, workflow, privacy, OpenTofu, and dependency-audit gates passed | Source, manifests, generated localization, notices, workflow controls, and private infrastructure remain internally consistent | External legal approval or production credentials |
+| Repository policy and legal gates | 226 tool tests plus terminology, legal inventory, distribution provenance, claims, workflow, privacy, OpenTofu, and dependency-audit gates passed | Source, manifests, generated localization, notices, workflow controls, and private infrastructure remain internally consistent | External legal approval or production credentials |
 | Private synthetic staging | Passed: container scan with zero known-vulnerability findings, migration `027`, five in-place runtime updates, enforced migration execution, lifecycle execution, three-account managed smoke in 120 seconds, cleanup audit, private-boundary verification, and zero drift | Accepted Safety contacts, manual paging, latest-only location, responder state, incident resolution, storage/restore/isolation, cleanup, base private-API internal ingress, managed-API IAM-only access with no broad invoker, digest pinning, scale bounds, PITR, and deletion protection work together on the deployed digest | Provider delivery because the smoke intentionally registered no APNs/FCM target or real account |
 | Deployment-order recovery | Passed: the first concurrent rollout correctly failed new readiness while prior healthy revisions retained 100% traffic; migration then succeeded, every latest revision became ready, and the stateful release receipt was applied with no cloud-resource mutation and zero drift | Required migrations fail closed without taking healthy traffic down, and future image changes cannot update dependent runtime workloads until the guarded migration succeeds | Regional failover or production rollback under load |
 
