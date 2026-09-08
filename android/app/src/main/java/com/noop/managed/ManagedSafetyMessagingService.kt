@@ -2,22 +2,19 @@ package com.noop.managed
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import com.noop.NoopApplication
 import com.noop.notif.ManagedSafetyNotifier
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 class ManagedSafetyMessagingService : FirebaseMessagingService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onNewToken(token: String) {
-        val app = applicationContext as? NoopApplication ?: return
-        if (!app.operationalRuntimeStarted) return
-        scope.launch {
-            app.managedCloud.registerManagedPushToken(token)
-        }
+        if (token.isBlank()) return
+        val scheduled = ManagedCloudScheduler.enqueuePushRegistration(applicationContext)
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_safety.push_token_refresh",
+            fields = mapOf(
+                "outcome" to if (scheduled) "deferred" else "failed",
+                "worker" to if (scheduled) "scheduled" else "unavailable",
+            ),
+        )
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -32,30 +29,19 @@ class ManagedSafetyMessagingService : FirebaseMessagingService() {
             )
             return
         }
-        val app = applicationContext as? NoopApplication
-        if (app == null || !app.operationalRuntimeStarted) {
-            val notification = ManagedSafetyNotifier.post(applicationContext, incidentId)
-            com.noop.AppDiagnosticsRecorder.record(
-                "managed_safety.push_received",
-                fields = mapOf(
-                    "outcome" to "deferred",
-                    "failure_kind" to "runtime_unavailable",
-                    "notification" to notification,
-                ),
-            )
-            return
-        }
-        scope.launch {
-            val updated = app.managedCloud.handleManagedSafetyPush(incidentId)
-            val notification = ManagedSafetyNotifier.post(applicationContext, incidentId)
-            com.noop.AppDiagnosticsRecorder.record(
-                "managed_safety.push_received",
-                fields = mapOf(
-                    "outcome" to if (updated) "completed" else "failed",
-                    "notification" to notification,
-                ),
-            )
-        }
+        val notification = ManagedSafetyNotifier.post(applicationContext, incidentId)
+        val scheduled = ManagedCloudScheduler.enqueueSafetyPush(
+            applicationContext,
+            incidentId,
+        )
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_safety.push_received",
+            fields = mapOf(
+                "outcome" to if (scheduled) "deferred" else "failed",
+                "notification" to notification,
+                "worker" to if (scheduled) "scheduled" else "unavailable",
+            ),
+        )
     }
 
     companion object {

@@ -774,15 +774,29 @@ class ManagedCloudService private constructor(context: Context) {
     suspend fun createSafetyRequest(noopId: String) =
         safetyAction("request_create") {
             registerCurrentManagedPushToken()
-            client().createSafetyRequest(
-                authorization = authorization(forceRefresh = true),
-                noopId = noopId,
-                requestId = UUID.randomUUID(),
+            val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+                ?: throw ManagedStorageException.InvalidResponse()
+            val request = preferences.safetyContactRequest(
+                accountScopeHash = accountScopeHash(),
+                noopId = canonical,
             )
+            try {
+                client().createSafetyRequest(
+                    authorization = authorization(forceRefresh = true),
+                    noopId = canonical,
+                    requestId = request.requestId,
+                )
+            } catch (error: Throwable) {
+                if (ManagedSafetyContactRequestPolicy.shouldRetire(error)) {
+                    preferences.clearSafetyContactRequest(request.requestId)
+                }
+                throw error
+            }
             preferences.safetyEnabled = true
             ManagedCloudScheduler.reconcile(appContext)
             setSafetyStatus(text(R.string.managed_safety_status_request_sent))
             refreshSafetyData()
+            preferences.clearSafetyContactRequest(request.requestId)
         }
 
     suspend fun decideSafetyRequest(requestId: UUID, accept: Boolean) =

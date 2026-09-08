@@ -108,6 +108,8 @@ final class ManagedCloudService: ObservableObject {
         static let safetyLastAttempt = "managedCloud.safety.lastAttempt.v1"
         static let safetyInviteRequestID =
             "managedCloud.safety.inviteRequestID.v1"
+        static let safetyContactRequest =
+            "managedCloud.safety.contactRequest.v1"
         static let safetyIncidentRequest =
             "managedCloud.safety.incidentRequest.v1"
         static let safetyLocationSequences =
@@ -630,16 +632,30 @@ final class ManagedCloudService: ObservableObject {
         guard beginSafetyAction() else { return }
         defer { endSafetyAction() }
         await runSafetyOperation("request_create") {
-            _ = try await client().createSafetyRequest(
-                noopID: noopID,
-                requestID: UUID(),
-                authorization: try await authorization(forceRefresh: true)
-            )
+            guard let canonical = ManagedSocialIdentifier.canonicalNOOPID(
+                noopID
+            ) else {
+                throw ManagedStorageError.invalidResponse
+            }
+            let request = try safetyContactRequest(noopID: canonical)
+            do {
+                _ = try await client().createSafetyRequest(
+                    noopID: canonical,
+                    requestID: request.requestID,
+                    authorization: try await authorization(forceRefresh: true)
+                )
+            } catch {
+                if Self.shouldRetireSafetyContactRequest(error) {
+                    clearSafetyContactRequest(request.requestID)
+                }
+                throw error
+            }
             defaults.set(true, forKey: Key.safetyEnabled)
             safetyStatus = String(
                 localized: "Safety contact request sent. Paging stays off until it is accepted."
             )
             try await refreshSafetyData()
+            clearSafetyContactRequest(request.requestID)
         }
     }
 
@@ -1580,6 +1596,7 @@ final class ManagedCloudService: ObservableObject {
             defaults.set(false, forKey: Key.safetyEnabled)
             defaults.removeObject(forKey: Key.safetyLastAttempt)
             defaults.removeObject(forKey: Key.safetyInviteRequestID)
+            defaults.removeObject(forKey: Key.safetyContactRequest)
             defaults.removeObject(forKey: Key.safetyIncidentRequest)
             defaults.removeObject(forKey: Key.safetyLocationSequences)
             if let scope = try? accountScopeHash() {
@@ -2308,6 +2325,58 @@ final class ManagedCloudService: ObservableObject {
         return created
     }
 
+    private func safetyContactRequest(
+        noopID: String
+    ) throws -> ManagedSafetyContactRequestRecord {
+        guard ManagedSocialIdentifier.canonicalNOOPID(noopID) == noopID else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let accountScopeHash = try accountScopeHash()
+        let targetScopeHash = try ManagedSafetyContactRequestPolicy
+            .targetScopeHash(
+                noopID: noopID
+            )
+        let existing = defaults.data(forKey: Key.safetyContactRequest).flatMap {
+            try? JSONDecoder().decode(
+                ManagedSafetyContactRequestRecord.self,
+                from: $0
+            )
+        }
+        let resolved = try ManagedSafetyContactRequestPolicy.resolve(
+            existing: existing,
+            accountScopeHash: accountScopeHash,
+            targetScopeHash: targetScopeHash
+        )
+        if resolved != existing {
+            guard let data = try? JSONEncoder().encode(resolved) else {
+                throw ManagedStorageError.encoding
+            }
+            defaults.set(data, forKey: Key.safetyContactRequest)
+        }
+        return resolved
+    }
+
+    private func clearSafetyContactRequest(_ requestID: UUID) {
+        guard let data = defaults.data(forKey: Key.safetyContactRequest),
+              let existing = try? JSONDecoder().decode(
+                  ManagedSafetyContactRequestRecord.self,
+                  from: data
+              ),
+              existing.requestID == requestID else {
+            return
+        }
+        defaults.removeObject(forKey: Key.safetyContactRequest)
+    }
+
+    private static func shouldRetireSafetyContactRequest(
+        _ error: Error
+    ) -> Bool {
+        if case ManagedCloudError.firebaseProjectConflict = error {
+            return true
+        }
+        return ManagedSafetyContactRequestPolicy.shouldRetire(error)
+    }
+
     private func safetyIncidentRequest(
         durationHours: Int,
         shareLocation: Bool
@@ -2942,6 +3011,7 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.safetyEnabled)
         defaults.removeObject(forKey: Key.safetyLastAttempt)
         defaults.removeObject(forKey: Key.safetyInviteRequestID)
+        defaults.removeObject(forKey: Key.safetyContactRequest)
         defaults.removeObject(forKey: Key.safetyIncidentRequest)
         defaults.removeObject(forKey: Key.safetyLocationSequences)
         ManagedCloudSocialInviteSecret.clearAll()

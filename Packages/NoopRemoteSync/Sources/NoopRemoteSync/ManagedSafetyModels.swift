@@ -93,6 +93,85 @@ public struct ManagedSafetyRequest: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct ManagedSafetyContactRequestRecord: Codable, Equatable, Sendable {
+    public let requestID: UUID
+    public let accountScopeHash: String
+    public let targetScopeHash: String
+
+    public init(
+        requestID: UUID,
+        accountScopeHash: String,
+        targetScopeHash: String
+    ) {
+        self.requestID = requestID
+        self.accountScopeHash = accountScopeHash
+        self.targetScopeHash = targetScopeHash
+    }
+}
+
+public enum ManagedSafetyContactRequestPolicy {
+    public static func targetScopeHash(noopID: String) throws -> String {
+        guard let canonical = ManagedSocialIdentifier.canonicalNOOPID(noopID)
+        else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return ManagedDigest.sha256(
+            Data(
+                "noop-managed-safety-contact-request-v1\0\(canonical)".utf8
+            )
+        )
+    }
+
+    public static func resolve(
+        existing: ManagedSafetyContactRequestRecord?,
+        accountScopeHash: String,
+        targetScopeHash: String,
+        makeRequestID: () -> UUID = { UUID() }
+    ) throws -> ManagedSafetyContactRequestRecord {
+        guard validDigest(accountScopeHash),
+              validDigest(targetScopeHash) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        if let existing, existing.accountScopeHash == accountScopeHash {
+            guard existing.targetScopeHash == targetScopeHash else {
+                throw ManagedStorageError.conflict
+            }
+            return existing
+        }
+        return ManagedSafetyContactRequestRecord(
+            requestID: makeRequestID(),
+            accountScopeHash: accountScopeHash,
+            targetScopeHash: targetScopeHash
+        )
+    }
+
+    public static func shouldRetire(_ error: Error) -> Bool {
+        guard let managed = error as? ManagedStorageError else {
+            return false
+        }
+        switch managed {
+        case .invalidConfiguration,
+             .encoding,
+             .forbidden,
+             .notFound,
+             .policyChanged,
+             .conflict:
+            return true
+        case let .server(status):
+            return (400..<500).contains(status)
+                && ![408, 429].contains(status)
+        default:
+            return false
+        }
+    }
+
+    private static func validDigest(_ value: String) -> Bool {
+        value.utf8.count == 64 && value.utf8.allSatisfy {
+            (48...57).contains($0) || (97...102).contains($0)
+        }
+    }
+}
+
 public struct ManagedSafetyContact: Codable, Equatable, Sendable, Identifiable {
     public let profileID: UUID
     public let displayName: String

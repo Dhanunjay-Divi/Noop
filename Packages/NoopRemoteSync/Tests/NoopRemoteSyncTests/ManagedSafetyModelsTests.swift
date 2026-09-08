@@ -142,4 +142,103 @@ final class ManagedSafetyModelsTests: XCTestCase {
             "\(profileID.uuidString.lowercased()):owner"
         )
     }
+
+    func testContactRequestTargetHashMatchesTheCrossPlatformVector() throws {
+        XCTAssertEqual(
+            try ManagedSafetyContactRequestPolicy.targetScopeHash(
+                noopID: " noop-2345-6789-abcd-efgh\n"
+            ),
+            "19073644815f42ceb975fac653f25b8250dfdfcc998196ba0f13fd5cab38f8f6"
+        )
+        XCTAssertThrowsError(
+            try ManagedSafetyContactRequestPolicy.targetScopeHash(
+                noopID: "NOOP-INVALID"
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? ManagedStorageError,
+                .invalidResponse
+            )
+        }
+    }
+
+    func testContactRequestIDReplaysOnlyForTheSameAccountAndTarget() throws {
+        let firstID = try XCTUnwrap(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000201")
+        )
+        let secondID = try XCTUnwrap(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000202")
+        )
+        let firstAccount = String(repeating: "a", count: 64)
+        let secondAccount = String(repeating: "b", count: 64)
+        let firstTarget = String(repeating: "c", count: 64)
+        let secondTarget = String(repeating: "d", count: 64)
+        let created = try ManagedSafetyContactRequestPolicy.resolve(
+            existing: nil,
+            accountScopeHash: firstAccount,
+            targetScopeHash: firstTarget,
+            makeRequestID: { firstID }
+        )
+
+        XCTAssertEqual(
+            try ManagedSafetyContactRequestPolicy.resolve(
+                existing: created,
+                accountScopeHash: firstAccount,
+                targetScopeHash: firstTarget,
+                makeRequestID: { secondID }
+            ),
+            created
+        )
+        XCTAssertThrowsError(
+            try ManagedSafetyContactRequestPolicy.resolve(
+                existing: created,
+                accountScopeHash: firstAccount,
+                targetScopeHash: secondTarget,
+                makeRequestID: { secondID }
+            )
+        ) {
+            XCTAssertEqual($0 as? ManagedStorageError, .conflict)
+        }
+        let otherAccount = try ManagedSafetyContactRequestPolicy.resolve(
+            existing: created,
+            accountScopeHash: secondAccount,
+            targetScopeHash: firstTarget,
+            makeRequestID: { secondID }
+        )
+        XCTAssertEqual(otherAccount.requestID, secondID)
+        XCTAssertEqual(otherAccount.accountScopeHash, secondAccount)
+    }
+
+    func testContactRequestIDRetiresOnlyForTerminalFailures() {
+        XCTAssertTrue(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.forbidden
+            )
+        )
+        XCTAssertTrue(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.server(status: 422)
+            )
+        )
+        XCTAssertFalse(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.server(status: 408)
+            )
+        )
+        XCTAssertFalse(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.server(status: 429)
+            )
+        )
+        XCTAssertFalse(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.server(status: 503)
+            )
+        )
+        XCTAssertFalse(
+            ManagedSafetyContactRequestPolicy.shouldRetire(
+                ManagedStorageError.transport
+            )
+        )
+    }
 }

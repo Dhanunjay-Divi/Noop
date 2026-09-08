@@ -176,6 +176,41 @@ internal class ManagedCloudPreferences(context: Context) {
             preferences.edit().putBoolean(KEY_SAFETY_ENABLED, value).apply()
         }
 
+    fun safetyContactRequest(
+        accountScopeHash: String,
+        noopId: String,
+    ): ManagedSafetyContactRequestRecord = synchronized(this) {
+        require(accountScopeHash.matches(SHA256))
+        val targetScopeHash = ManagedSafetyContactRequestPolicy
+            .targetScopeHash(noopId)
+        val existing = preferences.getString(KEY_SAFETY_CONTACT_REQUEST, null)
+            ?.let(::decodeSafetyContactRequest)
+        val resolved = ManagedSafetyContactRequestPolicy.resolve(
+            existing = existing,
+            accountScopeHash = accountScopeHash,
+            targetScopeHash = targetScopeHash,
+        )
+        if (resolved != existing) {
+            check(
+                preferences.edit()
+                    .putString(
+                        KEY_SAFETY_CONTACT_REQUEST,
+                        encodeSafetyContactRequest(resolved),
+                    )
+                    .commit(),
+            ) { "Could not persist the managed Safety contact request." }
+        }
+        resolved
+    }
+
+    fun clearSafetyContactRequest(requestId: UUID) = synchronized(this) {
+        val existing = preferences.getString(KEY_SAFETY_CONTACT_REQUEST, null)
+            ?.let(::decodeSafetyContactRequest)
+        if (existing?.requestId == requestId) {
+            preferences.edit().remove(KEY_SAFETY_CONTACT_REQUEST).apply()
+        }
+    }
+
     fun safetyIncidentRequest(
         accountScopeHash: String,
         durationHours: Int,
@@ -364,6 +399,7 @@ internal class ManagedCloudPreferences(context: Context) {
             .remove(KEY_SAFETY_INVITE_CAPABILITY)
             .remove(KEY_PENDING_SAFETY_INVITE)
             .remove(KEY_SAFETY_LOCATION_SEQUENCES)
+            .remove(KEY_SAFETY_CONTACT_REQUEST)
             .remove(KEY_SAFETY_INCIDENT_REQUEST)
             .remove(KEY_SAFETY_LAST_ATTEMPT_MS)
             .remove(KEY_SAFETY_ENABLED)
@@ -494,6 +530,28 @@ internal class ManagedCloudPreferences(context: Context) {
             it.durationHours in setOf(8, 12)
     }
 
+    private fun decodeSafetyContactRequest(
+        raw: String,
+    ): ManagedSafetyContactRequestRecord? = runCatching {
+        val value = JSONObject(raw)
+        ManagedSafetyContactRequestRecord(
+            requestId = UUID.fromString(value.getString("request_id")),
+            accountScopeHash = value.getString("account_scope_hash"),
+            targetScopeHash = value.getString("target_scope_hash"),
+        )
+    }.getOrNull()?.takeIf {
+        it.accountScopeHash.matches(SHA256) &&
+            it.targetScopeHash.matches(SHA256)
+    }
+
+    private fun encodeSafetyContactRequest(
+        value: ManagedSafetyContactRequestRecord,
+    ): String = JSONObject()
+        .put("request_id", value.requestId.toString().lowercase())
+        .put("account_scope_hash", value.accountScopeHash)
+        .put("target_scope_hash", value.targetScopeHash)
+        .toString()
+
     private fun encodeSafetyIncidentRequest(
         value: ManagedSafetyIncidentRequestRecord,
     ): String = JSONObject()
@@ -578,6 +636,8 @@ internal class ManagedCloudPreferences(context: Context) {
             "pending_safety_invite"
         private const val KEY_SAFETY_LOCATION_SEQUENCES =
             "safety_location_sequences"
+        private const val KEY_SAFETY_CONTACT_REQUEST =
+            "safety_contact_request"
         private const val KEY_SAFETY_INCIDENT_REQUEST =
             "safety_incident_request"
         private const val KEY_SAFETY_LAST_ATTEMPT_MS = "safety_last_attempt_ms"
@@ -594,6 +654,55 @@ internal class ManagedCloudPreferences(context: Context) {
         private val SOCIAL_HAPTIC_OUTCOMES =
             setOf("requested", "band_unavailable", "not_eligible", "failed")
     }
+}
+
+internal data class ManagedSafetyContactRequestRecord(
+    val requestId: UUID,
+    val accountScopeHash: String,
+    val targetScopeHash: String,
+)
+
+internal object ManagedSafetyContactRequestPolicy {
+    fun targetScopeHash(noopId: String): String {
+        val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+            ?: throw ManagedStorageException.InvalidResponse()
+        return ManagedDigest.sha256(
+            "noop-managed-safety-contact-request-v1\u0000$canonical"
+                .toByteArray(Charsets.UTF_8),
+        )
+    }
+
+    fun resolve(
+        existing: ManagedSafetyContactRequestRecord?,
+        accountScopeHash: String,
+        targetScopeHash: String,
+        createRequestId: () -> UUID = UUID::randomUUID,
+    ): ManagedSafetyContactRequestRecord {
+        require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        require(targetScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        if (existing?.accountScopeHash == accountScopeHash) {
+            if (existing.targetScopeHash != targetScopeHash) {
+                throw ManagedStorageException.Conflict()
+            }
+            return existing
+        }
+        return ManagedSafetyContactRequestRecord(
+            requestId = createRequestId(),
+            accountScopeHash = accountScopeHash,
+            targetScopeHash = targetScopeHash,
+        )
+    }
+
+    fun shouldRetire(error: Throwable): Boolean =
+        error is ManagedStorageException.Forbidden ||
+            error is ManagedStorageException.NotFound ||
+            error is ManagedStorageException.PolicyChanged ||
+            error is ManagedStorageException.Conflict ||
+            (
+                error is ManagedStorageException.Server &&
+                    error.statusCode in 400..499 &&
+                    error.statusCode !in setOf(408, 429)
+                )
 }
 
 internal data class ManagedSafetyIncidentRequestRecord(

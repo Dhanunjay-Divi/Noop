@@ -81,6 +81,11 @@ temporary resources created by the implementation and verification rounds.
 - Made incident creation retry-safe across process death on Apple and Android:
   one account-and-options-bound request ID is retained across ambiguous
   failures and retired only after success or a terminal response.
+- Made contact-request creation retry-safe across process death on Apple and
+  Android: one account-and-target-bound request ID is persisted before
+  transport, retained after ambiguous failures, and retired only after success
+  or a terminal response. A fixed SHA-256 vector proves both platforms derive
+  the same canonical target scope.
 - Bound the Apple Safety invite capability and request ID in one
   device-only Keychain record, including deterministic legacy migration and a
   duplicate-insert race that returns the binding actually persisted.
@@ -94,6 +99,10 @@ temporary resources created by the implementation and verification rounds.
   forbidden instead of authentication, and stopped live location after a
   forbidden response. Apple requests time-sensitive notification delivery and
   already carries the required entitlement.
+- Made Android display the generic private Safety notification synchronously
+  before the FCM callback returns, then hand authenticated incident catch-up to
+  unique network-only WorkManager jobs. FCM token refresh now uses the same
+  durable worker boundary instead of an untracked process-local coroutine.
 - Expanded the account-deletion disclosure to include Safety contacts,
   invitations, incident history, active alerts, and location sharing.
 - Replaced placeholder Safety text with generated translations for all nine
@@ -105,7 +114,8 @@ temporary resources created by the implementation and verification rounds.
 - Added focused regression coverage for token transfer, stale-claim rotation,
   transaction boundaries, inactive recipients, bounded initial and retry waves,
   fractional timestamps, retained participant erasure, lower idempotent
-  location sequences, notification policy, and incident-request lifecycle.
+  location sequences, notification policy, durable push work identity,
+  contact-request replay and binding, and incident-request lifecycle.
 
 ## Data, privacy, and medical truth
 
@@ -136,8 +146,10 @@ temporary resources created by the implementation and verification rounds.
   server request correlation, and `emit_operational_event`.
 - New bounded events or operation spans: Android permission rejection uses the
   existing fixed `managed_safety.push_registration` and
-  `managed_safety.notification_enable` boundaries with only fixed outcome and
-  failure-kind values.
+  `managed_safety.notification_enable` boundaries. FCM receipt and token
+  refresh use `managed_safety.push_received` and
+  `managed_safety.push_token_refresh`, with fixed outcome, notification, and
+  worker-state values only.
 - Redaction, retention, and high-frequency controls: no tokens, capabilities,
   account/contact/incident identifiers, coordinates, user text, payloads,
   health values, or arbitrary exceptions may enter diagnostics.
@@ -151,14 +163,14 @@ temporary resources created by the implementation and verification rounds.
 |---|---|---|---|
 | Starting protected pull-request matrix | 10 required contexts passed on `f733c153` | The pre-review implementation compiled and passed its declared hosted gates | Correctness of the unresolved review findings or physical-device behavior |
 | iOS simulator scroll journey | Five swipes averaged 5.247 seconds including XCTest idle waits, 0.220 seconds CPU, and about 68.3 MB peak memory | No simulator-reproducible regression in the measured journey | Physical-phone frame pacing, thermal pressure, large real databases, or BLE contention |
-| Shared Apple package | `106` tests passed | Managed Safety parsing, identifiers, lower-sequence replay, fractional expiry, retained incidents, and existing sync contracts are green | App-target or physical-device behavior |
-| Apple app graph | NOOPiOS Debug simulator and Release device builds passed; Strand macOS build passed | Both Apple app targets compile with the corrected Keychain, notification, idempotency, and stale-state paths | Signing, APNs display, iPhone background execution, or store upload |
+| Shared Apple package | `109` tests passed | Managed Safety parsing, identifiers, cross-platform contact-target hashing, retry binding, lower-sequence replay, fractional expiry, retained incidents, and existing sync contracts are green | App-target or physical-device behavior |
+| Apple app graph | Fresh exact-source NOOPiOS Debug simulator build passed; the production-shell suite passed `35` tests with `1` intentional environment skip and `0` failures; prior Release device and Strand macOS builds passed | Both Apple app targets compile with the corrected notification, idempotency, and stale-state paths, and the iOS navigation/performance shell remains operational | Signing, APNs display, iPhone background execution, or store upload |
 | Complete macOS XCTest graph | `1,655` passed, `1` existing environment skip, `0` failed | Broad Apple persistence, metrics, UI policy, backup, reporting, and integration contracts remain compatible | iOS-only and physical-band behavior |
-| Android production-flavor gate | `assembleFullDebug`, `testFullDebugUnitTest`, `lintFullDebug`, and `compileFullDebugAndroidTestKotlin` passed; `4,130` unit tests with `7` existing skips; `70` actionable tasks | Android app, resources, localization policy, runtime Safety policy, APK, lint, and instrumentation sources are green | Managed-emulator or physical OEM delivery/background behavior |
+| Android production-flavor gate | `assembleFullDebug`, `testFullDebugUnitTest`, `lintFullDebug`, and `compileFullDebugAndroidTestKotlin` passed; `4,136` unit tests with `7` existing skips and `0` failures or errors; `70` actionable tasks | Android app, resources, localization policy, synchronous notification handoff, durable Safety workers, retry binding, APK, lint, and instrumentation sources are green | Managed-emulator or physical OEM delivery/background behavior |
 | Clean Python 3.12 server gate | Ruff check and format passed; `387` tests passed with only the intentionally unconfigured Twilio staging test skipped | API, PostgreSQL overlay, migration, identity, Safety, initial/retry dispatch, lifecycle, and retention behavior pass against fresh extension-free databases | TimescaleDB container, provider traffic, or public deployment |
 | Python dependency audit | Runtime and dev requirements report zero known vulnerabilities after `httpx2 2.12.0` | The checked dependency declarations satisfy the repository's zero Critical/High policy and the newly disclosed test-client issues are fixed | Future disclosures |
 | Localization generation and CI audit | `304` Safety strings generated for `9` locales; `49` audit tests passed; no new unextracted Apple copy or Android complete-locale gaps | Safety copy is generated, translated, placeholder-safe, and brand-boundary clean | Human linguistic review in every market |
-| Repository policy matrix | Release controls, ten required contexts, terminology ratchet, calibration parity (`12` metrics, `3` revisions, `13` thresholds, `16` guards), health claims (`1,194` files), legal provenance, private-data, and `40` operations records passed | Source policy, metric parity, claims, provenance, privacy, and durable evidence remain intact | Legal approval, clinical validation, or production authorization |
+| Repository policy matrix | `9` release controls and `187` control tests passed; ten required contexts, terminology ratchet, calibration parity (`12` metrics, `3` revisions, `13` thresholds, `16` guards), health claims (`1,194` files), legal provenance, private-data, `49` localization tests, and `40` operations records passed | Source policy, metric parity, claims, provenance, privacy, and durable evidence remain intact | Legal approval, clinical validation, or production authorization |
 
 ## Physical device and deployment
 
@@ -179,8 +191,8 @@ temporary resources created by the implementation and verification rounds.
 
 - Changed paths: managed Safety server, shared Apple client, iOS runtime/UI,
   Android runtime/client/resources/tests, localization source/generated files,
-  the reviewed terminology inventory, the test-only Python dependency pin, and
-  this operations record.
+  the reviewed terminology inventory and its pinned release-source digest, the
+  test-only Python dependency pin, and this operations record.
 - Commits: commit containing this record is pending push at the local-evidence
   checkpoint.
 - Branch and remote state: pull request `#10` remains open; its previous exact
@@ -200,7 +212,7 @@ temporary resources created by the implementation and verification rounds.
 
 ## Open risks and honest limitations
 
-- Eighteen review threads have source and local regression dispositions but
+- Twenty review threads have source and local regression dispositions but
   still require exact-head hosted verification and explicit resolution.
 - The local server run uses the plain PostgreSQL overlay. The protected hosted
   server context must still exercise the pinned TimescaleDB image, containers,
@@ -211,7 +223,7 @@ temporary resources created by the implementation and verification rounds.
 ## Next round
 
 1. Push the reviewed implementation, pass all ten exact-head protected
-   contexts, resolve the eighteen conversations with evidence, and merge
+   contexts, resolve the twenty conversations with evidence, and merge
    normally.
 2. Run exact-main verification, then perform the bounded temporary-resource
    cleanup without removing retained private synthetic staging.
