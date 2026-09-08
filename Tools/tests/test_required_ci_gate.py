@@ -812,13 +812,19 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertIn("timeout-minutes: 70", source)
         self.assertEqual(source.count("continue-on-error: true"), 1)
         self.assertIn("Tools/android-managed-device-retry.py", source)
-        self.assertEqual(source.count("Tools/run-bounded-command.py"), 3)
-        self.assertEqual(source.count("--timeout-seconds 1080"), 2)
-        self.assertEqual(source.count("--timeout-seconds 1200"), 1)
-        self.assertEqual(source.count("--status-file "), 3)
-        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 4)
-        self.assertEqual(source.count("--no-configuration-cache"), 3)
+        self.assertEqual(source.count("Tools/run-bounded-command.py"), 5)
+        self.assertEqual(source.count("--timeout-seconds 720"), 2)
+        self.assertEqual(source.count("--timeout-seconds 900"), 2)
+        self.assertEqual(source.count("--timeout-seconds 180"), 1)
+        self.assertEqual(source.count("--status-file "), 5)
+        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 7)
+        self.assertEqual(source.count("--no-configuration-cache"), 5)
         self.assertIn("test_run_bounded_command.py", source)
+        self.assertIn("test_android_managed_device_retry.py", source)
+        self.assertIn("assembleFullDebugAndroidTest", source)
+        self.assertIn("pixel2Api35Setup", source)
+        self.assertIn("cleanManagedDevices", source)
+        self.assertIn("--bounded-status-file ", source)
         self.assertIn(
             "android.testInstrumentationRunnerArguments.notClass="
             "com.noop.ui.ReviewSampleInstrumentedTest",
@@ -832,7 +838,7 @@ class RequiredCIGateTests(unittest.TestCase):
             "steps.review_sample_retry.outputs.retry == 'true'",
             source,
         )
-        self.assertEqual(source.count("--rerun-tasks"), 1)
+        self.assertNotIn("--rerun-tasks", source)
         self.assertIn(
             "Tools/(android-managed-device-retry|run-bounded-command)\\.py$",
             source,

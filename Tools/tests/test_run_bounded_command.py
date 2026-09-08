@@ -65,18 +65,24 @@ class RunBoundedCommandTests(unittest.TestCase):
                 "time.sleep(60)"
             )
             stderr = io.StringIO()
+            status_file = root / "timeout.status"
             with contextlib.redirect_stderr(stderr):
                 exit_code = RUNNER.run_command(
                     [sys.executable, "-c", program],
                     timeout_seconds=1,
                     grace_seconds=1,
                     label="timeout-case",
+                    status_file=status_file,
                 )
 
             self.assertEqual(exit_code, RUNNER.TIMEOUT_EXIT_CODE)
             self.assertEqual(
                 stderr.getvalue(),
                 "bounded-command: label=timeout-case status=timeout\n",
+            )
+            self.assertEqual(
+                status_file.read_text(encoding="utf-8"),
+                "label=timeout-case\nstatus=timeout\nexit_code=124\n",
             )
             child_pid = int(child_pid_path.read_text(encoding="utf-8"))
             deadline = time.monotonic() + 3

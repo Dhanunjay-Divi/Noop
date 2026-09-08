@@ -11,6 +11,12 @@ from pathlib import Path
 
 MAX_EVIDENCE_FILES = 32
 MAX_EVIDENCE_BYTES = 1_000_000
+MAX_STATUS_BYTES = 4_096
+TIMEOUT_STATUS = {
+    "label": "review-sample-fresh-process",
+    "status": "timeout",
+    "exit_code": "124",
+}
 
 
 @dataclass(frozen=True)
@@ -34,14 +40,65 @@ def _read_bounded(paths: list[Path]) -> tuple[str | None, str | None]:
     return "\n".join(chunks), None
 
 
-def classify(results_root: Path) -> RetryDecision:
+def _read_status(path: Path | None) -> tuple[dict[str, str] | None, str | None]:
+    if path is None or not path.exists():
+        return None, None
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_STATUS_BYTES:
+            return None, "invalid-bounded-status"
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None, "invalid-bounded-status"
+    fields: dict[str, str] = {}
+    for line in lines:
+        if line.count("=") != 1:
+            return None, "invalid-bounded-status"
+        key, value = line.split("=", 1)
+        if key not in {"label", "status", "exit_code"} or key in fields:
+            return None, "invalid-bounded-status"
+        fields[key] = value
+    if set(fields) != {"label", "status", "exit_code"}:
+        return None, "invalid-bounded-status"
+    if fields["label"] != "review-sample-fresh-process":
+        return None, "invalid-bounded-status"
+    if fields["status"] not in {"success", "failed", "timeout", "start-error"}:
+        return None, "invalid-bounded-status"
+    try:
+        int(fields["exit_code"])
+    except ValueError:
+        return None, "invalid-bounded-status"
+    return fields, None
+
+
+def classify(
+    results_root: Path,
+    *,
+    bounded_status_file: Path | None = None,
+) -> RetryDecision:
+    bounded_status, status_error = _read_status(bounded_status_file)
+    if status_error is not None:
+        return RetryDecision(False, status_error, 0)
+    timeout_before_results = bounded_status == TIMEOUT_STATUS
+
     if not results_root.is_dir():
+        if timeout_before_results:
+            return RetryDecision(
+                True,
+                "managed-device-timeout-before-results",
+                0,
+            )
         return RetryDecision(False, "missing-results", 0)
 
     textprotos = sorted(results_root.rglob("test-result.textproto"))
     logs = sorted(results_root.rglob("utp*.log"))
     evidence_files = len(textprotos) + len(logs)
     if not textprotos:
+        if timeout_before_results:
+            return RetryDecision(
+                True,
+                "managed-device-timeout-before-results",
+                evidence_files,
+            )
         return RetryDecision(False, "missing-test-result", evidence_files)
     if evidence_files > MAX_EVIDENCE_FILES:
         return RetryDecision(False, "too-many-evidence-files", evidence_files)
@@ -86,10 +143,14 @@ def _write_github_output(path: Path, decision: RetryDecision) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("results_root", type=Path)
+    parser.add_argument("--bounded-status-file", type=Path)
     parser.add_argument("--github-output", type=Path)
     arguments = parser.parse_args(argv)
 
-    decision = classify(arguments.results_root)
+    decision = classify(
+        arguments.results_root,
+        bounded_status_file=arguments.bounded_status_file,
+    )
     if arguments.github_output is not None:
         _write_github_output(arguments.github_output, decision)
     print(

@@ -30,6 +30,16 @@ class AndroidManagedDeviceRetryTests(unittest.TestCase):
         (results / "utp.0.log").write_text(log, encoding="utf-8")
         return root
 
+    def _timeout_status(self, root: Path) -> Path:
+        path = root / "review-sample.status"
+        path.write_text(
+            "label=review-sample-fresh-process\n"
+            "status=timeout\n"
+            "exit_code=124\n",
+            encoding="utf-8",
+        )
+        return path
+
     def test_activity_service_loss_before_any_test_is_retriable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self._results(
@@ -91,6 +101,57 @@ issue {
             decision = RETRY.classify(Path(temporary) / "missing")
             self.assertFalse(decision.retry)
             self.assertEqual(decision.category, "missing-results")
+
+    def test_bounded_timeout_before_results_is_retriable_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status = self._timeout_status(root)
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=status,
+            )
+            self.assertTrue(decision.retry)
+            self.assertEqual(
+                decision.category,
+                "managed-device-timeout-before-results",
+            )
+
+    def test_timeout_never_retries_after_a_test_result_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = self._results(
+                root / "results",
+                proto="""
+test_status: FAILED
+test_result {
+  test_case {
+    test_class: "com.noop.ui.ReviewSampleInstrumentedTest"
+  }
+  test_status: FAILED
+}
+""",
+            )
+            decision = RETRY.classify(
+                results,
+                bounded_status_file=self._timeout_status(root),
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "test-results-present")
+
+    def test_invalid_bounded_status_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            status = root / "invalid.status"
+            status.write_text(
+                "label=review-sample-fresh-process\nstatus=timeout\n",
+                encoding="utf-8",
+            )
+            decision = RETRY.classify(
+                root / "missing",
+                bounded_status_file=status,
+            )
+            self.assertFalse(decision.retry)
+            self.assertEqual(decision.category, "invalid-bounded-status")
 
     def test_evidence_file_scan_is_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -16,6 +16,7 @@ TIMEOUT_EXIT_CODE = 124
 START_FAILURE_EXIT_CODE = 127
 MAX_TIMEOUT_SECONDS = 3_600
 MAX_GRACE_SECONDS = 60
+FINAL_KILL_WAIT_SECONDS = 10
 SAFE_LABEL = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 
 
@@ -90,18 +91,21 @@ def run_command(
             file=sys.stderr,
             flush=True,
         )
-        _signal_process_group(process, signal.SIGTERM)
-        try:
-            process.wait(timeout=grace_seconds)
-        except subprocess.TimeoutExpired:
-            _signal_process_group(process, signal.SIGKILL)
-            process.wait()
         _write_status(
             status_file,
             label=label,
             status="timeout",
             exit_code=TIMEOUT_EXIT_CODE,
         )
+        _signal_process_group(process, signal.SIGTERM)
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            _signal_process_group(process, signal.SIGKILL)
+            try:
+                process.wait(timeout=FINAL_KILL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
         return TIMEOUT_EXIT_CODE
 
     status = "success" if exit_code == 0 else "failed"
