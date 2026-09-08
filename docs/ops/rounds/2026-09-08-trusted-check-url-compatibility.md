@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `in progress`
+- State: `complete`
 - Owner: project team
-- Branch: `codex/trusted-check-details-url-fix`
+- Branch: `main`
 - Start commit: `c3c377abd57ab090b2ed0b5ade4461f6769a0d3a`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `243b11bae617118b3c5be71ce5fc81488aa493b8`
+- Record commit or PR: pull request `#7`, merged as
+  `ffae30d5b8072f5aa34afa2bd6f5945fdea8c8fc`
 
 ## Objective
 
@@ -79,7 +80,7 @@ correct authenticated response.
 | Full Tools suite | Passed, 222 tests | Both authenticated URL forms are accepted, mismatched IDs are rejected, and the repository release-control contract remains fail closed | Hosted GitHub behavior |
 | Required-CI, trusted-self, release-control, operations, terminology, workflow-lint, private-data, and health-claims gates | Passed | Reviewed source digests, workflow contracts, durable records, and repository safety gates remain exact | Hosted execution |
 | Actual bootstrap check parser | Passed for protected-main run `34193579552`, attempt `1` | The repaired exact-SHA verifier accepts the real canonical check-run object while retaining external workflow identity | Reporter execution from the repaired protected source |
-| Protected-main rerun after merge | Pending | GitHub's canonical response is accepted on the exact protected commit | Tenth-context activation |
+| Protected-main rerun after merge | Passed in run `34194149601`; custom check `101958240443` is successful on exact commit `ffae30d5b8072f5aa34afa2bd6f5945fdea8c8fc` | GitHub's canonical response is accepted by both the repaired reporter and exact-SHA verifier | Tenth-context activation |
 
 ## Physical device and deployment
 
@@ -95,6 +96,8 @@ correct authenticated response.
 
 - Changed paths: trusted reporter, exact-SHA verifier, focused tests, reviewed
   source digest, and operations documentation.
+- Branch and remote state: merged to protected `main` through pull request
+  `#7`.
 - Version/build impact: none.
 - Release or distribution impact: compatibility repair only.
 
@@ -109,16 +112,15 @@ correct authenticated response.
 
 ## Open risks and honest limitations
 
-- The custom context is not yet required by branch protection.
-- The activation round remains blocked until this fix is merged and one exact
-  protected-main custom check passes.
+- The custom context is not yet required by branch protection; that policy
+  change remains isolated in the activation round.
 - Supplier, physical-device, legal, carrier, signing, store, participant,
   population-calibration, and elapsed-operation gates remain open.
 
 ## Next round
 
-1. Resume the isolated trusted release-control activation after exact-main
-   hosted evidence is green.
+1. Complete the isolated trusted release-control activation and post-merge
+   ten-context verification.
 
 ## Privacy check
 

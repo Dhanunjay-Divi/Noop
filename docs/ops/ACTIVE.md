@@ -18,14 +18,20 @@ Last updated: **2026-09-08**
 
 ## Active work
 
-The trusted check URL compatibility round is in progress. The first
-protected-main trust workflow validated the exact source and created the
-intended successful custom check, but GitHub canonicalized the check details
-link to its check-run URL. The reporter rejected that valid authenticated
-response. The focused repair accepts only the requested Actions-run URL or a
-canonical URL bound to the exact repository and returned check ID; SHA,
-application, workflow-run, attempt, scope, and conclusion checks remain
-unchanged. Evidence is recorded in
+The trusted release-control activation round is in progress from repaired
+protected `main` commit `ffae30d5`. It promotes the already-proven
+`trusted-release-controls` custom check to the fifth universal workflow and
+tenth stable context. Live protection and immutable-release settings remain
+unchanged until the activation pull request passes all existing contexts plus
+the exact-head trust check. Evidence is recorded in
+[Trusted release-control activation](rounds/2026-09-08-trusted-release-control-activation.md).
+
+The trusted check URL compatibility round is complete. The reporter and
+exact-SHA verifier now accept GitHub's canonical check-run URL only when it is
+bound to the exact repository and authenticated response check ID. Protected
+main run `34194149601` passed validation and publication on exact commit
+`ffae30d5`; SHA, application, workflow-run, attempt, scope, and conclusion
+checks remain enforced. Evidence is recorded in
 [Trusted check URL compatibility](rounds/2026-09-08-trusted-check-url-compatibility.md).
 
 The production-readiness execution round is in progress. Current source adds
