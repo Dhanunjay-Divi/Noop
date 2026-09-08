@@ -51,7 +51,7 @@ jobs:
           CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
           git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
             > "$CHANGED_FILES"
-          if grep -Eq '^(android/|Tools/android-managed-device-retry\.py$|\.github/workflows/android\.yml$)' \
+          if grep -Eq '^(android/|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
              "$CHANGED_FILES"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -83,6 +83,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
 
+      - name: Test bounded managed-device command runner
+        run: >-
+          python3 -m unittest discover
+          -s ../Tools/tests
+          -p 'test_run_bounded_command.py'
+
       - name: Build debug APK
         run: ./gradlew assembleFullDebug
 
@@ -99,7 +105,7 @@ jobs:
     needs: [changes]
     if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 70
     defaults:
       run:
         working-directory: android
@@ -132,7 +138,13 @@ jobs:
         id: review_sample_first
         continue-on-error: true
         run: |
-          ./gradlew pixel2Api35FullDebugAndroidTest \
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 1080 \
+            --grace-seconds 30 \
+            --label review-sample-fresh-process \
+            --status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
             --no-configuration-cache \
@@ -155,7 +167,13 @@ jobs:
           }}
         run: |
           ./gradlew --stop
-          ./gradlew pixel2Api35FullDebugAndroidTest \
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 1080 \
+            --grace-seconds 30 \
+            --label review-sample-infrastructure-retry \
+            --status-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
             --no-configuration-cache \
@@ -163,7 +181,17 @@ jobs:
             --stacktrace
 
       - name: Run production-shell instrumentation tests
-        run: ./gradlew pixel2Api35FullDebugAndroidTest --stacktrace
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 1200 \
+            --grace-seconds 30 \
+            --label production-shell-instrumentation \
+            --status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            --no-configuration-cache \
+            --stacktrace
 
       - name: Retain managed-device diagnostics
         if: ${{ always() }}
@@ -173,6 +201,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/managedDevice/
             android/app/build/outputs/androidTest-results/managedDevice/
+            android/app/build/noop-managed-device-status/
           if-no-files-found: warn
           retention-days: 14
 

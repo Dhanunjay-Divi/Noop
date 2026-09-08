@@ -809,9 +809,21 @@ class RequiredCIGateTests(unittest.TestCase):
         source = (ROOT / ".github/workflows/android.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("timeout-minutes: 50", source)
+        self.assertIn("timeout-minutes: 70", source)
         self.assertEqual(source.count("continue-on-error: true"), 1)
         self.assertIn("Tools/android-managed-device-retry.py", source)
+        self.assertEqual(source.count("Tools/run-bounded-command.py"), 3)
+        self.assertEqual(source.count("--timeout-seconds 1080"), 2)
+        self.assertEqual(source.count("--timeout-seconds 1200"), 1)
+        self.assertEqual(source.count("--status-file "), 3)
+        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 4)
+        self.assertEqual(source.count("--no-configuration-cache"), 3)
+        self.assertIn("test_run_bounded_command.py", source)
+        self.assertIn(
+            "android.testInstrumentationRunnerArguments.notClass="
+            "com.noop.ui.ReviewSampleInstrumentedTest",
+            source,
+        )
         self.assertIn(
             "steps.review_sample_first.outcome == 'failure'",
             source,
@@ -822,7 +834,7 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         self.assertEqual(source.count("--rerun-tasks"), 1)
         self.assertIn(
-            "Tools/android-managed-device-retry\\.py$",
+            "Tools/(android-managed-device-retry|run-bounded-command)\\.py$",
             source,
         )
 
