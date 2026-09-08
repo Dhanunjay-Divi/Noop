@@ -948,6 +948,19 @@ class RequiredCIGateTests(unittest.TestCase):
             ),
             ("pull-request", 123, 2),
         )
+        canonical_check = {
+            **check,
+            "id": 789,
+            "details_url": (
+                "https://github.com/Dhanunjay-Divi/Noop/runs/789"
+            ),
+        }
+        self.assertEqual(
+            GATE._trusted_workflow_run_identity(
+                canonical_check, "Dhanunjay-Divi/Noop", sha
+            ),
+            ("pull-request", 123, 2),
+        )
         payload = {
             "id": 123,
             "run_attempt": 2,
@@ -980,6 +993,12 @@ class RequiredCIGateTests(unittest.TestCase):
                 "details_url": (
                     "https://github.com/Dhanunjay-Divi/Noop/"
                     "actions/runs/124"
+                ),
+            },
+            {
+                **canonical_check,
+                "details_url": (
+                    "https://github.com/Dhanunjay-Divi/Noop/runs/790"
                 ),
             },
         ):

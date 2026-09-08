@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -100,6 +101,32 @@ class GitHubCheckClient:
             raise TrustedControlError(
                 "exact-head release-control check response is invalid"
             ) from error
+
+
+def _valid_check_details_url(
+    value: Any,
+    *,
+    repository: str,
+    requested_url: str,
+    check_id: int,
+) -> bool:
+    if value == requested_url:
+        return True
+    if not isinstance(value, str):
+        return False
+    parsed = urllib.parse.urlsplit(value)
+    owner, name = repository.split("/", 1)
+    canonical = re.compile(
+        rf"/{re.escape(owner)}/{re.escape(name)}/runs/{check_id}",
+        re.IGNORECASE,
+    )
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == "github.com"
+        and not parsed.query
+        and not parsed.fragment
+        and canonical.fullmatch(parsed.path) is not None
+    )
 
 
 def _safe_root(path: Path, label: str) -> Path:
@@ -360,16 +387,25 @@ def report_exact_check(
     }
     response = client.create_check(repository, payload)
     app = response.get("app") if isinstance(response, dict) else None
+    response_id = response.get("id") if isinstance(response, dict) else None
+    valid_response_id = (
+        isinstance(response_id, int)
+        and not isinstance(response_id, bool)
+        and response_id > 0
+    )
     if (
         not isinstance(response, dict)
-        or not isinstance(response.get("id"), int)
-        or isinstance(response.get("id"), bool)
-        or response["id"] <= 0
+        or not valid_response_id
         or response.get("name") != CHECK_NAME
         or response.get("head_sha") != head_sha
         or response.get("status") != "completed"
         or response.get("conclusion") != conclusion
-        or response.get("details_url") != details_url
+        or not _valid_check_details_url(
+            response.get("details_url"),
+            repository=repository,
+            requested_url=details_url,
+            check_id=response_id,
+        )
         or response.get("external_id") != external_id
         or not isinstance(app, dict)
         or app.get("id") != GITHUB_ACTIONS_APP_ID

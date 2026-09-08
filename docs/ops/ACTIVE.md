@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-07**
+Last updated: **2026-09-08**
 
 ## Repository
 
@@ -17,6 +17,16 @@ Last updated: **2026-09-07**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The trusted check URL compatibility round is in progress. The first
+protected-main trust workflow validated the exact source and created the
+intended successful custom check, but GitHub canonicalized the check details
+link to its check-run URL. The reporter rejected that valid authenticated
+response. The focused repair accepts only the requested Actions-run URL or a
+canonical URL bound to the exact repository and returned check ID; SHA,
+application, workflow-run, attempt, scope, and conclusion checks remain
+unchanged. Evidence is recorded in
+[Trusted check URL compatibility](rounds/2026-09-08-trusted-check-url-compatibility.md).
 
 The production-readiness execution round is in progress. Current source adds
 provenance-gated official-reference comparison and chronological personal
