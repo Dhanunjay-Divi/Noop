@@ -2351,15 +2351,6 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 1,
-      "owner": "project team",
-      "path": "Tools/update-homebrew-cask.sh",
-      "reason": "Existing active symbol retained behind the additive compatibility migration.",
-      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "f44ad509998ca24dafc9295b3b892de6efacb2fd337beeb864d8a4e7f6817623"
-    },
-    {
-      "category": "core",
       "occurrenceCount": 3,
       "owner": "project team",
       "path": "Tools/verify-ios-band-collection.sh",

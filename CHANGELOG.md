@@ -1720,9 +1720,10 @@ A large batch of fixes from reported issues and community contributions.
   picker was greying out the `.zip` (the `UTType.folder` option, a Mac-only "pick an unzipped folder"
   affordance, blocked file selection in the iOS Files picker). iOS now offers only the file types it can
   actually open, so the `.zip` is selectable again. Thanks @adrnxq. (#179)
-- **New (iPhone):** an **AltStore / SideStore source** for one-tap updates on sideloaded installs — add
-  `https://raw.githubusercontent.com/NoopApp/noop/main/altstore-source.json` as a source. Reimplemented
-  from @RazvanRex. (#178)
+- **New (iPhone):** an **AltStore / SideStore source** for one-tap updates on sideloaded installs. The
+  current stable channel is
+  `https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json` and
+  works only while its manifest and IPA assets are public. Reimplemented from @RazvanRex. (#178)
 
 ## 2.6.2 — iPhone button-label polish
 

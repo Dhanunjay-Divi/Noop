@@ -24,9 +24,27 @@ link, even if someone who already has access can open it.
 | macOS | `NOOP-macos-*.zip` | Download, unzip, move NOOP to Applications, then right-click it and choose **Open** the first time. Community builds are ad-hoc signed and are not notarized. |
 | iPhone | `NOOP-ios-unsigned-*.ipa` | This is an unsigned community build. Download it while authenticated, then import the local file into AltStore, SideStore, or another sideloading tool. A normal App Store-style beta requires a separately signed TestFlight build. |
 
-The fixed version tags are stable releases. When present, `testing-latest` is a
-rolling prerelease for testers. It is replaced in place, may contain unfinished
-work, and should not be treated as a backup of your data.
+The fixed version tags are stable releases. Testing builds use unique
+`testing-snapshot-<run>-<attempt>` tags. A successful Actions run retains a
+verified draft. An owner then publishes it with
+`Tools/publish-testing-snapshot.sh <tag> <version>`, which rechecks the exact
+protected-main workflow run and attempt, canonical title/body/target, live
+immutable-release setting, owner-only tag-creation rule, no-bypass tag
+update/deletion rule, absent pre-publication tag, exact post-publication tag,
+exclusive owner writer, and complete asset set. Each published snapshot is an
+immutable prerelease, may contain unfinished work, and should not be treated as
+a backup of your data. The historical `testing-latest` release is a legacy
+snapshot and is no longer replaced in place; use the newest published testing
+snapshot by publication time.
+
+The testing and community-release workflows build only protected `main`. Their
+Android staging signing key must exist only in the protected `staging`
+environment under
+`ANDROID_STAGING_KEYSTORE_BASE64`, `ANDROID_STAGING_STORE_PASSWORD`,
+`ANDROID_STAGING_KEY_ALIAS`, and `ANDROID_STAGING_KEY_PASSWORD`. The workflow
+dispatchers must remain disabled while those values exist as repository-wide
+secrets. Moving the values requires the key owner to re-enter them because
+GitHub Actions secrets are write-only.
 
 Older staging APKs signed with the historical public debug key cannot be updated
 in place by the new privately signed staging APK, even though the application ID
@@ -37,10 +55,9 @@ the same update break will recur.
 
 The checked-in `altstore-source.json` is a publication template, not a working
 private distribution channel. AltStore and SideStore cannot authenticate to a
-private `raw.githubusercontent.com` manifest or its private GitHub release URLs.
-Do not advertise or add that source URL while this repository is private. It
-becomes usable only after the manifest, icon, and IPA assets all live at
-intentionally public HTTPS URLs.
+private manifest or private IPA URLs. The former mutable GitHub Release channel
+is disabled because production releases are immutable; it must be moved to a
+separate mutable pointer host and anonymously verified before it is advertised.
 
 See the [iPhone installation guide](IOS.md) for the exact setup and the
 limitations of free Apple-ID signing.

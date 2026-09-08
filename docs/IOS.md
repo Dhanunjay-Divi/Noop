@@ -4,7 +4,7 @@ Building and signing the app yourself is the supported development path. A
 legacy unsigned-artifact pipeline also exists for explicitly authorized
 development testing, but it is not the App Store distribution lane. This
 repository is currently private, so its Releases page requires authenticated
-collaborator access and its raw manifest is not a public install feed.
+collaborator access and its stable source asset is not a public install feed.
 
 Build and run the `NOOPiOS` scheme on a real iPhone with your own signing team.
 The CI job in [`app-build.yml`](../.github/workflows/app-build.yml) compile-checks
@@ -35,18 +35,19 @@ the widget; iOS still will not run it until the sideloader signs it on your devi
 ### AltStore/SideStore source status
 
 The repository contains an `altstore-source.json` publication template. Its
-current URL is deliberately **not advertised as an install path**:
+historical channel URL is deliberately **not advertised as an install path**:
 
-**Dormant template URL (not usable while private):**
-`https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json`
+**Dormant channel (not usable):**
+`https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json`
 
 AltStore/SideStore does not send GitHub collaborator credentials when fetching a
-source or an IPA. Consequently the private raw URL and private release URLs return
-an authentication failure to the sideloader. The source can be enabled only after
-the manifest, icon, and every advertised IPA are moved to intentionally public
-HTTPS hosting (or the repository itself is made public). Until then, authorized
-testers must download the IPA in an authenticated browser and import that local
-file into their sideloader.
+source or an IPA. Consequently private release URLs return an authentication
+failure to the sideloader. Immutable GitHub Releases also cannot host the
+mutable source pointer AltStore requires, so workflow invocation is disabled.
+The pointer must move to a separate mutable host and pass anonymous
+manifest/icon/IPA fetch and install tests before any channel is advertised.
+Until then, authorized testers must download the IPA in an authenticated
+browser and import that local file into their sideloader.
 
 Historical manifest entries are not release authority. Use only an artifact
 associated with a reviewed canonical-project commit and require a passing

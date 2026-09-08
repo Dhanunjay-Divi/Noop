@@ -1,0 +1,155 @@
+name: Homebrew cask publication
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Published production version to expose, for example 9.2.1
+        required: true
+        type: string
+      publish_forgejo:
+        description: Also mirror the cask to the configured Forgejo tap
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      NOOP_HOMEBREW_TAP_TOKEN:
+        description: Fine-grained write token scoped only to the public tap
+        required: true
+      NOOP_HOMEBREW_FORGE_TOKEN:
+        description: Write token scoped only to the Forgejo tap
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published production version to expose, for example 9.2.1
+        required: true
+        type: string
+      publish_forgejo:
+        description: Also mirror the cask to the configured Forgejo tap
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+concurrency:
+  group: homebrew-cask
+  cancel-in-progress: false
+
+jobs:
+  publish-homebrew-cask:
+    name: publish-homebrew-cask
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact protected-main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require exact protected-main source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Publish the verified release to the configured project tap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          NOOP_HOMEBREW_TAP_ORG: ${{ vars.NOOP_HOMEBREW_TAP_ORG }}
+          NOOP_HOMEBREW_GITHUB_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
+          PUBLISH_FORGEJO: ${{ inputs.publish_forgejo }}
+          FORGE_DOMAIN: ${{ inputs.publish_forgejo && vars.NOOP_HOMEBREW_FORGE_DOMAIN || '' }}
+          FORGE_ORG: ${{ inputs.publish_forgejo && vars.NOOP_HOMEBREW_FORGE_ORG || '' }}
+          NOOP_HOMEBREW_FORGE_TOKEN: ${{ inputs.publish_forgejo && secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::Invalid Homebrew source version."
+            exit 1
+          }
+          test -n "${NOOP_HOMEBREW_TAP_ORG:-}" || {
+            echo "::error::Repository variable NOOP_HOMEBREW_TAP_ORG is required."
+            exit 1
+          }
+          test -n "${NOOP_HOMEBREW_GITHUB_TOKEN:-}" || {
+            echo "::error::Repository secret NOOP_HOMEBREW_TAP_TOKEN is required."
+            exit 1
+          }
+          if [ "$PUBLISH_FORGEJO" = "true" ]; then
+            for name in FORGE_DOMAIN FORGE_ORG NOOP_HOMEBREW_FORGE_TOKEN; do
+              test -n "${!name:-}" || {
+                echo "::error::Missing required Homebrew Forgejo mirror configuration: ${name}."
+                exit 1
+              }
+            done
+            export NOOP_HOMEBREW_FORGE=1
+          else
+            export NOOP_HOMEBREW_FORGE=0
+          fi
+
+          SOURCE_VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')
+          [ "$SOURCE_VISIBILITY" = "public" ] || {
+            echo "::error::Homebrew publication requires a public source repository."
+            exit 1
+          }
+          TAP_VISIBILITY=$(
+            GH_TOKEN="$NOOP_HOMEBREW_GITHUB_TOKEN" \
+              gh api "repos/${NOOP_HOMEBREW_TAP_ORG}/homebrew-noop" \
+                --jq '.visibility'
+          )
+          [ "$TAP_VISIBILITY" = "public" ] || {
+            echo "::error::The configured Homebrew tap must be public."
+            exit 1
+          }
+
+          TAG="v${VERSION}"
+          ZIP="NOOP-macos-v${VERSION}.zip"
+          RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets)
+          [ "$(jq -r '.isDraft' <<<"$RELEASE")" = "false" ] || {
+            echo "::error::Release $TAG is still a draft."
+            exit 1
+          }
+          [ "$(jq -r '.isPrerelease' <<<"$RELEASE")" = "false" ] || {
+            echo "::error::Release $TAG is a prerelease."
+            exit 1
+          }
+          SIZE=$(jq -r --arg zip "$ZIP" \
+            '.assets[] | select(.name == $zip) | .size' <<<"$RELEASE")
+          [[ "$SIZE" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::Published release $TAG has no valid $ZIP asset."
+            exit 1
+          }
+
+          RELEASE_SHA=$(git rev-parse "${TAG}^{commit}")
+          git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA" || {
+            echo "::error::Published release $TAG is not contained in protected main."
+            exit 1
+          }
+          GH_TOKEN="$GH_TOKEN" python3 Tools/required-ci-gate.py verify-github \
+            --repository "$GITHUB_REPOSITORY" \
+            --sha "$RELEASE_SHA"
+          APPLE_VERSION=$(git show "${TAG}:project.yml" |
+            sed -n 's/.*MARKETING_VERSION: "\([^"]*\)".*/\1/p' | head -1)
+          ANDROID_VERSION=$(git show "${TAG}:android/app/build.gradle.kts" |
+            sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' | head -1)
+          test "$APPLE_VERSION" = "$VERSION"
+          test "$ANDROID_VERSION" = "$VERSION"
+
+          DOWNLOAD_DIR="$RUNNER_TEMP/homebrew-release"
+          mkdir -p "$DOWNLOAD_DIR"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ZIP" --dir "$DOWNLOAD_DIR"
+          test "$(stat -c %s "$DOWNLOAD_DIR/$ZIP")" = "$SIZE"
+
+          export NOOP_RELEASE_GITHUB_OWNER="${GITHUB_REPOSITORY%%/*}"
+          export NOOP_RELEASE_GITHUB_NAME="${GITHUB_REPOSITORY#*/}"
+          Tools/update-homebrew-cask.sh "$VERSION" "$DOWNLOAD_DIR/$ZIP"

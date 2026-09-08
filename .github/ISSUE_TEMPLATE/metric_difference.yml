@@ -17,7 +17,7 @@ body:
     attributes:
       label: NOOP version
       description: Settings → What's New, or the release tag and short commit shown in the release notes.
-      placeholder: "9.1.1 or testing-latest / abc1234"
+      placeholder: "9.1.1 or testing-snapshot-12345-1 / abc1234"
     validations:
       required: true
 

@@ -1,0 +1,83 @@
+{
+  "requiredCheckAppId": 15368,
+  "requiredContexts": [
+    "android-ci-required",
+    "apple-ci-required",
+    "health-claims",
+    "i18n-coverage",
+    "operations-record",
+    "release-controls",
+    "runtime-license-required",
+    "server-ci-required",
+    "swift-packages-required"
+  ],
+  "schemaVersion": 2,
+  "sourceBranch": "main",
+  "universalWorkflows": [
+    {
+      "path": ".github/workflows/health-claims.yml",
+      "pullRequestEvent": "pull_request",
+      "requiredJob": "health-claims"
+    },
+    {
+      "path": ".github/workflows/i18n-coverage.yml",
+      "pullRequestEvent": "pull_request",
+      "requiredJob": "i18n-coverage"
+    },
+    {
+      "path": ".github/workflows/ops-docs.yml",
+      "pullRequestEvent": "pull_request",
+      "requiredJob": "operations-record"
+    },
+    {
+      "path": ".github/workflows/release-controls.yml",
+      "pullRequestEvent": "pull_request",
+      "requiredJob": "release-controls"
+    }
+  ],
+  "workflows": [
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "build-and-test",
+        "production-shell"
+      ],
+      "path": ".github/workflows/android.yml",
+      "requiredJob": "android-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "build"
+      ],
+      "path": ".github/workflows/app-build.yml",
+      "requiredJob": "apple-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "runtime-license-inventory"
+      ],
+      "path": ".github/workflows/legal-inventory.yml",
+      "requiredJob": "runtime-license-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "server-ci"
+      ],
+      "path": ".github/workflows/server.yml",
+      "requiredJob": "server-ci-required"
+    },
+    {
+      "applicabilityJob": "changes",
+      "heavyJobs": [
+        "history-harness",
+        "study-harness",
+        "swift-packages"
+      ],
+      "path": ".github/workflows/swift-packages.yml",
+      "requiredJob": "swift-packages-required"
+    }
+  ]
+}

@@ -149,7 +149,8 @@ The Android coordinator (`android/app/src/main/java/com/noop/ble/…`) mirrors t
 Per `CLAUDE.md`, know the coverage before claiming it works:
 
 - **`swift test` (`Packages/**`)** does **not** cover this — the coordinator and drivers live under
-  `Strand/BLE`, i.e. **app-target Swift with no default CI** (`app-build.yml` is disabled). So:
+  `Strand/BLE`, i.e. **app-target Swift covered by the required
+  `app-build.yml` compile/test workflow**. So:
   - Compile the **macOS app locally**: `xcodegen generate && xcodebuild -project Strand.xcodeproj
     -scheme Strand -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build`.
   - Compile the **Android app locally**: `cd android && ./gradlew compileFullDebugKotlin` +

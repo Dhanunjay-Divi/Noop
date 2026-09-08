@@ -11,10 +11,9 @@ name: i18n Coverage
 on:
   pull_request:
     branches: [main]
-  # Audit main itself too, not just PRs into it. A RELEASE pushes STRAIGHT to main with no PR.
-  # Tools/appchangelog-gen.py now requires localized Android title resources, and the release
-  # workflow runs this same audit before its version-bump commit; this push trigger is a second,
-  # independent guard against any direct change regressing whole-tree coverage. Same fast job.
+  # Audit main itself too, not just PRs into it. The release workflow accepts only an already
+  # reviewed version commit and reruns this audit before draft creation; this push trigger gives
+  # that exact main SHA an independent whole-tree localization result. Same fast job.
   push:
     branches: [main]
 

@@ -4,14 +4,8 @@ name: Self-hosted Server CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'server/**'
-      - '.github/workflows/server.yml'
   push:
     branches: [main]
-    paths:
-      - 'server/**'
-      - '.github/workflows/server.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,8 +16,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: server-applicability
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine whether server checks apply
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [[ "$BASE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
+          if grep -Eq '^(server/|Tools/release-legal-gate\.py$|ThirdPartyNotices/|\.github/workflows/server\.yml$)' \
+             "$CHANGED_FILES"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   server-ci:
     name: server-ci
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     services:
       timescaledb:
@@ -160,3 +194,24 @@ jobs:
             -v noop-ci-encrypted-backups:/backups \
             noop-server-backup-ci sh -c \
               'archive=$(find /backups -maxdepth 1 -name "noop-*.dump.gpg" -print -quit); test -n "$archive"; exec sh /opt/noop/restore-drill.sh "$archive"'
+
+  server-ci-required:
+    name: server-ci-required
+    needs: [changes, server-ci]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable server job
+        env:
+          APPLICABILITY_RESULT: ${{ needs.changes.result }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          SERVER_RESULT: ${{ needs.server-ci.result }}
+        run: |
+          set -euo pipefail
+          test "$APPLICABILITY_RESULT" = "success"
+          if [ "$RUN_REQUIRED" = "true" ]; then
+            test "$SERVER_RESULT" = "success"
+          else
+            test "$RUN_REQUIRED" = "false"
+            test "$SERVER_RESULT" = "skipped"
+          fi

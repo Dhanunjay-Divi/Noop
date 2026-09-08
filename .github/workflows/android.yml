@@ -8,14 +8,8 @@ name: Android CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'android/**'
-      - '.github/workflows/android.yml'
   push:
     branches: [main]
-    paths:
-      - 'android/**'
-      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,7 +20,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: android-applicability
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine whether Android checks apply
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [[ "$BASE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
+          if grep -Eq '^(android/|Tools/(android-managed-device-retry|run-bounded-command)\.py$|\.github/workflows/android\.yml$)' \
+             "$CHANGED_FILES"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-test:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -49,6 +83,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
 
+      - name: Test managed-device control helpers
+        run: |
+          python3 -m unittest discover \
+            -s ../Tools/tests -p 'test_run_bounded_command.py'
+          python3 -m unittest discover \
+            -s ../Tools/tests -p 'test_android_managed_device_retry.py'
+
       - name: Build debug APK
         run: ./gradlew assembleFullDebug
 
@@ -62,8 +103,10 @@ jobs:
         run: ./gradlew compileFullDebugAndroidTestKotlin
 
   production-shell:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 70
     defaults:
       run:
         working-directory: android
@@ -92,15 +135,95 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Prove Review Sample worker isolation in a fresh process
+      - name: Prepare managed-device artifacts
         run: |
-          ./gradlew pixel2Api35FullDebugAndroidTest \
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 900 \
+            --grace-seconds 30 \
+            --label managed-device-preparation \
+            --status-file app/build/noop-managed-device-status/managed-device-preparation.status \
+            -- \
+            ./gradlew \
+            assembleFullDebug \
+            assembleFullDebugAndroidTest \
+            pixel2Api35Setup \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Prove Review Sample worker isolation in a fresh process
+        id: review_sample_first
+        continue-on-error: true
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 720 \
+            --grace-seconds 30 \
+            --label review-sample-fresh-process \
+            --status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
             -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Classify a zero-test managed-device infrastructure loss
+        if: ${{ steps.review_sample_first.outcome == 'failure' }}
+        id: review_sample_retry
+        run: |
+          python3 ../Tools/android-managed-device-retry.py \
+            app/build/outputs/androidTest-results/managedDevice \
+            --bounded-status-file app/build/noop-managed-device-status/review-sample-fresh-process.status \
+            --github-output "$GITHUB_OUTPUT"
+          echo "::warning title=Managed-device infrastructure retry::Android managed-device infrastructure failed before tests started; resetting and retrying once."
+
+      - name: Reset managed device before the approved retry
+        if: >-
+          ${{
+            steps.review_sample_first.outcome == 'failure' &&
+            steps.review_sample_retry.outputs.retry == 'true'
+          }}
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 180 \
+            --grace-seconds 15 \
+            --label managed-device-reset \
+            --status-file app/build/noop-managed-device-status/managed-device-reset.status \
+            -- \
+            ./gradlew cleanManagedDevices \
+            --no-configuration-cache \
+            --stacktrace
+
+      - name: Retry Review Sample isolation once on proven infrastructure loss
+        if: >-
+          ${{
+            steps.review_sample_first.outcome == 'failure' &&
+            steps.review_sample_retry.outputs.retry == 'true'
+          }}
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 720 \
+            --grace-seconds 30 \
+            --label review-sample-infrastructure-retry \
+            --status-file app/build/noop-managed-device-status/review-sample-infrastructure-retry.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=com.noop.ui.ReviewSampleInstrumentedTest \
+            -Pandroid.testInstrumentationRunnerArguments.requireFreshWorkManager=true \
+            --no-configuration-cache \
             --stacktrace
 
       - name: Run production-shell instrumentation tests
-        run: ./gradlew pixel2Api35FullDebugAndroidTest --stacktrace
+        run: |
+          python3 ../Tools/run-bounded-command.py \
+            --timeout-seconds 900 \
+            --grace-seconds 30 \
+            --label production-shell-instrumentation \
+            --status-file app/build/noop-managed-device-status/production-shell-instrumentation.status \
+            -- \
+            ./gradlew pixel2Api35FullDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.notClass=com.noop.ui.ReviewSampleInstrumentedTest \
+            --no-configuration-cache \
+            --stacktrace
 
       - name: Retain managed-device diagnostics
         if: ${{ always() }}
@@ -110,5 +233,30 @@ jobs:
           path: |
             android/app/build/reports/androidTests/managedDevice/
             android/app/build/outputs/androidTest-results/managedDevice/
+            android/app/build/noop-managed-device-status/
           if-no-files-found: warn
           retention-days: 14
+
+  android-ci-required:
+    name: android-ci-required
+    needs: [changes, build-and-test, production-shell]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable Android job
+        env:
+          APPLICABILITY_RESULT: ${{ needs.changes.result }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          BUILD_RESULT: ${{ needs.build-and-test.result }}
+          SHELL_RESULT: ${{ needs.production-shell.result }}
+        run: |
+          set -euo pipefail
+          test "$APPLICABILITY_RESULT" = "success"
+          if [ "$RUN_REQUIRED" = "true" ]; then
+            test "$BUILD_RESULT" = "success"
+            test "$SHELL_RESULT" = "success"
+          else
+            test "$RUN_REQUIRED" = "false"
+            test "$BUILD_RESULT" = "skipped"
+            test "$SHELL_RESULT" = "skipped"
+          fi

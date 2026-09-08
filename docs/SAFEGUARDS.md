@@ -26,7 +26,28 @@ GitHub's AUP prohibits, and may suspend accounts for:
 The BTC/ETH/etc. addresses belong in the in-app **Support** screen and the Donations wiki page — *that's it*. **Never paste a donation or crypto address into an issue, PR, or comment.** If a reply needs to mention donating, **link** to the wiki — don't paste the address. Repeating a crypto address across many comments is the single clearest "promotional bulk content / solicitation" signal, and it's what most likely tripped the filter.
 
 **2. Batch releases — don't drip-ship.**
-Combine multiple fixes into one release and space releases out. `Tools/release.sh` has a **cadence guard**: it refuses to publish if ≥3 releases were cut today or the last was <20 min ago, unless you deliberately set `ALLOW_RAPID_RELEASE=1`. A burst should always be a conscious decision, never an accident. (Tune via `CADENCE_LIMIT` / `CADENCE_MIN_GAP_MIN`.)
+Combine multiple fixes into one release and space releases out.
+`Tools/release.sh` is the guarded canonical build-and-publish command. Its
+**cadence guard** refuses to start if at least three releases were cut today or
+the last was less than 20 minutes ago, unless the operator deliberately sets
+`ALLOW_RAPID_RELEASE=1`. It waits for the exact hosted draft build and verifies
+live immutable-release policy before publication. Separate active tag rules
+allow only the repository administrator to create a production or testing tag,
+while no actor may update or delete one. Publication also refuses to run unless
+the authenticated actor is the repository owner and no other collaborator has
+write, maintain, or administrator access. A burst should always be a conscious
+decision, never an accident. Tune the local guard with `CADENCE_LIMIT` and
+`CADENCE_MIN_GAP_MIN`.
+
+An optional Forgejo release mirror follows the same guarded dispatch. Set
+`NOOP_RELEASE_FORGE=1` only after configuring repository variables
+`NOOP_FORGEJO_DOMAIN`, `NOOP_FORGEJO_ORG`, and `NOOP_FORGEJO_REPO` plus the
+repository-scoped `NOOP_FORGEJO_TOKEN` secret. The post-publication workflow
+reverifies the canonical production tag, exact protected-main checks, platform
+versions, asset names, sizes, and Android checksum before creating the mirror
+tag at the same exact commit. A failed mirror never mutates the canonical
+GitHub release and can be retried through the `Forgejo release mirror`
+workflow.
 
 **3. No mass-identical comments.**
 When replying across many issues/PRs (e.g. a board sweep), vary the wording and/or space the posts out. A flood of identical comments reads as inauthentic activity.
@@ -40,6 +61,19 @@ should run only on relevant branches/paths, use least-privilege permissions,
 cancel superseded work where practical, and avoid automation that mass-creates
 issues, comments, releases, or commits. Review every third-party action/version
 change as a supply-chain change.
+
+Release-authority changes use a protected-base `pull_request_target` workflow.
+Candidate source is checked out only as untrusted data, while validation and
+check publication execute from the reviewed base branch. The workflow has no
+manual-dispatch trigger and may publish only one bounded
+`trusted-release-controls` check tied to the exact pull-request head. Changes
+to release workflows, policy inputs, or release helpers must also refresh the
+reviewed SHA-256 source contract and pass its mutation tests.
+
+The manually dispatched testing and community-release builds are protected-main
+only. Android signing credentials belong in the protected `staging`
+environment, not repository-wide Actions secrets. Keep both workflows disabled
+until the environment-only secret boundary is verified.
 
 ## If it happens again
 Don't evade or create replacement accounts (that makes a suspension permanent

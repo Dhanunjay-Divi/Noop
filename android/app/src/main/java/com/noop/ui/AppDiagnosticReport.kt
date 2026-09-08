@@ -575,12 +575,9 @@ private fun ReportExplanation(controller: AppDiagnosticReportController) {
                 }
                 NoopToggleSwitch(
                     checked = controller.includeScreenshot,
-                    onCheckedChange = if (controller.screenshotAvailable) {
-                        { controller.includeScreenshot = it }
-                    } else {
-                        null
-                    },
+                    onCheckedChange = { controller.includeScreenshot = it },
                     modifier = Modifier.testTag("noop.app-report.include-screenshot"),
+                    enabled = controller.screenshotAvailable,
                 )
             }
         }

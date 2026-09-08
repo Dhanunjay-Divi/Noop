@@ -1,41 +1,16 @@
 # Build and test verification for the macOS and iOS app targets.
 #
 # This job compiles both app targets on every relevant change so a shared-code
-# change cannot silently break iOS or regress macOS. It is a compile-only gate:
-# CODE_SIGNING_ALLOWED=NO, no secrets, no signing identity, and no uploaded artifacts.
+# change cannot silently break iOS or regress macOS. It builds both targets and
+# runs the macOS app suite plus the iOS production-shell suite with signing
+# disabled, no secrets, no signing identity, and no uploaded app artifacts.
 name: App build (macOS + iOS)
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'Strand/**'
-      - 'StrandTests/**'
-      - 'StrandiOS/**'
-      - 'NOOPiOSUITests/**'
-      - 'StrandiOSShared/**'
-      - 'StrandiOSWidgets/**'
-      - 'Packages/**'
-      - 'Config/**'
-      - 'Tools/validate-launch-gate-isolation.py'
-      - 'Tools/tests/test_launch_gate_isolation.py'
-      - 'project.yml'
-      - '.github/workflows/app-build.yml'
   push:
     branches: [main]
-    paths:
-      - 'Strand/**'
-      - 'StrandTests/**'
-      - 'StrandiOS/**'
-      - 'NOOPiOSUITests/**'
-      - 'StrandiOSShared/**'
-      - 'StrandiOSWidgets/**'
-      - 'Packages/**'
-      - 'Config/**'
-      - 'Tools/validate-launch-gate-isolation.py'
-      - 'Tools/tests/test_launch_gate_isolation.py'
-      - 'project.yml'
-      - '.github/workflows/app-build.yml'
   workflow_dispatch:
 
 permissions:
@@ -46,7 +21,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: apple-applicability
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine whether Apple checks apply
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [[ "$BASE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED_FILES="$RUNNER_TEMP/noop-required-ci-changed-files.txt"
+          git diff --no-renames --name-only "$BASE_SHA" "$GITHUB_SHA" \
+            > "$CHANGED_FILES"
+          if grep -Eq '^((Strand|StrandTests|StrandiOS|NOOPiOSUITests|StrandiOSShared|StrandiOSWidgets|NOOPWatch|NOOPWatchComplications|Packages|Config)/|Strand\.xcodeproj/project\.xcworkspace/xcshareddata/swiftpm/Package\.resolved$|(LICENSE|NOTICE|ATTRIBUTION\.md|DISCLAIMER\.md|TERMS\.md)$|project\.yml$|Tools/(validate-launch-gate-isolation\.py|tests/test_launch_gate_isolation\.py)$|\.github/workflows/app-build\.yml$)' \
+             "$CHANGED_FILES"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -131,3 +146,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${GITHUB_REF_NAME}" || true
+
+  apple-ci-required:
+    name: apple-ci-required
+    needs: [changes, build]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every applicable Apple job
+        env:
+          APPLICABILITY_RESULT: ${{ needs.changes.result }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          test "$APPLICABILITY_RESULT" = "success"
+          if [ "$RUN_REQUIRED" = "true" ]; then
+            test "$BUILD_RESULT" = "success"
+          else
+            test "$RUN_REQUIRED" = "false"
+            test "$BUILD_RESULT" = "skipped"
+          fi
