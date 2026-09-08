@@ -70,7 +70,10 @@ temporary resources created by the implementation and verification rounds.
   contact lists, incident creation, push registration joins, and dispatch;
   pending deliveries for inactive accounts become terminally rejected.
 - Wrapped read paths that perform expiry mutation in explicit transactions and
-  bounded retry dispatch to one configured concurrency wave at a time.
+  bounded both owner-triggered and retry dispatch to one configured concurrency
+  wave at a time. Owner-triggered dispatch excludes deliveries already
+  attempted by the same request so a transient first-wave result cannot jump
+  ahead of untouched deliveries.
 - Accepted retained owner incidents with zero or one remaining participant
   after lifecycle erasure, gave reciprocal contact rows role-stable identities,
   accepted an idempotent lower server location sequence without moving the
@@ -100,7 +103,7 @@ temporary resources created by the implementation and verification rounds.
   dependency audit found four newly disclosed CVEs; both runtime and dev locks
   now audit with zero known vulnerabilities.
 - Added focused regression coverage for token transfer, stale-claim rotation,
-  transaction boundaries, inactive recipients, bounded retry waves,
+  transaction boundaries, inactive recipients, bounded initial and retry waves,
   fractional timestamps, retained participant erasure, lower idempotent
   location sequences, notification policy, and incident-request lifecycle.
 
@@ -152,7 +155,7 @@ temporary resources created by the implementation and verification rounds.
 | Apple app graph | NOOPiOS Debug simulator and Release device builds passed; Strand macOS build passed | Both Apple app targets compile with the corrected Keychain, notification, idempotency, and stale-state paths | Signing, APNs display, iPhone background execution, or store upload |
 | Complete macOS XCTest graph | `1,655` passed, `1` existing environment skip, `0` failed | Broad Apple persistence, metrics, UI policy, backup, reporting, and integration contracts remain compatible | iOS-only and physical-band behavior |
 | Android production-flavor gate | `assembleFullDebug`, `testFullDebugUnitTest`, `lintFullDebug`, and `compileFullDebugAndroidTestKotlin` passed; `4,130` unit tests with `7` existing skips; `70` actionable tasks | Android app, resources, localization policy, runtime Safety policy, APK, lint, and instrumentation sources are green | Managed-emulator or physical OEM delivery/background behavior |
-| Clean Python 3.12 server gate | Ruff check and format passed; `386` tests passed with only the intentionally unconfigured Twilio staging test skipped | API, PostgreSQL overlay, migration, identity, Safety, retry, lifecycle, and retention behavior pass against fresh extension-free databases | TimescaleDB container, provider traffic, or public deployment |
+| Clean Python 3.12 server gate | Ruff check and format passed; `387` tests passed with only the intentionally unconfigured Twilio staging test skipped | API, PostgreSQL overlay, migration, identity, Safety, initial/retry dispatch, lifecycle, and retention behavior pass against fresh extension-free databases | TimescaleDB container, provider traffic, or public deployment |
 | Python dependency audit | Runtime and dev requirements report zero known vulnerabilities after `httpx2 2.12.0` | The checked dependency declarations satisfy the repository's zero Critical/High policy and the newly disclosed test-client issues are fixed | Future disclosures |
 | Localization generation and CI audit | `304` Safety strings generated for `9` locales; `49` audit tests passed; no new unextracted Apple copy or Android complete-locale gaps | Safety copy is generated, translated, placeholder-safe, and brand-boundary clean | Human linguistic review in every market |
 | Repository policy matrix | Release controls, ten required contexts, terminology ratchet, calibration parity (`12` metrics, `3` revisions, `13` thresholds, `16` guards), health claims (`1,194` files), legal provenance, private-data, and `40` operations records passed | Source policy, metric parity, claims, provenance, privacy, and durable evidence remain intact | Legal approval, clinical validation, or production authorization |
@@ -197,7 +200,7 @@ temporary resources created by the implementation and verification rounds.
 
 ## Open risks and honest limitations
 
-- Seventeen review threads have source and local regression dispositions but
+- Eighteen review threads have source and local regression dispositions but
   still require exact-head hosted verification and explicit resolution.
 - The local server run uses the plain PostgreSQL overlay. The protected hosted
   server context must still exercise the pinned TimescaleDB image, containers,
@@ -208,7 +211,7 @@ temporary resources created by the implementation and verification rounds.
 ## Next round
 
 1. Push the reviewed implementation, pass all ten exact-head protected
-   contexts, resolve the seventeen conversations with evidence, and merge
+   contexts, resolve the eighteen conversations with evidence, and merge
    normally.
 2. Run exact-main verification, then perform the bounded temporary-resource
    cleanup without removing retained private synthetic staging.

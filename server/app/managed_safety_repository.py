@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -2001,6 +2002,7 @@ class PostgresManagedSafetyRepository:
         principal: ManagedPrincipal,
         incident_id: UUID,
         limit: int = 20,
+        exclude_delivery_ids: Collection[UUID] = (),
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
         if not 1 <= limit <= 20:
@@ -2109,6 +2111,9 @@ class PostgresManagedSafetyRepository:
                           'unavailable'
                       )
                       AND delivery.attempts < 3
+                      AND NOT (
+                          delivery.delivery_id = ANY($3::uuid[])
+                      )
                     ORDER BY delivery.attempts,
                              delivery.created_at,
                              delivery.delivery_id
@@ -2117,6 +2122,7 @@ class PostgresManagedSafetyRepository:
                     """,
                     incident_id,
                     limit,
+                    list(exclude_delivery_ids),
                 )
                 return await self._claim_delivery_candidates(
                     connection,
@@ -2511,11 +2517,25 @@ class ManagedSafetyPushService:
         principal: ManagedPrincipal,
         incident_id: UUID,
     ) -> dict[str, int]:
-        deliveries = await self.repository.claim_push_deliveries(
-            principal=principal,
-            incident_id=incident_id,
-        )
-        await self._send_claimed(deliveries)
+        remaining = 20
+        attempted_delivery_ids: set[UUID] = set()
+        while remaining > 0:
+            wave_limit = min(self.max_concurrency, remaining)
+            deliveries = await self.repository.claim_push_deliveries(
+                principal=principal,
+                incident_id=incident_id,
+                limit=wave_limit,
+                exclude_delivery_ids=attempted_delivery_ids,
+            )
+            if not deliveries:
+                break
+            attempted_delivery_ids.update(
+                delivery["delivery_id"] for delivery in deliveries
+            )
+            await self._send_claimed(deliveries)
+            remaining -= len(deliveries)
+            if len(deliveries) < wave_limit:
+                break
         return await self.repository.delivery_summary(
             principal=principal,
             incident_id=incident_id,

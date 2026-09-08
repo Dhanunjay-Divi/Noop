@@ -68,7 +68,14 @@ class _DeliveryRepository:
         self.completed = []
         self.due_claimed = False
 
-    async def claim_push_deliveries(self, **_):
+    async def claim_push_deliveries(
+        self,
+        *,
+        exclude_delivery_ids=(),
+        **_,
+    ):
+        if self.delivery_id in exclude_delivery_ids:
+            return []
         return [
             {
                 "delivery_id": self.delivery_id,
@@ -115,6 +122,42 @@ class _WaveDeliveryRepository:
 
     async def complete_push_delivery(self, **values):
         self.completed.append(values)
+
+
+class _IncidentWaveDeliveryRepository:
+    def __init__(self, deliveries: list[dict]) -> None:
+        self.deliveries = list(deliveries)
+        self.claim_limits: list[int] = []
+        self.claim_exclusions: list[set] = []
+        self.completed: list[dict] = []
+
+    async def claim_push_deliveries(
+        self,
+        *,
+        limit: int,
+        exclude_delivery_ids,
+        **_,
+    ):
+        excluded = set(exclude_delivery_ids)
+        self.claim_limits.append(limit)
+        self.claim_exclusions.append(excluded)
+        return [
+            delivery
+            for delivery in self.deliveries
+            if delivery["delivery_id"] not in excluded
+        ][:limit]
+
+    async def complete_push_delivery(self, **values):
+        self.completed.append(values)
+
+    async def delivery_summary(self, **_):
+        targeted = len(self.deliveries)
+        return {
+            "contacts_targeted": targeted,
+            "contacts_reached": targeted,
+            "installations_targeted": targeted,
+            "installations_reached": targeted,
+        }
 
 
 class _ConcurrentAcceptingProvider:
@@ -271,6 +314,58 @@ async def test_due_push_dispatch_claims_only_one_concurrency_wave_at_a_time() ->
     assert result.retryable_failures == 0
     assert result.terminal_failures == 0
     assert result.receipt_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_initial_push_dispatch_claims_only_one_concurrency_wave_at_a_time() -> (
+    None
+):
+    codec = ManagedPushTokenCodec("managed-push-secret-" + ("x" * 32))
+    account_id = uuid4()
+    deliveries = []
+    for index in range(5):
+        installation_id = f"ios-initial-wave-{index}"
+        deliveries.append(
+            {
+                "delivery_id": uuid4(),
+                "claim_id": uuid4(),
+                "incident_id": uuid4(),
+                "account_id": account_id,
+                "installation_id": installation_id,
+                "target_kind": "token",
+                "token_ciphertext": codec.seal(
+                    f"fcm-token:initial_wave_{index}_1234567890",
+                    account_id=account_id,
+                    installation_id=installation_id,
+                ),
+                "expires_at": datetime.now(UTC) + timedelta(hours=8),
+                "attempt": 1,
+            }
+        )
+    repository = _IncidentWaveDeliveryRepository(deliveries)
+    provider = _ConcurrentAcceptingProvider()
+    service = ManagedSafetyPushService(
+        repository=repository,
+        token_codec=codec,
+        provider=provider,
+        max_concurrency=2,
+    )
+
+    summary = await service.dispatch(
+        principal=object(),
+        incident_id=uuid4(),
+    )
+
+    assert repository.claim_limits == [2, 2, 2]
+    assert repository.claim_exclusions == [
+        set(),
+        {delivery["delivery_id"] for delivery in deliveries[:2]},
+        {delivery["delivery_id"] for delivery in deliveries[:4]},
+    ]
+    assert provider.maximum_active == 2
+    assert len(repository.completed) == 5
+    assert summary["installations_targeted"] == 5
+    assert summary["installations_reached"] == 5
 
 
 def test_managed_safety_models_are_strict_and_bounded() -> None:
