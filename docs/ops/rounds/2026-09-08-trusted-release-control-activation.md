@@ -4,9 +4,9 @@
 
 - State: `in progress`
 - Owner: project team
-- Branch: `codex/trusted-release-control-activation-preflight`
-- Start commit: pending exact protected-main bootstrap merge
-- End implementation commit: pending
+- Branch: `codex/trusted-release-control-activation`
+- Start commit: `ffae30d5b8072f5aa34afa2bd6f5945fdea8c8fc`
+- End implementation commit: `f13b33c7ea69d2debfe93c473d273fc963f936a9`
 - Record commit or PR: pending
 
 ## Objective
@@ -45,8 +45,10 @@ changes can merge.
 - Live `main` protection is strict, enforces administrators, requires
   conversation resolution and linear history, and rejects force pushes and
   deletion. It currently has no required-review rule.
-- The protected-base trusted workflow is staged in the production-readiness
-  pull request but is not yet present on `main`.
+- The protected-base trusted workflow exists on `main`. Repaired protected-main
+  run `34194149601` validated and published successful custom check
+  `101958240443` on exact commit
+  `ffae30d5b8072f5aa34afa2bd6f5945fdea8c8fc`.
 - Immutable GitHub Releases remain disabled intentionally. Four tag rulesets
   are active, while the testing and community-release workflows remain
   manually disabled pending signing-secret migration.
@@ -74,7 +76,7 @@ changes can merge.
 ## Observability
 
 - The custom check retains only its fixed name, bounded success/failure
-  summary, exact source SHA, authenticated Actions details link, and
+  summary, exact source SHA, authenticated canonical check-run link, and
   run-attempt-bound external ID.
 - No credentials, application payloads, user data, health values, arbitrary
   exception text, or dynamic repository content enter the check output.
@@ -83,8 +85,8 @@ changes can merge.
 
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
-| Local required-CI structural gate | Pending | Candidate source has five universal workflows and ten uniquely owned contexts | Hosted execution or live protection |
-| Exact bootstrap `main` trusted check | Pending | Protected-base workflow exists and can validate its own exact protected-main source | Candidate activation merge |
+| Full local policy suite | Passed: 222 tool tests; five conditional workflows, five universal workflows, ten contexts; trusted-self, release-control, operations, terminology, workflow-lint, private-data, health-claims, and calibration-parity gates | Candidate source has ten uniquely owned contexts and preserves the repository safety contracts | Hosted execution or live protection |
+| Exact bootstrap `main` trusted check | Passed in run `34194149601`; custom check `101958240443` is successful on exact `ffae30d5` | Protected-base workflow validates and reports its own exact protected-main source | Candidate activation merge |
 | Activation pull-request contexts | Pending | Existing nine contexts plus the custom exact-head check pass on the reviewed candidate | Exact-main post-merge state |
 | Live ten-context branch rule | Pending | Strict `main` protection matches the activated source contract under the Actions app | Store, signing, or release readiness |
 | Immutable-release setting | Pending until exact-main activation evidence | Published GitHub releases cannot be modified after activation | A completed release |
@@ -102,7 +104,7 @@ changes can merge.
 
 - Changed paths: required-CI contract, matching repository tests, and operations
   documentation only.
-- Branch and remote state: isolated local draft; not pushed.
+- Branch and remote state: rebased isolated activation branch; not yet pushed.
 - Version/build impact: none.
 - Release or distribution impact: policy activation only; no artifact or
   release mutation.
@@ -116,8 +118,6 @@ changes can merge.
 
 ## Open risks and honest limitations
 
-- The bootstrap pull request still requires all nine exact contexts and
-  conversation resolution before this activation can begin.
 - Publication remains blocked while a non-owner collaborator has write access.
 - Testing and community-release workflows remain disabled until the key owner
   migrates four Android signing values into the protected `staging`
