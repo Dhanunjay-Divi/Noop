@@ -6,7 +6,8 @@
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commits: `71ad5cb3a88d`, `ba26eeebde81`
+- End implementation commits: `71ad5cb3a88d`, `ba26eeebde81`,
+  `f3c60bf2c93d`
 - Record commit or PR: protected pull request `#10`; record commit pending
 
 ## Objective
@@ -104,11 +105,12 @@ rather than a prerequisite for app paging.
   refreshing, revoking, and cleaning up disposable custom claims. Failure
   output is bounded by subsystem and status rather than response data.
 - Hardened long hosted commands with a fixed-label, counter-only heartbeat.
-  Pull request `#10` initially completed 46 of 53 Android production-shell
-  tests with zero failures before the hosted runner terminated the silent
-  Gradle process with exit `143`, ahead of NOOP's explicit timeout and
-  diagnostic-retention path. The wrapper now keeps that bounded control path
-  active without printing commands, arguments, paths, identifiers, or data.
+  Pull request `#10` run `34253328209` initially completed 46 of 53 Android
+  production-shell tests with zero failures before the hosted runner
+  terminated the silent Gradle process with exit `143`, ahead of NOOP's
+  explicit timeout and diagnostic-retention path. The wrapper now keeps that
+  bounded control path active without printing commands, arguments, paths,
+  identifiers, or data.
 
 ## Data, privacy, and medical truth
 
