@@ -435,7 +435,11 @@ fi
   [ "$(jq -r '.body' <<<"$PUBLISHED_RELEASE")" = "$NOTES" ] &&
   [ "$(jq -r '.target_commitish' <<<"$PUBLISHED_RELEASE")" = \
     "$TARGET_COMMITISH" ] || {
-  echo "Forgejo did not publish the verified release" >&2
+  return_release_to_draft || {
+    echo "Forgejo invalid publication rollback failed" >&2
+    exit 1
+  }
+  echo "Forgejo publication metadata is invalid; release is draft" >&2
   exit 1
 }
 

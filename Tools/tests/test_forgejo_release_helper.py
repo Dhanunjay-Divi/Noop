@@ -154,7 +154,22 @@ class ForgejoReleaseHelperTests(unittest.TestCase):
             "Forgejo publication response failed; release is draft",
             source,
         )
+        self.assertIn("Forgejo invalid publication rollback failed", source)
+        self.assertIn(
+            "Forgejo publication metadata is invalid; release is draft",
+            source,
+        )
         self.assertIn("return_release_to_draft", source)
+        response_validation = source.index(
+            '[ "$(jq -r \'.draft\' <<<"$PUBLISHED_RELEASE")" = "false" ]'
+        )
+        invalid_metadata = source.index(
+            "Forgejo publication metadata is invalid; release is draft"
+        )
+        metadata_rollback = source.index(
+            "return_release_to_draft", response_validation
+        )
+        self.assertLess(metadata_rollback, invalid_metadata)
         clear_assets = source.index(
             'api -X DELETE \\\n'
             '      "$API/repos/$ORG/$REPO/releases/$REL_ID/assets/$asset_id"'

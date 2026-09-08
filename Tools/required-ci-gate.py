@@ -91,7 +91,7 @@ RELEASE_SOURCE_DIGESTS = {
         "a576abcb572baceba3c86d289e0d28872eb081a791bc93ec16f6a0e628986b7f"
     ),
     "Tools/forgejo-release.sh": (
-        "039a6a4a8c08f8db843f436863f50b2249cb06e0c0a7426f4afda2f04b1734cb"
+        "c716ef2301965a71b96ef9dc54b5bf3b6909a7c136dbefc4d1347ccbeeb3b87c"
     ),
     "Tools/forgejo-version-gate.py": (
         "f4374129699a85e0acd38c20599a02ca436ddd23791f04c2649e03c09f18639b"
