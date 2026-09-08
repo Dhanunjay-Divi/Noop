@@ -7,7 +7,7 @@
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
 - End implementation commits: `71ad5cb3a88d`, `ba26eeebde81`,
-  `f3c60bf2c93d`
+  `f3c60bf2c93d`, `ea1ff2ecb125`
 - Record commit or PR: protected pull request `#10`; record commit pending
 
 ## Objective
@@ -111,6 +111,19 @@ rather than a prerequisite for app paging.
   explicit timeout and diagnostic-retention path. The wrapper now keeps that
   bounded control path active without printing commands, arguments, paths,
   identifiers, or data.
+- Removed cross-process Android managed-device preparation after the same
+  emulator version used by a prior green run became intermittently stranded
+  across Gradle invocations. Run `34253328209` passed the isolated test and
+  then stopped at 46 of 53 broad tests; run `34257266178` stopped before its
+  isolated test began while two emulator processes remained. The exact source
+  completed the broad phase locally with 53 passes plus 2 intentional skips in
+  70 seconds and the isolated phase with 1 pass in 39 seconds.
+- Split the isolated Review Sample proof and the broad production-shell suite
+  into independently required fresh-runner jobs. Each job now performs one
+  no-daemon Gradle test invocation, has its own bounded deadline and retained
+  diagnostics, and is checked by `android-ci-required`. The only automatic
+  retry remains a single fail-closed retry after evidence proves that the
+  isolated runner failed before any test result existed.
 
 ## Data, privacy, and medical truth
 
@@ -165,9 +178,9 @@ rather than a prerequisite for app paging.
 | macOS app suite and universal Release build | 1,656 passed with 1 external-fixture skip; build passed | Shared Apple source, localization, privacy, diagnostics, shell, and contract coverage compiles for both desktop architectures | iOS notification delivery or phone background behavior |
 | Apple Release graph and iOS simulator suite | Release graph passed; 35 UI tests executed with 34 passes, 1 intentional private-pilot skip, and 0 failures | The iOS target compiles with managed push/location integration; latest-only session, relaunch, privacy, shell, tab responsiveness, calendar, complete metric catalog, and scrolling contracts execute | Signed physical-phone background execution |
 | iOS scroll performance | Passed; five swipe runs averaged 5.247 seconds including XCTest idle waits, 0.220 seconds CPU time, and about 68.3 MB peak physical memory with 0.077% variation | No simulator-reproducible scroll-lag regression appeared in the current Today journey | Physical-phone frame pacing, thermal pressure, large real databases, or background BLE contention |
-| Android full/demo matrix | Unit, lint, instrumentation compile, and API 35 device matrix passed; 55 device tests with 2 private-pilot skips | Managed session compiles, survives service restoration, shares one GPS listener, routes notification taps, and keeps diagnostics free of coordinates | OEM/physical background and notification behavior |
+| Android full/demo matrix | Unit, lint, instrumentation compile, and API 35 device matrix passed; exact-source fresh-process rerun completed 53 broad tests plus 2 private-pilot skips in 70 seconds and the isolated Review Sample test in 39 seconds | Managed session compiles, survives service restoration, shares one GPS listener, routes notification taps, keeps diagnostics free of coordinates, and does not reproduce the hosted 46-test stall when each phase owns one emulator lifecycle | OEM/physical background and notification behavior; fresh hosted-runner proof remains a protected-check gate |
 | Swift packages and harnesses | All 9 packages, 406 protocol tests with 1 opt-in corpus skip, 104 remote-sync tests, 12 study-harness tests, and 2 backfill tests passed | Shared models/clients, protocol compatibility, deterministic research harnesses, and backfill contracts remain intact | Supplier firmware or physical physiology |
-| Repository policy and legal gates | 222 tool tests plus terminology, legal inventory, distribution provenance, claims, workflow, privacy, OpenTofu, and dependency-audit gates passed | Source, manifests, generated localization, notices, workflow controls, and private infrastructure remain internally consistent | External legal approval or production credentials |
+| Repository policy and legal gates | 223 tool tests plus terminology, legal inventory, distribution provenance, claims, workflow, privacy, OpenTofu, and dependency-audit gates passed | Source, manifests, generated localization, notices, workflow controls, and private infrastructure remain internally consistent | External legal approval or production credentials |
 | Private synthetic staging | Passed: container scan with zero known-vulnerability findings, migration `027`, five in-place runtime updates, enforced migration execution, lifecycle execution, three-account managed smoke in 120 seconds, cleanup audit, private-boundary verification, and zero drift | Accepted Safety contacts, manual paging, latest-only location, responder state, incident resolution, storage/restore/isolation, cleanup, base private-API internal ingress, managed-API IAM-only access with no broad invoker, digest pinning, scale bounds, PITR, and deletion protection work together on the deployed digest | Provider delivery because the smoke intentionally registered no APNs/FCM target or real account |
 | Deployment-order recovery | Passed: the first concurrent rollout correctly failed new readiness while prior healthy revisions retained 100% traffic; migration then succeeded, every latest revision became ready, and the stateful release receipt was applied with no cloud-resource mutation and zero drift | Required migrations fail closed without taking healthy traffic down, and future image changes cannot update dependent runtime workloads until the guarded migration succeeds | Regional failover or production rollback under load |
 
@@ -194,7 +207,8 @@ rather than a prerequisite for app paging.
 - Changed paths: implementation commit `71ad5cb3a88d` changes 105 tracked paths;
   the deployment-order and smoke-harness follow-up is limited to private GCP
   infrastructure, its operator documentation, deployment contracts, and this
-  durable record.
+  durable record. The Android control follow-up changes only the managed-device
+  workflow, its required-job policy digest and tests, and this record.
 - Branch and remote state: protected pull request `#10` is open from the
   isolated branch; required review, normal merge, and exact-main verification
   remain pending.

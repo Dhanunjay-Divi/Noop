@@ -67,7 +67,7 @@ RELEASE_SOURCE_DIGESTS = {
         "57bc7fc96412a5703578f55ae6a0776430f3079ab313f6d1dc84c31d1d07ffb8"
     ),
     "release/required-ci.json": (
-        "0c0461c76c64da59064e526517a9f25ad45f397bdf4ea5cfb7acfda50c916168"
+        "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
         "ab8994c7133abad633395486d0676e0dcd26b58fc59a56f46a9ed51ee250b64b"
