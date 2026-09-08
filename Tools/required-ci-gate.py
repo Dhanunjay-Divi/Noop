@@ -73,7 +73,7 @@ RELEASE_SOURCE_DIGESTS = {
         "fe1b6ab24a5d904d5925a491625799516333e125ec9ba5e0932a5444a829580b"
     ),
     "release/terminology/legacy-inventory.json": (
-        "111354271cfc1beb375e3d61f6b918b881ed4aec8eaaad8a2b8ae941ee879334"
+        "944d057bc9f69d6e9b1fb45394330d24ee01952e910d15a79385c2786ad10d0d"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -139,7 +139,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8cb907cd981db978a895668bfc97e9c66d9ae632957032dec727ea5c8450b983"
     ),
     "Tools/trusted-release-controls.py": (
-        "f7966b520d989af9c7e4e18446d19bf17c41c68696b13eea6c81d938cfff81f3"
+        "979d6870507e2bc50d46d4300b74814f58679a93a1351792a9bfad0a23e4ef2d"
     ),
     "Tools/update-homebrew-cask.sh": (
         "1733e7b43266ac7f16ed3043cef4bea51f8353ebe533fb9aa3d260fa76639989"
@@ -1871,21 +1871,40 @@ def _trusted_workflow_run_identity(
         raise GateError("trusted exact-head check has no valid run URL")
     parsed = urllib.parse.urlsplit(details_url)
     owner, name = repository.split("/", 1)
-    path_pattern = re.compile(
+    actions_pattern = re.compile(
         rf"/{re.escape(owner)}/{re.escape(name)}"
         r"/actions/runs/([1-9][0-9]*)",
         re.IGNORECASE,
     )
-    path_match = path_pattern.fullmatch(parsed.path)
+    check_pattern = re.compile(
+        rf"/{re.escape(owner)}/{re.escape(name)}"
+        r"/runs/([1-9][0-9]*)",
+        re.IGNORECASE,
+    )
+    actions_match = actions_pattern.fullmatch(parsed.path)
+    check_match = check_pattern.fullmatch(parsed.path)
     scope = match.group(1)
     run_id = int(match.group(2))
+    check_id = check_run.get("id")
+    valid_check_id = (
+        isinstance(check_id, int)
+        and not isinstance(check_id, bool)
+        and check_id > 0
+    )
+    valid_path = (
+        actions_match is not None
+        and int(actions_match.group(1)) == run_id
+    ) or (
+        check_match is not None
+        and valid_check_id
+        and int(check_match.group(1)) == check_id
+    )
     if (
         parsed.scheme != "https"
         or parsed.netloc != "github.com"
         or parsed.query
         or parsed.fragment
-        or path_match is None
-        or int(path_match.group(1)) != run_id
+        or not valid_path
     ):
         raise GateError("trusted exact-head check has no valid run URL")
     return scope, run_id, int(match.group(3))

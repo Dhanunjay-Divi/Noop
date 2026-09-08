@@ -161,6 +161,41 @@ class TrustedReleaseControlTests(unittest.TestCase):
                     client.payload.get("conclusion"), "failure"
                 )
 
+    def test_exact_head_check_accepts_github_canonical_details_url(self) -> None:
+        client = FakeCheckClient()
+        client.response_overrides["details_url"] = (
+            "https://github.com/Dhanunjay-Divi/Noop/runs/123"
+        )
+        self.assertTrue(
+            TRUSTED.report_exact_check(
+                client=client,
+                repository="Dhanunjay-Divi/Noop",
+                head_sha="c" * 40,
+                scope="protected-main",
+                validation_result="success",
+                run_id=9012,
+                run_attempt=1,
+            )
+        )
+
+    def test_exact_head_check_rejects_wrong_canonical_details_url(self) -> None:
+        client = FakeCheckClient()
+        client.response_overrides["details_url"] = (
+            "https://github.com/Dhanunjay-Divi/Noop/runs/124"
+        )
+        with self.assertRaisesRegex(
+            TRUSTED.TrustedControlError, "identity is invalid"
+        ):
+            TRUSTED.report_exact_check(
+                client=client,
+                repository="Dhanunjay-Divi/Noop",
+                head_sha="c" * 40,
+                scope="protected-main",
+                validation_result="success",
+                run_id=9012,
+                run_attempt=1,
+            )
+
     def test_exact_head_check_rejects_another_app_identity(self) -> None:
         client = FakeCheckClient()
         client.response_overrides["app"] = {"id": 1}
