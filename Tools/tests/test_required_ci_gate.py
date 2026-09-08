@@ -31,6 +31,11 @@ class RequiredCIGateTests(unittest.TestCase):
                 "conclusion": "success",
                 "app": {"id": self.config["requiredCheckAppId"]},
                 "workflowPath": workflow_paths[context],
+                **(
+                    {"trustedScope": "protected-main"}
+                    if context == "trusted-release-controls"
+                    else {}
+                ),
             }
             for index, context in enumerate(
                 self.config["requiredContexts"], start=1
@@ -89,6 +94,7 @@ class RequiredCIGateTests(unittest.TestCase):
                 "runtime-license-required",
                 "server-ci-required",
                 "swift-packages-required",
+                "trusted-release-controls",
             ],
         )
 
@@ -1019,18 +1025,26 @@ class RequiredCIGateTests(unittest.TestCase):
         self.assertNotIn("\n    name: trusted-release-controls\n", source)
         GATE.check_trusted_release_workflow(ROOT)
 
-    def test_trusted_custom_context_is_ready_for_second_phase(self) -> None:
-        config = copy.deepcopy(self.config)
-        config["requiredContexts"].append("trusted-release-controls")
-        config["requiredContexts"].sort()
-        trusted = {
-            "path": ".github/workflows/trusted-release-controls.yml",
-            "pullRequestEvent": "pull_request_target",
-            "requiredJob": "trusted-release-controls",
-        }
-        config["universalWorkflows"].append(trusted)
+    def test_trusted_custom_context_is_active(self) -> None:
+        self.assertIn(
+            "trusted-release-controls",
+            self.config["requiredContexts"],
+        )
+        trusted = next(
+            workflow
+            for workflow in self.config["universalWorkflows"]
+            if workflow["requiredJob"] == "trusted-release-controls"
+        )
+        self.assertEqual(
+            trusted,
+            {
+                "path": ".github/workflows/trusted-release-controls.yml",
+                "pullRequestEvent": "pull_request_target",
+                "requiredJob": "trusted-release-controls",
+            },
+        )
         GATE.check_universal_workflow(ROOT, trusted)
-        GATE.check_required_context_ownership(ROOT, config)
+        GATE.check_required_context_ownership(ROOT, self.config)
 
     def test_protected_main_trusted_run_is_exact_sha_bound(self) -> None:
         sha = "c" * 40
@@ -1067,24 +1081,14 @@ class RequiredCIGateTests(unittest.TestCase):
     def test_pull_request_trust_cannot_satisfy_release_verification(
         self,
     ) -> None:
-        config = copy.deepcopy(self.config)
-        config["requiredContexts"].append("trusted-release-controls")
-        config["requiredContexts"].sort()
-        config["universalWorkflows"].append(
-            {
-                "path": ".github/workflows/trusted-release-controls.yml",
-                "pullRequestEvent": "pull_request_target",
-                "requiredJob": "trusted-release-controls",
-            }
-        )
-        workflow_paths = GATE.required_workflow_paths(config)
+        workflow_paths = GATE.required_workflow_paths(self.config)
         runs = [
             {
                 "id": index,
                 "name": context,
                 "status": "completed",
                 "conclusion": "success",
-                "app": {"id": config["requiredCheckAppId"]},
+                "app": {"id": self.config["requiredCheckAppId"]},
                 "workflowPath": workflow_paths[context],
                 **(
                     {"trustedScope": "pull-request"}
@@ -1093,15 +1097,15 @@ class RequiredCIGateTests(unittest.TestCase):
                 ),
             }
             for index, context in enumerate(
-                config["requiredContexts"], start=1
+                self.config["requiredContexts"], start=1
             )
         ]
         with self.assertRaisesRegex(
             GATE.GateError, "trusted-release-controls=missing"
         ):
-            GATE.evaluate_check_runs(config, runs)
+            GATE.evaluate_check_runs(self.config, runs)
         runs[-1]["trustedScope"] = "protected-main"
-        GATE.evaluate_check_runs(config, runs)
+        GATE.evaluate_check_runs(self.config, runs)
 
     def test_release_workflow_cannot_push_directly_to_main(self) -> None:
         source = (ROOT / ".github/workflows/release.yml").read_text(

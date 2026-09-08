@@ -9,7 +9,8 @@
     "release-controls",
     "runtime-license-required",
     "server-ci-required",
-    "swift-packages-required"
+    "swift-packages-required",
+    "trusted-release-controls"
   ],
   "schemaVersion": 2,
   "sourceBranch": "main",
@@ -33,6 +34,11 @@
       "path": ".github/workflows/release-controls.yml",
       "pullRequestEvent": "pull_request",
       "requiredJob": "release-controls"
+    },
+    {
+      "path": ".github/workflows/trusted-release-controls.yml",
+      "pullRequestEvent": "pull_request_target",
+      "requiredJob": "trusted-release-controls"
     }
   ],
   "workflows": [
