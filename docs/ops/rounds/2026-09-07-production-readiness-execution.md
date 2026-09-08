@@ -4,6 +4,7 @@
 
 - State: `in progress`
 - Owner: project team
+- Continued: `2026-09-08`
 - Branch: `codex/production-readiness-closeout-20260907`
 - Start commit: `52a84649c33c57b091c110e2b2912d2021ce7ffb`
 - End implementation commit: pending
@@ -150,9 +151,10 @@ external approval, signing authority, or elapsed production operation.
   license inventory now has an always-present fail-closed required result, and
   the lightweight health-claims, localization, operations-record, and release
   controls are modeled as universal checks that cannot use event-level path
-  filters. The contract now covers nine exact contexts; operations validation
-  runs on every `main` commit so exact-SHA publication evidence is always
-  available.
+  filters. The bootstrap contract retains nine exact contexts while installing
+  the protected-base workflow needed for a separately reviewed tenth-context
+  activation; operations validation runs on every `main` commit so exact-SHA
+  publication evidence is always available.
 - Added a tested release-version gate that compares both reviewed platform
   build numbers and the shared marketing version with the latest published
   production tag. A reused Android `versionCode`, Apple
@@ -161,15 +163,13 @@ external approval, signing authority, or elapsed production operation.
   commit stops the workflow before draft creation.
 - Bound exact-SHA publication checks to the same GitHub Actions application
   identity enforced by protected `main`, so a same-named check from another app
-  cannot satisfy release policy. The AltStore publication lane no longer
-  pushes directly to protected `main` or advertises a draft IPA. A reusable,
-  manually repairable workflow updates an anonymously verified stable
-  prerelease asset only after the exact checked production release is
-  published. Existing channel history is mandatory once the channel exists,
-  and a tested semantic-version guard rejects rollback to an older feed. If a
-  first publication created the channel release but failed before uploading
-  its initial manifest, a retry now recovers from the reviewed template;
-  existing manifest history remains mandatory once the asset is present.
+  cannot satisfy release policy. The retained AltStore implementation no longer
+  pushes directly to protected `main` or advertises a draft IPA, but immutable
+  GitHub Releases cannot host its required mutable source pointer. Direct
+  dispatch is removed and production release invocation is hard-disabled until
+  the pointer is moved to a separate host and anonymous fetch/install behavior
+  is verified. Its history, rollback, and interrupted-initialization controls
+  remain tested dormant code rather than an advertised channel.
 - Closed the final applicability defect found by protected review. All five
   conditional workflows now write the complete changed-path list before
   matching it, so `grep -q` cannot close a `pipefail` pipeline early and turn a
@@ -177,35 +177,38 @@ external approval, signing authority, or elapsed production operation.
   path inventory, so both the removed source and added destination are checked
   and a move out of a scoped directory cannot bypass its required build. The
   repository contract requires this complete-consumption shape.
-- Removed the legacy local release publisher and checked-in AltStore mutator.
+- Removed the legacy raw local release mutator and checked-in AltStore mutator.
   `Tools/release.sh` now accepts only a version, requires a clean exact
-  `origin/main`, rechecks release controls and exact-SHA hosted contexts,
-  preserves the cadence guard, and dispatches the canonical production
-  workflow with the already verified source SHA as a required input. If `main`
-  advances before GitHub resolves the dispatch, the workflow fails closed
-  instead of building the newer commit. The dispatcher cannot create, edit,
-  upload, or push a release directly.
-- Closed the three post-release defects found across the final protected reviews.
-  AltStore replacement now preserves the complete current manifest as a
-  separate durable release asset before `--clobber`; an interrupted
-  replacement restores from that asset only when the stable asset is absent.
-  A transient stable-asset fetch failure now fails closed instead of selecting
-  older history, while template recovery is permitted only for a release
-  explicitly marked as an unfinished first publication.
-  Both AltStore and Homebrew repair paths require their production tag to be
-  contained in protected `main` and to retain the exact required check set.
+  `origin/main`, rechecks release controls, live repository policy, and
+  exact-SHA hosted contexts, preserves the cadence guard, and dispatches the
+  canonical production draft build with the already verified source SHA. It
+  finds and waits for exactly that run title, workflow path, source, branch,
+  repository, and successful conclusion before rechecking policy and publishing
+  through the bounded shared publisher. A failed, interrupted, or ambiguous run
+  leaves a nonpublic draft. The script never uses raw `gh release` mutation.
+- Closed the final publication findings from independent review. Testing tags
+  now use their own strict verifier and no-bypass ruleset profile. Production
+  and testing Actions stop at exact verified drafts because the Actions token
+  cannot inspect the administration-only immutable-release setting; an
+  owner-authenticated local command verifies that setting and the appropriate
+  ruleset before dispatch, immediately before mutation, and again after
+  publication. The repository gate structurally locks both
+  exact-check and draft-verification steps, rejects job/step skip wrappers, and
+  requires owner-side run identity verification. Failed testing cleanup retains
+  a candidate on any lookup error rather than deleting a tag after a guessed
+  absence.
 - Restored the documented Homebrew opt-in as a retryable reusable/manual
   workflow after immutable release publication. The guarded local dispatcher
-  carries only the opt-in decision. The workflow requires a public source, a
-  public project tap, exact platform versions and artifact size, a
-  repository-scoped tap owner variable, and a tap-only write secret. The
-  helper accepts the scoped token through the environment, validates every
+  dispatches it only after canonical publication. The workflow requires a
+  public source, a public project tap, exact platform versions and artifact
+  size, a repository-scoped tap owner variable, and a tap-only write secret.
+  The helper accepts the scoped token through the environment, validates every
   repository coordinate before network access, and retains its deliberate
   local token-file fallback. No tap or token is provisioned by this round, so
   the lane remains disabled by default and no release was published.
 - Closed the retained Homebrew-to-Forgejo mirror path without broadening
-  release credentials. The local and GitHub dispatchers now carry the nested
-  opt-in explicitly, reject a Forgejo-tap request when canonical Homebrew
+  release credentials. The local dispatcher carries the nested opt-in
+  explicitly, rejects a Forgejo-tap request when canonical Homebrew
   publication is disabled, pass only the tap-specific GitHub and Forgejo
   secrets to the reusable workflow, and fail the requested mirror operation
   visibly if the canonical GitHub tap succeeds but the Forgejo push fails.
@@ -224,6 +227,20 @@ external approval, signing authority, or elapsed production operation.
   workflow. A repository-wide structural guard also requires exactly one
   source workflow owner for every protected context. Release and repair jobs
   have the explicit `actions: read` permission needed for that validation.
+- Added an owner-only trust root for every release-authority change. The
+  `pull_request_target` validator executes only protected-base source, treats
+  the candidate checkout as untrusted data, requires the repository owner to
+  be the exact `opened` or `synchronize` event actor for an in-repository
+  release-authority change, has no manual-dispatch trigger, and writes one
+  explicit `trusted-release-controls` check to the exact pull request head.
+  Candidate semantics remain independently enforced by the required
+  `release-controls` check. The trusted check payload, scope, Actions app, run
+  ID, attempt, event, workflow path, repository, details URL, external ID, head
+  SHA, and conclusion must all agree. A failed, skipped, or canceled validation
+  writes a bounded failure check and exits failed; no native same-named skipped
+  job or branch copy can manufacture the protected context. Exact-SHA release
+  verification accepts only the `protected-main` scope, so the otherwise valid
+  custom check on a pull request head cannot authorize publication.
 - Closed the final independent release-integrity findings before merge.
   Required-check ownership now treats every dynamic job display name as a
   wildcard and rejects it when it could resolve to any protected context;
@@ -241,11 +258,40 @@ external approval, signing authority, or elapsed production operation.
   receives only its own scoped credential. Optional Forgejo variables and
   credentials are absent from the Homebrew publication environment unless the
   nested mirror opt-in is selected.
-- Bound GitHub release publication to the live destination tag immediately
-  before and after mutation. Lightweight and bounded annotated tags must
-  resolve to the exact reviewed commit; a changed tag, unexpected release
-  identity/state, or changed/nonempty exact asset set returns that exact
-  release to a response-verified draft before the workflow fails.
+- Bound GitHub release publication to preventative repository controls rather
+  than an Actions-side post-exposure rollback. The private repository has an
+  active no-bypass production tag ruleset that rejects update and deletion of
+  `v*` tags and an active no-bypass testing ruleset that rejects updates to
+  `testing-snapshot-*`. The immutable-release setting remains intentionally
+  disabled through the nine-context bootstrap merge. It is enabled only after
+  a separately reviewed activation change adds the protected-base trust
+  workflow as the tenth source context, the exact custom protected-main check
+  passes, and live branch protection matches all ten source contexts. Each
+  workflow now defaults to read-only repository access; only the exact
+  draft-creation, artifact-upload, and failed-draft cleanup jobs receive
+  `contents: write`, and any additional write-capable job fails the repository
+  gate. The owner publisher loads the reviewed activation contract, rejects a
+  missing trusted context, requires live strict branch protection to contain
+  exactly the same contexts under the GitHub Actions application, and then
+  checks the immutable setting and exact tag ruleset before dispatch,
+  immediately before mutation, and after publication;
+  resolves lightweight or bounded annotated tags against the exact reviewed
+  commit with a stable-ref reread; binds testing tags to their encoded run and
+  attempt; and requires the exact five uploaded assets by server-assigned ID,
+  positive size, uploaded state, and server-computed SHA-256 digest. The
+  workflow retains that identity in an exact run-attempt manifest, and the
+  owner publisher rejects any changed asset before or after mutation. Two
+  fresh release-by-ID reads confirm the exact immutable release. A timed-out
+  publish request is accepted only if those live immutable checks prove it
+  completed correctly. Production and testing workflows each execute only a
+  canonical mutation-free draft verifier; the repository gate rejects changed
+  arguments, shell wrappers, skip conditions, workflow-side publication,
+  direct release REST mutation, and raw owner-script mutators. Bash syntax and
+  ShellCheck for both owner entrypoints are now part of the required hosted
+  release-control check. Every workflow, policy input, schema, and helper with
+  release-publication authority is also bound to an explicit reviewed SHA-256
+  source contract, so shell token concatenation, an extra write step, or an
+  unrelated cleanup deletion cannot pass by evading literal command scanning.
 - Removed the remaining legacy vendor name from generated Homebrew package
   metadata. The reviewed terminology snapshot now contains 17,370 classified
   occurrences across 1,508 path/category groups, one active/core occurrence
@@ -256,9 +302,35 @@ external approval, signing authority, or elapsed production operation.
   disabled default-off control. Android now matches iOS by retaining the switch
   semantics and disabling it until the transient capture is available. The
   archive still proves that no screenshot is attached without explicit opt-in.
-- Reconciled the user and operator documentation with the stable release-asset
-  AltStore channel and corrected current engineering guidance that still
-  described required Apple and Android workflows as disabled.
+- Reconciled user and operator documentation with immutable fixed releases,
+  owner-promoted testing snapshots, and the disabled AltStore pointer; also
+  corrected current engineering guidance that still described required Apple
+  and Android workflows as disabled.
+- A second independent publication review found that no-bypass update/deletion
+  rules did not restrict initial tag creation, testing builds could expose
+  repository-scoped Android signing secrets to a branch-selected workflow,
+  testing metadata was not canonical, and the draft-to-public transition still
+  depended on a mutable interval. Production and testing now each have two
+  active tag rules: an administrator-only creation rule and a separate
+  no-bypass update/deletion rule. The publisher requires the authenticated
+  repository owner, rejects every non-owner collaborator with write, maintain,
+  or administrator access, and rechecks this policy immediately before
+  publication.
+- A private synthetic GitHub probe proved that creating a draft release does
+  not create its Git tag; the probe draft and tag locator were removed
+  immediately. This exposed a previously masked functional defect in the
+  verifier. Draft verification now requires the destination tag to be absent,
+  publication checks absence again immediately before mutation, and only the
+  resulting immutable release may introduce an exact tag that resolves twice
+  to the reviewed commit.
+- Testing candidates are now restricted to the exact protected `main` commit.
+  Their title, body digest, target, run, attempt, assets, and source are bound
+  in the candidate manifest. Both testing and community-release Android
+  signing jobs read only from the protected `staging` environment; metadata
+  jobs cannot access those values. The live manual dispatchers are disabled
+  until the four write-only signing values are re-entered as environment
+  secrets and their repository-scoped copies are removed; no secret value was
+  read, printed, copied, or deleted by this round.
 - Reverified retained private GCP staging: OpenTofu format, validation, all
   three configuration tests, IAM-only runtime checks, and detailed live plan
   exit `0` pass with no drift.
@@ -320,7 +392,9 @@ external approval, signing authority, or elapsed production operation.
   lookup and are not emitted. Post-release
   channel automation records only static validation/recovery categories,
   workflow status, version, and bounded artifact presence; it does not emit
-  credentials, user data, or artifact content.
+  credentials, user data, or artifact content. The trusted PR validator emits
+  only a fixed check name, bounded success/failure summary, exact source SHA,
+  and authenticated Actions details link.
 - Redaction, retention, and high-frequency controls: no raw health values,
   sensor rows, user text, credentials, identifiers, dynamic URLs, payloads, or
   arbitrary errors enter diagnostics.
@@ -346,8 +420,9 @@ external approval, signing authority, or elapsed production operation.
 | GCP private staging plan | OpenTofu format, validate, three tests, and live plan green with zero drift | Retained IAM-only synthetic staging matches source | Public or production deployment |
 | GCP private runtime verifier | Passed internal ingress, no broad invoker, digest pin, scale bounds, PITR, and deletion-protection checks | Current private synthetic runtime keeps its intended infrastructure controls | Application correctness, public topology, or real-data operation |
 | Long-history synthetic matrix | All 10/30/90/365-day scenarios passed integrity and exact restore; report in `validation/HISTORY-HARNESS-2026-09-07.json` | Current host storage shape and exact retained-content recovery | Phone memory, thermal, battery, background, BLE, or population accuracy |
-| Staged repository policy matrix | 142 repository-tool tests and the exact 105-test release-control selection pass; release controls 9/9; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 14 workflows parse and pass `actionlint`; the changed Bash helpers pass syntax and ShellCheck | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
-| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass local structural tests; every protected name has one configured workflow owner; live read-only verification bound all nine checks on commit `bf77f902` to their exact Actions workflow and head SHA, then correctly reported only the two intentionally canceled platform runs as failed; release source mutation is rejected, both build counters must advance from published `v9.1.1`, exact-SHA verification is required twice, AltStore history is backed up before replacement, ambiguous channel recovery fails closed, Forgejo rollback is rejected before mutation, and nested Homebrew mirroring reaches a scoped, manually repairable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters or a same-named Actions job, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, or history-dropping source | A completed signed production release, public Homebrew/Forgejo tap, or provisioned mirror credentials |
+| Staged repository policy matrix | The complete Tools suite passes 204/204 and the exact hosted release-control selection passes 171/171; release controls pass 9/9 in the bootstrap phase and the separately tested activation model is ready for 10/10; terminology covers 17,370 classified occurrences in 1,508 path/category groups with zero forbidden mappings; calibration parity covers 12 metrics, 3 revisions, 13 thresholds, and 16 guards; health-claims 1,195 files clear; i18n passes; legal inventory covers 213 runtime components plus 3 container inputs; private-data and all 36 operations records pass; 15 workflows parse and pass `actionlint`; the changed Bash helpers pass syntax and ShellCheck | The exact staged source satisfies repository release, calibration-drift, privacy, claims, localization, legal, workflow-syntax, and operations contracts | Hosted execution or store approval |
+| Deterministic source-release evidence | Version parity resolves to 9.2.1 on Apple and Android; the fresh source SBOM contains 216 components and its two-artifact release manifest verifies against the exact candidate source SHA | Release evidence generation and verification are reproducible before hosted publication | Signed artifact identity, immutable publication, or store acceptance |
+| Required merge, tag, and repair contract | Five conditional and four universal workflow contracts plus nine stable contexts pass the bootstrap structural tests; the protected-base workflow and custom exact-head check are separately verified as ready for the fifth universal workflow and tenth stable context. The live branch rule carries the same nine-context contract until this workflow merges, after which its exact-main check must pass before the activation pull request and tenth protected context. Prior live read-only verification bound all nine checks on commit `bf77f902` to their exact Actions workflow and head SHA, then correctly reported only the two intentionally canceled platform runs as failed. Release source mutation is rejected, both build counters must advance from published `v9.1.1`, Actions can only produce an exact checked draft, and the owner dispatcher authenticates the exact successful run and live repository policy. Live production and testing tag controls now each use owner-admin-only creation plus no-bypass update/deletion. A cleaned private draft probe established that draft creation leaves the tag absent, and the verifier now enforces absent-before/exact-after semantics. AltStore invocation is disabled, Forgejo rollback is rejected before mutation, and nested Homebrew mirroring reaches a scoped retryable exact-tag workflow | Applicable platform/license failures cannot be hidden by event path filters or a same-named Actions job, and production or repair publication cannot proceed from an unchecked, stale-build, off-main, backward-version, nonexclusive-writer, policy-unverified, or history-dropping source | A completed immutable production release, public Homebrew/Forgejo tap, provisioned mirror credentials, or completed environment-secret migration |
 | Scoped local cleanup | Generated Python, Android, Swift, Xcode, OpenTofu, bytecode, and temporary artifacts absent; no Gradle daemon, emulator, or booted simulator; only the pre-existing PostgreSQL listener remains on the audited ports | This round left no active local app/test runtime or generated workspace cache | Reclaimed disk until macOS Trash is emptied, or removal of intentionally retained private staging |
 
 ## Physical device and deployment
@@ -374,22 +449,30 @@ external approval, signing authority, or elapsed production operation.
   and release documentation.
 - Commits: pending.
 - Branch and remote state: clean synchronized `main` at round start; PR `#6`
-  carries the protected closeout branch. Four implementation commits are
+  carries the protected closeout branch. Eleven implementation commits are
   already pushed. The final post-release channel fixes now pass the complete
   local repository-policy evidence and remain local only until the next
   closeout commit is created. Hosted final-head and exact-main evidence remain
   pending.
 - Repository visibility verified: inherited from current release evidence.
 - Version/build impact: none at round start.
-- Release or distribution impact: release and repair workflows changed, but no
-  production release, AltStore source, Homebrew tap, Git tag, or app artifact
-  was created or mutated.
+- Release or distribution impact: release and repair workflows changed. The
+  repository now rejects update/deletion of production `v*` tags and updates
+  to unique testing-snapshot tags without a bypass actor. The immutable-release
+  setting remains disabled through the bootstrap merge and the subsequent
+  ten-context activation merge; both owner publication commands fail closed
+  until source, live strict branch protection, the Actions application, tag
+  rulesets, and immutable-release setting all agree. No production release,
+  AltStore source, Homebrew tap, Git tag, or app artifact was created or
+  mutated.
 
 ## Decisions
 
-- Durable decision added or changed: none at round start.
-- Decision-log entry: pending only if implementation changes a durable product
-  boundary.
+- Durable decision added or changed: production release tags and published
+  assets are immutable; a correction requires a new reviewed version. Actions
+  builds exact drafts, while an owner-authenticated command verifies live
+  policy and performs publication.
+- Decision-log entry: this round record.
 
 ## Open risks and honest limitations
 
@@ -406,6 +489,29 @@ external approval, signing authority, or elapsed production operation.
 - Homebrew automation is code-complete but remains intentionally disabled
   until the owner creates the public project tap and provisions the scoped
   repository variable and tap-only write secret.
+- Immutable GitHub Releases must remain disabled through the compatible-source
+  bootstrap and ten-context activation merges. It is enabled only after exact
+  protected-main evidence and live strict branch protection both match the
+  activated source contract; publication remains unavailable until every live
+  control is verified.
+- The tenth `trusted-release-controls` protected context can be activated only
+  after its protected-base workflow exists on `main` and produces one verified
+  exact-main check. The current pull request must therefore merge under the
+  preceding nine-context contract; a separate activation pull request will
+  prove and enforce the complete ten-context contract without a bypass.
+- The live testing-build and community-release workflows are intentionally
+  disabled. Their four Android staging-signing values remain repository-scoped
+  because GitHub does not expose existing secret values for safe migration.
+  The key owner must re-enter them in the protected `staging` environment,
+  verify the repository-scoped copies are removed, and only then re-enable the
+  workflows.
+- Repository collaborator `nobelchowdary` currently has write access. The
+  publisher now rejects publication while any non-owner writer exists, which
+  closes the draft-mutation race fail-closed. GitHub accepted but did not apply
+  an attempted read-only downgrade because private personal-account
+  repositories grant collaborators write access only. Publication therefore
+  requires an owner decision to remove that collaborator or move the
+  repository/release authority to an organization with granular roles.
 - The measured retained 365-day database is about 444 MB and exact
   backup/restore temporarily reaches about 1.33 GB. Indexed host reads are fast,
   but only representative phones can establish launch, scroll, memory,

@@ -416,9 +416,18 @@ verify_remote_payloads || {
   exit 1
 }
 
-PUBLISHED_RELEASE="$(api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID" \
-  -d "$(jq -n --arg n "NOOP $TAG" --arg b "$NOTES" \
-        '{name:$n,body:$b,draft:false,prerelease:false}')")"
+if ! PUBLISHED_RELEASE="$(
+  api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID" \
+    -d "$(jq -n --arg n "NOOP $TAG" --arg b "$NOTES" \
+          '{name:$n,body:$b,draft:false,prerelease:false}')"
+)"; then
+  return_release_to_draft || {
+    echo "Forgejo ambiguous publication rollback failed" >&2
+    exit 1
+  }
+  echo "Forgejo publication response failed; release is draft" >&2
+  exit 1
+fi
 [ "$(jq -r '.draft' <<<"$PUBLISHED_RELEASE")" = "false" ] &&
   [ "$(jq -r '.prerelease' <<<"$PUBLISHED_RELEASE")" = "false" ] &&
   [ "$(jq -r '.tag_name' <<<"$PUBLISHED_RELEASE")" = "$TAG" ] &&

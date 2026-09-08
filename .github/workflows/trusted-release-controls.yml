@@ -1,0 +1,132 @@
+name: Trusted Release Controls
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-release-controls-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-pr:
+    if: github.event_name == 'pull_request_target'
+    name: trusted-release-controls-pr-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout protected base source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Checkout candidate as isolated data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Verify candidate with protected base controls
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_ACTOR: ${{ github.actor }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: >-
+          python3 Tools/trusted-release-controls.py verify-pr
+          --base-root "$GITHUB_WORKSPACE"
+          --candidate-root "$GITHUB_WORKSPACE/candidate"
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+          --repository "$REPOSITORY"
+          --head-repository "$HEAD_REPOSITORY"
+          --repository-owner "$REPOSITORY_OWNER"
+          --actor "$HEAD_ACTOR"
+
+  report-pr:
+    if: always() && github.event_name == 'pull_request_target'
+    name: trusted-release-controls-pr-report
+    needs: [verify-pr]
+    permissions:
+      checks: write
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout protected base source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Publish exact pull-request head result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          VALIDATION_RESULT: ${{ needs.verify-pr.result }}
+        run: >-
+          python3 Tools/trusted-release-controls.py report-check
+          --repository "$GITHUB_REPOSITORY"
+          --head-sha "$HEAD_SHA"
+          --scope pull-request
+          --validation-result "$VALIDATION_RESULT"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+
+  verify-main:
+    if: github.event_name == 'push'
+    name: trusted-release-controls-main-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact protected main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Verify protected main source
+        run: >-
+          python3 Tools/trusted-release-controls.py verify-self
+          --root "$GITHUB_WORKSPACE"
+
+  report-main:
+    if: always() && github.event_name == 'push'
+    name: trusted-release-controls-main-report
+    needs: [verify-main]
+    permissions:
+      checks: write
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact protected main source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Publish exact protected-main result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+          VALIDATION_RESULT: ${{ needs.verify-main.result }}
+        run: >-
+          python3 Tools/trusted-release-controls.py report-check
+          --repository "$GITHUB_REPOSITORY"
+          --head-sha "$HEAD_SHA"
+          --scope protected-main
+          --validation-result "$VALIDATION_RESULT"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"

@@ -27,11 +27,16 @@ The BTC/ETH/etc. addresses belong in the in-app **Support** screen and the Donat
 
 **2. Batch releases — don't drip-ship.**
 Combine multiple fixes into one release and space releases out.
-`Tools/release.sh` is a guarded dispatcher for the canonical workflow; its
-**cadence guard** refuses to dispatch if at least three releases were cut today
-or the last was less than 20 minutes ago, unless the operator deliberately sets
-`ALLOW_RAPID_RELEASE=1`. A burst should always be a conscious decision, never
-an accident. Tune the local guard with `CADENCE_LIMIT` and
+`Tools/release.sh` is the guarded canonical build-and-publish command. Its
+**cadence guard** refuses to start if at least three releases were cut today or
+the last was less than 20 minutes ago, unless the operator deliberately sets
+`ALLOW_RAPID_RELEASE=1`. It waits for the exact hosted draft build and verifies
+live immutable-release policy before publication. Separate active tag rules
+allow only the repository administrator to create a production or testing tag,
+while no actor may update or delete one. Publication also refuses to run unless
+the authenticated actor is the repository owner and no other collaborator has
+write, maintain, or administrator access. A burst should always be a conscious
+decision, never an accident. Tune the local guard with `CADENCE_LIMIT` and
 `CADENCE_MIN_GAP_MIN`.
 
 An optional Forgejo release mirror follows the same guarded dispatch. Set
@@ -56,6 +61,19 @@ should run only on relevant branches/paths, use least-privilege permissions,
 cancel superseded work where practical, and avoid automation that mass-creates
 issues, comments, releases, or commits. Review every third-party action/version
 change as a supply-chain change.
+
+Release-authority changes use a protected-base `pull_request_target` workflow.
+Candidate source is checked out only as untrusted data, while validation and
+check publication execute from the reviewed base branch. The workflow has no
+manual-dispatch trigger and may publish only one bounded
+`trusted-release-controls` check tied to the exact pull-request head. Changes
+to release workflows, policy inputs, or release helpers must also refresh the
+reviewed SHA-256 source contract and pass its mutation tests.
+
+The manually dispatched testing and community-release builds are protected-main
+only. Android signing credentials belong in the protected `staging`
+environment, not repository-wide Actions secrets. Keep both workflows disabled
+until the environment-only secret boundary is verified.
 
 ## If it happens again
 Don't evade or create replacement accounts (that makes a suspension permanent

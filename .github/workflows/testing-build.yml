@@ -2,42 +2,130 @@
 #
 # A `meta` job creates one run-specific DRAFT candidate, then the android / macOS / iOS jobs each
 # attach their artifact to that candidate. Only after every build passes and the complete asset set
-# verifies does `promote` swap it into `testing-latest`. The previous public testing release remains
-# available throughout all builds and is retained as a rollback release during the final tag swap.
+# verifies does `ready` retain that same unique draft for owner-side immutable
+# publication. Testing snapshots are never renamed, replaced, or used as
+# mutable pointers.
 # Apple artifacts remain unsigned/ad-hoc. Android requires a private staging signing identity held
-# in Actions secrets; the checked-in debug keystore is never used for a distributable artifact.
-# Trigger from the Actions tab. (Built from noop-staging via --ref.)
+# only in protected environment secrets; the checked-in debug keystore is never used for a
+# distributable artifact.
+# Trigger from the Actions tab on protected `main`. Signing credentials live
+# only in the protected staging environment, never as repository-wide secrets.
 name: Community testing build
+run-name: NOOP testing candidate @ ${{ github.sha }}
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: testing-build
-  # A queued run is cheaper than interrupting the short, rollback-protected publication critical
-  # section. Manual cancellation still leaves testing-latest untouched while builds are running.
+  # A queued run is cheaper than interrupting artifact publication. Manual cancellation leaves
+  # previously published immutable snapshots untouched.
   cancel-in-progress: false
 
 jobs:
   meta:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     outputs:
+      bodySha: ${{ steps.m.outputs.bodySha }}
+      title: ${{ steps.m.outputs.title }}
       tag: ${{ steps.m.outputs.tag }}
       ver: ${{ steps.m.outputs.ver }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Require exact protected-main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main" || {
+            echo "::error::Testing release candidates must be dispatched from protected main."
+            exit 1
+          }
+          MAIN_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')
+          test "$MAIN_SHA" = "$GITHUB_SHA" || {
+            echo "::error::Protected main advanced or the dispatched source is not exact."
+            exit 1
+          }
       - name: Enforce redistribution provenance and notices
         run: python3 Tools/release-legal-gate.py distribution
       - name: Reject unsupported health and delivery claims
         run: |
           python3 -m unittest Tools.tests.test_health_claims_gate
           python3 Tools/health_claims_gate.py
-      - name: Require private Android staging signing secrets
+      - id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="testing-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          DATE=$(date -u +%Y-%m-%d)
+          VER=$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
+          SHA="${GITHUB_SHA:0:7}"
+          TITLE="NOOP Staging - base ${VER} - ${DATE} - ${SHA}"
+          BODY="$RUNNER_TEMP/testing-release-body.md"
+          BODY="$BODY" DATE="$DATE" VER="$VER" SHA="$SHA" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["VER"]
+          date = os.environ["DATE"]
+          sha = os.environ["SHA"]
+          body = f"""Immutable testing snapshot for exactly the dispatched commit `{os.environ["GITHUB_SHA"]}`. A PR is included only if its changes are present in that commit. Filenames carry the base app version (`v{version}`).
+
+          - **Android (staging release)** - `NOOP-android-v{version}.apk` - non-debuggable but deliberately **unminified**, privately signed, and installed beside the main app as `com.noop.whoop.staging`.
+          - **macOS** - `NOOP-macos-v{version}.zip` - unzip, then **right-click -> Open** (ad-hoc signed, not notarized; Gatekeeper warns once). If it says *"damaged"*, run `xattr -dr com.apple.quarantine /Applications/NOOP.app`.
+          - **iOS** - `NOOP-ios-unsigned-v{version}.ipa` - unsigned community-testing artifact for explicitly authorized development installation; embedded watch app stripped, widget extension retained for Home/Lock-Screen widgets and Live Activities.
+
+          Repository visibility still controls access: assets in a private repository require an authenticated collaborator and are not a public distribution channel.
+
+          Base app version {version} - built {date} - `{sha}`.
+          """
+          Path(os.environ["BODY"]).write_text(body, encoding="utf-8")
+          PY
+          BODY_SHA=$(sha256sum "$BODY" | awk '{print $1}')
+          {
+            echo "tag=$TAG"
+            echo "ver=$VER"
+            echo "title=$TITLE"
+            echo "bodySha=$BODY_SHA"
+          } >> "$GITHUB_OUTPUT"
+          # Build into an isolated draft. A failed platform job cannot mutate any
+          # previously published testing snapshot.
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
+            --target "${{ github.sha }}" \
+            --title "$TITLE" --notes-file "$BODY"
+
+  android:
+    needs: meta
+    environment: staging
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0, pinned 2026-08-11
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
+      - name: Run Android unit tests before release signing
+        run: ./gradlew testFullDebugUnitTest
+      - name: Require protected staging signing secrets
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
           ANDROID_STAGING_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
@@ -52,54 +140,10 @@ jobs:
             ANDROID_STAGING_KEY_PASSWORD
           do
             if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required Actions secret ${name}; refusing to publish an Android artifact with a public/debug signing identity."
+              echo "::error::Missing protected staging secret ${name}; refusing to sign."
               exit 1
             fi
           done
-      - id: m
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="testing-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          DATE=$(date -u +%Y-%m-%d)
-          VER=$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
-          SHA="${GITHUB_SHA:0:7}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "ver=$VER" >> "$GITHUB_OUTPUT"
-          # Build into an isolated draft. Never mutate the currently-installable testing-latest
-          # release here: a failed Android/macOS/iOS job must leave the last known-good build intact.
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
-            --target "${{ github.sha }}" \
-            --title "NOOP Staging — base ${VER} · ${DATE} · ${SHA}" \
-            --notes "Rolling **latest** testing build — refreshed in place, so this tag is always the newest. It contains exactly the dispatched commit \`${GITHUB_SHA}\`; a PR is included only if its changes are present in that commit. Filenames carry the base app version (\`v${VER}\`).
-
-          - **Android (staging release)** — \`NOOP-android-v${VER}.apk\` — non-debuggable but deliberately **unminified**, privately signed, and installed beside the main app as \`com.noop.whoop.staging\`.
-          - **macOS** — \`NOOP-macos-v${VER}.zip\` — unzip, then **right-click → Open** (ad-hoc signed, not notarized; Gatekeeper warns once). If it says *\"damaged\"*, run \`xattr -dr com.apple.quarantine /Applications/NOOP.app\`.
-          - **iOS** — \`NOOP-ios-unsigned-v${VER}.ipa\` — unsigned community-testing artifact for explicitly authorized development installation; embedded watch app stripped, widget extension retained for Home/Lock-Screen widgets and Live Activities.
-
-          Repository visibility still controls access: assets in a private repository require an authenticated collaborator and are not a public distribution channel.
-
-          Base app version ${VER} · built ${DATE} · \`${SHA}\`."
-
-  android:
-    needs: meta
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: android
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0, pinned 2026-08-11
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
-      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
-      - name: Run Android unit tests before release signing
-        run: ./gradlew testFullDebugUnitTest
       - name: Prepare private staging signing key
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
@@ -159,11 +203,14 @@ jobs:
 
   macos:
     needs: meta
+    permissions:
+      contents: write
     runs-on: macos-15
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -205,12 +252,15 @@ jobs:
 
   ios:
     needs: meta
+    permissions:
+      contents: write
     # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK → Xcode 26 → macos-26.
     runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -244,39 +294,48 @@ jobs:
           zip -qr "NOOP-ios-unsigned-v${VER}.ipa" Payload
           gh release upload "${{ needs.meta.outputs.tag }}" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
-  promote:
+  ready:
     needs: [meta, android, macos, ios]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify the complete candidate and promote transactionally
+      - name: Checkout exact snapshot source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify the complete candidate bytes
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
-          PUBLIC_TAG: testing-latest
           VER: ${{ needs.meta.outputs.ver }}
-          TARGET_SHA: ${{ github.sha }}
-          BACKUP_TAG: testing-rollback-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          set -Eeuo pipefail
-
-          # Validate the draft and its bytes before touching the currently-public testing release.
-          CANDIDATE_ID=$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json databaseId,isDraft --jq 'select(.isDraft == true) | .databaseId')
-          [ -n "$CANDIDATE_ID" ] || {
-            echo "::error::Candidate $CANDIDATE_TAG is missing or is no longer a draft."
-            exit 1
-          }
-          ASSETS=$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name')
+          set -euo pipefail
+          CANDIDATE=$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${CANDIDATE_TAG}"
+          )
+          [ "$(jq -r '.tag_name' <<<"$CANDIDATE")" = "$CANDIDATE_TAG" ]
+          [ "$(jq -r '.draft' <<<"$CANDIDATE")" = "true" ]
+          [ "$(jq -r '.prerelease' <<<"$CANDIDATE")" = "true" ]
           EXPECTED=$(printf '%s\n' \
             "NOOP-android-v${VER}.apk" \
             "NOOP-android-v${VER}.apk.sha256" \
             "NOOP-android-v${VER}.cdx.json" \
             "NOOP-macos-v${VER}.zip" \
             "NOOP-ios-unsigned-v${VER}.ipa" | sort)
-          [ "$(printf '%s\n' "$ASSETS" | sort)" = "$EXPECTED" ] || {
+          ACTUAL=$(
+            jq -er '
+              if all(.assets[];
+                (.name | type == "string") and
+                (.size | type == "number") and
+                (.size > 0) and
+                (.state == "uploaded"))
+              then [.assets[].name] | sort | .[]
+              else error("invalid testing asset")
+              end
+            ' <<<"$CANDIDATE"
+          )
+          [ "$ACTUAL" = "$EXPECTED" ] || {
             echo "::error::Candidate $CANDIDATE_TAG does not contain exactly the five expected artifacts."
-            printf 'Expected:\n%s\nActual:\n%s\n' "$EXPECTED" "$ASSETS"
             exit 1
           }
 
@@ -293,145 +352,44 @@ jobs:
             unzip -tq "NOOP-ios-unsigned-v${VER}.ipa" >/dev/null
           )
           rm -rf "$VERIFY_DIR"
+      - name: Record exact testing snapshot draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
+          VER: ${{ needs.meta.outputs.ver }}
+          TARGET_SHA: ${{ github.sha }}
+          EXPECTED_NAME: ${{ needs.meta.outputs.title }}
+          EXPECTED_BODY_SHA: ${{ needs.meta.outputs.bodySha }}
+        run: >-
+          python3 Tools/github-release-publish.py
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$CANDIDATE_TAG"
+          --version "$VER"
+          --expected-sha "$TARGET_SHA"
+          --expected-name "$EXPECTED_NAME"
+          --expected-body-sha256 "$EXPECTED_BODY_SHA"
+          --expected-target "$TARGET_SHA"
+          --verify-draft-only
+          --testing-snapshot
+          --write-manifest "$RUNNER_TEMP/testing-release-candidate.json"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Retain exact testing candidate manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
+        with:
+          name: testing-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/testing-release-candidate.json
+          if-no-files-found: error
+          retention-days: 14
 
-          HAD_OLD_RELEASE=0
-          OLD_RELEASE_ID=""
-          HAD_PUBLIC_REF=0
-          OLD_REF_SHA=""
-          BACKUP_REF_CREATED=0
-          OLD_RENAMED=0
-          SWAP_ARMED=0
-          SWAP_VERIFIED=0
-
-          if gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            HAD_OLD_RELEASE=1
-            OLD_RELEASE_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${PUBLIC_TAG}")
-            OLD_RELEASE_ID=$(jq -r '.id' <<<"$OLD_RELEASE_JSON")
-            if [ "$(jq -r '.immutable // false' <<<"$OLD_RELEASE_JSON")" = "true" ]; then
-              echo "::error::$PUBLIC_TAG is immutable. Keep versioned testing tags instead of a rolling release."
-              exit 1
-            fi
-          fi
-          if OLD_REF_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" \
-              --jq '.object.sha' 2>/dev/null); then
-            HAD_PUBLIC_REF=1
-          else
-            OLD_REF_SHA=""
-          fi
-          if [ "$HAD_OLD_RELEASE" -eq 1 ] && [ "$HAD_PUBLIC_REF" -ne 1 ]; then
-            echo "::error::$PUBLIC_TAG has a release but no matching git tag; refusing an unsafe swap."
-            exit 1
-          fi
-
-          # If any command in the tag-swap critical section fails, remove only this run's candidate,
-          # restore the old tag ref, and rename the untouched rollback release back to testing-latest.
-          rollback() {
-            status=$?
-            trap - EXIT INT TERM
-            set +e
-            if [ "$SWAP_ARMED" -eq 1 ] && [ "$SWAP_VERIFIED" -ne 1 ]; then
-              rollback_ok=1
-              current_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-                --json databaseId --jq '.databaseId' 2>/dev/null)
-              if [ "$current_id" = "$CANDIDATE_ID" ]; then
-                # Do not let a partially-verified candidate block restoration of the known-good tag.
-                gh release delete "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-                  --yes >/dev/null 2>&1 || rollback_ok=0
-              fi
-
-              if [ "$HAD_PUBLIC_REF" -eq 1 ]; then
-                gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
-                  -f sha="$OLD_REF_SHA" -F force=true >/dev/null || rollback_ok=0
-              else
-                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
-                  >/dev/null 2>&1 || true
-              fi
-
-              if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
-                restored_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-                  --json databaseId --jq '.databaseId' 2>/dev/null)
-                if [ "$restored_id" != "$OLD_RELEASE_ID" ] && [ "$OLD_RENAMED" -eq 1 ]; then
-                  gh release edit "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
-                    --tag "$PUBLIC_TAG" >/dev/null 2>&1 || rollback_ok=0
-                  restored_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-                    --json databaseId --jq '.databaseId' 2>/dev/null)
-                fi
-                restored_ref=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" \
-                  --jq '.object.sha' 2>/dev/null)
-                if [ "$restored_id" = "$OLD_RELEASE_ID" ] && \
-                    [ "$restored_ref" = "$OLD_REF_SHA" ] && [ "$rollback_ok" -eq 1 ]; then
-                  if [ "$BACKUP_REF_CREATED" -eq 1 ]; then
-                    gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${BACKUP_TAG}" \
-                      >/dev/null 2>&1 || true
-                  fi
-                  echo "::error::Candidate promotion failed; restored the previous $PUBLIC_TAG release."
-                else
-                  echo "::error::Automatic rollback was incomplete. The previous release remains under $BACKUP_TAG for manual recovery."
-                fi
-              else
-                echo "::error::Candidate promotion failed before the first $PUBLIC_TAG release completed."
-              fi
-            fi
-            exit "$status"
-          }
-          # EXIT also covers `set -e` failures; INT/TERM convert a manual cancellation into an EXIT
-          # so the same rollback runs while the runner still permits API calls.
-          trap rollback EXIT
-          trap 'exit 130' INT TERM
-          SWAP_ARMED=1
-
-          if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
-            # Keep the previous release object and every asset intact under a private rollback tag
-            # until the new public release has passed post-promotion verification.
-            BACKUP_REF_CREATED=1
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${BACKUP_TAG}" -f sha="$OLD_REF_SHA" >/dev/null
-            OLD_RENAMED=1
-            gh release edit "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-              --tag "$BACKUP_TAG" >/dev/null
-            [ "$(gh release view "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
-              --json databaseId --jq '.databaseId')" = "$OLD_RELEASE_ID" ]
-          fi
-
-          if [ "$HAD_PUBLIC_REF" -eq 1 ]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
-              -f sha="$TARGET_SHA" -F force=true >/dev/null
-          else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${PUBLIC_TAG}" -f sha="$TARGET_SHA" >/dev/null
-          fi
-
-          gh release edit "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --tag "$PUBLIC_TAG" --target "$TARGET_SHA" \
-            --verify-tag --draft=false --prerelease --latest=false
-
-          PUBLIC_JSON=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json databaseId,isDraft,isPrerelease,assets)
-          [ "$(jq -r '.databaseId' <<<"$PUBLIC_JSON")" = "$CANDIDATE_ID" ]
-          [ "$(jq -r '.isDraft' <<<"$PUBLIC_JSON")" = "false" ]
-          [ "$(jq -r '.isPrerelease' <<<"$PUBLIC_JSON")" = "true" ]
-          PUBLIC_ASSETS=$(jq -r '.assets[].name' <<<"$PUBLIC_JSON" | sort)
-          [ "$PUBLIC_ASSETS" = "$EXPECTED" ]
-          [ "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" --jq '.object.sha')" = "$TARGET_SHA" ]
-          SWAP_VERIFIED=1
-          trap - EXIT INT TERM
-
-          # The public candidate is now verified. Cleanup is deliberately best-effort: retaining an
-          # inaccessible rollback release is safer than rolling back a healthy testing-latest build.
-          if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
-            gh release delete "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
-              --cleanup-tag --yes || echo "::warning::Published $PUBLIC_TAG, but could not remove $BACKUP_TAG."
-          fi
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${CANDIDATE_TAG}" \
-            >/dev/null 2>&1 || true
-          echo "Promoted verified candidate $CANDIDATE_TAG to $PUBLIC_TAG at $TARGET_SHA."
-
-  # Always remove an unpromoted run-specific draft. This never names testing-latest, so a failed or
-  # cancelled build cannot delete the last known-good public candidate. Also remove the disposable
-  # noop-staging branch after every platform job settles.
+  # Retain a fully verified draft for owner-side immutable publication. On a
+  # failed build, remove only this run's draft. Any inspection failure retains
+  # the candidate rather than guessing that it is absent.
   cleanup:
-    needs: [meta, android, macos, ios, promote]
+    needs: [meta, android, macos, ios, ready]
     if: ${{ always() }}
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Delete this run's unpromoted draft
@@ -439,14 +397,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
+          READY_RESULT: ${{ needs.ready.result }}
         run: |
-          if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --yes
+          set -euo pipefail
+          if [ "$READY_RESULT" = "success" ]; then
+            echo "Retained verified testing draft $CANDIDATE_TAG for owner publication."
+            exit 0
           fi
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${CANDIDATE_TAG}" \
-            >/dev/null 2>&1 || true
-      - name: Delete the disposable staging branch
-        if: ${{ github.ref_type == 'branch' && github.ref_name == 'noop-staging' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/noop-staging" || true
+          RELEASE=$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${CANDIDATE_TAG}"
+          ) || {
+            echo "::error::Could not inspect failed testing candidate; retained it for review."
+            exit 1
+          }
+          if [ "$(jq -r '.draft' <<<"$RELEASE")" = "true" ]; then
+            gh release delete "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag --yes
+          else
+            echo "Retained non-draft testing snapshot $CANDIDATE_TAG."
+          fi

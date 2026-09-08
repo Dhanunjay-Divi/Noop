@@ -40,15 +40,23 @@ jobs:
           Tools.tests.test_calibration_parity_audit
           Tools.tests.test_forgejo_release_helper
           Tools.tests.test_forgejo_version_gate
+          Tools.tests.test_github_release_publish
           Tools.tests.test_github_release_tag_gate
           Tools.tests.test_homebrew_helper
           Tools.tests.test_homebrew_version_gate
           Tools.tests.test_required_ci_gate
           Tools.tests.test_release_version_gate
+          Tools.tests.test_testing_release_workflow
           Tools.tests.test_terminology_audit
+          Tools.tests.test_trusted_release_controls
 
       - name: Verify required merge and release checks
         run: python3 Tools/required-ci-gate.py check
+
+      - name: Verify release shell entrypoints
+        run: |
+          bash -n Tools/release.sh Tools/publish-testing-snapshot.sh
+          shellcheck Tools/release.sh Tools/publish-testing-snapshot.sh
 
       - name: Verify Apple and Android calibration parity
         run: python3 Tools/calibration-parity-audit.py check

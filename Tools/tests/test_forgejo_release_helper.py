@@ -149,14 +149,19 @@ class ForgejoReleaseHelperTests(unittest.TestCase):
         )
         self.assertGreaterEqual(source.count("verify_remote_payloads"), 3)
         self.assertIn("Forgejo publication drift rollback failed", source)
+        self.assertIn("Forgejo ambiguous publication rollback failed", source)
+        self.assertIn(
+            "Forgejo publication response failed; release is draft",
+            source,
+        )
         self.assertIn("return_release_to_draft", source)
         clear_assets = source.index(
             'api -X DELETE \\\n'
             '      "$API/repos/$ORG/$REPO/releases/$REL_ID/assets/$asset_id"'
         )
         publish = source.index(
-            "PUBLISHED_RELEASE=\"$(api -X PATCH "
-            "\"$API/repos/$ORG/$REPO/releases/$REL_ID\""
+            'if ! PUBLISHED_RELEASE="$(\n'
+            '  api -X PATCH "$API/repos/$ORG/$REPO/releases/$REL_ID"'
         )
         self.assertLess(clear_assets, publish)
 

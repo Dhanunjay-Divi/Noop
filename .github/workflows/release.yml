@@ -5,17 +5,18 @@
 #
 # The version, build numbers, localized What's New entry, and release notes must already be committed
 # through protected `main`. This workflow verifies every required check on that exact commit before it
-# creates a draft, then publishes a fixed, non-prerelease `v<VERSION>` release with version-stamped
-# artifacts. A new release remains a draft until every platform artifact is
-# attached and reverified, then it is published as latest. The repairable
-# AltStore source workflow runs only after publication, so the public feed can
-# never advertise an inaccessible draft IPA. UpdateCheck finds the
-# published release (isNewer strips the `-staging` suffix, so an installed
-# staging build compares clean).
+# creates a draft and attaches version-stamped artifacts. A new release remains
+# a draft after every platform artifact is attached and reverified. The guarded
+# owner-side dispatcher waits for this exact workflow run, rechecks live
+# repository policy with an administration-capable token, and only then
+# publishes the immutable release. UpdateCheck finds the published release
+# (isNewer strips the `-staging` suffix, so an installed staging build compares
+# clean).
 #
-# Contrast with the testing workflow: it publishes the rolling `testing-latest` PRERELEASE (a
-# snapshot), which releases/latest deliberately ignores. THIS never touches testing-latest.
+# Contrast with the testing workflow: it builds uniquely tagged prerelease
+# drafts for the same owner-side immutable publication boundary.
 name: Community release build
+run-name: NOOP release candidate v${{ inputs.version }} @ ${{ inputs.release_sha }}
 
 on:
   workflow_dispatch:
@@ -26,26 +27,11 @@ on:
       release_sha:
         description: "Exact protected-main commit already verified by the dispatcher"
         required: true
-      publish_homebrew:
-        description: "Update the configured public project tap after publication"
-        required: false
-        type: boolean
-        default: false
-      publish_homebrew_forgejo:
-        description: "Also mirror the Homebrew tap to its configured Forgejo repository"
-        required: false
-        type: boolean
-        default: false
-      publish_forgejo:
-        description: "Mirror the verified canonical release to the configured Forgejo repository"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   actions: read
   checks: read
-  contents: write
+  contents: read
 
 concurrency:
   group: release-build
@@ -53,12 +39,17 @@ concurrency:
 
 jobs:
   bump:
+    permissions:
+      actions: read
+      checks: read
+      contents: write
     runs-on: ubuntu-latest
     outputs:
       ver: ${{ steps.b.outputs.ver }}
       tag: ${{ steps.b.outputs.tag }}
       sha: ${{ steps.b.outputs.sha }}
       buildVersion: ${{ steps.b.outputs.buildVersion }}
+      bodySha: ${{ steps.b.outputs.bodySha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
         with:
@@ -69,8 +60,6 @@ jobs:
       - name: Require exact protected-main source
         env:
           EXPECTED_RELEASE_SHA: ${{ github.event.inputs.release_sha }}
-          PUBLISH_HOMEBREW: ${{ inputs.publish_homebrew }}
-          PUBLISH_HOMEBREW_FORGEJO: ${{ inputs.publish_homebrew_forgejo }}
         run: |
           set -euo pipefail
           [[ "$EXPECTED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
@@ -83,11 +72,6 @@ jobs:
             echo "::error::Protected main advanced after release verification; review and dispatch the new exact commit."
             exit 1
           }
-          if [ "$PUBLISH_HOMEBREW_FORGEJO" = "true" ] &&
-             [ "$PUBLISH_HOMEBREW" != "true" ]; then
-            echo "::error::The Homebrew Forgejo mirror requires Homebrew publication."
-            exit 1
-          fi
       - name: Enforce repository release controls
         run: python3 Tools/release-control-gate.py check
       - name: Require every merge check on the exact release commit
@@ -103,25 +87,6 @@ jobs:
         run: |
           python3 -m unittest Tools.tests.test_health_claims_gate
           python3 Tools/health_claims_gate.py
-      - name: Require private Android staging signing secrets
-        env:
-          ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
-          ANDROID_STAGING_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
-          ANDROID_STAGING_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
-          ANDROID_STAGING_KEY_PASSWORD: ${{ secrets.ANDROID_STAGING_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          for name in \
-            ANDROID_STAGING_KEYSTORE_BASE64 \
-            ANDROID_STAGING_STORE_PASSWORD \
-            ANDROID_STAGING_KEY_ALIAS \
-            ANDROID_STAGING_KEY_PASSWORD
-          do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required Actions secret ${name}; refusing to publish an Android artifact with a public/debug signing identity."
-              exit 1
-            fi
-          done
       - id: b
         env:
           GH_TOKEN: ${{ github.token }}
@@ -181,68 +146,79 @@ jobs:
           # The reviewed iOS build number for the AltStore manifest.
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
+          BODY=$(mktemp)
+          # Release body = the required per-version changelog
+          # docs/releases/<TAG>.md, plus a downloads footer.
+          awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{fm=0; next} !fm{print}' \
+            "$NOTES_MD" > "$BODY"
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+            --json tagName,isPrerelease,isDraft \
+            --jq 'map(select(.isPrerelease==false and .isDraft==false)) | .[0].tagName // empty' 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            AUTO=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" -f previous_tag_name="$PREV" -f target_commitish="$(git rev-parse HEAD)" \
+              --jq '.body' 2>/dev/null || true)
+            AUTO=$(printf '%s' "$AUTO" \
+              | sed -E 's/ by @[A-Za-z0-9_-]+//g' \
+              | awk 'BEGIN{skip=0} /^#+ *New Contributors/{skip=1; next} /^#+ /{skip=0} skip{next} {print}')
+            [ -n "$AUTO" ] && printf '\n---\n\n%s\n' "$AUTO" >> "$BODY"
+          else
+            echo "First release (no prior release tag) — skipping the auto PR breakdown."
+          fi
+          {
+            # shellcheck disable=SC2016
+            printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
+            # shellcheck disable=SC2016
+            printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
+            # shellcheck disable=SC2016
+            printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
+            # shellcheck disable=SC2016
+            printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (unsigned community artifact for authorized development installation)\n' "$NEW"
+          } >> "$BODY"
+
           # Keep the immutable release as a DRAFT at the reviewed commit until
-          # all three platform artifacts are complete. The repairable AltStore
-          # channel is updated only after publication. A retry may refresh an
-          # existing draft, but it must never pull an already-published
-          # immutable release back into draft.
+          # all three platform artifacts are complete. Every retry resets the
+          # title, body, and target to the canonical values generated above.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
             if [ "$IS_DRAFT" != "true" ]; then
               echo "::error::Release $TAG is already published and immutable; refusing to replace it."
               exit 1
             fi
-            echo "Release $TAG already exists as a draft — refreshing its target and assets."
+            echo "Release $TAG already exists as a draft — resetting canonical metadata."
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --draft --target "$GITHUB_SHA"
+              --draft --target "$GITHUB_SHA" \
+              --title "NOOP ${NEW}" --notes-file "$BODY"
           else
-            # Release body = the required per-version changelog docs/releases/<TAG>.md, plus a
-            # downloads footer. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source
-            # of truth, and the pre-push gate above rejects a missing/malformed file.)
-            BODY=$(mktemp)
-            NOTES_MD="docs/releases/${TAG}.md"
-            if [ -f "$NOTES_MD" ]; then
-              # Strip a leading YAML front-matter block (the `whatsnew:` used by appchangelog-gen) so it
-              # never leaks into the GitHub release body; files without front-matter pass through unchanged.
-              awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{fm=0; next} !fm{print}' "$NOTES_MD" > "$BODY"
-            else
-              echo "::error::Missing ${NOTES_MD}; refusing to create a placeholder release."
-              exit 1
-            fi
-            # Auto "What's Changed" breakdown: GitHub's generate-notes API lists every merged PR since the
-            # previous RELEASE (non-prerelease, so testing-latest snapshots are ignored), + contributors +
-            # a full-changelog compare link. Appended below the curated notes. Skipped on the very first
-            # release (no prior tag → the diff would run to repo start). Best-effort: a failure is ignored.
-            PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
-              --json tagName,isPrerelease,isDraft \
-              --jq 'map(select(.isPrerelease==false and .isDraft==false)) | .[0].tagName // empty' 2>/dev/null || true)
-            if [ -n "$PREV" ]; then
-              AUTO=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-                -f tag_name="$TAG" -f previous_tag_name="$PREV" -f target_commitish="$(git rev-parse HEAD)" \
-                --jq '.body' 2>/dev/null || true)
-              # Drop the per-PR "by @author" suffix and any generated "New Contributors" block;
-              # the curated release notes retain the required contributor and lineage credits.
-              AUTO=$(printf '%s' "$AUTO" \
-                | sed -E 's/ by @[A-Za-z0-9_-]+//g' \
-                | awk 'BEGIN{skip=0} /^#+ *New Contributors/{skip=1; next} /^#+ /{skip=0} skip{next} {print}')
-              [ -n "$AUTO" ] && printf '\n---\n\n%s\n' "$AUTO" >> "$BODY"
-            else
-              echo "First release (no prior release tag) — skipping the auto PR breakdown."
-            fi
-            {
-              # shellcheck disable=SC2016
-              printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
-              # shellcheck disable=SC2016
-              printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
-              # shellcheck disable=SC2016
-              printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
-              # shellcheck disable=SC2016
-              printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (unsigned community artifact for authorized development installation)\n' "$NEW"
-            } >> "$BODY"
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
               --target "$GITHUB_SHA" \
               --title "NOOP ${NEW}" --notes-file "$BODY"
           fi
+
+          RELEASE_JSON=$(mktemp)
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            > "$RELEASE_JSON"
+          BODY_SHA=$(
+            python3 - "$BODY" "$RELEASE_JSON" "NOOP ${NEW}" "$GITHUB_SHA" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          body = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          release = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          if not (
+              release.get("draft") is True
+              and release.get("prerelease") is False
+              and release.get("name") == sys.argv[3]
+              and release.get("body") == body
+              and release.get("target_commitish") == sys.argv[4]
+          ):
+              raise SystemExit("release draft metadata is not canonical")
+          print(hashlib.sha256(body.encode("utf-8")).hexdigest())
+          PY
+          )
+          echo "bodySha=$BODY_SHA" >> "$GITHUB_OUTPUT"
 
   android_tests:
     needs: bump
@@ -266,6 +242,9 @@ jobs:
 
   android:
     needs: [bump, android_tests]
+    environment: staging
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -281,6 +260,25 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2, pinned 2026-08-11
+      - name: Require protected staging signing secrets
+        env:
+          ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
+          ANDROID_STAGING_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
+          ANDROID_STAGING_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
+          ANDROID_STAGING_KEY_PASSWORD: ${{ secrets.ANDROID_STAGING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in \
+            ANDROID_STAGING_KEYSTORE_BASE64 \
+            ANDROID_STAGING_STORE_PASSWORD \
+            ANDROID_STAGING_KEY_ALIAS \
+            ANDROID_STAGING_KEY_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing protected staging secret ${name}; refusing to sign."
+              exit 1
+            fi
+          done
       - name: Prepare private staging signing key
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
@@ -345,6 +343,8 @@ jobs:
 
   macos:
     needs: bump
+    permissions:
+      contents: write
     runs-on: macos-15
     timeout-minutes: 40
     steps:
@@ -400,6 +400,8 @@ jobs:
 
   ios:
     needs: bump
+    permissions:
+      contents: write
     # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK → Xcode 26 → macos-26.
     runs-on: macos-26
     timeout-minutes: 40
@@ -445,7 +447,8 @@ jobs:
           }
           gh release upload "$TAG" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
-  publish:
+  ready:
+    name: release-candidate-ready
     needs: [bump, android, macos, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -455,7 +458,7 @@ jobs:
         with:
           ref: ${{ needs.bump.outputs.sha }}
           persist-credentials: false
-      - name: Reverify required checks before publication
+      - name: Reverify required checks for exact candidate
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.bump.outputs.sha }}
@@ -463,158 +466,51 @@ jobs:
           python3 Tools/required-ci-gate.py verify-github
           --repository "$GITHUB_REPOSITORY"
           --sha "$RELEASE_SHA"
-      - name: Verify assets and publish as latest
+      - name: Verify complete candidate bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.bump.outputs.tag }}
+          VER: ${{ needs.bump.outputs.ver }}
+        run: |
+          set -euo pipefail
+          VERIFY_DIR=$(mktemp -d "$RUNNER_TEMP/noop-release-ready.XXXXXX")
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir "$VERIFY_DIR" --pattern 'NOOP-*'
+          (
+            cd "$VERIFY_DIR"
+            test "$(find . -maxdepth 1 -type f -name 'NOOP-*' | wc -l | tr -d ' ')" = "5"
+            sha256sum --check "NOOP-android-v${VER}.apk.sha256"
+            jq -e '.bomFormat == "CycloneDX" and (.components | type == "array")' \
+              "NOOP-android-v${VER}.cdx.json" >/dev/null
+            unzip -tq "NOOP-android-v${VER}.apk" >/dev/null
+            unzip -tq "NOOP-macos-v${VER}.zip" >/dev/null
+            unzip -tq "NOOP-ios-unsigned-v${VER}.ipa" >/dev/null
+          )
+          rm -rf "$VERIFY_DIR"
+      - name: Record exact release draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.bump.outputs.tag }}
           VER: ${{ needs.bump.outputs.ver }}
           RELEASE_SHA: ${{ needs.bump.outputs.sha }}
-        run: |
-          set -euo pipefail
-          RELEASE=$(
-            timeout 30s gh api \
-              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
-          )
-          RELEASE_ID=$(jq -er '.id | select(type == "number" and . > 0)' \
-            <<<"$RELEASE")
-          [ "$(jq -r '.tag_name' <<<"$RELEASE")" = "$TAG" ]
-          [ "$(jq -r '.draft' <<<"$RELEASE")" = "true" ] || {
-            echo "::error::Release $TAG is not the expected draft."
-            exit 1
-          }
-          [ "$(jq -r '.prerelease' <<<"$RELEASE")" = "false" ]
-
-          EXPECTED_ASSETS=$(
-            printf '%s\n' \
-              "NOOP-android-v${VER}.apk" \
-              "NOOP-android-v${VER}.apk.sha256" \
-              "NOOP-android-v${VER}.cdx.json" \
-              "NOOP-macos-v${VER}.zip" \
-              "NOOP-ios-unsigned-v${VER}.ipa" |
-              sort
-          )
-          ACTUAL_ASSETS=$(
-            jq -er '
-              if all(.assets[];
-                (.name | type == "string") and
-                (.size | type == "number") and
-                (.size > 0))
-              then [.assets[].name] | sort | .[]
-              else error("invalid release asset")
-              end
-            ' <<<"$RELEASE"
-          )
-          [ "$ACTUAL_ASSETS" = "$EXPECTED_ASSETS" ] || {
-            echo "::error::Release $TAG does not contain the exact verified asset set."
-            exit 1
-          }
-
-          python3 Tools/github-release-tag-gate.py \
-            --repository "$GITHUB_REPOSITORY" \
-            --tag "$TAG" \
-            --expected-sha "$RELEASE_SHA"
-
-          return_release_to_draft() {
-            local rolled_back
-            rolled_back=$(
-              timeout 30s gh api --method PATCH \
-                "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-                -F draft=true -F prerelease=false
-            ) || {
-              echo "::error::Published release validation failed and automatic draft rollback failed."
-              return 1
-            }
-            [ "$(jq -r '.id' <<<"$rolled_back")" = "$RELEASE_ID" ] &&
-              [ "$(jq -r '.draft' <<<"$rolled_back")" = "true" ] &&
-              [ "$(jq -r '.prerelease' <<<"$rolled_back")" = "false" ] || {
-              echo "::error::Published release validation failed and draft rollback was not verified."
-              return 1
-            }
-          }
-
-          if ! PUBLISHED=$(
-            timeout 30s gh api --method PATCH \
-              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-              -F draft=false -F prerelease=false -f make_latest=true
-          ); then
-            return_release_to_draft || exit 1
-            echo "::error::Release publication request failed; release returned to draft."
-            exit 1
-          fi
-
-          if
-            [ "$(jq -r '.id' <<<"$PUBLISHED")" = "$RELEASE_ID" ] &&
-            [ "$(jq -r '.tag_name' <<<"$PUBLISHED")" = "$TAG" ] &&
-            [ "$(jq -r '.draft' <<<"$PUBLISHED")" = "false" ] &&
-            [ "$(jq -r '.prerelease' <<<"$PUBLISHED")" = "false" ] &&
-            PUBLISHED_ASSETS=$(
-              jq -er '
-                if all(.assets[];
-                  (.name | type == "string") and
-                  (.size | type == "number") and
-                  (.size > 0))
-                then [.assets[].name] | sort | .[]
-                else error("invalid release asset")
-                end
-              ' <<<"$PUBLISHED"
-            ) &&
-            [ "$PUBLISHED_ASSETS" = "$EXPECTED_ASSETS" ] &&
-            python3 Tools/github-release-tag-gate.py \
-              --repository "$GITHUB_REPOSITORY" \
-              --tag "$TAG" \
-              --expected-sha "$RELEASE_SHA"
-          then
-            :
-          else
-            return_release_to_draft || exit 1
-            echo "::error::Published release validation failed; release returned to draft."
-            exit 1
-          fi
-
-  # Update the stable public AltStore / SideStore channel only after the
-  # versioned release is published. The called workflow is also manually
-  # dispatchable, so a transient channel-hosting failure can be repaired
-  # without rebuilding or mutating an immutable production release.
-  altstore:
-    needs: [bump, publish]
-    permissions:
-      actions: read
-      checks: read
-      contents: write
-    uses: ./.github/workflows/altstore-source.yml
-    with:
-      version: ${{ needs.bump.outputs.ver }}
-
-  # Homebrew is opt-in until the public project tap, scoped write token, and
-  # repository variable are provisioned. The called workflow is manually
-  # repairable, so a tap outage never requires rebuilding an immutable release.
-  homebrew:
-    needs: [bump, publish]
-    if: ${{ inputs.publish_homebrew }}
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-    uses: ./.github/workflows/homebrew-cask.yml
-    with:
-      version: ${{ needs.bump.outputs.ver }}
-      publish_forgejo: ${{ inputs.publish_homebrew_forgejo }}
-    secrets:
-      NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}
-      NOOP_HOMEBREW_FORGE_TOKEN: ${{ inputs.publish_homebrew_forgejo && secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}
-
-  # Forgejo is an explicit optional mirror. GitHub remains canonical, and the
-  # called workflow is manually retryable without rebuilding the immutable
-  # production release.
-  forgejo:
-    needs: [bump, publish]
-    if: ${{ inputs.publish_forgejo }}
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-    uses: ./.github/workflows/forgejo-release.yml
-    with:
-      version: ${{ needs.bump.outputs.ver }}
-    secrets:
-      NOOP_FORGEJO_TOKEN: ${{ secrets.NOOP_FORGEJO_TOKEN }}
+          BODY_SHA: ${{ needs.bump.outputs.bodySha }}
+        run: >-
+          python3 Tools/github-release-publish.py
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$TAG"
+          --version "$VER"
+          --expected-sha "$RELEASE_SHA"
+          --expected-name "NOOP $VER"
+          --expected-body-sha256 "$BODY_SHA"
+          --expected-target "$RELEASE_SHA"
+          --verify-draft-only
+          --write-manifest "$RUNNER_TEMP/release-candidate.json"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Retain exact candidate manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, pinned 2026-04-10
+        with:
+          name: production-release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-candidate.json
+          if-no-files-found: error
+          retention-days: 14

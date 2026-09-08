@@ -35,18 +35,19 @@ the widget; iOS still will not run it until the sideloader signs it on your devi
 ### AltStore/SideStore source status
 
 The repository contains an `altstore-source.json` publication template. Its
-stable channel URL is deliberately **not advertised as an install path**:
+historical channel URL is deliberately **not advertised as an install path**:
 
-**Dormant stable channel (not usable while private):**
+**Dormant channel (not usable):**
 `https://github.com/Dhanunjay-Divi/Noop/releases/download/altstore-source/altstore-source.json`
 
 AltStore/SideStore does not send GitHub collaborator credentials when fetching a
 source or an IPA. Consequently private release URLs return an authentication
-failure to the sideloader. The release workflow publishes this mutable channel
-asset only after the repository, manifest, icon, and advertised IPA are
-intentionally public and the versioned production release has passed its exact
-source checks. Until then, authorized testers must download the IPA in an
-authenticated browser and import that local file into their sideloader.
+failure to the sideloader. Immutable GitHub Releases also cannot host the
+mutable source pointer AltStore requires, so workflow invocation is disabled.
+The pointer must move to a separate mutable host and pass anonymous
+manifest/icon/IPA fetch and install tests before any channel is advertised.
+Until then, authorized testers must download the IPA in an authenticated
+browser and import that local file into their sideloader.
 
 Historical manifest entries are not release authority. Use only an artifact
 associated with a reviewed canonical-project commit and require a passing

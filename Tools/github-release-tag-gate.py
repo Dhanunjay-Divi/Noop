@@ -17,6 +17,7 @@ from typing import Any
 
 SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+SAFE_TESTING_TAG = re.compile(r"^testing-snapshot-[0-9]+-[0-9]+$")
 SAFE_SHA = re.compile(r"^[0-9a-f]{40}$")
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TAG_DEPTH = 5
@@ -96,17 +97,79 @@ def github_json(path: str, token: str) -> Any:
         raise GateError("GitHub release tag response is invalid") from error
 
 
+def github_optional_json(path: str, token: str) -> Any | None:
+    request = urllib.request.Request(
+        f"https://api.github.com{path}",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "noop-release-tag-gate",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise GateError("GitHub release tag lookup failed") from error
+    except OSError as error:
+        raise GateError("GitHub release tag lookup failed") from error
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise GateError("GitHub release tag response exceeded the size limit")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as error:
+        raise GateError("GitHub release tag response is invalid") from error
+
+
+def verify_remote_tag_absent(
+    repository: str,
+    tag: str,
+    token: str,
+    fetcher: Callable[[str], Any | None] | None = None,
+    *,
+    testing_snapshot: bool = False,
+) -> None:
+    if SAFE_REPOSITORY.fullmatch(repository) is None:
+        raise GateError("repository must be owner/name")
+    expected_pattern = SAFE_TESTING_TAG if testing_snapshot else SAFE_TAG
+    if expected_pattern.fullmatch(tag) is None:
+        label = (
+            "testing-snapshot-<run>-<attempt>"
+            if testing_snapshot
+            else "vX.Y.Z"
+        )
+        raise GateError(f"release tag must be {label}")
+    if not token:
+        raise GateError("GitHub token is unavailable")
+    read = fetcher or (lambda path: github_optional_json(path, token))
+    encoded_tag = urllib.parse.quote(tag, safe="")
+    ref_path = f"/repos/{repository}/git/ref/tags/{encoded_tag}"
+    if read(ref_path) is not None:
+        raise GateError("release tag already exists before publication")
+
+
 def verify_remote_tag(
     repository: str,
     tag: str,
     expected_sha: str,
     token: str,
     fetcher: Callable[[str], Any] | None = None,
+    *,
+    testing_snapshot: bool = False,
 ) -> None:
     if SAFE_REPOSITORY.fullmatch(repository) is None:
         raise GateError("repository must be owner/name")
-    if SAFE_TAG.fullmatch(tag) is None:
-        raise GateError("release tag must be vX.Y.Z")
+    expected_pattern = SAFE_TESTING_TAG if testing_snapshot else SAFE_TAG
+    if expected_pattern.fullmatch(tag) is None:
+        label = (
+            "testing-snapshot-<run>-<attempt>"
+            if testing_snapshot
+            else "vX.Y.Z"
+        )
+        raise GateError(f"release tag must be {label}")
     if SAFE_SHA.fullmatch(expected_sha) is None:
         raise GateError("expected SHA must be a full lowercase commit SHA")
     if not token:
@@ -122,6 +185,16 @@ def verify_remote_tag(
     )
     if actual_sha != expected_sha:
         raise GateError("live release tag points to a different commit")
+    confirmed_ref = read(ref_path)
+    confirmed_sha = resolve_tag_target(
+        confirmed_ref,
+        tag,
+        lambda sha: read(f"/repos/{repository}/git/tags/{sha}"),
+    )
+    if confirmed_ref.get("object") != ref_payload.get("object"):
+        raise GateError("live release tag changed during verification")
+    if confirmed_sha != expected_sha:
+        raise GateError("live release tag changed during verification")
 
 
 def main() -> int:
@@ -129,6 +202,7 @@ def main() -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--expected-sha", required=True)
+    parser.add_argument("--testing-snapshot", action="store_true")
     args = parser.parse_args()
     try:
         verify_remote_tag(
@@ -136,6 +210,7 @@ def main() -> int:
             args.tag,
             args.expected_sha,
             os.environ.get("GH_TOKEN", ""),
+            testing_snapshot=args.testing_snapshot,
         )
     except GateError as error:
         print(f"release-tag: {error}", file=sys.stderr)

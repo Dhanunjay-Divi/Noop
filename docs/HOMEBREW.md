@@ -32,9 +32,9 @@ NOOP_HOMEBREW_TAP_ORG=Dhanunjay-Divi \
 ```
 
 To opt the canonical protected release into that step, set
-`NOOP_RELEASE_HOMEBREW=1` when dispatching `Tools/release.sh`. The dispatcher
-passes the decision to a retryable post-publication workflow; it never pushes
-the tap from the local release process.
+`NOOP_RELEASE_HOMEBREW=1` when running `Tools/release.sh`. After canonical
+publication, the command dispatches a retryable post-publication workflow; it
+never pushes the tap from the local release process.
 
 Automated publication additionally requires:
 
@@ -43,7 +43,7 @@ Automated publication additionally requires:
   write** on only `<owner>/homebrew-noop`.
 
 To mirror that tap to Forgejo as part of the same guarded publication, also set
-`NOOP_HOMEBREW_FORGE=1` when dispatching `Tools/release.sh`, configure
+`NOOP_HOMEBREW_FORGE=1` when running `Tools/release.sh`, configure
 repository variables `NOOP_HOMEBREW_FORGE_DOMAIN` and
 `NOOP_HOMEBREW_FORGE_ORG`, and provision repository secret
 `NOOP_HOMEBREW_FORGE_TOKEN` with write access only to the Forgejo

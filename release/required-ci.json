@@ -11,23 +11,27 @@
     "server-ci-required",
     "swift-packages-required"
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sourceBranch": "main",
   "universalWorkflows": [
     {
       "path": ".github/workflows/health-claims.yml",
+      "pullRequestEvent": "pull_request",
       "requiredJob": "health-claims"
     },
     {
       "path": ".github/workflows/i18n-coverage.yml",
+      "pullRequestEvent": "pull_request",
       "requiredJob": "i18n-coverage"
     },
     {
       "path": ".github/workflows/ops-docs.yml",
+      "pullRequestEvent": "pull_request",
       "requiredJob": "operations-record"
     },
     {
       "path": ".github/workflows/release-controls.yml",
+      "pullRequestEvent": "pull_request",
       "requiredJob": "release-controls"
     }
   ],

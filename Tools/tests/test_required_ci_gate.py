@@ -40,8 +40,35 @@ class RequiredCIGateTests(unittest.TestCase):
     def test_repository_required_workflows_fail_closed(self) -> None:
         GATE.check_repository()
 
+    def test_every_reviewed_release_source_matches_its_digest(self) -> None:
+        GATE.check_reviewed_release_sources(ROOT)
+
+    def test_publication_authority_cannot_change_outside_reviewed_digest(
+        self,
+    ) -> None:
+        for relative_path in (
+            "Tools/github-release-publish.py",
+            "Tools/github-release-tag-gate.py",
+        ):
+            with self.subTest(path=relative_path):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    path = root / relative_path
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(
+                        (ROOT / relative_path).read_bytes()
+                        + b"\n# synthetic direct publication bypass\n"
+                    )
+                    with self.assertRaisesRegex(
+                        GATE.GateError, "reviewed source contract"
+                    ):
+                        GATE._require_reviewed_source_digest(
+                            root, relative_path
+                        )
+
     def test_release_build_uses_only_exact_green_main_source(self) -> None:
         GATE.check_release_workflow(ROOT)
+        GATE.check_testing_release_workflow(ROOT)
         GATE.check_altstore_workflow(ROOT)
         GATE.check_forgejo_workflow(ROOT)
         GATE.check_homebrew_workflow(ROOT)
@@ -325,6 +352,18 @@ class RequiredCIGateTests(unittest.TestCase):
         )
         self.assertIn('test "$GITHUB_SHA" = "$EXPECTED_RELEASE_SHA"', workflow)
         self.assertIn('--field "release_sha=$SOURCE_SHA"', dispatcher)
+        self.assertIn('gh run watch "$RUN_ID"', dispatcher)
+        self.assertIn('--tag "v${VERSION}"', dispatcher)
+        self.assertNotIn("publish_altstore:", workflow)
+        self.assertNotIn(
+            "uses: ./.github/workflows/altstore-source.yml",
+            workflow,
+        )
+        altstore = (
+            ROOT / ".github/workflows/altstore-source.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("workflow_call:", altstore)
+        self.assertNotIn("workflow_dispatch:", altstore)
 
     def test_altstore_channel_recovers_only_a_marked_initial_asset(self) -> None:
         text = (ROOT / ".github/workflows/altstore-source.yml").read_text(
@@ -361,36 +400,14 @@ class RequiredCIGateTests(unittest.TestCase):
         homebrew = (ROOT / ".github/workflows/homebrew-cask.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("publish_homebrew:", release)
-        self.assertIn("uses: ./.github/workflows/homebrew-cask.yml", release)
-        self.assertIn("if: ${{ inputs.publish_homebrew }}", release)
+        self.assertNotIn("uses: ./.github/workflows/homebrew-cask.yml", release)
         self.assertIn(
-            "NOOP_HOMEBREW_TAP_TOKEN: ${{ secrets.NOOP_HOMEBREW_TAP_TOKEN }}",
-            release,
-        )
-        self.assertIn(
-            "NOOP_HOMEBREW_FORGE_TOKEN: ${{ "
-            "inputs.publish_homebrew_forgejo && "
-            "secrets.NOOP_HOMEBREW_FORGE_TOKEN || '' }}",
-            release,
-        )
-        self.assertNotIn("secrets: inherit", release)
-        self.assertIn(
-            '--field "publish_homebrew=$PUBLISH_HOMEBREW"',
+            "gh workflow run homebrew-cask.yml",
             dispatcher,
         )
         self.assertIn(
-            '--field "publish_homebrew_forgejo=$PUBLISH_HOMEBREW_FORGEJO"',
+            '--field "publish_forgejo=$PUBLISH_HOMEBREW_FORGEJO"',
             dispatcher,
-        )
-        self.assertIn("publish_homebrew_forgejo:", release)
-        self.assertIn(
-            "The Homebrew Forgejo mirror requires Homebrew publication.",
-            release,
-        )
-        self.assertIn(
-            "publish_forgejo: ${{ inputs.publish_homebrew_forgejo }}",
-            release,
         )
         self.assertIn("workflow_dispatch:", homebrew)
         self.assertIn("publish_forgejo:", homebrew)
@@ -415,11 +432,9 @@ class RequiredCIGateTests(unittest.TestCase):
         forgejo = (ROOT / ".github/workflows/forgejo-release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("publish_forgejo:", release)
-        self.assertIn("uses: ./.github/workflows/forgejo-release.yml", release)
-        self.assertIn("if: ${{ inputs.publish_forgejo }}", release)
+        self.assertNotIn("uses: ./.github/workflows/forgejo-release.yml", release)
         self.assertIn(
-            '--field "publish_forgejo=$PUBLISH_FORGEJO"',
+            "gh workflow run forgejo-release.yml",
             dispatcher,
         )
         self.assertIn("workflow_dispatch:", forgejo)
@@ -434,47 +449,99 @@ class RequiredCIGateTests(unittest.TestCase):
         for module in (
             "Tools.tests.test_forgejo_release_helper",
             "Tools.tests.test_forgejo_version_gate",
+            "Tools.tests.test_github_release_publish",
             "Tools.tests.test_github_release_tag_gate",
             "Tools.tests.test_homebrew_helper",
             "Tools.tests.test_homebrew_version_gate",
+            "Tools.tests.test_testing_release_workflow",
+            "Tools.tests.test_trusted_release_controls",
         ):
             self.assertIn(module, workflow)
+        self.assertIn(
+            "bash -n Tools/release.sh Tools/publish-testing-snapshot.sh",
+            workflow,
+        )
+        self.assertIn(
+            "shellcheck Tools/release.sh Tools/publish-testing-snapshot.sh",
+            workflow,
+        )
 
-    def test_release_publication_is_bound_to_live_tag_and_rollback(self) -> None:
+    def test_release_shell_validation_is_required(self) -> None:
+        source = (
+            ROOT / ".github/workflows/release-controls.yml"
+        ).read_text(encoding="utf-8")
+        for command in (
+            "bash -n Tools/release.sh Tools/publish-testing-snapshot.sh",
+            "shellcheck Tools/release.sh Tools/publish-testing-snapshot.sh",
+        ):
+            with self.subTest(command=command):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    path = root / ".github/workflows/release-controls.yml"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(
+                        source.replace(command, "echo skipped", 1),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        GATE.GateError, "does not run"
+                    ):
+                        GATE.check_release_control_test_suite(root)
+
+    def test_release_workflow_can_only_record_the_exact_draft(self) -> None:
         source = (ROOT / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
-        publish = GATE._job_section(source, "publish")
-        mutation = publish.index(
-            'if ! PUBLISHED=$(\n'
-            "            timeout 30s gh api --method PATCH"
+        ready = GATE._job_section(source, "ready")
+        checks_step = GATE._named_step(
+            ready, "Reverify required checks for exact candidate"
         )
-        first_gate = publish.index(
-            "python3 Tools/github-release-tag-gate.py"
+        self.assertEqual(
+            GATE._folded_run_command(
+                checks_step, "Reverify required checks for exact candidate"
+            ),
+            'python3 Tools/required-ci-gate.py verify-github '
+            '--repository "$GITHUB_REPOSITORY" '
+            '--sha "$RELEASE_SHA"',
         )
-        second_gate = publish.index(
-            "python3 Tools/github-release-tag-gate.py",
-            first_gate + 1,
+        self.assertEqual(
+            GATE._step_environment(
+                checks_step, "Reverify required checks for exact candidate"
+            ),
+            {
+                "GH_TOKEN": "${{ github.token }}",
+                "RELEASE_SHA": "${{ needs.bump.outputs.sha }}",
+            },
         )
-        request_rollback = publish.index(
-            "return_release_to_draft || exit 1",
-            mutation,
+        draft_step = GATE._named_step(ready, "Record exact release draft")
+        self.assertEqual(
+            GATE._folded_run_command(
+                draft_step, "Record exact release draft"
+            ),
+            'python3 Tools/github-release-publish.py '
+            '--repository "$GITHUB_REPOSITORY" '
+            '--tag "$TAG" '
+            '--version "$VER" '
+            '--expected-sha "$RELEASE_SHA" '
+            '--expected-name "NOOP $VER" '
+            '--expected-body-sha256 "$BODY_SHA" '
+            '--expected-target "$RELEASE_SHA" '
+            '--verify-draft-only '
+            '--write-manifest "$RUNNER_TEMP/release-candidate.json" '
+            '--run-id "$GITHUB_RUN_ID" '
+            '--run-attempt "$GITHUB_RUN_ATTEMPT"',
         )
-        validation_rollback = publish.index(
-            "return_release_to_draft || exit 1",
-            second_gate,
-        )
-        self.assertLess(first_gate, mutation)
-        self.assertLess(mutation, request_rollback)
-        self.assertLess(request_rollback, second_gate)
-        self.assertLess(second_gate, validation_rollback)
-        self.assertIn(
-            "Release publication request failed; release returned to draft.",
-            publish,
-        )
-        self.assertIn(
-            "Published release validation failed; release returned to draft.",
-            publish,
+        self.assertEqual(
+            GATE._step_environment(
+                draft_step, "Record exact release draft"
+            ),
+            {
+                "GH_TOKEN": "${{ github.token }}",
+                "TAG": "${{ needs.bump.outputs.tag }}",
+                "VER": "${{ needs.bump.outputs.ver }}",
+                "RELEASE_SHA": "${{ needs.bump.outputs.sha }}",
+                "BODY_SHA": "${{ needs.bump.outputs.bodySha }}",
+            },
         )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -483,16 +550,232 @@ class RequiredCIGateTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(
                 source.replace(
-                    "python3 Tools/github-release-tag-gate.py",
-                    "python3 Tools/release-version-gate.py",
+                    '--expected-sha "$RELEASE_SHA"',
+                    '--expected-sha "$(git rev-parse HEAD)"',
                     1,
                 ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(
-                GATE.GateError, "before and after publication"
+                GATE.GateError, "exact draft verifier"
             ):
                 GATE.check_release_workflow(root)
+
+        for step_name, command in (
+            (
+                "Reverify required checks for exact candidate",
+                "          python3 Tools/required-ci-gate.py verify-github",
+            ),
+            (
+                "Record exact release draft",
+                "          python3 Tools/github-release-publish.py",
+            ),
+        ):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / ".github/workflows/release.yml"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    source.replace(
+                        f"      - name: {step_name}\n",
+                        f"      - name: {step_name}\n        if: false\n",
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    GATE.GateError, "only canonical env and run"
+                ):
+                    GATE.check_release_workflow(root)
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / ".github/workflows/release.yml"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    source.replace(command, "          echo bypassed", 1),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(GATE.GateError):
+                    GATE.check_release_workflow(root)
+
+        for property_line in ("    if: false\n", "    continue-on-error: true\n"):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / ".github/workflows/release.yml"
+                path.parent.mkdir(parents=True)
+                path.write_text(
+                    source.replace(
+                        "  ready:\n"
+                        "    name: release-candidate-ready\n"
+                        "    needs: [bump, android, macos, ios]\n"
+                        "    runs-on: ubuntu-latest\n",
+                        "  ready:\n"
+                        "    name: release-candidate-ready\n"
+                        "    needs: [bump, android, macos, ios]\n"
+                        "    runs-on: ubuntu-latest\n"
+                        + property_line,
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    GATE.GateError, "canonical required properties"
+                ):
+                    GATE.check_release_workflow(root)
+
+    def test_release_workflow_rejects_an_extra_write_capable_job(self) -> None:
+        source = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        source = source.replace(
+            "jobs:\n",
+            "jobs:\n"
+            "  ship:\n"
+            "    permissions:\n"
+            "      contents: write\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: gh api --method PATCH "
+            "repos/example/project/releases/1 -f draft=false\n",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / ".github/workflows/release.yml"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError, "exact allowlist"
+            ):
+                GATE.check_release_workflow(root)
+
+    def test_release_signing_secrets_are_environment_scoped(self) -> None:
+        source = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        bump = GATE._job_section(source, "bump")
+        android = GATE._job_section(source, "android")
+        self.assertNotIn("ANDROID_STAGING_KEYSTORE_BASE64", bump)
+        self.assertIn("    environment: staging\n", android)
+        for secret in (
+            "ANDROID_STAGING_KEYSTORE_BASE64",
+            "ANDROID_STAGING_STORE_PASSWORD",
+            "ANDROID_STAGING_KEY_ALIAS",
+            "ANDROID_STAGING_KEY_PASSWORD",
+        ):
+            self.assertIn(secret, android)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / ".github/workflows/release.yml"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                source.replace("    environment: staging\n", "", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                GATE.GateError, "protected staging environment"
+            ):
+                GATE.check_release_workflow(root)
+
+    def test_release_workflow_rejects_direct_release_api_mutation(self) -> None:
+        source = (ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        source = source.replace(
+            "\n  android_tests:\n",
+            "      - name: Direct publication bypass\n"
+            "        run: gh api --method PATCH "
+            "repos/example/project/releases/1 -f draft=false\n"
+            "\n  android_tests:\n",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / ".github/workflows/release.yml"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError, "direct release API mutation|draft publication"
+            ):
+                GATE.check_release_workflow(root)
+
+    def test_testing_workflow_rejects_direct_release_api_mutation(self) -> None:
+        source = (ROOT / ".github/workflows/testing-build.yml").read_text(
+            encoding="utf-8"
+        )
+        source = source.replace(
+            "\n  android:\n",
+            "      - name: Direct publication bypass\n"
+            "        run: gh api -X PATCH "
+            "repos/example/project/releases/1 -f draft=false\n"
+            "\n  android:\n",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / ".github/workflows/testing-build.yml"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError, "direct release API mutation|draft publication"
+            ):
+                GATE.check_testing_release_workflow(root)
+
+    def test_obfuscated_publication_command_breaks_reviewed_source(self) -> None:
+        cases = (
+            (
+                ".github/workflows/release.yml",
+                "\n  android_tests:\n",
+                "      - name: Obfuscated publication bypass\n"
+                "        run: g\"\"h api -X PATCH "
+                "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                "\n  android_tests:\n",
+                GATE.check_release_workflow,
+            ),
+            (
+                ".github/workflows/testing-build.yml",
+                "\n  android:\n",
+                "      - name: Obfuscated publication bypass\n"
+                "        run: g\"\"h api -X PATCH "
+                "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                "\n  android:\n",
+                GATE.check_testing_release_workflow,
+            ),
+        )
+        for relative_path, marker, replacement, check in cases:
+            with self.subTest(path=relative_path):
+                source = (ROOT / relative_path).read_text(encoding="utf-8")
+                source = source.replace(marker, replacement, 1)
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    path = root / relative_path
+                    path.parent.mkdir(parents=True)
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        GATE.GateError, "reviewed source contract"
+                    ):
+                        check(root)
+
+    def test_testing_cleanup_is_an_exact_reviewed_source_contract(self) -> None:
+        relative_path = ".github/workflows/testing-build.yml"
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        source = source.replace(
+            "\n  cleanup:\n",
+            "\n  cleanup:\n"
+            "    # Synthetic unrelated release mutation.\n"
+            "    # gh release delete v9.1.1 --repo \"$GITHUB_REPOSITORY\" --yes\n",
+            1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / relative_path
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                GATE.GateError, "reviewed source contract"
+            ):
+                GATE.check_testing_release_workflow(root)
 
     def test_required_job_cannot_ignore_a_heavy_job(self) -> None:
         workflow = self.config["workflows"][0]
@@ -617,14 +900,168 @@ class RequiredCIGateTests(unittest.TestCase):
         with self.assertRaisesRegex(GATE.GateError, "identity is invalid"):
             GATE._workflow_path_from_run(payload, 123, "b" * 40)
 
+    def test_trusted_exact_head_check_is_bound_to_run_attempt_and_sha(
+        self,
+    ) -> None:
+        sha = "a" * 40
+        check = {
+            "details_url": (
+                "https://github.com/Dhanunjay-Divi/Noop/actions/runs/123"
+            ),
+            "external_id": (
+                f"trusted-release-controls:pull-request:123:2:{sha}"
+            ),
+        }
+        self.assertEqual(
+            GATE._trusted_workflow_run_identity(
+                check, "Dhanunjay-Divi/Noop", sha
+            ),
+            ("pull-request", 123, 2),
+        )
+        payload = {
+            "id": 123,
+            "run_attempt": 2,
+            "event": "pull_request_target",
+            "status": "completed",
+            "path": ".github/workflows/trusted-release-controls.yml",
+            "head_repository": {"full_name": "Dhanunjay-Divi/Noop"},
+        }
+        self.assertEqual(
+            GATE._workflow_path_from_trusted_run(
+                payload,
+                scope="pull-request",
+                run_id=123,
+                run_attempt=2,
+                repository="Dhanunjay-Divi/Noop",
+                expected_sha=sha,
+            ),
+            ".github/workflows/trusted-release-controls.yml",
+        )
+        for invalid in (
+            {
+                **check,
+                "external_id": (
+                    "trusted-release-controls:pull-request:123:2:"
+                    + "b" * 40
+                ),
+            },
+            {
+                **check,
+                "details_url": (
+                    "https://github.com/Dhanunjay-Divi/Noop/"
+                    "actions/runs/124"
+                ),
+            },
+        ):
+            with self.assertRaises(GATE.GateError):
+                GATE._trusted_workflow_run_identity(
+                    invalid, "Dhanunjay-Divi/Noop", sha
+                )
+
+    def test_trusted_workflow_has_no_branch_dispatch_bypass(self) -> None:
+        source = (
+            ROOT / ".github/workflows/trusted-release-controls.yml"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("workflow_dispatch:", source)
+        self.assertIn("checks: write", source)
+        self.assertIn(
+            "Tools/trusted-release-controls.py report-check", source
+        )
+        self.assertNotIn("\n    name: trusted-release-controls\n", source)
+        GATE.check_trusted_release_workflow(ROOT)
+
+    def test_trusted_custom_context_is_ready_for_second_phase(self) -> None:
+        config = copy.deepcopy(self.config)
+        config["requiredContexts"].append("trusted-release-controls")
+        config["requiredContexts"].sort()
+        trusted = {
+            "path": ".github/workflows/trusted-release-controls.yml",
+            "pullRequestEvent": "pull_request_target",
+            "requiredJob": "trusted-release-controls",
+        }
+        config["universalWorkflows"].append(trusted)
+        GATE.check_universal_workflow(ROOT, trusted)
+        GATE.check_required_context_ownership(ROOT, config)
+
+    def test_protected_main_trusted_run_is_exact_sha_bound(self) -> None:
+        sha = "c" * 40
+        payload = {
+            "id": 456,
+            "run_attempt": 3,
+            "event": "push",
+            "status": "completed",
+            "path": ".github/workflows/trusted-release-controls.yml",
+            "head_sha": sha,
+            "head_repository": {"full_name": "Dhanunjay-Divi/Noop"},
+        }
+        self.assertEqual(
+            GATE._workflow_path_from_trusted_run(
+                payload,
+                scope="protected-main",
+                run_id=456,
+                run_attempt=3,
+                repository="Dhanunjay-Divi/Noop",
+                expected_sha=sha,
+            ),
+            ".github/workflows/trusted-release-controls.yml",
+        )
+        with self.assertRaisesRegex(GATE.GateError, "identity is invalid"):
+            GATE._workflow_path_from_trusted_run(
+                payload,
+                scope="protected-main",
+                run_id=456,
+                run_attempt=3,
+                repository="Dhanunjay-Divi/Noop",
+                expected_sha="d" * 40,
+            )
+
+    def test_pull_request_trust_cannot_satisfy_release_verification(
+        self,
+    ) -> None:
+        config = copy.deepcopy(self.config)
+        config["requiredContexts"].append("trusted-release-controls")
+        config["requiredContexts"].sort()
+        config["universalWorkflows"].append(
+            {
+                "path": ".github/workflows/trusted-release-controls.yml",
+                "pullRequestEvent": "pull_request_target",
+                "requiredJob": "trusted-release-controls",
+            }
+        )
+        workflow_paths = GATE.required_workflow_paths(config)
+        runs = [
+            {
+                "id": index,
+                "name": context,
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"id": config["requiredCheckAppId"]},
+                "workflowPath": workflow_paths[context],
+                **(
+                    {"trustedScope": "pull-request"}
+                    if context == "trusted-release-controls"
+                    else {}
+                ),
+            }
+            for index, context in enumerate(
+                config["requiredContexts"], start=1
+            )
+        ]
+        with self.assertRaisesRegex(
+            GATE.GateError, "trusted-release-controls=missing"
+        ):
+            GATE.evaluate_check_runs(config, runs)
+        runs[-1]["trustedScope"] = "protected-main"
+        GATE.evaluate_check_runs(config, runs)
+
     def test_release_workflow_cannot_push_directly_to_main(self) -> None:
         source = (ROOT / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         source = source.replace(
-            "uses: ./.github/workflows/altstore-source.yml",
-            "uses: ./.github/workflows/altstore-source.yml\n"
-            "    # git push origin HEAD:refs/heads/main",
+            "name: Community release build\n",
+            "name: Community release build\n"
+            "# git push origin HEAD:refs/heads/main\n",
             1,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -637,7 +1074,7 @@ class RequiredCIGateTests(unittest.TestCase):
             ):
                 GATE.check_release_workflow(root)
 
-    def test_local_release_entrypoint_cannot_publish_directly(self) -> None:
+    def test_local_release_entrypoint_cannot_bypass_the_publisher(self) -> None:
         source = (ROOT / "Tools/release.sh").read_text(encoding="utf-8")
         source += "\ngh release upload v1.2.3 app.ipa\n"
         with tempfile.TemporaryDirectory() as temporary:
@@ -649,6 +1086,62 @@ class RequiredCIGateTests(unittest.TestCase):
                 GATE.GateError, "retains direct publication"
             ):
                 GATE.check_local_release_entrypoint(root)
+
+    def test_owner_entrypoints_reject_raw_release_api_mutation(self) -> None:
+        cases = (
+            (
+                "Tools/release.sh",
+                GATE.check_local_release_entrypoint,
+            ),
+            (
+                "Tools/publish-testing-snapshot.sh",
+                GATE.check_local_testing_entrypoint,
+            ),
+        )
+        for relative_path, check in cases:
+            with self.subTest(path=relative_path):
+                source = (ROOT / relative_path).read_text(encoding="utf-8")
+                source += (
+                    "\ngh api --method PATCH "
+                    "repos/example/project/releases/1 -f draft=false\n"
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    path = root / relative_path
+                    path.parent.mkdir(parents=True)
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        GATE.GateError, "raw GitHub API mutation"
+                    ):
+                        check(root)
+
+    def test_owner_entrypoints_reject_obfuscated_mutation(self) -> None:
+        cases = (
+            (
+                "Tools/release.sh",
+                GATE.check_local_release_entrypoint,
+            ),
+            (
+                "Tools/publish-testing-snapshot.sh",
+                GATE.check_local_testing_entrypoint,
+            ),
+        )
+        for relative_path, check in cases:
+            with self.subTest(path=relative_path):
+                source = (ROOT / relative_path).read_text(encoding="utf-8")
+                source += (
+                    "\ng\"\"h api -X PATCH "
+                    "repos/example/project/releases/1 -f draf\"\"t=false\n"
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    path = root / relative_path
+                    path.parent.mkdir(parents=True)
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        GATE.GateError, "reviewed source contract"
+                    ):
+                        check(root)
 
 
 if __name__ == "__main__":
