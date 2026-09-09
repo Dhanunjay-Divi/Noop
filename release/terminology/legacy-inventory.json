@@ -3,7 +3,7 @@
     "compatibility": 1698,
     "core": 4962,
     "customer": 813,
-    "fixture": 5321,
+    "fixture": 5325,
     "generated": 13,
     "historical": 3020,
     "import": 870,
@@ -23788,24 +23788,24 @@
         2552,
         2731,
         2736,
-        2852,
-        2857,
-        2992,
-        2993,
-        2997,
-        2998,
-        3012,
-        3013,
-        3039,
-        3040,
-        3262,
-        3263,
-        3281,
-        3300,
-        3343,
-        3470,
-        3592,
-        3613
+        2861,
+        2866,
+        3001,
+        3002,
+        3006,
+        3007,
+        3021,
+        3022,
+        3048,
+        3049,
+        3271,
+        3272,
+        3290,
+        3309,
+        3352,
+        3479,
+        3601,
+        3622
       ],
       "occurrenceCount": 90,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -23830,10 +23830,10 @@
         1018,
         2137,
         2138,
-        3262,
-        3263,
-        3432,
-        3434
+        3271,
+        3272,
+        3441,
+        3443
       ],
       "occurrenceCount": 10,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -30273,6 +30273,22 @@
         "whoop-export": 1,
         "whoop-only": 1,
         "whooprepository": 18
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
+        30,
+        31,
+        34,
+        35
+      ],
+      "occurrenceCount": 4,
+      "path": "android/app/src/test/java/com/noop/data/RestDataVersionPolicyTest.kt",
+      "sha256": "02e8ac0bf5313ddd56b9125df7d692fa4234e662496a342226351d2fcec00805",
+      "tokenCounts": {
+        "whoopdao": 3,
+        "whooprepository": 1
       }
     },
     {
@@ -37274,7 +37290,7 @@
       }
     }
   ],
-  "occurrenceCount": 17364,
+  "occurrenceCount": 17368,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

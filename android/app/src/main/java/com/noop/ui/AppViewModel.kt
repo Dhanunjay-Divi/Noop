@@ -276,7 +276,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun deletePairedDeviceData(id: String) {
         noopApp.deviceRegistry.deleteDeviceData(id)
         repository.noteWorkoutsChanged()
-        noteAgeMetricsChanged()
+        noteAllMetricsChanged()
     }
 
     /**
@@ -2775,13 +2775,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         scheduleAgeMetricRecompute()
     }
 
-    private fun noteAgeMetricsChanged() {
+    private fun invalidateTodayAgeMetricCaches() {
         todayCardsLoadedSig = null
         todayCardsLoadedProfileSig = null
         todayCardsLoadedAgeMetricVersion = null
         todayFitnessAgeCache = null
         todayVitalityCache = null
+    }
+
+    private fun noteAgeMetricsChanged() {
+        invalidateTodayAgeMetricCaches()
         repository.noteAgeMetricsChanged()
+    }
+
+    private fun noteAllMetricsChanged() {
+        invalidateTodayAgeMetricCaches()
+        repository.noteMetricsChanged()
     }
 
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +

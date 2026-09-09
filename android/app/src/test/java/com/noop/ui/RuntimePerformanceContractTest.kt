@@ -154,6 +154,26 @@ class RuntimePerformanceContractTest {
         assertTrue(components.contains("delay(HISTORY_QUERY_QUIET_MS)"))
     }
 
+    @Test
+    fun deletingDeviceDataInvalidatesTheCachedRestRevision() {
+        val viewModel = source("com/noop/ui/AppViewModel.kt")
+        val start = viewModel.indexOf("suspend fun deletePairedDeviceData")
+        val end = viewModel.indexOf("/**", start + 1)
+        assertTrue(start >= 0 && end > start)
+
+        val deleteBlock = viewModel.substring(start, end)
+        assertTrue(deleteBlock.contains("noteAllMetricsChanged()"))
+        assertFalse(deleteBlock.contains("noteAgeMetricsChanged()"))
+
+        val notifierStart = viewModel.indexOf("private fun noteAllMetricsChanged()")
+        val notifierEnd = viewModel.indexOf("\n    }", notifierStart) + "\n    }".length
+        assertTrue(notifierStart >= 0 && notifierEnd > notifierStart)
+        assertTrue(
+            viewModel.substring(notifierStart, notifierEnd)
+                .contains("repository.noteMetricsChanged()"),
+        )
+    }
+
     private fun source(relative: String): String {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         val file = listOf(
