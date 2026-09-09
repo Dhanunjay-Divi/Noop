@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: pending
-- Record commit or PR: protected pull request pending
+- End implementation commit: `80729acb`
+- Record commit or PR: protected pull request `#12`
 
 ## Objective
 
@@ -153,9 +153,10 @@ Android where applicable, and leave physical-phone conclusions explicit.
 
 - Changed paths: Apple Today repository/cache and tests, Android Today/liquid
   scaffolds and tests, plus this operations record.
-- Commits: pending protected review.
-- Branch and remote state: local performance branch from protected `main`;
-  not pushed.
+- Commits: implementation `80729acb`; record follow-up is the pull-request
+  head.
+- Branch and remote state: pushed to
+  `codex/large-data-scroll-lag-20260909`; protected pull request `#12` is open.
 - Repository visibility verified: not repeated.
 - Version/build impact: no version change.
 - Release or distribution impact: none until reviewed and merged.
