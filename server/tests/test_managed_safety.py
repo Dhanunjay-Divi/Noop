@@ -441,9 +441,7 @@ async def test_concurrent_received_request_quota_serializes_on_contact_profile(
             timeout=10,
         )
         assert sum(isinstance(result, dict) for result in results) == 1
-        assert sum(
-            isinstance(result, ManagedConflictError) for result in results
-        ) == 1
+        assert sum(isinstance(result, ManagedConflictError) for result in results) == 1
         assert (
             await pool.fetchval(
                 """

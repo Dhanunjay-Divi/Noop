@@ -781,10 +781,7 @@ class PostgresManagedSafetyRepository:
             raise ManagedConflictError("Safety contact limit has been reached")
         if int(counts["pending"]) >= SAFETY_MAX_PENDING_REQUESTS:
             raise ManagedConflictError("too many Safety contact requests are pending")
-        if (
-            int(counts["pending_received"])
-            >= SAFETY_MAX_RECEIVED_PENDING_REQUESTS
-        ):
+        if int(counts["pending_received"]) >= SAFETY_MAX_RECEIVED_PENDING_REQUESTS:
             raise ManagedConflictError(
                 "Safety contact is not accepting more requests right now"
             )

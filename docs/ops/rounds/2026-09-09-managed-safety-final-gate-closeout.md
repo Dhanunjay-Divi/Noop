@@ -148,6 +148,14 @@ external gates.
 - The first localization unit-test invocation used the repository root, where
   the script module is not importable by name. Running the documented test
   module from `Tools` passes all 49 cases.
+- The first exact-head hosted server run passed Ruff lint but failed
+  `ruff format --check` for the two edited Safety repository/test files. The
+  pinned formatter changed layout only; focused server regressions and every
+  local release-policy gate were rerun before the replacement push.
+- The first post-format focused rerun reused a prior integration database and
+  collided with a deliberately single-use synthetic invitation capability. A
+  fresh `template0` database passed all 27 lifecycle and managed-Safety tests;
+  the temporary database was then removed.
 
 ## Physical device and deployment
 
