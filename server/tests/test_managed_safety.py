@@ -226,6 +226,41 @@ async def _accept_contact(
     return profile, accepted
 
 
+async def _register_push_eligibility(
+    primary: PostgresRepository,
+    safety: PostgresManagedSafetyRepository,
+    *,
+    principal: ManagedPrincipal,
+    label: str,
+) -> str:
+    installation_id = f"ios-eligibility-{label}-{uuid4().hex[:12]}"
+    await _installation(
+        primary,
+        principal,
+        installation_id=installation_id,
+        platform="ios",
+    )
+    token = f"fcm-token:eligibility_{label}_{uuid4().hex}"
+    codec = ManagedPushTokenCodec(PUSH_SECRET)
+    await safety.register_push_installation(
+        principal=principal,
+        installation_id=installation_id,
+        registration=ManagedPushRegistration(
+            platform="ios",
+            environment="development",
+            target_kind="token",
+            token=token,
+        ),
+        token_hash=codec.token_hash(token),
+        token_ciphertext=codec.seal(
+            token,
+            account_id=principal.account_id,
+            installation_id=installation_id,
+        ),
+    )
+    return installation_id
+
+
 def test_pending_request_quotas_fit_the_complete_request_list() -> None:
     assert SAFETY_MAX_REQUESTS_PER_DAY == 50
     assert (
@@ -258,7 +293,17 @@ def test_safety_mutation_lock_order_contracts() -> None:
         "FOR UPDATE OF contact",
         targeted_incident_expiry,
     )
-    assert expire < all_profile_lock < targeted_incident_expiry < contact_row_lock
+    push_row_lock = incident_source.index(
+        "FROM managed_push_installations",
+        contact_row_lock,
+    )
+    assert (
+        expire
+        < all_profile_lock
+        < targeted_incident_expiry
+        < contact_row_lock
+        < push_row_lock
+    )
 
     request_source = inspect.getsource(PostgresManagedSafetyRepository._create_request)
     request_profile_lock = request_source.index("_lock_active_profiles_and_accounts")
@@ -300,6 +345,172 @@ def test_safety_mutation_lock_order_contracts() -> None:
         installation_lock,
     )
     assert installation_lock < delivery_lock
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_incident_requires_two_contacts_with_active_app_alerts() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"eligible-owner-{uuid4()}")
+        first = await _principal(primary, label=f"eligible-first-{uuid4()}")
+        second = await _principal(primary, label=f"eligible-second-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="eligible-first",
+        )
+
+        with pytest.raises(ManagedConflictError):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+
+        second_installation = await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="eligible-second",
+        )
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.execute(
+                    """
+                    SELECT installation_id
+                    FROM managed_push_installations
+                    WHERE account_id = $1 AND installation_id = $2
+                    FOR UPDATE
+                    """,
+                    second.account_id,
+                    second_installation,
+                )
+                create_task = asyncio.create_task(
+                    safety.create_incident(
+                        principal=owner,
+                        request=ManagedSafetyIncidentCreate(
+                            request_id=uuid4(),
+                            duration_hours=8,
+                            share_location=False,
+                        ),
+                    )
+                )
+                await _wait_for_database_waiter(pool)
+                assert not create_task.done()
+                await blocker.execute(
+                    """
+                    UPDATE managed_push_installations
+                    SET status = 'revoked',
+                        revoked_at = clock_timestamp(),
+                        updated_at = clock_timestamp()
+                    WHERE account_id = $1 AND installation_id = $2
+                    """,
+                    second.account_id,
+                    second_installation,
+                )
+        with pytest.raises(ManagedConflictError):
+            await asyncio.wait_for(create_task, timeout=5)
+
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="eligible-second-replacement",
+        )
+        incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        assert incident["status"] == "open"
+        assert len(incident["participants"]) == 2
+        delivery = await primary._require_pool().fetchrow(
+            """
+            SELECT delivery.delivery_id, push.token_hash
+            FROM managed_safety_push_deliveries delivery
+            JOIN managed_push_installations push
+              ON push.account_id = delivery.account_id
+             AND push.installation_id = delivery.installation_id
+            WHERE delivery.incident_id = $1
+            ORDER BY delivery.delivery_id
+            LIMIT 1
+            """,
+            UUID(incident["incident_id"]),
+        )
+        claim_id = uuid4()
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sending',
+                attempts = 1,
+                claim_id = $2,
+                claim_expires_at = clock_timestamp() - interval '1 second',
+                last_attempt_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE delivery_id = $1
+            """,
+            delivery["delivery_id"],
+            claim_id,
+        )
+        await safety.complete_push_delivery(
+            delivery_id=delivery["delivery_id"],
+            claim_id=claim_id,
+            claimed_token_hash=str(delivery["token_hash"]).strip(),
+            outcome="sent",
+            provider_reference_hash="a" * 64,
+        )
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE delivery_id = $1
+                """,
+                delivery["delivery_id"],
+            )
+            == "sent"
+        )
+    finally:
+        await primary.shutdown()
 
 
 class _RecordingPushProvider:
@@ -1000,6 +1211,18 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
             contact=second,
             contact_name="Second",
         )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="quota-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="quota-second",
+        )
 
         pool = primary._require_pool()
         incident_ids: list[UUID] = []
@@ -1198,6 +1421,18 @@ async def test_safety_quota_survives_owner_profile_recreation() -> None:
             contact=second,
             contact_name="Second",
         )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="recreate-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="recreate-second",
+        )
         consumed_request_id = uuid4()
         for index in range(4):
             incident = await safety.create_incident(
@@ -1318,6 +1553,18 @@ async def test_safety_quota_purges_only_after_linked_incident() -> None:
             owner=owner,
             contact=second,
             contact_name="Second",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="purge-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="purge-second",
         )
         incident = await safety.create_incident(
             principal=owner,
@@ -1514,6 +1761,18 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
             owner=owner,
             contact=second,
             contact_name="Second",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="tenant-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="tenant-second",
         )
         contacts = await safety.list_contacts(principal=owner)
         assert {row["profile_id"] for row in contacts} == {
@@ -2134,6 +2393,18 @@ async def test_contact_profile_deletion_reopens_surviving_incident() -> None:
             owner=owner,
             contact=pending,
             contact_name="Pending",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=responding,
+            label="delete-responding",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=pending,
+            label="delete-pending",
         )
         incident = await safety.create_incident(
             principal=owner,
@@ -2784,6 +3055,18 @@ async def test_safety_incident_locks_contact_profiles_before_contact_rows() -> N
             contact=second,
             contact_name="Second",
         )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="lock-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="lock-second",
+        )
         contact_profile_ids = [
             UUID(first_profile["profile_id"]),
             UUID(second_profile["profile_id"]),
@@ -3091,6 +3374,12 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             contact=second,
             contact_name="Second",
         )
+        second_eligibility = await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="retry-second",
+        )
         run_id = uuid4().hex
         installation_id = f"ios-retry-{run_id}"
         await _installation(
@@ -3117,6 +3406,18 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
                 share_location=False,
             ),
         )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                attempts = 1,
+                delivered_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1 AND installation_id = $2
+            """,
+            UUID(incident["incident_id"]),
+            second_eligibility,
+        )
 
         await push.dispatch(
             principal=owner,
@@ -3128,6 +3429,22 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             UPDATE managed_safety_push_deliveries
             SET last_attempt_at = clock_timestamp() - interval '2 minutes'
             WHERE incident_id = $1
+            """,
+            UUID(incident["incident_id"]),
+        )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                delivered_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE incident_id <> $1
+              AND status IN (
+                    'pending',
+                    'sending',
+                    'transient_failure',
+                    'unavailable'
+                  )
             """,
             UUID(incident["incident_id"]),
         )
@@ -3143,9 +3460,10 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             """
             SELECT status, attempts
             FROM managed_safety_push_deliveries
-            WHERE incident_id = $1
+            WHERE incident_id = $1 AND installation_id = $2
             """,
             UUID(incident["incident_id"]),
+            installation_id,
         )
         assert row["status"] == "sent"
         assert row["attempts"] == 2
@@ -3205,25 +3523,39 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
         await primary._require_pool().execute(
             """
             UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                attempts = 1,
+                delivered_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1 AND installation_id = $2
+            """,
+            exhausted_id,
+            second_eligibility,
+        )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
             SET status = 'sending',
                 attempts = 3,
                 claim_id = $2,
                 claim_expires_at = clock_timestamp() - interval '1 second',
                 last_attempt_at = clock_timestamp() - interval '2 minutes',
                 updated_at = clock_timestamp() - interval '2 minutes'
-            WHERE incident_id = $1
+            WHERE incident_id = $1 AND installation_id = $3
             """,
             exhausted_id,
             uuid4(),
+            installation_id,
         )
         assert (await push.dispatch_due(limit=20)).claimed == 0
         exhausted_row = await primary._require_pool().fetchrow(
             """
             SELECT status, attempts
             FROM managed_safety_push_deliveries
-            WHERE incident_id = $1
+            WHERE incident_id = $1 AND installation_id = $2
             """,
             exhausted_id,
+            installation_id,
         )
         assert exhausted_row["status"] == "rejected"
         assert exhausted_row["attempts"] == 3
@@ -3247,6 +3579,18 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
                 duration_hours=8,
                 share_location=False,
             ),
+        )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                attempts = 1,
+                delivered_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1 AND installation_id = $2
+            """,
+            UUID(invalid_incident["incident_id"]),
+            second_eligibility,
         )
         await primary._require_pool().execute(
             """
@@ -3327,6 +3671,18 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             contact=second,
             contact_name="Second",
         )
+        first_eligibility = await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="late-first",
+        )
+        second_eligibility = await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="late-second",
+        )
         incident = await safety.create_incident(
             principal=owner,
             request=ManagedSafetyIncidentCreate(
@@ -3336,6 +3692,19 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             ),
         )
         incident_id = UUID(incident["incident_id"])
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sent',
+                attempts = 1,
+                delivered_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE incident_id = $1
+              AND installation_id = ANY($2::text[])
+            """,
+            incident_id,
+            [first_eligibility, second_eligibility],
+        )
         run_id = uuid4().hex
         first_installation = f"ios-late-first-{run_id}"
         await _installation(
@@ -3746,6 +4115,18 @@ async def test_targeted_expiry_preserves_request_and_incident_uniqueness() -> No
             contact=second,
             contact_name="Second",
         )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="expiry-first",
+        )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=second,
+            label="expiry-second",
+        )
 
         stale_incident = await safety.create_incident(
             principal=owner,
@@ -3835,6 +4216,12 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             contact=second,
             contact_name="Second",
         )
+        await _register_push_eligibility(
+            primary,
+            safety,
+            principal=first,
+            label="inactive-first",
+        )
         await primary._require_pool().execute(
             """
             UPDATE managed_accounts
@@ -3904,8 +4291,11 @@ async def test_inactive_safety_contacts_cannot_start_or_receive_a_page() -> None
             incident_id=incident_id,
         )
 
-        assert provider.tokens == []
-        assert summary["installations_reached"] == 0
+        assert len(provider.tokens) == 1
+        assert provider.tokens[0].startswith(
+            "ios:token:fcm-token:eligibility_inactive-first_"
+        )
+        assert summary["installations_reached"] == 1
         assert (
             await primary._require_pool().fetchval(
                 """

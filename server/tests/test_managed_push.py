@@ -128,7 +128,7 @@ class _WaveDeliveryRepository:
         self.claim_limits: list[int] = []
         self.completed: list[dict] = []
 
-    async def claim_due_push_deliveries(self, *, limit: int):
+    async def claim_due_push_deliveries(self, *, limit: int, **_):
         self.claim_limits.append(limit)
         claimed = self.pending[:limit]
         self.pending = self.pending[limit:]
@@ -1013,3 +1013,18 @@ async def test_fcm_provider_refreshes_cached_token_once_after_401() -> None:
         ("metadata", "fresh-access-token"),
         ("send", "Bearer fresh-access-token"),
     ]
+
+
+def test_fcm_claim_duration_covers_the_maximum_provider_path() -> None:
+    provider = FirebaseCloudMessagingProvider(
+        project_id="noop-test-project",
+        timeout_seconds=30,
+    )
+    service = ManagedSafetyPushService(
+        repository=object(),
+        token_codec=ManagedPushTokenCodec("managed-push-claim-duration-" + ("x" * 32)),
+        provider=provider,
+    )
+
+    assert provider.maximum_delivery_seconds == 210
+    assert service.claim_seconds == 240

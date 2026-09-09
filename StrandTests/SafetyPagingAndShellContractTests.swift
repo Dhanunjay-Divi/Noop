@@ -689,6 +689,59 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedSafetyAcceptanceRequiresReachableAppAlerts() throws {
+        let apple = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        let server = try source(
+            "server/app/managed_safety_repository.py"
+        )
+
+        XCTAssertTrue(apple.contains(
+            "if accept, !(await enableManagedSafetyNotifications())"
+        ))
+        XCTAssertTrue(android.contains(
+            "if (accept && !registerCurrentManagedPushToken())"
+        ))
+        XCTAssertTrue(server.contains(
+            "FROM managed_push_installations push"
+        ))
+        XCTAssertTrue(server.contains(
+            "ORDER BY account_id, installation_id"
+        ))
+        XCTAssertTrue(server.contains(
+            "active_push_accounts"
+        ))
+    }
+
+    func testManagedSafetyForegroundAndBackgroundEntryAreBounded() throws {
+        let presenter = try source(
+            "Strand/System/NotificationPresenter.swift"
+        )
+        let application = try source(
+            "StrandiOS/App/StrandiOSApp.swift"
+        )
+
+        XCTAssertTrue(presenter.contains(
+            "completionHandler([])"
+        ))
+        XCTAssertTrue(presenter.contains(
+            "guard ManagedRuntimeAuthorization.isAllowed else"
+        ))
+        XCTAssertTrue(application.contains(
+            "managedSafetyBackgroundDeadline: Duration = .seconds(20)"
+        ))
+        XCTAssertTrue(application.contains("private var didComplete = false"))
+        XCTAssertTrue(application.contains("catchUpTask?.cancel()"))
+        XCTAssertTrue(application.contains("deadlineTask?.cancel()"))
+        XCTAssertTrue(application.contains(
+            #""failure_kind": "background_deadline""#
+        ))
+    }
+
     func testManagedSafetyNotificationResponseCanRouteRetainedHistory() throws {
         let presenter = try source(
             "Strand/System/NotificationPresenter.swift"

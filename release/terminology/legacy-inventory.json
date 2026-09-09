@@ -1,6 +1,6 @@
 {
   "categoryCounts": {
-    "compatibility": 1695,
+    "compatibility": 1697,
     "core": 4970,
     "customer": 813,
     "fixture": 5319,
@@ -15773,11 +15773,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        964,
-        1021,
-        1021,
-        1021,
-        1022
+        1017,
+        1074,
+        1074,
+        1074,
+        1075
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -16790,8 +16790,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        228,
-        1248
+        291,
+        1311
       ],
       "occurrenceCount": 2,
       "path": "StrandiOS/App/StrandiOSApp.swift",
@@ -16862,14 +16862,14 @@
       "category": "core",
       "lineNumbers": [
         13,
-        2260,
-        2958,
-        2963,
-        2977,
-        2984,
-        2986,
-        3062,
-        3068
+        2270,
+        2968,
+        2973,
+        2987,
+        2994,
+        2996,
+        3072,
+        3078
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -20730,50 +20730,52 @@
       "category": "compatibility",
       "lineNumbers": [
         0,
-        72,
-        78,
-        116,
-        185,
-        338,
-        344,
-        365,
-        374,
-        380,
-        399,
-        416,
-        419,
-        431,
-        433,
-        443,
-        527,
-        547,
-        564,
-        573,
-        578,
-        587,
-        625,
-        712,
-        727,
-        886,
-        956,
-        966,
-        983
+        83,
+        89,
+        127,
+        196,
+        349,
+        355,
+        376,
+        385,
+        391,
+        410,
+        427,
+        430,
+        442,
+        444,
+        454,
+        538,
+        558,
+        575,
+        584,
+        589,
+        598,
+        636,
+        647,
+        726,
+        741,
+        900,
+        970,
+        980,
+        997,
+        1024
       ],
-      "occurrenceCount": 29,
+      "occurrenceCount": 31,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
-      "sha256": "f3389c885e96fc57c9edd1097083dbf98a72b031fe4f75bfa9c49414a8c148c4",
+      "sha256": "3074e443e291fd0ca12819b157df689b4057a88db0aa0de31eabd6d04bf5cd65",
       "tokenCounts": {
         "whoop": 2,
         "whoop5detected": 1,
         "whoopbleclient": 2,
-        "whoopconnectionservice": 24
+        "whoopconnectionservice": 26
       }
     },
     {
       "category": "persisted",
       "lineNumbers": [
-        309,
-        414
+        320,
+        425
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
@@ -22139,14 +22141,14 @@
         28,
         29,
         115,
-        1863,
-        2576,
-        2576,
-        2585,
-        2585,
-        2598,
-        2599,
-        2600
+        1875,
+        2588,
+        2588,
+        2597,
+        2597,
+        2610,
+        2611,
+        2612
       ],
       "occurrenceCount": 12,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
@@ -35052,8 +35054,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        39,
-        39
+        40,
+        40
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/INDEX.md",
@@ -37275,7 +37277,7 @@
       }
     }
   ],
-  "occurrenceCount": 17376,
+  "occurrenceCount": 17378,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

@@ -18,6 +18,24 @@ Last updated: **2026-09-09**
 
 ## Active work
 
+The latest managed Safety late-review closeout is implemented and completely
+locally verified on protected pull request `#10`. Apple and Android require a
+working app-alert path before accepting a Safety contact; incident creation
+counts only accepted contacts represented by deterministically locked active
+push installations. Apple suppresses foreground managed Safety presentation
+until launch authorization is current and completes background catch-up exactly
+once within a 20-second deadline. The delivery lease now covers the provider's
+bounded maximum plus receipt margin, and Android releases a foreground service
+that existed only for managed location after all independent reasons end. The
+complete local server suite passed 424 tests with only the explicit real-provider
+case skipped; Android passed 4,143 tests plus lint, build, and instrumentation
+compilation; Apple passed 1,669 tests with one expected skip and the complete
+unsigned iOS simulator graph builds; 227 Tools tests and every local policy gate
+pass. Replacement push and exact-head review, protected checks, normal merge,
+physical providers/devices, and external launch gates remain. No public
+traffic, real paging, or real health data was used. Evidence is recorded in
+[Managed Safety late-review closeout](rounds/2026-09-09-managed-safety-late-review-closeout.md).
+
 The latest managed Safety lock and retention closeout is implemented and
 completely locally verified on protected pull request `#10`. Contact request
 creation/removal and profile/incident expiry now follow one deterministic lock

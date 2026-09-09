@@ -742,8 +742,18 @@ final class ManagedCloudService: ObservableObject {
     }
 
     func decideSafetyRequest(_ requestID: UUID, accept: Bool) async {
-        if accept {
-            _ = await enableManagedSafetyNotifications()
+        if accept, !(await enableManagedSafetyNotifications()) {
+            safetyStatus = String(
+                localized: "managed.safety.notification.permission"
+            )
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.request_decide",
+                fields: [
+                    "outcome": "deferred",
+                    "failure_kind": "notification_not_authorized",
+                ]
+            )
+            return
         }
         guard beginSafetyAction() else { return }
         defer { endSafetyAction() }

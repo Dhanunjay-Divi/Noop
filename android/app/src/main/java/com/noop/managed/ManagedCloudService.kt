@@ -819,7 +819,19 @@ class ManagedCloudService private constructor(context: Context) {
 
     suspend fun decideSafetyRequest(requestId: UUID, accept: Boolean) =
         safetyAction("request_decide") {
-            if (accept) registerCurrentManagedPushToken()
+            if (accept && !registerCurrentManagedPushToken()) {
+                setSafetyStatus(
+                    text(R.string.managed_safety_notification_permission),
+                )
+                com.noop.AppDiagnosticsRecorder.record(
+                    "managed_safety.request_decide",
+                    fields = mapOf(
+                        "outcome" to "deferred",
+                        "failure_kind" to "notification_not_authorized",
+                    ),
+                )
+                return@safetyAction
+            }
             client().decideSafetyRequest(
                 authorization = authorization(forceRefresh = true),
                 requestId = requestId,

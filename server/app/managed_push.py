@@ -25,6 +25,7 @@ METADATA_TOKEN_URL = (
     "http://metadata.google.internal/computeMetadata/v1/"
     "instance/service-accounts/default/token"
 )
+FCM_MAX_DELIVERY_TIMEOUT_MULTIPLIER = 7
 
 
 class ManagedPushError(Exception):
@@ -64,6 +65,9 @@ class ManagedPushResult:
 class ManagedPushSending(Protocol):
     @property
     def available(self) -> bool: ...
+
+    @property
+    def maximum_delivery_seconds(self) -> int: ...
 
     async def send_safety_incident(
         self,
@@ -232,6 +236,10 @@ class UnavailableManagedPushProvider:
     def available(self) -> bool:
         return False
 
+    @property
+    def maximum_delivery_seconds(self) -> int:
+        return 1
+
     async def send_safety_incident(
         self,
         *,
@@ -269,6 +277,13 @@ class FirebaseCloudMessagingProvider:
     @property
     def available(self) -> bool:
         return True
+
+    @property
+    def maximum_delivery_seconds(self) -> int:
+        # Two bounded metadata-lock waits, two provider requests, and the
+        # bounded rejected-token invalidation path fit inside seven configured
+        # request windows. The repository adds a separate receipt margin.
+        return self.timeout_seconds * FCM_MAX_DELIVERY_TIMEOUT_MULTIPLIER
 
     @staticmethod
     def payload(
@@ -396,7 +411,10 @@ class FirebaseCloudMessagingProvider:
             return ManagedPushResult(outcome="rejected")
         try:
             for attempt in range(2):
-                access_token = await self._metadata_access_token()
+                access_token = await asyncio.wait_for(
+                    self._metadata_access_token(),
+                    timeout=self.timeout_seconds * 2,
+                )
                 try:
                     return await asyncio.to_thread(
                         self._send,
@@ -409,7 +427,10 @@ class FirebaseCloudMessagingProvider:
                 except HTTPError as error:
                     if error.code != 401:
                         raise
-                    await self._invalidate_access_token(access_token)
+                    await asyncio.wait_for(
+                        self._invalidate_access_token(access_token),
+                        timeout=self.timeout_seconds,
+                    )
                     if attempt == 1:
                         raise
             raise AssertionError("unreachable")

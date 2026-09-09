@@ -42,6 +42,7 @@ class ManagedSafetyLocationContractTest {
 
         assertTrue(service!!.contains("ManagedSafetyLiveLocationSession.state"))
         assertTrue(service.contains("updateSafetyLocationForStream("))
+        assertTrue(service.contains("releaseManagedSafetyLocation("))
         assertEquals(
             1,
             Regex("""SafetyIncidentLocationTracker\(this\)""")

@@ -49,7 +49,8 @@ SAFETY_MAX_RECEIVED_PENDING_REQUESTS = (
     SAFETY_REQUEST_LIST_LIMIT - SAFETY_MAX_PENDING_REQUESTS
 )
 SAFETY_MAX_ACTIVE_PUSH_INSTALLATIONS = 4
-SAFETY_PUSH_CLAIM_SECONDS = 60
+SAFETY_PUSH_MIN_CLAIM_SECONDS = 60
+SAFETY_PUSH_RECEIPT_MARGIN_SECONDS = 30
 SAFETY_PUSH_RETRY_DELAY_SECONDS = 60
 SAFETY_MAX_INCIDENTS_PER_HOUR = 4
 SAFETY_MAX_INCIDENTS_PER_DAY = 12
@@ -1690,9 +1691,9 @@ class PostgresManagedSafetyRepository:
                         ),
                         retry_after_seconds=math.ceil((retry_at - now).total_seconds()),
                     )
-                contacts = await connection.fetch(
+                contact_candidates = await connection.fetch(
                     """
-                    SELECT contact.contact_profile_id
+                    SELECT contact.contact_profile_id, profile.account_id
                     FROM managed_safety_contacts contact
                     JOIN managed_social_profiles profile
                       ON profile.profile_id = contact.contact_profile_id
@@ -1721,6 +1722,25 @@ class PostgresManagedSafetyRepository:
                     owner["profile_id"],
                     contact_snapshot_ids,
                 )
+                active_push_accounts = {
+                    row["account_id"]
+                    for row in await connection.fetch(
+                        """
+                        SELECT account_id, installation_id
+                        FROM managed_push_installations
+                        WHERE account_id = ANY($1::uuid[])
+                          AND status = 'active'
+                        ORDER BY account_id, installation_id
+                        FOR UPDATE
+                        """,
+                        [row["account_id"] for row in contact_candidates],
+                    )
+                }
+                contacts = [
+                    row
+                    for row in contact_candidates
+                    if row["account_id"] in active_push_accounts
+                ]
                 if len(contacts) < SAFETY_MIN_CONTACTS:
                     raise ManagedConflictError(
                         "at least two accepted Safety contacts are required"
@@ -2396,10 +2416,13 @@ class PostgresManagedSafetyRepository:
         incident_id: UUID,
         limit: int = 20,
         exclude_delivery_ids: Collection[UUID] = (),
+        claim_seconds: int = SAFETY_PUSH_MIN_CLAIM_SECONDS,
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
         if not 1 <= limit <= 20:
             raise ValueError("push delivery claim limit must be 1 through 20")
+        if not SAFETY_PUSH_MIN_CLAIM_SECONDS <= claim_seconds <= 15 * 60:
+            raise ValueError("push claim duration is outside the supported bound")
         await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
@@ -2522,15 +2545,19 @@ class PostgresManagedSafetyRepository:
                     connection,
                     candidates=candidates,
                     now=now,
+                    claim_seconds=claim_seconds,
                 )
 
     async def claim_due_push_deliveries(
         self,
         *,
         limit: int = 100,
+        claim_seconds: int = SAFETY_PUSH_MIN_CLAIM_SECONDS,
     ) -> list[dict[str, Any]]:
         if not 1 <= limit <= 200:
             raise ValueError("push retry claim limit must be 1 through 200")
+        if not SAFETY_PUSH_MIN_CLAIM_SECONDS <= claim_seconds <= 15 * 60:
+            raise ValueError("push claim duration is outside the supported bound")
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 now = await connection.fetchval("SELECT clock_timestamp()")
@@ -2625,6 +2652,7 @@ class PostgresManagedSafetyRepository:
                     connection,
                     candidates=candidates,
                     now=now,
+                    claim_seconds=claim_seconds,
                 )
 
     @staticmethod
@@ -2633,11 +2661,12 @@ class PostgresManagedSafetyRepository:
         *,
         candidates: list[Any],
         now: datetime,
+        claim_seconds: int,
     ) -> list[dict[str, Any]]:
         claimed: list[dict[str, Any]] = []
         for candidate in candidates:
             claim_id = uuid4()
-            claim_expires_at = now + timedelta(seconds=SAFETY_PUSH_CLAIM_SECONDS)
+            claim_expires_at = now + timedelta(seconds=claim_seconds)
             attempt = int(candidate["attempts"]) + 1
             await connection.execute(
                 """
@@ -2730,11 +2759,7 @@ class PostgresManagedSafetyRepository:
                     or row["installation_id"] != delivery_owner["installation_id"]
                 ):
                     raise ManagedConflictError("Safety push delivery ownership changed")
-                if (
-                    row["status"] != "sending"
-                    or row["claim_id"] != claim_id
-                    or row["claim_expires_at"] <= now
-                ):
+                if row["status"] != "sending" or row["claim_id"] != claim_id:
                     raise ManagedConflictError(
                         "Safety push delivery claim is no longer valid"
                     )
@@ -3021,6 +3046,15 @@ class ManagedSafetyPushService:
         self.token_codec = token_codec
         self.provider = provider
         self.max_concurrency = max_concurrency
+        provider_delivery_seconds = int(
+            getattr(provider, "maximum_delivery_seconds", 30)
+        )
+        if not 1 <= provider_delivery_seconds <= 14 * 60:
+            raise ValueError("push provider delivery bound is unsupported")
+        self.claim_seconds = max(
+            SAFETY_PUSH_MIN_CLAIM_SECONDS,
+            provider_delivery_seconds + SAFETY_PUSH_RECEIPT_MARGIN_SECONDS,
+        )
 
     async def register(
         self,
@@ -3057,6 +3091,7 @@ class ManagedSafetyPushService:
                 incident_id=incident_id,
                 limit=wave_limit,
                 exclude_delivery_ids=attempted_delivery_ids,
+                claim_seconds=self.claim_seconds,
             )
             if not deliveries:
                 break
@@ -3085,6 +3120,7 @@ class ManagedSafetyPushService:
             wave_limit = min(self.max_concurrency, remaining)
             deliveries = await self.repository.claim_due_push_deliveries(
                 limit=wave_limit,
+                claim_seconds=self.claim_seconds,
             )
             if not deliveries:
                 break

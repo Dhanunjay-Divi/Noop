@@ -20,8 +20,37 @@ enum ManagedRuntimeAuthorization {
     }
 }
 
+@MainActor
+private final class ManagedSafetyBackgroundFetchCompletion {
+    private var didComplete = false
+    private let completionHandler: (UIBackgroundFetchResult) -> Void
+    var catchUpTask: Task<Void, Never>?
+    var deadlineTask: Task<Void, Never>?
+
+    init(_ completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        self.completionHandler = completionHandler
+    }
+
+    func finish(
+        _ result: UIBackgroundFetchResult,
+        deadlineWon: Bool
+    ) {
+        guard !didComplete else { return }
+        didComplete = true
+        if deadlineWon {
+            catchUpTask?.cancel()
+        } else {
+            deadlineTask?.cancel()
+        }
+        catchUpTask = nil
+        deadlineTask = nil
+        completionHandler(result)
+    }
+}
+
 final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
     MessagingDelegate {
+    private static let managedSafetyBackgroundDeadline: Duration = .seconds(20)
     private var pendingAPNSToken: Data?
 
     func application(
@@ -91,9 +120,43 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
                 return
             }
             NotificationRouteBridge.recordPending(.safety)
+            Self.startManagedSafetyBackgroundCatchUp(
+                incidentID: incidentID,
+                completionHandler: completionHandler
+            )
+        }
+    }
+
+    @MainActor
+    private static func startManagedSafetyBackgroundCatchUp(
+        incidentID: UUID,
+        completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        let completion = ManagedSafetyBackgroundFetchCompletion(
+            completionHandler
+        )
+        completion.catchUpTask = Task { @MainActor in
             let updated = await ManagedCloudService.shared
                 .handleManagedSafetyPush(incidentID: incidentID)
-            completionHandler(updated ? .newData : .failed)
+            completion.finish(
+                updated ? .newData : .failed,
+                deadlineWon: false
+            )
+        }
+        completion.deadlineTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: managedSafetyBackgroundDeadline)
+            } catch {
+                return
+            }
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_received",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": "background_deadline",
+                ]
+            )
+            completion.finish(.failed, deadlineWon: true)
         }
     }
 

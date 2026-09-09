@@ -68,6 +68,17 @@ import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+internal fun shouldStopConnectionServiceAfterManagedSafetyLocation(
+    backgroundReconnectAllowed: Boolean,
+    gpsActive: Boolean,
+    legacySafetyLocationActive: Boolean,
+    managedSafetyLocationActive: Boolean,
+): Boolean =
+    !backgroundReconnectAllowed &&
+        !gpsActive &&
+        !legacySafetyLocationActive &&
+        !managedSafetyLocationActive
+
 /**
  * Foreground service that keeps the WHOOP BLE connection alive while the app is backgrounded or
  * closed.
@@ -632,6 +643,9 @@ class WhoopConnectionService : Service() {
                                     SafetyLiveLocationSession.state.value
                                         .isActiveAt(nowUnix),
                         )
+                        releaseManagedSafetyLocation(
+                            this@WhoopConnectionService,
+                        )
                         return@collect
                     }
 
@@ -981,6 +995,35 @@ class WhoopConnectionService : Service() {
                 return
             }
             runCatching { context.stopService(Intent(context, WhoopConnectionService::class.java)) }
+        }
+
+        /**
+         * Release a foreground-service lease that existed only for managed
+         * Safety location. A durable BLE reconnect, GPS workout, or other
+         * Safety session keeps the service alive.
+         */
+        fun releaseManagedSafetyLocation(context: Context) {
+            SafetyLiveLocationSession.initialize(context)
+            ManagedSafetyLiveLocationSession.initialize(context)
+            val nowUnix = System.currentTimeMillis() / 1_000L
+            if (
+                !shouldStopConnectionServiceAfterManagedSafetyLocation(
+                    backgroundReconnectAllowed =
+                        BackgroundReconnectPolicy.runtimeDecision(context).reconnect,
+                    gpsActive = GpsSession.state.value.active,
+                    legacySafetyLocationActive =
+                        SafetyLiveLocationSession.state.value.isActiveAt(nowUnix),
+                    managedSafetyLocationActive =
+                        ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix),
+                )
+            ) {
+                return
+            }
+            runCatching {
+                context.stopService(
+                    Intent(context, WhoopConnectionService::class.java),
+                )
+            }
         }
     }
 }

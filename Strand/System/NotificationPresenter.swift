@@ -305,15 +305,34 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        LocalNotificationLifecycle.presented(notification.request)
+#if os(iOS)
         if ManagedSafetyPushPayload.incidentID(
             from: notification.request.content.userInfo
         ) != nil {
-            AppDiagnosticsRecorder.shared.record(
-                "managed_safety.push_presented",
-                fields: ["outcome": "foreground"]
-            )
+            Task { @MainActor in
+                guard ManagedRuntimeAuthorization.isAllowed else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.push_presented",
+                        fields: [
+                            "outcome": "deferred",
+                            "failure_kind": "terms_required",
+                        ]
+                    )
+                    completionHandler([])
+                    return
+                }
+                LocalNotificationLifecycle.presented(notification.request)
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_presented",
+                    fields: ["outcome": "foreground"]
+                )
+                ContextualActionCenter.shared.capture(notification.request)
+                completionHandler([.banner, .sound, .list])
+            }
+            return
         }
+#endif
+        LocalNotificationLifecycle.presented(notification.request)
         Task { @MainActor in
             ContextualActionCenter.shared.capture(notification.request)
         }
