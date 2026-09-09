@@ -61,11 +61,13 @@ route to retained authenticated history while background delivery remains
 expiry-gated, APNs alerts use translated catalog keys, and social-profile
 deletion immediately clears cascaded Safety state on both phones. The full
 Apple, Android, and fresh-PostgreSQL server suites, dependency audits, and
-repository policy gates pass locally. Pull request `#10` still requires green
-replacement-head hosted checks, a clean exact-head review, and normal protected
-merge. Physical APNs/FCM, terminated/background execution, location, haptic,
-carrier, legal, monitoring, failover, and staffed-operations evidence remains
-open. Evidence is recorded in
+repository policy gates pass locally. The first replacement-head hosted
+release-control run exposed only a stale fail-closed terminology inventory;
+the reviewed regeneration contains no forbidden mapping or active allowlist
+change. Pull request `#10` still requires a green hosted rerun, a clean
+exact-head review, and normal protected merge. Physical APNs/FCM,
+terminated/background execution, location, haptic, carrier, legal, monitoring,
+failover, and staffed-operations evidence remains open. Evidence is recorded in
 [Managed Safety exact-head review](rounds/2026-09-09-managed-safety-exact-head-review.md).
 
 The production-readiness execution round is complete for supplier-independent

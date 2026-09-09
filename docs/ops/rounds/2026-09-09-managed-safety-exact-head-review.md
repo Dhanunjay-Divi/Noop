@@ -102,6 +102,8 @@ localization, or lifecycle guarantees.
 | Server focused push regressions | 12 passed | APNs localization-key payload and generic notification contract are pinned | APNs acceptance on a physical phone |
 | Server quality and dependency gates | Ruff check/format passed; both locked dependency audits found no known vulnerability | Changed server source is formatted and scanned against current local advisories | Future advisories or provider security review |
 | Repository policy gates | Ops records, private-data guard, health claims, legal inventory, release controls, and launch-gate isolation passed | The replacement preserves repository privacy, claims, legal, and release invariants | Owner/legal approval or signed distribution |
+| Hosted release-control diagnosis | The first replacement-head run failed only because changed source line numbers made the fail-closed terminology inventory stale; a reviewed regeneration records 17,376 classified occurrences, no forbidden mapping, and no active allowlist change | The hosted failure is an evidence-snapshot mismatch rather than an application or policy regression | The replacement head still requires a green hosted rerun |
+| Scoped resource cleanup | Six synthetic PostgreSQL databases and eight inactive temporary benchmark/build directories totaling about 20 GB were removed after their evidence was recorded | Completed local test resources are not being left to consume disk or database capacity | The intentionally retained private GCP staging stack or worktrees still needed for protected merge |
 
 ## Physical device and deployment
 
@@ -130,6 +132,10 @@ localization, or lifecycle guarantees.
   no migration was rewritten or checksum rule weakened.
 - The local machine has no Docker runtime, so exact TimescaleDB overlay
   verification remains delegated to protected hosted CI.
+- The active Safety and performance worktrees, one iOS simulator, and build
+  daemons remain until protected merges and exact-main verification complete;
+  they are not abandoned resources and will be stopped or removed at final
+  closeout.
 
 ## Next round
 

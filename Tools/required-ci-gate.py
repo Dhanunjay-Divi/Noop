@@ -73,7 +73,7 @@ RELEASE_SOURCE_DIGESTS = {
         "ab8994c7133abad633395486d0676e0dcd26b58fc59a56f46a9ed51ee250b64b"
     ),
     "release/terminology/legacy-inventory.json": (
-        "448ef5a71a035861a4a61c24f357f017b37cb6ca6b05098f1653e631bd2b8a5a"
+        "98173484bd8e1fca55e387c544b5822461333347dffcd69ecc6867bf62f02dd9"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
