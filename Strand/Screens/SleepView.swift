@@ -558,7 +558,7 @@ struct SleepView: View {
             }
             .padding(NoopMetrics.cardInnerPadding + NoopMetrics.space1)
             .frame(maxWidth: .infinity)
-            .timeOfDayBackground(.night)
+            .timeOfDayBackground(.night, animated: false)
             // The Rest hero is intentionally a fixed-dark focus surface in every app appearance.
             // Forcing only this subtree dark keeps its liquid score legible on Pearl without turning
             // the page-level section title into white-on-white text.

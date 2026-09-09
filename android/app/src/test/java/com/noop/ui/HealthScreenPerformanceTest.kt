@@ -64,6 +64,12 @@ class HealthScreenPerformanceTest {
         assertFalse(seriesBuilder.contains("vm.activeStrapId"))
     }
 
+    @Test
+    fun liveHeartRateHeroUsesAStaticAtmosphere() {
+        val source = source("com/noop/ui/HealthScreen.kt")
+        assertTrue(source.contains(".timeOfDayBackground(animated = false)"))
+    }
+
     private fun source(relative: String): String {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         return listOf(

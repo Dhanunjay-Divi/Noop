@@ -2272,7 +2272,7 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(Metrics.cardRadius))
-                .timeOfDayBackground(),
+                .timeOfDayBackground(animated = false),
         ) {
             NoopCard(padding = Metrics.space18, tint = Palette.metricRose) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

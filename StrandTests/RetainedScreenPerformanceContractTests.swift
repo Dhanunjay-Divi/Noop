@@ -102,6 +102,11 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         ))
     }
 
+    func testSleepHeroDoesNotSpendScrollFramesOnDecorativeAtmosphere() throws {
+        let text = try source("Strand/Screens/SleepView.swift")
+        XCTAssertTrue(text.contains(".timeOfDayBackground(.night, animated: false)"))
+    }
+
     func testWorkoutRecoveryHistoryLoadsOnlyAtItsLazyMount() throws {
         let text = try source("Strand/Screens/WorkoutsView.swift")
 
