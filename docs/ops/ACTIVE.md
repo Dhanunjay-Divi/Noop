@@ -95,8 +95,13 @@ has measured a 4.2-million-row, approximately 441 MB local database and removes
 active backfill/write contention, repeated retained-screen queries, unnecessary
 per-chunk reads, and scroll-time animation work across Apple and Android. It is
 now being integrated after the Safety merge and still requires complete local
-and hosted verification, protected merge, and a reviewed shake-to-report ZIP
-from the affected phone on the merged-main build. Evidence is recorded in
+and hosted verification and protected merge. The first hosted
+release-control run exposed only a stale fail-closed terminology inventory;
+its reviewed regeneration has no forbidden mapping or active allowlist
+expansion. A reviewed shake-to-report ZIP from the affected phone on the
+merged-main build plus representative large-database, active-collection,
+low-storage, thermal, memory-pressure, and in-place-upgrade physical-device
+runs remain required. Evidence is recorded in
 [Large-data scroll lag](rounds/2026-09-09-large-data-scroll-lag.md).
 
 The latest managed Safety race closeout is implemented and locally verified on

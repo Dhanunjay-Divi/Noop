@@ -137,6 +137,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Apple focused regression | 9 tests passed after the final backfill-completion trigger fix | Exact cache aging, defer policy, invalidation wiring, and backfill reload remain mounted | Physical collection or real-device frame pacing |
 | Apple simulator build and UI performance | iOS build passed; repeated navigation and Today scroll tests passed; scroll journey averaged 5.182 s wall time, 0.161 s CPU, and about 44.7 MB peak physical memory | The optimized simulator path is functional, nonblank, and emits no severe over-150 ms scroll hitch | Representative phone thermal, storage, BLE, or long-running performance |
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |
+| Hosted release-control diagnosis | The first pull-request run failed only because the fail-closed terminology inventory had not yet been regenerated; the reviewed snapshot now records 17,369 classified occurrences, no forbidden mapping, and one fewer persisted compatibility occurrence after consolidating the Android Rest read | The performance change introduces no forbidden terminology mapping or active allowlist expansion | The rebased exact head still requires a green hosted rerun |
 
 ## Physical device and deployment
 
@@ -179,6 +180,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
 - The 1.32 GB temporary restore peak remains too high to treat a low-storage
   phone as proven; representative in-place restore and low-storage tests remain
   release gates.
+- The performance branch must be rebased after the preceding managed Safety
+  pull request merges; protected checks and review apply to that final exact
+  head rather than this pre-rebase snapshot.
 
 ## Next round
 
