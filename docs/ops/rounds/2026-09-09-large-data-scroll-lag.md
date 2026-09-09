@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: `80729acb`
+- End implementation commit: `1def2905`
 - Record commit or PR: protected pull request `#12`
 
 ## Objective
@@ -172,6 +172,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Apple focused regression | The final passes ran 30 performance/model tests, then 10 device-ownership and sleep-decode tests, with zero failures | Exact cache aging, defer policy, device invalidation, cancellation, off-main analysis, and sleep decoding remain mounted | Physical collection or real-device frame pacing |
 | Apple simulator build and UI performance | The exact review-fix iOS build passed; repeated five-tab navigation passed in 81.637 s and Today scroll passed with a 5.213 s average measured window, 0.180 s CPU, and 41,375 KB peak app memory | The optimized simulator path is functional, nonblank, and emits no severe over-150 ms scroll hitch | Representative phone thermal, storage, BLE, or long-running performance |
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |
+| Repository policy matrix | 222 Tools tests passed; operations records, terminology, required CI, localization, health claims, release controls, calibration parity, legal/distribution, private-data, shell syntax, and shellcheck gates all passed | The exact local branch preserves repository release, privacy, terminology, and evidence contracts | Hosted checks and protected review on the pushed exact head |
 | Hosted release-control diagnosis | The first pull-request run failed only because the fail-closed terminology inventory had not yet been regenerated; the reviewed snapshot now records 17,369 classified occurrences, no forbidden mapping, and one fewer persisted compatibility occurrence after consolidating the Android Rest read | The performance change introduces no forbidden terminology mapping or active allowlist expansion | The rebased exact head still requires a green hosted rerun |
 | Exact-head automated and fresh review | Four hosted cache-lifecycle findings were reproduced and corrected: Android metric revision, Android failed-read retry, Apple device identity, and Apple post-backfill invalidation. The fresh local pass additionally removed Compose `StateFlow.value` reads from composition, made Health history queries observe the selected Android device, and made Apple auto-workout scans cancel and reject cross-device results | The final local patch closes concrete stale-data, retry, cancellation, and cross-device publication defects before protected merge | A clean review and hosted checks on the rebased exact head |
 
@@ -192,8 +193,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
   diagnostics, and tests; Android Today, Health, Sleep, Stress, Workouts,
   repository/Room, liquid scaffolds, diagnostics, and tests; plus this
   operations record.
-- Commits: implementation `80729acb`; record follow-up is the pull-request
-  head.
+- Commits: initial implementation `80729acb`; final retained-screen,
+  cancellation, device-ownership, diagnostics, tests, and evidence fix
+  `1def2905`; record follow-up is the pull-request head.
 - Branch and remote state: pushed to
   `codex/large-data-scroll-lag-20260909`; protected pull request `#12` is open.
 - Repository visibility verified: not repeated.
