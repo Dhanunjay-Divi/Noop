@@ -96,6 +96,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -169,6 +171,18 @@ private suspend fun loadSleepBrowseSessions(
     }
 }
 
+private data class SleepHistorySnapshot(
+    val sessions: List<SleepSession>,
+    val habitualMidsleep: Long?,
+    val motionByStart: Map<Long, List<Double>>,
+)
+
+private data class SleepMetricSnapshot(
+    val imported: ImportedSleepSeries,
+    val confidenceByDay: Map<String, ScoreConfidence>,
+    val evidenceByDay: Map<String, ScoreConfidence.RestEvidenceFlags>,
+)
+
 /** Low-frequency projection for the only BLE state rendered by the Sleep root. */
 internal fun Flow<LiveState>.sleepHistorySyncProgressChanges(): Flow<HistorySyncUiProgress?> =
     map { state ->
@@ -192,6 +206,12 @@ internal fun sleepHistoryResultBucket(count: Int): String = when {
     else -> "over_365"
 }
 
+internal fun shouldPublishSleepHistorySnapshot(
+    requestDeviceId: String,
+    currentDeviceId: String,
+    isCancelled: Boolean,
+): Boolean = !isCancelled && requestDeviceId == currentDeviceId
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SleepScreen(
@@ -206,6 +226,7 @@ fun SleepScreen(
     val backfillNote by remember(vm.live) {
         vm.live.sleepHistorySyncProgressChanges()
     }.collectAsStateWithLifecycle(initialValue = null)
+    val isBackfilling = backfillNote != null
 
     // Every recorded sleep BLOCK, oldest→newest — the hero's ◀/▶ chevrons walk this whole list,
     // including same-day naps / split sleep that `sleepSessionsMerged` collapses to one-per-night
@@ -213,32 +234,72 @@ fun SleepScreen(
     // "-noop" sessions on days the import doesn't cover (imported-wins / computed-fills, mirroring
     // mergeSleep but WITHOUT the per-night collapse). Keyed on `days` so a sync/import (which always
     // rewrites dailyMetric too) reloads; these reads have no Flow. (#160, #170)
-    var sleeps by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
+    var sleeps by remember(activeDeviceId) { mutableStateOf<List<SleepSession>>(emptyList()) }
     // Durable deleted-night markers. Unlike the 7-second Undo banner these remain reachable after the
     // session row is gone, giving each suppressed window a "Recompute this night" escape hatch (#515).
-    var dismissedSleeps by remember { mutableStateOf<List<DismissedSleep>>(emptyList()) }
-    var recomputingSleep by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    var dismissedSleeps by remember(activeDeviceId) {
+        mutableStateOf<List<DismissedSleep>>(emptyList())
+    }
+    var recomputingSleep by remember(activeDeviceId) {
+        mutableStateOf<Pair<String, Long>?>(null)
+    }
     // 0 = latest night, N = N sleep-sessions back. Reset to the newest night only on a REAL data
     // reload (new sync / re-import via `days` changing). The optimistic bed/wake edit rewrites
     // `sleeps` in place WITHOUT touching `days`, so it must not reset the browse — keeping the
     // user on the night they just edited. (#160)
-    var nightOffset by remember { mutableIntStateOf(0) }
-    LaunchedEffect(days, activeDeviceId) {
-        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_sessions_load")
+    var nightOffset by remember(activeDeviceId) { mutableIntStateOf(0) }
+    var habitualMidsleep by remember(activeDeviceId) { mutableStateOf<Long?>(null) }
+    var motionByStart by remember(activeDeviceId) {
+        mutableStateOf<Map<Long, List<Double>>>(emptyMap())
+    }
+    LaunchedEffect(days, activeDeviceId, isBackfilling) {
+        if (isBackfilling) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_snapshot_load")
         var outcome = "completed"
         var fields = emptyMap<String, String>()
         try {
-            // Read the ACTIVE-strap plus canonical union (#814/#1008), richness-merge each historical
-            // local wake-day, and preserve naps/split blocks.
-            sleeps = loadSleepBrowseSessions(vm, activeDeviceId)
+            val snapshot = coroutineScope {
+                val sessions = async { loadSleepBrowseSessions(vm, requestDeviceId) }
+                val habitual = async { vm.repo.habitualMidsleepSec(requestDeviceId) }
+                val loadedSessions = sessions.await()
+                val motion = async {
+                    vm.repo.sessionMotions(
+                        requestDeviceId,
+                        loadedSessions.map { it.startTs },
+                    )
+                }
+                SleepHistorySnapshot(
+                    sessions = loadedSessions,
+                    habitualMidsleep = habitual.await(),
+                    motionByStart = motion.await(),
+                )
+            }
+            currentCoroutineContext().ensureActive()
+            if (!shouldPublishSleepHistorySnapshot(
+                    requestDeviceId = requestDeviceId,
+                    currentDeviceId = vm.activeStrapId,
+                    isCancelled = false,
+                )
+            ) {
+                outcome = "superseded"
+                return@LaunchedEffect
+            }
+            // Publish the sessions, learned timing, and motion together. This prevents a canceled
+            // old-device load from leaving a mixed Sleep screen assembled from two devices.
+            sleeps = snapshot.sessions
+            habitualMidsleep = snapshot.habitualMidsleep
+            motionByStart = snapshot.motionByStart
             nightOffset = 0
-            fields = mapOf("result_bucket" to sleepHistoryResultBucket(sleeps.size))
+            fields = mapOf(
+                "session_bucket" to sleepHistoryResultBucket(snapshot.sessions.size),
+                "motion_bucket" to sleepHistoryResultBucket(snapshot.motionByStart.size),
+            )
         } catch (cancelled: CancellationException) {
             outcome = "canceled"
             throw cancelled
         } catch (_: Exception) {
             outcome = "failed"
-            sleeps = emptyList()
         } finally {
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
@@ -251,9 +312,15 @@ fun SleepScreen(
     // Read the active∪canonical management union so a marker created before a strap re-add remains
     // visible. Keyed on days because deletes/recomputes both rescore and republish the affected day.
     LaunchedEffect(days, activeDeviceId) {
-        dismissedSleeps = runCatching {
-            vm.repo.dismissedSleepsUnion(activeDeviceId)
-        }.getOrDefault(dismissedSleeps)
+        try {
+            val loaded = vm.repo.dismissedSleepsUnion(activeDeviceId)
+            currentCoroutineContext().ensureActive()
+            if (vm.activeStrapId == activeDeviceId) dismissedSleeps = loaded
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Preserve the last coherent list on a transient read failure.
+        }
     }
 
     // #65: the transient UNDO banner shown after a suppressing delete. Holds the deleted SleepSession
@@ -268,65 +335,24 @@ fun SleepScreen(
         }
     }
 
-    // The user's LEARNED habitual midsleep (local time-of-day seconds), or null under the cold-start
-    // threshold. Loaded from `vm.repo.habitualMidsleepSec` — the SAME value AnalyticsEngine.analyzeDay
-    // threads into the daily total — and fed into the main-night selector so the hero, the naps split,
-    // and the edit target pick the SAME block the analytics rollup did, for a shift/late sleeper too.
-    // null keeps the existing cold-start overnight-band fallback. Keyed on `days` so it refreshes
-    // alongside `sleeps`. Mirrors iOS SleepView.habitualMidsleepSec. (#547)
-    var habitualMidsleep by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(days, activeDeviceId) {
-        // Thread the ACTIVE strap id so the learner unions active + canonical nights (#814/#1008);
-        // habitualMidsleepSec resolves the canonical "my-whoop" sibling internally either way.
-        habitualMidsleep = runCatching { vm.repo.habitualMidsleepSec(activeDeviceId) }.getOrNull()
-    }
-
-    // Persisted per-epoch MOTION keyed by each session's detected startTs (#407). Loaded alongside
-    // `sleeps`; `selectNight` reads only the ALREADY-resolved main-night GROUP's entries (no re-resolution)
-    // and lays them along the hypnogram's timeline. A block with no stored series stays absent (honest empty
-    // state for older rows whose motionJSON is NULL). Mirrors iOS SleepView.motionByStart.
-    var motionByStart by remember { mutableStateOf<Map<Long, List<Double>>>(emptyMap()) }
-    LaunchedEffect(sleeps, activeDeviceId) {
-        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_motion_load")
-        var outcome = "completed"
-        var fields = emptyMap<String, String>()
-        try {
-            motionByStart = vm.repo.sessionMotions(
-                activeDeviceId,
-                sleeps.map { it.startTs },
-            )
-            fields = mapOf("result_bucket" to sleepHistoryResultBucket(motionByStart.size))
-        } catch (cancelled: CancellationException) {
-            outcome = "canceled"
-            throw cancelled
-        } catch (_: Exception) {
-            outcome = "failed"
-            motionByStart = emptyMap()
-        } finally {
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = outcome,
-                fields = fields,
-            )
-        }
-    }
-
     // Export-verbatim sleep figures (sleep_performance / consistency / need / debt) — the
     // headline tiles prefer them over the on-device approximations. Keyed on `days` so a
     // fresh import (which always rewrites dailyMetric too) reloads; metricSeries has no Flow.
-    var imported by remember { mutableStateOf(ImportedSleepSeries()) }
-    var restConfidenceByDay by remember {
+    var imported by remember(activeDeviceId) { mutableStateOf(ImportedSleepSeries()) }
+    var restConfidenceByDay by remember(activeDeviceId) {
         mutableStateOf<Map<String, ScoreConfidence>>(emptyMap())
     }
-    var restEvidenceByDay by remember {
+    var restEvidenceByDay by remember(activeDeviceId) {
         mutableStateOf<Map<String, ScoreConfidence.RestEvidenceFlags>>(emptyMap())
     }
-    LaunchedEffect(days, activeDeviceId, restDataVersion) {
+    LaunchedEffect(days, activeDeviceId, restDataVersion, isBackfilling) {
+        if (isBackfilling) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_metrics_load")
         var outcome = "completed"
         var fields = emptyMap<String, String>()
         try {
-            coroutineScope {
+            val snapshot = coroutineScope {
                 suspend fun load(key: String) = try {
                     vm.repo.metricSeries("my-whoop", key, "0000-00-00", "9999-99-99")
                         .associate { it.day to it.value }
@@ -343,7 +369,7 @@ fun SleepScreen(
                 val confidence = async {
                     try {
                         vm.repo.metricSeriesComputedUnion(
-                            activeDeviceId,
+                            requestDeviceId,
                             ScoreConfidence.restConfidenceSeriesKey,
                             "0000-00-00",
                             "9999-99-99",
@@ -354,7 +380,7 @@ fun SleepScreen(
                         emptyList()
                     }
                 }
-                val evidenceJobs = vm.repo.computedSourceIds(activeDeviceId).map { source ->
+                val evidenceJobs = vm.repo.computedSourceIds(requestDeviceId).map { source ->
                     async {
                         try {
                             vm.repo.metricSeries(
@@ -371,13 +397,13 @@ fun SleepScreen(
                     }
                 }
 
-                imported = ImportedSleepSeries(
+                val loadedImported = ImportedSleepSeries(
                     performance = performance.await(),
                     consistency = consistency.await(),
                     needMin = need.await(),
                     debtMin = debt.await(),
                 )
-                restConfidenceByDay = confidence.await().mapNotNull { row ->
+                val loadedConfidence = confidence.await().mapNotNull { row ->
                     ScoreConfidence.fromPersistedValue(row.value)?.let { row.day to it }
                 }.toMap()
                 val mergedEvidence = linkedMapOf<String, ScoreConfidence.RestEvidenceFlags>()
@@ -386,12 +412,29 @@ fun SleepScreen(
                         mergedEvidence[row.day] = it
                     }
                 }
-                restEvidenceByDay = mergedEvidence
-                fields = mapOf(
-                    "session_bucket" to sleepHistoryResultBucket(sleeps.size),
-                    "metric_day_bucket" to sleepHistoryResultBucket(imported.performance.size),
+                SleepMetricSnapshot(
+                    imported = loadedImported,
+                    confidenceByDay = loadedConfidence,
+                    evidenceByDay = mergedEvidence,
                 )
             }
+            currentCoroutineContext().ensureActive()
+            if (!shouldPublishSleepHistorySnapshot(
+                    requestDeviceId = requestDeviceId,
+                    currentDeviceId = vm.activeStrapId,
+                    isCancelled = false,
+                )
+            ) {
+                outcome = "superseded"
+                return@LaunchedEffect
+            }
+            imported = snapshot.imported
+            restConfidenceByDay = snapshot.confidenceByDay
+            restEvidenceByDay = snapshot.evidenceByDay
+            fields = mapOf(
+                "session_bucket" to sleepHistoryResultBucket(sleeps.size),
+                "metric_day_bucket" to sleepHistoryResultBucket(snapshot.imported.performance.size),
+            )
         } catch (cancelled: CancellationException) {
             outcome = "canceled"
             throw cancelled

@@ -123,6 +123,9 @@ struct SleepView: View {
     /// The pending auto-dismiss task for `sleepUndo`, cancelled when a new delete replaces the banner or
     /// the user hits Undo, so a stale timer can't clear a fresh banner.
     @State private var sleepUndoTask: Task<Void, Never>?
+    /// Mirrors only the history-offload edge from LiveState. Heavy sleep-history reads wait until the
+    /// write burst finishes, while the small syncing leaf continues to show progress independently.
+    @State private var liveBackfillingFlag = false
 
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
@@ -196,12 +199,16 @@ struct SleepView: View {
                     navNight = nil
                 }
             }
+            .background(SleepBackfillFlagBridge(flag: $liveBackfillingFlag))
             // Load EVERY sleep block across BOTH sources (un-deduplicated) so the hero's ◀/▶ can
             // browse split-sleep days the dashboard collapses — including Bluetooth-only nights,
             // whose blocks live under the computed source. Re-runs whenever a sync/import bumps
             // refreshSeq; snaps back to the newest day and rebuilds the model so offset 0 reflects
             // the freshly-loaded blocks. (#170)
-            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)") {
+            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(liveBackfillingFlag)") {
+                guard !liveBackfillingFlag else { return }
+                let requestRefreshSeq = repo.refreshSeq
+                let requestDeviceId = repo.deviceId
                 let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("sleep.history_load")
                 var diagnosticOutcome = "completed"
                 var diagnosticFields: [String: String] = [:]
@@ -232,10 +239,6 @@ struct SleepView: View {
                     diagnosticOutcome = "canceled"
                     return
                 }
-                allSessions = loadedSessions
-                // Load the learned habitual midsleep the engine used, so the main-night pick aligns to it
-                // (a shift/late sleeper) instead of only the cold-start band. nil under threshold. (#547)
-                habitualMidsleepSec = loadedHabitualMidsleep
                 // Per-epoch motion for every block (#407), keyed by detected start. mergeDay reads only the
                 // already-resolved group's entries — this just pre-fetches them all so the model build is sync.
                 async let motionsTask = repo.sessionMotions(
@@ -246,10 +249,21 @@ struct SleepView: View {
                 )
                 let (loadedMotions, loadedStageEvidence, confidenceRows, evidenceRows) =
                     await (motionsTask, stageEvidenceTask, confidenceTask, evidenceSeriesTask)
-                guard !Task.isCancelled else {
-                    diagnosticOutcome = "canceled"
+                guard Self.shouldPublishHistoryLoad(
+                    requestRefreshSeq: requestRefreshSeq,
+                    currentRefreshSeq: repo.refreshSeq,
+                    requestDeviceId: requestDeviceId,
+                    currentDeviceId: repo.deviceId,
+                    isCancelled: Task.isCancelled
+                ) else {
+                    diagnosticOutcome = Task.isCancelled ? "canceled" : "superseded"
                     return
                 }
+                // Publish one coherent snapshot only after every independent read still belongs to
+                // the current refresh and device. A canceled old-device task must not replace only
+                // sessions while leaving motion, evidence, and the model from another device.
+                allSessions = loadedSessions
+                habitualMidsleepSec = loadedHabitualMidsleep
                 motionByStart = loadedMotions
                 detailedStageEvidence = loadedStageEvidence
                 publishableDetailedStageDays = Self.detailedStagePublicationDays(
@@ -667,6 +681,18 @@ struct SleepView: View {
         case 31...365: return "31_to_365"
         default: return "over_365"
         }
+    }
+
+    static func shouldPublishHistoryLoad(
+        requestRefreshSeq: Int,
+        currentRefreshSeq: Int,
+        requestDeviceId: String,
+        currentDeviceId: String,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled
+            && requestRefreshSeq == currentRefreshSeq
+            && requestDeviceId == currentDeviceId
     }
 
     private func isImportedPerformance(for night: Night) -> Bool {
@@ -3362,6 +3388,23 @@ private struct SleepSyncingNote: View {
                 lastDurableProgressAt: live.historySyncLastDurableProgressAt
             )
         }
+    }
+}
+
+/// Zero-size edge bridge. SleepView never observes the sensor-cadence LiveState object itself; it receives
+/// only the backfill start/stop Boolean needed to cancel and defer query-heavy history snapshots.
+private struct SleepBackfillFlagBridge: View {
+    @EnvironmentObject private var live: LiveState
+    @Binding var flag: Bool
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { if flag != live.backfilling { flag = live.backfilling } }
+            .onChangeCompat(of: live.backfilling) { active in
+                if flag != active { flag = active }
+            }
     }
 }
 

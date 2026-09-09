@@ -37,6 +37,23 @@ class TodayRestLoadPolicyTest {
     }
 
     @Test
+    fun bestEffortReadPreservesStructuredCancellation() = runBlocking {
+        try {
+            loadTodayBestEffort<String> {
+                throw CancellationException("test")
+            }
+            fail("Expected cancellation")
+        } catch (_: CancellationException) {
+            // Expected.
+        }
+    }
+
+    @Test
+    fun bestEffortReadMapsOrdinaryFailureToNull() = runBlocking {
+        assertEquals(null, loadTodayBestEffort<String> { error("transient") })
+    }
+
+    @Test
     fun permanentFailureStopsAtTheBoundedAttemptLimit() = runBlocking {
         var calls = 0
         try {

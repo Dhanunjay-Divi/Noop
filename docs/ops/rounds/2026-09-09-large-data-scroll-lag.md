@@ -91,6 +91,11 @@ Android where applicable, and leave physical-phone conclusions explicit.
   keys it to the daily data, active device, and metric-series revision, and
   filters day changes in memory. Failed reads remain retryable rather than
   being cached as a valid empty history.
+- Android Today now treats an active history offload as a database write
+  boundary: it keeps the last coherent dashboard visible, cancels and defers
+  history-wide card, calorie, weight, step, Rest, SpO2, provenance, Effort, and
+  footer reads, then reloads once after the backfill edge falls. Best-effort
+  reads rethrow structured cancellation and reject cross-device publication.
 - Android screen scaffolds publish drag/fling state to the liquid primitives.
   Decorative vessel, tube, and thread clocks pause while content is moving and
   resume from the same retained simulation state afterward.
@@ -101,8 +106,11 @@ Android where applicable, and leave physical-phone conclusions explicit.
 - Apple and Android Sleep collect only a deduplicated history-sync projection at
   the root, start independent session, timing, confidence, evidence, and metric
   reads concurrently, and replace one motion query per sleep block with bounded
-  batched reads. Android has a dedicated Rest-data revision covering every
-  Sleep/Today series and daily-score mutation.
+  batched reads. Each platform now publishes sessions, learned timing, motion,
+  confidence, and evidence only as a coherent current-device snapshot; an
+  active backfill cancels and defers these history reads until its completion
+  edge. Android has a dedicated Rest-data revision covering every Sleep/Today
+  series and daily-score mutation.
 - Apple and Android Stress read the active-plus-canonical HR/R-R union, perform
   deterministic daytime analysis off the UI executor, propagate cancellation,
   and reject superseded or cross-device results before publication.
@@ -146,7 +154,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
   report review flow, and synthetic history harness.
 - New bounded events or operation spans: `today.liquid.load`,
   `today.rest_composite_load`, `sleep.history_load`,
-  `sleep.history_sessions_load`, `sleep.history_motion_load`,
+  `sleep.history_snapshot_load`,
   `sleep.history_metrics_load`, `stress.daytime_analysis`,
   `workouts.recovery_trend_load`, and `workouts.auto_detect_scan` record only
   outcome class, selected scope where already applicable, and bounded result
@@ -169,6 +177,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Read benchmark | Daily/trend reads below 0.4 ms; HR buckets 31.45 ms; fingerprint 10.62 ms; storage attribution 1.81 s | Ordinary indexed history reads remain bounded at this size and the broad diagnostic read is identifiable | Smoothness while a real BLE stream and OS services compete |
 | Concurrent write benchmark | About 82 ms mean and 96 ms maximum reads during one-million-row writes versus about 30 ms at rest | Active ingestion creates measurable contention even though the database remains readable | A specific tester's lag without their reviewed report |
 | Android production gate | Debug APK assembly, 4,137 tests with zero failures or errors and 7 skips, lint, and instrumentation-source compilation passed after the exact review fixes in 2m43s | Android source, cache, retry, diagnostics, cancellation, device-switch, and animation-budget changes compile and pass repository tests | GPU pacing, OEM behavior, or physical scrolling |
+| Backfill-contention follow-up | Focused Android compile/tests passed for retained screens, runtime contracts, and Rest-load policy; the Apple app compiled and all 6 retained-screen contracts passed | Query-heavy Today/Sleep work now defers during writes, cancellation remains structured, and cross-device partial snapshots are rejected | Physical frame pacing during a real band offload |
 | Apple focused regression | The final passes ran 30 performance/model tests, then 10 device-ownership and sleep-decode tests, with zero failures | Exact cache aging, defer policy, device invalidation, cancellation, off-main analysis, and sleep decoding remain mounted | Physical collection or real-device frame pacing |
 | Apple simulator build and UI performance | The exact review-fix iOS build passed; repeated five-tab navigation passed in 81.637 s and Today scroll passed with a 5.213 s average measured window, 0.180 s CPU, and 41,375 KB peak app memory | The optimized simulator path is functional, nonblank, and emits no severe over-150 ms scroll hitch | Representative phone thermal, storage, BLE, or long-running performance |
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |

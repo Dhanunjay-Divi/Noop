@@ -56,12 +56,18 @@ class RetainedScreenPerformanceTest {
         assertFalse(root.contains("vm.live.collectAsStateWithLifecycle()"))
         assertTrue(
             Regex("""vm\.repo\.sessionMotions\(\s*activeDeviceId""")
-                .containsMatchIn(root),
+                .containsMatchIn(root) ||
+                Regex("""vm\.repo\.sessionMotions\(\s*requestDeviceId""")
+                    .containsMatchIn(root),
         )
         assertTrue(root.contains("vm.selectedDeviceId.collectAsStateWithLifecycle()"))
-        assertTrue(root.contains("\"sleep.history_sessions_load\""))
-        assertTrue(root.contains("\"sleep.history_motion_load\""))
+        assertTrue(root.contains("\"sleep.history_snapshot_load\""))
         assertTrue(root.contains("\"sleep.history_metrics_load\""))
+        assertTrue(root.contains("shouldPublishSleepHistorySnapshot("))
+        assertTrue(root.contains("SleepHistorySnapshot("))
+        assertTrue(root.contains("SleepMetricSnapshot("))
+        assertTrue(root.contains("val isBackfilling = backfillNote != null"))
+        assertTrue(root.contains("if (isBackfilling) return@LaunchedEffect"))
 
         val batchStart = repository.indexOf("suspend fun sessionMotions(")
         val batchEnd = repository.indexOf("/** Persist the decoded", startIndex = batchStart)
@@ -70,6 +76,31 @@ class RetainedScreenPerformanceTest {
         assertTrue(batch.contains("dao.sessionMotionRows"))
         assertFalse(batch.contains("for (start in starts)"))
         assertTrue(dao.contains("suspend fun sessionMotionRows("))
+    }
+
+    @Test
+    fun sleepHistoryPublicationRejectsCancellationAndDeviceSupersession() {
+        assertTrue(
+            shouldPublishSleepHistorySnapshot(
+                requestDeviceId = "device-a",
+                currentDeviceId = "device-a",
+                isCancelled = false,
+            ),
+        )
+        assertFalse(
+            shouldPublishSleepHistorySnapshot(
+                requestDeviceId = "device-a",
+                currentDeviceId = "device-b",
+                isCancelled = false,
+            ),
+        )
+        assertFalse(
+            shouldPublishSleepHistorySnapshot(
+                requestDeviceId = "device-a",
+                currentDeviceId = "device-a",
+                isCancelled = true,
+            ),
+        )
     }
 
     @Test

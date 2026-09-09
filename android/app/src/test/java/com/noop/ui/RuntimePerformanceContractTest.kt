@@ -124,7 +124,12 @@ class RuntimePerformanceContractTest {
                 .count(),
         )
         assertTrue(restBlock.contains("restDataVersion = restDataVersion"))
-        assertTrue(restBlock.contains("LaunchedEffect(days, activeStrapId, restDataVersion)"))
+        assertTrue(
+            restBlock.contains(
+                "LaunchedEffect(days, activeStrapId, restDataVersion, deferHistoricalQueries)",
+            ),
+        )
+        assertTrue(restBlock.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
         assertTrue(restBlock.contains("viewModel.todayRestCompositeLoadedKey"))
         assertTrue(restBlock.contains("loadTodayRestWithRetry"))
         assertTrue(restBlock.contains("catch (cancelled: CancellationException)"))
@@ -139,6 +144,9 @@ class RuntimePerformanceContractTest {
         assertTrue(today.contains("viewModel.selectedDeviceId.collectAsStateWithLifecycle()"))
         assertTrue(today.contains("viewModel.todayCardsLoadedDeviceId == activeStrapId"))
         assertTrue(today.contains("viewModel.todayFooterLoadedDeviceId == activeStrapId"))
+        assertTrue(today.contains("val deferHistoricalQueries = liveSnap.backfilling"))
+        assertTrue(today.contains("loadTodayBestEffort"))
+        assertTrue(today.contains("currentCoroutineContext().ensureActive()"))
     }
 
     private fun source(relative: String): String {

@@ -16,7 +16,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
     func testSleepHistoryStartsIndependentReadsTogetherAndTimesTheBoundary() throws {
         let text = try source("Strand/Screens/SleepView.swift")
         let start = try XCTUnwrap(
-            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)")"#)
+            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(liveBackfillingFlag)")"#)
         )
         let end = try XCTUnwrap(
             text.range(of: ".sheet(item: $wakeEdit)", range: start.lowerBound..<text.endIndex)
@@ -31,6 +31,41 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("\"sleep.history_load\""))
         XCTAssertTrue(block.contains("\"session_bucket\""))
         XCTAssertTrue(block.contains("\"motion_bucket\""))
+        XCTAssertTrue(block.contains("shouldPublishHistoryLoad("))
+        XCTAssertTrue(block.contains("requestRefreshSeq: requestRefreshSeq"))
+        XCTAssertTrue(block.contains("requestDeviceId: requestDeviceId"))
+        XCTAssertTrue(block.contains("guard !liveBackfillingFlag else { return }"))
+    }
+
+    func testSleepHistoryPublicationRejectsCancellationRefreshAndDeviceSupersession() {
+        XCTAssertTrue(SleepView.shouldPublishHistoryLoad(
+            requestRefreshSeq: 7,
+            currentRefreshSeq: 7,
+            requestDeviceId: "device-a",
+            currentDeviceId: "device-a",
+            isCancelled: false
+        ))
+        XCTAssertFalse(SleepView.shouldPublishHistoryLoad(
+            requestRefreshSeq: 7,
+            currentRefreshSeq: 8,
+            requestDeviceId: "device-a",
+            currentDeviceId: "device-a",
+            isCancelled: false
+        ))
+        XCTAssertFalse(SleepView.shouldPublishHistoryLoad(
+            requestRefreshSeq: 7,
+            currentRefreshSeq: 7,
+            requestDeviceId: "device-a",
+            currentDeviceId: "device-b",
+            isCancelled: false
+        ))
+        XCTAssertFalse(SleepView.shouldPublishHistoryLoad(
+            requestRefreshSeq: 7,
+            currentRefreshSeq: 7,
+            requestDeviceId: "device-a",
+            currentDeviceId: "device-a",
+            isCancelled: true
+        ))
     }
 
     func testWorkoutRecoveryHistoryLoadsOnlyAtItsLazyMount() throws {
