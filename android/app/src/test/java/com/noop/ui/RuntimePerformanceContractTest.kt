@@ -70,6 +70,38 @@ class RuntimePerformanceContractTest {
     }
 
     @Test
+    fun realtimeHrEffectsReleaseTheLeaseOwnedByTheDisposedEffect() {
+        val health = source("com/noop/ui/HealthScreen.kt")
+        val live = source("com/noop/ui/LiveScreen.kt")
+        val hrv = source("com/noop/ui/HrvSnapshotScreen.kt")
+
+        assertRealtimeHrLeaseEffect(
+            source = health,
+            ownershipExpression = "liveTrackingOptedIn",
+            receiver = "vm",
+        )
+        assertRealtimeHrLeaseEffect(
+            source = live,
+            ownershipExpression = "liveTrackingOptedIn",
+            receiver = "viewModel",
+        )
+        assertRealtimeHrLeaseEffect(
+            source = hrv,
+            ownershipExpression = "phase == HrvPhase.Capturing",
+            receiver = "viewModel",
+        )
+
+        val viewModel = source("com/noop/ui/AppViewModel.kt")
+        assertTrue(viewModel.contains("\"realtime_hr.lease\""))
+        assertTrue(viewModel.contains("\"action\" to action"))
+        assertTrue(viewModel.contains("\"transition\" to transition.name.lowercase()"))
+        assertTrue(viewModel.contains("\"lease_count_bucket\""))
+        assertTrue(viewModel.contains("\"foreground\" to realtimeLeasePolicy.isForeground.toString()"))
+        assertTrue(viewModel.contains("\"transport_armed\" to realtimeLeasePolicy.transportArmed.toString()"))
+        assertFalse(viewModel.contains("\"lease_count\" to realtimeLeasePolicy.leaseCount.toString()"))
+    }
+
+    @Test
     fun sharedScreenScaffoldsPauseLiquidClocksDuringDragAndFling() {
         val components = source("com/noop/ui/Components.kt")
         val primitives = source("com/noop/ui/LiquidPrimitives.kt")
@@ -182,6 +214,33 @@ class RuntimePerformanceContractTest {
             File(userDir, "android/app/src/main/java/$relative"),
         ).firstOrNull(File::isFile) ?: error("Could not locate $relative from $userDir")
         return file.readText()
+    }
+
+    private fun assertRealtimeHrLeaseEffect(
+        source: String,
+        ownershipExpression: String,
+        receiver: String,
+    ) {
+        assertTrue(
+            source.contains(
+                "val ownsRealtimeHrLease = $ownershipExpression",
+            ),
+        )
+        assertTrue(
+            source.contains(
+                "if (ownsRealtimeHrLease) $receiver.requestRealtimeHr()",
+            ),
+        )
+        assertTrue(
+            source.contains(
+                "if (ownsRealtimeHrLease) $receiver.releaseRealtimeHr()",
+            ),
+        )
+        assertFalse(
+            source.contains(
+                "onDispose { if ($ownershipExpression)",
+            ),
+        )
     }
 
     private fun projectFile(relative: String): String {

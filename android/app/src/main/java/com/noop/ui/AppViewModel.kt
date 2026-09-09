@@ -2700,7 +2700,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  blanks the stale smoothing window so a resume shows "-" until a fresh sample lands (#46).
      *  Guarded on 0→1 so a second concurrent HR screen doesn't re-clear an already-live window. */
     fun requestRealtimeHr() {
-        if (realtimeLeasePolicy.requestLease() == ForegroundRealtimeLeasePolicy.Transition.ARM) {
+        val transition = realtimeLeasePolicy.requestLease()
+        recordRealtimeLease("request", transition)
+        if (transition == ForegroundRealtimeLeasePolicy.Transition.ARM) {
             resetSmoothing()
             ble.startRealtime()
         }
@@ -2708,7 +2710,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A live-HR screen went away. Stops the realtime stream only when the last one leaves. */
     fun releaseRealtimeHr() {
-        if (realtimeLeasePolicy.releaseLease() == ForegroundRealtimeLeasePolicy.Transition.DISARM) {
+        val transition = realtimeLeasePolicy.releaseLease()
+        recordRealtimeLease("release", transition)
+        if (transition == ForegroundRealtimeLeasePolicy.Transition.DISARM) {
             ble.stopRealtime()
         }
     }
@@ -2717,7 +2721,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  history sync, or change Continuous HRV capture. A still-held explicit lease re-arms once when the
      *  Activity resumes; stale smoothing is cleared before that resumed stream is shown. */
     fun setRealtimeForeground(foreground: Boolean) {
-        when (realtimeLeasePolicy.setForeground(foreground)) {
+        val transition = realtimeLeasePolicy.setForeground(foreground)
+        recordRealtimeLease(if (foreground) "foreground" else "background", transition)
+        when (transition) {
             ForegroundRealtimeLeasePolicy.Transition.ARM -> {
                 resetSmoothing()
                 ble.startRealtime()
@@ -2725,6 +2731,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ForegroundRealtimeLeasePolicy.Transition.DISARM -> ble.stopRealtime()
             ForegroundRealtimeLeasePolicy.Transition.NONE -> Unit
         }
+    }
+
+    private fun recordRealtimeLease(
+        action: String,
+        transition: ForegroundRealtimeLeasePolicy.Transition,
+    ) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "realtime_hr.lease",
+            fields = mapOf(
+                "action" to action,
+                "transition" to transition.name.lowercase(),
+                "lease_count_bucket" to when (realtimeLeasePolicy.leaseCount) {
+                    0 -> "zero"
+                    1 -> "one"
+                    else -> "multiple"
+                },
+                "foreground" to realtimeLeasePolicy.isForeground.toString(),
+                "transport_armed" to realtimeLeasePolicy.transportArmed.toString(),
+            ),
+        )
     }
 
     /** Refresh the battery reading. Reads the standard 0x2A19 characteristic (works on 5/MG, where the

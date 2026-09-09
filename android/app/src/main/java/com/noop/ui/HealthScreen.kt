@@ -2166,9 +2166,10 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
     // This card owns one foreground realtime lease after an explicit Start. Stopping or leaving
     // Health disposes the true-keyed effect and releases only this card's lease.
     DisposableEffect(liveTrackingOptedIn) {
-        if (liveTrackingOptedIn) vm.requestRealtimeHr()
+        val ownsRealtimeHrLease = liveTrackingOptedIn
+        if (ownsRealtimeHrLease) vm.requestRealtimeHr()
         onDispose {
-            if (liveTrackingOptedIn) vm.releaseRealtimeHr()
+            if (ownsRealtimeHrLease) vm.releaseRealtimeHr()
         }
     }
 

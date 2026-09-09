@@ -879,8 +879,9 @@ private fun StrengthExerciseVideo(
         resolved = StrengthVideoCache.resolve(context.applicationContext, source)
         if (resolved == null) onError()
     }
-    DisposableEffect(source.model, requestVersion) {
-        onDispose { playerView?.release() }
+    DisposableEffect(playerView) {
+        val ownedPlayerView = playerView
+        onDispose { ownedPlayerView?.release() }
     }
 
     resolved?.let { video ->
@@ -991,7 +992,8 @@ internal fun StrengthNativeExerciseMedia(
         if (loading) advanceSource()
     }
     DisposableEffect(animation) {
-        onDispose { animation?.stop() }
+        val ownedAnimation = animation
+        onDispose { ownedAnimation?.stop() }
     }
 
     BoxWithConstraints(

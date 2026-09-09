@@ -140,8 +140,9 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     // Stop tap releases it; Activity background is handled centrally so the same visible opted-in
     // session resumes on foreground without ref-count churn.
     DisposableEffect(liveTrackingOptedIn) {
-        if (liveTrackingOptedIn) viewModel.requestRealtimeHr()
-        onDispose { if (liveTrackingOptedIn) viewModel.releaseRealtimeHr() }
+        val ownsRealtimeHrLease = liveTrackingOptedIn
+        if (ownsRealtimeHrLease) viewModel.requestRealtimeHr()
+        onDispose { if (ownsRealtimeHrLease) viewModel.releaseRealtimeHr() }
     }
     LaunchedEffect(live.bonded) {
         if (live.bonded) viewModel.getBattery()

@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `implemented and locally verified; Safety rebase, protected review, and physical-device evidence pending`
+- State: `implemented and completely locally verified after Safety rebase; protected review and physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: pending final Safety rebase
+- End implementation commit: final protected pull-request head
 - Record commit or PR: protected pull request `#12`
 
 ## Objective
@@ -214,6 +214,27 @@ Android where applicable, and leave physical-phone conclusions explicit.
   Workouts recovery, and Apple auto-detection add bounded operation spans and
   categorical result-size buckets. The existing scroll summary reports frame
   gaps without retaining health values or raw events.
+- The post-Safety fresh lifecycle review found three Android realtime-HR
+  surfaces whose `DisposableEffect` cleanup re-read mutable Compose state.
+  Tapping Stop could therefore dispose the old true-keyed effect after the
+  state had already become false and skip its release, leaving the
+  battery-intensive stream leased. Health, Live, and spot-HRV capture now
+  capture immutable effect-local ownership and release exactly the lease that
+  effect acquired.
+- The same ownership review found the strength guide video and GIF cleanup
+  closures could target a newly assigned player or animation instead of the
+  instance being disposed. Both effects now key to and capture the exact owned
+  resource, preventing recomposition from releasing the replacement player or
+  stopping the replacement animation.
+- Android now records the low-frequency `realtime_hr.lease` lifecycle boundary
+  in the user-reviewed app report. It stores only the fixed action and
+  transition, foreground and transport booleans, and a zero/one/multiple lease
+  bucket. It records no heart rate, sensor row, timestamp, device identifier,
+  user content, or raw count.
+- The first post-rebase iOS build used the temporary worktree's stale generated
+  Xcode project and could not resolve Firebase Messaging. Regenerating from the
+  already-correct `project.yml` restored the declared dependency; the complete
+  unsigned iOS graph then built. No generated project file is committed.
 
 ## Data, privacy, and medical truth
 
@@ -244,8 +265,10 @@ Android where applicable, and leave physical-phone conclusions explicit.
   `workouts.recovery_trend_load`, and `workouts.auto_detect_scan` record only
   outcome class, selected scope where already applicable, and bounded result
   counts. The retained Android recovery load distinguishes completed, canceled,
-  superseded, and failed outcomes. No row values, metric values, dates,
-  identifiers, exception messages, or payloads are recorded.
+  superseded, and failed outcomes. `realtime_hr.lease` adds only fixed lifecycle
+  categories, booleans, and a zero/one/multiple ownership bucket. No row values,
+  metric values, dates, identifiers, exception messages, raw counts, or
+  payloads are recorded.
 - Redaction, retention, and high-frequency controls: no sensor values, rows,
   identifiers, payloads, or free-form content; summaries remain throttled and
   local until a user reviews and shares them.
@@ -278,17 +301,24 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Cold-mount history-write gate | The complete changed Apple graph compiled and 25 focused retained-screen/Liquid Today tests passed, including a runtime publisher regression proving only the initial value and true/false edges publish | A screen opened during an already-active history write sees the block synchronously, retains the two-second quiet release, and avoids sensor-rate root invalidation | Physical frame pacing during a real band offload |
 | Final device/cache audit | The macOS app compiled and 27 Liquid Today/retained-screen tests passed with zero failures. Android's production flavor compiled and 16 retained-screen/Health tests passed with zero failures | Current-vs-historical Liquid keys are distinct; Classic Today publishes atomic device-owned snapshots; overnight Sleep Stress waits for the quiet edge; Android Vital detail rejects an old-device result | Physical-phone frame pacing, active BLE/offload behavior, or the affected tester's exact database |
 | Old Android hosted production-shell run | Compilation and packaging completed, but the managed device task was terminated with exit 143 at the workflow's 900-second bound before any instrumentation result was emitted | The old failure was a bounded emulator/test-infrastructure timeout rather than a product assertion | The rebased exact head still requires a completed hosted production-shell run |
-| Post-review policy preflight | `git diff --check`, the 39-record operations validator, `required-ci-gate.py check`, and the terminology ratchet passed. The regenerated pre-rebase snapshot records 17,360 classified occurrences across 1,510 groups with no active-allowlist change. An initial no-subcommand `required-ci-gate.py` invocation returned its expected usage error and was corrected | The review patch remains structurally clean, keeps the required-context policy intact, and does not introduce an unreviewed active legacy term | Final regenerated snapshot and complete policy matrix after the Safety rebase |
+| Final repository policy matrix | `git diff --check`; 49 operations records; terminology and active-use ratchets; 5 conditional, 5 universal, and 10 required CI contexts; private-data guard; i18n diff audit; 1,195-file health-claims scan; 12-metric/3-revision/13-threshold/16-guard calibration parity; 9 release controls; 230-component/3-container legal inventory; distribution provenance; and all 227 Tools tests passed. The final snapshot contains 17,367 classified occurrences across 1,511 groups, zero forbidden mappings, and no active-allowlist expansion | The exact documented source preserves repository release, privacy, localization, terminology, calibration, evidence, and distribution contracts | Hosted exact-head checks and physical-device behavior |
+| Non-gating broad ShellCheck probe | `bash -n Tools/*.sh` passed. A broader `shellcheck Tools/*.sh` command returned existing warnings and rejected two zsh-only visual-QA scripts as unsupported; no shell file changed in this round and this broad command is not a required repository gate | The changed patch introduced no shell syntax surface | Existing repository-wide shell lint debt outside this performance change |
+| Post-rebase lifecycle review | Health, Live, and spot-HRV use immutable effect-local realtime-HR ownership; strength video and GIF disposal capture the exact player/animation; focused production-flavor contracts passed | Stop/navigation and media replacement can no longer skip the owned release or dispose a newly installed resource | Physical transport timing, battery drain, and exercise-media decoder behavior on an OEM phone |
+| Final Android local production lane | 4,175 JVM tests passed with zero failures or errors and 7 skips; APK assembly, lint, and instrumentation-source compilation passed in 2m55s after the bounded lease event was added | The exact Android source compiles, packages, preserves diagnostics privacy contracts, and passes its complete local unit/lint gate | OEM frame pacing, BLE, background survival, and physical battery impact |
+| Final Android API 35 managed device | 53 production-shell tests passed with zero failures and 2 expected private-pilot skips in 44s under the repository's 900-second bound. The first invocation failed before provisioning because the SDK environment was omitted; the corrected rerun and final exact-source rerun both passed | The app shell, migrations, storage reconciliation, body-map multi-selection, switch styling, and report-review surface execute on a managed Android device | Real-band transport, OEM process policy, physical scrolling, haptics, location, or battery |
+| Final Apple local production lanes | The regenerated unsigned iOS graph built; the macOS scheme passed 1,698 tests with zero failures and 1 expected skip; the iPhone 17 Pro simulator production shell passed 35 tests with zero failures and 1 expected skip in 611.6s | The exact Apple source and generated dependency graph compile, the shared suite passes, and production-shell journeys execute on iOS 26.5 simulator | Physical iPhone frame pacing, BLE/background survival, energy, thermal behavior, or signing |
 
 ## Physical device and deployment
 
-- Install/update action: unsigned simulator builds only; no physical app
-  container was changed.
-- Generalized device and OS class: not provided.
+- Install/update action: unsigned iOS simulator build/test and Android API 35
+  managed-device install/test only; no physical app container was changed.
+- Generalized device and OS class: iPhone 17 Pro simulator on iOS 26.5 and the
+  repository's Pixel 2 API 35 managed virtual device.
 - Data-preservation result: the simulator database was replaced only with
   deterministic synthetic history and the original database was restored with
   integrity `ok`; no physical app container was touched.
-- BLE/background/haptic/battery scenarios exercised: not run.
+- BLE/background/haptic/battery scenarios exercised: not run; simulator shell
+  and persistence journeys are not hardware evidence.
 - Unrun hardware gates: large existing database, active collection and
   backfill, low-storage, thermal, memory-pressure, background, and in-place
   upgrade checks on representative Apple and Android phones.
@@ -297,13 +327,14 @@ Android where applicable, and leave physical-phone conclusions explicit.
 
 - Changed paths: Apple Today, Health, Sleep, Stress, Workouts, repository/cache,
   diagnostics, and tests; Android Today, Health, Sleep, Stress, Workouts,
-  repository/Room, liquid scaffolds, diagnostics, and tests; plus this
-  operations record.
-- Commits: initial implementation `80729acb`; final retained-screen,
-  cancellation, device-ownership, diagnostics, tests, and evidence fix
-  `1def2905`; record follow-up is the pull-request head.
-- Branch and remote state: pushed to
-  `codex/large-data-scroll-lag-20260909`; protected pull request `#12` is open.
+  repository/Room, liquid scaffolds, realtime-HR ownership, strength-media
+  ownership, diagnostics, and tests; plus this operations record.
+- Commits: the implementation chain was rebased onto Safety `main` and ends at
+  `0237bdef` before this final lifecycle/observability closeout; the closeout is
+  the final protected pull-request head.
+- Branch and remote state: local rebased branch
+  `codex/large-data-scroll-lag-20260909`; protected pull request `#12` remains
+  open and requires a force-with-lease update to replace its pre-rebase head.
 - Repository visibility verified: not repeated.
 - Version/build impact: no version change.
 - Release or distribution impact: none until reviewed and merged.
@@ -326,13 +357,13 @@ Android where applicable, and leave physical-phone conclusions explicit.
 - The 1.32 GB temporary restore peak remains too high to treat a low-storage
   phone as proven; representative in-place restore and low-storage tests remain
   release gates.
-- The performance branch must be rebased after the preceding managed Safety
-  pull request merges; protected checks and review apply to that final exact
-  head rather than this pre-rebase snapshot.
+- Hosted checks and exact-head review still apply to the final pushed commit.
+- The local API 35 and iOS simulator results do not replace the representative
+  physical-phone matrix or the affected user's reviewed report.
 
 ## Next round
 
-1. Complete protected review and merge.
+1. Push the rebased exact head, complete protected review/checks, and merge.
 2. Collect one user-reviewed shake report from an affected physical phone and
    run the large existing-database, active-backfill, low-storage, thermal,
    memory-pressure, and in-place-upgrade device matrix.

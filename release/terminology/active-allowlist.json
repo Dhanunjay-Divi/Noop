@@ -1775,12 +1775,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 68,
+      "occurrenceCount": 67,
       "owner": "project team",
       "path": "Strand/Screens/TodayView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "217eb72ddf9916c3c9a474eb159ae9d172fdf56403c2a120b91ab9648a5d6c7f"
+      "sha256": "2b6191b9695b57504e17a67a04f05a5e2c294355f115ff2fd0e2ab8f25084428"
     },
     {
       "category": "customer",
