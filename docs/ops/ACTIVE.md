@@ -18,6 +18,21 @@ Last updated: **2026-09-09**
 
 ## Active work
 
+The latest managed Safety lock and retention closeout is implemented and
+completely locally verified on protected pull request `#10`. Contact request
+creation/removal and profile/incident expiry now follow one deterministic lock
+hierarchy; broad erasure cancellation cannot reactivate an account while
+another broad erasure is live; and migration `032` bounds terminal
+contact-request churn with an account-scoped rolling ledger that survives
+profile recreation. The complete server collection contains 423 cases: 422
+passed and only the explicit real-provider Twilio staging case was skipped.
+All local release, terminology, privacy, claims, calibration, localization,
+legal, and operations controls pass. Replacement exact-head review, hosted
+checks, normal protected merge, physical providers/devices, and external
+launch gates remain. No public traffic, real paging, or real health data was
+used. Evidence is recorded in
+[Managed Safety lock and retention closeout](rounds/2026-09-09-managed-safety-lock-retention-closeout.md).
+
 The latest exact-head managed Safety erasure closeout is implemented and
 completely locally verified on protected pull request `#10`. Both Cloud Run
 services wait for current and previous push-token secret IAM grants; account

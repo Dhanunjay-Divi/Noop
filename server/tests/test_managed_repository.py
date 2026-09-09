@@ -43,6 +43,23 @@ def test_erasure_request_preserves_job_before_account_lock_order() -> None:
     account_lock = source.index("FROM managed_accounts", job_lock)
     assert advisory < job_lock < account_lock
 
+    cancel_source = inspect.getsource(PostgresManagedRepository.cancel_erasure)
+    cancel_advisory = cancel_source.index("noop-managed-erasure-account:")
+    cancel_job_lock = cancel_source.index(
+        "FROM managed_erasure_jobs",
+        cancel_advisory,
+    )
+    cancel_account_lock = cancel_source.index(
+        "FROM managed_accounts",
+        cancel_job_lock,
+    )
+    assert cancel_advisory < cancel_job_lock < cancel_account_lock
+
+    claim_source = inspect.getsource(PostgresManagedRepository.claim_erasure_deletions)
+    assert "JOIN managed_accounts account" in claim_source
+    assert "account.status = 'erasure_pending'" in claim_source
+    assert "account.status = 'active'" in claim_source
+
 
 async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:
     for _ in range(500):
@@ -822,6 +839,248 @@ async def test_managed_repository_enrollment_chunk_retry_and_tenant_isolation() 
                 installation_id=first_installation,
                 reservation=oversized,
             )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_erasure_cancel_keeps_account_blocked_while_another_job_is_live() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"erasure-cancel-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        first = await repository.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="a" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(days=1),
+        )
+
+        with pytest.raises(ManagedForbiddenError, match="not active"):
+            await repository.request_erasure(
+                principal=principal,
+                request_id=uuid4(),
+                scope="all_managed_data",
+                confirmation_sha256="b" * 64,
+                identity_deletion_ticket=None,
+                cooling_off=timedelta(days=1),
+            )
+
+        first_job_id = UUID(first["erasure_job_id"])
+        second_job_id = uuid4()
+        pool = primary._require_pool()
+        await pool.execute(
+            """
+            INSERT INTO managed_erasure_jobs (
+                erasure_job_id,
+                account_id,
+                request_id,
+                requested_by_identity_id,
+                scope,
+                status,
+                tenant_replay_hash,
+                confirmation_sha256,
+                identity_deletion_ticket,
+                requested_at,
+                not_before,
+                verification_expires_at
+            )
+            SELECT $2,
+                   account_id,
+                   $3,
+                   requested_by_identity_id,
+                   scope,
+                   'cooling_off',
+                   tenant_replay_hash,
+                   $4,
+                   NULL,
+                   requested_at,
+                   not_before,
+                   verification_expires_at
+            FROM managed_erasure_jobs
+            WHERE erasure_job_id = $1
+            """,
+            first_job_id,
+            second_job_id,
+            uuid4(),
+            "c" * 64,
+        )
+
+        await repository.cancel_erasure(
+            principal=principal,
+            erasure_job_id=first_job_id,
+        )
+        assert (
+            await pool.fetchval(
+                "SELECT status FROM managed_accounts WHERE account_id = $1",
+                principal.account_id,
+            )
+            == "erasure_pending"
+        )
+        await repository.cancel_erasure(
+            principal=principal,
+            erasure_job_id=second_job_id,
+        )
+        assert (
+            await pool.fetchval(
+                "SELECT status FROM managed_accounts WHERE account_id = $1",
+                principal.account_id,
+            )
+            == "active"
+        )
+
+        raw = await repository.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="raw_chunks",
+            confirmation_sha256="d" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(0),
+        )
+        await pool.execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'suspended',
+                suspended_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            principal.account_id,
+        )
+        claimed = await repository.claim_erasure_deletions(
+            now=await repository.coordination_now(),
+            batch_size=10,
+        )
+        assert claimed == []
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_erasure_jobs
+                WHERE erasure_job_id = $1
+                """,
+                UUID(raw["erasure_job_id"]),
+            )
+            == "cooling_off"
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for PostgreSQL integration tests",
+)
+@pytest.mark.asyncio
+async def test_erasure_request_and_cancel_serialize_on_account_lock() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        repository = _managed(primary)
+        now = datetime.now(UTC)
+        claims = _claims(f"erasure-race-{uuid4()}", now)
+        installation_id = str(uuid4())
+        await repository.enroll(
+            claims=claims,
+            enrollment=_enrollment(installation_id, uuid4()),
+        )
+        principal = await repository.principal_for_identity(claims)
+        first = await repository.request_erasure(
+            principal=principal,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="a" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(days=1),
+        )
+        first_job_id = UUID(first["erasure_job_id"])
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
+                cancel_task = asyncio.create_task(
+                    repository.cancel_erasure(
+                        principal=principal,
+                        erasure_job_id=first_job_id,
+                    )
+                )
+                await _wait_for_lock_waiters(pool, minimum=1)
+                request_task = asyncio.create_task(
+                    repository.request_erasure(
+                        principal=principal,
+                        request_id=uuid4(),
+                        scope="all_managed_data",
+                        confirmation_sha256="b" * 64,
+                        identity_deletion_ticket=None,
+                        cooling_off=timedelta(days=1),
+                    )
+                )
+                await _wait_for_lock_waiters(pool, minimum=2)
+
+        canceled, requested = await asyncio.wait_for(
+            asyncio.gather(
+                cancel_task,
+                request_task,
+                return_exceptions=True,
+            ),
+            timeout=5,
+        )
+        assert isinstance(canceled, dict)
+        assert canceled["status"] == "canceled"
+        assert isinstance(requested, (dict, ManagedForbiddenError))
+
+        account_status = await pool.fetchval(
+            "SELECT status FROM managed_accounts WHERE account_id = $1",
+            principal.account_id,
+        )
+        live_count = await pool.fetchval(
+            """
+            SELECT count(*)
+            FROM managed_erasure_jobs
+            WHERE account_id = $1
+              AND scope IN ('all_managed_data', 'account')
+              AND status IN (
+                  'queued',
+                  'cooling_off',
+                  'running',
+                  'verifying'
+              )
+            """,
+            principal.account_id,
+        )
+        assert (account_status, int(live_count)) in {
+            ("active", 0),
+            ("erasure_pending", 1),
+        }
     finally:
         await primary.shutdown()
 

@@ -35,6 +35,7 @@ from app.managed_safety_repository import (
     SAFETY_MAX_INVITES_PER_DAY,
     SAFETY_MAX_PENDING_REQUESTS,
     SAFETY_MAX_RECEIVED_PENDING_REQUESTS,
+    SAFETY_MAX_REQUESTS_PER_DAY,
     SAFETY_REQUEST_LIST_LIMIT,
     ManagedSafetyPushService,
     PostgresManagedSafetyRepository,
@@ -226,6 +227,7 @@ async def _accept_contact(
 
 
 def test_pending_request_quotas_fit_the_complete_request_list() -> None:
+    assert SAFETY_MAX_REQUESTS_PER_DAY == 50
     assert (
         SAFETY_MAX_PENDING_REQUESTS + SAFETY_MAX_RECEIVED_PENDING_REQUESTS
         == SAFETY_REQUEST_LIST_LIMIT
@@ -234,21 +236,60 @@ def test_pending_request_quotas_fit_the_complete_request_list() -> None:
 
 def test_safety_mutation_lock_order_contracts() -> None:
     remove_source = inspect.getsource(PostgresManagedSafetyRepository.remove_contact)
+    pair_lock = remove_source.index("_lock_pair")
     profile_lock = remove_source.index("_lock_profiles_and_accounts")
     incident_lock = remove_source.index(
         "_lock_active_managed_safety_incidents_for_profile_pair"
     )
     contact_lock = remove_source.index("FOR UPDATE", incident_lock)
-    assert profile_lock < incident_lock < contact_lock
+    assert pair_lock < profile_lock < incident_lock < contact_lock
 
     incident_source = inspect.getsource(PostgresManagedSafetyRepository.create_incident)
     assert "for_update=True" not in incident_source
+    expire = incident_source.index("_expire_before_profile_operation")
     all_profile_lock = incident_source.index(
         'profile_ids=(owner["profile_id"], *contact_snapshot_ids)'
     )
-    expire = incident_source.index("await self._expire", all_profile_lock)
-    contact_row_lock = incident_source.index("FOR UPDATE OF contact", expire)
-    assert all_profile_lock < expire < contact_row_lock
+    targeted_incident_expiry = incident_source.index(
+        "await self._expire_incidents",
+        all_profile_lock,
+    )
+    contact_row_lock = incident_source.index(
+        "FOR UPDATE OF contact",
+        targeted_incident_expiry,
+    )
+    assert expire < all_profile_lock < targeted_incident_expiry < contact_row_lock
+
+    request_source = inspect.getsource(PostgresManagedSafetyRepository._create_request)
+    request_profile_lock = request_source.index("_lock_active_profiles_and_accounts")
+    targeted_request_expiry = request_source.index(
+        "UPDATE managed_safety_requests",
+        request_profile_lock,
+    )
+    request_replay = request_source.index(
+        "FROM managed_safety_request_quota_events",
+        targeted_request_expiry,
+    )
+    assert request_profile_lock < targeted_request_expiry < request_replay
+
+    profile_operations = (
+        PostgresManagedSafetyRepository.create_invite,
+        PostgresManagedSafetyRepository.create_request,
+        PostgresManagedSafetyRepository.redeem_invite,
+        PostgresManagedSafetyRepository.list_requests,
+        PostgresManagedSafetyRepository.decide_request,
+        PostgresManagedSafetyRepository.create_incident,
+        PostgresManagedSafetyRepository.list_incidents,
+        PostgresManagedSafetyRepository.get_incident,
+        PostgresManagedSafetyRepository.update_location,
+        PostgresManagedSafetyRepository.respond,
+        PostgresManagedSafetyRepository.end_incident,
+        PostgresManagedSafetyRepository.claim_push_deliveries,
+    )
+    for operation in profile_operations:
+        source = inspect.getsource(operation)
+        assert "_expire_before_profile_operation" in source
+        assert "await self._expire(connection" not in source
 
     completion_source = inspect.getsource(
         PostgresManagedSafetyRepository.complete_push_delivery
@@ -533,6 +574,128 @@ async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
             request=ManagedSafetyInviteCreate(
                 request_id=uuid4(),
                 capability="noopsafety_" + ("x" * 43),
+            ),
+        )
+        assert after_window["duplicate"] is False
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_request_churn_has_account_scoped_daily_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        managed_safety_repository,
+        "SAFETY_MAX_REQUESTS_PER_DAY",
+        2,
+    )
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"request-quota-owner-{uuid4()}")
+        contact = await _principal(
+            primary,
+            label=f"request-quota-contact-{uuid4()}",
+        )
+        await _profile(managed, owner, display_name="Owner")
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Contact",
+        )
+
+        final_request_id = uuid4()
+        final_request = None
+        for index in range(2):
+            request_id = final_request_id if index == 1 else uuid4()
+            created = await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=request_id,
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+            await safety.decide_request(
+                principal=contact,
+                request_id=UUID(created["request_id"]),
+                decision="accept",
+            )
+            await safety.remove_contact(
+                principal=owner,
+                other_profile_id=UUID(contact_profile["profile_id"]),
+            )
+            final_request = created
+
+        assert final_request is not None
+        replay = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=final_request_id,
+                noop_id=contact_profile["noop_id"],
+            ),
+        )
+        assert replay["duplicate"] is True
+        assert replay["request_id"] == final_request["request_id"]
+
+        with pytest.raises(ManagedRateLimitError) as limited:
+            await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=uuid4(),
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+        assert 1 <= limited.value.retry_after_seconds <= 24 * 60 * 60
+
+        await managed.delete_social_profile(principal=owner)
+        await _profile(managed, owner, display_name="Owner Again")
+
+        with pytest.raises(ManagedConflictError, match="already consumed"):
+            await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=final_request_id,
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+        with pytest.raises(ManagedRateLimitError):
+            await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=uuid4(),
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_request_quota_events
+            SET created_at = created_at - interval '25 hours'
+            WHERE owner_account_id = $1
+            """,
+            owner.account_id,
+        )
+        after_window = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=contact_profile["noop_id"],
             ),
         )
         assert after_window["duplicate"] is False
@@ -1237,6 +1400,89 @@ async def test_safety_quota_purges_only_after_linked_incident() -> None:
     ),
 )
 @pytest.mark.asyncio
+async def test_safety_request_quota_purges_only_after_linked_request() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(
+            primary,
+            label=f"request-purge-owner-{uuid4()}",
+        )
+        contact = await _principal(
+            primary,
+            label=f"request-purge-contact-{uuid4()}",
+        )
+        await _profile(managed, owner, display_name="Owner")
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Contact",
+        )
+        request = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=contact_profile["noop_id"],
+            ),
+        )
+        request_id = UUID(request["request_id"])
+        await safety.decide_request(
+            principal=contact,
+            request_id=request_id,
+            decision="decline",
+        )
+
+        pool = primary._require_pool()
+        now = datetime.now(UTC)
+        await pool.execute(
+            """
+            UPDATE managed_safety_request_quota_events
+            SET created_at = $2::timestamptz - interval '61 days',
+                purge_after = $2::timestamptz - interval '1 day'
+            WHERE safety_request_id = $1
+            """,
+            request_id,
+            now,
+        )
+        first_purge = await safety.purge_expired_rows(now=now, batch_size=10)
+        assert first_purge["managed_safety_requests_deleted"] == 0
+        assert first_purge["managed_safety_request_quota_events_deleted"] == 0
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_requests
+            SET created_at = $2::timestamptz - interval '61 days',
+                decided_at = $2::timestamptz - interval '60 days',
+                expires_at = $2::timestamptz - interval '31 days',
+                purge_after = $2::timestamptz - interval '1 day'
+            WHERE request_id = $1
+            """,
+            request_id,
+            now,
+        )
+        second_purge = await safety.purge_expired_rows(now=now, batch_size=10)
+        assert second_purge["managed_safety_requests_deleted"] == 1
+        assert second_purge["managed_safety_request_quota_events_deleted"] == 1
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
 async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
@@ -1649,6 +1895,82 @@ async def test_remove_contact_and_profile_delete_do_not_deadlock() -> None:
     ),
 )
 @pytest.mark.asyncio
+async def test_remove_contact_and_create_request_do_not_deadlock() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(
+            primary,
+            label=f"remove-request-owner-{uuid4()}",
+        )
+        contact = await _principal(
+            primary,
+            label=f"remove-request-contact-{uuid4()}",
+        )
+        await _profile(managed, owner, display_name="Owner")
+        contact_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=contact,
+            contact_name="Contact",
+        )
+
+        profiles_locked = asyncio.Event()
+        continue_remove = asyncio.Event()
+        original_lock = safety._lock_profiles_and_accounts
+
+        async def paused_lock(connection, *, profile_ids):
+            rows = await original_lock(connection, profile_ids=profile_ids)
+            profiles_locked.set()
+            await continue_remove.wait()
+            return rows
+
+        safety._lock_profiles_and_accounts = paused_lock
+        remove_task = asyncio.create_task(
+            safety.remove_contact(
+                principal=owner,
+                other_profile_id=UUID(contact_profile["profile_id"]),
+            )
+        )
+        await asyncio.wait_for(profiles_locked.wait(), timeout=2)
+        create_task = asyncio.create_task(
+            safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=uuid4(),
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+        )
+        await _wait_for_database_waiter(primary._require_pool())
+        continue_remove.set()
+        _, created = await asyncio.wait_for(
+            asyncio.gather(remove_task, create_task),
+            timeout=5,
+        )
+        assert created["status"] == "pending"
+        assert created["duplicate"] is False
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
 async def test_invite_revoke_is_idempotent_after_redemption() -> None:
     primary = PostgresRepository(
         DATABASE_URL or "",
@@ -1897,14 +2219,15 @@ async def test_invite_redeem_and_owner_profile_delete_do_not_deadlock() -> None:
 
         profile_locks_held = asyncio.Event()
         continue_redeem = asyncio.Event()
-        original_expire = safety._expire
+        original_lock = safety._lock_active_profiles_and_accounts
 
-        async def paused_expire(connection, now):
+        async def paused_lock(connection, *, profile_ids):
+            rows = await original_lock(connection, profile_ids=profile_ids)
             profile_locks_held.set()
             await continue_redeem.wait()
-            await original_expire(connection, now)
+            return rows
 
-        safety._expire = paused_expire
+        safety._lock_active_profiles_and_accounts = paused_lock
         redeem_task = asyncio.create_task(
             safety.redeem_invite(
                 principal=contact,
@@ -3328,6 +3651,142 @@ async def test_managed_safety_read_expiry_is_always_transactional() -> None:
             )
 
         assert transaction_checks == [True, True, True]
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_targeted_expiry_preserves_request_and_incident_uniqueness() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(
+            primary,
+            label=f"targeted-expiry-owner-{uuid4()}",
+        )
+        first = await _principal(
+            primary,
+            label=f"targeted-expiry-first-{uuid4()}",
+        )
+        second = await _principal(
+            primary,
+            label=f"targeted-expiry-second-{uuid4()}",
+        )
+        await _profile(managed, owner, display_name="Owner")
+        first_profile = await _profile(managed, first, display_name="First")
+
+        stale_request = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=first_profile["noop_id"],
+            ),
+        )
+        stale_request_id = UUID(stale_request["request_id"])
+        pool = primary._require_pool()
+        now = datetime.now(UTC)
+        await pool.execute(
+            """
+            UPDATE managed_safety_requests
+            SET created_at = $2::timestamptz - interval '61 days',
+                expires_at = $2::timestamptz - interval '31 days',
+                purge_after = $2::timestamptz + interval '1 day'
+            WHERE request_id = $1
+            """,
+            stale_request_id,
+            now,
+        )
+
+        async def skip_global_expiry() -> None:
+            return None
+
+        safety._expire_before_profile_operation = skip_global_expiry
+        replacement = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=first_profile["noop_id"],
+            ),
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_safety_requests
+                WHERE request_id = $1
+                """,
+                stale_request_id,
+            )
+            == "expired"
+        )
+        await safety.decide_request(
+            principal=first,
+            request_id=UUID(replacement["request_id"]),
+            decision="accept",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+
+        stale_incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        stale_incident_id = UUID(stale_incident["incident_id"])
+        await pool.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET created_at = $2::timestamptz - interval '9 hours',
+                expires_at = $2::timestamptz - interval '1 hour',
+                purge_after = $2::timestamptz + interval '31 days'
+            WHERE incident_id = $1
+            """,
+            stale_incident_id,
+            now,
+        )
+        replacement_incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        assert replacement_incident["incident_id"] != stale_incident["incident_id"]
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_safety_incidents
+                WHERE incident_id = $1
+                """,
+                stale_incident_id,
+            )
+            == "expired"
+        )
     finally:
         await primary.shutdown()
 

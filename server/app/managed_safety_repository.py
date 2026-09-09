@@ -40,6 +40,7 @@ SAFETY_MAX_OWNERS_PER_CONTACT = 20
 SAFETY_MIN_CONTACTS = 2
 SAFETY_MAX_ACTIVE_INVITES = 10
 SAFETY_MAX_INVITES_PER_DAY = 50
+SAFETY_MAX_REQUESTS_PER_DAY = 50
 SAFETY_MAX_PENDING_REQUESTS = 10
 SAFETY_REQUEST_LIST_LIMIT = 50
 # A profile can also own at most SAFETY_MAX_PENDING_REQUESTS outgoing rows. Keeping
@@ -139,7 +140,9 @@ class PostgresManagedSafetyRepository:
     ) -> list[Any]:
         return await connection.fetch(
             """
-            SELECT profile.profile_id, profile.display_name
+            SELECT profile.profile_id,
+                   profile.account_id,
+                   profile.display_name
             FROM managed_social_profiles profile
             JOIN managed_accounts account
               ON account.account_id = profile.account_id
@@ -172,32 +175,23 @@ class PostgresManagedSafetyRepository:
         )
 
     @staticmethod
-    async def _expire(connection: Any, now: datetime) -> None:
-        await connection.execute(
-            """
-            UPDATE managed_safety_invites
-            SET status = 'expired'
-            WHERE status = 'active' AND expires_at <= $1
-            """,
-            now,
-        )
-        await connection.execute(
-            """
-            UPDATE managed_safety_requests
-            SET status = 'expired', decided_at = $1
-            WHERE status = 'pending' AND expires_at <= $1
-            """,
-            now,
-        )
+    async def _expire_incidents(
+        connection: Any,
+        *,
+        now: datetime,
+        owner_profile_id: UUID | None = None,
+    ) -> None:
         expired = await connection.fetch(
             """
             UPDATE managed_safety_incidents
             SET status = 'expired', ended_at = $1
             WHERE status IN ('open', 'acknowledged')
               AND expires_at <= $1
+              AND ($2::uuid IS NULL OR owner_profile_id = $2)
             RETURNING incident_id
             """,
             now,
+            owner_profile_id,
         )
         if expired:
             incident_ids = [row["incident_id"] for row in expired]
@@ -226,6 +220,28 @@ class PostgresManagedSafetyRepository:
                 incident_ids,
                 now,
             )
+
+    async def _expire(self, connection: Any, now: datetime) -> None:
+        await connection.execute(
+            """
+            UPDATE managed_safety_invites
+            SET status = 'expired'
+            WHERE status = 'active' AND expires_at <= $1
+            """,
+            now,
+        )
+        await connection.execute(
+            """
+            UPDATE managed_safety_requests
+            SET status = 'expired', decided_at = $1
+            WHERE status = 'pending' AND expires_at <= $1
+            """,
+            now,
+        )
+        await self._expire_incidents(
+            connection,
+            now=now,
+        )
         await connection.execute(
             """
             UPDATE managed_safety_push_deliveries
@@ -240,6 +256,12 @@ class PostgresManagedSafetyRepository:
             """,
             now,
         )
+
+    async def _expire_before_profile_operation(self) -> None:
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await self._expire(connection, now)
 
     @staticmethod
     def _public_request(row: Any, caller_profile_id: UUID) -> dict[str, Any]:
@@ -543,6 +565,7 @@ class PostgresManagedSafetyRepository:
         request: ManagedSafetyInviteCreate,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         capability = request.capability.get_secret_value()
         capability_hash = hashlib.sha256(capability.encode("ascii")).hexdigest()
         async with self._pool().acquire() as connection:
@@ -557,7 +580,6 @@ class PostgresManagedSafetyRepository:
                     f"noop-managed-safety-invite:{owner['account_id']}",
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 replay = await connection.fetchrow(
                     """
                     SELECT quota.*,
@@ -732,7 +754,6 @@ class PostgresManagedSafetyRepository:
         client_request_id: UUID,
         source: str,
         invite_id: UUID | None,
-        now: datetime,
     ) -> dict[str, Any]:
         if owner_profile_id == contact_profile_id:
             raise ManagedConflictError("a profile cannot be its own Safety contact")
@@ -747,28 +768,84 @@ class PostgresManagedSafetyRepository:
         )
         if len(profiles) != 2:
             raise ManagedNotFoundError("NOOP profile was not found")
-        names = {row["profile_id"]: str(row["display_name"]) for row in profiles}
-        replay = await connection.fetchrow(
+        now = await connection.fetchval("SELECT clock_timestamp()")
+        await connection.execute(
             """
-            SELECT request.*, contact.display_name AS other_display_name
-            FROM managed_safety_requests request
-            JOIN managed_social_profiles contact
-              ON contact.profile_id = request.contact_profile_id
-            WHERE request.owner_profile_id = $1
-              AND request.client_request_id = $2
+            UPDATE managed_safety_requests
+            SET status = 'expired', decided_at = $3
+            WHERE owner_profile_id = $1
+              AND contact_profile_id = $2
+              AND status = 'pending'
+              AND expires_at <= $3
             """,
             owner_profile_id,
+            contact_profile_id,
+            now,
+        )
+        profiles_by_id = {row["profile_id"]: row for row in profiles}
+        names = {
+            profile_id: str(row["display_name"])
+            for profile_id, row in profiles_by_id.items()
+        }
+        owner_account_id = profiles_by_id[owner_profile_id]["account_id"]
+        contact_account_id = profiles_by_id[contact_profile_id]["account_id"]
+        replay = await connection.fetchrow(
+            """
+            SELECT quota.safety_request_id AS quota_request_id,
+                   quota.contact_account_id AS quota_contact_account_id,
+                   quota.source AS quota_source,
+                   request.*,
+                   contact.display_name AS other_display_name
+            FROM managed_safety_request_quota_events quota
+            LEFT JOIN managed_safety_requests request
+              ON request.request_id = quota.safety_request_id
+            LEFT JOIN managed_social_profiles contact
+              ON contact.profile_id = request.contact_profile_id
+            WHERE quota.owner_account_id = $1
+              AND quota.client_request_id = $2
+            FOR UPDATE OF quota
+            """,
+            owner_account_id,
             client_request_id,
         )
         if replay is not None:
             if (
-                replay["contact_profile_id"] != contact_profile_id
-                or replay["source"] != source
+                replay["quota_contact_account_id"] != contact_account_id
+                or replay["quota_source"] != source
             ):
                 raise ManagedConflictError("Safety contact request id was reused")
+            if (
+                replay["request_id"] is None
+                or replay["owner_profile_id"] != owner_profile_id
+                or replay["contact_profile_id"] != contact_profile_id
+                or replay["other_display_name"] is None
+            ):
+                raise ManagedConflictError(
+                    "Safety contact request id was already consumed"
+                )
             result = self._public_request(replay, owner_profile_id)
             result["duplicate"] = True
             return result
+        quota = await connection.fetchrow(
+            """
+            SELECT count(*) AS recent_count,
+                   min(created_at) AS recent_oldest
+            FROM managed_safety_request_quota_events
+            WHERE owner_account_id = $1
+              AND created_at > $2::timestamptz - interval '24 hours'
+            """,
+            owner_account_id,
+            now,
+        )
+        if int(quota["recent_count"]) >= SAFETY_MAX_REQUESTS_PER_DAY:
+            retry_at = quota["recent_oldest"] + timedelta(days=1)
+            raise ManagedRateLimitError(
+                "Safety contact request limit has been reached",
+                retry_after_seconds=max(
+                    1,
+                    math.ceil((retry_at - now).total_seconds()),
+                ),
+            )
         blocked = await connection.fetchval(
             """
             SELECT EXISTS (
@@ -885,6 +962,26 @@ class PostgresManagedSafetyRepository:
             now,
             names[contact_profile_id],
         )
+        await connection.execute(
+            """
+            INSERT INTO managed_safety_request_quota_events (
+                owner_account_id,
+                client_request_id,
+                safety_request_id,
+                contact_account_id,
+                source,
+                created_at,
+                purge_after
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            owner_account_id,
+            client_request_id,
+            row["request_id"],
+            contact_account_id,
+            source,
+            now,
+            row["purge_after"],
+        )
         result = self._public_request(row, owner_profile_id)
         result["duplicate"] = False
         return result
@@ -896,6 +993,7 @@ class PostgresManagedSafetyRepository:
         request: ManagedSafetyRequestCreate,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
@@ -918,8 +1016,6 @@ class PostgresManagedSafetyRepository:
                 )
                 if contact is None:
                     raise ManagedNotFoundError("NOOP ID was not found")
-                now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 return await self._create_request(
                     connection,
                     owner_profile_id=owner["profile_id"],
@@ -927,7 +1023,6 @@ class PostgresManagedSafetyRepository:
                     client_request_id=request.request_id,
                     source="noop_id",
                     invite_id=None,
-                    now=now,
                 )
 
     async def redeem_invite(
@@ -938,6 +1033,7 @@ class PostgresManagedSafetyRepository:
         capability: str,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         capability_hash = hashlib.sha256(capability.encode("ascii")).hexdigest()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
@@ -987,7 +1083,6 @@ class PostgresManagedSafetyRepository:
                 if len(profiles) != 2:
                     raise ManagedNotFoundError("Safety invitation was not found")
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 invite = await connection.fetchrow(
                     """
                     SELECT *
@@ -1035,7 +1130,6 @@ class PostgresManagedSafetyRepository:
                     client_request_id=request_id,
                     source="invite",
                     invite_id=invite["invite_id"],
-                    now=now,
                 )
                 await connection.execute(
                     """
@@ -1059,6 +1153,7 @@ class PostgresManagedSafetyRepository:
         principal: ManagedPrincipal,
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 profile = await self._profile(
@@ -1066,7 +1161,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 rows = await connection.fetch(
                     """
                     SELECT request.*,
@@ -1101,6 +1195,7 @@ class PostgresManagedSafetyRepository:
         decision: str,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         target_status = "accepted" if decision == "accept" else "declined"
         async with self._pool().acquire() as connection:
             async with connection.transaction():
@@ -1138,7 +1233,6 @@ class PostgresManagedSafetyRepository:
                             "Safety contact request can no longer be accepted"
                         )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 request = await connection.fetchrow(
                     """
                     SELECT request.*, owner.display_name AS other_display_name
@@ -1306,10 +1400,6 @@ class PostgresManagedSafetyRepository:
                     connection,
                     account_id=principal.account_id,
                 )
-                await self._lock_profiles_and_accounts(
-                    connection,
-                    profile_ids=(profile["profile_id"], other_profile_id),
-                )
                 directed_pairs = sorted(
                     (
                         (profile["profile_id"], other_profile_id),
@@ -1323,6 +1413,10 @@ class PostgresManagedSafetyRepository:
                         owner_profile_id=owner_profile_id,
                         contact_profile_id=contact_profile_id,
                     )
+                await self._lock_profiles_and_accounts(
+                    connection,
+                    profile_ids=(profile["profile_id"], other_profile_id),
+                )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 active_incident_ids = (
                     await _lock_active_managed_safety_incidents_for_profile_pair(
@@ -1446,6 +1540,7 @@ class PostgresManagedSafetyRepository:
         request: ManagedSafetyIncidentCreate,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
@@ -1540,7 +1635,12 @@ class PostgresManagedSafetyRepository:
                         "Safety profile changed while paging contacts"
                     )
                 owner = locked_owner
-                await self._expire(connection, now)
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await self._expire_incidents(
+                    connection,
+                    now=now,
+                    owner_profile_id=owner["profile_id"],
+                )
                 active = await connection.fetchval(
                     """
                     SELECT EXISTS (
@@ -1929,6 +2029,7 @@ class PostgresManagedSafetyRepository:
         principal: ManagedPrincipal,
     ) -> list[dict[str, Any]]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 profile = await self._profile(
@@ -1936,7 +2037,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 rows = await connection.fetch(
                     """
                     SELECT incident.incident_id
@@ -1979,6 +2079,7 @@ class PostgresManagedSafetyRepository:
         incident_id: UUID,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 profile = await self._profile(
@@ -1986,7 +2087,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 return await self._incident_detail(
                     connection,
                     caller_profile_id=profile["profile_id"],
@@ -2002,6 +2102,7 @@ class PostgresManagedSafetyRepository:
         update: ManagedSafetyLocationUpdate,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
@@ -2009,7 +2110,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 incident = await connection.fetchrow(
                     """
                     SELECT *
@@ -2121,6 +2221,7 @@ class PostgresManagedSafetyRepository:
         decision: str,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 contact = await self._profile(
@@ -2128,7 +2229,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 incident = await connection.fetchrow(
                     """
                     SELECT *
@@ -2214,6 +2314,7 @@ class PostgresManagedSafetyRepository:
         outcome: str,
     ) -> dict[str, Any]:
         self._require_active(principal)
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
@@ -2221,7 +2322,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 incident = await connection.fetchrow(
                     """
                     SELECT *
@@ -2300,6 +2400,7 @@ class PostgresManagedSafetyRepository:
         self._require_active(principal)
         if not 1 <= limit <= 20:
             raise ValueError("push delivery claim limit must be 1 through 20")
+        await self._expire_before_profile_operation()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 owner = await self._profile(
@@ -2307,7 +2408,6 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 incident = await connection.fetchrow(
                     """
                     SELECT *
@@ -2829,6 +2929,34 @@ class PostgresManagedSafetyRepository:
                     batch_size,
                 )
                 counts["managed_safety_requests_deleted"] = len(deleted_requests)
+                deleted_request_quota_events = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT owner_account_id, client_request_id
+                        FROM managed_safety_request_quota_events quota
+                        WHERE quota.purge_after <= $1
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_safety_requests request
+                              WHERE request.request_id =
+                                    quota.safety_request_id
+                          )
+                        ORDER BY purge_after, owner_account_id, client_request_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    DELETE FROM managed_safety_request_quota_events quota
+                    USING candidates
+                    WHERE quota.owner_account_id = candidates.owner_account_id
+                      AND quota.client_request_id = candidates.client_request_id
+                    RETURNING quota.client_request_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["managed_safety_request_quota_events_deleted"] = len(
+                    deleted_request_quota_events
+                )
                 deleted_invites = await connection.fetch(
                     """
                     WITH candidates AS (

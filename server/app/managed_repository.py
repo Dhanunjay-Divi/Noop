@@ -3453,12 +3453,24 @@ class PostgresManagedRepository:
             async with connection.transaction():
                 jobs = await connection.fetch(
                     """
-                    SELECT *
-                    FROM managed_erasure_jobs
-                    WHERE status IN ('queued', 'cooling_off', 'running')
-                      AND not_before <= $1
-                    ORDER BY requested_at, erasure_job_id
-                    FOR UPDATE SKIP LOCKED
+                    SELECT job.*
+                    FROM managed_erasure_jobs job
+                    JOIN managed_accounts account
+                      ON account.account_id = job.account_id
+                    WHERE job.status IN ('queued', 'cooling_off', 'running')
+                      AND job.not_before <= $1
+                      AND (
+                            (
+                                job.scope IN ('all_managed_data', 'account')
+                                AND account.status = 'erasure_pending'
+                            )
+                            OR (
+                                job.scope IN ('raw_chunks', 'derived_data')
+                                AND account.status = 'active'
+                            )
+                          )
+                    ORDER BY job.requested_at, job.erasure_job_id
+                    FOR UPDATE OF job SKIP LOCKED
                     LIMIT 10
                     """,
                     now,
@@ -8194,7 +8206,6 @@ class PostgresManagedRepository:
             and not 29 <= len(identity_deletion_ticket) <= 1_024
         ):
             raise ManagedConfigurationError("identity deletion ticket is invalid")
-        now = await self.coordination_now()
         tenant_replay_hash = self._tenant_replay_hash(principal.account_id)
         job_id = uuid4()
         async with self._pool().acquire() as connection:
@@ -8235,6 +8246,9 @@ class PostgresManagedRepository:
                         dict(existing),
                         duplicate=True,
                     )
+                if account["status"] != "active":
+                    raise ManagedForbiddenError("managed account is not active")
+                now = await connection.fetchval("SELECT clock_timestamp()")
                 not_before = now + cooling_off
                 row = await connection.fetchrow(
                     """
@@ -8323,9 +8337,42 @@ class PostgresManagedRepository:
         principal: ManagedPrincipal,
         erasure_job_id: UUID,
     ) -> dict[str, Any]:
-        now = await self.coordination_now()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE account_id = $1 AND erasure_job_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    erasure_job_id,
+                )
+                account = await connection.fetchrow(
+                    """
+                    SELECT status
+                    FROM managed_accounts
+                    WHERE account_id = $1
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                )
+                if account is None:
+                    raise ManagedNotFoundError("managed account was not found")
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if (
+                    existing is None
+                    or existing["status"] != "cooling_off"
+                    or existing["not_before"] <= now
+                ):
+                    raise ManagedConflictError(
+                        "managed erasure can no longer be canceled"
+                    )
                 row = await connection.fetchrow(
                     """
                     UPDATE managed_erasure_jobs
@@ -8343,22 +8390,39 @@ class PostgresManagedRepository:
                     erasure_job_id,
                     now,
                 )
-                if row is None:
-                    raise ManagedConflictError(
-                        "managed erasure can no longer be canceled"
+                if existing["scope"] in {"all_managed_data", "account"}:
+                    other_live_erasure = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_erasure_jobs
+                            WHERE account_id = $1
+                              AND erasure_job_id <> $2
+                              AND scope IN ('all_managed_data', 'account')
+                              AND status IN (
+                                  'queued',
+                                  'cooling_off',
+                                  'running',
+                                  'verifying'
+                              )
+                        )
+                        """,
+                        principal.account_id,
+                        erasure_job_id,
                     )
-                await connection.execute(
-                    """
-                    UPDATE managed_accounts
-                    SET status = 'active',
-                        erasure_requested_at = NULL,
-                        updated_at = $2
-                    WHERE account_id = $1
-                      AND status = 'erasure_pending'
-                    """,
-                    principal.account_id,
-                    now,
-                )
+                    if not other_live_erasure:
+                        await connection.execute(
+                            """
+                            UPDATE managed_accounts
+                            SET status = 'active',
+                                erasure_requested_at = NULL,
+                                updated_at = $2
+                            WHERE account_id = $1
+                              AND status = 'erasure_pending'
+                            """,
+                            principal.account_id,
+                            now,
+                        )
         return self._public_erasure(dict(row), duplicate=False)
 
     @staticmethod
