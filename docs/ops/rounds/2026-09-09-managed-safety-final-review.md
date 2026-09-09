@@ -72,6 +72,9 @@ existing external launch gates.
 - The Safety catalog was regenerated as 313 strings across all nine supported
   locales. No coordinate, account, contact, incident identifier, provider
   response, or arbitrary error entered diagnostics.
+- The first hosted macOS rerun correctly rejected a stale contract that still
+  expected the pre-status catalog size of 304. The invariant now pins the
+  generated 313-entry catalog, and the exact focused macOS test passes.
 
 ## Data, privacy, and medical truth
 
@@ -104,6 +107,7 @@ existing external launch gates.
 | iOS simulator app build | `NOOPiOS` Debug simulator graph completed with `BUILD SUCCEEDED` | The application delegate, Firebase-managed service, Core Location, widgets, and watch dependencies compile together | Signing, APNs, GPS delivery, battery, or real background execution |
 | Android Safety regression | 29 focused tests completed with `BUILD SUCCESSFUL` | Localized status mapping and existing location/session contracts compile and pass | FCM delivery, OEM process behavior, or physical GPS |
 | Server formatting and generated localization | Ruff check/format passed; 313 strings regenerated for nine locales; JSON, Ruby, and diff checks passed | Changed source is formatted and generated resources match the catalog | Human linguistic review of every translation |
+| Hosted macOS localization contract | The first exact-head run exposed the stale 304-entry assertion; the corrected 313-entry invariant passed locally in 0.074 seconds | The test now matches the reviewed generated catalog instead of masking a hosted failure | The replacement protected head still requires a green hosted rerun |
 | Terminology ratchet | 17,376 classified occurrences across 1,509 path/category groups; zero forbidden mappings; active allowlist unchanged | Generated line movement and new source text were reviewed and the fail-closed snapshot is current | Removal of existing compatibility terminology |
 
 ## Physical device and deployment
@@ -121,8 +125,8 @@ existing external launch gates.
 
 - Changed paths: managed server repositories and tests; Apple Safety runtime,
   managed service, app delegate, view, and tests; Android Safety view and test;
-  generated nine-locale Safety resources; terminology snapshot and pinned
-  digest; operations records.
+  generated nine-locale Safety resources; the macOS localization contract;
+  terminology snapshot and pinned digest; operations records.
 - Commits: implementation `e1c02d0b`; this record follow-up will become the
   protected pull-request head used for hosted checks and review.
 - Branch and remote state: protected pull request `#10` remains open.

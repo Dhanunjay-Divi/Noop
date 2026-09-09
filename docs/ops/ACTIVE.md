@@ -83,7 +83,10 @@ apps map every wire status to localized app-owned copy. A fresh extension-free
 PostgreSQL Safety file passed 10 tests, the full server suite passed 371 tests
 with 19 environment-gated skips, the Apple Safety suite passed 30 tests, the
 Android Safety suite passed 29 tests, and the complete iOS simulator app graph
-builds. Protected exact-head review, hosted checks, and normal merge remain.
+builds. The first final-review hosted macOS run found one stale 304-entry
+localization assertion; the corrected contract pins the generated 313-entry
+catalog and passes locally. Protected exact-head review, hosted checks, and
+normal merge remain.
 No public traffic or real participant paging is enabled. Evidence is recorded
 in
 [Managed Safety final review](rounds/2026-09-09-managed-safety-final-review.md).

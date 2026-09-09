@@ -305,7 +305,7 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 304)
+        XCTAssertEqual(source.count, 313)
         for (key, translations) in source {
             XCTAssertTrue(
                 key.hasPrefix("safety.") || key.hasPrefix("managed.safety."),
