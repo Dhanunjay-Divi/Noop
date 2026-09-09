@@ -1161,6 +1161,19 @@ class PostgresManagedSafetyRepository:
                     connection,
                     account_id=principal.account_id,
                 )
+                directed_pairs = sorted(
+                    (
+                        (profile["profile_id"], other_profile_id),
+                        (other_profile_id, profile["profile_id"]),
+                    ),
+                    key=lambda pair: (str(pair[0]), str(pair[1])),
+                )
+                for owner_profile_id, contact_profile_id in directed_pairs:
+                    await self._lock_pair(
+                        connection,
+                        owner_profile_id=owner_profile_id,
+                        contact_profile_id=contact_profile_id,
+                    )
                 pairs = await connection.fetch(
                     """
                     SELECT owner_profile_id, contact_profile_id
@@ -1182,13 +1195,26 @@ class PostgresManagedSafetyRepository:
                     raise ManagedNotFoundError(
                         "Safety contact relationship was not found"
                     )
-                for pair in pairs:
-                    await self._lock_pair(
-                        connection,
-                        owner_profile_id=pair["owner_profile_id"],
-                        contact_profile_id=pair["contact_profile_id"],
-                    )
                 now = await connection.fetchval("SELECT clock_timestamp()")
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_requests
+                    SET status = 'canceled', decided_at = $3
+                    WHERE status = 'pending'
+                      AND (
+                          (
+                            owner_profile_id = $1
+                            AND contact_profile_id = $2
+                          ) OR (
+                            owner_profile_id = $2
+                            AND contact_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    other_profile_id,
+                    now,
+                )
                 await connection.execute(
                     """
                     DELETE FROM managed_safety_contacts

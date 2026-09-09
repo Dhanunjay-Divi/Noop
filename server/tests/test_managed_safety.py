@@ -574,6 +574,13 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
         first_profile = await _profile(managed, first, display_name="First")
         second_profile = await _profile(managed, second, display_name="Second")
 
+        stale_reciprocal_request = await safety.create_request(
+            principal=second,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=first_profile["noop_id"],
+            ),
+        )
         first_request = await safety.create_request(
             principal=first,
             request=ManagedSafetyRequestCreate(
@@ -584,18 +591,6 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
         await safety.decide_request(
             principal=second,
             request_id=UUID(first_request["request_id"]),
-            decision="accept",
-        )
-        second_request = await safety.create_request(
-            principal=second,
-            request=ManagedSafetyRequestCreate(
-                request_id=uuid4(),
-                noop_id=first_profile["noop_id"],
-            ),
-        )
-        await safety.decide_request(
-            principal=first,
-            request_id=UUID(second_request["request_id"]),
             decision="accept",
         )
 
@@ -615,7 +610,7 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
                 UUID(first_profile["profile_id"]),
                 UUID(second_profile["profile_id"]),
             )
-            == 2
+            == 1
         )
         await safety.remove_contact(
             principal=first,
@@ -623,6 +618,94 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
         )
         assert await safety.list_contacts(principal=first) == []
         assert await safety.list_contacts(principal=second) == []
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT status
+                FROM managed_safety_requests
+                WHERE request_id = $1
+                """,
+                UUID(stale_reciprocal_request["request_id"]),
+            )
+            == "canceled"
+        )
+        with pytest.raises(ManagedConflictError):
+            await safety.decide_request(
+                principal=first,
+                request_id=UUID(stale_reciprocal_request["request_id"]),
+                decision="accept",
+            )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_social_profile_deletion_cascades_accepted_safety_contact() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=8,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"owner-delete-{uuid4()}")
+        contact = await _principal(primary, label=f"contact-delete-{uuid4()}")
+        owner_profile = await _profile(managed, owner, display_name="Owner")
+        contact_profile, accepted = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=contact,
+            contact_name="Contact",
+        )
+
+        await managed.delete_social_profile(principal=owner)
+
+        pool = primary._require_pool()
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_contacts
+                WHERE owner_profile_id = $1 OR contact_profile_id = $1
+                """,
+                UUID(owner_profile["profile_id"]),
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_requests
+                WHERE request_id = $1
+                """,
+                UUID(accepted["request_id"]),
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_social_profiles
+                WHERE profile_id = $1
+                """,
+                UUID(contact_profile["profile_id"]),
+            )
+            == 1
+        )
     finally:
         await primary.shutdown()
 

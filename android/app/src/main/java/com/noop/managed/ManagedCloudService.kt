@@ -2,11 +2,13 @@ package com.noop.managed
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.icu.text.ListFormatter
 import android.net.Uri
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
@@ -614,7 +616,7 @@ class ManagedCloudService private constructor(context: Context) {
             "managed_safety.push_registration",
         )
         if (!managedSafetyNotificationPermissionGranted()) {
-            runCatching { runtime().messaging.isAutoInitEnabled = false }
+            retireManagedPushInstallationForNotificationSettings()
             com.noop.AppDiagnosticsRecorder.endOperation(
                 diagnostic,
                 outcome = "rejected",
@@ -661,7 +663,7 @@ class ManagedCloudService private constructor(context: Context) {
     suspend fun registerCurrentManagedPushToken(): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED) return false
         if (!managedSafetyNotificationPermissionGranted()) {
-            runCatching { runtime().messaging.isAutoInitEnabled = false }
+            retireManagedPushInstallationForNotificationSettings()
             com.noop.AppDiagnosticsRecorder.record(
                 "managed_safety.notification_enable",
                 fields = mapOf(
@@ -2741,13 +2743,34 @@ class ManagedCloudService private constructor(context: Context) {
         )
 
     private fun managedSafetyNotificationPermissionGranted(): Boolean =
-        ManagedSafetyNotificationPermission.canRegister(
-            sdkInt = Build.VERSION.SDK_INT,
-            permissionGranted = ContextCompat.checkSelfPermission(
-                appContext,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED,
+        ManagedSafetyNotificationPermission.canRegister(appContext)
+
+    private suspend fun retireManagedPushInstallationForNotificationSettings() {
+        runCatching { runtime().messaging.isAutoInitEnabled = false }
+        val result = runCatching {
+            client().revokePushInstallation(
+                authorization = authorization(forceRefresh = false),
+            )
+        }
+        val error = result.exceptionOrNull()
+        com.noop.AppDiagnosticsRecorder.record(
+            "managed_safety.push_revocation",
+            fields = mapOf(
+                "outcome" to if (
+                    error == null || error is ManagedStorageException.NotFound
+                ) {
+                    "completed"
+                } else {
+                    "failed"
+                },
+                "failure_kind" to when (error) {
+                    null, is ManagedStorageException.NotFound -> "none"
+                    else -> diagnosticSyncFailureKind(error)
+                },
+                "reason" to "notification_not_authorized",
+            ),
         )
+    }
 
     private fun shouldRetireSafetyIncidentRequest(error: Throwable): Boolean =
         ManagedSafetyIncidentRequestPolicy.shouldRetire(error) ||
@@ -3087,8 +3110,43 @@ class ManagedCloudService private constructor(context: Context) {
 }
 
 internal object ManagedSafetyNotificationPermission {
-    fun canRegister(sdkInt: Int, permissionGranted: Boolean): Boolean =
-        sdkInt < Build.VERSION_CODES.TIRAMISU || permissionGranted
+    fun canRegister(context: Context): Boolean = runCatching {
+        val appContext = context.applicationContext
+        ManagedSafetyNotifier.prepare(appContext)
+        val channelImportance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+            manager.getNotificationChannel(ManagedSafetyNotifier.CHANNEL_ID)?.importance
+        } else {
+            null
+        }
+        canRegister(
+            sdkInt = Build.VERSION.SDK_INT,
+            permissionGranted = ContextCompat.checkSelfPermission(
+                appContext,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED,
+            appNotificationsEnabled = NotificationManagerCompat
+                .from(appContext)
+                .areNotificationsEnabled(),
+            channelImportance = channelImportance,
+        )
+    }.getOrDefault(false)
+
+    fun canRegister(
+        sdkInt: Int,
+        permissionGranted: Boolean,
+        appNotificationsEnabled: Boolean,
+        channelImportance: Int?,
+    ): Boolean {
+        if (sdkInt >= Build.VERSION_CODES.TIRAMISU && !permissionGranted) return false
+        if (!appNotificationsEnabled) return false
+        return sdkInt < Build.VERSION_CODES.O ||
+            (
+                channelImportance != null &&
+                    channelImportance != NotificationManager.IMPORTANCE_NONE
+            )
+    }
 }
 
 internal fun managedDeletionDeadlinePassed(

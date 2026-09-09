@@ -158,6 +158,11 @@ final class ManagedCloudService: ObservableObject {
     }
 
     func bootstrap() {
+        reconcilePersistedManagedState()
+        scheduleManagedSafetyBootstrap()
+    }
+
+    private func reconcilePersistedManagedState() {
         guard configuration != nil else {
             phase = .unavailable
             return
@@ -169,7 +174,6 @@ final class ManagedCloudService: ObservableObject {
                 return
             }
             reconcileAuthenticatedState()
-            scheduleManagedSafetyBootstrap()
         } catch {
             phase = .unavailable
             setStatus(Self.userMessage(for: error))
@@ -513,7 +517,10 @@ final class ManagedCloudService: ObservableObject {
                 .requestAuthorization(
                     options: [.alert, .sound, .timeSensitive]
                 )
-            guard allowed else { return false }
+            guard allowed else {
+                await retireManagedPushInstallationForNotificationSettings()
+                return false
+            }
             UIApplication.shared.registerForRemoteNotifications()
             ManagedFirebaseApplicationDelegate
                 .configureManagedMessagingIfPossible()
@@ -811,6 +818,9 @@ final class ManagedCloudService: ObservableObject {
     }
 
     func handleManagedSafetyPush(incidentID: UUID?) async -> Bool {
+        if !firebaseConfigured || phase == .signedOut {
+            reconcilePersistedManagedState()
+        }
         guard phase == .enrolled else { return false }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_safety.push_catch_up"
@@ -3143,7 +3153,11 @@ final class ManagedCloudService: ObservableObject {
         @unknown default:
             authorized = false
         }
-        guard authorized, phase == .enrolled else { return }
+        guard phase == .enrolled else { return }
+        guard authorized else {
+            await retireManagedPushInstallationForNotificationSettings()
+            return
+        }
         do {
             try configureFirebaseIfNeeded()
             UIApplication.shared.registerForRemoteNotifications()
@@ -3156,6 +3170,43 @@ final class ManagedCloudService: ObservableObject {
                 fields: [
                     "outcome": "failed",
                     "failure_kind": Self.diagnosticSyncFailureKind(error),
+                ]
+            )
+        }
+    }
+
+    private func retireManagedPushInstallationForNotificationSettings() async {
+        if FirebaseApp.app() != nil {
+            Messaging.messaging().isAutoInitEnabled = false
+        }
+        do {
+            try await client().revokePushInstallation(
+                authorization: try await authorization(forceRefresh: false)
+            )
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_revocation",
+                fields: [
+                    "outcome": "completed",
+                    "failure_kind": "none",
+                    "reason": "notification_not_authorized",
+                ]
+            )
+        } catch ManagedStorageError.notFound {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_revocation",
+                fields: [
+                    "outcome": "completed",
+                    "failure_kind": "none",
+                    "reason": "notification_not_authorized",
+                ]
+            )
+        } catch {
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_revocation",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": Self.diagnosticSyncFailureKind(error),
+                    "reason": "notification_not_authorized",
                 ]
             )
         }

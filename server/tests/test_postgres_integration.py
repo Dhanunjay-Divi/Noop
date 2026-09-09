@@ -223,6 +223,9 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
 
 def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> None:
     sql = (MIGRATIONS / "027_managed_app_safety.sql").read_text(encoding="utf-8")
+    lifecycle = (MIGRATIONS / "028_managed_safety_contact_lifecycle.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
     assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
@@ -235,6 +238,8 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     assert "token_ciphertext text NOT NULL" in sql
     assert "managed_safety_invite_request_fk" in sql
     assert "IF NOT EXISTS (" in sql
+    assert "managed_safety_contacts_accepted_request_id_fkey" in lifecycle
+    assert "ON DELETE CASCADE" in lifecycle
 
 
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:

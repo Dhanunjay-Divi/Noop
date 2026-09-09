@@ -533,6 +533,64 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedSafetyColdPushRestoresPersistedEnrollmentBeforeGuard() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let start = try XCTUnwrap(
+            service.range(
+                of: "func handleManagedSafetyPush(incidentID: UUID?) async -> Bool"
+            )
+        )
+        let end = try XCTUnwrap(
+            service.range(
+                of: "// MARK: - Managed Friends",
+                range: start.upperBound..<service.endIndex
+            )
+        )
+        let handler = String(service[start.lowerBound..<end.lowerBound])
+        let reconcile = try XCTUnwrap(
+            handler.range(of: "reconcilePersistedManagedState()")
+        )
+        let phaseGuard = try XCTUnwrap(
+            handler.range(of: "guard phase == .enrolled")
+        )
+
+        XCTAssertTrue(handler.contains(
+            "if !firebaseConfigured || phase == .signedOut"
+        ))
+        XCTAssertLessThan(reconcile.lowerBound, phaseGuard.lowerBound)
+    }
+
+    func testManagedSafetyRetiresPushWhenNotificationsAreNotAuthorized() throws {
+        let service = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+
+        XCTAssertTrue(service.contains(
+            """
+            guard allowed else {
+                            await retireManagedPushInstallationForNotificationSettings()
+                            return false
+                        }
+            """
+        ))
+        XCTAssertTrue(service.contains(
+            """
+            guard authorized else {
+                        await retireManagedPushInstallationForNotificationSettings()
+                        return
+                    }
+            """
+        ))
+        XCTAssertTrue(service.contains(
+            "Messaging.messaging().isAutoInitEnabled = false"
+        ))
+        XCTAssertTrue(service.contains(
+            "try await client().revokePushInstallation("
+        ))
+    }
+
     func testAutomaticFallBoundaryRemainsVisibleAndRuntimeInert() throws {
         let center = try source("Strand/Screens/SafetyCenterView.swift")
         let appModel = try source("Strand/App/AppModel.swift")

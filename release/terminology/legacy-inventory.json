@@ -15773,11 +15773,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        540,
-        597,
-        597,
-        597,
-        598
+        598,
+        655,
+        655,
+        655,
+        656
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -16862,14 +16862,14 @@
       "category": "core",
       "lineNumbers": [
         13,
-        2064,
-        2762,
-        2767,
-        2781,
-        2788,
-        2790,
-        2866,
-        2872
+        2074,
+        2772,
+        2777,
+        2791,
+        2798,
+        2800,
+        2876,
+        2882
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -22135,18 +22135,18 @@
     {
       "category": "core",
       "lineNumbers": [
-        24,
         26,
-        27,
-        113,
-        1776,
-        2489,
-        2489,
-        2498,
-        2498,
-        2511,
-        2512,
-        2513
+        28,
+        29,
+        115,
+        1778,
+        2491,
+        2491,
+        2500,
+        2500,
+        2513,
+        2514,
+        2515
       ],
       "occurrenceCount": 12,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",

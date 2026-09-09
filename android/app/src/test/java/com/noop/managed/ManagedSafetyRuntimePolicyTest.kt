@@ -10,23 +10,53 @@ import java.util.UUID
 
 class ManagedSafetyRuntimePolicyTest {
     @Test
-    fun notificationRegistrationRequiresPermissionOnAndroid13AndLater() {
+    fun notificationRegistrationRequiresUsableAppAndChannelDelivery() {
         assertTrue(
             ManagedSafetyNotificationPermission.canRegister(
-                sdkInt = 32,
+                sdkInt = 25,
                 permissionGranted = false,
+                appNotificationsEnabled = true,
+                channelImportance = null,
             ),
         )
         assertFalse(
             ManagedSafetyNotificationPermission.canRegister(
                 sdkInt = 33,
                 permissionGranted = false,
+                appNotificationsEnabled = true,
+                channelImportance = 4,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyNotificationPermission.canRegister(
+                sdkInt = 32,
+                permissionGranted = true,
+                appNotificationsEnabled = false,
+                channelImportance = 4,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyNotificationPermission.canRegister(
+                sdkInt = 32,
+                permissionGranted = true,
+                appNotificationsEnabled = true,
+                channelImportance = 0,
+            ),
+        )
+        assertFalse(
+            ManagedSafetyNotificationPermission.canRegister(
+                sdkInt = 32,
+                permissionGranted = true,
+                appNotificationsEnabled = true,
+                channelImportance = null,
             ),
         )
         assertTrue(
             ManagedSafetyNotificationPermission.canRegister(
                 sdkInt = 35,
                 permissionGranted = true,
+                appNotificationsEnabled = true,
+                channelImportance = 4,
             ),
         )
     }
