@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `b98f2db4e2ca6dbf9e97ffe8c49ed30b8b93cdca`
-- End implementation commit: pending
+- End implementation commit: `e1521ecc`
 - Record commit or PR: protected pull request `#10`
 
 ## Objective
@@ -113,6 +113,8 @@ localization, or lifecycle guarantees.
 
 - Pull request `#10` remains open and blocked until the replacement head passes
   hosted checks and exact-head review.
+- Implementation commit: `e1521ecc`; the record follow-up is the pull-request
+  head.
 - Review threads remain unresolved until a clean exact-head review and required
   checks pass.
 
