@@ -139,6 +139,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -419,6 +421,10 @@ private data class TodayLiveSnapshot(
     val charging: Boolean?,
 )
 
+/** Coarsen the durable-progress clock so per-chunk writes cannot invalidate the full Today tree. */
+internal fun boundedTodaySyncProgressTimestamp(timestamp: Long?): Long? =
+    timestamp?.let { ((it + 9L) / 10L) * 10L }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodayScreen(
@@ -486,7 +492,8 @@ fun TodayScreen(
                 syncRowsThisSession = s.syncRowsThisSession,
                 syncDataNewestAt = s.syncDataNewestAt,
                 syncStartedAt = s.syncStartedAt,
-                syncLastDurableProgressAt = s.syncLastDurableProgressAt,
+                syncLastDurableProgressAt =
+                    boundedTodaySyncProgressTimestamp(s.syncLastDurableProgressAt),
                 historySyncExperimental = s.historySyncExperimental,
                 sustainedEmptyOffload = s.sustainedEmptyOffload,
                 batteryPct = s.batteryPct,
@@ -498,7 +505,7 @@ fun TodayScreen(
     // Bulk history offload is a sustained database write burst. Keep the current coherent dashboard
     // visible and cancel/defer history-wide reads until the backfill edge falls; each keyed effect below
     // then runs once against the completed snapshot instead of competing with every chunk commit.
-    val deferHistoricalQueries = liveSnap.backfilling
+    val deferHistoricalQueries = rememberHistoryQueryGate(liveSnap.backfilling)
     // #849: seed from the ViewModel cache so a re-mount (tab-return / post-import) restores the last footer
     // immediately instead of flashing empty while the heavy reload is (now) skipped for unchanged data.
     var footer by remember(activeStrapId) {
@@ -858,7 +865,14 @@ fun TodayScreen(
     // hides it (no "X left" while topping up); a too-short discharge run returns null and the badge shows just
     // the %. Display rule: hours < 48 -> "~Nh left", else "~N days left"; null hides the estimate.
     var batteryEstimateText by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(liveSnap.connected, liveSnap.batteryPct, liveSnap.whoop5, liveSnap.charging) {
+    LaunchedEffect(
+        liveSnap.connected,
+        liveSnap.batteryPct,
+        liveSnap.whoop5,
+        liveSnap.charging,
+        deferHistoricalQueries,
+    ) {
+        if (deferHistoricalQueries) return@LaunchedEffect
         batteryEstimateText = if (!liveSnap.connected || liveSnap.charging == true) {
             null
         } else {
@@ -2144,7 +2158,16 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric, effortScale, effortForDay)
+                            HeartRateTrendCard(
+                                viewModel = viewModel,
+                                days = days,
+                                selectedDay = selectedDay,
+                                today = todayDate,
+                                activeDeviceId = activeStrapId,
+                                displayMetric = displayMetric,
+                                effortScale = effortScale,
+                                effortForDay = effortForDay,
+                            )
                         }
                         // The three hero vitals, HRV / Resting HR / Respiratory. Carried day (#543).
                         TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
@@ -7349,6 +7372,7 @@ private fun HeartRateTrendCard(
     days: List<DailyMetric>,
     selectedDay: LocalDate,
     today: LocalDate,
+    activeDeviceId: String,
     displayMetric: DailyMetric? = null,
     effortScale: EffortScale = EffortScale.HUNDRED,
     effortForDay: Double? = null,
@@ -7356,12 +7380,12 @@ private fun HeartRateTrendCard(
     // "Today" here is the LOGICAL day (rolls at 04:00 local), so in the small hours after midnight the
     // trend keeps the evening's curve, window start at the logical day's own midnight, "since midnight"
     // subtitle, "Today" label, rather than blanking to an empty new-calendar-day axis (#144).
-    var buckets by remember { mutableStateOf<List<HrBucket>>(emptyList()) }
+    var buckets by remember(activeDeviceId) { mutableStateOf<List<HrBucket>>(emptyList()) }
     // The night's sleep session overlapping the HR window + the day's workouts, the Overview-HR
     // marker layers (sleep band, Charge at wake, sport glyphs at HR peaks). Loaded off the main
     // thread alongside the buckets; each marker self-hides when its data is absent. (PR #285)
-    var sleepToday by remember { mutableStateOf<SleepSession?>(null) }
-    var workoutsToday by remember { mutableStateOf<List<WorkoutRow>>(emptyList()) }
+    var sleepToday by remember(activeDeviceId) { mutableStateOf<SleepSession?>(null) }
+    var workoutsToday by remember(activeDeviceId) { mutableStateOf<List<WorkoutRow>>(emptyList()) }
     // #985: the selected HR window. rememberSaveable ordinal so the choice survives rotation / process
     // death and feels sticky like a preference; 0 = TODAY, the unchanged full-day default. Forced to
     // TODAY on a past day (no "now" to anchor a rolling window - the pills don't render there either).
@@ -7375,51 +7399,87 @@ private fun HeartRateTrendCard(
     // extent, so an existing window stays valid). Reset by double-tap on the chart or the Reset link.
     // Also keyed on the #985 window: changing the window re-frames the chart, so a pinch-zoom made
     // inside the old frame resets with it rather than surviving as a stale sub-range.
-    var hrZoom by remember(selectedDay, hrWindowOrdinal) { mutableStateOf<LongRange?>(null) }
-    // #605: a WHOOP-4.0 offload banks raw HR samples straight into the hr-sample store WITHOUT touching
-    // any DailyMetric row, so a sync that only adds today's HR curve never changes `days`, and keying the
-    // reload on `days` alone left this chart frozen on the pre-sync window until something unrelated
-    // recomposed it. Re-key on the live sync tokens too: `lastSyncAt` ticks the moment an offload reaches
-    // HISTORY_COMPLETE (the banked samples are now final → reload the buckets), and `syncChunksThisSession`
-    // advances through a long backfill so the curve fills in progressively rather than only at the end.
-    // (No "show a past day curve" fallback, rejected behaviour change; this only re-queries the SAME
-    // selected-day window when fresh samples land.) Mirrors the iOS Today HR lane keying off the sync state.
-    val live by viewModel.live.collectAsStateWithLifecycle()
-    // Re-load when the day list changes (an import updates it), when the day selector moves, and, via the
-    // sync tokens, when a strap offload banks fresh HR samples for the current window. Also on first compose.
-    LaunchedEffect(days, selectedDay, today, live.lastSyncAt, live.syncChunksThisSession) {
+    var hrZoom by remember(activeDeviceId, selectedDay, hrWindowOrdinal) {
+        mutableStateOf<LongRange?>(null)
+    }
+    // Raw HR can change without a DailyMetric revision. Refresh once after the history-write burst is
+    // stably quiet; querying on every chunk was the measured write-contention path and repeatedly rebuilt
+    // this chart while the user scrolled.
+    val lastHistorySyncAt by viewModel.lastHistorySyncAt.collectAsStateWithLifecycle()
+    val rawBackfilling by viewModel.historyBackfillActive.collectAsStateWithLifecycle()
+    val deferHistoricalQueries = rememberHistoryQueryGate(rawBackfilling)
+    LaunchedEffect(
+        days,
+        selectedDay,
+        today,
+        activeDeviceId,
+        lastHistorySyncAt,
+        deferHistoricalQueries,
+    ) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("today.hr_trend_load")
+        var outcome = "completed"
+        var fields = emptyMap<String, String>()
         val zone = ZoneId.systemDefault()
         val start = selectedDay.atStartOfDay(zone).toEpochSecond()
         val nextStart = selectedDay.plusDays(1).atStartOfDay(zone).toEpochSecond()
         val now = System.currentTimeMillis() / 1000
         val end = if (selectedDay == today) now else (nextStart - 1)
-        // #908: the Today HR curve reads the active strap ∪ canonical "my-whoop" union, NOT a hardcoded
-        // "my-whoop". A strap re-added via the device manager banks live HR under its own fresh id, so a
-        // pinned read showed the "no heart rate banked yet today" empty state. Single-WHOOP ⇒ one id ⇒ same.
-        buckets = viewModel.repo.hrBucketsUnion(viewModel.activeStrapId, start, end, 300L)
-        // The sleep that ended within the chart window (the night before / this morning), anchors
-        // the band + the Charge-at-wake marker. A wide lower bound catches an onset before midnight.
-        // Resolves the day's bridged MAIN-night span via `mainSleepSpan` (the SAME resolver the Sleep
-        // tab hero and AnalyticsEngine's daily total use), not an ad hoc "freshest-ending block" pick --
-        // that could disagree with the Sleep tab and the Coupled view's bed-wake read for a night stored
-        // as more than one block (#294).
-        sleepToday = runCatching {
-            val overlapping = viewModel.repo.sleepSessions("my-whoop", start - 18 * 3600L, end)
-                .filter { it.startTs <= end && it.endTs >= start }   // overlaps the window
-            val habitualMidsleepSec = viewModel.repo.habitualMidsleepSec("my-whoop")
-            mainSleepSpan(overlapping, habitualMidsleepSec)?.let { (spanStart, spanEnd) ->
-                SleepSession(deviceId = "my-whoop", startTs = spanStart, endTs = spanEnd)
+        try {
+            val snapshot = coroutineScope {
+                val loadedBuckets = async {
+                    viewModel.repo.hrBucketsUnion(requestDeviceId, start, end, 300L)
+                }
+                val loadedSleep = async {
+                    loadTodayBestEffort {
+                        val overlapping = viewModel.repo
+                            .sleepSessionsUnion(requestDeviceId, start - 18 * 3600L, end)
+                            .filter { it.startTs <= end && it.endTs >= start }
+                        val habitualMidsleepSec =
+                            viewModel.repo.habitualMidsleepSec(requestDeviceId)
+                        mainSleepSpan(overlapping, habitualMidsleepSec)?.let { (spanStart, spanEnd) ->
+                            SleepSession(
+                                deviceId = requestDeviceId,
+                                startTs = spanStart,
+                                endTs = spanEnd,
+                            )
+                        }
+                    }
+                }
+                val loadedWorkouts = async {
+                    loadTodayBestEffort {
+                        viewModel.repo
+                            .workoutsAllSources(requestDeviceId, start - 6 * 3600L, end)
+                            .filter { it.startTs <= end && it.endTs >= start }
+                    } ?: emptyList()
+                }
+                Triple(loadedBuckets.await(), loadedSleep.await(), loadedWorkouts.await())
             }
-        }.getOrNull()
-        // Workouts overlapping the window, each gets a sport glyph at its in-window HR peak.
-        // Union every source (not just "my-whoop"): Health-Connect-imported sessions are stored
-        // under their own device id, so a strap-only query left them glyph-less here while the
-        // "Last Workouts" feed below showed them (#34/#53). The glyph self-hides when no strap HR
-        // overlaps, so an import with no matching strap curve simply draws nothing.
-        workoutsToday = runCatching {
-            viewModel.repo.workoutsAllSources(viewModel.deviceId, start - 6 * 3600L, end)
-                .filter { it.startTs <= end && it.endTs >= start }
-        }.getOrDefault(emptyList())
+            currentCoroutineContext().ensureActive()
+            if (viewModel.activeStrapId != requestDeviceId) {
+                outcome = "superseded"
+                return@LaunchedEffect
+            }
+            buckets = snapshot.first
+            sleepToday = snapshot.second
+            workoutsToday = snapshot.third
+            fields = mapOf(
+                "hr_bucket" to sleepHistoryResultBucket(snapshot.first.size),
+                "workout_bucket" to workoutRecoveryResultBucket(snapshot.third.size),
+            )
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
     }
     val selectedLabel = when (selectedDay) {
         today -> "Today"

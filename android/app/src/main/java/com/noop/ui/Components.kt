@@ -113,6 +113,26 @@ import kotlin.math.sin
 // Every screen composes ONLY these. Fixed dimensions + one spacing scale guarantee
 // the uniform, instrument-grade look from the reference.
 
+internal const val HISTORY_QUERY_QUIET_MS = 2_000L
+
+/**
+ * Holds database-heavy UI reads across the short false edges between back-to-back history sessions.
+ * The visible sync UI still follows the raw state; only query work waits for a stable quiet interval.
+ */
+@Composable
+internal fun rememberHistoryQueryGate(backfilling: Boolean): Boolean {
+    var blocked by remember { mutableStateOf(backfilling) }
+    LaunchedEffect(backfilling) {
+        if (backfilling) {
+            blocked = true
+        } else if (blocked) {
+            delay(HISTORY_QUERY_QUIET_MS)
+            blocked = false
+        }
+    }
+    return blocked
+}
+
 // MARK: - Switch
 
 /**

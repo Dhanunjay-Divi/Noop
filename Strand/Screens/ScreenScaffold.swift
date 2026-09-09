@@ -4,6 +4,41 @@ import StrandDesign
 import UIKit
 #endif
 
+/// Keeps query-heavy screens away from the store until a history-write burst has been quiet for a
+/// short interval. Some band firmware completes a deep sync in several back-to-back sessions and
+/// briefly drops `backfilling` between them; releasing on that raw edge lets multi-year reads start
+/// just as the next write slice begins. The visible sync affordance still follows the raw state.
+struct HistoryWriteQueryGateBridge: View {
+    static let quietNanoseconds: UInt64 = 2_000_000_000
+
+    @EnvironmentObject private var live: LiveState
+    @Binding var blocked: Bool
+    @State private var releaseTask: Task<Void, Never>?
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { reconcile(live.backfilling) }
+            .onChangeCompat(of: live.backfilling) { reconcile($0) }
+            .onDisappear { releaseTask?.cancel() }
+    }
+
+    private func reconcile(_ active: Bool) {
+        releaseTask?.cancel()
+        if active {
+            if !blocked { blocked = true }
+            return
+        }
+        guard blocked else { return }
+        releaseTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.quietNanoseconds)
+            guard !Task.isCancelled, !live.backfilling else { return }
+            blocked = false
+        }
+    }
+}
+
 /// Standard scrollable screen container: title + dark surface + content column.
 struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// Optional — when nil (and no subtitle) the header is omitted entirely, so a screen can supply its

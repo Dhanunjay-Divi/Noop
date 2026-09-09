@@ -125,7 +125,7 @@ struct SleepView: View {
     @State private var sleepUndoTask: Task<Void, Never>?
     /// Mirrors only the history-offload edge from LiveState. Heavy sleep-history reads wait until the
     /// write burst finishes, while the small syncing leaf continues to show progress independently.
-    @State private var liveBackfillingFlag = false
+    @State private var historyWriteQueryGate = false
 
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
@@ -199,14 +199,14 @@ struct SleepView: View {
                     navNight = nil
                 }
             }
-            .background(SleepBackfillFlagBridge(flag: $liveBackfillingFlag))
+            .background(HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate))
             // Load EVERY sleep block across BOTH sources (un-deduplicated) so the hero's ◀/▶ can
             // browse split-sleep days the dashboard collapses — including Bluetooth-only nights,
             // whose blocks live under the computed source. Re-runs whenever a sync/import bumps
             // refreshSeq; snaps back to the newest day and rebuilds the model so offset 0 reflects
             // the freshly-loaded blocks. (#170)
-            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(liveBackfillingFlag)") {
-                guard !liveBackfillingFlag else { return }
+            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyWriteQueryGate)") {
+                guard !historyWriteQueryGate else { return }
                 let requestRefreshSeq = repo.refreshSeq
                 let requestDeviceId = repo.deviceId
                 let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("sleep.history_load")
@@ -3388,23 +3388,6 @@ private struct SleepSyncingNote: View {
                 lastDurableProgressAt: live.historySyncLastDurableProgressAt
             )
         }
-    }
-}
-
-/// Zero-size edge bridge. SleepView never observes the sensor-cadence LiveState object itself; it receives
-/// only the backfill start/stop Boolean needed to cancel and defer query-heavy history snapshots.
-private struct SleepBackfillFlagBridge: View {
-    @EnvironmentObject private var live: LiveState
-    @Binding var flag: Bool
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-            .onAppear { if flag != live.backfilling { flag = live.backfilling } }
-            .onChangeCompat(of: live.backfilling) { active in
-                if flag != active { flag = active }
-            }
     }
 }
 

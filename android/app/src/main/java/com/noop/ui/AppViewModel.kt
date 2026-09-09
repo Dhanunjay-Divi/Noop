@@ -85,6 +85,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -458,6 +459,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val lastHistorySyncAt: StateFlow<Long?> = live
         .map { it.lastSyncAt }
         .stateIn(viewModelScope, SharingStarted.Eagerly, live.value.lastSyncAt)
+    /** Low-frequency write-boundary projection for retained screens. */
+    val historyBackfillActive: StateFlow<Boolean> = live
+        .map { it.backfilling }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, live.value.backfilling)
 
     /** Which strap the user is pairing — drives the scan filter in [connect]. Defaults to WHOOP 4.0. */
     private val _selectedModel = MutableStateFlow(WhoopModel.WHOOP4)

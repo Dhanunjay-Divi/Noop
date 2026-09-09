@@ -173,9 +173,10 @@ struct LiquidTodayView: View {
     /// Flips true once the first load() completes. Until then the hero gauges + sky render STATIC so the
     /// launch data-churn (refresh publish + BLE/HR notifies) isn't fighting 4 live canvases + CoreMotion.
     @State private var dataLoaded = false
-    /// Mirrors only the history-offload boolean edge from LiveState. The full dashboard must not observe
-    /// LiveState's 1 Hz updates; this flag changes only when bulk history writing starts or stops.
-    @State private var liveBackfillingFlag = false
+    /// Blocks query work until a multi-session history-write burst has been stably quiet.
+    @State private var historyWriteQueryGate = false
+    /// Forces one real post-sync load even if raw rows changed without advancing a query-cache revision.
+    @State private var deferredQueryLoadForHistoryWrite = false
     /// The selected day currently represented by the query-backed state below. It lets a same-day refresh
     /// preserve visible values while an offload writes, while a day change still loads immediately.
     @State private var loadedQueryDayKey: String?
@@ -450,7 +451,7 @@ struct LiquidTodayView: View {
             .frame(maxWidth: .infinity)
             #endif
         }
-        .background(LiquidTodayBackfillFlagBridge(flag: $liveBackfillingFlag))
+        .background(HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate))
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
             scrollTracker.offset = offset
@@ -482,7 +483,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(liveBackfillingFlag)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyWriteQueryGate)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -2676,13 +2677,15 @@ struct LiquidTodayView: View {
         return max(0, now.timeIntervalSince(bankedAt)) < queryCacheMaxAge
     }
 
-    static func shouldDeferQueryLoad(
-        isBackfilling: Bool,
-        hasDisplayedData: Bool,
-        loadedDayKey: String?,
-        requestedDayKey: String
+    static func shouldDeferQueryLoad(isBackfilling: Bool) -> Bool { isBackfilling }
+
+    static func canRestoreDuringHistoryWrite(
+        cachedKey: LiquidTodayQueryKey,
+        requestKey: LiquidTodayQueryKey
     ) -> Bool {
-        isBackfilling && hasDisplayedData && loadedDayKey == requestedDayKey
+        cachedKey.deviceId == requestKey.deviceId
+            && cachedKey.dayKey == requestKey.dayKey
+            && cachedKey.profileState == requestKey.profileState
     }
 
     private func applyQueryCache(_ cache: LiquidTodayLoadCache) {
@@ -2810,7 +2813,30 @@ struct LiquidTodayView: View {
             chargeLandingHapticTrigger += 1
         }
 
-        if let cached = repo.liquidTodayLoadCache,
+        if Self.shouldDeferQueryLoad(isBackfilling: historyWriteQueryGate) {
+            deferredQueryLoadForHistoryWrite = true
+            if let cached = repo.liquidTodayLoadCache,
+               Self.canRestoreDuringHistoryWrite(cachedKey: cached.key, requestKey: requestKey) {
+                applyQueryCache(cached)
+                loadedQueryDayKey = requestedDayKey
+                markQueryDataLoaded()
+                diagnosticOutcome = "backfill_cache_restore"
+                diagnosticFields = [
+                    "hr_bucket_count": String(cached.hrValues.count),
+                    "workout_count": String(cached.workouts.count),
+                    "trend_metric_count": String(cached.keyMetricTrends.count),
+                ]
+            } else {
+                diagnosticOutcome = "backfill_deferred"
+            }
+            return
+        }
+
+        let forceAfterHistoryWrite = deferredQueryLoadForHistoryWrite
+        deferredQueryLoadForHistoryWrite = false
+
+        if !forceAfterHistoryWrite,
+           let cached = repo.liquidTodayLoadCache,
            Self.shouldRestoreQueryCache(
                 cachedKey: cached.key,
                 requestKey: requestKey,
@@ -2827,16 +2853,6 @@ struct LiquidTodayView: View {
                 "workout_count": String(cached.workouts.count),
                 "trend_metric_count": String(cached.keyMetricTrends.count),
             ]
-            return
-        }
-
-        if Self.shouldDeferQueryLoad(
-            isBackfilling: liveBackfillingFlag,
-            hasDisplayedData: dataLoaded,
-            loadedDayKey: loadedQueryDayKey,
-            requestedDayKey: requestedDayKey
-        ) {
-            diagnosticOutcome = "backfill_deferred"
             return
         }
 
@@ -3389,23 +3405,6 @@ struct LiquidTodayLoadCache {
     let workouts: [WorkoutRow]
     let keyMetricTrends: [KeyMetric: [Double]]
     let resolvedSpo2ByDay: [String: Double]
-}
-
-/// Zero-size LiveState observer. It forwards only the backfill boolean edge, avoiding the 1 Hz live
-/// publication stream that would otherwise invalidate the full liquid dashboard during a scroll.
-private struct LiquidTodayBackfillFlagBridge: View {
-    @EnvironmentObject private var live: LiveState
-    @Binding var flag: Bool
-
-    var body: some View {
-        Color.clear
-            .frame(width: 0, height: 0)
-            .accessibilityHidden(true)
-            .onAppear { if flag != live.backfilling { flag = live.backfilling } }
-            .onChangeCompat(of: live.backfilling) { now in
-                if flag != now { flag = now }
-            }
-    }
 }
 
 // MARK: - Cross-metric pattern brief

@@ -227,6 +227,7 @@ fun SleepScreen(
         vm.live.sleepHistorySyncProgressChanges()
     }.collectAsStateWithLifecycle(initialValue = null)
     val isBackfilling = backfillNote != null
+    val deferHistoricalQueries = rememberHistoryQueryGate(isBackfilling)
 
     // Every recorded sleep BLOCK, oldest→newest — the hero's ◀/▶ chevrons walk this whole list,
     // including same-day naps / split sleep that `sleepSessionsMerged` collapses to one-per-night
@@ -252,8 +253,8 @@ fun SleepScreen(
     var motionByStart by remember(activeDeviceId) {
         mutableStateOf<Map<Long, List<Double>>>(emptyMap())
     }
-    LaunchedEffect(days, activeDeviceId, isBackfilling) {
-        if (isBackfilling) return@LaunchedEffect
+    LaunchedEffect(days, activeDeviceId, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
         val requestDeviceId = activeDeviceId
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_snapshot_load")
         var outcome = "completed"
@@ -345,8 +346,8 @@ fun SleepScreen(
     var restEvidenceByDay by remember(activeDeviceId) {
         mutableStateOf<Map<String, ScoreConfidence.RestEvidenceFlags>>(emptyMap())
     }
-    LaunchedEffect(days, activeDeviceId, restDataVersion, isBackfilling) {
-        if (isBackfilling) return@LaunchedEffect
+    LaunchedEffect(days, activeDeviceId, restDataVersion, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
         val requestDeviceId = activeDeviceId
         val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_metrics_load")
         var outcome = "completed"

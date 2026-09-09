@@ -67,7 +67,8 @@ class RetainedScreenPerformanceTest {
         assertTrue(root.contains("SleepHistorySnapshot("))
         assertTrue(root.contains("SleepMetricSnapshot("))
         assertTrue(root.contains("val isBackfilling = backfillNote != null"))
-        assertTrue(root.contains("if (isBackfilling) return@LaunchedEffect"))
+        assertTrue(root.contains("rememberHistoryQueryGate(isBackfilling)"))
+        assertTrue(root.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
 
         val batchStart = repository.indexOf("suspend fun sessionMotions(")
         val batchEnd = repository.indexOf("/** Persist the decoded", startIndex = batchStart)
@@ -135,6 +136,33 @@ class RetainedScreenPerformanceTest {
         assertTrue(stress.contains("rrIntervalsUnion(deviceId"))
         assertTrue(stress.contains("catch (cancelled: CancellationException)"))
         assertTrue(stress.contains("throw cancelled"))
+    }
+
+    @Test
+    fun todayHeartRateWaitsForStableHistoryWritesAndPublishesAtomically() {
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val start = today.indexOf("private fun HeartRateTrendCard(")
+        val end = today.indexOf("val selectedLabel =", startIndex = start)
+        val block = today.substring(start, end)
+
+        assertTrue(block.contains("viewModel.lastHistorySyncAt.collectAsStateWithLifecycle()"))
+        assertTrue(block.contains("viewModel.historyBackfillActive.collectAsStateWithLifecycle()"))
+        assertTrue(block.contains("rememberHistoryQueryGate(rawBackfilling)"))
+        assertTrue(block.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
+        assertTrue(block.contains("coroutineScope"))
+        assertTrue(block.contains("Triple("))
+        assertTrue(block.contains("viewModel.activeStrapId != requestDeviceId"))
+        assertTrue(block.contains("\"today.hr_trend_load\""))
+        assertFalse(block.contains("syncChunksThisSession"))
+        assertFalse(block.contains("runCatching"))
+    }
+
+    @Test
+    fun todayDurableProgressClockIsBoundedAwayFromPerChunkRecomposition() {
+        assertEquals(null, boundedTodaySyncProgressTimestamp(null))
+        assertEquals(100L, boundedTodaySyncProgressTimestamp(100L))
+        assertEquals(110L, boundedTodaySyncProgressTimestamp(101L))
+        assertEquals(110L, boundedTodaySyncProgressTimestamp(109L))
     }
 
     @Test

@@ -16,7 +16,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
     func testSleepHistoryStartsIndependentReadsTogetherAndTimesTheBoundary() throws {
         let text = try source("Strand/Screens/SleepView.swift")
         let start = try XCTUnwrap(
-            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(liveBackfillingFlag)")"#)
+            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyWriteQueryGate)")"#)
         )
         let end = try XCTUnwrap(
             text.range(of: ".sheet(item: $wakeEdit)", range: start.lowerBound..<text.endIndex)
@@ -34,7 +34,41 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("shouldPublishHistoryLoad("))
         XCTAssertTrue(block.contains("requestRefreshSeq: requestRefreshSeq"))
         XCTAssertTrue(block.contains("requestDeviceId: requestDeviceId"))
-        XCTAssertTrue(block.contains("guard !liveBackfillingFlag else { return }"))
+        XCTAssertTrue(block.contains("guard !historyWriteQueryGate else { return }"))
+        XCTAssertTrue(text.contains("HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate)"))
+    }
+
+    func testHistoryWriteQueryGateWaitsForAStableQuietEdge() throws {
+        let text = try source("Strand/Screens/ScreenScaffold.swift")
+        let start = try XCTUnwrap(text.range(of: "struct HistoryWriteQueryGateBridge"))
+        let end = try XCTUnwrap(
+            text.range(of: "/// Standard scrollable screen container", range: start.upperBound..<text.endIndex)
+        )
+        let block = text[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(block.contains("quietNanoseconds: UInt64 = 2_000_000_000"))
+        XCTAssertTrue(block.contains("releaseTask?.cancel()"))
+        XCTAssertTrue(block.contains("try? await Task.sleep"))
+        XCTAssertTrue(block.contains("!live.backfilling"))
+        XCTAssertTrue(block.contains("blocked = false"))
+    }
+
+    func testClassicTodayDefersColdAndWarmReadsUntilHistoryWritesAreQuiet() throws {
+        let text = try source("Strand/Screens/TodayView.swift")
+        let start = try XCTUnwrap(text.range(of: "private func loadAll() async"))
+        let end = try XCTUnwrap(
+            text.range(of: "private var backfillActivelyWriting", range: start.upperBound..<text.endIndex)
+        )
+        let block = text[start.lowerBound..<end.lowerBound]
+
+        let writeGate = try XCTUnwrap(block.range(of: "if backfillActivelyWriting"))
+        let dayLoad = try XCTUnwrap(block.range(of: "await loadDayScoped"))
+        XCTAssertLessThan(writeGate.lowerBound, dayLoad.lowerBound)
+        XCTAssertTrue(block.contains("deferredDashboardReadsForHistoryWrite = true"))
+        XCTAssertTrue(block.contains("restoreDayScoped(cached)"))
+        XCTAssertTrue(block.contains("restoreHistoryWide(cached)"))
+        XCTAssertTrue(block.contains("forceReload: forceAfterHistoryWrite"))
+        XCTAssertTrue(text.contains("historyWriteGate: historyWriteQueryGate"))
     }
 
     func testSleepHistoryPublicationRejectsCancellationRefreshAndDeviceSupersession() {

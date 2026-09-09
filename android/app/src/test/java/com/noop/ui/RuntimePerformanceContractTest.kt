@@ -144,9 +144,14 @@ class RuntimePerformanceContractTest {
         assertTrue(today.contains("viewModel.selectedDeviceId.collectAsStateWithLifecycle()"))
         assertTrue(today.contains("viewModel.todayCardsLoadedDeviceId == activeStrapId"))
         assertTrue(today.contains("viewModel.todayFooterLoadedDeviceId == activeStrapId"))
-        assertTrue(today.contains("val deferHistoricalQueries = liveSnap.backfilling"))
+        assertTrue(today.contains("rememberHistoryQueryGate(liveSnap.backfilling)"))
         assertTrue(today.contains("loadTodayBestEffort"))
         assertTrue(today.contains("currentCoroutineContext().ensureActive()"))
+
+        val components = source("com/noop/ui/Components.kt")
+        assertTrue(components.contains("HISTORY_QUERY_QUIET_MS = 2_000L"))
+        assertTrue(components.contains("rememberHistoryQueryGate"))
+        assertTrue(components.contains("delay(HISTORY_QUERY_QUIET_MS)"))
     }
 
     private fun source(relative: String): String {

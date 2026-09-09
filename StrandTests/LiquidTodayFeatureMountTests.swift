@@ -119,30 +119,42 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         ))
     }
 
-    func testLiquidTodayDefersOnlyAnAlreadyVisibleSameDayDuringBackfill() {
-        XCTAssertTrue(LiquidTodayView.shouldDeferQueryLoad(
-            isBackfilling: true,
-            hasDisplayedData: true,
-            loadedDayKey: "2026-09-09",
-            requestedDayKey: "2026-09-09"
+    func testLiquidTodayDefersEveryQueryLoadDuringHistoryWrites() {
+        XCTAssertTrue(LiquidTodayView.shouldDeferQueryLoad(isBackfilling: true))
+        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(isBackfilling: false))
+    }
+
+    func testLiquidTodayCanRestoreOnlyTheSameDeviceDayAndProfileDuringHistoryWrites() {
+        let cached = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            profileState: "profile-a"
+        )
+        let newer = LiquidTodayQueryKey(
+            refreshSeq: 9,
+            ageMetricsSeq: 5,
+            workoutsSeq: 6,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            profileState: "profile-a"
+        )
+        XCTAssertTrue(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: newer
         ))
-        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
-            isBackfilling: true,
-            hasDisplayedData: true,
-            loadedDayKey: "2026-09-08",
-            requestedDayKey: "2026-09-09"
-        ))
-        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
-            isBackfilling: true,
-            hasDisplayedData: false,
-            loadedDayKey: nil,
-            requestedDayKey: "2026-09-09"
-        ))
-        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
-            isBackfilling: false,
-            hasDisplayedData: true,
-            loadedDayKey: "2026-09-09",
-            requestedDayKey: "2026-09-09"
+        XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: LiquidTodayQueryKey(
+                refreshSeq: 9,
+                ageMetricsSeq: 5,
+                workoutsSeq: 6,
+                deviceId: "device-b",
+                dayKey: "2026-09-09",
+                profileState: "profile-a"
+            )
         ))
     }
 
@@ -155,7 +167,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         )
 
         XCTAssertTrue(task.contains("\\(repo.refreshSeq)"))
-        XCTAssertTrue(task.contains("\\(liveBackfillingFlag)"))
+        XCTAssertTrue(task.contains("\\(historyWriteQueryGate)"))
         XCTAssertTrue(task.contains("\\(repo.deviceId)"))
         XCTAssertFalse(task.contains("repo.liquidTodayLoadCache = nil"))
         XCTAssertTrue(task.contains("await load()"))
