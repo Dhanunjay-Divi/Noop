@@ -69,6 +69,9 @@ localization, or lifecycle guarantees.
 - Successful social-profile deletion clears Friends and Safety preferences,
   cached presentation, pending capabilities, location sharing, and background
   scheduling state on both phones.
+- The launch-gate isolation preflight now resolves one all-target build-setting
+  snapshot and groups setting names in memory instead of invoking four
+  independent package-graph resolutions. Secret values remain discarded.
 - Focused and broad Apple, Android, server, dependency, privacy, localization,
   release-control, and operations verification is complete locally.
 
@@ -103,6 +106,7 @@ localization, or lifecycle guarantees.
 | Server quality and dependency gates | Ruff check/format passed; both locked dependency audits found no known vulnerability | Changed server source is formatted and scanned against current local advisories | Future advisories or provider security review |
 | Repository policy gates | Ops records, private-data guard, health claims, legal inventory, release controls, and launch-gate isolation passed | The replacement preserves repository privacy, claims, legal, and release invariants | Owner/legal approval or signed distribution |
 | Hosted release-control diagnosis | The first replacement-head run failed only because changed source line numbers made the fail-closed terminology inventory stale; a reviewed regeneration records 17,376 classified occurrences, no forbidden mapping, and no active allowlist change | The hosted failure is an evidence-snapshot mismatch rather than an application or policy regression | The replacement head still requires a green hosted rerun |
+| Hosted Apple preflight diagnosis | The corrected head's release-control check passed, but the iOS job spent 150 seconds on repeated cold `xcodebuild -showBuildSettings` package resolution and returned no settings for its first two targets. The replacement single all-target scan passed locally in 13.4 seconds, and its six parser/policy tests pass | Launch-secret isolation remains fail-closed while avoiding four redundant cold package resolutions | The revised exact head still requires a green hosted Apple rerun |
 | Scoped resource cleanup | Six synthetic PostgreSQL databases and eight inactive temporary benchmark/build directories totaling about 20 GB were removed after their evidence was recorded | Completed local test resources are not being left to consume disk or database capacity | The intentionally retained private GCP staging stack or worktrees still needed for protected merge |
 
 ## Physical device and deployment

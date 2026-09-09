@@ -64,10 +64,13 @@ Apple, Android, and fresh-PostgreSQL server suites, dependency audits, and
 repository policy gates pass locally. The first replacement-head hosted
 release-control run exposed only a stale fail-closed terminology inventory;
 the reviewed regeneration contains no forbidden mapping or active allowlist
-change. Pull request `#10` still requires a green hosted rerun, a clean
-exact-head review, and normal protected merge. Physical APNs/FCM,
-terminated/background execution, location, haptic, carrier, legal, monitoring,
-failover, and staffed-operations evidence remains open. Evidence is recorded in
+change. The following iOS run then exposed four redundant cold package-graph
+resolutions in the launch-gate isolation preflight; one all-target,
+name-only scan now preserves the same fail-closed policy and passes locally.
+Pull request `#10` still requires a green hosted rerun, a clean exact-head
+review, and normal protected merge. Physical APNs/FCM, terminated/background
+execution, location, haptic, carrier, legal, monitoring, failover, and
+staffed-operations evidence remains open. Evidence is recorded in
 [Managed Safety exact-head review](rounds/2026-09-09-managed-safety-exact-head-review.md).
 
 The production-readiness execution round is complete for supplier-independent

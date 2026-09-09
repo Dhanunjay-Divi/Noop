@@ -27,6 +27,31 @@ class LaunchGateIsolationTests(unittest.TestCase):
         )
         self.assertNotIn("should-never-be-returned", names)
 
+    def test_target_parser_groups_names_without_values(self) -> None:
+        grouped = MODULE.target_setting_names(
+            """
+Build settings for action build and target NOOPiOS:
+    APP_GROUP_ID = group.example
+    NOOP_LAUNCH_GATE_SALT_HEX = should-never-be-returned
+Build settings for action build and target NOOPiOSWidgets:
+    APP_GROUP_ID = group.example.widgets
+    NOOP_LAUNCH_GATE_REQUIRED = YES
+Build settings for action build and target Unrelated:
+    NOOP_LAUNCH_GATE_VERIFIER_HEX = ignored
+            """,
+            (MODULE.IPHONE_TARGET, *MODULE.EXTENSION_TARGETS),
+        )
+        self.assertEqual(
+            grouped[MODULE.IPHONE_TARGET],
+            frozenset({"APP_GROUP_ID", "NOOP_LAUNCH_GATE_SALT_HEX"}),
+        )
+        self.assertEqual(
+            grouped["NOOPiOSWidgets"],
+            frozenset({"APP_GROUP_ID", "NOOP_LAUNCH_GATE_REQUIRED"}),
+        )
+        self.assertNotIn("Unrelated", grouped)
+        self.assertNotIn("should-never-be-returned", repr(grouped))
+
     def test_extensions_reject_every_iPhone_only_setting(self) -> None:
         names = MODULE.PUBLIC_SETTINGS | MODULE.IPHONE_ONLY_SETTINGS
         for target in MODULE.EXTENSION_TARGETS:
