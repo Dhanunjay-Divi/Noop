@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import Strand
@@ -16,7 +17,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
     func testSleepHistoryStartsIndependentReadsTogetherAndTimesTheBoundary() throws {
         let text = try source("Strand/Screens/SleepView.swift")
         let start = try XCTUnwrap(
-            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyWriteQueryGate)")"#)
+            text.range(of: #".task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyReadsBlocked)")"#)
         )
         let end = try XCTUnwrap(
             text.range(of: ".sheet(item: $wakeEdit)", range: start.lowerBound..<text.endIndex)
@@ -34,8 +35,9 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("shouldPublishHistoryLoad("))
         XCTAssertTrue(block.contains("requestRefreshSeq: requestRefreshSeq"))
         XCTAssertTrue(block.contains("requestDeviceId: requestDeviceId"))
-        XCTAssertTrue(block.contains("guard !historyWriteQueryGate else { return }"))
-        XCTAssertTrue(text.contains("HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate)"))
+        XCTAssertTrue(block.contains("guard !historyReadsBlocked else { return }"))
+        XCTAssertTrue(text.contains("active: repo.historyWritesActive"))
+        XCTAssertTrue(text.contains("repo.historyWritesActive || historyWriteQueryGate"))
     }
 
     func testHistoryWriteQueryGateWaitsForAStableQuietEdge() throws {
@@ -49,8 +51,42 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("quietNanoseconds: UInt64 = 2_000_000_000"))
         XCTAssertTrue(block.contains("releaseTask?.cancel()"))
         XCTAssertTrue(block.contains("try? await Task.sleep"))
-        XCTAssertTrue(block.contains("!live.backfilling"))
+        XCTAssertTrue(block.contains("!active"))
         XCTAssertTrue(block.contains("blocked = false"))
+    }
+
+    func testHistoryWriteGateBlocksSynchronouslyBeforeTheLeafQuietHoldArrives() throws {
+        let repository = try source("Strand/Data/Repository.swift")
+        let model = try source("Strand/App/AppModel.swift")
+        let screens = try [
+            source("Strand/Screens/TodayView.swift"),
+            source("Strand/Liquid/LiquidTodayView.swift"),
+            source("Strand/Screens/SleepView.swift"),
+        ]
+
+        XCTAssertTrue(repository.contains("@Published private(set) var historyWritesActive = false"))
+        XCTAssertTrue(model.contains("live.$backfilling.removeDuplicates()"))
+        XCTAssertTrue(model.contains("repo.setHistoryWritesActive(active)"))
+        for screen in screens {
+            XCTAssertTrue(screen.contains("repo.historyWritesActive || historyWriteQueryGate"))
+            XCTAssertTrue(screen.contains("active: repo.historyWritesActive"))
+        }
+    }
+
+    @MainActor
+    func testRepositoryHistoryWriteBoundaryPublishesOnlyStateEdges() {
+        let repository = Repository(deviceId: "history-write-gate")
+        var observed: [Bool] = []
+        let observation = repository.$historyWritesActive.sink {
+            observed.append($0)
+        }
+
+        repository.setHistoryWritesActive(true)
+        repository.setHistoryWritesActive(true)
+        repository.setHistoryWritesActive(false)
+
+        XCTAssertEqual(observed, [false, true, false])
+        withExtendedLifetime(observation) {}
     }
 
     func testClassicTodayDefersColdAndWarmReadsUntilHistoryWritesAreQuiet() throws {
@@ -68,7 +104,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("restoreDayScoped(cached)"))
         XCTAssertTrue(block.contains("restoreHistoryWide(cached)"))
         XCTAssertTrue(block.contains("forceReload: forceAfterHistoryWrite"))
-        XCTAssertTrue(text.contains("historyWriteGate: historyWriteQueryGate"))
+        XCTAssertTrue(text.contains("historyWriteGate: historyReadsBlocked"))
     }
 
     func testSleepHistoryPublicationRejectsCancellationRefreshAndDeviceSupersession() {

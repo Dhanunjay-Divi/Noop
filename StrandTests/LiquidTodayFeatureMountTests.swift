@@ -174,7 +174,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         )
 
         XCTAssertTrue(task.contains("\\(repo.refreshSeq)"))
-        XCTAssertTrue(task.contains("\\(historyWriteQueryGate)"))
+        XCTAssertTrue(task.contains("\\(historyReadsBlocked)"))
         XCTAssertTrue(task.contains("\\(repo.deviceId)"))
         XCTAssertFalse(task.contains("repo.liquidTodayLoadCache = nil"))
         XCTAssertTrue(task.contains("await load()"))

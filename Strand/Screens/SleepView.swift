@@ -126,6 +126,9 @@ struct SleepView: View {
     /// Mirrors only the history-offload edge from LiveState. Heavy sleep-history reads wait until the
     /// write burst finishes, while the small syncing leaf continues to show progress independently.
     @State private var historyWriteQueryGate = false
+    private var historyReadsBlocked: Bool {
+        repo.historyWritesActive || historyWriteQueryGate
+    }
 
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
@@ -199,14 +202,17 @@ struct SleepView: View {
                     navNight = nil
                 }
             }
-            .background(HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate))
+            .background(HistoryWriteQueryGateBridge(
+                active: repo.historyWritesActive,
+                blocked: $historyWriteQueryGate
+            ))
             // Load EVERY sleep block across BOTH sources (un-deduplicated) so the hero's ◀/▶ can
             // browse split-sleep days the dashboard collapses — including Bluetooth-only nights,
             // whose blocks live under the computed source. Re-runs whenever a sync/import bumps
             // refreshSeq; snaps back to the newest day and rebuilds the model so offset 0 reflects
             // the freshly-loaded blocks. (#170)
-            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyWriteQueryGate)") {
-                guard !historyWriteQueryGate else { return }
+            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyReadsBlocked)") {
+                guard !historyReadsBlocked else { return }
                 let requestRefreshSeq = repo.refreshSeq
                 let requestDeviceId = repo.deviceId
                 let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("sleep.history_load")

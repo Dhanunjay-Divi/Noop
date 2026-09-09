@@ -395,6 +395,9 @@ struct TodayView: View {
     /// Set when a query pass was deferred. The first stably-quiet pass bypasses same-sequence caches so
     /// raw HR or sleep rows that did not change `refreshSeq` still become visible immediately.
     @State private var deferredDashboardReadsForHistoryWrite = false
+    private var historyReadsBlocked: Bool {
+        repo.historyWritesActive || historyWriteQueryGate
+    }
 
     // 14-day sparkline series, keyed by metric key. Loaded once in .task.
     @State private var sparks: [String: [Double]] = [:]
@@ -1657,7 +1660,10 @@ struct TodayView: View {
             .onPreferenceChange(HRChartFrameKey.self) { hrChartFrame = $0 }
             // Mirror the low-frequency history-write boundary without observing the sensor-cadence
             // LiveState object. The shared bridge holds the gate through short continuation gaps.
-            .background(HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate))
+            .background(HistoryWriteQueryGateBridge(
+                active: repo.historyWritesActive,
+                blocked: $historyWriteQueryGate
+            ))
         }
         // Reload when the data refreshes OR the selected day changes, the HR trend and Rest score are
         // day-scoped, so navigating must re-fetch them for the newly selected window.
@@ -1665,7 +1671,7 @@ struct TodayView: View {
                                workoutsSeq: repo.workoutsSeq,
                                offset: selectedDayOffset,
                                ageMetricState: profile.ageMetricStateToken,
-                               historyWriteGate: historyWriteQueryGate)) { await loadAll() }
+                               historyWriteGate: historyReadsBlocked)) { await loadAll() }
         // #989: hydration writes don't bump refreshSeq, so the card needs its own triggers, a logged /
         // edited / deleted drink (hydrationSeq) and the Settings feature toggle both re-read just the two
         // hydration fields. Cheap (one metricSeries row), never re-runs the heavy loads.
@@ -4251,7 +4257,7 @@ struct TodayView: View {
     /// True while the strap is mid history-offload, the SAME signal the "Syncing strap history…" note
     /// reads (`LiveState.backfilling`, set across BLEManager.startBackfilling/exitBackfilling). Used to
     /// defer the bulk history-wide reads so they don't contend with the offload's bulk writes (#755).
-    private var backfillActivelyWriting: Bool { historyWriteQueryGate }
+    private var backfillActivelyWriting: Bool { historyReadsBlocked }
 
     /// 14-day sparklines + the cross-source bundles + the "your cards" series + workouts, everything that
     /// does NOT depend on `selectedDayOffset`. The bulk of the dashboard's reads; deferred during an active

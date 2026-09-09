@@ -89,7 +89,7 @@ final class ScrollInteractionTracker: ObservableObject {
 struct HistoryWriteQueryGateBridge: View {
     static let quietNanoseconds: UInt64 = 2_000_000_000
 
-    @EnvironmentObject private var live: LiveState
+    let active: Bool
     @Binding var blocked: Bool
     @State private var releaseTask: Task<Void, Never>?
 
@@ -97,8 +97,8 @@ struct HistoryWriteQueryGateBridge: View {
         Color.clear
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
-            .onAppear { reconcile(live.backfilling) }
-            .onChangeCompat(of: live.backfilling) { reconcile($0) }
+            .onAppear { reconcile(active) }
+            .onChangeCompat(of: active) { reconcile($0) }
             .onDisappear { releaseTask?.cancel() }
     }
 
@@ -111,7 +111,7 @@ struct HistoryWriteQueryGateBridge: View {
         guard blocked else { return }
         releaseTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: Self.quietNanoseconds)
-            guard !Task.isCancelled, !live.backfilling else { return }
+            guard !Task.isCancelled, !active else { return }
             blocked = false
         }
     }

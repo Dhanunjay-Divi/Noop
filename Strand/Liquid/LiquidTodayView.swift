@@ -180,6 +180,9 @@ struct LiquidTodayView: View {
     /// The selected day currently represented by the query-backed state below. It lets a same-day refresh
     /// preserve visible values while an offload writes, while a day change still loads immediately.
     @State private var loadedQueryDayKey: String?
+    private var historyReadsBlocked: Bool {
+        repo.historyWritesActive || historyWriteQueryGate
+    }
 
     // Custom liquid pull-to-refresh: a vessel that FILLS as you drag, releases into a refresh (replaces
     // the system spinner). Driven by the scroll's top overscroll offset.
@@ -452,7 +455,10 @@ struct LiquidTodayView: View {
             .frame(maxWidth: .infinity)
             #endif
         }
-        .background(HistoryWriteQueryGateBridge(blocked: $historyWriteQueryGate))
+        .background(HistoryWriteQueryGateBridge(
+            active: repo.historyWritesActive,
+            blocked: $historyWriteQueryGate
+        ))
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
             scrollTracker.offset = offset
@@ -487,7 +493,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyWriteQueryGate)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyReadsBlocked)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -2818,7 +2824,7 @@ struct LiquidTodayView: View {
             chargeLandingHapticTrigger += 1
         }
 
-        if Self.shouldDeferQueryLoad(isBackfilling: historyWriteQueryGate) {
+        if Self.shouldDeferQueryLoad(isBackfilling: historyReadsBlocked) {
             deferredQueryLoadForHistoryWrite = true
             if let cached = repo.liquidTodayLoadCache,
                Self.canRestoreDuringHistoryWrite(cachedKey: cached.key, requestKey: requestKey) {

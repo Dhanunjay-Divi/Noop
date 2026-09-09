@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implemented and locally verified; protected review and physical-device evidence pending`
+- State: `implemented and locally verified; Safety rebase, protected review, and physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
@@ -45,7 +45,8 @@ Android where applicable, and leave physical-phone conclusions explicit.
 
 - Reproduction or observed symptom: a tester pulled current source on
   2026-09-08 and still described the app as laggy. No reviewed shake report or
-  physical-device trace is available yet.
+  physical-device trace is available yet. The protected performance work was
+  still only on pull request `#12`, so that pull of `main` did not contain it.
 - Relevant source/device/OS/firmware class: iPhone shell and shared GRDB store;
   Android Room parity applies to any changed retention or persistence
   contract. Exact phone, OS, database composition, thermal state, active
@@ -91,6 +92,15 @@ Android where applicable, and leave physical-phone conclusions explicit.
   through the short false edges between continuation sessions. Cold mounts do
   not run broad reads against active writes; same-device cached content stays
   visible, and one forced catch-up load runs after a two-second quiet edge.
+- A fresh cold-mount audit closed the remaining Apple ordering race. AppModel
+  now mirrors only the deduplicated history-write boolean onto the already
+  observed Repository before screens mount. Classic Today, Liquid Today, and
+  Sleep combine that synchronous edge with their local two-second quiet hold,
+  so their first task cannot start broad reads before the leaf bridge appears,
+  and the heavy roots still do not observe sensor-rate LiveState publications.
+- Android parity was rechecked rather than changed speculatively: its retained
+  ViewModel already exposes an eagerly seeded, deduplicated boolean StateFlow,
+  and Today/Sleep initialize the same quiet gate from that current value.
 - Android Today performs one resolved Rest-history read for both the selected
   score and sparkline, retains the compact day/value map across tab remounts,
   keys it to the daily data, active device, and metric-series revision, and
@@ -247,6 +257,8 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Scroll-interaction clock follow-up | Android compiled and ran 22 retained-screen, Health, and frame-pacer contracts with zero failures in 23 seconds. After the shared status-pill follow-up, all 52 StrandDesign tests and 22 Apple retained-screen, Health, and Liquid Today contracts passed with zero failures | Connection/status pulses, band-sync sweeps, and Daily Signal waveforms stop their decorative clocks while drag or fling owns the frame budget on both platforms; every shared Apple `StatePill` receives the shell gate | Physical GPU timing, hidden OS work, or the tester's exact phone |
 | Apple interaction-wiring audit | The standard Apple scaffold and liquid Today now publish the shared interaction environment through an edge-coalesced offset tracker; the Android Health sampler uses the existing Compose interaction local. The production-flavor Android focused suite passed in 30 seconds, and the Apple app compiled and ran 15 Health/retained-screen contracts with zero failures. A follow-up no-churn audit replaced the first scheduler-sensitive lifecycle assertion with a pure latest-movement timing-policy test; all 13 focused retained-screen contracts then passed | Shared Apple motion consumers now receive a real drag/deceleration signal rather than the environment default, one settle task serves the full gesture instead of being recreated per frame, and Health has no one-second sampling clock while paused or scrolling on either platform | Physical touch latency, GPU pacing, or the tester's exact phone |
 | Large-store Apple simulator scroll | A verified 294.9 MB store with 2,376,000 active-device HR rows and 864,000 R-R rows was swapped into the installed iPhone 17 Pro simulator. `testTodayScrollPerformance` passed five up/down iterations with a 5.188 s average automation window, 0.167 s average app CPU time, and about 35.3 MB peak physical memory. The original 1.10 MB database was restored with integrity `ok` | The optimized Today path remains functional and bounded when the same active device owns a phone-sized production-schema store | Physical GPU pacing, thermal behavior, flash latency, active BLE ingestion, or the affected tester's phone |
+| Cold-mount history-write gate | The complete changed Apple graph compiled and 25 focused retained-screen/Liquid Today tests passed, including a runtime publisher regression proving only the initial value and true/false edges publish | A screen opened during an already-active history write sees the block synchronously, retains the two-second quiet release, and avoids sensor-rate root invalidation | Physical frame pacing during a real band offload |
+| Old Android hosted production-shell run | Compilation and packaging completed, but the managed device task was terminated with exit 143 at the workflow's 900-second bound before any instrumentation result was emitted | The old failure was a bounded emulator/test-infrastructure timeout rather than a product assertion | The rebased exact head still requires a completed hosted production-shell run |
 | Post-review policy preflight | `git diff --check`, the 39-record operations validator, `required-ci-gate.py check`, and the terminology ratchet passed. The regenerated pre-rebase snapshot records 17,360 classified occurrences across 1,510 groups with no active-allowlist change. An initial no-subcommand `required-ci-gate.py` invocation returned its expected usage error and was corrected | The review patch remains structurally clean, keeps the required-context policy intact, and does not introduce an unreviewed active legacy term | Final regenerated snapshot and complete policy matrix after the Safety rebase |
 
 ## Physical device and deployment
