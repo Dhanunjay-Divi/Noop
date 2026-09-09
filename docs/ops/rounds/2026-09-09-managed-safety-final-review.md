@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `94dfe9d04b54dee706f56361724640ded32f2773`
-- End implementation commit: pending
+- End implementation commit: `e1c02d0b`
 - Record commit or PR: protected pull request `#10`
 
 ## Objective
@@ -123,8 +123,8 @@ existing external launch gates.
   managed service, app delegate, view, and tests; Android Safety view and test;
   generated nine-locale Safety resources; terminology snapshot and pinned
   digest; operations records.
-- Commits: implementation pending local commit; the protected pull-request head
-  will identify the exact source reviewed and merged.
+- Commits: implementation `e1c02d0b`; this record follow-up will become the
+  protected pull-request head used for hosted checks and review.
 - Branch and remote state: protected pull request `#10` remains open.
 - Repository visibility verified: inherited from the exact-head review round.
 - Version/build impact: no version change planned.
