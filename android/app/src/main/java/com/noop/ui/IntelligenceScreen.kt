@@ -18,7 +18,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,28 +52,6 @@ import kotlin.math.roundToInt
 @Composable
 fun IntelligenceScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
-    // PERF (#scroll-jank): the BLE live state ticks ~1Hz. This screen reads `live` ONLY for the
-    // "syncing history" note, so reading the whole `live` object at body scope recomposed the entire
-    // Intelligence screen on every HR tick. Collapse it to the progress fields the note needs via a
-    // structural-equality snapshot: a 72→73 bpm tick produces an EQUAL
-    // snapshot and the body is NOT recomposed; it only recomposes when visible sync progress changes.
-    val live by vm.live.collectAsStateWithLifecycle()
-    val backfillNote by remember {
-        derivedStateOf {
-            val s = live
-            if (s.backfilling) {
-                HistorySyncUiProgress(
-                    batches = s.syncChunksThisSession,
-                    rows = s.syncRowsThisSession,
-                    newestDataUnix = s.syncDataNewestAt,
-                    startedAt = s.syncStartedAt,
-                    lastDurableProgressAt = s.syncLastDurableProgressAt,
-                )
-            } else {
-                null
-            }
-        }
-    }
 
     // Effort display scale (#268) — routes every Effort value/label on this screen. Display-only.
     val effortScale = UnitPrefs.effortScale(LocalContext.current)
@@ -121,15 +98,7 @@ fun IntelligenceScreen(vm: AppViewModel) {
         if (ordered.isEmpty()) {
             item {
                 // While the strap is mid-offload, say so — an empty list reads as final otherwise (#77).
-                backfillNote?.let { progress ->
-                    SyncingHistoryNote(
-                        chunks = progress.batches,
-                        rows = progress.rows,
-                        newestDataUnix = progress.newestDataUnix,
-                        startedAt = progress.startedAt,
-                        lastDurableProgressAt = progress.lastDurableProgressAt,
-                    )
-                }
+                IntelligenceSyncingHistoryStatus(vm)
                 EmptyNote()
             }
         } else {
@@ -178,6 +147,20 @@ fun IntelligenceScreen(vm: AppViewModel) {
                 items(filtered, key = { it.day }) { day -> DayCard(day, effortScale) }
             }
         }
+    }
+}
+
+@Composable
+private fun IntelligenceSyncingHistoryStatus(vm: AppViewModel) {
+    val status by vm.historySyncStatus.collectAsStateWithLifecycle()
+    if (status.backfilling) {
+        SyncingHistoryNote(
+            chunks = status.batches,
+            rows = status.rows,
+            newestDataUnix = status.newestDataUnix,
+            startedAt = status.startedAt,
+            lastDurableProgressAt = status.lastDurableProgressAt,
+        )
     }
 }
 

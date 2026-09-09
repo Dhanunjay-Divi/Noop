@@ -12,7 +12,7 @@ import org.junit.Test
 
 class RetainedScreenPerformanceTest {
     @Test
-    fun sleepSyncProjectionSuppressesOrdinarySensorTicks() = runTest {
+    fun sharedSyncProjectionSuppressesOrdinarySensorTicks() = runTest {
         val observed = flowOf(
             LiveState(heartRate = 70, heartRateSampleSequence = 1),
             LiveState(heartRate = 71, heartRateSampleSequence = 2),
@@ -34,13 +34,43 @@ class RetainedScreenPerformanceTest {
                 syncRowsThisSession = 80,
             ),
             LiveState(heartRate = 73, heartRateSampleSequence = 4),
-        ).sleepHistorySyncProgressChanges().toList()
+        ).historySyncStatusChanges().toList()
 
         assertEquals(4, observed.size)
-        assertEquals(null, observed[0])
-        assertEquals(1, observed[1]?.batches)
-        assertEquals(2, observed[2]?.batches)
-        assertEquals(null, observed[3])
+        assertFalse(observed[0].backfilling)
+        assertEquals(1, observed[1].batches)
+        assertEquals(2, observed[2].batches)
+        assertFalse(observed[3].backfilling)
+    }
+
+    @Test
+    fun dashboardProjectionSuppressesSensorAndSyncProgressTicks() = runTest {
+        val observed = flowOf(
+            LiveState(heartRate = 70, heartRateSampleSequence = 1),
+            LiveState(heartRate = 71, heartRateSampleSequence = 2),
+            LiveState(
+                connected = true,
+                batteryPct = 80.0,
+                syncChunksThisSession = 1,
+            ),
+            LiveState(
+                connected = true,
+                batteryPct = 80.0,
+                heartRate = 72,
+                heartRateSampleSequence = 3,
+                syncChunksThisSession = 2,
+            ),
+            LiveState(
+                connected = true,
+                batteryPct = 79.0,
+                syncChunksThisSession = 3,
+            ),
+        ).dashboardLiveChanges().toList()
+
+        assertEquals(3, observed.size)
+        assertFalse(observed[0].connected)
+        assertEquals(80.0, observed[1].batteryPct)
+        assertEquals(79.0, observed[2].batteryPct)
     }
 
     @Test
@@ -52,7 +82,9 @@ class RetainedScreenPerformanceTest {
         val rootStart = sleep.indexOf("fun SleepScreen(")
         val rootEnd = sleep.indexOf("// MARK: - 0b.", startIndex = rootStart)
         val root = sleep.substring(rootStart, rootEnd)
-        assertTrue(root.contains("sleepHistorySyncProgressChanges()"))
+        assertTrue(root.contains("vm.historyBackfillActive.collectAsStateWithLifecycle()"))
+        assertTrue(root.contains("SleepSyncingHistoryStatus(vm)"))
+        assertFalse(root.contains("vm.historySyncStatus.collectAsStateWithLifecycle()"))
         assertFalse(root.contains("vm.live.collectAsStateWithLifecycle()"))
         assertTrue(
             Regex("""vm\.repo\.sessionMotions\(\s*activeDeviceId""")
@@ -66,7 +98,7 @@ class RetainedScreenPerformanceTest {
         assertTrue(root.contains("shouldPublishSleepHistorySnapshot("))
         assertTrue(root.contains("SleepHistorySnapshot("))
         assertTrue(root.contains("SleepMetricSnapshot("))
-        assertTrue(root.contains("val isBackfilling = backfillNote != null"))
+        assertTrue(root.contains("val isBackfilling by vm.historyBackfillActive"))
         assertTrue(root.contains("rememberHistoryQueryGate(isBackfilling)"))
         assertTrue(root.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
 
@@ -158,11 +190,38 @@ class RetainedScreenPerformanceTest {
     }
 
     @Test
-    fun todayDurableProgressClockIsBoundedAwayFromPerChunkRecomposition() {
-        assertEquals(null, boundedTodaySyncProgressTimestamp(null))
-        assertEquals(100L, boundedTodaySyncProgressTimestamp(100L))
-        assertEquals(110L, boundedTodaySyncProgressTimestamp(101L))
-        assertEquals(110L, boundedTodaySyncProgressTimestamp(109L))
+    fun todayRootDoesNotObserveExactHistoryProgress() {
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val rootStart = today.indexOf("fun TodayScreen(")
+        val rootEnd = today.indexOf("// MARK: - Evidence-gated Daily Action", startIndex = rootStart)
+        val root = today.substring(rootStart, rootEnd)
+
+        assertTrue(root.contains("viewModel.dashboardLive.collectAsStateWithLifecycle()"))
+        assertTrue(root.contains("viewModel.historyBackfillActive.collectAsStateWithLifecycle()"))
+        assertTrue(root.contains("TodayHeaderSyncStatus(viewModel)"))
+        assertTrue(root.contains("TodaySyncingHistoryStatus("))
+        assertTrue(root.contains("TodaySourcesSectionLive("))
+        assertFalse(root.contains("viewModel.live.collectAsStateWithLifecycle()"))
+        assertFalse(root.contains("viewModel.historySyncStatus.collectAsStateWithLifecycle()"))
+        assertFalse(root.contains("syncRowsThisSession"))
+        assertFalse(root.contains("syncChunksThisSession"))
+    }
+
+    @Test
+    fun intelligenceRootKeepsExactSyncProgressInItsEmptyStateLeaf() {
+        val intelligence = source("com/noop/ui/IntelligenceScreen.kt")
+        val rootStart = intelligence.indexOf("fun IntelligenceScreen(")
+        val rootEnd = intelligence.indexOf(
+            "private fun IntelligenceSyncingHistoryStatus(",
+            startIndex = rootStart,
+        )
+        val root = intelligence.substring(rootStart, rootEnd)
+
+        assertTrue(root.contains("IntelligenceSyncingHistoryStatus(vm)"))
+        assertFalse(root.contains("vm.live.collectAsStateWithLifecycle()"))
+        assertFalse(root.contains("vm.historySyncStatus.collectAsStateWithLifecycle()"))
+        assertFalse(root.contains("syncRowsThisSession"))
+        assertFalse(root.contains("syncChunksThisSession"))
     }
 
     @Test

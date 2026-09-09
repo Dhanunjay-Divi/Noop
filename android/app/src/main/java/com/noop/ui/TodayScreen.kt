@@ -104,7 +104,6 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -391,40 +390,6 @@ private fun Modifier.liquidTodayCompactSurface(): Modifier = composed {
 // the mini "Your cards" vessel so Vitality reads the same purple as iOS.
 private val LIQUID_PURPLE: Color = Color(red = 0x9b / 255f, green = 0x7b / 255f, blue = 0xff / 255f, alpha = 1f)
 
-/**
- * The minimal, stable slice of the BLE [com.noop.ble.LiveState] the Today top-level body reads. Pulled out
- * so a per-second heart-rate tick, which the body does not display numerically, produces an EQUAL value
- * and skips recomposing the whole dashboard (the redesign's scroll-jank fix). `hrStreaming` collapses the
- * ticking bpm to "is a live stream present" (the only thing the recording light needs); all other fields
- * change at most every few seconds. A plain data class so [androidx.compose.runtime.derivedStateOf] can
- * structurally-compare successive snapshots and emit only on a real change.
- */
-private data class TodayLiveSnapshot(
-    val connected: Boolean,
-    val bonded: Boolean,
-    val hrStreaming: Boolean,
-    val lastSyncAt: Long?,
-    val backfilling: Boolean,
-    val syncChunksThisSession: Int,
-    val syncRowsThisSession: Int,
-    val syncDataNewestAt: Long?,
-    val syncStartedAt: Long?,
-    val syncLastDurableProgressAt: Long?,
-    val historySyncExperimental: Boolean,
-    val sustainedEmptyOffload: Boolean,
-    val batteryPct: Double?,
-    /** True once a WHOOP 5/MG strap has been seen this session, picks the 5/MG rated-life fallback for the
-     *  battery runtime estimate (#713). Changes at most once per connection, so it doesn't reintroduce the
-     *  per-tick churn the snapshot exists to avoid. */
-    val whoop5: Boolean,
-    /** Charging hides the runtime estimate (no "X left" while topping up). Rare flips, snapshot-safe. */
-    val charging: Boolean?,
-)
-
-/** Coarsen the durable-progress clock so per-chunk writes cannot invalidate the full Today tree. */
-internal fun boundedTodaySyncProgressTimestamp(timestamp: Long?): Long? =
-    timestamp?.let { ((it + 9L) / 10L) * 10L }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodayScreen(
@@ -466,46 +431,15 @@ fun TodayScreen(
     val illnessWatchEnabled by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
     val activeStrapId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
-    val live by viewModel.live.collectAsStateWithLifecycle()
+    val liveSnap by viewModel.dashboardLive.collectAsStateWithLifecycle()
+    val historyBackfilling by viewModel.historyBackfillActive.collectAsStateWithLifecycle()
     // The in-flight manual workout (single source of truth, survives an app kill via rehydration), so the
     // indicator card auto-appears/clears off this alone. Null↔non-null + the start drive the card; the
     // per-second clock ticks inside the card's own LaunchedEffect, never recomposing the Today body.
     val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
-    // PERF (#scroll-jank): the BLE live state ticks the heart rate roughly once a second. Reading the raw
-    // `live` object directly in this top-level body would recompose the ENTIRE Today tree (rings, cards,
-    // scene-positioning) on every bpm change, visible as scroll stutter on real devices. The body only
-    // needs a handful of stable, slow-changing fields, and the live HR matters here only as "is a stream
-    // present" (null↔non-null), never the bpm number. Funnel those through a `derivedStateOf` snapshot so a
-    // 72→73 bpm tick produces an EQUAL snapshot and the body is NOT recomposed; it only recomposes when
-    // connection / sync / battery / streaming-presence actually change. The live bpm number is rendered
-    // elsewhere (HeartRateTrendCard), which scopes its own collection. Appearance-preserving.
-    val liveSnap by remember {
-        derivedStateOf {
-            val s = live
-            TodayLiveSnapshot(
-                connected = s.connected,
-                bonded = s.bonded,
-                hrStreaming = s.heartRate != null,
-                lastSyncAt = s.lastSyncAt,
-                backfilling = s.backfilling,
-                syncChunksThisSession = s.syncChunksThisSession,
-                syncRowsThisSession = s.syncRowsThisSession,
-                syncDataNewestAt = s.syncDataNewestAt,
-                syncStartedAt = s.syncStartedAt,
-                syncLastDurableProgressAt =
-                    boundedTodaySyncProgressTimestamp(s.syncLastDurableProgressAt),
-                historySyncExperimental = s.historySyncExperimental,
-                sustainedEmptyOffload = s.sustainedEmptyOffload,
-                batteryPct = s.batteryPct,
-                whoop5 = s.whoop5Detected,
-                charging = s.charging,
-            )
-        }
-    }
-    // Bulk history offload is a sustained database write burst. Keep the current coherent dashboard
-    // visible and cancel/defer history-wide reads until the backfill edge falls; each keyed effect below
-    // then runs once against the completed snapshot instead of competing with every chunk commit.
-    val deferHistoricalQueries = rememberHistoryQueryGate(liveSnap.backfilling)
+    // The root observes only stable connection/battery fields plus the boolean history-write edge.
+    // Exact batch/row progress is rendered by small leaves below and cannot invalidate this dashboard.
+    val deferHistoricalQueries = rememberHistoryQueryGate(historyBackfilling)
     // #849: seed from the ViewModel cache so a re-mount (tab-return / post-import) restores the last footer
     // immediately instead of flashing empty while the heavy reload is (now) skipped for unchanged data.
     var footer by remember(activeStrapId) {
@@ -1620,7 +1554,7 @@ fun TodayScreen(
             onHorizontalDrag = { _, dragAmount -> accumulatedX += dragAmount },
         )
     }
-    val canPullToSync = todayPullToSyncEnabled(liveSnap.connected, liveSnap.bonded, liveSnap.backfilling)
+    val canPullToSync = todayPullToSyncEnabled(liveSnap.connected, liveSnap.bonded, historyBackfilling)
     val pullToSyncState = rememberPullToRefreshState()
     var pullToSyncRefreshing by remember { mutableStateOf(false) }
     LaunchedEffect(pullToSyncRefreshing, canPullToSync) {
@@ -1630,45 +1564,7 @@ fun TodayScreen(
             pullToSyncRefreshing = false
         }
     }
-    // A new logical day may not have its own row yet while Today still shows carried Recovery,
-    // Sleep, and vitals from existing history. That is cached content too: disclose an automatic
-    // offload briefly, then return the space to the dashboard while the transfer continues.
     val hasCachedTodayContent = days.isNotEmpty()
-    var syncPresentationNow by remember(
-        liveSnap.backfilling,
-        liveSnap.syncStartedAt,
-        hasCachedTodayContent,
-    ) {
-        mutableLongStateOf(System.currentTimeMillis() / 1_000L)
-    }
-    LaunchedEffect(
-        liveSnap.backfilling,
-        liveSnap.syncStartedAt,
-        liveSnap.syncLastDurableProgressAt,
-        hasCachedTodayContent,
-    ) {
-        syncPresentationNow = System.currentTimeMillis() / 1_000L
-        val startedAt = liveSnap.syncStartedAt
-        if (liveSnap.backfilling && startedAt != null) {
-            val progressReference = liveSnap.syncLastDurableProgressAt ?: startedAt
-            val deadlines = listOf(
-                startedAt + HistorySyncPresentationPolicy.EXPANDED_FOR_SECONDS,
-                progressReference + HistorySyncDurableProgressPolicy.STALLED_AFTER_SECONDS,
-            ).filter { it > syncPresentationNow }.sorted()
-            for (deadline in deadlines) {
-                val remaining = (deadline - System.currentTimeMillis() / 1_000L).coerceAtLeast(0)
-                if (remaining > 0) kotlinx.coroutines.delay(remaining * 1_000L)
-                syncPresentationNow = System.currentTimeMillis() / 1_000L
-            }
-        }
-    }
-    val historySyncPresentation = HistorySyncPresentationPolicy.state(
-        isSyncing = liveSnap.backfilling,
-        hasCachedContent = hasCachedTodayContent,
-        startedAt = liveSnap.syncStartedAt,
-        lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
-        now = syncPresentationNow,
-    )
 
     Box(
         modifier = Modifier
@@ -1744,10 +1640,7 @@ fun TodayScreen(
             connected = liveSnap.connected,
             batteryPct = if (liveSnap.connected) liveSnap.batteryPct else null,
             charging = liveSnap.charging,
-            backfilling = liveSnap.backfilling,
-            syncChunksThisSession = liveSnap.syncChunksThisSession,
-            lastSyncAt = liveSnap.lastSyncAt,
-            historySyncExperimental = liveSnap.historySyncExperimental,
+            syncStatus = { TodayHeaderSyncStatus(viewModel) },
             weatherState = weatherState.takeIf { selectedDayOffset == 0 },
             temperatureUnit = temperatureUnit,
             onWeatherClick = {
@@ -1787,22 +1680,11 @@ fun TodayScreen(
             }
         }
 
-        if (
-            liveSnap.backfilling &&
-            (
-                historySyncPresentation == HistorySyncPresentationState.EXPANDED ||
-                    historySyncPresentation == HistorySyncPresentationState.ATTENTION
-                )
-        ) {
-            item {
-                SyncingHistoryNote(
-                    chunks = liveSnap.syncChunksThisSession,
-                    rows = liveSnap.syncRowsThisSession,
-                    newestDataUnix = liveSnap.syncDataNewestAt,
-                    startedAt = liveSnap.syncStartedAt,
-                    lastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
-                )
-            }
+        item {
+            TodaySyncingHistoryStatus(
+                viewModel = viewModel,
+                hasCachedContent = hasCachedTodayContent,
+            )
         }
 
         // Design Reset (iOS parity): the "New here?" first-run card is off the Today dashboard for the
@@ -1971,9 +1853,7 @@ fun TodayScreen(
                                     DailySignalHeader(
                                         status = dailySignalStatus,
                                         sourceLabel = heroSourceLabel,
-                                        bandBackfilling = liveSnap.backfilling,
-                                        bandSyncChunks = liveSnap.syncChunksThisSession,
-                                        bandLastSyncAt = liveSnap.lastSyncAt,
+                                        viewModel = viewModel,
                                         onOpen = onOpenHealth,
                                     )
                                     ScoreHeroRow(
@@ -2222,16 +2102,11 @@ fun TodayScreen(
         // Strap battery only while the link is up AND a real reading exists, a stale % from a
         // dropped connection must not present as live (#159).
         item {
-            TodaySourcesSection(
-                footer,
+            TodaySourcesSectionLive(
+                viewModel = viewModel,
+                footer = footer,
                 strapBatteryPct = if (liveSnap.connected) liveSnap.batteryPct?.roundToInt() else null,
                 strapBatteryEstimate = if (liveSnap.connected) batteryEstimateText else null,
-                bandBackfilling = liveSnap.backfilling,
-                bandSyncBatches = liveSnap.syncChunksThisSession,
-                bandSyncRows = liveSnap.syncRowsThisSession,
-                bandSyncNewestAt = liveSnap.syncDataNewestAt,
-                bandSyncStartedAt = liveSnap.syncStartedAt,
-                bandSyncLastDurableProgressAt = liveSnap.syncLastDurableProgressAt,
                 expanded = sourcesExpanded,
                 onToggle = { sourcesExpanded = !sourcesExpanded },
             )
@@ -3419,10 +3294,7 @@ private fun LiquidTodayHeader(
     connected: Boolean,
     batteryPct: Double?,
     charging: Boolean?,
-    backfilling: Boolean = false,
-    syncChunksThisSession: Int = 0,
-    lastSyncAt: Long? = null,
-    historySyncExperimental: Boolean = false,
+    syncStatus: @Composable () -> Unit,
     weatherState: TodayWeatherState? = null,
     temperatureUnit: TemperatureUnit,
     onWeatherClick: () -> Unit,
@@ -3562,12 +3434,7 @@ private fun LiquidTodayHeader(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                SyncStatusChip(
-                    backfilling = backfilling,
-                    chunks = syncChunksThisSession,
-                    lastSyncAt = lastSyncAt,
-                    historySyncExperimental = historySyncExperimental,
-                )
+                syncStatus()
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -3968,6 +3835,80 @@ private fun HeaderIconButton(
     }
 }
 
+@Composable
+private fun TodayHeaderSyncStatus(viewModel: AppViewModel) {
+    val status by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    SyncStatusChip(
+        backfilling = status.backfilling,
+        chunks = status.batches,
+        lastSyncAt = status.lastSyncAt,
+        historySyncExperimental = status.experimental,
+    )
+}
+
+/**
+ * Owns exact history progress and its elapsed clock inside one list item. The Today root observes only
+ * the boolean write edge, so a new batch or row count cannot rebuild the dashboard while it is scrolled.
+ */
+@Composable
+private fun TodaySyncingHistoryStatus(
+    viewModel: AppViewModel,
+    hasCachedContent: Boolean,
+) {
+    val status by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    var now by remember(
+        status.backfilling,
+        status.startedAt,
+        status.lastDurableProgressAt,
+        hasCachedContent,
+    ) {
+        mutableLongStateOf(System.currentTimeMillis() / 1_000L)
+    }
+    LaunchedEffect(
+        status.backfilling,
+        status.startedAt,
+        status.lastDurableProgressAt,
+        hasCachedContent,
+    ) {
+        now = System.currentTimeMillis() / 1_000L
+        val startedAt = status.startedAt
+        if (status.backfilling && startedAt != null) {
+            val progressReference = status.lastDurableProgressAt ?: startedAt
+            val deadlines = listOf(
+                startedAt + HistorySyncPresentationPolicy.EXPANDED_FOR_SECONDS,
+                progressReference + HistorySyncDurableProgressPolicy.STALLED_AFTER_SECONDS,
+            ).filter { it > now }.sorted()
+            for (deadline in deadlines) {
+                val remaining = (deadline - System.currentTimeMillis() / 1_000L).coerceAtLeast(0)
+                if (remaining > 0) delay(remaining * 1_000L)
+                now = System.currentTimeMillis() / 1_000L
+            }
+        }
+    }
+    val presentation = HistorySyncPresentationPolicy.state(
+        isSyncing = status.backfilling,
+        hasCachedContent = hasCachedContent,
+        startedAt = status.startedAt,
+        lastDurableProgressAt = status.lastDurableProgressAt,
+        now = now,
+    )
+    if (
+        status.backfilling &&
+        (
+            presentation == HistorySyncPresentationState.EXPANDED ||
+                presentation == HistorySyncPresentationState.ATTENTION
+            )
+    ) {
+        SyncingHistoryNote(
+            chunks = status.batches,
+            rows = status.rows,
+            newestDataUnix = status.newestDataUnix,
+            startedAt = status.startedAt,
+            lastDurableProgressAt = status.lastDurableProgressAt,
+        )
+    }
+}
+
 /** #245: compact sync-status chip for the Today top bar, shown to EVERY user. The full-width
  *  SyncingHistoryNote is gated on `recovery == null`, so an established user (and especially a WHOOP 5/MG
  *  owner, whose history offloads are rare) saw no sync feedback on Today. THREE states so the ABSENCE of
@@ -4252,9 +4193,7 @@ private fun LiquidWordmark(
 private fun DailySignalHeader(
     status: DailySignalStatus,
     sourceLabel: String?,
-    bandBackfilling: Boolean,
-    bandSyncChunks: Int,
-    bandLastSyncAt: Long?,
+    viewModel: AppViewModel,
     onOpen: () -> Unit,
 ) {
     val tint = when (status) {
@@ -4301,11 +4240,9 @@ private fun DailySignalHeader(
                 DailySignalIdentity(status = status, tint = tint)
                 Spacer(Modifier.weight(1f))
                 if (sourceLabel != null) {
-                    DailySignalSourceBadge(
+                    DailySignalSourceBadgeLive(
                         text = sourceLabel,
-                        bandBackfilling = bandBackfilling,
-                        bandSyncChunks = bandSyncChunks,
-                        bandLastSyncAt = bandLastSyncAt,
+                        viewModel = viewModel,
                     )
                 }
                 DailySignalStatePill(title = label, tint = tint)
@@ -4322,11 +4259,9 @@ private fun DailySignalHeader(
                     verticalArrangement = Arrangement.spacedBy(Metrics.space8),
                 ) {
                     if (sourceLabel != null) {
-                        DailySignalSourceBadge(
+                        DailySignalSourceBadgeLive(
                             text = sourceLabel,
-                            bandBackfilling = bandBackfilling,
-                            bandSyncChunks = bandSyncChunks,
-                            bandLastSyncAt = bandLastSyncAt,
+                            viewModel = viewModel,
                         )
                     }
                     DailySignalStatePill(title = label, tint = tint)
@@ -4334,6 +4269,22 @@ private fun DailySignalHeader(
             }
         }
     }
+}
+
+@Composable
+private fun DailySignalSourceBadgeLive(
+    text: String,
+    viewModel: AppViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val status by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    DailySignalSourceBadge(
+        text = text,
+        bandBackfilling = status.backfilling,
+        bandSyncChunks = status.batches,
+        bandLastSyncAt = status.lastSyncAt,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -8195,6 +8146,31 @@ private fun TodayWorkoutsSection(workouts: List<WorkoutRow>) {
             )
         }
     }
+}
+
+@Composable
+private fun TodaySourcesSectionLive(
+    viewModel: AppViewModel,
+    footer: TodayFooterState,
+    strapBatteryPct: Int? = null,
+    strapBatteryEstimate: String? = null,
+    expanded: Boolean = true,
+    onToggle: () -> Unit = {},
+) {
+    val status by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+    TodaySourcesSection(
+        footer = footer,
+        strapBatteryPct = strapBatteryPct,
+        strapBatteryEstimate = strapBatteryEstimate,
+        bandBackfilling = status.backfilling,
+        bandSyncBatches = status.batches,
+        bandSyncRows = status.rows,
+        bandSyncNewestAt = status.newestDataUnix,
+        bandSyncStartedAt = status.startedAt,
+        bandSyncLastDurableProgressAt = status.lastDurableProgressAt,
+        expanded = expanded,
+        onToggle = onToggle,
+    )
 }
 
 @Composable

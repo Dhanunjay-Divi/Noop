@@ -87,7 +87,6 @@ import com.noop.analytics.SleepDebtLedger
 import com.noop.analytics.SleepEditGuard
 import com.noop.analytics.SleepStageTotals
 import com.noop.analytics.SleepStress
-import com.noop.ble.LiveState
 import com.noop.data.DismissedSleep
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
@@ -98,9 +97,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -183,22 +179,6 @@ private data class SleepMetricSnapshot(
     val evidenceByDay: Map<String, ScoreConfidence.RestEvidenceFlags>,
 )
 
-/** Low-frequency projection for the only BLE state rendered by the Sleep root. */
-internal fun Flow<LiveState>.sleepHistorySyncProgressChanges(): Flow<HistorySyncUiProgress?> =
-    map { state ->
-        if (state.backfilling) {
-            HistorySyncUiProgress(
-                batches = state.syncChunksThisSession,
-                rows = state.syncRowsThisSession,
-                newestDataUnix = state.syncDataNewestAt,
-                startedAt = state.syncStartedAt,
-                lastDurableProgressAt = state.syncLastDurableProgressAt,
-            )
-        } else {
-            null
-        }
-    }.distinctUntilChanged()
-
 internal fun sleepHistoryResultBucket(count: Int): String = when {
     count <= 0 -> "empty"
     count <= 30 -> "up_to_30"
@@ -212,6 +192,20 @@ internal fun shouldPublishSleepHistorySnapshot(
     isCancelled: Boolean,
 ): Boolean = !isCancelled && requestDeviceId == currentDeviceId
 
+@Composable
+private fun SleepSyncingHistoryStatus(vm: AppViewModel) {
+    val status by vm.historySyncStatus.collectAsStateWithLifecycle()
+    if (status.backfilling) {
+        SyncingHistoryNote(
+            chunks = status.batches,
+            rows = status.rows,
+            newestDataUnix = status.newestDataUnix,
+            startedAt = status.startedAt,
+            lastDurableProgressAt = status.lastDurableProgressAt,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SleepScreen(
@@ -221,12 +215,9 @@ fun SleepScreen(
     val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val restDataVersion by vm.restDataVersion.collectAsStateWithLifecycle()
 
-    // The full BLE state ticks at sensor cadence. Collect only the deduplicated sync projection so an
-    // ordinary heart-rate packet cannot recompose this query-heavy screen root.
-    val backfillNote by remember(vm.live) {
-        vm.live.sleepHistorySyncProgressChanges()
-    }.collectAsStateWithLifecycle(initialValue = null)
-    val isBackfilling = backfillNote != null
+    // Exact batches/rows are rendered only by the empty-state leaf. The query-heavy root observes the
+    // boolean write edge, so neither sensor packets nor history progress can rebuild the whole screen.
+    val isBackfilling by vm.historyBackfillActive.collectAsStateWithLifecycle()
     val deferHistoricalQueries = rememberHistoryQueryGate(isBackfilling)
 
     // Every recorded sleep BLOCK, oldest→newest — the hero's ◀/▶ chevrons walk this whole list,
@@ -681,15 +672,7 @@ fun SleepScreen(
         if (tilesModel == null && night == null) {
             // While the strap is mid-offload, say so - "No nights" reads as final otherwise (#77).
             item {
-                backfillNote?.let { progress ->
-                    SyncingHistoryNote(
-                        chunks = progress.batches,
-                        rows = progress.rows,
-                        newestDataUnix = progress.newestDataUnix,
-                        startedAt = progress.startedAt,
-                        lastDurableProgressAt = progress.lastDurableProgressAt,
-                    )
-                }
+                SleepSyncingHistoryStatus(vm)
                 SleepEmptyState()
             }
         } else {

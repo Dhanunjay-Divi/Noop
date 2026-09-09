@@ -80,6 +80,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,6 +126,54 @@ internal data class TodayRestCompositeCacheKey(
     val activeStrapId: String,
     val restDataVersion: Long,
 )
+
+/** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
+internal data class DashboardLiveSnapshot(
+    val connected: Boolean,
+    val bonded: Boolean,
+    val batteryPct: Double?,
+    val whoop5: Boolean,
+    val charging: Boolean?,
+)
+
+internal fun LiveState.dashboardLiveSnapshot(): DashboardLiveSnapshot =
+    DashboardLiveSnapshot(
+        connected = connected,
+        bonded = bonded,
+        batteryPct = batteryPct,
+        whoop5 = whoop5Detected,
+        charging = charging,
+    )
+
+internal fun Flow<LiveState>.dashboardLiveChanges(): Flow<DashboardLiveSnapshot> =
+    map(LiveState::dashboardLiveSnapshot).distinctUntilChanged()
+
+/** Exact history progress for small status leaves; ordinary sensor packets map to an equal value. */
+internal data class HistorySyncStatusSnapshot(
+    val backfilling: Boolean,
+    val batches: Int,
+    val rows: Int,
+    val newestDataUnix: Long?,
+    val startedAt: Long?,
+    val lastDurableProgressAt: Long?,
+    val lastSyncAt: Long?,
+    val experimental: Boolean,
+)
+
+internal fun LiveState.historySyncStatusSnapshot(): HistorySyncStatusSnapshot =
+    HistorySyncStatusSnapshot(
+        backfilling = backfilling,
+        batches = syncChunksThisSession,
+        rows = syncRowsThisSession,
+        newestDataUnix = syncDataNewestAt,
+        startedAt = syncStartedAt,
+        lastDurableProgressAt = syncLastDurableProgressAt,
+        lastSyncAt = lastSyncAt,
+        experimental = historySyncExperimental,
+    )
+
+internal fun Flow<LiveState>.historySyncStatusChanges(): Flow<HistorySyncStatusSnapshot> =
+    map(LiveState::historySyncStatusSnapshot).distinctUntilChanged()
 
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
@@ -454,6 +503,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Live connection + biometric snapshot, surfaced straight from the BLE client. */
     val live: StateFlow<LiveState> = ble.state
+    /** Slow-changing Today-root state. Exact history progress is collected only by status leaves. */
+    internal val dashboardLive: StateFlow<DashboardLiveSnapshot> = live
+        .dashboardLiveChanges()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            live.value.dashboardLiveSnapshot(),
+        )
+    /** Shared exact sync projection. It emits for progress, not for HR/R-R sensor cadence. */
+    internal val historySyncStatus: StateFlow<HistorySyncStatusSnapshot> = live
+        .historySyncStatusChanges()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            live.value.historySyncStatusSnapshot(),
+        )
     /** Low-frequency projection for history consumers that need to refresh after an offload without
      *  collecting the full live state (which republishes every heart-rate packet). */
     val lastHistorySyncAt: StateFlow<Long?> = live

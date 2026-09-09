@@ -144,7 +144,7 @@ class RuntimePerformanceContractTest {
         assertTrue(today.contains("viewModel.selectedDeviceId.collectAsStateWithLifecycle()"))
         assertTrue(today.contains("viewModel.todayCardsLoadedDeviceId == activeStrapId"))
         assertTrue(today.contains("viewModel.todayFooterLoadedDeviceId == activeStrapId"))
-        assertTrue(today.contains("rememberHistoryQueryGate(liveSnap.backfilling)"))
+        assertTrue(today.contains("rememberHistoryQueryGate(historyBackfilling)"))
         assertTrue(today.contains("loadTodayBestEffort"))
         assertTrue(today.contains("currentCoroutineContext().ensureActive()"))
 

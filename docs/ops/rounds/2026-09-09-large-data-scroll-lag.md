@@ -105,6 +105,12 @@ Android where applicable, and leave physical-phone conclusions explicit.
   loads HR, sleep, and workouts concurrently once the burst is quiet, publishes
   one current-device snapshot, and records a bounded `today.hr_trend_load`
   operation.
+- Android now exposes separate stable dashboard-live and exact history-progress
+  projections. Today observes only connection, battery, and the boolean
+  history-write edge; exact batches, rows, newest date, and elapsed time remain
+  visible inside isolated header, sync-note, and data-source leaves. Sleep and
+  Intelligence use the same leaf boundary, so a history batch cannot rebuild
+  their full scroll roots.
 - Android screen scaffolds publish drag/fling state to the liquid primitives.
   Decorative vessel, tube, and thread clocks pause while content is moving and
   resume from the same retained simulation state afterward.
@@ -185,8 +191,8 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | 30-day high-rate synthetic fixture | 4,207,350 rows; 440.6 MB database; 1.32 GB temporary peak | Current schema can hold a phone-sized dense local history and supports exact size attribution | Physical-phone memory, flash, thermal, or background behavior |
 | Read benchmark | Daily/trend reads below 0.4 ms; HR buckets 31.45 ms; fingerprint 10.62 ms; storage attribution 1.81 s | Ordinary indexed history reads remain bounded at this size and the broad diagnostic read is identifiable | Smoothness while a real BLE stream and OS services compete |
 | Concurrent write benchmark | About 82 ms mean and 96 ms maximum reads during one-million-row writes versus about 30 ms at rest | Active ingestion creates measurable contention even though the database remains readable | A specific tester's lag without their reviewed report |
-| Android production gate | Debug APK assembly, 4,137 tests with zero failures or errors and 7 skips, lint, and instrumentation-source compilation passed after the exact review fixes in 2m43s | Android source, cache, retry, diagnostics, cancellation, device-switch, and animation-budget changes compile and pass repository tests | GPU pacing, OEM behavior, or physical scrolling |
-| Backfill-contention follow-up | Focused Android compile/tests passed twice, including the final quiet-edge and HR-card changes; the final pass completed in 16s. The Apple app compiled and 18 retained-screen/Liquid-Today contracts passed | Query-heavy Today/Sleep work now defers through continuation gaps, Android no longer reloads the HR card per chunk, cancellation remains structured, and cross-device partial snapshots are rejected | Physical frame pacing during a real band offload |
+| Android production gate | Debug APK assembly, 4,144 tests with zero failures or errors and 7 skips, lint with zero errors, and instrumentation-source compilation passed after the final sync-leaf review in 2m | Android source, cache, retry, diagnostics, cancellation, device-switch, query-gate, and animation-budget changes compile and pass repository tests | GPU pacing, OEM behavior, or physical scrolling |
+| Backfill-contention follow-up | Focused Android compile/tests passed after the final quiet-edge, HR-card, and sync-leaf changes. The Apple app compiled and 18 retained-screen/Liquid-Today contracts passed | Query-heavy Today/Sleep work now defers through continuation gaps, Android no longer reloads the HR card or full Today/Sleep/Intelligence roots per chunk, cancellation remains structured, and cross-device partial snapshots are rejected | Physical frame pacing during a real band offload |
 | Apple focused regression | The final passes ran 30 performance/model tests, then 10 device-ownership and sleep-decode tests, with zero failures | Exact cache aging, defer policy, device invalidation, cancellation, off-main analysis, and sleep decoding remain mounted | Physical collection or real-device frame pacing |
 | Apple simulator build and UI performance | The exact review-fix iOS build passed; repeated five-tab navigation passed in 81.637 s and Today scroll passed with a 5.213 s average measured window, 0.180 s CPU, and 41,375 KB peak app memory | The optimized simulator path is functional, nonblank, and emits no severe over-150 ms scroll hitch | Representative phone thermal, storage, BLE, or long-running performance |
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |
