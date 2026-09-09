@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -229,6 +230,35 @@ def test_pending_request_quotas_fit_the_complete_request_list() -> None:
         SAFETY_MAX_PENDING_REQUESTS + SAFETY_MAX_RECEIVED_PENDING_REQUESTS
         == SAFETY_REQUEST_LIST_LIMIT
     )
+
+
+def test_safety_mutation_lock_order_contracts() -> None:
+    remove_source = inspect.getsource(PostgresManagedSafetyRepository.remove_contact)
+    profile_lock = remove_source.index("_lock_profiles_and_accounts")
+    incident_lock = remove_source.index(
+        "_lock_active_managed_safety_incidents_for_profile_pair"
+    )
+    contact_lock = remove_source.index("FOR UPDATE", incident_lock)
+    assert profile_lock < incident_lock < contact_lock
+
+    incident_source = inspect.getsource(PostgresManagedSafetyRepository.create_incident)
+    assert "for_update=True" not in incident_source
+    all_profile_lock = incident_source.index(
+        'profile_ids=(owner["profile_id"], *contact_snapshot_ids)'
+    )
+    expire = incident_source.index("await self._expire", all_profile_lock)
+    contact_row_lock = incident_source.index("FOR UPDATE OF contact", expire)
+    assert all_profile_lock < expire < contact_row_lock
+
+    completion_source = inspect.getsource(
+        PostgresManagedSafetyRepository.complete_push_delivery
+    )
+    installation_lock = completion_source.index("FROM managed_push_installations")
+    delivery_lock = completion_source.index(
+        "FROM managed_safety_push_deliveries",
+        installation_lock,
+    )
+    assert installation_lock < delivery_lock
 
 
 class _RecordingPushProvider:
@@ -1528,6 +1558,85 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
                 request_id=UUID(stale_reciprocal_request["request_id"]),
                 decision="accept",
             )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_remove_contact_and_profile_delete_do_not_deadlock() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"remove-race-owner-{uuid4()}")
+        contact = await _principal(
+            primary,
+            label=f"remove-race-contact-{uuid4()}",
+        )
+        owner_profile = await _profile(managed, owner, display_name="Owner")
+        contact_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=contact,
+            contact_name="Contact",
+        )
+
+        profiles_locked = asyncio.Event()
+        continue_remove = asyncio.Event()
+        original_lock = safety._lock_profiles_and_accounts
+
+        async def paused_lock(connection, *, profile_ids):
+            rows = await original_lock(connection, profile_ids=profile_ids)
+            profiles_locked.set()
+            await continue_remove.wait()
+            return rows
+
+        safety._lock_profiles_and_accounts = paused_lock
+        remove_task = asyncio.create_task(
+            safety.remove_contact(
+                principal=owner,
+                other_profile_id=UUID(contact_profile["profile_id"]),
+            )
+        )
+        await asyncio.wait_for(profiles_locked.wait(), timeout=2)
+        delete_task = asyncio.create_task(
+            managed.delete_social_profile(principal=contact)
+        )
+        await _wait_for_database_waiter(primary._require_pool())
+        continue_remove.set()
+        await asyncio.wait_for(
+            asyncio.gather(remove_task, delete_task),
+            timeout=5,
+        )
+
+        pool = primary._require_pool()
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_contacts
+                WHERE owner_profile_id = $1 OR contact_profile_id = $2
+                """,
+                UUID(owner_profile["profile_id"]),
+                UUID(contact_profile["profile_id"]),
+            )
+            == 0
+        )
     finally:
         await primary.shutdown()
 

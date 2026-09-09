@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -33,6 +34,14 @@ from app.repository import PostgresRepository
 DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
 DATABASE_ENGINE = os.getenv("NOOP_TEST_DATABASE_ENGINE", "timescaledb")
 POLICY_SHA256 = "e9324e49b411f124635c24b2de509f4e459cb164b7bdd23519c65c778d12d7ef"
+
+
+def test_erasure_request_preserves_job_before_account_lock_order() -> None:
+    source = inspect.getsource(PostgresManagedRepository.request_erasure)
+    advisory = source.index("noop-managed-erasure-account:")
+    job_lock = source.index("FROM managed_erasure_jobs", advisory)
+    account_lock = source.index("FROM managed_accounts", job_lock)
+    assert advisory < job_lock < account_lock
 
 
 async def _wait_for_lock_waiters(pool, *, minimum: int) -> None:

@@ -153,6 +153,25 @@ class PostgresManagedSafetyRepository:
         )
 
     @staticmethod
+    async def _lock_profiles_and_accounts(
+        connection: Any,
+        *,
+        profile_ids: Collection[UUID],
+    ) -> list[Any]:
+        return await connection.fetch(
+            """
+            SELECT profile.profile_id
+            FROM managed_social_profiles profile
+            JOIN managed_accounts account
+              ON account.account_id = profile.account_id
+            WHERE profile.profile_id = ANY($1::uuid[])
+            ORDER BY profile.profile_id
+            FOR UPDATE OF account, profile
+            """,
+            list(profile_ids),
+        )
+
+    @staticmethod
     async def _expire(connection: Any, now: datetime) -> None:
         await connection.execute(
             """
@@ -1287,6 +1306,10 @@ class PostgresManagedSafetyRepository:
                     connection,
                     account_id=principal.account_id,
                 )
+                await self._lock_profiles_and_accounts(
+                    connection,
+                    profile_ids=(profile["profile_id"], other_profile_id),
+                )
                 directed_pairs = sorted(
                     (
                         (profile["profile_id"], other_profile_id),
@@ -1300,6 +1323,14 @@ class PostgresManagedSafetyRepository:
                         owner_profile_id=owner_profile_id,
                         contact_profile_id=contact_profile_id,
                     )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                active_incident_ids = (
+                    await _lock_active_managed_safety_incidents_for_profile_pair(
+                        connection,
+                        first_profile_id=profile["profile_id"],
+                        second_profile_id=other_profile_id,
+                    )
+                )
                 await connection.fetch(
                     """
                     SELECT owner_profile_id, contact_profile_id
@@ -1316,14 +1347,6 @@ class PostgresManagedSafetyRepository:
                     """,
                     profile["profile_id"],
                     other_profile_id,
-                )
-                now = await connection.fetchval("SELECT clock_timestamp()")
-                active_incident_ids = (
-                    await _lock_active_managed_safety_incidents_for_profile_pair(
-                        connection,
-                        first_profile_id=profile["profile_id"],
-                        second_profile_id=other_profile_id,
-                    )
                 )
                 await connection.execute(
                     """
@@ -1428,14 +1451,12 @@ class PostgresManagedSafetyRepository:
                 owner = await self._profile(
                     connection,
                     account_id=principal.account_id,
-                    for_update=True,
                 )
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"noop-managed-safety-incident:{owner['account_id']}",
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
-                await self._expire(connection, now)
                 replay = await connection.fetchrow(
                     """
                     SELECT quota.*,
@@ -1470,6 +1491,56 @@ class PostgresManagedSafetyRepository:
                     )
                     result["duplicate"] = True
                     return result
+                contact_snapshot = await connection.fetch(
+                    """
+                    SELECT contact.contact_profile_id
+                    FROM managed_safety_contacts contact
+                    JOIN managed_social_profiles profile
+                      ON profile.profile_id = contact.contact_profile_id
+                     AND profile.status = 'active'
+                    JOIN managed_accounts account
+                      ON account.account_id = profile.account_id
+                     AND account.status = 'active'
+                    WHERE contact.owner_profile_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM managed_social_blocks block
+                          WHERE (
+                              block.blocker_profile_id = $1
+                              AND block.blocked_profile_id =
+                                    contact.contact_profile_id
+                          ) OR (
+                              block.blocker_profile_id =
+                                    contact.contact_profile_id
+                              AND block.blocked_profile_id = $1
+                          )
+                      )
+                    ORDER BY contact.created_at, contact.contact_profile_id
+                    """,
+                    owner["profile_id"],
+                )
+                contact_snapshot_ids = [
+                    row["contact_profile_id"] for row in contact_snapshot
+                ]
+                locked_profiles = await self._lock_active_profiles_and_accounts(
+                    connection,
+                    profile_ids=(owner["profile_id"], *contact_snapshot_ids),
+                )
+                locked_profile_ids = {row["profile_id"] for row in locked_profiles}
+                if owner["profile_id"] not in locked_profile_ids:
+                    raise ManagedNotFoundError(
+                        "create a NOOP profile before configuring Safety contacts"
+                    )
+                locked_owner = await self._profile(
+                    connection,
+                    account_id=principal.account_id,
+                )
+                if locked_owner["profile_id"] != owner["profile_id"]:
+                    raise ManagedConflictError(
+                        "Safety profile changed while paging contacts"
+                    )
+                owner = locked_owner
+                await self._expire(connection, now)
                 active = await connection.fetchval(
                     """
                     SELECT EXISTS (
@@ -1519,41 +1590,6 @@ class PostgresManagedSafetyRepository:
                         ),
                         retry_after_seconds=math.ceil((retry_at - now).total_seconds()),
                     )
-                contact_snapshot = await connection.fetch(
-                    """
-                    SELECT contact.contact_profile_id
-                    FROM managed_safety_contacts contact
-                    JOIN managed_social_profiles profile
-                      ON profile.profile_id = contact.contact_profile_id
-                     AND profile.status = 'active'
-                    JOIN managed_accounts account
-                      ON account.account_id = profile.account_id
-                     AND account.status = 'active'
-                    WHERE contact.owner_profile_id = $1
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM managed_social_blocks block
-                          WHERE (
-                              block.blocker_profile_id = $1
-                              AND block.blocked_profile_id =
-                                    contact.contact_profile_id
-                          ) OR (
-                              block.blocker_profile_id =
-                                    contact.contact_profile_id
-                              AND block.blocked_profile_id = $1
-                          )
-                      )
-                    ORDER BY contact.created_at, contact.contact_profile_id
-                    """,
-                    owner["profile_id"],
-                )
-                contact_snapshot_ids = [
-                    row["contact_profile_id"] for row in contact_snapshot
-                ]
-                await self._lock_active_profiles_and_accounts(
-                    connection,
-                    profile_ids=contact_snapshot_ids,
-                )
                 contacts = await connection.fetch(
                     """
                     SELECT contact.contact_profile_id
@@ -2558,6 +2594,26 @@ class PostgresManagedSafetyRepository:
         async with self._pool().acquire() as connection:
             async with connection.transaction():
                 now = await connection.fetchval("SELECT clock_timestamp()")
+                delivery_owner = await connection.fetchrow(
+                    """
+                    SELECT account_id, installation_id
+                    FROM managed_safety_push_deliveries
+                    WHERE delivery_id = $1
+                    """,
+                    delivery_id,
+                )
+                if delivery_owner is None:
+                    raise ManagedNotFoundError("Safety push delivery was not found")
+                await connection.fetchrow(
+                    """
+                    SELECT account_id, installation_id
+                    FROM managed_push_installations
+                    WHERE account_id = $1 AND installation_id = $2
+                    FOR UPDATE
+                    """,
+                    delivery_owner["account_id"],
+                    delivery_owner["installation_id"],
+                )
                 row = await connection.fetchrow(
                     """
                     SELECT *
@@ -2569,6 +2625,11 @@ class PostgresManagedSafetyRepository:
                 )
                 if row is None:
                     raise ManagedNotFoundError("Safety push delivery was not found")
+                if (
+                    row["account_id"] != delivery_owner["account_id"]
+                    or row["installation_id"] != delivery_owner["installation_id"]
+                ):
+                    raise ManagedConflictError("Safety push delivery ownership changed")
                 if (
                     row["status"] != "sending"
                     or row["claim_id"] != claim_id

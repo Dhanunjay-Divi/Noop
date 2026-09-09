@@ -20,14 +20,14 @@ Last updated: **2026-09-09**
 
 The latest exact-head managed Safety erasure closeout is implemented and
 completely locally verified on protected pull request `#10`. Both Cloud Run
-services now wait for current and previous push-token secret IAM grants,
-incident creation locks active contact profiles and accounts before accepted
-contact rows, and account erasure atomically cancels owned incidents, removes
-their latest location, revokes participation, reconciles acknowledgement, and
-rejects retryable deliveries. The complete clean server suite passed 413 tests
-with one intentional real-provider skip; release-policy and OpenTofu gates are
-green. A replacement exact-head review, protected checks, and normal merge
-remain. No public traffic or real paging was enabled. Evidence is recorded in
+services wait for current and previous push-token secret IAM grants; account
+erasure atomically retires active Safety state; contact removal locks profiles,
+incidents, then contacts; incident creation locks its owner and all contacts in
+one global order; push completion locks installation before delivery; and
+erasure replay locks job before account. The complete clean server suite now
+covers 416 cases with one intentional real-provider skip. Replacement policy
+gates, exact-head review, protected checks, and normal merge remain. No public
+traffic or real paging was enabled. Evidence is recorded in
 [Managed Safety erasure closeout](rounds/2026-09-09-managed-safety-erasure-closeout.md).
 
 The latest managed Safety final-gate closeout is implemented and locally

@@ -8199,6 +8199,20 @@ class PostgresManagedRepository:
         job_id = uuid4()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE account_id = $1 AND request_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    request_id,
+                )
                 account = await connection.fetchrow(
                     """
                     SELECT status
@@ -8210,16 +8224,6 @@ class PostgresManagedRepository:
                 )
                 if account is None:
                     raise ManagedNotFoundError("managed account was not found")
-                existing = await connection.fetchrow(
-                    """
-                    SELECT *
-                    FROM managed_erasure_jobs
-                    WHERE account_id = $1 AND request_id = $2
-                    FOR UPDATE
-                    """,
-                    principal.account_id,
-                    request_id,
-                )
                 if existing is not None:
                     if (
                         existing["scope"] != scope

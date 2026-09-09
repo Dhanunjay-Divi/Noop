@@ -11,9 +11,10 @@
 
 ## Objective
 
-Close the three actionable findings from the exact-head review of `5c8987a1`
-without weakening managed Safety privacy, account erasure, rolling secret
-rotation, or transactional lock ordering:
+Close the original three findings from the exact-head review of `5c8987a1`
+and the four additional lock-order findings from the exact-head review of
+`56e7938b`, without weakening managed Safety privacy, account erasure, rolling
+secret rotation, or transactional consistency:
 
 1. make both Cloud Run services wait for the previous push-token secret IAM
    grant as well as the current-key grant;
@@ -21,6 +22,13 @@ rotation, or transactional lock ordering:
    accepted-contact rows; and
 3. retire an erasing account's active Safety ownership and participation in the
    same transaction that marks the account `erasure_pending`.
+4. make contact removal lock extant profiles/accounts and active incidents
+   before accepted-contact rows;
+5. make push receipt completion lock the target push installation before its
+   delivery row;
+6. lock an incident owner plus every eligible contact profile/account in one
+   global order; and
+7. keep erasure retries on the existing job-before-account hierarchy.
 
 ## Scope
 
@@ -69,6 +77,23 @@ rotation, or transactional lock ordering:
   and rejects that participant's retryable deliveries.
 - All Safety retirement changes and the `erasure_pending` account transition
   occur in one PostgreSQL transaction. A failure rolls back both.
+- Contact removal now locks both extant profile/account rows in deterministic
+  order, then active incidents, then accepted-contact rows. Social-profile
+  deletion cannot hold an incident while waiting behind a contact row owned by
+  the removal transaction.
+- Incident creation no longer pre-locks its owner separately. It snapshots
+  eligible contacts, locks the owner plus every contact profile/account in one
+  sorted set, revalidates the owner, and only then expires or creates incident
+  state. Mutual contact sets therefore cannot acquire each other's profile
+  locks in opposite order.
+- Push receipt completion reads immutable delivery ownership without a row
+  lock, locks the corresponding push installation, and then locks and
+  revalidates the delivery claim. Token rotation and an invalid receipt now
+  use the same installation-before-delivery hierarchy.
+- Erasure requests take an account-scoped transaction advisory lock, lock an
+  existing idempotency job before the account row, and then create or replay
+  the request. Concurrent first requests remain serialized without restoring
+  the account-before-job inversion.
 
 ## Data, privacy, and medical truth
 
@@ -102,7 +127,10 @@ rotation, or transactional lock ordering:
 | Existing account-erasure regression | Passed with the PostgreSQL overlay | Identity deletion and reenrollment behavior remains compatible with immediate Safety retirement | External identity-provider deletion |
 | Complete clean server suite | 413 tests passed; one real-provider staging test intentionally skipped | Every locally available API, repository, migration, ownership, paging, lifecycle, tenancy, retention, and deployment contract remains compatible | Real provider traffic or hosted TimescaleDB behavior |
 | Repository policy matrix | 187 release-control tests, 8 health-claims tests, 9 legal-inventory tests, the 1,195-file claims scan, 230-component legal inventory, i18n, privacy, calibration, required-CI, operations, terminology, ShellCheck, and diff checks passed | The replacement tree preserves repository release, claims, localization, provenance, privacy, and evidence contracts | Hosted exact-SHA checks or physical behavior |
-| OpenTofu gates | Recursive format and validation passed; 4 ownership-default tests passed | The current and previous secret dependencies preserve the private default-off runtime contract | Live IAM propagation or service startup |
+| OpenTofu gates | Recursive format and validation passed; all 10 ownership provisioning tests passed | The current and previous secret dependencies preserve the private default-off runtime contract | Live IAM propagation or service startup |
+| Final lock-order source contracts | Three Safety lock hierarchies and the erasure job-before-account hierarchy passed focused tests | Later refactors cannot silently restore owner-only incident locking, contact-before-profile removal, delivery-before-installation completion, or account-before-job replay | PostgreSQL scheduler behavior by themselves |
+| Final fresh-PostgreSQL overlap | Profile deletion versus contact removal, incident profile locking, and account erasure passed on an isolated database | The reviewed user-visible races complete without a deadlock on PostgreSQL | Production connection pressure or provider delivery |
+| Final complete server suite | All 416 collected locally available cases completed; one real-provider staging case remained intentionally skipped | The lock-order replacement is compatible with the complete API, migration, tenancy, paging, retention, and lifecycle surface | Real provider traffic or physical-device behavior |
 
 ### Failed and corrected attempts
 
@@ -118,6 +146,11 @@ rotation, or transactional lock ordering:
 - The new round initially omitted the mandatory `Decisions` heading. The
   operations validator rejected it; the decision record was added before the
   complete 46-round validation passed.
+- The exact-head review of `56e7938b` found four additional P2 lock inversions
+  after the earlier three findings were closed. The old hosted checks were
+  allowed to finish as evidence for that superseded head but were not treated
+  as merge evidence. The four transaction paths and focused race contracts
+  were replaced before requesting another review.
 
 ## Physical device and deployment
 
@@ -146,6 +179,10 @@ rotation, or transactional lock ordering:
 - Incident creation may use an eligibility snapshot only to choose a stable
   lock set; it must revalidate contact, profile, account, and block state while
   holding the final locks.
+- Safety mutations use profiles/accounts before incidents/contact rows, push
+  installations before deliveries, and erasure jobs before accounts. New
+  idempotent erasure requests use an advisory lock to serialize the no-row-yet
+  case without violating that hierarchy.
 - Decision-log entry: this round record unless a broader account-erasure or
   Safety architecture decision supersedes it.
 
