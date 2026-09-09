@@ -4,18 +4,41 @@ import StrandDesign
 import UIKit
 #endif
 
+enum ScrollInteractionTiming {
+    static let defaultSettleNanoseconds: UInt64 = 180_000_000
+
+    static func remainingSeconds(
+        lastMovementUptime: TimeInterval,
+        nowUptime: TimeInterval,
+        settleNanoseconds: UInt64
+    ) -> TimeInterval {
+        max(
+            0,
+            Double(settleNanoseconds) / 1_000_000_000
+                - (nowUptime - lastMovementUptime)
+        )
+    }
+}
+
 /// Converts high-frequency scroll offsets into one low-frequency interaction edge for the shared
 /// motion budget. Reference storage avoids invalidating an entire retained screen on every frame:
 /// observers publish only when movement begins and after the final drag/deceleration update settles.
 @MainActor
 final class ScrollInteractionTracker: ObservableObject {
-    static let settleNanoseconds: UInt64 = 180_000_000
     static let minimumOffsetDelta: CGFloat = 0.25
 
     @Published private(set) var isActive = false
 
+    private let settleDelayNanoseconds: UInt64
     private var previousOffset: CGFloat?
+    private var lastMovementUptime: TimeInterval?
     private var settleTask: Task<Void, Never>?
+
+    init(
+        settleNanoseconds: UInt64 = ScrollInteractionTiming.defaultSettleNanoseconds
+    ) {
+        settleDelayNanoseconds = settleNanoseconds
+    }
 
     func observe(offset: CGFloat) {
         guard offset.isFinite else { return }
@@ -23,12 +46,30 @@ final class ScrollInteractionTracker: ObservableObject {
         guard let previousOffset,
               abs(offset - previousOffset) >= Self.minimumOffsetDelta else { return }
 
+        lastMovementUptime = ProcessInfo.processInfo.systemUptime
         if !isActive { isActive = true }
-        settleTask?.cancel()
+        guard settleTask == nil else { return }
         settleTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: Self.settleNanoseconds)
-            guard !Task.isCancelled else { return }
-            self?.isActive = false
+            while let self, !Task.isCancelled {
+                guard let lastMovementUptime = self.lastMovementUptime else { return }
+                let remaining = ScrollInteractionTiming.remainingSeconds(
+                    lastMovementUptime: lastMovementUptime,
+                    nowUptime: ProcessInfo.processInfo.systemUptime,
+                    settleNanoseconds: self.settleDelayNanoseconds
+                )
+                if remaining == 0 {
+                    self.isActive = false
+                    self.settleTask = nil
+                    return
+                }
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(remaining * 1_000_000_000)
+                    )
+                } catch {
+                    return
+                }
+            }
         }
     }
 
@@ -36,6 +77,7 @@ final class ScrollInteractionTracker: ObservableObject {
         settleTask?.cancel()
         settleTask = nil
         previousOffset = nil
+        lastMovementUptime = nil
         isActive = false
     }
 }

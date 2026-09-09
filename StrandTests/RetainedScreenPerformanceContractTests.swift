@@ -145,6 +145,7 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         let liquidToday = try source("Strand/Liquid/LiquidTodayView.swift")
 
         XCTAssertTrue(scaffold.contains("final class ScrollInteractionTracker"))
+        XCTAssertTrue(scaffold.contains("guard settleTask == nil else { return }"))
         XCTAssertTrue(scaffold.contains("scrollInteraction.observe(offset: offset)"))
         XCTAssertTrue(
             scaffold.contains(
@@ -156,6 +157,38 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
             liquidToday.contains(
                 ".environment(\\.noopInteractionInProgress, scrollInteraction.isActive)"
             )
+        )
+    }
+
+    func testScrollInteractionTrackerSettlesAgainstTheLatestMovementEdge() {
+        let settleNanoseconds: UInt64 = 180_000_000
+
+        XCTAssertEqual(
+            ScrollInteractionTiming.remainingSeconds(
+                lastMovementUptime: 10,
+                nowUptime: 10,
+                settleNanoseconds: settleNanoseconds
+            ),
+            0.18,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            ScrollInteractionTiming.remainingSeconds(
+                lastMovementUptime: 10.10,
+                nowUptime: 10.18,
+                settleNanoseconds: settleNanoseconds
+            ),
+            0.10,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            ScrollInteractionTiming.remainingSeconds(
+                lastMovementUptime: 10,
+                nowUptime: 10.18,
+                settleNanoseconds: settleNanoseconds
+            ),
+            0,
+            accuracy: 0.000_001
         )
     }
 
