@@ -89,6 +89,7 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
                 if runtime_settings.managed_push_token_previous_secret
                 else ()
             ),
+            write_version=runtime_settings.managed_push_token_write_version,
         )
         provider = (
             FirebaseCloudMessagingProvider(

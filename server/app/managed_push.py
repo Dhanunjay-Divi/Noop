@@ -35,6 +35,14 @@ class ManagedPushTokenError(ManagedPushError):
     pass
 
 
+class ManagedPushTokenUnavailableError(ManagedPushTokenError):
+    """The envelope may become readable after a compatible key/code rollout."""
+
+
+class ManagedPushTokenCorruptError(ManagedPushTokenError):
+    """The envelope is malformed or fails authentication under its known key."""
+
+
 @dataclass(frozen=True, slots=True)
 class ManagedPushOpenedToken:
     token: str
@@ -74,7 +82,10 @@ class ManagedPushTokenCodec:
         secret: str,
         *,
         previous_secrets: Collection[str] = (),
+        write_version: Literal["v1", "v2"] = "v1",
     ) -> None:
+        if write_version not in {"v1", "v2"}:
+            raise ValueError("managed push token write version must be v1 or v2")
         secrets = [secret, *previous_secrets]
         if any(len(value.encode("utf-8")) < 32 for value in secrets):
             raise ValueError("managed push token secrets must be at least 32 bytes")
@@ -82,6 +93,7 @@ class ManagedPushTokenCodec:
             raise ValueError("managed push token secrets must be distinct")
         self._current_key_id = self._key_id(secret)
         self._keys = {self._key_id(value): self._derive_key(value) for value in secrets}
+        self._write_version = write_version
         if len(self._keys) != len(secrets):
             raise ValueError("managed push token key identifiers must be distinct")
 
@@ -120,11 +132,18 @@ class ManagedPushTokenCodec:
             self._aad(account_id, installation_id),
         )
         encoded = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
-        return f"v2.{self._current_key_id}." + encoded.rstrip("=")
+        payload = encoded.rstrip("=")
+        if self._write_version == "v1":
+            return "v1." + payload
+        return f"v2.{self._current_key_id}." + payload
 
     @staticmethod
     def _decode_payload(value: str) -> bytes:
-        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        decoded = base64.b64decode(
+            value + "=" * (-len(value) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
         if len(decoded) < 29:
             raise ValueError("short envelope")
         return decoded
@@ -137,39 +156,62 @@ class ManagedPushTokenCodec:
         installation_id: str,
     ) -> ManagedPushOpenedToken:
         candidates: list[tuple[str, bytes]]
-        needs_reseal = True
+        envelope_version: Literal["v1", "v2"]
         if sealed.startswith("v1."):
+            envelope_version = "v1"
             raw = sealed.removeprefix("v1.")
             candidates = list(self._keys.items())
         elif sealed.startswith("v2."):
+            envelope_version = "v2"
             parts = sealed.split(".", 2)
-            if len(parts) != 3 or parts[1] not in self._keys:
-                raise ManagedPushTokenError("push token envelope key is unavailable")
+            if len(parts) != 3 or not parts[1] or not parts[2]:
+                raise ManagedPushTokenCorruptError("push token envelope is malformed")
+            if parts[1] not in self._keys:
+                raise ManagedPushTokenUnavailableError(
+                    "push token envelope key is unavailable"
+                )
             raw = parts[2]
             candidates = [(parts[1], self._keys[parts[1]])]
-            needs_reseal = parts[1] != self._current_key_id
         else:
-            raise ManagedPushTokenError("push token envelope is unsupported")
+            raise ManagedPushTokenUnavailableError(
+                "push token envelope version is unavailable"
+            )
         try:
             decoded = self._decode_payload(raw)
         except (ValueError, TypeError) as exc:
-            raise ManagedPushTokenError(
+            raise ManagedPushTokenCorruptError(
                 "push token envelope could not be opened"
             ) from exc
-        for _, key in candidates:
+        for key_id, key in candidates:
             try:
                 plaintext = AESGCM(key).decrypt(
                     decoded[:12],
                     decoded[12:],
                     self._aad(account_id, installation_id),
                 )
+                try:
+                    token = plaintext.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise ManagedPushTokenCorruptError(
+                        "push token plaintext is invalid"
+                    ) from exc
                 return ManagedPushOpenedToken(
-                    token=plaintext.decode("utf-8"),
-                    needs_reseal=needs_reseal,
+                    token=token,
+                    needs_reseal=(
+                        envelope_version != self._write_version
+                        or key_id != self._current_key_id
+                    ),
                 )
-            except (InvalidTag, UnicodeDecodeError):
+            except InvalidTag:
                 continue
-        raise ManagedPushTokenError("push token envelope could not be opened")
+        if envelope_version == "v1":
+            # Legacy v1 carries no key identifier. A failed authentication may
+            # mean the prior key has not reached this revision yet, so keep it
+            # retryable instead of destroying a potentially valid registration.
+            raise ManagedPushTokenUnavailableError(
+                "push token legacy key is unavailable"
+            )
+        raise ManagedPushTokenCorruptError("push token envelope authentication failed")
 
     def open(
         self,

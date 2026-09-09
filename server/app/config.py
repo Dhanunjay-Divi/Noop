@@ -113,6 +113,7 @@ class Settings:
     managed_push_retry_enabled: bool = False
     managed_push_token_secret: str | None = None
     managed_push_token_previous_secret: str | None = None
+    managed_push_token_write_version: str = "v1"
     managed_push_timeout_seconds: int = 5
     managed_push_max_concurrency: int = 6
     ownership_service_enabled: bool = False
@@ -287,6 +288,11 @@ class Settings:
             managed_push_token_previous_secret=os.getenv(
                 "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
             ),
+            managed_push_token_write_version=_choice(
+                "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION",
+                "v1",
+                frozenset({"v1", "v2"}),
+            ),
             managed_push_timeout_seconds=_positive_int(
                 "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS",
                 5,
@@ -443,6 +449,8 @@ class Settings:
                 raise RuntimeError(
                     "current and previous managed push token secrets must differ"
                 )
+        if self.managed_push_token_write_version not in {"v1", "v2"}:
+            raise RuntimeError("NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION must be v1 or v2")
         if self.managed_entitlement_mode not in {
             "closed",
             "pilot",

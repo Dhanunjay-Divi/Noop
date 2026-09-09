@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 from datetime import UTC, datetime, timedelta
@@ -14,7 +15,9 @@ from app.managed_push import (
     FirebaseCloudMessagingProvider,
     ManagedPushResult,
     ManagedPushTokenCodec,
+    ManagedPushTokenCorruptError,
     ManagedPushTokenError,
+    ManagedPushTokenUnavailableError,
     UnavailableManagedPushProvider,
 )
 from app.managed_safety_models import (
@@ -191,8 +194,20 @@ class _ConcurrentAcceptingProvider:
         )
 
 
+def _tamper_envelope(sealed: str) -> str:
+    parts = sealed.split(".")
+    payload = parts[-1]
+    decoded = bytearray(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    decoded[-1] ^= 0x01
+    parts[-1] = base64.urlsafe_b64encode(bytes(decoded)).decode("ascii").rstrip("=")
+    return ".".join(parts)
+
+
 def test_managed_push_token_codec_binds_ciphertext_to_installation() -> None:
-    codec = ManagedPushTokenCodec("managed-push-secret-" + ("x" * 32))
+    codec = ManagedPushTokenCodec(
+        "managed-push-secret-" + ("x" * 32),
+        write_version="v2",
+    )
     account_id = uuid4()
     token = "fcm-token:ABC_def-1234567890"
     sealed = codec.seal(
@@ -219,13 +234,97 @@ def test_managed_push_token_codec_binds_ciphertext_to_installation() -> None:
         )
 
 
+def test_managed_push_rollout_stays_v1_until_every_reader_is_dual_version() -> None:
+    secret = "managed-push-rollout-" + ("r" * 32)
+    account_id = uuid4()
+    installation_id = "ios-rolling-deployment"
+    token = "fcm-token:rolling_deployment_1234567890"
+    compatibility_writer = ManagedPushTokenCodec(secret)
+    legacy_envelope = compatibility_writer.seal(
+        token,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+
+    assert legacy_envelope.startswith("v1.")
+    assert (
+        ManagedPushTokenCodec(secret).open(
+            legacy_envelope,
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+        == token
+    )
+
+    promoted_writer = ManagedPushTokenCodec(secret, write_version="v2")
+    opened_legacy = promoted_writer.open_with_rotation(
+        legacy_envelope,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    assert opened_legacy.token == token
+    assert opened_legacy.needs_reseal is True
+
+    promoted_envelope = promoted_writer.seal(
+        token,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    assert promoted_envelope.startswith("v2.")
+    opened_during_rollback = compatibility_writer.open_with_rotation(
+        promoted_envelope,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    assert opened_during_rollback.token == token
+    assert opened_during_rollback.needs_reseal is True
+
+
+def test_managed_push_token_codec_classifies_corruption_and_missing_keys() -> None:
+    current_secret = "managed-push-current-" + ("c" * 32)
+    previous_secret = "managed-push-previous-" + ("p" * 32)
+    account_id = uuid4()
+    installation_id = "android-token-classification"
+    current = ManagedPushTokenCodec(current_secret, write_version="v2")
+    previous = ManagedPushTokenCodec(previous_secret, write_version="v2")
+    current_envelope = current.seal(
+        "fcm-token:classification_1234567890",
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+
+    with pytest.raises(ManagedPushTokenCorruptError, match="authentication"):
+        current.open(
+            _tamper_envelope(current_envelope),
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+    with pytest.raises(ManagedPushTokenCorruptError, match="could not be opened"):
+        current.open(
+            "v1.abc",
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+    with pytest.raises(ManagedPushTokenUnavailableError, match="key is unavailable"):
+        current.open(
+            previous.seal(
+                "fcm-token:missing_key_1234567890",
+                account_id=account_id,
+                installation_id=installation_id,
+            ),
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+
+
 def test_managed_push_token_codec_preserves_previous_and_legacy_envelopes() -> None:
     previous_secret = "managed-push-previous-" + ("p" * 32)
     current_secret = "managed-push-current-" + ("c" * 32)
-    previous = ManagedPushTokenCodec(previous_secret)
+    previous = ManagedPushTokenCodec(previous_secret, write_version="v2")
     rotated = ManagedPushTokenCodec(
         current_secret,
         previous_secrets=(previous_secret,),
+        write_version="v2",
     )
     account_id = uuid4()
     installation_id = "ios-key-rotation"
@@ -266,6 +365,7 @@ def test_managed_push_token_codec_preserves_previous_and_legacy_envelopes() -> N
     staged = ManagedPushTokenCodec(
         previous_secret,
         previous_secrets=(current_secret,),
+        write_version="v2",
     )
     assert (
         staged.open(
@@ -280,8 +380,11 @@ def test_managed_push_token_codec_preserves_previous_and_legacy_envelopes() -> N
         == token
     )
 
-    without_previous = ManagedPushTokenCodec(current_secret)
-    with pytest.raises(ManagedPushTokenError, match="key is unavailable"):
+    without_previous = ManagedPushTokenCodec(
+        current_secret,
+        write_version="v2",
+    )
+    with pytest.raises(ManagedPushTokenUnavailableError, match="key is unavailable"):
         without_previous.open(
             old_v2,
             account_id=account_id,
@@ -326,10 +429,11 @@ async def test_unexpected_provider_failure_becomes_retryable_unavailable() -> No
 async def test_push_key_rotation_reseals_before_delivery() -> None:
     previous_secret = "managed-push-previous-" + ("p" * 32)
     current_secret = "managed-push-current-" + ("c" * 32)
-    previous = ManagedPushTokenCodec(previous_secret)
+    previous = ManagedPushTokenCodec(previous_secret, write_version="v2")
     rotated = ManagedPushTokenCodec(
         current_secret,
         previous_secrets=(previous_secret,),
+        write_version="v2",
     )
     account_id = uuid4()
     installation_id = "android-key-rotation"
@@ -368,8 +472,14 @@ async def test_push_key_rotation_reseals_before_delivery() -> None:
 
 @pytest.mark.asyncio
 async def test_unavailable_push_token_key_does_not_invalidate_registration() -> None:
-    current = ManagedPushTokenCodec("managed-push-current-" + ("c" * 32))
-    previous = ManagedPushTokenCodec("managed-push-previous-" + ("p" * 32))
+    current = ManagedPushTokenCodec(
+        "managed-push-current-" + ("c" * 32),
+        write_version="v2",
+    )
+    previous = ManagedPushTokenCodec(
+        "managed-push-previous-" + ("p" * 32),
+        write_version="v2",
+    )
     account_id = uuid4()
     installation_id = "ios-missing-key"
     repository = _DeliveryRepository(
@@ -392,6 +502,47 @@ async def test_unavailable_push_token_key_does_not_invalidate_registration() -> 
     await service.dispatch(principal=object(), incident_id=uuid4())
 
     assert repository.completed[0]["outcome"] == "unavailable"
+    assert repository.reencrypted == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corruption_kind", ["malformed-v1", "tampered-current-v2"])
+async def test_corrupt_push_token_envelope_is_terminal(
+    corruption_kind: str,
+) -> None:
+    codec = ManagedPushTokenCodec(
+        "managed-push-corrupt-" + ("x" * 32),
+        write_version="v2",
+    )
+    account_id = uuid4()
+    installation_id = f"ios-{corruption_kind}"
+    if corruption_kind == "malformed-v1":
+        ciphertext = "v1.abc"
+    else:
+        ciphertext = _tamper_envelope(
+            codec.seal(
+                "fcm-token:corrupt_1234567890",
+                account_id=account_id,
+                installation_id=installation_id,
+            )
+        )
+    repository = _DeliveryRepository(
+        account_id=account_id,
+        installation_id=installation_id,
+        platform="ios",
+        target_kind="token",
+        token_ciphertext=ciphertext,
+    )
+    service = ManagedSafetyPushService(
+        repository=repository,
+        token_codec=codec,
+        provider=_ConcurrentAcceptingProvider(),
+    )
+
+    await service.dispatch(principal=object(), incident_id=uuid4())
+
+    assert repository.completed[0]["outcome"] == "invalid"
+    assert repository.completed[0]["provider_reference_hash"] is None
     assert repository.reencrypted == []
 
 

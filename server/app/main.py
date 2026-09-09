@@ -1121,6 +1121,7 @@ def create_app(
                         if runtime_settings.managed_push_token_previous_secret
                         else ()
                     ),
+                    write_version=runtime_settings.managed_push_token_write_version,
                 ),
                 provider=push_provider,
                 max_concurrency=(runtime_settings.managed_push_max_concurrency),

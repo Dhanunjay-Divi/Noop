@@ -505,6 +505,10 @@ resource "google_cloud_run_v2_service" "managed_api" {
           }
         }
       }
+      env {
+        name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"
+        value = var.managed_push_token_write_version
+      }
 
       resources {
         limits = {
@@ -980,6 +984,10 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
               version = "latest"
             }
           }
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"
+          value = var.managed_push_token_write_version
         }
 
         resources {

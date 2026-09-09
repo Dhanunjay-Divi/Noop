@@ -41,6 +41,22 @@ REPLAY_SECRET = "test-managed-safety-replay-secret-at-least-32-bytes"
 PUSH_SECRET = "test-managed-safety-push-secret-at-least-32-bytes"
 
 
+async def _wait_for_database_waiter(pool) -> None:
+    for _ in range(200):
+        if int(
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM pg_locks
+                WHERE NOT granted
+                """
+            )
+        ):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("expected a database lock waiter")
+
+
 def _managed(primary: PostgresRepository) -> PostgresManagedRepository:
     return PostgresManagedRepository(
         primary,
@@ -555,6 +571,15 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
             """,
             incident_ids,
         )
+        await pool.execute(
+            """
+            UPDATE managed_safety_page_quota_events
+            SET created_at = created_at - interval '6 hours',
+                purge_after = purge_after - interval '6 hours'
+            WHERE incident_id = ANY($1::uuid[])
+            """,
+            incident_ids,
+        )
         for hours_ago in (4, 2):
             group: list[UUID] = []
             for _ in range(4):
@@ -587,6 +612,16 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 group,
                 hours_ago,
             )
+            await pool.execute(
+                """
+                UPDATE managed_safety_page_quota_events
+                SET created_at = created_at - $2::int * interval '1 hour',
+                    purge_after = purge_after - $2::int * interval '1 hour'
+                WHERE incident_id = ANY($1::uuid[])
+                """,
+                group,
+                hours_ago,
+            )
 
         with pytest.raises(ManagedRateLimitError) as daily_error:
             await safety.create_incident(
@@ -610,6 +645,249 @@ async def test_safety_incident_creation_has_durable_owner_quota() -> None:
                 owner.account_id,
             )
             == 12
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events
+                WHERE owner_account_id = $1
+                """,
+                owner.account_id,
+            )
+            == 12
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_quota_survives_owner_profile_recreation() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"quota-recreate-owner-{uuid4()}")
+        first = await _principal(primary, label=f"quota-recreate-first-{uuid4()}")
+        second = await _principal(primary, label=f"quota-recreate-second-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        first_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        second_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        consumed_request_id = uuid4()
+        for index in range(4):
+            incident = await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=consumed_request_id if index == 0 else uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+            await safety.end_incident(
+                principal=owner,
+                incident_id=UUID(incident["incident_id"]),
+                outcome="canceled",
+            )
+
+        await managed.delete_social_profile(principal=owner)
+        pool = primary._require_pool()
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_incidents incident
+                JOIN managed_social_profiles profile
+                  ON profile.profile_id = incident.owner_profile_id
+                WHERE profile.account_id = $1
+                """,
+                owner.account_id,
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events
+                WHERE owner_account_id = $1
+                """,
+                owner.account_id,
+            )
+            == 4
+        )
+
+        await _profile(managed, owner, display_name="Owner Again")
+        for contact, profile in (
+            (first, first_profile),
+            (second, second_profile),
+        ):
+            request = await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=uuid4(),
+                    noop_id=profile["noop_id"],
+                ),
+            )
+            await safety.decide_request(
+                principal=contact,
+                request_id=UUID(request["request_id"]),
+                decision="accept",
+            )
+
+        with pytest.raises(ManagedConflictError, match="already consumed"):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=consumed_request_id,
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+        with pytest.raises(ManagedRateLimitError):
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_quota_purges_only_after_linked_incident() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"quota-purge-owner-{uuid4()}")
+        first = await _principal(primary, label=f"quota-purge-first-{uuid4()}")
+        second = await _principal(primary, label=f"quota-purge-second-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        incident_id = UUID(incident["incident_id"])
+        await safety.end_incident(
+            principal=owner,
+            incident_id=incident_id,
+            outcome="canceled",
+        )
+        pool = primary._require_pool()
+        now = datetime.now(UTC)
+        await pool.execute(
+            """
+            UPDATE managed_safety_page_quota_events
+            SET created_at = created_at - interval '40 days',
+                purge_after = $2::timestamptz - interval '1 day'
+            WHERE incident_id = $1
+            """,
+            incident_id,
+            now,
+        )
+
+        first_purge = await safety.purge_expired_rows(now=now, batch_size=10)
+        assert first_purge["managed_safety_incidents_deleted"] == 0
+        assert first_purge["managed_safety_page_quota_events_deleted"] == 0
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events
+                WHERE incident_id = $1
+                """,
+                incident_id,
+            )
+            == 1
+        )
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET created_at = created_at - interval '40 days',
+                expires_at = expires_at - interval '40 days',
+                acknowledged_at = acknowledged_at - interval '40 days',
+                ended_at = ended_at - interval '40 days',
+                purge_after = $2::timestamptz - interval '1 day'
+            WHERE incident_id = $1
+            """,
+            incident_id,
+            now,
+        )
+        second_purge = await safety.purge_expired_rows(now=now, batch_size=10)
+        assert second_purge["managed_safety_incidents_deleted"] == 1
+        assert second_purge["managed_safety_page_quota_events_deleted"] == 1
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_page_quota_events
+                WHERE incident_id = $1
+                """,
+                incident_id,
+            )
+            == 0
         )
     finally:
         await primary.shutdown()
@@ -1010,6 +1288,118 @@ async def test_social_profile_deletion_cascades_accepted_safety_contact() -> Non
                 UUID(contact_profile["profile_id"]),
             )
             == 1
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_invite_redeem_and_owner_profile_delete_do_not_deadlock() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"invite-race-owner-{uuid4()}")
+        contact = await _principal(primary, label=f"invite-race-contact-{uuid4()}")
+        owner_profile = await _profile(managed, owner, display_name="Owner")
+        await _profile(managed, contact, display_name="Contact")
+        capability = "noopsafety_" + ("r" * 43)
+        invite = await safety.create_invite(
+            principal=owner,
+            request=ManagedSafetyInviteCreate(
+                request_id=uuid4(),
+                capability=capability,
+            ),
+        )
+
+        profile_locks_held = asyncio.Event()
+        continue_redeem = asyncio.Event()
+        original_expire = safety._expire
+
+        async def paused_expire(connection, now):
+            profile_locks_held.set()
+            await continue_redeem.wait()
+            await original_expire(connection, now)
+
+        safety._expire = paused_expire
+        redeem_task = asyncio.create_task(
+            safety.redeem_invite(
+                principal=contact,
+                request_id=uuid4(),
+                capability=capability,
+            )
+        )
+        await asyncio.wait_for(profile_locks_held.wait(), timeout=2)
+        delete_task = asyncio.create_task(
+            managed.delete_social_profile(principal=owner)
+        )
+        await _wait_for_database_waiter(primary._require_pool())
+        continue_redeem.set()
+        redeemed, _ = await asyncio.wait_for(
+            asyncio.gather(redeem_task, delete_task),
+            timeout=5,
+        )
+
+        assert redeemed["source"] == "invite"
+        pool = primary._require_pool()
+        owner_profile_id = UUID(owner_profile["profile_id"])
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_social_profiles
+                WHERE profile_id = $1
+                """,
+                owner_profile_id,
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_invites
+                WHERE invite_id = $1
+                """,
+                UUID(invite["invite_id"]),
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_requests
+                WHERE owner_profile_id = $1
+                """,
+                owner_profile_id,
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_contacts
+                WHERE owner_profile_id = $1
+                """,
+                owner_profile_id,
+            )
+            == 0
         )
     finally:
         await primary.shutdown()
@@ -1673,14 +2063,14 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             """,
             first.account_id,
             installation_id,
-            "v1." + ("a" * 40),
+            "v1." + ("*" * 40),
         )
-        unavailable_delivery = await push.dispatch(
+        corrupt_delivery = await push.dispatch(
             principal=owner,
             incident_id=UUID(invalid_incident["incident_id"]),
         )
-        assert unavailable_delivery["installations_retryable"] == 1
-        assert unavailable_delivery["installations_terminal"] == 0
+        assert corrupt_delivery["installations_retryable"] == 0
+        assert corrupt_delivery["installations_terminal"] == 1
         retained = await primary._require_pool().fetchrow(
             """
             SELECT status, token_hash, token_ciphertext
@@ -1690,8 +2080,8 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             first.account_id,
             installation_id,
         )
-        assert retained["status"] == "active"
-        assert retained["token_ciphertext"] == "v1." + ("a" * 40)
+        assert retained["status"] == "invalid"
+        assert retained["token_ciphertext"].startswith("invalid.")
         assert provider.calls == 2
     finally:
         await primary.shutdown()

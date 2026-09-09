@@ -209,6 +209,11 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"' in runtime
+    assert runtime.count('name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"') == 2
+    assert "value = var.managed_push_token_write_version" in runtime
+    assert 'variable "managed_push_token_write_version"' in (
+        REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf"
+    ).read_text(encoding="utf-8")
     assert "managed_api_push_sender" in runtime
     assert "managed_lifecycle_push_sender" in runtime
     assert "managed_api_push_token_secret" in runtime

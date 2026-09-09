@@ -352,3 +352,14 @@ variable "managed_entitlement_mode" {
     error_message = "managed_entitlement_mode must be closed, pilot, open_beta, or paid."
   }
 }
+
+variable "managed_push_token_write_version" {
+  description = "Push-token envelope written by every managed API and lifecycle revision. Keep v1 for the dual-reader rollout, then promote all revisions together to v2."
+  type        = string
+  default     = "v1"
+
+  validation {
+    condition     = contains(["v1", "v2"], var.managed_push_token_write_version)
+    error_message = "managed_push_token_write_version must be v1 or v2."
+  }
+}

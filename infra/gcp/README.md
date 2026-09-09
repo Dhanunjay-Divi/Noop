@@ -158,6 +158,15 @@ change. Each successful step is evidence required by the next:
     IAM-only managed API, processor, lifecycle, scheduler, and authenticated
     Pub/Sub push. Long-running services cannot run migrations, and no provider
     delivery is exercised until a signed client registers an approved target.
+
+    Keep `managed_push_token_write_version = "v1"` for the first deployment
+    containing the dual-version token reader. Confirm every prior API revision
+    has drained and the lifecycle job uses the same new image before changing
+    the variable to `"v2"` and applying all API/lifecycle revisions together.
+    A pre-dual-reader revision cannot open a newly written v2 envelope. Later
+    secret rotation remains separate: stage the next key as the previous key,
+    fully deploy, then promote it while retaining the old current key through
+    the second deployment.
 14. Invoke the IAM-only services with synthetic credentials and run upload,
     duplicate, reconnect, restore, tenant-isolation, retention, export, and
     erasure tests.

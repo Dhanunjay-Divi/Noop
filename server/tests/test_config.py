@@ -134,6 +134,20 @@ def test_managed_push_previous_secret_is_loaded_without_exposure(
     assert settings.managed_push_token_previous_secret is not None
 
 
+def test_managed_push_write_version_defaults_to_rolling_compatible_v1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION", raising=False)
+    assert Settings.from_env().managed_push_token_write_version == "v1"
+
+    monkeypatch.setenv("NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION", "v2")
+    assert Settings.from_env().managed_push_token_write_version == "v2"
+
+    monkeypatch.setenv("NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION", "v3")
+    with pytest.raises(ValueError, match="WRITE_VERSION"):
+        Settings.from_env()
+
+
 def test_ownership_service_requires_project_bound_apps_and_bounded_freshness() -> None:
     project_number = "123456789012"
     settings = Settings(

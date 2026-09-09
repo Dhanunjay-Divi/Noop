@@ -411,6 +411,7 @@ async def _run() -> ManagedLifecycleResult:
                     if settings.managed_push_token_previous_secret
                     else ()
                 ),
+                write_version=settings.managed_push_token_write_version,
             ),
             provider=FirebaseCloudMessagingProvider(
                 project_id=settings.managed_project_id or "",

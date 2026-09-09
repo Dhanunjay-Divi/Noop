@@ -13,7 +13,9 @@ from uuid import UUID, uuid4
 from app.managed_push import (
     ManagedPushSending,
     ManagedPushTokenCodec,
+    ManagedPushTokenCorruptError,
     ManagedPushTokenError,
+    ManagedPushTokenUnavailableError,
 )
 from app.managed_repository import (
     ManagedConflictError,
@@ -866,17 +868,63 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
+                invite_snapshot = await connection.fetchrow(
+                    """
+                    SELECT invite_id,
+                           owner_profile_id,
+                           status,
+                           expires_at,
+                           redeemed_by_profile_id,
+                           safety_request_id
+                    FROM managed_safety_invites
+                    WHERE capability_hash = $1
+                    """,
+                    capability_hash,
+                )
+                if invite_snapshot is None:
+                    raise ManagedNotFoundError("Safety invitation was not found")
+                is_duplicate_snapshot = (
+                    invite_snapshot["status"] == "redeemed"
+                    and invite_snapshot["redeemed_by_profile_id"]
+                    == contact["profile_id"]
+                    and invite_snapshot["safety_request_id"] is not None
+                )
+                if not is_duplicate_snapshot and (
+                    invite_snapshot["status"] != "active"
+                    or invite_snapshot["expires_at"] <= now
+                ):
+                    raise ManagedNotFoundError("Safety invitation was not found")
+                await self._lock_pair(
+                    connection,
+                    owner_profile_id=invite_snapshot["owner_profile_id"],
+                    contact_profile_id=contact["profile_id"],
+                )
+                profiles = await self._lock_active_profiles_and_accounts(
+                    connection,
+                    profile_ids=[
+                        invite_snapshot["owner_profile_id"],
+                        contact["profile_id"],
+                    ],
+                )
+                if len(profiles) != 2:
+                    raise ManagedNotFoundError("Safety invitation was not found")
+                now = await connection.fetchval("SELECT clock_timestamp()")
                 await self._expire(connection, now)
                 invite = await connection.fetchrow(
                     """
                     SELECT *
                     FROM managed_safety_invites
-                    WHERE capability_hash = $1
+                    WHERE invite_id = $1
+                      AND capability_hash = $2
                     FOR UPDATE
                     """,
+                    invite_snapshot["invite_id"],
                     capability_hash,
                 )
-                if invite is None:
+                if (
+                    invite is None
+                    or invite["owner_profile_id"] != invite_snapshot["owner_profile_id"]
+                ):
                     raise ManagedNotFoundError("Safety invitation was not found")
                 if (
                     invite["status"] == "redeemed"
@@ -1328,19 +1376,22 @@ class PostgresManagedSafetyRepository:
                 )
                 await connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                    f"noop-managed-safety-incident:{owner['profile_id']}",
+                    f"noop-managed-safety-incident:{owner['account_id']}",
                 )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 await self._expire(connection, now)
                 replay = await connection.fetchrow(
                     """
-                    SELECT *
-                    FROM managed_safety_incidents
-                    WHERE owner_profile_id = $1
-                      AND client_request_id = $2
-                    FOR UPDATE
+                    SELECT quota.*,
+                           incident.owner_profile_id AS incident_owner_profile_id
+                    FROM managed_safety_page_quota_events quota
+                    LEFT JOIN managed_safety_incidents incident
+                      ON incident.incident_id = quota.incident_id
+                    WHERE quota.owner_account_id = $1
+                      AND quota.client_request_id = $2
+                    FOR UPDATE OF quota
                     """,
-                    owner["profile_id"],
+                    owner["account_id"],
                     request.request_id,
                 )
                 if replay is not None:
@@ -1350,6 +1401,10 @@ class PostgresManagedSafetyRepository:
                     ):
                         raise ManagedConflictError(
                             "Safety incident request id was reused"
+                        )
+                    if replay["incident_owner_profile_id"] != owner["profile_id"]:
+                        raise ManagedConflictError(
+                            "Safety incident request id was already consumed"
                         )
                     result = await self._incident_detail(
                         connection,
@@ -1383,11 +1438,11 @@ class PostgresManagedSafetyRepository:
                         ) AS hourly_oldest,
                         count(*) AS daily_count,
                         min(created_at) AS daily_oldest
-                    FROM managed_safety_incidents
-                    WHERE owner_profile_id = $1
+                    FROM managed_safety_page_quota_events
+                    WHERE owner_account_id = $1
                       AND created_at > $2::timestamptz - interval '24 hours'
                     """,
-                    owner["profile_id"],
+                    owner["account_id"],
                     now,
                 )
                 retry_windows: list[datetime] = []
@@ -1464,6 +1519,29 @@ class PostgresManagedSafetyRepository:
                     incident_id,
                     owner["profile_id"],
                     request.request_id,
+                    request.duration_hours,
+                    request.share_location,
+                    now,
+                    expires_at,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_safety_page_quota_events (
+                        owner_account_id,
+                        client_request_id,
+                        incident_id,
+                        duration_hours,
+                        share_location,
+                        created_at,
+                        purge_after
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6,
+                        $7::timestamptz + interval '30 days'
+                    )
+                    """,
+                    owner["account_id"],
+                    request.request_id,
+                    incident_id,
                     request.duration_hours,
                     request.share_location,
                     now,
@@ -2542,6 +2620,33 @@ class PostgresManagedSafetyRepository:
                     batch_size,
                 )
                 counts["managed_safety_incidents_deleted"] = len(deleted_incidents)
+                deleted_quota_events = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT owner_account_id, client_request_id
+                        FROM managed_safety_page_quota_events quota
+                        WHERE quota.purge_after <= $1
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_safety_incidents incident
+                              WHERE incident.incident_id = quota.incident_id
+                          )
+                        ORDER BY purge_after, owner_account_id, client_request_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    DELETE FROM managed_safety_page_quota_events quota
+                    USING candidates
+                    WHERE quota.owner_account_id = candidates.owner_account_id
+                      AND quota.client_request_id = candidates.client_request_id
+                    RETURNING quota.client_request_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["managed_safety_page_quota_events_deleted"] = len(
+                    deleted_quota_events
+                )
                 deleted_requests = await connection.fetch(
                     """
                     WITH candidates AS (
@@ -2725,9 +2830,18 @@ class ManagedSafetyPushService:
                     )
                     outcome = result.outcome
                     provider_reference_hash = result.provider_reference_hash
-                except ManagedPushTokenError:
+                except ManagedPushTokenUnavailableError:
                     # A missing previous key is a server configuration failure,
                     # not evidence that the provider registration is invalid.
+                    outcome = "unavailable"
+                    provider_reference_hash = None
+                except ManagedPushTokenCorruptError:
+                    # A malformed envelope or authentication failure under its
+                    # known key cannot be repaired by retrying this delivery.
+                    outcome = "invalid"
+                    provider_reference_hash = None
+                except ManagedPushTokenError:
+                    # Keep unknown codec failures fail-safe and retryable.
                     outcome = "unavailable"
                     provider_reference_hash = None
                 except Exception:
