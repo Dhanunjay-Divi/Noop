@@ -142,6 +142,11 @@ Android where applicable, and leave physical-phone conclusions explicit.
   and retained children finally receive the intended motion budget. The
   matching Android scaffolds already published their real
   `isScrollInProgress` state.
+- A fresh simulator run temporarily replaced the installed app's database with
+  a verified 294.9 MB production-schema fixture for the same synthetic device
+  used by the UI harness. That store contained 2,376,000 HR rows and 864,000
+  R-R rows. Five Today up/down scroll iterations passed; the original simulator
+  database was restored afterward with SQLite integrity `ok`.
 - The Health live-heart-rate trace no longer owns an idle one-second clock on
   either platform. Its sampler exists only after the wearer explicitly starts
   Live HR, pauses while a drag/fling owns the frame budget, leaves the last
@@ -241,6 +246,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Decorative-atmosphere follow-up | Android `HealthScreenPerformanceTest` and `RetainedScreenPerformanceTest` passed in 17 seconds; Apple compiled and ran 11 Health/retained-screen performance contracts with zero failures | The remaining Apple Sleep and Android Health card atmospheres are pinned static and cannot consume a separate 20 fps clock while their lists scroll | Physical GPU timing or the tester's exact phone |
 | Scroll-interaction clock follow-up | Android compiled and ran 22 retained-screen, Health, and frame-pacer contracts with zero failures in 23 seconds. After the shared status-pill follow-up, all 52 StrandDesign tests and 22 Apple retained-screen, Health, and Liquid Today contracts passed with zero failures | Connection/status pulses, band-sync sweeps, and Daily Signal waveforms stop their decorative clocks while drag or fling owns the frame budget on both platforms; every shared Apple `StatePill` receives the shell gate | Physical GPU timing, hidden OS work, or the tester's exact phone |
 | Apple interaction-wiring audit | The standard Apple scaffold and liquid Today now publish the shared interaction environment through an edge-coalesced offset tracker; the Android Health sampler uses the existing Compose interaction local. The production-flavor Android focused suite passed in 30 seconds, and the Apple app compiled and ran 15 Health/retained-screen contracts with zero failures. A follow-up no-churn audit replaced the first scheduler-sensitive lifecycle assertion with a pure latest-movement timing-policy test; all 13 focused retained-screen contracts then passed | Shared Apple motion consumers now receive a real drag/deceleration signal rather than the environment default, one settle task serves the full gesture instead of being recreated per frame, and Health has no one-second sampling clock while paused or scrolling on either platform | Physical touch latency, GPU pacing, or the tester's exact phone |
+| Large-store Apple simulator scroll | A verified 294.9 MB store with 2,376,000 active-device HR rows and 864,000 R-R rows was swapped into the installed iPhone 17 Pro simulator. `testTodayScrollPerformance` passed five up/down iterations with a 5.188 s average automation window, 0.167 s average app CPU time, and about 35.3 MB peak physical memory. The original 1.10 MB database was restored with integrity `ok` | The optimized Today path remains functional and bounded when the same active device owns a phone-sized production-schema store | Physical GPU pacing, thermal behavior, flash latency, active BLE ingestion, or the affected tester's phone |
 | Post-review policy preflight | `git diff --check`, the 39-record operations validator, `required-ci-gate.py check`, and the terminology ratchet passed. The regenerated pre-rebase snapshot records 17,360 classified occurrences across 1,510 groups with no active-allowlist change. An initial no-subcommand `required-ci-gate.py` invocation returned its expected usage error and was corrected | The review patch remains structurally clean, keeps the required-context policy intact, and does not introduce an unreviewed active legacy term | Final regenerated snapshot and complete policy matrix after the Safety rebase |
 
 ## Physical device and deployment
@@ -248,7 +254,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
 - Install/update action: unsigned simulator builds only; no physical app
   container was changed.
 - Generalized device and OS class: not provided.
-- Data-preservation result: no physical app container touched.
+- Data-preservation result: the simulator database was replaced only with
+  deterministic synthetic history and the original database was restored with
+  integrity `ok`; no physical app container was touched.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: large existing database, active collection and
   backfill, low-storage, thermal, memory-pressure, background, and in-place
