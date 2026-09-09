@@ -107,6 +107,17 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(text.contains(".timeOfDayBackground(.night, animated: false)"))
     }
 
+    func testTodayDecorativeStatusClocksPauseDuringScrollInteraction() throws {
+        let classic = try source("Strand/Screens/TodayView.swift")
+        let liquid = try source("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(classic.contains("@Environment(\\.liquidInteractionInProgress)"))
+        XCTAssertTrue(classic.contains("!interactionInProgress else"))
+        XCTAssertTrue(liquid.contains("@Environment(\\.liquidInteractionInProgress)"))
+        XCTAssertTrue(liquid.contains("syncing && !reduceMotion && !interactionInProgress"))
+        XCTAssertTrue(liquid.contains("guard !posed, !interactionInProgress else"))
+    }
+
     func testWorkoutRecoveryHistoryLoadsOnlyAtItsLazyMount() throws {
         let text = try source("Strand/Screens/WorkoutsView.swift")
 

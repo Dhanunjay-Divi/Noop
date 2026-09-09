@@ -5148,6 +5148,7 @@ private struct RecordingStatusLight: View {
     /// Drives the syncing pulse; toggled in `.task` while an offload runs (never during body eval).
     @State private var pulsing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
 
     /// Colour for the light: green recording, amber last-synced, red not recording, accent for
@@ -5199,8 +5200,11 @@ private struct RecordingStatusLight: View {
             : (state?.accessibilityText ?? String(localized: "Recording status, not shown for a past day")))
         // Run the repeating pulse only while syncing and decorative motion is allowed. The steady
         // accent dot still conveys synchronization in Low Power/Reduce Motion modes.
-        .task(id: "\(syncing)-\(motion.poseStill(reduceMotion))") {
-            guard syncing, !motion.poseStill(reduceMotion) else { pulsing = false; return }
+        .task(id: "\(syncing)-\(motion.poseStill(reduceMotion))-\(interactionInProgress)") {
+            guard syncing, !motion.poseStill(reduceMotion), !interactionInProgress else {
+                pulsing = false
+                return
+            }
             withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { pulsing = true }
         }
     }

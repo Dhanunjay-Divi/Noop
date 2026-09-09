@@ -4320,6 +4320,7 @@ private fun DailySignalSourceBadge(
     bandLastSyncAt: Long?,
     modifier: Modifier = Modifier,
 ) {
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
     val isBand = sourceLabelIncludesCompatibleBand(text)
     val syncingRaw = isBand && bandBackfilling
     var presentingSync by remember(isBand) { mutableStateOf(false) }
@@ -4374,7 +4375,7 @@ private fun DailySignalSourceBadge(
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        if (syncing && !rememberPoseStill()) {
+        if (syncing && !rememberPoseStill() && !interactionInProgress) {
             DailySignalBandSyncSweep(Modifier.matchParentSize())
         }
         Text(
@@ -4451,6 +4452,7 @@ private fun DailySignalWaveform(
     tint: Color,
 ) {
     val posed = rememberPoseStill()
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
     val progress = remember { Animatable(1f) }
     val sweepMillis = if (status == DailySignalStatus.ALERT) 550 else 780
     val restMillis = when (status) {
@@ -4460,9 +4462,9 @@ private fun DailySignalWaveform(
         DailySignalStatus.BUILDING -> 4_000L
     }
 
-    LaunchedEffect(status, posed) {
+    LaunchedEffect(status, posed, interactionInProgress) {
         progress.snapTo(1f)
-        if (posed) return@LaunchedEffect
+        if (posed || interactionInProgress) return@LaunchedEffect
         while (true) {
             progress.snapTo(0f)
             progress.animateTo(

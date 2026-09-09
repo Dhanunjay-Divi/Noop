@@ -4119,6 +4119,7 @@ private struct DailySignalHeader: View {
 private struct DailySignalSourceChip: View {
     @EnvironmentObject private var live: LiveState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
 
     let text: String
 
@@ -4169,7 +4170,7 @@ private struct DailySignalSourceChip: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
                         .fill(StrandPalette.onDarkSecondary.opacity(0.13))
-                    if syncing && !reduceMotion {
+                    if syncing && !reduceMotion && !interactionInProgress {
                         GeometryReader { proxy in
                             let width = max(CGFloat(22), proxy.size.width * 0.48)
                             LinearGradient(
@@ -4201,6 +4202,9 @@ private struct DailySignalSourceChip: View {
                 updateSyncPresentation()
             }
             .onChangeCompat(of: reduceMotion) { _ in
+                updateSweep()
+            }
+            .onChangeCompat(of: interactionInProgress) { _ in
                 updateSweep()
             }
             .onDisappear {
@@ -4245,7 +4249,7 @@ private struct DailySignalSourceChip: View {
 
     private func updateSweep() {
         withAnimation(.none) { sweep = 0 }
-        guard syncing, !reduceMotion else { return }
+        guard syncing, !reduceMotion, !interactionInProgress else { return }
         DispatchQueue.main.async {
             withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
                 sweep = 1
@@ -4262,6 +4266,7 @@ private struct DailySignalWaveform: View {
     let tint: Color
     let posed: Bool
 
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @State private var progress: CGFloat = 1
 
     private var sweepSeconds: Double {
@@ -4290,9 +4295,9 @@ private struct DailySignalWaveform: View {
         }
         .frame(width: 30, height: 17)
         .accessibilityHidden(true)
-        .task(id: "\(status.rawValue)-\(posed)") {
+        .task(id: "\(status.rawValue)-\(posed)-\(interactionInProgress)") {
             progress = 1
-            guard !posed else { return }
+            guard !posed, !interactionInProgress else { return }
             while !Task.isCancelled {
                 progress = 0
                 withAnimation(.linear(duration: sweepSeconds)) { progress = 1 }

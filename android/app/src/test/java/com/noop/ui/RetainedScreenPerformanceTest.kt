@@ -220,6 +220,17 @@ class RetainedScreenPerformanceTest {
     }
 
     @Test
+    fun decorativeStatusClocksPauseWhileAListIsMoving() {
+        val components = source("com/noop/ui/Components.kt")
+        val today = source("com/noop/ui/TodayScreen.kt")
+
+        assertTrue(components.contains("pulsing && !renderStill && !interactionInProgress"))
+        assertTrue(today.contains("syncing && !rememberPoseStill() && !interactionInProgress"))
+        assertTrue(today.contains("LaunchedEffect(status, posed, interactionInProgress)"))
+        assertTrue(today.contains("if (posed || interactionInProgress) return@LaunchedEffect"))
+    }
+
+    @Test
     fun intelligenceRootKeepsExactSyncProgressInItsEmptyStateLeaf() {
         val intelligence = source("com/noop/ui/IntelligenceScreen.kt")
         val rootStart = intelligence.indexOf("fun IntelligenceScreen(")

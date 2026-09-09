@@ -656,7 +656,8 @@ fun ConnectionDot(
         // subscription invalidating the frame, for a halo that wasn't even drawn. Hoisting it into a child
         // that's composed only when `pulsing` means a still dot does zero per-frame work. Identical visuals.
         val renderStill = rememberPoseStill()
-        if (pulsing && !renderStill) {
+        val interactionInProgress = LocalLiquidInteractionInProgress.current
+        if (pulsing && !renderStill && !interactionInProgress) {
             PulsingDotHalo(tone = tone, size = size)
         }
         Box(
