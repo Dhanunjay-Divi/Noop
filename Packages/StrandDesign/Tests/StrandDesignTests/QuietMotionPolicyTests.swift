@@ -19,4 +19,35 @@ final class QuietMotionPolicyTests: XCTestCase {
         environment.noopInteractionInProgress = true
         XCTAssertTrue(environment.noopInteractionInProgress)
     }
+
+    func testRepeatingMotionYieldsToStillAndInteractionPolicies() {
+        XCTAssertTrue(
+            noopAllowsRepeatingMotion(
+                requested: true,
+                poseStill: false,
+                interactionInProgress: false
+            )
+        )
+        XCTAssertFalse(
+            noopAllowsRepeatingMotion(
+                requested: false,
+                poseStill: false,
+                interactionInProgress: false
+            )
+        )
+        XCTAssertFalse(
+            noopAllowsRepeatingMotion(
+                requested: true,
+                poseStill: true,
+                interactionInProgress: false
+            )
+        )
+        XCTAssertFalse(
+            noopAllowsRepeatingMotion(
+                requested: true,
+                poseStill: false,
+                interactionInProgress: true
+            )
+        )
+    }
 }

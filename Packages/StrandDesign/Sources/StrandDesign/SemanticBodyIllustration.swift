@@ -40,11 +40,19 @@ public struct SemanticBodyIllustration: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.noopInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
     @State private var presented = false
     @State private var eventPresented = false
 
     private var poseStill: Bool { motion.poseStill(reduceMotion) }
+    private var repeatsMotion: Bool {
+        noopAllowsRepeatingMotion(
+            requested: isActive,
+            poseStill: poseStill,
+            interactionInProgress: interactionInProgress
+        )
+    }
 
     public init(
         _ kind: SemanticBodyKind,
@@ -62,7 +70,7 @@ public struct SemanticBodyIllustration: View {
 
     public var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0,
-                                paused: poseStill || !isActive)) { context in
+                                paused: !repeatsMotion)) { context in
             illustration(at: context.date.timeIntervalSinceReferenceDate)
         }
         .frame(width: size, height: size)
@@ -73,7 +81,7 @@ public struct SemanticBodyIllustration: View {
 
     private func illustration(at seconds: TimeInterval) -> some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.31, style: .continuous)
-        let phase = isActive && !poseStill ? seconds : 0
+        let phase = repeatsMotion ? seconds : 0
         let transform = motionTransform(at: phase)
         let settled = poseStill || (presented && eventPresented)
 

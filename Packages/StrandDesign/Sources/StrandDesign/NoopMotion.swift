@@ -112,6 +112,15 @@ public extension EnvironmentValues {
     }
 }
 
+@inline(__always)
+func noopAllowsRepeatingMotion(
+    requested: Bool,
+    poseStill: Bool,
+    interactionInProgress: Bool
+) -> Bool {
+    requested && !poseStill && !interactionInProgress
+}
+
 /// One process-wide source of truth for non-essential animation policy.
 ///
 /// Views supply SwiftUI's live Reduce Motion environment value to `poseStill(_:)`; this object

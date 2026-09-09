@@ -696,15 +696,22 @@ private struct PulseDot: View {
     var size: CGFloat
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.noopInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
     private var poseStill: Bool { motion.poseStill(reduceMotion) }
     @Environment(\.colorScheme) private var scheme
     var body: some View {
+        let shouldAnimatePulse = noopAllowsRepeatingMotion(
+            requested: pulsing && scheme == .dark,
+            poseStill: poseStill,
+            interactionInProgress: interactionInProgress
+        )
+
         ZStack {
             // Dark-mode only (#review): AdditiveBloom used to hide this expanding ring on light
             // (content.opacity(0)); now that we drop the offscreen bloom, gate it explicitly so light
             // mode stays ring-free (the resting dot + its shadow carry the live state there).
-            if pulsing && scheme == .dark {
+            if shouldAnimatePulse {
                 Circle().fill(color)
                     .frame(width: size, height: size)
                     .scaleEffect(animate ? 2.4 : 1.0)
@@ -719,8 +726,14 @@ private struct PulseDot: View {
                 .shadow(color: color.opacity(0.8), radius: pulsing ? 4 : 2)
         }
         .frame(width: size, height: size)
-        .onAppear { if pulsing && !poseStill { animate = true } }
-        .animation(pulsing && !poseStill ? StrandMotion.breathe : nil, value: animate)
+        .task(id: shouldAnimatePulse) {
+            animate = false
+            guard shouldAnimatePulse else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            animate = true
+        }
+        .animation(shouldAnimatePulse ? StrandMotion.breathe : nil, value: animate)
         .accessibilityHidden(true)
     }
 }
