@@ -676,6 +676,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var todayVitalityCache: Double? = null
 
     /**
+     * The Rest number and its sparkline consume the same resolved sleep_performance history. Keep that
+     * compact day/value map across Today re-mounts so one Room read serves both outputs and a day swipe
+     * performs only in-memory filtering.
+     */
+    var todayRestCompositeLoadedSig: Int? = null
+    var todayRestCompositeCache: Map<String, Double> = emptyMap()
+
+    /**
      * Recent daily metrics (newest last), backing the Today grid + illness watch.
      * MERGED: imported "my-whoop" rows win per day; on-device computed "my-whoop-noop"
      * rows (from [IntelligenceEngine]) gap-fill, so recovery/strain/sleep populate from

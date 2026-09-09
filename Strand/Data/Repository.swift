@@ -583,6 +583,7 @@ final class Repository: ObservableObject {
         ageMetricsSeq += 1
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
+        liquidTodayLoadCache = nil
     }
 
     /// Bumped whenever workout persistence changes independently of the daily-metric cache. Activity
@@ -592,6 +593,7 @@ final class Repository: ObservableObject {
         workoutsSeq += 1
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
+        liquidTodayLoadCache = nil
     }
 
     /// Workouts & GPS test mode (Test Centre): the tagged sink for the `.workouts` diagnostic lines
@@ -1294,6 +1296,11 @@ final class Repository: ObservableObject {
     /// #932: the snapshot `loadDayScoped()` last built, so a same-(seq, day) re-mount RESTORES it in-memory
     /// (no store queries, no hrBuckets/hrSamples reads) instead of re-running the heavy load. Not @Published.
     var todayDayScopedCache: TodayDayScopedCache?
+
+    /// The default Liquid Today screen's complete query-backed snapshot. The cache key carries every
+    /// independent revision plus the selected day and age-profile state; current-day restores are also
+    /// age-gated in LiquidTodayView because live HR banking does not advance refreshSeq.
+    var liquidTodayLoadCache: LiquidTodayLoadCache?
 
     #if DEBUG
     /// v7.7.2 regression guard: DEBUG-only tally of how many times each cached heavy load actually ran its

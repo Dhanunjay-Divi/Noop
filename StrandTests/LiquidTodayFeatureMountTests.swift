@@ -53,6 +53,93 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertEqual(AppModel.analysisBackstopNanoseconds, 30 * 60 * 1_000_000_000)
     }
 
+    func testLiquidTodayCacheIsExactAndCurrentDayIsAgeGated() {
+        let key = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            dayKey: "2026-09-09",
+            profileState: "profile-a"
+        )
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        XCTAssertTrue(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-30),
+            now: now,
+            isToday: true
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-121),
+            now: now,
+            isToday: true
+        ))
+        XCTAssertTrue(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-10_000),
+            now: now,
+            isToday: false
+        ))
+
+        let newer = LiquidTodayQueryKey(
+            refreshSeq: 5,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            dayKey: "2026-09-09",
+            profileState: "profile-a"
+        )
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: newer,
+            bankedAt: now,
+            now: now,
+            isToday: false
+        ))
+    }
+
+    func testLiquidTodayDefersOnlyAnAlreadyVisibleSameDayDuringBackfill() {
+        XCTAssertTrue(LiquidTodayView.shouldDeferQueryLoad(
+            isBackfilling: true,
+            hasDisplayedData: true,
+            loadedDayKey: "2026-09-09",
+            requestedDayKey: "2026-09-09"
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
+            isBackfilling: true,
+            hasDisplayedData: true,
+            loadedDayKey: "2026-09-08",
+            requestedDayKey: "2026-09-09"
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
+            isBackfilling: true,
+            hasDisplayedData: false,
+            loadedDayKey: nil,
+            requestedDayKey: "2026-09-09"
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(
+            isBackfilling: false,
+            hasDisplayedData: true,
+            loadedDayKey: "2026-09-09",
+            requestedDayKey: "2026-09-09"
+        ))
+    }
+
+    func testLiquidTodayReloadsWhenBackfillFinishes() throws {
+        let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let task = try slice(
+            source,
+            from: ".task(id:",
+            to: "#if DEBUG"
+        )
+
+        XCTAssertTrue(task.contains("\\(liveBackfillingFlag)"))
+        XCTAssertTrue(task.contains("await load()"))
+    }
+
     func testChargeV2UpgradeForcesFullHistoryUntilPassCompletes() {
         XCTAssertEqual(ChargeFormulaUpgradeGate.currentRevision, "noop-charge-v2")
         XCTAssertEqual(ChargeFormulaUpgradeGate.historyDays, 4_000)

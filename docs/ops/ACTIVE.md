@@ -18,8 +18,8 @@ Last updated: **2026-09-09**
 
 ## Active work
 
-The latest managed Safety late-review closeout is implemented and completely
-locally verified on protected pull request `#10`. Apple and Android require a
+The managed Safety implementation from protected pull request `#10` is merged
+on `main` as `035dec3c` after all 35 hosted checks passed. Apple and Android require a
 working app-alert path before accepting a Safety contact; incident creation
 counts only accepted contacts represented by deterministically locked active
 push installations. Apple suppresses foreground managed Safety presentation
@@ -31,9 +31,8 @@ complete local server suite passed 424 tests with only the explicit real-provide
 case skipped; Android passed 4,143 tests plus lint, build, and instrumentation
 compilation; Apple passed 1,669 tests with one expected skip and the complete
 unsigned iOS simulator graph builds; 227 Tools tests and every local policy gate
-pass. Replacement push and exact-head review, protected checks, normal merge,
-physical providers/devices, and external launch gates remain. No public
-traffic, real paging, or real health data was used. Evidence is recorded in
+pass. Physical providers/devices and external launch gates remain. No public
+traffic, real paging, or real health data was used during verification. Evidence is recorded in
 [Managed Safety late-review closeout](rounds/2026-09-09-managed-safety-late-review-closeout.md).
 
 The latest managed Safety lock and retention closeout is implemented and
@@ -90,14 +89,15 @@ exact-head review, protected checks, and normal merge. No public traffic or
 real participant paging was enabled. Evidence is recorded in
 [Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
 
-The reported physical-phone lag is not evidence against the pending
-large-data fix yet: yesterday's protected `main` did not contain pull request
-`#12`. That branch has measured a 4.2-million-row, approximately 441 MB local
-database and removes active backfill/write contention, repeated retained-screen
-queries, unnecessary per-chunk reads, and scroll-time animation work across
-Apple and Android. It still requires integration after Safety, complete local
+The reported physical-phone lag is not evidence against the large-data fix yet:
+yesterday's protected `main` did not contain pull request `#12`. That branch
+has measured a 4.2-million-row, approximately 441 MB local database and removes
+active backfill/write contention, repeated retained-screen queries, unnecessary
+per-chunk reads, and scroll-time animation work across Apple and Android. It is
+now being integrated after the Safety merge and still requires complete local
 and hosted verification, protected merge, and a reviewed shake-to-report ZIP
-from the affected phone on the merged-main build.
+from the affected phone on the merged-main build. Evidence is recorded in
+[Large-data scroll lag](rounds/2026-09-09-large-data-scroll-lag.md).
 
 The latest managed Safety race closeout is implemented and locally verified on
 protected pull request `#10`. Invitation and contact deletes are idempotent,

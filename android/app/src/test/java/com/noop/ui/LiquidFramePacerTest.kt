@@ -7,6 +7,23 @@ import org.junit.Test
 
 class LiquidFramePacerTest {
     @Test
+    fun liquidAnimationYieldsTheFrameBudgetDuringScroll() {
+        assertTrue(shouldAnimateLiquid(animated = true, renderStill = false, interactionInProgress = false))
+        assertEquals(
+            false,
+            shouldAnimateLiquid(animated = true, renderStill = false, interactionInProgress = true),
+        )
+        assertEquals(
+            false,
+            shouldAnimateLiquid(animated = true, renderStill = true, interactionInProgress = false),
+        )
+        assertEquals(
+            false,
+            shouldAnimateLiquid(animated = false, renderStill = false, interactionInProgress = false),
+        )
+    }
+
+    @Test
     fun capsHighRefreshDisplaysAtRequestedBudgets() {
         assertTrue(acceptedFrames(displayHz = 120, targetFps = 60, seconds = 1) in 59..60)
         assertTrue(acceptedFrames(displayHz = 120, targetFps = 30, seconds = 1) in 29..30)

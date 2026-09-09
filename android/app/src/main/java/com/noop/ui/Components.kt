@@ -56,6 +56,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -1528,6 +1529,7 @@ fun ScreenScaffold(
     fullBleedBackground: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     // The scrolling content column. Its OUTER modifier differs by path: with no topBackground it is the
     // original root Column (the caller's `modifier` + an opaque-canvas background — byte-for-byte the old
     // layout); with a topBackground the canvas + scene paint in the wrapping Box's background (below) and
@@ -1542,7 +1544,7 @@ fun ScreenScaffold(
     val column: @Composable () -> Unit = {
         Column(
             modifier = columnModifier
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(
                     start = Metrics.screenPadding,
                     end = Metrics.screenPadding,
@@ -1583,44 +1585,48 @@ fun ScreenScaffold(
         }
     }
 
-    if (topBackground == null) {
-        // Unchanged path: the column IS the root, with the caller's `modifier` + opaque canvas background
-        // applied to it directly — byte-for-byte the previous layout (no wrapping Box).
-        column()
-    } else {
-        // Scene-backed path (Today): the wrapping Box paints the flat canvas, then the SCREEN-level scene
-        // backdrop over it, anchored to the TOP and bled UP behind the status bar so it reads as a
-        // full-bleed scenic header; the (transparent) scroll content floats OVER both. Mirrors the iOS
-        // scaffold's `.background(alignment: .top){ ZStack { surfaceBase; topBackground }.ignoresSafeArea() }`.
-        // Pull the scene up by the status-bar inset (the Scaffold already pushed this content below the
-        // bar), so the scene bleeds behind the status bar rather than starting under it.
-        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
-            Box(
-                modifier = (
-                    if (fullBleedBackground) {
-                        // Sky-behind-cards: the backdrop fills the whole viewport (no band offset), so
-                        // the transparent content scrolls OVER a full-height sky. Identical to the lazy
-                        // twin's fullBleedBackground container.
-                        Modifier.fillMaxSize()
-                    } else {
-                        Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.TopCenter)
-                            .offset(y = -statusBarTop)
-                    }
-                    )
-                    // PERF (#scroll-jank): promote the static scene backdrop to its OWN compositing layer so
-                    // its gradient + bitmap rasterise ONCE into a render node and are reused as a texture on
-                    // every scroll frame, instead of the parent re-issuing the scene's `drawBehind` draw each
-                    // time the (sibling) scroll column composites over it. The backdrop reads no scroll state
-                    // and never moves, so an empty `graphicsLayer {}` is purely an isolation hint —
-                    // appearance-identical. Mirrors keeping the iOS scene as a static screen-level backdrop.
-                    .graphicsLayer { },
-            ) {
-                topBackground()
-            }
+    CompositionLocalProvider(
+        LocalLiquidInteractionInProgress provides scrollState.isScrollInProgress,
+    ) {
+        if (topBackground == null) {
+            // Unchanged path: the column IS the root, with the caller's `modifier` + opaque canvas background
+            // applied to it directly — byte-for-byte the previous layout (no wrapping Box).
             column()
+        } else {
+            // Scene-backed path (Today): the wrapping Box paints the flat canvas, then the SCREEN-level scene
+            // backdrop over it, anchored to the TOP and bled UP behind the status bar so it reads as a
+            // full-bleed scenic header; the (transparent) scroll content floats OVER both. Mirrors the iOS
+            // scaffold's `.background(alignment: .top){ ZStack { surfaceBase; topBackground }.ignoresSafeArea() }`.
+            // Pull the scene up by the status-bar inset (the Scaffold already pushed this content below the
+            // bar), so the scene bleeds behind the status bar rather than starting under it.
+            val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
+                Box(
+                    modifier = (
+                        if (fullBleedBackground) {
+                            // Sky-behind-cards: the backdrop fills the whole viewport (no band offset), so
+                            // the transparent content scrolls OVER a full-height sky. Identical to the lazy
+                            // twin's fullBleedBackground container.
+                            Modifier.fillMaxSize()
+                        } else {
+                            Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter)
+                                .offset(y = -statusBarTop)
+                        }
+                        )
+                        // PERF (#scroll-jank): promote the static scene backdrop to its OWN compositing layer so
+                        // its gradient + bitmap rasterise ONCE into a render node and are reused as a texture on
+                        // every scroll frame, instead of the parent re-issuing the scene's `drawBehind` draw each
+                        // time the (sibling) scroll column composites over it. The backdrop reads no scroll state
+                        // and never moves, so an empty `graphicsLayer {}` is purely an isolation hint —
+                        // appearance-identical. Mirrors keeping the iOS scene as a static screen-level backdrop.
+                        .graphicsLayer { },
+                ) {
+                    topBackground()
+                }
+                column()
+            }
         }
     }
 }
@@ -1728,31 +1734,35 @@ fun LazyScreenScaffold(
         }
     }
 
-    if (topBackground == null) {
-        list()
-    } else {
-        // Scene-backed path: the wrapping Box paints the flat canvas + the screen-level scene backdrop
-        // (anchored TOP, bled up behind the status bar), and the transparent LazyColumn floats over both.
-        // Identical scene treatment to ScreenScaffold — including promoting the static backdrop to its own
-        // compositing layer (an empty graphicsLayer {}) so the scene rasterises once and replays as a
-        // texture on every scroll frame instead of being re-issued under the scrolling rows.
-        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
-            Box(
-                modifier = (
-                    if (fullBleedBackground) {
-                        // Sky-behind-cards: the backdrop fills the whole viewport (covers under the status
-                        // bar already), so the transparent rows scroll OVER a full-height sky.
-                        Modifier.fillMaxSize()
-                    } else {
-                        // Default: a top-anchored band bled up behind the status bar.
-                        Modifier.fillMaxWidth().align(Alignment.TopCenter).offset(y = -statusBarTop)
-                    }
-                    ).graphicsLayer { },
-            ) {
-                topBackground()
-            }
+    CompositionLocalProvider(
+        LocalLiquidInteractionInProgress provides listState.isScrollInProgress,
+    ) {
+        if (topBackground == null) {
             list()
+        } else {
+            // Scene-backed path: the wrapping Box paints the flat canvas + the screen-level scene backdrop
+            // (anchored TOP, bled up behind the status bar), and the transparent LazyColumn floats over both.
+            // Identical scene treatment to ScreenScaffold — including promoting the static backdrop to its own
+            // compositing layer (an empty graphicsLayer {}) so the scene rasterises once and replays as a
+            // texture on every scroll frame instead of being re-issued under the scrolling rows.
+            val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
+                Box(
+                    modifier = (
+                        if (fullBleedBackground) {
+                            // Sky-behind-cards: the backdrop fills the whole viewport (covers under the status
+                            // bar already), so the transparent rows scroll OVER a full-height sky.
+                            Modifier.fillMaxSize()
+                        } else {
+                            // Default: a top-anchored band bled up behind the status bar.
+                            Modifier.fillMaxWidth().align(Alignment.TopCenter).offset(y = -statusBarTop)
+                        }
+                        ).graphicsLayer { },
+                ) {
+                    topBackground()
+                }
+                list()
+            }
         }
     }
 }

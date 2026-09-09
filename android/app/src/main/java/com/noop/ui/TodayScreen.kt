@@ -1069,44 +1069,48 @@ fun TodayScreen(
         }.getOrNull()
     }
 
-    // The Rest SCORE (0–100) for the selected day, IntelligenceEngine's Rest composite, written to the
-    // `sleep_performance` metric series. The Key-Metrics "Rest" tile shows THIS, with hours-in-bed kept
-    // as the caption; the tile previously showed hours where the score belonged (#248). resolvedSeries
-    // merges imported + computed sleep_performance (imported-wins), so an importer sees the export's
-    // figure and a Bluetooth-only user sees the on-device composite. Null until loaded / no night yet.
-    var restScoreForDay by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(days, selectedDayKey, selectedDayOffset) {
-        val byDay = runCatching {
+    // Rest number + sparkline share one resolved history read. The day/value map lives on the ViewModel so
+    // a tab return restores it without touching Room, and changing the selected day only filters memory.
+    val restCompositeSig = 31 * days.hashCode() + viewModel.activeStrapId.hashCode()
+    var restCompositeByDay by remember(restCompositeSig) {
+        mutableStateOf(
+            viewModel.todayRestCompositeCache.takeIf {
+                viewModel.todayRestCompositeLoadedSig == restCompositeSig
+            } ?: emptyMap(),
+        )
+    }
+    LaunchedEffect(days, viewModel.activeStrapId) {
+        if (viewModel.todayRestCompositeLoadedSig == restCompositeSig) {
+            restCompositeByDay = viewModel.todayRestCompositeCache
+            return@LaunchedEffect
+        }
+        val loaded = runCatching {
             viewModel.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
                 strapDeviceId = viewModel.activeStrapId)
                 .values.associate { it.first to it.second }
         }.getOrDefault(emptyMap())
-        // #977: the tail-fallback (latest scored night) is now freshness-gated. A live 5.0 whose sleep never
-        // scores used to pin Rest to the weeks-old series tail forever while Charge advanced; if that tail is
-        // stale, fall through to null so the Rest ring shows its needs-a-tracked-night state instead of a
-        // frozen number. `selectedDayKey` is today's key at offset 0, so it anchors the freshness check.
-        val latest = byDay.entries.maxByOrNull { it.key }
-        restScoreForDay = freshRestScore(
-            todayValue = byDay[selectedDayKey], lastDay = latest?.key, lastValue = latest?.value,
-            isTodaySelected = selectedDayOffset == 0, today = selectedDayKey)
+        restCompositeByDay = loaded
+        viewModel.todayRestCompositeCache = loaded
+        viewModel.todayRestCompositeLoadedSig = restCompositeSig
     }
 
-    // The Rest tile's SPARKLINE series (#614 follow-up). The Rest tile's NUMBER is the Rest composite
-    // (0–100) from `sleep_performance` above, but its mini-graph used to plot raw sleep MINUTES
-    // (`w.sleepMin`), so the trend line didn't track the score it sat under. Build the SAME 0–100
-    // `sleep_performance` series here, windowed to the trailing 14 calendar days ending on the selected
-    // day (oldest → newest, nulls dropped, mirrors remember14's windowing of the DailyMetric series), and
-    // feed it to the Rest tile instead. Now the sparkline tracks the Rest score. Empty until loaded.
-    var restCompositeSpark by remember { mutableStateOf<List<Double>>(emptyList()) }
-    LaunchedEffect(days, selectedDay, keyMetricsWindowDays) {
-        val byDay = runCatching {
-            viewModel.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
-                strapDeviceId = viewModel.activeStrapId)
-                .values.associate { it.first to it.second }
-        }.getOrDefault(emptyMap())
+    // #977: the tail fallback is freshness-gated, so an old scored night cannot pose as today's Rest.
+    val restScoreForDay = remember(restCompositeByDay, selectedDayKey, selectedDayOffset) {
+        val latest = restCompositeByDay.entries.maxByOrNull { it.key }
+        freshRestScore(
+            todayValue = restCompositeByDay[selectedDayKey],
+            lastDay = latest?.key,
+            lastValue = latest?.value,
+            isTodaySelected = selectedDayOffset == 0,
+            today = selectedDayKey,
+        )
+    }
+
+    // The Rest tile plots the same 0–100 composite as its number, trailing the selected calendar window.
+    val restCompositeSpark = remember(restCompositeByDay, selectedDay, keyMetricsWindowDays) {
         val cutoff = selectedDay.minusDays((keyMetricsWindowDays - 1).toLong()).toString()
         val end = selectedDay.toString()
-        restCompositeSpark = byDay.entries
+        restCompositeByDay.entries
             .filter { it.key in cutoff..end }
             .sortedBy { it.key }
             .map { it.value }

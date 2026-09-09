@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -66,6 +67,60 @@ class RuntimePerformanceContractTest {
         assertTrue(workouts.contains("vm.workouts.collectAsStateWithLifecycle()"))
         assertTrue(insights.contains("vm.recentDays.collectAsStateWithLifecycle()"))
         assertTrue(insights.contains("hub.state.collectAsStateWithLifecycle()"))
+    }
+
+    @Test
+    fun sharedScreenScaffoldsPauseLiquidClocksDuringDragAndFling() {
+        val components = source("com/noop/ui/Components.kt")
+        val primitives = source("com/noop/ui/LiquidPrimitives.kt")
+
+        assertTrue(components.contains("val scrollState = rememberScrollState()"))
+        assertTrue(
+            components.contains(
+                "LocalLiquidInteractionInProgress provides scrollState.isScrollInProgress",
+            ),
+        )
+        assertTrue(
+            components.contains(
+                "LocalLiquidInteractionInProgress provides listState.isScrollInProgress",
+            ),
+        )
+
+        val vesselStart = primitives.indexOf("fun LiquidVessel(")
+        val vesselPauseGate = primitives.indexOf(
+            "if (shouldAnimateLiquid(animated, renderStill, interactionInProgress))",
+            vesselStart,
+        )
+        val vesselSim = primitives.indexOf(
+            "val sim = remember { LiquidSim(target = value ?: 0.0) }",
+            vesselStart,
+        )
+        assertTrue(vesselStart >= 0 && vesselSim in vesselStart until vesselPauseGate)
+
+        val tubeStart = primitives.indexOf("fun LiquidTube(")
+        val tubePauseGate = primitives.indexOf(
+            "if (shouldAnimateLiquid(animated, renderStill, interactionInProgress))",
+            tubeStart,
+        )
+        val tubeSim = primitives.indexOf(
+            "val sim = remember { LiquidSim(target = 0.0) }",
+            tubeStart,
+        )
+        assertTrue(tubeStart >= 0 && tubeSim in tubeStart until tubePauseGate)
+    }
+
+    @Test
+    fun todayUsesOneCachedRestHistoryForTheNumberAndSparkline() {
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val start = today.indexOf("val restCompositeSig =")
+        val end = today.indexOf("// Calibrated SpO2", start)
+        assertTrue(start >= 0 && end > start)
+
+        val restBlock = today.substring(start, end)
+        assertEquals(1, Regex("""resolvedSeries\("sleep_performance"""").findAll(restBlock).count())
+        assertTrue(restBlock.contains("viewModel.todayRestCompositeLoadedSig"))
+        assertTrue(restBlock.contains("remember(restCompositeByDay, selectedDayKey, selectedDayOffset)"))
+        assertTrue(restBlock.contains("remember(restCompositeByDay, selectedDay, keyMetricsWindowDays)"))
     }
 
     private fun source(relative: String): String {
