@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -63,9 +65,18 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
         encoding="utf-8"
     )
+    outputs = (REPOSITORY_ROOT / "infra" / "gcp" / "outputs.tf").read_text(
+        encoding="utf-8"
+    )
     variables = (REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf").read_text(
         encoding="utf-8"
     )
+    migration_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "run-migration.sh"
+    ).read_text(encoding="utf-8")
+    verifier = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "verify-private-runtime.sh"
+    ).read_text(encoding="utf-8")
 
     assert 'ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"' in runtime
     assert "allAuthenticatedUsers" not in runtime
@@ -108,6 +119,22 @@ def test_gcp_runtime_is_private_pinned_and_migration_gated() -> None:
     assert "max_instance_count = 2" in runtime
     assert "var.runtime_image != null" in variables
     assert "@sha256:" in variables
+    assert 'variable "migration_image"' in variables
+    assert "migration_image or runtime_image" in migration_script
+    assert "hashlib.sha256(image.encode" in migration_script
+    assert "local.migration_workloads_enabled" in runtime
+    assert "image   = local.migration_image" in runtime
+    assert 'resource "terraform_data" "migration_execution"' in runtime
+    assert "triggers_replace = [local.migration_release_marker]" in runtime
+    assert runtime.count("terraform_data.migration_execution,") == 5
+    assert "NOOP_MIGRATION_RELEASE_MARKER" in runtime
+    assert runtime.count('name  = "NOOP_RUNTIME_RELEASE"') == 6
+    assert "value = local.migration_release_marker" in runtime
+    assert runtime.count("value = local.runtime_release_marker") == 5
+    assert 'output "migration_release_marker"' in outputs
+    assert "successful migration execution" in verifier
+    assert "Managed API has a broad invoker grant." in verifier
+    assert "managed API digest-pinned image" in verifier
     assert 'variable "enable_managed_runtime"' in variables
     assert "var.enable_managed_runtime" in runtime
     assert "var.enable_managed_runtime" in variables
@@ -154,6 +181,158 @@ def test_gcp_managed_identity_is_attested_and_uses_restricted_keys() -> None:
     assert "value = google_firebase_apple_app.staging[0].app_id" in runtime
     assert 'name  = "NOOP_MANAGED_ANDROID_APP_ID"' in runtime
     assert "value = google_firebase_android_app.staging[0].app_id" in runtime
+
+
+def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
+    iam = (REPOSITORY_ROOT / "infra" / "gcp" / "iam.tf").read_text(encoding="utf-8")
+    locals_file = (REPOSITORY_ROOT / "infra" / "gcp" / "locals.tf").read_text(
+        encoding="utf-8"
+    )
+    runtime = (REPOSITORY_ROOT / "infra" / "gcp" / "runtime.tf").read_text(
+        encoding="utf-8"
+    )
+    configure_script = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "configure-runtime-secrets.sh"
+    ).read_text(encoding="utf-8")
+
+    assert '"fcm.googleapis.com"' in locals_file
+    assert "cloudmessaging.messages.create" in iam
+    assert "firebasecloudmessaging.admin" not in iam
+    assert "var.enable_managed_runtime ? 1 : 0" in iam
+    assert 'secret_id = "${local.prefix}-managed-push-token-secret"' in iam
+    assert 'secret_id = "${local.prefix}-managed-push-token-previous-secret"' in iam
+    assert "managed_api_push_token_secret" in iam
+    assert "managed_lifecycle_push_token_secret" in iam
+    assert "managed_api_push_token_previous_secret" in iam
+    assert "managed_lifecycle_push_token_previous_secret" in iam
+    assert 'name  = "NOOP_MANAGED_PUSH_ENABLED"' in runtime
+    assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
+    assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
+    assert 'name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"' in runtime
+    assert runtime.count('name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"') == 2
+    assert "value = var.managed_push_token_write_version" in runtime
+    assert 'variable "managed_push_token_write_version"' in (
+        REPOSITORY_ROOT / "infra" / "gcp" / "variables.tf"
+    ).read_text(encoding="utf-8")
+    assert "managed_api_push_sender" in runtime
+    assert "managed_lifecycle_push_sender" in runtime
+    assert "managed_api_push_token_secret" in runtime
+    assert "managed_api_push_token_previous_secret" in runtime
+    assert "managed_lifecycle_push_token_secret" in runtime
+    assert "managed_lifecycle_push_token_previous_secret" in runtime
+    assert "managed_push_token_secret=" in configure_script
+    assert "managed_push_token_previous_secret=" in configure_script
+    assert "openssl rand -hex 32" in configure_script
+    assert "--data-file=-" in configure_script
+
+
+def test_private_staging_smoke_covers_managed_safety_without_real_push_targets() -> (
+    None
+):
+    smoke = (
+        REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "smoke-managed-runtime.py"
+    ).read_text(encoding="utf-8")
+
+    assert "self._exercise_safety()" in smoke
+    assert "PASS three fictional phone OTP identities" in smoke
+    assert "self._provision_pilot_claims()" in smoke
+    assert '"noop_managed_pilot"' in smoke
+    assert "account.pilot_claim_enabled = enabled" in smoke
+    assert "account.managed_enrolled = True" in smoke
+    assert smoke.index("account.managed_enrolled = True") < smoke.index(
+        'boundary = response.get("product_boundary", {})'
+    )
+    assert "synthetic cleanup requires review" in smoke
+    assert "if not cleanup_succeeded:" in smoke
+    assert "managed {operation} request returned HTTP" in smoke
+    assert "owner, outsider = self.accounts[:2]" in smoke
+    assert "FAIL unexpected managed runtime smoke failure" in smoke
+    assert "/v1/managed/safety/invites" in smoke
+    assert "/v1/managed/safety/requests" in smoke
+    assert "/v1/managed/safety/contacts" in smoke
+    assert "/v1/managed/safety/incidents" in smoke
+    assert "latest-only location" in smoke
+    assert "/v1/managed/push/installations/current" not in smoke
+
+    path = REPOSITORY_ROOT / "infra" / "gcp" / "scripts" / "smoke-managed-runtime.py"
+    spec = importlib.util.spec_from_file_location("noop_managed_smoke_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    account = module.SyntheticAccount(
+        phone="+16505550000",
+        code="000000",
+        platform="ios",
+        installation_id="ios-staging-cleanup-test",
+        installation_token="noopm_" + ("a" * 43),
+        id_token="synthetic-token",
+        local_id="synthetic-local-id",
+    )
+    runner = object.__new__(module.ManagedStagingSmoke)
+    runner.accounts = [account]
+    runner.access_token = "synthetic-access-token"
+    runner.project_id = "noop-synthetic-test"
+    runner.identity_config_changed = False
+    runner.original_test_numbers = {}
+    runner.debug_resource = ""
+
+    def fail_identity_cleanup(*_args: object, **_kwargs: object) -> None:
+        raise module.SmokeFailure("synthetic cleanup failure")
+
+    runner._identity_admin_request = fail_identity_cleanup
+    assert runner._best_effort_cleanup() is False
+    assert account.local_id == "synthetic-local-id"
+
+
+def test_mobile_managed_push_is_consent_gated_and_explicit() -> None:
+    android_manifest = (
+        REPOSITORY_ROOT / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    ).read_text(encoding="utf-8")
+    android_service = (
+        REPOSITORY_ROOT
+        / "android"
+        / "app"
+        / "src"
+        / "main"
+        / "java"
+        / "com"
+        / "noop"
+        / "managed"
+        / "ManagedCloudService.kt"
+    ).read_text(encoding="utf-8")
+    ios_project = (REPOSITORY_ROOT / "project.yml").read_text(encoding="utf-8")
+    ios_plist = (REPOSITORY_ROOT / "StrandiOS" / "Resources" / "Info.plist").read_text(
+        encoding="utf-8"
+    )
+    ios_service = (
+        REPOSITORY_ROOT / "StrandiOS" / "System" / "ManagedCloudService.swift"
+    ).read_text(encoding="utf-8")
+
+    firebase_provider = android_manifest.split(
+        'android:name="com.google.firebase.provider.FirebaseInitProvider"',
+        maxsplit=1,
+    )[1].split("/>", maxsplit=1)[0]
+    assert 'tools:node="remove"' in firebase_provider
+    messaging_metadata = android_manifest.split(
+        'android:name="firebase_messaging_auto_init_enabled"',
+        maxsplit=1,
+    )[1].split("/>", maxsplit=1)[0]
+    assert 'android:value="false"' in messaging_metadata
+    assert "messaging.isAutoInitEnabled = true" in android_service
+    assert "messaging.isAutoInitEnabled = false" in android_service
+    assert "FirebaseMessagingAutoInitEnabled: false" in ios_project
+    assert "<key>FirebaseMessagingAutoInitEnabled</key>" in ios_plist
+    assert (
+        ios_plist.split(
+            "<key>FirebaseMessagingAutoInitEnabled</key>",
+            maxsplit=1,
+        )[1]
+        .lstrip()
+        .startswith("<false/>")
+    )
+    assert "Messaging.messaging().isAutoInitEnabled = true" in ios_service
+    assert "Messaging.messaging().isAutoInitEnabled = false" in ios_service
 
 
 def test_gcp_managed_processor_accepts_only_authenticated_pubsub_push() -> None:

@@ -140,7 +140,9 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
                 "authorization": "Bearer private-value",
                 "phone_number": "+15555550123",
                 "installation_id": "noop-private-installation",
+                "incident_id": UUID().uuidString,
                 "request_url": "https://private.example/signed",
+                "server_request_id": String(repeating: "b", count: 32),
                 "user_note": "private user text",
             ]
         )
@@ -155,11 +157,13 @@ final class AppDiagnosticsRecorderTests: XCTestCase {
         )
         let fields = try XCTUnwrap(object["fields"] as? [String: String])
         XCTAssertEqual(fields["route"], "/v1/managed/chunks/{chunk_id}")
-        XCTAssertEqual(fields["redacted_fields"], "5")
+        XCTAssertEqual(fields["redacted_fields"], "7")
         XCTAssertFalse(text.contains("private-value"))
         XCTAssertFalse(text.contains("15555550123"))
         XCTAssertFalse(text.contains("noop-private-installation"))
+        XCTAssertFalse(text.contains("incident_id"))
         XCTAssertFalse(text.contains("private.example"))
+        XCTAssertFalse(text.contains(String(repeating: "b", count: 32)))
         XCTAssertFalse(text.contains("private user text"))
     }
 

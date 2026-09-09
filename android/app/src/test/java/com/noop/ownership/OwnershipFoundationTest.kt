@@ -803,25 +803,6 @@ class OwnershipFoundationTest {
     }
 
     @Test
-    fun diagnosticRequestIdAcceptsOnlyServerCorrelationFormat() {
-        val compact = "0123456789abcdef0123456789abcdef"
-        assertEquals(
-            compact,
-            OwnershipClient.diagnosticRequestId(compact),
-        )
-        listOf(
-            "0123456789ABCDEF0123456789ABCDEF",
-            "01234567-89ab-4def-8123-456789abcdef",
-            "request-123",
-            "a".repeat(31),
-            "a".repeat(33),
-        ).forEach { candidate ->
-            assertNull(OwnershipClient.diagnosticRequestId(candidate))
-        }
-        assertNull(OwnershipClient.diagnosticRequestId(null))
-    }
-
-    @Test
     fun bootstrapUsesIdentityAndAppCheckWithoutInstallationCredential() = runTest {
         var captured: Request? = null
         val client = OwnershipClient(

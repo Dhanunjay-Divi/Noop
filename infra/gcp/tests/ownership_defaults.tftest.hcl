@@ -51,6 +51,32 @@ run "ownership_runtime_requires_every_guard" {
   expect_failures = [var.enable_ownership_runtime]
 }
 
+run "migration_image_executes_without_runtime_rollout" {
+  command = plan
+
+  variables {
+    enable_managed_database = true
+    enable_managed_runtime  = false
+    enable_private_api      = false
+    migration_image         = "asia-south1-docker.pkg.dev/noop-ownership-test/noop/runtime@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    runtime_image           = null
+  }
+
+  assert {
+    condition = (
+      length(google_cloud_run_v2_job.migrate) == 1
+      && length(terraform_data.migration_execution) == 1
+      && length(google_cloud_run_v2_service.api) == 0
+      && length(google_cloud_run_v2_service.managed_api) == 0
+      && google_cloud_run_v2_job.migrate[0].template[0].template[0].containers[0].image
+      == var.migration_image
+      && terraform_data.migration_execution[0].triggers_replace[0]
+      == substr(sha256(var.migration_image), 0, 16)
+    )
+    error_message = "A staged migration image must execute without rolling out runtime services."
+  }
+}
+
 run "ownership_runtime_is_iam_only_when_every_guard_is_present" {
   command = plan
 
@@ -96,5 +122,13 @@ run "ownership_runtime_is_iam_only_when_every_guard_is_present" {
       && length(google_cloud_run_v2_service_iam_member.managed_api_public) == 0
     )
     error_message = "The guarded ownership plan must remain IAM-only with no public invoker."
+  }
+
+  assert {
+    condition = (
+      terraform_data.migration_execution[0].triggers_replace[0]
+      == substr(sha256(var.runtime_image), 0, 16)
+    )
+    error_message = "A runtime image rollout must execute its matching migration first."
   }
 }

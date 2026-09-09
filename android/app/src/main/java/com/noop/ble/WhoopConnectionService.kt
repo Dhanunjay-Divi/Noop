@@ -29,6 +29,9 @@ import com.noop.data.DailyMetric
 import com.noop.data.MedicationStore
 import com.noop.location.GpsSession
 import com.noop.location.LocationTracker
+import com.noop.managed.ManagedCloudService
+import com.noop.managed.ManagedSafetyLiveLocationSession
+import com.noop.managed.ManagedSafetyLocationRetryPolicy
 import com.noop.notif.BatteryAlertNotifier
 import com.noop.notif.HydrationReminderDelivery
 import com.noop.notif.IllnessAlertNotifier
@@ -48,19 +51,33 @@ import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+internal fun shouldStopConnectionServiceAfterManagedSafetyLocation(
+    backgroundReconnectAllowed: Boolean,
+    gpsActive: Boolean,
+    legacySafetyLocationActive: Boolean,
+    managedSafetyLocationActive: Boolean,
+): Boolean =
+    !backgroundReconnectAllowed &&
+        !gpsActive &&
+        !legacySafetyLocationActive &&
+        !managedSafetyLocationActive
 
 /**
  * Foreground service that keeps the WHOOP BLE connection alive while the app is backgrounded or
@@ -132,7 +149,15 @@ class WhoopConnectionService : Service() {
     private var safetyLocationGateJob: Job? = null
     private var safetyLocationJob: Job? = null
     private var safetyIncidentStatusJob: Job? = null
-    private val safetyLocationTracker by lazy { SafetyIncidentLocationTracker(this) }
+    private var managedSafetyLocationGateJob: Job? = null
+    private var managedSafetyLocationJob: Job? = null
+    private val safetyLocationUpdates by lazy {
+        SafetyIncidentLocationTracker(this).stream().shareIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0L),
+            replay = 0,
+        )
+    }
 
     /** Last illness-watch evaluation seen by the collector — clear→raised is the notify edge.
      *  In-memory on purpose: the persisted once-a-day gate (NoopPrefs) handles dedupe across
@@ -195,9 +220,26 @@ class WhoopConnectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        SafetyLiveLocationSession.initialize(this)
+        ManagedSafetyLiveLocationSession.initialize(this)
+
         // The notification "Disconnect" action routes back here as a self-intent.
         if (intent?.action == ACTION_STOP) {
             runCatching { ble.disconnect() }
+            if (locationForegroundActive()) {
+                ensureChannel()
+                return if (
+                    startForegroundCompat(
+                        buildNotification(ble.state.value, null),
+                        locationActive = true,
+                    )
+                ) {
+                    START_STICKY
+                } else {
+                    stopSelf()
+                    START_NOT_STICKY
+                }
+            }
             NotificationLifecycleLedger.cancelled(
                 this,
                 NotificationLifecycleId.CONNECTION_SERVICE,
@@ -213,7 +255,12 @@ class WhoopConnectionService : Service() {
         // Must call startForeground promptly after startForegroundService(). If it fails (e.g. the
         // API 34 connectedDevice type needs BLUETOOTH_CONNECT and the user denied it) we stop cleanly
         // rather than crash — the connection itself keeps working in the foreground regardless.
-        if (!startForegroundCompat(buildNotification(ble.state.value, null))) {
+        if (
+            !startForegroundCompat(
+                buildNotification(ble.state.value, null),
+                locationActive = locationForegroundActive(),
+            )
+        ) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -462,9 +509,7 @@ class WhoopConnectionService : Service() {
                         GpsSession.workoutsLog = null   // route finished: drop the test-mode sink
                         startForegroundCompat(
                             buildNotification(ble.state.value, null),
-                            locationActive = SafetyLiveLocationSession.state.value.isActiveAt(
-                                System.currentTimeMillis() / 1_000L,
-                            ),
+                            locationActive = safetyLocationActive(),
                         )
                     }
                 }
@@ -472,7 +517,6 @@ class WhoopConnectionService : Service() {
 
         // Stream only the newest fix for an active Safety page. Session identity/expiry is
         // distinct from sequence so each uploaded fix does not restart the platform location listener.
-        SafetyLiveLocationSession.initialize(this)
         SafetyIncidentStatusMonitor.reconcile(this)
         safetyLocationGateJob?.cancel()
         safetyLocationGateJob = scope.launch {
@@ -497,7 +541,9 @@ class WhoopConnectionService : Service() {
                         }
                         startForegroundCompat(
                             buildNotification(ble.state.value, null),
-                            locationActive = GpsSession.state.value.active,
+                            locationActive =
+                                GpsSession.state.value.active ||
+                                    managedSafetyLocationActive(),
                         )
                         return@collect
                     }
@@ -531,7 +577,7 @@ class WhoopConnectionService : Service() {
                             )
                         }
                         try {
-                            safetyLocationTracker.stream()
+                            safetyLocationUpdates
                                 .conflate()
                                 .collect locationCollect@ { location ->
                                     val sequence = SafetyLiveLocationSession.nextSequence(
@@ -552,6 +598,112 @@ class WhoopConnectionService : Service() {
                                                 this@WhoopConnectionService,
                                                 expectedDispatchId = dispatchId,
                                             )
+                                        }
+                                    }
+                                }
+                        } finally {
+                            expiry.cancel()
+                        }
+                    }
+                }
+        }
+
+        managedSafetyLocationGateJob?.cancel()
+        managedSafetyLocationGateJob = scope.launch {
+            ManagedSafetyLiveLocationSession.state
+                .map { it.incidentId to it.expiresAtUnix }
+                .distinctUntilChanged()
+                .collect { (incidentIdValue, expiresAtUnix) ->
+                    managedSafetyLocationJob?.cancel()
+                    managedSafetyLocationJob = null
+                    val nowUnix = System.currentTimeMillis() / 1_000L
+                    val incidentId = incidentIdValue?.let {
+                        runCatching { UUID.fromString(it) }.getOrNull()
+                    }
+                    if (
+                        incidentId == null ||
+                        expiresAtUnix == null ||
+                        expiresAtUnix <= nowUnix
+                    ) {
+                        if (incidentId != null) {
+                            (application as NoopApplication).managedCloud
+                                .stopSafetyLocationForRuntime(
+                                    incidentId,
+                                    "expired",
+                                )
+                        } else if (!incidentIdValue.isNullOrBlank()) {
+                            ManagedSafetyLiveLocationSession.stop(
+                                this@WhoopConnectionService,
+                            )
+                        }
+                        startForegroundCompat(
+                            buildNotification(ble.state.value, null),
+                            locationActive =
+                                GpsSession.state.value.active ||
+                                    SafetyLiveLocationSession.state.value
+                                        .isActiveAt(nowUnix),
+                        )
+                        releaseManagedSafetyLocation(
+                            this@WhoopConnectionService,
+                        )
+                        return@collect
+                    }
+
+                    startForegroundCompat(
+                        buildNotification(ble.state.value, null),
+                        locationActive = true,
+                    )
+                    managedSafetyLocationJob = launch {
+                        val expiry = launch {
+                            delay(
+                                ManagedSafetyLiveLocationSession
+                                    .remainingSessionSeconds(
+                                        expiresAtUnix,
+                                        nowUnix,
+                                    ) * 1_000L,
+                            )
+                            (application as NoopApplication).managedCloud
+                                .stopSafetyLocationForRuntime(
+                                    incidentId,
+                                    "expired",
+                                )
+                        }
+                        try {
+                            safetyLocationUpdates
+                                .conflate()
+                                .collect { location ->
+                                    var failedAttempts = 0
+                                    locationUpload@ while (true) {
+                                        when (
+                                            (application as NoopApplication)
+                                                .managedCloud
+                                                .updateSafetyLocationForStream(
+                                                    incidentId,
+                                                    location,
+                                                )
+                                        ) {
+                                            ManagedCloudService
+                                                .SafetyLocationUploadOutcome.STOP -> {
+                                                (application as NoopApplication)
+                                                    .managedCloud
+                                                    .stopSafetyLocationForRuntime(
+                                                        incidentId,
+                                                        "server_terminal",
+                                                    )
+                                                break@locationUpload
+                                            }
+                                            ManagedCloudService
+                                                .SafetyLocationUploadOutcome.ACCEPTED ->
+                                                break@locationUpload
+                                            ManagedCloudService
+                                                .SafetyLocationUploadOutcome.RETRY -> {
+                                                failedAttempts += 1
+                                                val retryDelay =
+                                                    ManagedSafetyLocationRetryPolicy
+                                                        .delayMillis(failedAttempts)
+                                                        ?: break@locationUpload
+                                                delay(retryDelay)
+                                            }
                                         }
                                     }
                                 }
@@ -595,10 +747,24 @@ class WhoopConnectionService : Service() {
         // reconnect. No remembered strap / opted-out background link stays NOT_STICKY. GPS retains its
         // independent sticky guarantee. Neither branch leases the high-rate realtime stream.
         return if (GpsSession.state.value.active ||
-            SafetyLiveLocationSession.state.value.isActiveAt(System.currentTimeMillis() / 1_000L) ||
+            safetyLocationActive() ||
             BackgroundReconnectPolicy.runtimeDecision(this).reconnect
         ) START_STICKY else START_NOT_STICKY
     }
+
+    private fun safetyLocationActive(
+        nowUnix: Long = System.currentTimeMillis() / 1_000L,
+    ): Boolean =
+        SafetyLiveLocationSession.state.value.isActiveAt(nowUnix) ||
+            ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
+
+    private fun managedSafetyLocationActive(
+        nowUnix: Long = System.currentTimeMillis() / 1_000L,
+    ): Boolean =
+        ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
+
+    private fun locationForegroundActive(): Boolean =
+        GpsSession.state.value.active || safetyLocationActive()
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
      *  [locationActive] we add the location FGS type for a GPS workout or active Safety page. */
@@ -610,7 +776,19 @@ class WhoopConnectionService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val locationType =
                     if (locationActive) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or locationType
+                val connectedDeviceType =
+                    if (
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        ContextCompat.checkSelfPermission(
+                            this,
+                            android.Manifest.permission.BLUETOOTH_CONNECT,
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    } else {
+                        0
+                    }
+                connectedDeviceType or locationType
             } else {
                 0
             }
@@ -667,6 +845,7 @@ class WhoopConnectionService : Service() {
             recoveryPct?.roundToInt(),
             effort?.roundToInt(),
             state.batteryPct?.roundToInt(),
+            safetyLocationActive(),
         ).joinToString("|")
         if (key == lastNotificationKey) return
         lastNotificationKey = key
@@ -691,17 +870,24 @@ class WhoopConnectionService : Service() {
         // foreground service to re-post (and wake the device) ~once a second all day, which is a real
         // battery cost for a number nobody reads off the lock screen. The title now reflects only the
         // connection / sync state, which changes rarely — see postNotification's dedup.
+        val safetyLocationActive = safetyLocationActive()
         val title = when {
+            safetyLocationActive -> "Safety location sharing active"
             !state.connected   -> "Reconnecting to Noop Band…"
             state.backfilling  -> "Syncing strap history…"
             else               -> "Connected to Noop Band"
         }
-        val detail = connectionNotificationDetail(
-            connected = state.connected,
-            recoveryPct = recoveryPct,
-            effort = effort,
-            batteryPct = state.batteryPct,
-        )
+        val detail =
+            if (safetyLocationActive) {
+                "Sharing only the latest location until the page ends"
+            } else {
+                connectionNotificationDetail(
+                    connected = state.connected,
+                    recoveryPct = recoveryPct,
+                    effort = effort,
+                    batteryPct = state.batteryPct,
+                )
+            }
 
         val openApp = NotificationPlatformIdentity.activityPendingIntent(
             this,
@@ -715,19 +901,21 @@ class WhoopConnectionService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
             .setContentTitle(title)
             .setContentText(detail)
             .setContentIntent(openApp)
-            .addAction(0, "Disconnect", stopAction)
             .setOngoing(true)
             .setSilent(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
+        if (!safetyLocationActive || state.connected) {
+            builder.addAction(0, "Disconnect", stopAction)
+        }
+        return builder.build()
     }
 
     private fun ensureChannel() {
@@ -736,13 +924,13 @@ class WhoopConnectionService : Service() {
         // that crash onStartCommand (it would take the FGS — and the connection — down with it).
         runCatching {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Noop Band connection",
+                "NOOP background activity",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Shown while NOOP keeps Noop Band connected in the background."
+                description =
+                    "Shown while NOOP keeps the band connected or shares an active Safety location."
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)
@@ -796,7 +984,46 @@ class WhoopConnectionService : Service() {
 
         /** Drop the foreground promotion. The connection itself is torn down by the caller. */
         fun stop(context: Context) {
+            SafetyLiveLocationSession.initialize(context)
+            ManagedSafetyLiveLocationSession.initialize(context)
+            val nowUnix = System.currentTimeMillis() / 1_000L
+            if (
+                GpsSession.state.value.active ||
+                SafetyLiveLocationSession.state.value.isActiveAt(nowUnix) ||
+                ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix)
+            ) {
+                return
+            }
             runCatching { context.stopService(Intent(context, WhoopConnectionService::class.java)) }
+        }
+
+        /**
+         * Release a foreground-service lease that existed only for managed
+         * Safety location. A durable BLE reconnect, GPS workout, or other
+         * Safety session keeps the service alive.
+         */
+        fun releaseManagedSafetyLocation(context: Context) {
+            SafetyLiveLocationSession.initialize(context)
+            ManagedSafetyLiveLocationSession.initialize(context)
+            val nowUnix = System.currentTimeMillis() / 1_000L
+            if (
+                !shouldStopConnectionServiceAfterManagedSafetyLocation(
+                    backgroundReconnectAllowed =
+                        BackgroundReconnectPolicy.runtimeDecision(context).reconnect,
+                    gpsActive = GpsSession.state.value.active,
+                    legacySafetyLocationActive =
+                        SafetyLiveLocationSession.state.value.isActiveAt(nowUnix),
+                    managedSafetyLocationActive =
+                        ManagedSafetyLiveLocationSession.state.value.isActiveAt(nowUnix),
+                )
+            ) {
+                return
+            }
+            runCatching {
+                context.stopService(
+                    Intent(context, WhoopConnectionService::class.java),
+                )
+            }
         }
     }
 }

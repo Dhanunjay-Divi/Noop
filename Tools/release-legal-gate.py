@@ -175,6 +175,7 @@ PYTHON = {
 
 ANDROID_APACHE_PREFIXES = (
     "androidx.",
+    "com.google.android.datatransport:",
     "com.google.code.findbugs:",
     "com.google.code.gson:",
     "com.google.crypto.tink:",
@@ -209,6 +210,13 @@ ANDROID_FIREBASE_APACHE_COORDINATES = {
     "com.google.firebase:firebase-common",
     "com.google.firebase:firebase-common-ktx",
     "com.google.firebase:firebase-components",
+    "com.google.firebase:firebase-datatransport",
+    "com.google.firebase:firebase-encoders",
+    "com.google.firebase:firebase-encoders-json",
+    "com.google.firebase:firebase-encoders-proto",
+    "com.google.firebase:firebase-installations",
+    "com.google.firebase:firebase-installations-interop",
+    "com.google.firebase:firebase-messaging",
 }
 ANDROID_GOOGLE_SDK_COORDINATES = {
     "com.google.android.gms:play-services-auth",
@@ -216,12 +224,16 @@ ANDROID_GOOGLE_SDK_COORDINATES = {
     "com.google.android.gms:play-services-auth-base",
     "com.google.android.gms:play-services-base",
     "com.google.android.gms:play-services-basement",
+    "com.google.android.gms:play-services-cloud-messaging",
     "com.google.android.gms:play-services-fido",
+    "com.google.android.gms:play-services-stats",
     "com.google.android.gms:play-services-tasks",
     "com.google.android.libraries.identity.googleid:googleid",
     "com.google.android.recaptcha:recaptcha",
     "com.google.firebase:firebase-auth",
     "com.google.firebase:firebase-auth-interop",
+    "com.google.firebase:firebase-iid-interop",
+    "com.google.firebase:firebase-measurement-connector",
 }
 ANDROID_PLAY_CORE_COORDINATES = {
     "com.google.android.play:core-common",

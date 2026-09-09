@@ -2525,6 +2525,7 @@
     <string name="managed_cloud_error_network">NOOP+ konnte nicht erreicht werden.</string>
     <string name="managed_cloud_error_invalid_response">NOOP+ hat eine ungültige Antwort zurückgegeben.</string>
     <string name="managed_cloud_error_authentication">Die NOOP+ Authentifizierung ist abgelaufen. Melde dich erneut an.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ hat diese Aktion nicht zugelassen.</string>
     <string name="managed_cloud_error_policy_changed">Die NOOP+ Speicherrichtlinie wurde geändert. Prüfe sie vor der Synchronisierung.</string>
     <string name="managed_cloud_error_cursor_expired">Der Cloud-Cursor dieses Geräts ist abgelaufen. Eine vollständige Wiederherstellung ist erforderlich.</string>
     <string name="managed_cloud_error_not_found">Die angeforderte NOOP+ Ressource ist nicht mehr vorhanden.</string>
@@ -2674,7 +2675,7 @@
     <string name="managed_friends_rotate_body">Deine aktuelle ID nimmt keine neuen Anfragen mehr an. Bestehende Freunde bleiben unverändert.</string>
     <string name="managed_friends_rotate_action">NOOP-ID ersetzen</string>
     <string name="managed_friends_delete_title">Verwaltete Freunde löschen?</string>
-    <string name="managed_friends_delete_body">Freundschaften, Einladungen, geteilte Zusammenfassungen, Abzeichen und ausstehende Anstupser werden gelöscht. NOOP+ Sicherung und Gerätedaten bleiben unverändert.</string>
+    <string name="managed_friends_delete_body">Freundschaften, Einladungen, geteilte Zusammenfassungen, Abzeichen, ausstehende Anstupser, Safety-Kontakte, Safety-Einladungen und der Safety-Vorfallsverlauf werden gelöscht. Jede aktive Safety-Alarmierung und Standortfreigabe wird beendet. NOOP+ Sicherung und Gerätedaten bleiben unverändert.</string>
     <string name="managed_friends_delete_action">Verwaltete Freunde löschen</string>
     <string name="managed_friends_invite_title">Privater Einladungslink</string>
     <string name="managed_friends_invite_body">Der Link läuft innerhalb von 72 Stunden ab und erstellt eine Anfrage, niemals automatisch eine Freundschaft.</string>

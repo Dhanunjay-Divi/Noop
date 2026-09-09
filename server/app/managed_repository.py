@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import secrets
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -52,6 +53,199 @@ SOCIAL_MAX_SENT_POKES_PER_DAY = 10
 SOCIAL_MAX_RECEIVED_POKES_PER_DAY = 20
 
 
+async def _lock_active_managed_safety_incidents_for_profile_pair(
+    connection: Any,
+    *,
+    first_profile_id: UUID,
+    second_profile_id: UUID,
+) -> tuple[UUID, ...]:
+    rows = await connection.fetch(
+        """
+        SELECT incident.incident_id
+        FROM managed_safety_incidents incident
+        WHERE incident.status IN ('open', 'acknowledged')
+          AND (
+              (
+                incident.owner_profile_id = $1
+                AND EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.contact_profile_id = $2
+                      AND participant.status <> 'revoked'
+                )
+              ) OR (
+                incident.owner_profile_id = $2
+                AND EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.contact_profile_id = $1
+                      AND participant.status <> 'revoked'
+                )
+              )
+          )
+        ORDER BY incident.incident_id
+        FOR UPDATE OF incident
+        """,
+        first_profile_id,
+        second_profile_id,
+    )
+    return tuple(row["incident_id"] for row in rows)
+
+
+async def _reconcile_managed_safety_incident_acknowledgement(
+    connection: Any,
+    *,
+    incident_ids: Collection[UUID],
+    now: datetime,
+) -> None:
+    ordered_ids = sorted(set(incident_ids), key=str)
+    if not ordered_ids:
+        return
+    await connection.execute(
+        """
+        UPDATE managed_safety_incidents incident
+        SET status = CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.status = 'responding'
+                )
+                THEN 'acknowledged'
+                ELSE 'open'
+            END,
+            acknowledged_at = CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.status = 'responding'
+                )
+                THEN COALESCE(incident.acknowledged_at, $2)
+                ELSE NULL
+            END
+        WHERE incident.incident_id = ANY($1::uuid[])
+          AND incident.status IN ('open', 'acknowledged')
+        """,
+        ordered_ids,
+        now,
+    )
+
+
+async def _retire_managed_safety_profile(
+    connection: Any,
+    *,
+    profile_id: UUID,
+    now: datetime,
+) -> None:
+    incident_rows = await connection.fetch(
+        """
+        SELECT incident.incident_id,
+               incident.owner_profile_id = $1 AS profile_is_owner
+        FROM managed_safety_incidents incident
+        WHERE incident.status IN ('open', 'acknowledged')
+          AND (
+              incident.owner_profile_id = $1
+              OR EXISTS (
+                  SELECT 1
+                  FROM managed_safety_participants participant
+                  WHERE participant.incident_id = incident.incident_id
+                    AND participant.contact_profile_id = $1
+                    AND participant.status <> 'revoked'
+              )
+          )
+        ORDER BY incident.incident_id
+        FOR UPDATE OF incident
+        """,
+        profile_id,
+    )
+    owned_incident_ids = [
+        row["incident_id"] for row in incident_rows if row["profile_is_owner"]
+    ]
+    participating_incident_ids = [
+        row["incident_id"] for row in incident_rows if not row["profile_is_owner"]
+    ]
+
+    if owned_incident_ids:
+        await connection.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET status = 'canceled', ended_at = $2
+            WHERE incident_id = ANY($1::uuid[])
+              AND status IN ('open', 'acknowledged')
+            """,
+            owned_incident_ids,
+            now,
+        )
+        await connection.execute(
+            """
+            DELETE FROM managed_safety_locations
+            WHERE incident_id = ANY($1::uuid[])
+            """,
+            owned_incident_ids,
+        )
+        await connection.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'rejected',
+                claim_id = NULL,
+                claim_expires_at = NULL,
+                updated_at = $2
+            WHERE incident_id = ANY($1::uuid[])
+              AND status IN (
+                  'pending',
+                  'sending',
+                  'transient_failure',
+                  'unavailable'
+              )
+            """,
+            owned_incident_ids,
+            now,
+        )
+
+    if participating_incident_ids:
+        await connection.execute(
+            """
+            UPDATE managed_safety_participants
+            SET status = 'revoked',
+                responded_at = COALESCE(responded_at, $3)
+            WHERE contact_profile_id = $1
+              AND incident_id = ANY($2::uuid[])
+              AND status <> 'revoked'
+            """,
+            profile_id,
+            participating_incident_ids,
+            now,
+        )
+        await _reconcile_managed_safety_incident_acknowledgement(
+            connection,
+            incident_ids=participating_incident_ids,
+            now=now,
+        )
+        await connection.execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'rejected',
+                claim_id = NULL,
+                claim_expires_at = NULL,
+                updated_at = $3
+            WHERE contact_profile_id = $1
+              AND incident_id = ANY($2::uuid[])
+              AND status IN (
+                  'pending',
+                  'sending',
+                  'transient_failure',
+                  'unavailable'
+              )
+            """,
+            profile_id,
+            participating_incident_ids,
+            now,
+        )
+
+
 class ManagedStorageError(Exception):
     """Base class for managed-storage contract failures."""
 
@@ -66,6 +260,12 @@ class ManagedForbiddenError(ManagedStorageError):
 
 class ManagedConflictError(ManagedStorageError):
     pass
+
+
+class ManagedRateLimitError(ManagedStorageError):
+    def __init__(self, message: str, *, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = max(1, retry_after_seconds)
 
 
 class ManagedQuotaExceededError(ManagedStorageError):
@@ -1083,6 +1283,21 @@ class PostgresManagedRepository:
                             token_version = token_version + 1
                         WHERE installation_id = $1
                         """,
+                        installation_id,
+                        now,
+                    )
+                    await connection.execute(
+                        """
+                        UPDATE managed_push_installations
+                        SET status = 'revoked',
+                            token_ciphertext = 'revoked.' || token_hash,
+                            revoked_at = COALESCE(revoked_at, $3),
+                            updated_at = GREATEST(updated_at, $3)
+                        WHERE account_id = $1
+                          AND installation_id = $2
+                          AND status <> 'revoked'
+                        """,
+                        principal.account_id,
                         installation_id,
                         now,
                     )
@@ -3238,12 +3453,24 @@ class PostgresManagedRepository:
             async with connection.transaction():
                 jobs = await connection.fetch(
                     """
-                    SELECT *
-                    FROM managed_erasure_jobs
-                    WHERE status IN ('queued', 'cooling_off', 'running')
-                      AND not_before <= $1
-                    ORDER BY requested_at, erasure_job_id
-                    FOR UPDATE SKIP LOCKED
+                    SELECT job.*
+                    FROM managed_erasure_jobs job
+                    JOIN managed_accounts account
+                      ON account.account_id = job.account_id
+                    WHERE job.status IN ('queued', 'cooling_off', 'running')
+                      AND job.not_before <= $1
+                      AND (
+                            (
+                                job.scope IN ('all_managed_data', 'account')
+                                AND account.status = 'erasure_pending'
+                            )
+                            OR (
+                                job.scope IN ('raw_chunks', 'derived_data')
+                                AND account.status = 'active'
+                            )
+                          )
+                    ORDER BY job.requested_at, job.erasure_job_id
+                    FOR UPDATE OF job SKIP LOCKED
                     LIMIT 10
                     """,
                     now,
@@ -3629,6 +3856,18 @@ class PostgresManagedRepository:
                             SET status = 'revoked',
                                 revoked_at = COALESCE(revoked_at, $2),
                                 token_valid_after = $2
+                            WHERE account_id = $1
+                            """,
+                            account_id,
+                            now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE managed_push_installations
+                            SET status = 'revoked',
+                                token_ciphertext = 'revoked.' || token_hash,
+                                revoked_at = COALESCE(revoked_at, $2),
+                                updated_at = GREATEST(updated_at, $2)
                             WHERE account_id = $1
                             """,
                             account_id,
@@ -5289,15 +5528,39 @@ class PostgresManagedRepository:
         principal: ManagedPrincipal,
     ) -> None:
         self._require_active(principal)
-        deleted = await self._pool().execute(
-            """
-            DELETE FROM managed_social_profiles
-            WHERE account_id = $1
-            """,
-            principal.account_id,
-        )
-        if deleted == "DELETE 0":
-            raise ManagedNotFoundError("managed Friends profile was not found")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                incident_rows = await connection.fetch(
+                    """
+                    SELECT incident.incident_id
+                    FROM managed_safety_incidents incident
+                    JOIN managed_safety_participants participant
+                      ON participant.incident_id = incident.incident_id
+                    WHERE participant.contact_profile_id = $1
+                      AND incident.status IN ('open', 'acknowledged')
+                    ORDER BY incident.incident_id
+                    FOR UPDATE OF incident
+                    """,
+                    profile["profile_id"],
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_profiles
+                    WHERE profile_id = $1
+                    """,
+                    profile["profile_id"],
+                )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=(row["incident_id"] for row in incident_rows),
+                    now=now,
+                )
 
     async def update_social_profile(
         self,
@@ -6654,6 +6917,103 @@ class PostgresManagedRepository:
                     profile["profile_id"],
                     blocked_profile_id,
                 )
+                await connection.execute(
+                    """
+                    DELETE FROM managed_safety_contacts
+                    WHERE (
+                        owner_profile_id = $1
+                        AND contact_profile_id = $2
+                    ) OR (
+                        owner_profile_id = $2
+                        AND contact_profile_id = $1
+                    )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                )
+                active_incident_ids = (
+                    await _lock_active_managed_safety_incidents_for_profile_pair(
+                        connection,
+                        first_profile_id=profile["profile_id"],
+                        second_profile_id=blocked_profile_id,
+                    )
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_requests
+                    SET status = 'canceled', decided_at = $3
+                    WHERE status = 'pending'
+                      AND (
+                          (
+                            owner_profile_id = $1
+                            AND contact_profile_id = $2
+                          ) OR (
+                            owner_profile_id = $2
+                            AND contact_profile_id = $1
+                          )
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_participants participant
+                    SET status = 'revoked', responded_at = $3
+                    FROM managed_safety_incidents incident
+                    WHERE participant.incident_id = incident.incident_id
+                      AND incident.status IN ('open', 'acknowledged')
+                      AND (
+                          (
+                            incident.owner_profile_id = $1
+                            AND participant.contact_profile_id = $2
+                          ) OR (
+                            incident.owner_profile_id = $2
+                            AND participant.contact_profile_id = $1
+                          )
+                      )
+                      AND participant.status <> 'revoked'
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=active_incident_ids,
+                    now=now,
+                )
+                await connection.execute(
+                    """
+                    UPDATE managed_safety_push_deliveries delivery
+                    SET status = 'rejected',
+                        claim_id = NULL,
+                        claim_expires_at = NULL,
+                        updated_at = $3
+                    FROM managed_safety_incidents incident
+                    WHERE delivery.incident_id = incident.incident_id
+                      AND incident.status IN ('open', 'acknowledged')
+                      AND (
+                          (
+                            incident.owner_profile_id = $1
+                            AND delivery.contact_profile_id = $2
+                          ) OR (
+                            incident.owner_profile_id = $2
+                            AND delivery.contact_profile_id = $1
+                          )
+                      )
+                      AND delivery.status IN (
+                          'pending',
+                          'sending',
+                          'transient_failure',
+                          'unavailable'
+                      )
+                    """,
+                    profile["profile_id"],
+                    blocked_profile_id,
+                    now,
+                )
                 for owner_profile_id in (
                     profile["profile_id"],
                     blocked_profile_id,
@@ -7846,11 +8206,14 @@ class PostgresManagedRepository:
             and not 29 <= len(identity_deletion_ticket) <= 1_024
         ):
             raise ManagedConfigurationError("identity deletion ticket is invalid")
-        now = await self.coordination_now()
         tenant_replay_hash = self._tenant_replay_hash(principal.account_id)
         job_id = uuid4()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
                 existing = await connection.fetchrow(
                     """
                     SELECT *
@@ -7861,6 +8224,17 @@ class PostgresManagedRepository:
                     principal.account_id,
                     request_id,
                 )
+                account = await connection.fetchrow(
+                    """
+                    SELECT status
+                    FROM managed_accounts
+                    WHERE account_id = $1
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                )
+                if account is None:
+                    raise ManagedNotFoundError("managed account was not found")
                 if existing is not None:
                     if (
                         existing["scope"] != scope
@@ -7872,6 +8246,9 @@ class PostgresManagedRepository:
                         dict(existing),
                         duplicate=True,
                     )
+                if account["status"] != "active":
+                    raise ManagedForbiddenError("managed account is not active")
+                now = await connection.fetchval("SELECT clock_timestamp()")
                 not_before = now + cooling_off
                 row = await connection.fetchrow(
                     """
@@ -7907,6 +8284,21 @@ class PostgresManagedRepository:
                     not_before,
                 )
                 if scope in {"all_managed_data", "account"}:
+                    profile = await connection.fetchrow(
+                        """
+                        SELECT profile_id
+                        FROM managed_social_profiles
+                        WHERE account_id = $1 AND status = 'active'
+                        FOR UPDATE
+                        """,
+                        principal.account_id,
+                    )
+                    if profile is not None:
+                        await _retire_managed_safety_profile(
+                            connection,
+                            profile_id=profile["profile_id"],
+                            now=now,
+                        )
                     await connection.execute(
                         """
                         UPDATE managed_accounts
@@ -7945,9 +8337,42 @@ class PostgresManagedRepository:
         principal: ManagedPrincipal,
         erasure_job_id: UUID,
     ) -> dict[str, Any]:
-        now = await self.coordination_now()
         async with self._pool().acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-erasure-account:{principal.account_id}",
+                )
+                existing = await connection.fetchrow(
+                    """
+                    SELECT *
+                    FROM managed_erasure_jobs
+                    WHERE account_id = $1 AND erasure_job_id = $2
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                    erasure_job_id,
+                )
+                account = await connection.fetchrow(
+                    """
+                    SELECT status
+                    FROM managed_accounts
+                    WHERE account_id = $1
+                    FOR UPDATE
+                    """,
+                    principal.account_id,
+                )
+                if account is None:
+                    raise ManagedNotFoundError("managed account was not found")
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                if (
+                    existing is None
+                    or existing["status"] != "cooling_off"
+                    or existing["not_before"] <= now
+                ):
+                    raise ManagedConflictError(
+                        "managed erasure can no longer be canceled"
+                    )
                 row = await connection.fetchrow(
                     """
                     UPDATE managed_erasure_jobs
@@ -7965,22 +8390,39 @@ class PostgresManagedRepository:
                     erasure_job_id,
                     now,
                 )
-                if row is None:
-                    raise ManagedConflictError(
-                        "managed erasure can no longer be canceled"
+                if existing["scope"] in {"all_managed_data", "account"}:
+                    other_live_erasure = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM managed_erasure_jobs
+                            WHERE account_id = $1
+                              AND erasure_job_id <> $2
+                              AND scope IN ('all_managed_data', 'account')
+                              AND status IN (
+                                  'queued',
+                                  'cooling_off',
+                                  'running',
+                                  'verifying'
+                              )
+                        )
+                        """,
+                        principal.account_id,
+                        erasure_job_id,
                     )
-                await connection.execute(
-                    """
-                    UPDATE managed_accounts
-                    SET status = 'active',
-                        erasure_requested_at = NULL,
-                        updated_at = $2
-                    WHERE account_id = $1
-                      AND status = 'erasure_pending'
-                    """,
-                    principal.account_id,
-                    now,
-                )
+                    if not other_live_erasure:
+                        await connection.execute(
+                            """
+                            UPDATE managed_accounts
+                            SET status = 'active',
+                                erasure_requested_at = NULL,
+                                updated_at = $2
+                            WHERE account_id = $1
+                              AND status = 'erasure_pending'
+                            """,
+                            principal.account_id,
+                            now,
+                        )
         return self._public_erasure(dict(row), duplicate=False)
 
     @staticmethod

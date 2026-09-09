@@ -143,18 +143,27 @@ final class SafetySOSRuntime {
             expiresAt: expiresAt,
             startingSequence: resumedSequence
         ) { location, sequence in
-            if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
-                == dispatch.dispatchId.uuidString.lowercased() {
-                UserDefaults.standard.set(
-                    NSNumber(value: sequence),
-                    forKey: Self.activeSequenceKey
+            do {
+                _ = try await service.updateLocation(
+                    for: dispatch.dispatchId,
+                    sequence: sequence,
+                    location: location
                 )
+                if UserDefaults.standard.string(
+                    forKey: Self.activeDispatchKey
+                ) == dispatch.dispatchId.uuidString.lowercased() {
+                    UserDefaults.standard.set(
+                        NSNumber(value: sequence),
+                        forKey: Self.activeSequenceKey
+                    )
+                }
+                return .accepted
+            } catch let RemoteSyncError.server(status, _)
+                where [401, 404, 409, 410].contains(status) {
+                return .stop
+            } catch {
+                return .retry
             }
-            _ = try await service.updateLocation(
-                for: dispatch.dispatchId,
-                sequence: sequence,
-                location: location
-            )
         }
         #endif
     }
@@ -238,18 +247,27 @@ final class SafetySOSRuntime {
             expiresAt: fallbackExpiry,
             startingSequence: resumedSequence
         ) { location, sequence in
-            if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
-                == dispatchId.uuidString.lowercased() {
-                UserDefaults.standard.set(
-                    NSNumber(value: sequence),
-                    forKey: Self.activeSequenceKey
+            do {
+                _ = try await service.updateLocation(
+                    for: dispatchId,
+                    sequence: sequence,
+                    location: location
                 )
+                if UserDefaults.standard.string(
+                    forKey: Self.activeDispatchKey
+                ) == dispatchId.uuidString.lowercased() {
+                    UserDefaults.standard.set(
+                        NSNumber(value: sequence),
+                        forKey: Self.activeSequenceKey
+                    )
+                }
+                return .accepted
+            } catch let RemoteSyncError.server(status, _)
+                where [401, 404, 409, 410].contains(status) {
+                return .stop
+            } catch {
+                return .retry
             }
-            _ = try await service.updateLocation(
-                for: dispatchId,
-                sequence: sequence,
-                location: location
-            )
         }
         #endif
     }
@@ -550,10 +568,70 @@ final class SafetySOSRuntime {
     }
 }
 
+enum ManagedSafetyLocationRetryPolicy {
+    static func delayNanoseconds(afterFailedAttempt failedAttempts: Int) -> UInt64? {
+        switch failedAttempts {
+        case 1:
+            return 2_000_000_000
+        case 2:
+            return 5_000_000_000
+        default:
+            return nil
+        }
+    }
+}
+
+struct ManagedSafetyLocationSessionPolicy {
+    struct RestoredSession: Equatable {
+        let incidentID: UUID
+        let expiresAt: Date
+    }
+
+    static let maximumSessionDuration: TimeInterval = 12 * 60 * 60
+
+    static func boundedExpiry(
+        requestedExpiry: Date,
+        now: Date = Date()
+    ) -> Date? {
+        guard requestedExpiry > now else { return nil }
+        return min(
+            requestedExpiry,
+            now.addingTimeInterval(maximumSessionDuration)
+        )
+    }
+
+    static func restoredSession(
+        incidentID: String?,
+        expiresAtUnix: Double,
+        now: Date = Date()
+    ) -> RestoredSession? {
+        guard let incidentID,
+              let identifier = UUID(uuidString: incidentID),
+              expiresAtUnix > 0,
+              let expiry = boundedExpiry(
+                  requestedExpiry: Date(timeIntervalSince1970: expiresAtUnix),
+                  now: now
+              ) else {
+            return nil
+        }
+        return RestoredSession(
+            incidentID: identifier,
+            expiresAt: expiry
+        )
+    }
+}
+
 #if os(iOS)
 @MainActor
-private final class SafetyIncidentLocationStreamer: NSObject {
-    typealias Sender = @MainActor (SafetyLocation, Int64) async throws -> Void
+final class SafetyIncidentLocationStreamer: NSObject {
+    enum SubmissionDisposition {
+        case accepted
+        case retry
+        case stop
+    }
+
+    typealias Sender =
+        @MainActor (SafetyLocation, Int64) async -> SubmissionDisposition
 
     private let manager = CLLocationManager()
     private var sender: Sender?
@@ -604,6 +682,7 @@ private final class SafetyIncidentLocationStreamer: NSObject {
 
     func stop() {
         manager.stopUpdatingLocation()
+        manager.stopMonitoringSignificantLocationChanges()
         manager.allowsBackgroundLocationUpdates = false
         sendTask?.cancel()
         expiryTask?.cancel()
@@ -620,6 +699,7 @@ private final class SafetyIncidentLocationStreamer: NSObject {
         case .authorizedAlways:
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
+            manager.startMonitoringSignificantLocationChanges()
             manager.startUpdatingLocation()
         case .authorizedWhenInUse:
             manager.allowsBackgroundLocationUpdates = false
@@ -651,13 +731,27 @@ private final class SafetyIncidentLocationStreamer: NSObject {
         lastSubmittedAt = Date()
         sendTask = Task { @MainActor [weak self] in
             defer { self?.sendTask = nil }
-            do {
-                try await sender(location, submittedSequence)
-            } catch let RemoteSyncError.server(status, _) where
-                [401, 404, 409, 410].contains(status) {
-                self?.stop()
-            } catch {
-                // Temporary failures keep the session active. A fresh fix retries with a new sequence.
+            var failedAttempts = 0
+            while !Task.isCancelled {
+                switch await sender(location, submittedSequence) {
+                case .accepted:
+                    return
+                case .stop:
+                    self?.stop()
+                    return
+                case .retry:
+                    failedAttempts += 1
+                    guard let delay = ManagedSafetyLocationRetryPolicy
+                        .delayNanoseconds(
+                            afterFailedAttempt: failedAttempts
+                        )
+                    else { return }
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        return
+                    }
+                }
             }
         }
     }

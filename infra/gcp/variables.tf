@@ -93,6 +93,23 @@ variable "runtime_image" {
   }
 }
 
+variable "migration_image" {
+  description = "Optional digest-pinned image staged on the migration job before runtime rollout."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.migration_image == null
+      || can(regex(
+        "^asia-south[12]-docker\\.pkg\\.dev/[a-z][a-z0-9-]{4,28}[a-z0-9]/[a-z0-9._-]+/[a-z0-9._-]+@sha256:[0-9a-f]{64}$",
+        var.migration_image,
+      ))
+    )
+    error_message = "migration_image must be an asia-south1/2 Artifact Registry sha256 digest URI."
+  }
+}
+
 variable "enable_private_api" {
   description = "Create the IAM-protected, internal-ingress staging API after migrations pass."
   type        = bool
@@ -333,5 +350,16 @@ variable "managed_entitlement_mode" {
   validation {
     condition     = contains(["closed", "pilot", "open_beta", "paid"], var.managed_entitlement_mode)
     error_message = "managed_entitlement_mode must be closed, pilot, open_beta, or paid."
+  }
+}
+
+variable "managed_push_token_write_version" {
+  description = "Push-token envelope written by every managed API and lifecycle revision. Keep v1 for the dual-reader rollout, then promote all revisions together to v2."
+  type        = string
+  default     = "v1"
+
+  validation {
+    condition     = contains(["v1", "v2"], var.managed_push_token_write_version)
+    error_message = "managed_push_token_write_version must be v1 or v2."
   }
 }

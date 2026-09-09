@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-08**
+Last updated: **2026-09-09**
 
 ## Repository
 
@@ -17,6 +17,115 @@ Last updated: **2026-09-08**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The latest managed Safety late-review closeout is implemented and completely
+locally verified on protected pull request `#10`. Apple and Android require a
+working app-alert path before accepting a Safety contact; incident creation
+counts only accepted contacts represented by deterministically locked active
+push installations. Apple suppresses foreground managed Safety presentation
+until launch authorization is current and completes background catch-up exactly
+once within a 20-second deadline. The delivery lease now covers the provider's
+bounded maximum plus receipt margin, and Android releases a foreground service
+that existed only for managed location after all independent reasons end. The
+complete local server suite passed 424 tests with only the explicit real-provider
+case skipped; Android passed 4,143 tests plus lint, build, and instrumentation
+compilation; Apple passed 1,669 tests with one expected skip and the complete
+unsigned iOS simulator graph builds; 227 Tools tests and every local policy gate
+pass. Replacement push and exact-head review, protected checks, normal merge,
+physical providers/devices, and external launch gates remain. No public
+traffic, real paging, or real health data was used. Evidence is recorded in
+[Managed Safety late-review closeout](rounds/2026-09-09-managed-safety-late-review-closeout.md).
+
+The latest managed Safety lock and retention closeout is implemented and
+completely locally verified on protected pull request `#10`. Contact request
+creation/removal and profile/incident expiry now follow one deterministic lock
+hierarchy; broad erasure cancellation cannot reactivate an account while
+another broad erasure is live; and migration `032` bounds terminal
+contact-request churn with an account-scoped rolling ledger that survives
+profile recreation. The complete server collection contains 423 cases: 422
+passed and only the explicit real-provider Twilio staging case was skipped.
+Apple now implements Firebase Messaging's exact registration-token delegate
+selector; its focused contract and complete iOS simulator app graph pass.
+All local release, terminology, privacy, claims, calibration, localization,
+legal, and operations controls pass. Replacement exact-head review, hosted
+checks, normal protected merge, physical providers/devices, and external
+launch gates remain. No public traffic, real paging, or real health data was
+used. Evidence is recorded in
+[Managed Safety lock and retention closeout](rounds/2026-09-09-managed-safety-lock-retention-closeout.md).
+
+The latest exact-head managed Safety erasure closeout is implemented and
+completely locally verified on protected pull request `#10`. Both Cloud Run
+services wait for current and previous push-token secret IAM grants; account
+erasure atomically retires active Safety state; contact removal locks profiles,
+incidents, then contacts; incident creation locks its owner and all contacts in
+one global order; push completion locks installation before delivery; and
+erasure replay locks job before account. The complete clean server suite now
+covers 416 cases with one intentional real-provider skip. Replacement policy
+gates, exact-head review, protected checks, and normal merge remain. No public
+traffic or real paging was enabled. Evidence is recorded in
+[Managed Safety erasure closeout](rounds/2026-09-09-managed-safety-erasure-closeout.md).
+
+The latest managed Safety final-gate closeout is implemented and locally
+verified on protected pull request `#10`. Apple and Android now reject every
+managed push wake, token-refresh, notification, and worker entry point until
+launch access and the exact current Terms version are valid; normal
+post-acceptance bootstrap retries registration. A profile can receive at most
+40 pending contact requests while retaining 10 outgoing pending requests, with
+count and insert serialized under the contact profile/account lock and
+idempotent replay preserved. Due urgent Safety push retries now run before
+slower lifecycle cleanup. The latest review follow-up also adds migration `031`
+to cap invitation create/revoke churn at 50 per account per rolling 24 hours
+without allowing profile recreation or retained-capability reuse to reset the
+limit. Deleting a responding profile now reopens a surviving incident when no
+responder remains, and both apps retire a confirmed contact-request replay
+before any fallible refresh.
+
+The fresh PostgreSQL server suite passed 393 tests with 19 expected skips,
+Android passed 4,142 tests plus lint/build/instrumentation-source compilation,
+the Apple Safety suite passed 33 tests, the full Strand suite passed 1,666 tests
+with one expected skip, and the complete iOS app/widget/watch simulator graph
+builds for arm64 and x86_64. The complete local release-policy matrix is green.
+The fully verified replacement head still requires commit, push, clean
+exact-head review, protected checks, and normal merge. No public traffic or
+real participant paging was enabled. Evidence is recorded in
+[Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
+
+The reported physical-phone lag is not evidence against the pending
+large-data fix yet: yesterday's protected `main` did not contain pull request
+`#12`. That branch has measured a 4.2-million-row, approximately 441 MB local
+database and removes active backfill/write contention, repeated retained-screen
+queries, unnecessary per-chunk reads, and scroll-time animation work across
+Apple and Android. It still requires integration after Safety, complete local
+and hosted verification, protected merge, and a reviewed shake-to-report ZIP
+from the affected phone on the merged-main build.
+
+The latest managed Safety race closeout is implemented and locally verified on
+protected pull request `#10`. Invitation and contact deletes are idempotent,
+invalid provider receipts are bound to the exact claimed token hash, Apple and
+Android serialize push registration with disconnect revocation, and all nine
+supported locales tell an invitation redeemer to accept the request. The
+locally available server suite passed 388 tests with 19 expected skips, Android
+passed 4,140 tests plus lint/build/instrumentation compilation, 31 Apple Safety
+tests passed, the clean iOS graph builds, and the complete repository policy
+matrix passes. Replacement protected checks, a clean review of the exact
+replacement head, and normal merge remain. Physical APNs/FCM,
+terminated/background execution, location, haptic, battery, legal, monitoring,
+failover, and staffed-operations evidence remains open. No public traffic or
+real participant paging was enabled. Evidence is recorded in
+[Managed Safety race closeout](rounds/2026-09-09-managed-safety-race-closeout.md).
+
+The managed Safety review-hardening round is implemented and locally verified
+on protected pull request `#10`. Migration `030` preserves account-scoped page
+quotas and consumed request IDs across social-profile recreation; invitation
+redemption follows profile/account-before-invite locking; and push-token
+encryption now has a v1-compatible dual-reader rollout phase plus distinct
+retryable-key and terminal-corruption outcomes. The complete two-database
+server suite collected 406 tests: 405 passed and only real-Twilio staging
+remained explicitly skipped. OpenTofu, dependency, shell, privacy, terminology,
+claims, calibration, operations, and release-control gates pass. Replacement
+protected checks, a clean exact-head review, and normal merge remain. No public
+traffic or real participant paging was enabled. Evidence is recorded in
+[Managed Safety review hardening](rounds/2026-09-09-managed-safety-review-hardening.md).
 
 The trusted release-control activation round is complete. Pull request `#8`
 passed the preceding protected rule and exact-head trust check, merged normally
@@ -36,6 +145,65 @@ main run `34194149601` passed validation and publication on exact commit
 checks remain enforced. Evidence is recorded in
 [Trusted check URL compatibility](rounds/2026-09-08-trusted-check-url-compatibility.md).
 
+The managed app Safety paging round has completed its supplier-independent
+source, simulator, server, migration, and private synthetic deployment work on
+`codex/managed-app-safety-paging-20260908`; protected-main review and merge are
+pending. Accepted NOOP accounts are the primary manual Safety contact path,
+opaque APNs/FCM wake payloads contain only a fixed event kind, opaque incident
+reference, and expiry, while authenticated app entry fetches every displayable
+detail. One latest location replaces the prior fix for the bounded active page.
+Apple and Android reconcile the location session across
+foreground/background runtime changes, and Android shares one platform GPS
+stream even if the later provider fallback is also active. A scanned digest,
+migration `027`, lifecycle execution, and a three-account private smoke pass
+with no public invoker, provider push target, real user, or real health data.
+Evidence is recorded in
+[Managed app Safety paging](rounds/2026-09-08-managed-app-safety-paging.md).
+Signed physical terminated/background push, location permission and battery
+behavior, legal/security review, monitoring, failover, and staffed operations
+remain launch gates. SMS/voice is not on the app-paging critical path.
+
+The exact-head Safety review follow-up is implemented and locally verified on
+the same protected branch. Apple and Android now refuse to discard an account
+when both server and provider push invalidation fail, expired notification taps
+route to retained authenticated history while background delivery remains
+expiry-gated, APNs alerts use translated catalog keys, and social-profile
+deletion immediately clears cascaded Safety state on both phones. The full
+Apple, Android, and fresh-PostgreSQL server suites, dependency audits, and
+repository policy gates pass locally. The first replacement-head hosted
+release-control run exposed only a stale fail-closed terminology inventory;
+the reviewed regeneration contains no forbidden mapping or active allowlist
+change. The following iOS run then exposed four redundant cold package-graph
+resolutions in the launch-gate isolation preflight; one all-target,
+name-only scan now preserves the same fail-closed policy and passes locally.
+Pull request `#10` still requires a green hosted rerun, a clean exact-head
+review, and normal protected merge. Physical APNs/FCM, terminated/background
+execution, location, haptic, carrier, legal, monitoring, failover, and
+staffed-operations evidence remains open. Evidence is recorded in
+[Managed Safety exact-head review](rounds/2026-09-09-managed-safety-exact-head-review.md).
+
+A final exact-head Safety review round is implemented and locally verified
+after the prior replacement head passed all required hosted checks. Contact
+acceptance now follows the same profile-before-request lock order as blocking;
+incident acknowledgement is recomputed whenever responders withdraw or are
+revoked; Apple persists only a bounded opaque location-session reference and
+uses significant-location monitoring for system-managed relaunch; and both
+apps map every wire status to localized app-owned copy. The next exact-head
+review found three additional push defects. Apple now labels the Firebase
+Messaging callback value as an FCM registration token, rechecks notification
+authorization before each registration, and retires unauthorized
+installations. The server always addresses that value through FCM HTTP v1
+`message.token`, keeps legacy iOS `fid`-labeled rows rolling-compatible through
+migration `029`, and invalidates and reacquires a cached OAuth token once after
+`401`. The complete fresh PostgreSQL suite passed 390 tests with only the
+explicit real-Twilio staging test skipped, all 110 shared managed-client tests
+passed, the Apple Safety suite passed 30 tests, Ruff passed, and the complete
+iOS simulator app graph builds. Protected replacement-head review, hosted
+checks, and normal merge remain.
+No public traffic or real participant paging is enabled. Evidence is recorded
+in
+[Managed Safety final review](rounds/2026-09-09-managed-safety-final-review.md).
+
 The production-readiness execution round is complete for supplier-independent
 source and repository work. Current source adds
 provenance-gated official-reference comparison and chronological personal
@@ -45,8 +213,8 @@ guards, Apple retry-on-persistence-failure semantics, a deterministic
 10/30/90/365-day history and exact-restore harness, neutral compatibility
 labels, a machine-readable terminology ratchet, and a disclosed deterministic
 Review Sample Mode in the shipping Apple and Android source. The current ledger
-has 396 stable actions: 66 evidenced complete and 330 pending, split into 32
-owner, 231 engineering, 33 joint, and 34 external actions. Full local Android,
+has 396 stable actions: 68 evidenced complete and 328 pending, split into 31
+owner, 230 engineering, 33 joint, and 34 external actions. Full local Android,
 server, package, macOS, localization, claims, legal, private-data, OpenTofu,
 and private-runtime checks pass; the final Apple simulator suite also passes.
 Review Sample passes focused Apple standard/compact/exit-to-Terms simulator
@@ -108,7 +276,7 @@ The first public production release now has one ordered execution plan:
 [`../FIRST_PRODUCTION_RELEASE_PLAN.md`](../FIRST_PRODUCTION_RELEASE_PLAN.md).
 Its editable action ledger is
 [`../FIRST_PRODUCTION_RELEASE_CHECKLIST.md`](../FIRST_PRODUCTION_RELEASE_CHECKLIST.md),
-with 396 stable actions: 66 evidenced complete and 330 pending. New owner
+with 396 stable actions: 68 evidenced complete and 328 pending. New owner
 requests can be inserted without renumbering the plan.
 It covers the first-party NOOP Band input dossier, firmware and native SDK
 boundaries, safe terminology/data migration, mobile parity, storage and

@@ -20,13 +20,14 @@ import com.noop.ui.DebugExportScheduler
 import com.noop.ui.NoopPrefs
 import com.noop.ui.AppearanceMode
 import com.noop.ui.AppearancePrefs
-import com.noop.ui.Terms
 import com.noop.widget.WidgetSnapshotStore
 import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
+import com.noop.managed.ManagedRuntimeGate
+import com.noop.managed.ManagedSafetyLiveLocationSession
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
@@ -140,7 +141,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
     }
 
     private fun hasAcceptedCurrentTerms(): Boolean =
-        NoopPrefs.of(this).getString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, null) == Terms.CURRENT_VERSION
+        ManagedRuntimeGate.isAuthorized(this)
 
     override fun onTrimMemory(level: Int) {
         AppDiagnosticsRecorder.record(
@@ -288,6 +289,7 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
             runCatching { HydrationReminderScheduler.reconcile(this@NoopApplication) }
             runCatching {
                 SafetyLiveLocationSession.initialize(this@NoopApplication)
+                ManagedSafetyLiveLocationSession.initialize(this@NoopApplication)
                 SafetyIncidentStatusMonitor.reconcile(this@NoopApplication)
             }
         }

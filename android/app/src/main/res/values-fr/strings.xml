@@ -2509,6 +2509,7 @@
     <string name="managed_cloud_error_network">NOOP+ est inaccessible.</string>
     <string name="managed_cloud_error_invalid_response">NOOP+ a renvoyé une réponse non valide.</string>
     <string name="managed_cloud_error_authentication">L’authentification NOOP+ a expiré. Reconnectez-vous.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ n’a pas autorisé cette action.</string>
     <string name="managed_cloud_error_policy_changed">La politique de stockage NOOP+ a changé. Vérifiez-la avant la synchronisation.</string>
     <string name="managed_cloud_error_cursor_expired">Le curseur cloud de cet appareil a expiré. Une restauration complète est nécessaire.</string>
     <string name="managed_cloud_error_not_found">La ressource NOOP+ demandée n’existe plus.</string>
@@ -2658,7 +2659,7 @@
     <string name="managed_friends_rotate_body">Votre identifiant actuel n’acceptera plus de nouvelles demandes. Les amis existants ne changent pas.</string>
     <string name="managed_friends_rotate_action">Remplacer l’identifiant NOOP</string>
     <string name="managed_friends_delete_title">Supprimer les Amis gérés ?</string>
-    <string name="managed_friends_delete_body">Les amitiés, invitations, résumés partagés, badges et signes en attente seront supprimés. La sauvegarde NOOP+ et les données de l’appareil ne changent pas.</string>
+    <string name="managed_friends_delete_body">Les amitiés, invitations, résumés partagés, badges, signes en attente, contacts Safety, invitations Safety et l’historique des incidents Safety seront supprimés. Toute alerte Safety active et tout partage de position prendront fin. La sauvegarde NOOP+ et les données de l’appareil ne changent pas.</string>
     <string name="managed_friends_delete_action">Supprimer les Amis gérés</string>
     <string name="managed_friends_invite_title">Lien d’invitation privé</string>
     <string name="managed_friends_invite_body">Le lien expire sous 72 heures et crée une demande, jamais une amitié automatique.</string>

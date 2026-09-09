@@ -2509,6 +2509,7 @@
     <string name="managed_cloud_error_network">No se pudo conectar con NOOP+.</string>
     <string name="managed_cloud_error_invalid_response">NOOP+ devolvió una respuesta no válida.</string>
     <string name="managed_cloud_error_authentication">La autenticación de NOOP+ ha caducado. Vuelve a iniciar sesión.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ no permitió esa acción.</string>
     <string name="managed_cloud_error_policy_changed">La política de almacenamiento de NOOP+ ha cambiado. Revísala antes de sincronizar.</string>
     <string name="managed_cloud_error_cursor_expired">El cursor en la nube de este dispositivo ha caducado. Se necesita una restauración completa.</string>
     <string name="managed_cloud_error_not_found">El recurso de NOOP+ solicitado ya no existe.</string>
@@ -2658,7 +2659,7 @@
     <string name="managed_friends_rotate_body">Tu ID actual dejará de aceptar solicitudes nuevas. Los amigos existentes no cambiarán.</string>
     <string name="managed_friends_rotate_action">Sustituir ID de NOOP</string>
     <string name="managed_friends_delete_title">¿Eliminar Amigos administrados?</string>
-    <string name="managed_friends_delete_body">Se eliminarán amistades, invitaciones, resúmenes compartidos, insignias y toques pendientes. La copia de seguridad de NOOP+ y los datos del dispositivo no cambiarán.</string>
+    <string name="managed_friends_delete_body">Se eliminarán amistades, invitaciones, resúmenes compartidos, insignias, toques pendientes, contactos de Safety, invitaciones de Safety y el historial de incidentes de Safety. Cualquier alerta de Safety activa y el uso compartido de ubicación finalizarán. La copia de seguridad de NOOP+ y los datos del dispositivo no cambiarán.</string>
     <string name="managed_friends_delete_action">Eliminar Amigos administrados</string>
     <string name="managed_friends_invite_title">Enlace de invitación privado</string>
     <string name="managed_friends_invite_body">El enlace caduca en un plazo de 72 horas y crea una solicitud, nunca una amistad automática.</string>

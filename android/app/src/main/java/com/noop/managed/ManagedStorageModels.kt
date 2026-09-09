@@ -359,6 +359,7 @@ sealed class ManagedStorageException(message: String, cause: Throwable? = null) 
         ManagedStorageException("The NOOP+ storage policy changed. Review it before syncing.")
     class CursorExpired(val minimumSequence: Long?) :
         ManagedStorageException("This device's cloud cursor expired. A full restore is required.")
+    class Forbidden : ManagedStorageException("NOOP+ did not allow that action.")
     class NotFound : ManagedStorageException("The requested NOOP+ resource no longer exists.")
     class QuotaExceeded : ManagedStorageException("This NOOP+ storage allowance is full.")
     class Conflict : ManagedStorageException("NOOP+ rejected conflicting sync state.")

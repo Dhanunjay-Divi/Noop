@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import com.noop.R
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -141,6 +142,72 @@ class SafetyCenterLocalizationContractTest {
             ),
         )
         assertFalse(source.contains("Safety page request accepted. SMS delivery is pending"))
+    }
+
+    @Test
+    fun managedSafetyHistoryMapsEveryWireStatusToLocalizedCopy() {
+        assertEquals(
+            R.string.managed_safety_status_label_resolved,
+            managedSafetyIncidentStatusResource("resolved"),
+        )
+        assertEquals(
+            R.string.managed_safety_status_label_unavailable,
+            managedSafetyIncidentStatusResource("future_status"),
+        )
+        assertEquals(
+            R.string.managed_safety_participant_status_cannot_respond,
+            managedSafetyParticipantStatusResource("cannot_respond"),
+        )
+        assertEquals(
+            R.string.managed_safety_participant_status_unavailable,
+            managedSafetyParticipantStatusResource("future_status"),
+        )
+
+        val managed = first(
+            "src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+            "android/app/src/main/java/com/noop/ui/ManagedSafetySection.kt",
+        )
+        assumeTrue("Managed Safety source unavailable", managed != null)
+        val source = managed!!.readText()
+        assertFalse(source.contains("participant.status.replace('_', ' ')"))
+        assertFalse(source.contains("it.status.replaceFirstChar"))
+    }
+
+    @Test
+    fun managedPushEntryPointsFailClosedUntilCurrentTermsAreAccepted() {
+        val gate = first(
+            "src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+            "app/src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+        )
+        val scheduler = first(
+            "src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+        )
+        val messaging = first(
+            "src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+            "app/src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+        )
+        assumeTrue(
+            "Managed push sources unavailable",
+            gate != null && scheduler != null && messaging != null,
+        )
+
+        val gateSource = gate!!.readText()
+        val schedulerSource = scheduler!!.readText()
+        val messagingSource = messaging!!.readText()
+        assertTrue(gateSource.contains("acceptedVersion == Terms.CURRENT_VERSION"))
+        assertTrue(
+            schedulerSource.split("ManagedRuntimeGate.isAuthorized").size - 1 >= 8,
+        )
+        assertTrue(
+            messagingSource.split("ManagedRuntimeGate.isAuthorized").size - 1 == 2,
+        )
+        assertTrue(messagingSource.contains("\"failure_kind\" to \"terms_required\""))
+        assertTrue(messagingSource.contains("\"notification\" to \"suppressed\""))
     }
 
     @Test

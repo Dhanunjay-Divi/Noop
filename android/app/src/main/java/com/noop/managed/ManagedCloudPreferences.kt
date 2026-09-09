@@ -98,6 +98,188 @@ internal class ManagedCloudPreferences(context: Context) {
         preferences.edit().remove(KEY_SOCIAL_INVITE_CAPABILITY).apply()
     }
 
+    fun safetyInviteRequestId(): UUID =
+        stableRequestId(KEY_SAFETY_INVITE_REQUEST_ID)
+
+    fun clearSafetyInviteRequestId() {
+        preferences.edit().remove(KEY_SAFETY_INVITE_REQUEST_ID).apply()
+    }
+
+    fun safetyInviteCapability(): String = synchronized(this) {
+        preferences.getString(KEY_SAFETY_INVITE_CAPABILITY, null)
+            ?.takeIf(ManagedSafetyIdentifier.invitePattern::matches)
+            ?: ManagedSafetyIdentifier.makeInviteCapability().also { created ->
+                check(ManagedSafetyIdentifier.invitePattern.matches(created))
+                check(
+                    preferences.edit()
+                        .putString(KEY_SAFETY_INVITE_CAPABILITY, created)
+                        .commit(),
+                ) { "Could not persist the managed Safety invitation." }
+            }
+    }
+
+    fun clearSafetyInviteCapability() {
+        preferences.edit().remove(KEY_SAFETY_INVITE_CAPABILITY).apply()
+    }
+
+    var pendingSafetyInviteCapability: String?
+        get() = preferences.getString(KEY_PENDING_SAFETY_INVITE, null)
+            ?.takeIf(ManagedSafetyIdentifier.invitePattern::matches)
+        set(value) {
+            require(value == null || ManagedSafetyIdentifier.invitePattern.matches(value))
+            putString(KEY_PENDING_SAFETY_INVITE, value)
+        }
+
+    var safetyLastAttemptMs: Long
+        get() = preferences.getLong(KEY_SAFETY_LAST_ATTEMPT_MS, 0L)
+        set(value) {
+            preferences.edit()
+                .putLong(KEY_SAFETY_LAST_ATTEMPT_MS, value.coerceAtLeast(0L))
+                .apply()
+        }
+
+    fun beginSafetyAttempt(nowMs: Long, minimumIntervalMs: Long): Long? =
+        synchronized(this) {
+            require(nowMs >= 0L)
+            require(minimumIntervalMs > 0L)
+            val previous = preferences.getLong(KEY_SAFETY_LAST_ATTEMPT_MS, 0L)
+            if (previous > 0L && nowMs - previous < minimumIntervalMs) {
+                return@synchronized null
+            }
+            check(
+                preferences.edit()
+                    .putLong(KEY_SAFETY_LAST_ATTEMPT_MS, nowMs)
+                    .commit(),
+            ) { "Could not persist the managed Safety attempt lease." }
+            previous
+        }
+
+    fun rollbackSafetyAttempt(nowMs: Long, previousMs: Long) =
+        synchronized(this) {
+            if (preferences.getLong(KEY_SAFETY_LAST_ATTEMPT_MS, 0L) != nowMs) {
+                return@synchronized
+            }
+            val editor = preferences.edit()
+            if (previousMs > 0L) {
+                editor.putLong(KEY_SAFETY_LAST_ATTEMPT_MS, previousMs)
+            } else {
+                editor.remove(KEY_SAFETY_LAST_ATTEMPT_MS)
+            }
+            check(editor.commit()) {
+                "Could not roll back the managed Safety attempt lease."
+            }
+        }
+
+    var safetyEnabled: Boolean
+        get() = preferences.getBoolean(KEY_SAFETY_ENABLED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_SAFETY_ENABLED, value).apply()
+        }
+
+    fun safetyContactRequest(
+        accountScopeHash: String,
+        noopId: String,
+    ): ManagedSafetyContactRequestRecord = synchronized(this) {
+        require(accountScopeHash.matches(SHA256))
+        val targetScopeHash = ManagedSafetyContactRequestPolicy
+            .targetScopeHash(noopId)
+        val existing = preferences.getString(KEY_SAFETY_CONTACT_REQUEST, null)
+            ?.let(::decodeSafetyContactRequest)
+        val resolved = ManagedSafetyContactRequestPolicy.resolve(
+            existing = existing,
+            accountScopeHash = accountScopeHash,
+            targetScopeHash = targetScopeHash,
+        )
+        if (resolved != existing) {
+            check(
+                preferences.edit()
+                    .putString(
+                        KEY_SAFETY_CONTACT_REQUEST,
+                        encodeSafetyContactRequest(resolved),
+                    )
+                    .commit(),
+            ) { "Could not persist the managed Safety contact request." }
+        }
+        resolved
+    }
+
+    fun clearSafetyContactRequest(requestId: UUID) = synchronized(this) {
+        val existing = preferences.getString(KEY_SAFETY_CONTACT_REQUEST, null)
+            ?.let(::decodeSafetyContactRequest)
+        if (existing?.requestId == requestId) {
+            preferences.edit().remove(KEY_SAFETY_CONTACT_REQUEST).apply()
+        }
+    }
+
+    fun safetyIncidentRequest(
+        accountScopeHash: String,
+        durationHours: Int,
+        shareLocation: Boolean,
+    ): ManagedSafetyIncidentRequestRecord = synchronized(this) {
+        require(accountScopeHash.matches(SHA256))
+        val existing = preferences.getString(KEY_SAFETY_INCIDENT_REQUEST, null)
+            ?.let(::decodeSafetyIncidentRequest)
+        val resolved = ManagedSafetyIncidentRequestPolicy.resolve(
+            existing = existing,
+            accountScopeHash = accountScopeHash,
+            durationHours = durationHours,
+            shareLocation = shareLocation,
+        )
+        if (resolved != existing) {
+            check(
+                preferences.edit()
+                    .putString(
+                        KEY_SAFETY_INCIDENT_REQUEST,
+                        encodeSafetyIncidentRequest(resolved),
+                    )
+                    .commit(),
+            ) { "Could not persist the managed Safety incident request." }
+        }
+        resolved
+    }
+
+    fun clearSafetyIncidentRequest(requestId: UUID) = synchronized(this) {
+        val existing = preferences.getString(KEY_SAFETY_INCIDENT_REQUEST, null)
+            ?.let(::decodeSafetyIncidentRequest)
+        if (existing?.requestId == requestId) {
+            preferences.edit().remove(KEY_SAFETY_INCIDENT_REQUEST).apply()
+        }
+    }
+
+    fun proposedSafetyLocationSequence(incidentId: UUID): Long = synchronized(this) {
+        val key = incidentId.toString().lowercase()
+        (safetyLocationSequences()[key] ?: 0L)
+            .coerceIn(0L, Long.MAX_VALUE - 1L) + 1L
+    }
+
+    fun adoptSafetyLocationSequence(incidentId: UUID, sequence: Long) =
+        synchronized(this) {
+            require(sequence > 0L)
+            val key = incidentId.toString().lowercase()
+            val values = safetyLocationSequences().toMutableMap()
+            values[key] = maxOf(values[key] ?: 0L, sequence)
+            val retained = values.entries
+                .sortedByDescending(Map.Entry<String, Long>::value)
+                .take(MAX_SAFETY_LOCATION_SEQUENCES)
+                .associate { it.key to it.value }
+            check(
+                preferences.edit()
+                    .putString(
+                        KEY_SAFETY_LOCATION_SEQUENCES,
+                        JSONObject(retained).toString(),
+                    )
+                    .commit(),
+            ) { "Could not persist managed Safety location progress." }
+        }
+
+    fun clearSafetyLocationSequence(incidentId: UUID) = synchronized(this) {
+        val values = safetyLocationSequences().toMutableMap()
+        values.remove(incidentId.toString().lowercase())
+        preferences.edit()
+            .putString(KEY_SAFETY_LOCATION_SEQUENCES, JSONObject(values).toString())
+            .apply()
+    }
+
     var pendingSocialInviteCapability: String?
         get() = preferences.getString(KEY_PENDING_SOCIAL_INVITE, null)
             ?.takeIf(ManagedSocialIdentifier.invitePattern::matches)
@@ -211,6 +393,19 @@ internal class ManagedCloudPreferences(context: Context) {
             .apply()
     }
 
+    fun clearSafetyState() {
+        preferences.edit()
+            .remove(KEY_SAFETY_INVITE_REQUEST_ID)
+            .remove(KEY_SAFETY_INVITE_CAPABILITY)
+            .remove(KEY_PENDING_SAFETY_INVITE)
+            .remove(KEY_SAFETY_LOCATION_SEQUENCES)
+            .remove(KEY_SAFETY_CONTACT_REQUEST)
+            .remove(KEY_SAFETY_INCIDENT_REQUEST)
+            .remove(KEY_SAFETY_LAST_ATTEMPT_MS)
+            .remove(KEY_SAFETY_ENABLED)
+            .apply()
+    }
+
     fun completeEnrollment(accountScopeHash: String, policyVersion: String) {
         check(
             preferences.edit()
@@ -287,6 +482,7 @@ internal class ManagedCloudPreferences(context: Context) {
             .putBoolean(KEY_OPTIMIZE_PHONE_STORAGE, false)
             .apply()
         clearSocialState()
+        clearSafetyState()
     }
 
     private fun stableRequestId(key: String): UUID = synchronized(this) {
@@ -297,9 +493,73 @@ internal class ManagedCloudPreferences(context: Context) {
                     preferences.edit()
                         .putString(key, it.toString().lowercase())
                         .commit(),
-                ) { "Could not persist the managed Friends request." }
+                ) { "Could not persist the managed request." }
             }
     }
+
+    private fun safetyLocationSequences(): Map<String, Long> {
+        val raw = preferences.getString(KEY_SAFETY_LOCATION_SEQUENCES, null)
+            ?: return emptyMap()
+        return runCatching {
+            val values = JSONObject(raw)
+            buildMap {
+                values.keys().forEach { incidentId ->
+                    val sequence = values.optLong(incidentId, -1L)
+                    if (runCatching { UUID.fromString(incidentId) }.isSuccess &&
+                        sequence > 0L
+                    ) {
+                        put(incidentId.lowercase(), sequence)
+                    }
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun decodeSafetyIncidentRequest(
+        raw: String,
+    ): ManagedSafetyIncidentRequestRecord? = runCatching {
+        val value = JSONObject(raw)
+        ManagedSafetyIncidentRequestRecord(
+            requestId = UUID.fromString(value.getString("request_id")),
+            accountScopeHash = value.getString("account_scope_hash"),
+            durationHours = value.getInt("duration_hours"),
+            shareLocation = value.getBoolean("share_location"),
+        )
+    }.getOrNull()?.takeIf {
+        it.accountScopeHash.matches(SHA256) &&
+            it.durationHours in setOf(8, 12)
+    }
+
+    private fun decodeSafetyContactRequest(
+        raw: String,
+    ): ManagedSafetyContactRequestRecord? = runCatching {
+        val value = JSONObject(raw)
+        ManagedSafetyContactRequestRecord(
+            requestId = UUID.fromString(value.getString("request_id")),
+            accountScopeHash = value.getString("account_scope_hash"),
+            targetScopeHash = value.getString("target_scope_hash"),
+        )
+    }.getOrNull()?.takeIf {
+        it.accountScopeHash.matches(SHA256) &&
+            it.targetScopeHash.matches(SHA256)
+    }
+
+    private fun encodeSafetyContactRequest(
+        value: ManagedSafetyContactRequestRecord,
+    ): String = JSONObject()
+        .put("request_id", value.requestId.toString().lowercase())
+        .put("account_scope_hash", value.accountScopeHash)
+        .put("target_scope_hash", value.targetScopeHash)
+        .toString()
+
+    private fun encodeSafetyIncidentRequest(
+        value: ManagedSafetyIncidentRequestRecord,
+    ): String = JSONObject()
+        .put("request_id", value.requestId.toString().lowercase())
+        .put("account_scope_hash", value.accountScopeHash)
+        .put("duration_hours", value.durationHours)
+        .put("share_location", value.shareLocation)
+        .toString()
 
     private fun socialDeliveryReceipts(
         nowMs: Long = System.currentTimeMillis(),
@@ -368,7 +628,22 @@ internal class ManagedCloudPreferences(context: Context) {
         private const val KEY_SOCIAL_DELIVERY_RECEIPTS =
             "social_delivery_receipts"
         private const val KEY_SOCIAL_ENABLED = "social_enabled"
+        private const val KEY_SAFETY_INVITE_REQUEST_ID =
+            "safety_invite_request_id"
+        private const val KEY_SAFETY_INVITE_CAPABILITY =
+            "safety_invite_capability"
+        private const val KEY_PENDING_SAFETY_INVITE =
+            "pending_safety_invite"
+        private const val KEY_SAFETY_LOCATION_SEQUENCES =
+            "safety_location_sequences"
+        private const val KEY_SAFETY_CONTACT_REQUEST =
+            "safety_contact_request"
+        private const val KEY_SAFETY_INCIDENT_REQUEST =
+            "safety_incident_request"
+        private const val KEY_SAFETY_LAST_ATTEMPT_MS = "safety_last_attempt_ms"
+        private const val KEY_SAFETY_ENABLED = "safety_enabled"
         private const val MAX_SOCIAL_DELIVERY_RECEIPTS = 64
+        private const val MAX_SAFETY_LOCATION_SEQUENCES = 8
         private const val SOCIAL_DELIVERY_RETENTION_MS = 7L * 24 * 60 * 60 * 1_000
         private val INSTALLATION_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
         private val INSTALLATION_TOKEN = Regex("^noopm_[A-Za-z0-9_-]{43}$")
@@ -379,6 +654,101 @@ internal class ManagedCloudPreferences(context: Context) {
         private val SOCIAL_HAPTIC_OUTCOMES =
             setOf("requested", "band_unavailable", "not_eligible", "failed")
     }
+}
+
+internal data class ManagedSafetyContactRequestRecord(
+    val requestId: UUID,
+    val accountScopeHash: String,
+    val targetScopeHash: String,
+)
+
+internal object ManagedSafetyContactRequestPolicy {
+    fun targetScopeHash(noopId: String): String {
+        val canonical = ManagedSocialIdentifier.canonicalNoopId(noopId)
+            ?: throw ManagedStorageException.InvalidResponse()
+        return ManagedDigest.sha256(
+            "noop-managed-safety-contact-request-v1\u0000$canonical"
+                .toByteArray(Charsets.UTF_8),
+        )
+    }
+
+    fun resolve(
+        existing: ManagedSafetyContactRequestRecord?,
+        accountScopeHash: String,
+        targetScopeHash: String,
+        createRequestId: () -> UUID = UUID::randomUUID,
+    ): ManagedSafetyContactRequestRecord {
+        require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        require(targetScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        if (existing?.accountScopeHash == accountScopeHash) {
+            if (existing.targetScopeHash != targetScopeHash) {
+                throw ManagedStorageException.Conflict()
+            }
+            return existing
+        }
+        return ManagedSafetyContactRequestRecord(
+            requestId = createRequestId(),
+            accountScopeHash = accountScopeHash,
+            targetScopeHash = targetScopeHash,
+        )
+    }
+
+    fun shouldRetire(error: Throwable): Boolean =
+        error is ManagedStorageException.Forbidden ||
+            error is ManagedStorageException.NotFound ||
+            error is ManagedStorageException.PolicyChanged ||
+            error is ManagedStorageException.Conflict ||
+            (
+                error is ManagedStorageException.Server &&
+                    error.statusCode in 400..499 &&
+                    error.statusCode !in setOf(408, 429)
+                )
+}
+
+internal data class ManagedSafetyIncidentRequestRecord(
+    val requestId: UUID,
+    val accountScopeHash: String,
+    val durationHours: Int,
+    val shareLocation: Boolean,
+)
+
+internal object ManagedSafetyIncidentRequestPolicy {
+    fun resolve(
+        existing: ManagedSafetyIncidentRequestRecord?,
+        accountScopeHash: String,
+        durationHours: Int,
+        shareLocation: Boolean,
+        createRequestId: () -> UUID = UUID::randomUUID,
+    ): ManagedSafetyIncidentRequestRecord {
+        require(accountScopeHash.matches(Regex("^[0-9a-f]{64}$")))
+        require(durationHours in setOf(8, 12))
+        if (existing?.accountScopeHash == accountScopeHash) {
+            if (
+                existing.durationHours != durationHours ||
+                existing.shareLocation != shareLocation
+            ) {
+                throw ManagedStorageException.Conflict()
+            }
+            return existing
+        }
+        return ManagedSafetyIncidentRequestRecord(
+            requestId = createRequestId(),
+            accountScopeHash = accountScopeHash,
+            durationHours = durationHours,
+            shareLocation = shareLocation,
+        )
+    }
+
+    fun shouldRetire(error: Throwable): Boolean =
+        error is ManagedStorageException.Forbidden ||
+            error is ManagedStorageException.NotFound ||
+            error is ManagedStorageException.PolicyChanged ||
+            error is ManagedStorageException.Conflict ||
+            (
+                error is ManagedStorageException.Server &&
+                    error.statusCode in 400..499 &&
+                    error.statusCode !in setOf(408, 429)
+                )
 }
 
 internal data class ManagedSocialDeliveryReceipt(

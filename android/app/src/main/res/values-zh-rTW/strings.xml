@@ -360,4 +360,6 @@
     <string name="strength_signal_honesty">心率反映心血管反應。次數和負重僅來自你的紀錄。</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">更清晰的更新與協助修正問題的報告</string>
     <string name="whats_new_welcome_version">歡迎使用 %1$s 版本</string>
+    <string name="managed_friends_delete_body">好友關係、邀請、分享摘要、徽章、待處理提醒、Safety 聯絡人、Safety 邀請和 Safety 事件歷史將被刪除。任何有效的 Safety 求助通知和位置分享都將結束。NOOP+ 備份和裝置內資料不受影響。</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ 不允許執行此操作。</string>
 </resources>

@@ -10,12 +10,19 @@ from app.managed_lifecycle import ManagedLifecycleResult, ManagedLifecycleRunner
 from app.managed_identity_deletion import ManagedIdentityDeletionError
 from app.managed_object_store import ManagedObjectStoreError
 from app.managed_repository import ManagedProcessingBusyError
+from app.managed_safety_repository import ManagedPushBatchResult
 
 
 class FakeLifecycleRepository:
-    def __init__(self, *, acquired: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        acquired: bool = True,
+        events: list[str] | None = None,
+    ) -> None:
         self.now = datetime(2026, 9, 3, 12, tzinfo=UTC)
         self.acquired = acquired
+        self.events = events
         self.released_lease = False
         self.deleted: list = []
         self.purged = {
@@ -63,6 +70,8 @@ class FakeLifecycleRepository:
         return self.now
 
     async def acquire_worker_lease(self, **kwargs):
+        if self.events is not None:
+            self.events.append("lease")
         return self.acquired
 
     async def release_worker_lease(self, **kwargs):
@@ -72,6 +81,8 @@ class FakeLifecycleRepository:
         return [{"chunk_id": self.pending[1]["chunk_id"]}]
 
     async def processing_reconciliation_candidates(self, **kwargs):
+        if self.events is not None:
+            self.events.append("reconcile")
         return self.reconciliation_candidates
 
     async def claim_retention_deletions(self, **kwargs):
@@ -153,6 +164,24 @@ class FakeChunkProcessor:
             raise ManagedObjectStoreError("temporary")
         if object_key == self.busy_key:
             raise ManagedProcessingBusyError("busy")
+
+
+class FakeSafetyPushService:
+    def __init__(
+        self,
+        result: ManagedPushBatchResult,
+        *,
+        events: list[str] | None = None,
+    ) -> None:
+        self.result = result
+        self.events = events
+        self.limits: list[int] = []
+
+    async def dispatch_due(self, *, limit: int) -> ManagedPushBatchResult:
+        if self.events is not None:
+            self.events.append("push")
+        self.limits.append(limit)
+        return self.result
 
 
 @pytest.mark.asyncio
@@ -285,6 +314,38 @@ async def test_lifecycle_reconciles_stranded_uploads_and_reports_retry_state() -
     assert result.chunk_reconciliation_failures == 1
     assert len(processor.processed) == 3
     assert all(len(queue_hash) == 64 for _, _, queue_hash in processor.processed)
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
+    events: list[str] = []
+    repository = FakeLifecycleRepository(events=events)
+    push = FakeSafetyPushService(
+        ManagedPushBatchResult(
+            claimed=4,
+            provider_accepted=2,
+            retryable_failures=1,
+            terminal_failures=1,
+        ),
+        events=events,
+    )
+
+    result = await ManagedLifecycleRunner(
+        repository,  # type: ignore[arg-type]
+        FakeObjectStore(),  # type: ignore[arg-type]
+        FakeIdentityDeleter(),
+        FakeChunkProcessor(),  # type: ignore[arg-type]
+        safety_push_service=push,  # type: ignore[arg-type]
+        batch_size=250,
+    ).run_once(owner_id=uuid4())
+
+    assert push.limits == [200]
+    assert events[:3] == ["lease", "push", "reconcile"]
+    assert result.safety_push_claimed == 4
+    assert result.safety_push_provider_accepted == 2
+    assert result.safety_push_retryable_failures == 1
+    assert result.safety_push_terminal_failures == 1
+    assert result.safety_push_receipt_failures == 0
 
 
 def test_lifecycle_cli_emits_bounded_failure_without_traceback(

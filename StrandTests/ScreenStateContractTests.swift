@@ -285,7 +285,9 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
     }
 
     private func safetyResourceKeys(_ source: String) throws -> Set<String> {
-        let pattern = try NSRegularExpression(pattern: #"name="(safety_[^"]+)""#)
+        let pattern = try NSRegularExpression(
+            pattern: #"name="((?:managed_)?safety_[^"]+)""#
+        )
         let range = NSRange(source.startIndex..., in: source)
         return Set(pattern.matches(in: source, range: range).compactMap { match in
             guard let range = Range(match.range(at: 1), in: source) else { return nil }
@@ -303,9 +305,12 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 221)
+        XCTAssertEqual(source.count, 313)
         for (key, translations) in source {
-            XCTAssertTrue(key.hasPrefix("safety."), key)
+            XCTAssertTrue(
+                key.hasPrefix("safety.") || key.hasPrefix("managed.safety."),
+                key
+            )
             XCTAssertEqual(Set(translations.keys), locales, key)
             XCTAssertTrue(translations.values.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
         }
@@ -317,7 +322,9 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: catalogData) as? [String: Any]
         )
         let strings = try XCTUnwrap(catalog["strings"] as? [String: Any])
-        let safetyCatalog = strings.filter { $0.key.hasPrefix("safety.") }
+        let safetyCatalog = strings.filter {
+            $0.key.hasPrefix("safety.") || $0.key.hasPrefix("managed.safety.")
+        }
         XCTAssertEqual(Set(safetyCatalog.keys), Set(source.keys))
         for (key, rawEntry) in safetyCatalog {
             let entry = try XCTUnwrap(rawEntry as? [String: Any])

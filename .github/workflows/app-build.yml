@@ -79,7 +79,10 @@ jobs:
           # workflows for their NOOPiOS legs. macos-15 stays correct for the macOS/Strand leg above.
           - scheme: NOOPiOS
             destination: 'generic/platform=iOS Simulator'
-            extra_args: ''
+            # Xcode 26.5's universal simulator graph can incorrectly compile the embedded Watch app
+            # as an iOS-simulator product and reject its valid watchOS-only AppIcon. CI runs on Apple
+            # Silicon, so build the runnable arm64 simulator slice explicitly.
+            extra_args: 'ARCHS=arm64 ONLY_ACTIVE_ARCH=YES'
             runner: macos-26
     steps:
       - name: Checkout

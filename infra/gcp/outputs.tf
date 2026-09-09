@@ -150,9 +150,16 @@ output "database_connection_name" {
 }
 
 output "migration_job" {
-  description = "One-shot migration job name, or null until a runtime image is selected."
-  value = local.runtime_workloads_enabled ? (
+  description = "One-shot migration job name, or null until a migration or runtime image is selected."
+  value = local.migration_workloads_enabled ? (
     google_cloud_run_v2_job.migrate[0].name
+  ) : null
+}
+
+output "migration_release_marker" {
+  description = "Non-secret marker binding the configured migration job to its immutable image."
+  value = local.migration_workloads_enabled ? (
+    local.migration_release_marker
   ) : null
 }
 

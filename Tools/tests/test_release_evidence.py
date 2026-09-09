@@ -75,7 +75,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(first["bomFormat"], "CycloneDX")
         self.assertEqual(first["specVersion"], "1.5")
-        self.assertEqual(len(first["components"]), 216)
+        self.assertEqual(len(first["components"]), 233)
         self.assertEqual(
             sum(item["type"] == "container" for item in first["components"]),
             3,

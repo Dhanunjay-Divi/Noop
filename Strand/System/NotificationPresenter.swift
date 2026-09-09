@@ -1,4 +1,5 @@
 import Foundation
+import NoopRemoteSync
 import UserNotifications
 
 enum LocalNotificationLifecycleState: String, Codable, CaseIterable, Sendable {
@@ -304,6 +305,33 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+#if os(iOS)
+        if ManagedSafetyPushPayload.incidentID(
+            from: notification.request.content.userInfo
+        ) != nil {
+            Task { @MainActor in
+                guard ManagedRuntimeAuthorization.isAllowed else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.push_presented",
+                        fields: [
+                            "outcome": "deferred",
+                            "failure_kind": "terms_required",
+                        ]
+                    )
+                    completionHandler([])
+                    return
+                }
+                LocalNotificationLifecycle.presented(notification.request)
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_presented",
+                    fields: ["outcome": "foreground"]
+                )
+                ContextualActionCenter.shared.capture(notification.request)
+                completionHandler([.banner, .sound, .list])
+            }
+            return
+        }
+#endif
         LocalNotificationLifecycle.presented(notification.request)
         Task { @MainActor in
             ContextualActionCenter.shared.capture(notification.request)
@@ -324,11 +352,41 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
         Task { @MainActor in
             ContextualActionCenter.shared.capture(response.notification.request)
         }
+        #if os(iOS)
+        if let incidentID = ManagedSafetyPushPayload.incidentIDForUserResponse(
+            from: response.notification.request.content.userInfo
+        ) {
+            NotificationRouteBridge.recordPending(.safety)
+            Task { @MainActor in
+                guard ManagedRuntimeAuthorization.isAllowed else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.push_opened",
+                        fields: [
+                            "outcome": "deferred",
+                            "failure_kind": "terms_required",
+                        ]
+                    )
+                    return
+                }
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_opened",
+                    fields: ["outcome": "accepted"]
+                )
+                _ = await ManagedCloudService.shared
+                    .handleManagedSafetyPush(incidentID: incidentID)
+            }
+        } else if let route = NotificationRouteBridge.route(
+            from: response.notification.request.content.userInfo
+        ) {
+            NotificationRouteBridge.recordPending(route)
+        }
+        #else
         if let route = NotificationRouteBridge.route(
             from: response.notification.request.content.userInfo
         ) {
             NotificationRouteBridge.recordPending(route)
         }
+        #endif
         completionHandler()
     }
 }

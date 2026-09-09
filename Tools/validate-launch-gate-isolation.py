@@ -35,12 +35,41 @@ EXTENSION_TARGETS = (
     "NOOPWatchComplications",
 )
 SETTING_PATTERN = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=", re.MULTILINE)
+TARGET_HEADER_PATTERN = re.compile(
+    r"^Build settings for action [^ ]+ and target (.+):$"
+)
+SETTING_LINE_PATTERN = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=")
 
 
 def setting_names(output: str) -> frozenset[str]:
     """Return names only so callers cannot accidentally log build-setting values."""
 
     return frozenset(SETTING_PATTERN.findall(output))
+
+
+def target_setting_names(
+    output: str,
+    targets: tuple[str, ...],
+) -> dict[str, frozenset[str]]:
+    """Group setting names by target without retaining any setting values."""
+
+    expected = set(targets)
+    grouped: dict[str, set[str]] = {}
+    current_target: str | None = None
+    for line in output.splitlines():
+        header = TARGET_HEADER_PATTERN.match(line)
+        if header:
+            candidate = header.group(1)
+            current_target = candidate if candidate in expected else None
+            if current_target is not None:
+                grouped.setdefault(current_target, set())
+            continue
+        if current_target is None:
+            continue
+        setting = SETTING_LINE_PATTERN.match(line)
+        if setting:
+            grouped[current_target].add(setting.group(1))
+    return {target: frozenset(names) for target, names in grouped.items()}
 
 
 def target_errors(
@@ -68,16 +97,19 @@ def target_errors(
     return errors
 
 
-def build_setting_names(project: Path, configuration: str, target: str) -> frozenset[str]:
+def build_setting_names(
+    project: Path,
+    configuration: str,
+    targets: tuple[str, ...],
+) -> dict[str, frozenset[str]]:
     result = subprocess.run(
         [
             "xcodebuild",
             "-project",
             str(project),
-            "-target",
-            target,
             "-configuration",
             configuration,
+            "-alltargets",
             "-showBuildSettings",
         ],
         check=False,
@@ -85,8 +117,8 @@ def build_setting_names(project: Path, configuration: str, target: str) -> froze
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"xcodebuild could not resolve build settings for {target}")
-    return setting_names(result.stdout)
+        raise RuntimeError("xcodebuild could not resolve project build settings")
+    return target_setting_names(result.stdout, targets)
 
 
 def main() -> int:
@@ -107,12 +139,22 @@ def main() -> int:
         print("launch-gate isolation: generate the Xcode project first", file=sys.stderr)
         return 2
 
+    targets = (IPHONE_TARGET, *EXTENSION_TARGETS)
     errors: list[str] = []
-    for target in (IPHONE_TARGET, *EXTENSION_TARGETS):
-        try:
-            names = build_setting_names(args.project, args.configuration, target)
-        except RuntimeError as error:
-            errors.append(str(error))
+    try:
+        names_by_target = build_setting_names(
+            args.project,
+            args.configuration,
+            targets,
+        )
+    except RuntimeError as error:
+        errors.append(str(error))
+        names_by_target = {}
+
+    for target in targets:
+        names = names_by_target.get(target)
+        if names is None:
+            errors.append(f"{target}: build settings were not returned")
             continue
         errors.extend(
             target_errors(

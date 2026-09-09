@@ -56,6 +56,21 @@ from app.managed_object_store import (
     ManagedObjectStoreError,
     ManagedObjectStoring,
 )
+from app.managed_safety_models import (
+    ManagedPushRegistration,
+    ManagedSafetyIncidentCreate,
+    ManagedSafetyIncidentEnd,
+    ManagedSafetyInviteCreate,
+    ManagedSafetyInviteRedeem,
+    ManagedSafetyLocationUpdate,
+    ManagedSafetyRequestCreate,
+    ManagedSafetyRequestDecision,
+    ManagedSafetyResponse,
+)
+from app.managed_safety_repository import (
+    ManagedSafetyPushService,
+    PostgresManagedSafetyRepository,
+)
 from app.managed_repository import (
     ManagedConfigurationError,
     ManagedConflictError,
@@ -64,6 +79,7 @@ from app.managed_repository import (
     ManagedNotFoundError,
     ManagedPrincipal,
     ManagedQuotaExceededError,
+    ManagedRateLimitError,
     ManagedStorageError,
     PostgresManagedRepository,
 )
@@ -105,6 +121,8 @@ def managed_router(
     token_verifier: ManagedTokenVerifying,
     object_store: ManagedObjectStoring,
     identity_deletion_ticket_codec: ManagedIdentityDeletionTicketCodec,
+    safety_repository: PostgresManagedSafetyRepository | None = None,
+    safety_push_service: ManagedSafetyPushService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1/managed", tags=["managed-storage"])
 
@@ -237,6 +255,22 @@ def managed_router(
             installation_id=installation_id,
         )
 
+    def require_safety_repository() -> PostgresManagedSafetyRepository:
+        if safety_repository is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed Safety is not configured",
+            )
+        return safety_repository
+
+    def require_safety_push() -> ManagedSafetyPushService:
+        if safety_push_service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="managed Safety push is not configured",
+            )
+        return safety_push_service
+
     @router.post(
         "/enroll",
         status_code=status.HTTP_201_CREATED,
@@ -307,6 +341,411 @@ def managed_router(
             _raise_managed(error)
             raise AssertionError("unreachable")
 
+    @router.put("/push/installations/current")
+    async def register_push_installation(
+        body: ManagedPushRegistration,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        push = require_safety_push()
+        try:
+            registration = await push.register(
+                principal=identity.principal,
+                installation_id=identity.installation_id,
+                registration=body,
+            )
+            emit_operational_event(
+                "managed_safety.push_registered",
+                service="noop-managed-api",
+                outcome="completed",
+                platform=body.platform,
+                environment=body.environment,
+                target_kind=body.target_kind,
+                duplicate=bool(registration["duplicate"]),
+            )
+            return {"registration": registration}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/push/installations/current",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
+    )
+    async def revoke_push_installation(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        repository = require_safety_repository()
+        try:
+            await repository.revoke_push_installation(
+                principal=identity.principal,
+                installation_id=identity.installation_id,
+            )
+            emit_operational_event(
+                "managed_safety.push_revoked",
+                service="noop-managed-api",
+                outcome="completed",
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/safety/invites",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_safety_invite(
+        body: ManagedSafetyInviteCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            invite = await repository.create_invite(
+                principal=identity.principal,
+                request=body,
+            )
+            emit_operational_event(
+                "managed_safety.invite_created",
+                service="noop-managed-api",
+                outcome="completed",
+                duplicate=bool(invite["duplicate"]),
+            )
+            return {"invite": invite}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/safety/invites/{invite_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
+    )
+    async def revoke_safety_invite(
+        invite_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        repository = require_safety_repository()
+        try:
+            await repository.revoke_invite(
+                principal=identity.principal,
+                invite_id=invite_id,
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/safety/invites:redeem")
+    async def redeem_safety_invite(
+        body: ManagedSafetyInviteRedeem,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            request = await repository.redeem_invite(
+                principal=identity.principal,
+                request_id=body.request_id,
+                capability=body.capability.get_secret_value(),
+            )
+            emit_operational_event(
+                "managed_safety.invite_redeemed",
+                service="noop-managed-api",
+                outcome="pending_acceptance",
+                duplicate=bool(request["duplicate"]),
+            )
+            return {"request": request}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/safety/requests",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_safety_request(
+        body: ManagedSafetyRequestCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            request = await repository.create_request(
+                principal=identity.principal,
+                request=body,
+            )
+            emit_operational_event(
+                "managed_safety.request_created",
+                service="noop-managed-api",
+                outcome="pending_acceptance",
+                duplicate=bool(request["duplicate"]),
+            )
+            return {"request": request}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/safety/requests")
+    async def safety_requests(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            return {
+                "requests": await repository.list_requests(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/safety/requests/{request_id}")
+    async def decide_safety_request(
+        request_id: UUID,
+        body: ManagedSafetyRequestDecision,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            request = await repository.decide_request(
+                principal=identity.principal,
+                request_id=request_id,
+                decision=body.decision,
+            )
+            emit_operational_event(
+                "managed_safety.request_decided",
+                service="noop-managed-api",
+                outcome=body.decision,
+                duplicate=bool(request["duplicate"]),
+            )
+            return {"request": request}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/safety/contacts")
+    async def safety_contacts(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            return {
+                "contacts": await repository.list_contacts(
+                    principal=identity.principal,
+                ),
+                "minimum_required": 2,
+                "maximum_allowed": 5,
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.delete(
+        "/safety/contacts/{profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
+    )
+    async def remove_safety_contact(
+        profile_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> None:
+        repository = require_safety_repository()
+        try:
+            await repository.remove_contact(
+                principal=identity.principal,
+                other_profile_id=profile_id,
+            )
+            emit_operational_event(
+                "managed_safety.contact_removed",
+                service="noop-managed-api",
+                outcome="completed",
+            )
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post(
+        "/safety/incidents",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_safety_incident(
+        body: ManagedSafetyIncidentCreate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            incident = await repository.create_incident(
+                principal=identity.principal,
+                request=body,
+            )
+            duplicate = bool(incident.get("duplicate", False))
+            delivery_outcome = "not_configured"
+            if safety_push_service is not None:
+                try:
+                    await safety_push_service.dispatch(
+                        principal=identity.principal,
+                        incident_id=UUID(incident["incident_id"]),
+                    )
+                    incident = await repository.get_incident(
+                        principal=identity.principal,
+                        incident_id=UUID(incident["incident_id"]),
+                    )
+                    incident["duplicate"] = duplicate
+                    delivery_outcome = "attempted"
+                except ManagedStorageError:
+                    delivery_outcome = "deferred"
+            emit_operational_event(
+                "managed_safety.incident_created",
+                service="noop-managed-api",
+                outcome="accepted",
+                duplicate=duplicate,
+                push=delivery_outcome,
+                contacts_targeted=int(
+                    incident.get("delivery", {}).get(
+                        "contacts_targeted",
+                        0,
+                    )
+                ),
+                contacts_reached=int(
+                    incident.get("delivery", {}).get(
+                        "contacts_reached",
+                        0,
+                    )
+                ),
+            )
+            return {
+                "incident": incident,
+                "push_outcome": delivery_outcome,
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/safety/incidents")
+    async def safety_incidents(
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            return {
+                "incidents": await repository.list_incidents(
+                    principal=identity.principal,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.get("/safety/incidents/{incident_id}")
+    async def safety_incident(
+        incident_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            return {
+                "incident": await repository.get_incident(
+                    principal=identity.principal,
+                    incident_id=incident_id,
+                )
+            }
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.put("/safety/incidents/{incident_id}/location")
+    async def update_safety_location(
+        incident_id: UUID,
+        body: ManagedSafetyLocationUpdate,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            location = await repository.update_location(
+                principal=identity.principal,
+                incident_id=incident_id,
+                update=body,
+            )
+            emit_operational_event(
+                "managed_safety.location_replaced",
+                service="noop-managed-api",
+                outcome="completed",
+                duplicate=bool(location["duplicate"]),
+            )
+            return {"location": location}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/safety/incidents/{incident_id}/response")
+    async def respond_to_safety_incident(
+        incident_id: UUID,
+        body: ManagedSafetyResponse,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            incident = await repository.respond(
+                principal=identity.principal,
+                incident_id=incident_id,
+                decision=body.decision,
+            )
+            emit_operational_event(
+                "managed_safety.response_recorded",
+                service="noop-managed-api",
+                outcome=body.decision,
+                duplicate=bool(incident["duplicate"]),
+            )
+            return {"incident": incident}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/safety/incidents/{incident_id}:end")
+    async def end_safety_incident(
+        incident_id: UUID,
+        body: ManagedSafetyIncidentEnd,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        repository = require_safety_repository()
+        try:
+            incident = await repository.end_incident(
+                principal=identity.principal,
+                incident_id=incident_id,
+                outcome=body.outcome,
+            )
+            emit_operational_event(
+                "managed_safety.incident_ended",
+                service="noop-managed-api",
+                outcome=body.outcome,
+                duplicate=bool(incident["duplicate"]),
+            )
+            return {"incident": incident}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/safety/incidents/{incident_id}:retry-push")
+    async def retry_safety_push(
+        incident_id: UUID,
+        identity: ManagedRequestIdentity = Depends(require_identity),
+    ) -> dict:
+        push = require_safety_push()
+        try:
+            delivery = await push.dispatch(
+                principal=identity.principal,
+                incident_id=incident_id,
+            )
+            emit_operational_event(
+                "managed_safety.push_retried",
+                service="noop-managed-api",
+                outcome="completed",
+                contacts_targeted=delivery["contacts_targeted"],
+                contacts_reached=delivery["contacts_reached"],
+            )
+            return {"delivery": delivery}
+        except ManagedStorageError as error:
+            _raise_managed(error)
+            raise AssertionError("unreachable")
+
     @router.get("/social/profile")
     async def social_profile(
         identity: ManagedRequestIdentity = Depends(require_identity),
@@ -324,6 +763,7 @@ def managed_router(
     @router.delete(
         "/social/profile",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     async def delete_social_profile(
         confirmation: Annotated[
@@ -428,6 +868,7 @@ def managed_router(
     @router.delete(
         "/social/invites/{invite_id}",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     async def revoke_social_invite(
         invite_id: UUID,
@@ -545,6 +986,7 @@ def managed_router(
     @router.delete(
         "/social/friends/{friend_profile_id}",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     async def remove_social_friend(
         friend_profile_id: UUID,
@@ -562,6 +1004,7 @@ def managed_router(
     @router.post(
         "/social/blocks/{blocked_profile_id}",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     async def block_social_profile(
         blocked_profile_id: UUID,
@@ -593,6 +1036,7 @@ def managed_router(
     @router.delete(
         "/social/blocks/{blocked_profile_id}",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     async def unblock_social_profile(
         blocked_profile_id: UUID,
@@ -1470,6 +1914,12 @@ def _raise_managed(error: ManagedStorageError) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(error),
+        )
+    if isinstance(error, ManagedRateLimitError):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(error),
+            headers={"Retry-After": str(error.retry_after_seconds)},
         )
     if isinstance(error, ManagedQuotaExceededError):
         raise HTTPException(

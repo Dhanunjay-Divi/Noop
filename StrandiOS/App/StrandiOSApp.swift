@@ -1,6 +1,8 @@
 #if os(iOS)
 import FirebaseAuth
 import FirebaseCore
+import FirebaseMessaging
+import NoopRemoteSync
 import SwiftUI
 import StrandAnalytics
 import StrandDesign
@@ -8,15 +10,80 @@ import UserNotifications
 import UIKit
 import WidgetKit
 
-final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate {
+@MainActor
+enum ManagedRuntimeAuthorization {
+    static var isAllowed: Bool {
+        LaunchAccessController().isUnlocked
+            && UserDefaults.standard.string(
+                forKey: "noop.acceptedTermsVersion"
+            ) == Terms.currentVersion
+    }
+}
+
+@MainActor
+private final class ManagedSafetyBackgroundFetchCompletion {
+    private var didComplete = false
+    private let completionHandler: (UIBackgroundFetchResult) -> Void
+    var catchUpTask: Task<Void, Never>?
+    var deadlineTask: Task<Void, Never>?
+
+    init(_ completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        self.completionHandler = completionHandler
+    }
+
+    func finish(
+        _ result: UIBackgroundFetchResult,
+        deadlineWon: Bool
+    ) {
+        guard !didComplete else { return }
+        didComplete = true
+        if deadlineWon {
+            catchUpTask?.cancel()
+        } else {
+            deadlineTask?.cancel()
+        }
+        catchUpTask = nil
+        deadlineTask = nil
+        completionHandler(result)
+    }
+}
+
+final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
+    MessagingDelegate {
+    private static let managedSafetyBackgroundDeadline: Duration = .seconds(20)
     private var pendingAPNSToken: Data?
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions:
+            [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        guard launchOptions?[.location] != nil else { return true }
+        Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else { return }
+            ManagedCloudService.shared.bootstrap()
+        }
+        return true
+    }
 
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         pendingAPNSToken = deviceToken
-        forwardPendingAPNSTokenIfPossible()
+        Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_token_refresh",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                return
+            }
+            forwardPendingAPNSTokenIfPossible()
+        }
     }
 
     func application(
@@ -24,10 +91,73 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        _ = Self.configuredAuths().contains {
-            $0.canHandleNotification(userInfo)
+        Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_received",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                completionHandler(.noData)
+                return
+            }
+            _ = Self.configuredAuths().contains {
+                $0.canHandleNotification(userInfo)
+            }
+            guard let incidentID = ManagedSafetyPushPayload.incidentID(
+                from: userInfo
+            ) else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_received",
+                    fields: [
+                        "outcome": "rejected",
+                        "failure_kind": "invalid_payload",
+                    ]
+                )
+                completionHandler(.noData)
+                return
+            }
+            NotificationRouteBridge.recordPending(.safety)
+            Self.startManagedSafetyBackgroundCatchUp(
+                incidentID: incidentID,
+                completionHandler: completionHandler
+            )
         }
-        completionHandler(.noData)
+    }
+
+    @MainActor
+    private static func startManagedSafetyBackgroundCatchUp(
+        incidentID: UUID,
+        completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        let completion = ManagedSafetyBackgroundFetchCompletion(
+            completionHandler
+        )
+        completion.catchUpTask = Task { @MainActor in
+            let updated = await ManagedCloudService.shared
+                .handleManagedSafetyPush(incidentID: incidentID)
+            completion.finish(
+                updated ? .newData : .failed,
+                deadlineWon: false
+            )
+        }
+        completion.deadlineTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: managedSafetyBackgroundDeadline)
+            } catch {
+                return
+            }
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.push_received",
+                fields: [
+                    "outcome": "failed",
+                    "failure_kind": "background_deadline",
+                ]
+            )
+            completion.finish(.failed, deadlineWon: true)
+        }
     }
 
     func application(
@@ -38,16 +168,56 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         Self.handleOpenURL(url)
     }
 
+    @MainActor
     func forwardPendingAPNSTokenIfPossible() {
+        guard ManagedRuntimeAuthorization.isAllowed else { return }
         guard let pendingAPNSToken else { return }
         Self.configuredAuths().forEach {
             $0.setAPNSToken(pendingAPNSToken, type: .unknown)
         }
+        if FirebaseApp.app() != nil {
+            Messaging.messaging().apnsToken = pendingAPNSToken
+        }
     }
 
+    @MainActor
     static func forwardPendingAPNSTokenIfPossible() {
         (UIApplication.shared.delegate as? ManagedFirebaseApplicationDelegate)?
             .forwardPendingAPNSTokenIfPossible()
+    }
+
+    @MainActor
+    static func configureManagedMessagingIfPossible() {
+        guard ManagedRuntimeAuthorization.isAllowed else { return }
+        guard FirebaseApp.app() != nil,
+              let delegate = UIApplication.shared.delegate
+                as? ManagedFirebaseApplicationDelegate else {
+            return
+        }
+        Messaging.messaging().delegate = delegate
+        delegate.forwardPendingAPNSTokenIfPossible()
+    }
+
+    func messaging(
+        _ messaging: Messaging,
+        didReceiveRegistrationToken registrationID: String?
+    ) {
+        guard let registrationID, !registrationID.isEmpty else { return }
+        Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_token_refresh",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                return
+            }
+            await ManagedCloudService.shared.registerManagedPushToken(
+                registrationID
+            )
+        }
     }
 
     static func handleOpenURL(_ url: URL) -> Bool {
@@ -66,6 +236,7 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate 
         }
         return values
     }
+
 }
 
 /// iOS entry point. Unlike the macOS app (which adds a `MenuBarExtra` scene), iOS uses a single
@@ -195,6 +366,9 @@ struct StrandiOSApp: App {
         _model = StateObject(wrappedValue: model)
         ManagedCloudService.shared.configureSocialPokeHaptic { [weak model] in
             model?.requestManagedSocialPokeHaptic() ?? false
+        }
+        if operationallyAllowed {
+            ManagedCloudService.shared.bootstrap()
         }
         let bridge = HealthKitBridge(
             repo: model.repo,
@@ -525,6 +699,14 @@ struct StrandiOSApp: App {
                         router.openFriends()
                         return
                     }
+                    if ManagedCloudService.shared.stageSafetyInviteLink(url) {
+                        guard launchAccess.isUnlocked,
+                              acceptedTermsVersion == Terms.currentVersion else {
+                            return
+                        }
+                        NotificationRouteBridge.recordPending(.safety)
+                        return
+                    }
                     guard launchAccess.isUnlocked,
                           acceptedTermsVersion == Terms.currentVersion else { return }
                     if let destination = NOOPWidgetDestination(url: url) {
@@ -770,6 +952,7 @@ struct StrandiOSApp: App {
         guard launchAccess.isUnlocked,
               acceptedTermsVersion == Terms.currentVersion else { return }
         model.startOperationalWorkAfterLaunchAccess()
+        ManagedCloudService.shared.bootstrap()
         ScheduledDebugExport.activateIfEnabled()
         health.registerObserversAtLaunchIfPreviouslyRequested()
         configureWatchHandlers()

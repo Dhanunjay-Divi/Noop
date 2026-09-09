@@ -81,7 +81,7 @@ resource "google_sql_database" "noop" {
 }
 
 resource "google_cloud_run_v2_job" "migrate" {
-  count = local.runtime_workloads_enabled ? 1 : 0
+  count = local.migration_workloads_enabled ? 1 : 0
 
   project             = var.project_id
   name                = "${local.prefix}-migrate"
@@ -102,10 +102,14 @@ resource "google_cloud_run_v2_job" "migrate" {
       }
 
       containers {
-        image   = var.runtime_image
+        image   = local.migration_image
         command = ["python"]
         args    = ["-m", "app.migrate"]
 
+        env {
+          name  = "NOOP_RUNTIME_RELEASE"
+          value = local.migration_release_marker
+        }
         env {
           name  = "NOOP_DATABASE_ENGINE"
           value = "postgresql"
@@ -153,6 +157,31 @@ resource "google_cloud_run_v2_job" "migrate" {
   ]
 }
 
+resource "terraform_data" "migration_execution" {
+  count = local.migration_workloads_enabled ? 1 : 0
+
+  input = {
+    release_marker = local.migration_release_marker
+  }
+  triggers_replace = [local.migration_release_marker]
+
+  provisioner "local-exec" {
+    command     = "exec \"${path.module}/scripts/run-migration.sh\""
+    interpreter = ["/usr/bin/env", "bash", "-c"]
+    working_dir = path.module
+    quiet       = true
+
+    environment = {
+      NOOP_MIGRATION_JOB            = google_cloud_run_v2_job.migrate[0].name
+      NOOP_MIGRATION_PROJECT_ID     = var.project_id
+      NOOP_MIGRATION_REGION         = var.region
+      NOOP_MIGRATION_RELEASE_MARKER = local.migration_release_marker
+    }
+  }
+
+  depends_on = [google_cloud_run_v2_job.migrate]
+}
+
 resource "google_cloud_run_v2_service" "api" {
   count = var.enable_private_api ? 1 : 0
 
@@ -182,6 +211,10 @@ resource "google_cloud_run_v2_service" "api" {
     containers {
       image = var.runtime_image
 
+      env {
+        name  = "NOOP_RUNTIME_RELEASE"
+        value = local.runtime_release_marker
+      }
       ports {
         container_port = 8080
       }
@@ -278,7 +311,7 @@ resource "google_cloud_run_v2_service" "api" {
   }
 
   depends_on = [
-    google_cloud_run_v2_job.migrate,
+    terraform_data.migration_execution,
     google_project_iam_member.api_cloud_sql_client,
     google_secret_manager_secret_iam_member.api_admin_token,
     google_secret_manager_secret_iam_member.api_database_url,
@@ -320,6 +353,10 @@ resource "google_cloud_run_v2_service" "managed_api" {
         "exec uvicorn app.managed_main:app --host 0.0.0.0 --port 8080 --no-access-log",
       ]
 
+      env {
+        name  = "NOOP_RUNTIME_RELEASE"
+        value = local.runtime_release_marker
+      }
       ports {
         container_port = 8080
       }
@@ -355,6 +392,18 @@ resource "google_cloud_run_v2_service" "managed_api" {
       env {
         name  = "NOOP_MANAGED_STORAGE_ENABLED"
         value = "true"
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
+        value = "5"
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_MAX_CONCURRENCY"
+        value = "6"
       }
       env {
         name  = "NOOP_MANAGED_ENTITLEMENT_MODE"
@@ -438,6 +487,28 @@ resource "google_cloud_run_v2_service" "managed_api" {
           }
         }
       }
+      env {
+        name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed_push_token_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"
+        value = var.managed_push_token_write_version
+      }
 
       resources {
         limits = {
@@ -480,9 +551,12 @@ resource "google_cloud_run_v2_service" "managed_api" {
   }
 
   depends_on = [
-    google_cloud_run_v2_job.migrate,
+    terraform_data.migration_execution,
     google_project_iam_member.managed_api_cloud_sql_client,
+    google_project_iam_member.managed_api_push_sender,
     google_secret_manager_secret_iam_member.managed_api_database_url,
+    google_secret_manager_secret_iam_member.managed_api_push_token_secret,
+    google_secret_manager_secret_iam_member.managed_api_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_api_replay_secret,
     google_storage_bucket_iam_member.managed_api_raw_creator,
     google_storage_bucket_iam_member.managed_api_raw_reader,
@@ -536,6 +610,10 @@ resource "google_cloud_run_v2_service" "ownership_api" {
         "exec uvicorn app.ownership_main:app --host 0.0.0.0 --port 8080 --no-access-log",
       ]
 
+      env {
+        name  = "NOOP_RUNTIME_RELEASE"
+        value = local.runtime_release_marker
+      }
       ports {
         container_port = 8080
       }
@@ -647,7 +725,7 @@ resource "google_cloud_run_v2_service" "ownership_api" {
   }
 
   depends_on = [
-    google_cloud_run_v2_job.migrate,
+    terraform_data.migration_execution,
     google_project_iam_member.ownership_api_cloud_sql_client,
     google_secret_manager_secret_iam_member.ownership_api_database_url,
   ]
@@ -686,6 +764,10 @@ resource "google_cloud_run_v2_service" "managed_processor" {
         "exec uvicorn app.managed_processor_main:app --host 0.0.0.0 --port 8080 --no-access-log",
       ]
 
+      env {
+        name  = "NOOP_RUNTIME_RELEASE"
+        value = local.runtime_release_marker
+      }
       ports {
         container_port = 8080
       }
@@ -777,7 +859,7 @@ resource "google_cloud_run_v2_service" "managed_processor" {
   }
 
   depends_on = [
-    google_cloud_run_v2_job.migrate,
+    terraform_data.migration_execution,
     google_project_iam_member.processor_cloud_sql_client,
     google_secret_manager_secret_iam_member.processor_database_url,
     google_storage_bucket_iam_member.processor_raw_reader,
@@ -821,6 +903,10 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
         args    = ["-m", "app.managed_lifecycle"]
 
         env {
+          name  = "NOOP_RUNTIME_RELEASE"
+          value = local.runtime_release_marker
+        }
+        env {
           name  = "NOOP_DATABASE_ENGINE"
           value = "postgresql"
         }
@@ -849,6 +935,18 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value = var.project_id
         }
         env {
+          name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"
+          value = "true"
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS"
+          value = "5"
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_MAX_CONCURRENCY"
+          value = "6"
+        }
+        env {
           name  = "NOOP_MANAGED_SIGNER_EMAIL"
           value = google_service_account.managed_lifecycle.email
         }
@@ -870,6 +968,28 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
             }
           }
         }
+        env {
+          name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed_push_token_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name  = "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION"
+          value = var.managed_push_token_write_version
+        }
 
         resources {
           limits = {
@@ -887,12 +1007,15 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
   }
 
   depends_on = [
-    google_cloud_run_v2_job.migrate,
+    terraform_data.migration_execution,
     google_project_iam_member.managed_lifecycle_cloud_sql_client,
     google_secret_manager_secret_iam_member.managed_lifecycle_database_url,
+    google_secret_manager_secret_iam_member.managed_lifecycle_push_token_secret,
+    google_secret_manager_secret_iam_member.managed_lifecycle_push_token_previous_secret,
     google_secret_manager_secret_iam_member.managed_lifecycle_replay_secret,
     google_storage_bucket_iam_member.managed_lifecycle_raw_deleter,
     google_project_iam_member.managed_lifecycle_identity_deleter,
+    google_project_iam_member.managed_lifecycle_push_sender,
   ]
 }
 

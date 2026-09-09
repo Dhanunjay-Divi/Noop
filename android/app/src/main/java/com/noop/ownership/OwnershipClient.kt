@@ -437,7 +437,6 @@ internal class OwnershipClient(
         val started = System.nanoTime()
         try {
             executeCancellable(builder.build()).use { response ->
-                val requestId = response.header("X-Noop-Request-ID")
                 val responseBytes = try {
                     response.readBounded(maximumBytes)
                 } catch (error: OwnershipException) {
@@ -445,7 +444,6 @@ internal class OwnershipClient(
                         routeGroup = routeGroup,
                         method = method,
                         statusCode = response.code,
-                        requestId = requestId,
                         startedNanos = started,
                         outcome = if (response.isSuccessful) "failed" else "rejected",
                     )
@@ -455,7 +453,6 @@ internal class OwnershipClient(
                     routeGroup = routeGroup,
                     method = method,
                     statusCode = response.code,
-                    requestId = requestId,
                     startedNanos = started,
                     outcome = if (response.isSuccessful) "completed" else "rejected",
                 )
@@ -506,7 +503,6 @@ internal class OwnershipClient(
                 routeGroup = routeGroup,
                 method = method,
                 statusCode = null,
-                requestId = null,
                 startedNanos = started,
                 outcome = "canceled",
             )
@@ -516,7 +512,6 @@ internal class OwnershipClient(
                 routeGroup = routeGroup,
                 method = method,
                 statusCode = null,
-                requestId = null,
                 startedNanos = started,
                 outcome = "failed",
             )
@@ -589,7 +584,6 @@ internal class OwnershipClient(
         routeGroup: String,
         method: String,
         statusCode: Int?,
-        requestId: String?,
         startedNanos: Long,
         outcome: String,
     ) {
@@ -604,7 +598,6 @@ internal class OwnershipClient(
             "outcome" to outcome,
         )
         if (statusCode != null) fields["status_code"] = statusCode.toString()
-        diagnosticRequestId(requestId)?.let { fields["server_request_id"] = it }
         AppDiagnosticsRecorder.record("ownership_http.request", fields)
     }
 
@@ -618,10 +611,6 @@ internal class OwnershipClient(
         private val LOCALE = Regex("^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8}){0,2}$")
         private val CHALLENGE = Regex("^[A-Za-z0-9_-]{43}$")
         private val INSTALLATION_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
-        internal val REQUEST_ID = Regex("^[0-9a-f]{32}$")
-
-        internal fun diagnosticRequestId(raw: String?): String? =
-            raw?.takeIf { it.matches(REQUEST_ID) }
     }
 }
 

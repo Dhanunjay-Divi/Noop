@@ -41,4 +41,48 @@ class BackgroundReconnectPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun managedSafetyReleasePreservesEveryIndependentServiceReason() {
+        assertTrue(
+            shouldStopConnectionServiceAfterManagedSafetyLocation(
+                backgroundReconnectAllowed = false,
+                gpsActive = false,
+                legacySafetyLocationActive = false,
+                managedSafetyLocationActive = false,
+            ),
+        )
+        assertFalse(
+            shouldStopConnectionServiceAfterManagedSafetyLocation(
+                backgroundReconnectAllowed = true,
+                gpsActive = false,
+                legacySafetyLocationActive = false,
+                managedSafetyLocationActive = false,
+            ),
+        )
+        assertFalse(
+            shouldStopConnectionServiceAfterManagedSafetyLocation(
+                backgroundReconnectAllowed = false,
+                gpsActive = true,
+                legacySafetyLocationActive = false,
+                managedSafetyLocationActive = false,
+            ),
+        )
+        assertFalse(
+            shouldStopConnectionServiceAfterManagedSafetyLocation(
+                backgroundReconnectAllowed = false,
+                gpsActive = false,
+                legacySafetyLocationActive = true,
+                managedSafetyLocationActive = false,
+            ),
+        )
+        assertFalse(
+            shouldStopConnectionServiceAfterManagedSafetyLocation(
+                backgroundReconnectAllowed = false,
+                gpsActive = false,
+                legacySafetyLocationActive = false,
+                managedSafetyLocationActive = true,
+            ),
+        )
+    }
 }

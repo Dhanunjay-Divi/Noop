@@ -62,6 +62,79 @@ public actor ManagedStorageClient {
     private struct InstallationResponse: Decodable {
         let installation: ManagedInstallation
     }
+    private struct PushRegistrationResponse: Decodable {
+        let registration: ManagedPushRegistrationInfo
+    }
+    private struct SafetyInviteResponse: Decodable {
+        let invite: ManagedSafetyInvite
+    }
+    private struct SafetyRequestResponse: Decodable {
+        let request: ManagedSafetyRequest
+    }
+    private struct SafetyRequestsResponse: Decodable {
+        let requests: [ManagedSafetyRequest]
+    }
+    private struct SafetyContactsResponse: Decodable {
+        let contacts: [ManagedSafetyContact]
+        let minimumRequired: Int
+        let maximumAllowed: Int
+    }
+    private struct SafetyIncidentResponse: Decodable {
+        let incident: ManagedSafetyIncident
+    }
+    private struct SafetyIncidentCreationResponse: Decodable {
+        let incident: ManagedSafetyIncident
+        let pushOutcome: String
+    }
+    private struct SafetyIncidentsResponse: Decodable {
+        let incidents: [ManagedSafetyIncident]
+    }
+    private struct SafetyLocationResponse: Decodable {
+        let location: ManagedSafetyLocation
+    }
+    private struct SafetyDeliveryResponse: Decodable {
+        let delivery: ManagedSafetyDelivery
+    }
+    private struct PushRegistrationRequest: Encodable {
+        let platform: String
+        let environment: String
+        let targetKind: String
+        let token: String
+    }
+    private struct SafetyInviteCreateRequest: Encodable {
+        let requestID: UUID
+        let capability: String
+        let expiresInHours: Int
+    }
+    private struct SafetyInviteRedeemRequest: Encodable {
+        let requestID: UUID
+        let capability: String
+    }
+    private struct SafetyRequestCreateRequest: Encodable {
+        let requestID: UUID
+        let noopID: String
+    }
+    private struct SafetyRequestDecisionRequest: Encodable {
+        let decision: String
+    }
+    private struct SafetyIncidentCreateRequest: Encodable {
+        let requestID: UUID
+        let durationHours: Int
+        let shareLocation: Bool
+    }
+    private struct SafetyLocationUpdateRequest: Encodable {
+        let sequence: Int64
+        let latitude: Double
+        let longitude: Double
+        let horizontalAccuracyM: Double
+        let capturedAt: String
+    }
+    private struct SafetyResponseRequest: Encodable {
+        let decision: String
+    }
+    private struct SafetyIncidentEndRequest: Encodable {
+        let outcome: String
+    }
     private struct SocialProfileResponse: Decodable {
         let profile: ManagedSocialProfile
     }
@@ -259,6 +332,355 @@ public actor ManagedStorageClient {
             throw ManagedStorageError.invalidResponse
         }
         return response.installation
+    }
+
+    public func registerPushInstallation(
+        platform: ManagedStoragePlatform,
+        environment: ManagedPushEnvironment,
+        targetKind: ManagedPushTargetKind,
+        token: String,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedPushRegistrationInfo {
+        let expectedTargetKind = ManagedPushTargetKind.token
+        guard targetKind == expectedTargetKind else {
+            throw ManagedStorageError.invalidResponse
+        }
+        guard token.range(
+            of: #"^[A-Za-z0-9:_-]{16,4096}$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: PushRegistrationResponse = try await send(
+            path: "v1/managed/push/installations/current",
+            method: "PUT",
+            body: PushRegistrationRequest(
+                platform: platform.rawValue,
+                environment: environment.rawValue,
+                targetKind: targetKind.rawValue,
+                token: token
+            ),
+            authorization: authorization
+        )
+        guard response.registration.installationID
+                == authorization.installationID,
+              response.registration.platform == platform,
+              response.registration.environment == environment,
+              response.registration.targetKind == targetKind,
+              response.registration.status == "active",
+              ManagedTimestamp.milliseconds(
+                  iso8601: response.registration.updatedAt
+              ) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.registration
+    }
+
+    public func revokePushInstallation(
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/push/installations/current",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func createSafetyInvite(
+        capability: String,
+        expiresInHours: Int = 72,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyInvite {
+        guard ManagedSafetyIdentifier.valid(capability),
+              (1...168).contains(expiresInHours) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SafetyInviteResponse = try await send(
+            path: "v1/managed/safety/invites",
+            method: "POST",
+            body: SafetyInviteCreateRequest(
+                requestID: requestID,
+                capability: capability,
+                expiresInHours: expiresInHours
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.invite, expectedCapability: capability)
+        return response.invite
+    }
+
+    public func revokeSafetyInvite(
+        _ inviteID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/safety/invites/\(inviteID.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func redeemSafetyInvite(
+        capability: String,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyRequest {
+        guard ManagedSafetyIdentifier.valid(capability) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SafetyRequestResponse = try await send(
+            path: "v1/managed/safety/invites:redeem",
+            method: "POST",
+            body: SafetyInviteRedeemRequest(
+                requestID: requestID,
+                capability: capability
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func createSafetyRequest(
+        noopID: String,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyRequest {
+        guard let canonical = ManagedSocialIdentifier.canonicalNOOPID(noopID) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SafetyRequestResponse = try await send(
+            path: "v1/managed/safety/requests",
+            method: "POST",
+            body: SafetyRequestCreateRequest(
+                requestID: requestID,
+                noopID: canonical
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func safetyRequests(
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSafetyRequest] {
+        let response: SafetyRequestsResponse = try await send(
+            path: "v1/managed/safety/requests",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.requests.count <= 100 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.requests.forEach(Self.validate)
+        return response.requests
+    }
+
+    public func decideSafetyRequest(
+        _ requestID: UUID,
+        accept: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyRequest {
+        let response: SafetyRequestResponse = try await send(
+            path: "v1/managed/safety/requests/\(requestID.uuidString.lowercased())",
+            method: "POST",
+            body: SafetyRequestDecisionRequest(
+                decision: accept ? "accept" : "decline"
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.request)
+        return response.request
+    }
+
+    public func safetyContacts(
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyContacts {
+        let response: SafetyContactsResponse = try await send(
+            path: "v1/managed/safety/contacts",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.minimumRequired == 2,
+              response.maximumAllowed == 5,
+              response.contacts.count <= 25 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.contacts.forEach(Self.validate)
+        return ManagedSafetyContacts(
+            contacts: response.contacts,
+            minimumRequired: response.minimumRequired,
+            maximumAllowed: response.maximumAllowed
+        )
+    }
+
+    public func removeSafetyContact(
+        _ profileID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws {
+        try await sendWithoutResponse(
+            path: "v1/managed/safety/contacts/\(profileID.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+    }
+
+    public func createSafetyIncident(
+        durationHours: Int,
+        shareLocation: Bool,
+        requestID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyIncidentCreation {
+        guard [8, 12].contains(durationHours) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SafetyIncidentCreationResponse = try await send(
+            path: "v1/managed/safety/incidents",
+            method: "POST",
+            body: SafetyIncidentCreateRequest(
+                requestID: requestID,
+                durationHours: durationHours,
+                shareLocation: shareLocation
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.incident)
+        guard ["attempted", "deferred", "not_configured"].contains(
+            response.pushOutcome
+        ) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return ManagedSafetyIncidentCreation(
+            incident: response.incident,
+            pushOutcome: response.pushOutcome
+        )
+    }
+
+    public func safetyIncidents(
+        authorization: ManagedAuthorization
+    ) async throws -> [ManagedSafetyIncident] {
+        let response: SafetyIncidentsResponse = try await send(
+            path: "v1/managed/safety/incidents",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.incidents.count <= 30 else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try response.incidents.forEach(Self.validate)
+        return response.incidents
+    }
+
+    public func safetyIncident(
+        _ incidentID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyIncident {
+        let response: SafetyIncidentResponse = try await send(
+            path: "v1/managed/safety/incidents/\(incidentID.uuidString.lowercased())",
+            method: "GET",
+            authorization: authorization
+        )
+        guard response.incident.incidentID == incidentID else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try Self.validate(response.incident)
+        return response.incident
+    }
+
+    public func updateSafetyLocation(
+        incidentID: UUID,
+        sequence: Int64,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyM: Double,
+        capturedAt: String,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyLocation {
+        guard sequence > 0,
+              latitude.isFinite,
+              (-90.0...90.0).contains(latitude),
+              longitude.isFinite,
+              (-180.0...180.0).contains(longitude),
+              horizontalAccuracyM.isFinite,
+              (0.0...10_000.0).contains(horizontalAccuracyM),
+              ManagedTimestamp.milliseconds(iso8601: capturedAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+        let response: SafetyLocationResponse = try await send(
+            path: "v1/managed/safety/incidents/"
+                + "\(incidentID.uuidString.lowercased())/location",
+            method: "PUT",
+            body: SafetyLocationUpdateRequest(
+                sequence: sequence,
+                latitude: latitude,
+                longitude: longitude,
+                horizontalAccuracyM: horizontalAccuracyM,
+                capturedAt: capturedAt
+            ),
+            authorization: authorization
+        )
+        try Self.validate(response.location)
+        return response.location
+    }
+
+    public func respondToSafetyIncident(
+        _ incidentID: UUID,
+        responding: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyIncident {
+        let response: SafetyIncidentResponse = try await send(
+            path: "v1/managed/safety/incidents/"
+                + "\(incidentID.uuidString.lowercased())/response",
+            method: "POST",
+            body: SafetyResponseRequest(
+                decision: responding ? "responding" : "cannot_respond"
+            ),
+            authorization: authorization
+        )
+        guard response.incident.incidentID == incidentID else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try Self.validate(response.incident)
+        return response.incident
+    }
+
+    public func endSafetyIncident(
+        _ incidentID: UUID,
+        resolved: Bool,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyIncident {
+        let response: SafetyIncidentResponse = try await send(
+            path: "v1/managed/safety/incidents/"
+                + "\(incidentID.uuidString.lowercased()):end",
+            method: "POST",
+            body: SafetyIncidentEndRequest(
+                outcome: resolved ? "resolved" : "canceled"
+            ),
+            authorization: authorization
+        )
+        guard response.incident.incidentID == incidentID else {
+            throw ManagedStorageError.invalidResponse
+        }
+        try Self.validate(response.incident)
+        return response.incident
+    }
+
+    public func retrySafetyPush(
+        _ incidentID: UUID,
+        authorization: ManagedAuthorization
+    ) async throws -> ManagedSafetyDelivery {
+        let response: SafetyDeliveryResponse = try await send(
+            path: "v1/managed/safety/incidents/"
+                + "\(incidentID.uuidString.lowercased()):retry-push",
+            method: "POST",
+            authorization: authorization
+        )
+        guard Self.valid(response.delivery) else {
+            throw ManagedStorageError.invalidResponse
+        }
+        return response.delivery
     }
 
     public func createSocialProfile(
@@ -1319,6 +1741,141 @@ public actor ManagedStorageClient {
                 CharacterSet(charactersIn: "-._~")
             )
         ) ?? ""
+    }
+
+    private static func validate(
+        _ invite: ManagedSafetyInvite,
+        expectedCapability: String
+    ) throws {
+        guard invite.capability == expectedCapability,
+              ManagedSafetyIdentifier.valid(invite.capability),
+              ["active", "revoked", "redeemed", "expired"].contains(
+                  invite.status
+              ),
+              ManagedTimestamp.milliseconds(iso8601: invite.createdAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: invite.expiresAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ request: ManagedSafetyRequest) throws {
+        guard !request.displayName.isEmpty,
+              request.displayName.count <= 64,
+              ["incoming", "outgoing"].contains(request.direction),
+              ["noop_id", "invite"].contains(request.source),
+              [
+                  "pending",
+                  "accepted",
+                  "declined",
+                  "canceled",
+                  "expired",
+              ].contains(request.status),
+              ManagedTimestamp.milliseconds(iso8601: request.createdAt) != nil,
+              request.decidedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              ManagedTimestamp.milliseconds(iso8601: request.expiresAt) != nil,
+              (request.status == "pending") == (request.decidedAt == nil) else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ contact: ManagedSafetyContact) throws {
+        guard !contact.displayName.isEmpty,
+              contact.displayName.count <= 64,
+              ["contact", "owner"].contains(contact.role),
+              ManagedTimestamp.milliseconds(iso8601: contact.acceptedAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ location: ManagedSafetyLocation) throws {
+        guard location.sequence > 0,
+              location.latitude.isFinite,
+              (-90.0...90.0).contains(location.latitude),
+              location.longitude.isFinite,
+              (-180.0...180.0).contains(location.longitude),
+              location.horizontalAccuracyM.isFinite,
+              (0.0...10_000.0).contains(location.horizontalAccuracyM),
+              ManagedTimestamp.milliseconds(iso8601: location.capturedAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: location.receivedAt) != nil else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func validate(_ participant: ManagedSafetyParticipant) throws {
+        guard !participant.displayName.isEmpty,
+              participant.displayName.count <= 64,
+              [
+                  "pending",
+                  "responding",
+                  "cannot_respond",
+                  "revoked",
+              ].contains(participant.status),
+              ManagedTimestamp.milliseconds(iso8601: participant.pagedAt) != nil,
+              participant.respondedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              (participant.status == "pending")
+                == (participant.respondedAt == nil),
+              !participant.push.reached || participant.push.configured else {
+            throw ManagedStorageError.invalidResponse
+        }
+    }
+
+    private static func valid(_ delivery: ManagedSafetyDelivery) -> Bool {
+        delivery.contactsTargeted >= 0
+            && delivery.contactsReached >= 0
+            && delivery.installationsTargeted >= 0
+            && delivery.installationsReached >= 0
+            && delivery.contactsReached <= delivery.contactsTargeted
+            && delivery.installationsReached
+                <= delivery.installationsTargeted
+            && delivery.contactsReached
+                <= delivery.installationsReached
+    }
+
+    private static func validate(_ incident: ManagedSafetyIncident) throws {
+        let active = ["open", "acknowledged"].contains(incident.status)
+        let terminal = ["resolved", "canceled", "expired"].contains(
+            incident.status
+        )
+        let participantCountIsValid = incident.role == "owner"
+            ? (0...5).contains(incident.participants.count)
+            : incident.participants.count == 1
+        guard ["owner", "contact"].contains(incident.role),
+              !incident.ownerDisplayName.isEmpty,
+              incident.ownerDisplayName.count <= 64,
+              incident.trigger == "manual_sos",
+              active || terminal,
+              [8, 12].contains(incident.durationHours),
+              ManagedTimestamp.milliseconds(iso8601: incident.createdAt) != nil,
+              ManagedTimestamp.milliseconds(iso8601: incident.expiresAt) != nil,
+              incident.acknowledgedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              incident.endedAt.map({
+                  ManagedTimestamp.milliseconds(iso8601: $0) != nil
+              }) ?? true,
+              participantCountIsValid,
+              Set(incident.participants.map(\.profileID)).count
+                == incident.participants.count,
+              incident.participants.allSatisfy({
+                  (try? validate($0)) != nil
+              }),
+              incident.location.map({
+                  (try? validate($0)) != nil
+              }) ?? true,
+              !incident.shareLocation || active || incident.location == nil,
+              incident.status != "open" || incident.acknowledgedAt == nil,
+              incident.status != "acknowledged"
+                || incident.acknowledgedAt != nil,
+              active == (incident.endedAt == nil),
+              incident.role != "owner"
+                || incident.delivery.map(valid) == true,
+              incident.role != "contact" || incident.delivery == nil else {
+            throw ManagedStorageError.invalidResponse
+        }
     }
 
     private static func validate(_ profile: ManagedSocialProfile) throws {

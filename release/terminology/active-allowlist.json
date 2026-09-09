@@ -3224,12 +3224,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 10,
+      "occurrenceCount": 12,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "302b64a57dd27c0470ad06c0cc3d43834c2b0e4406e699e6d149ac3e0f1c0dc6"
+      "sha256": "d5a3e59c981ccc4841eb3f970b4ebe1f9b0d08af5f340f04e8c51b47ce7b1b0c"
     },
     {
       "category": "core",

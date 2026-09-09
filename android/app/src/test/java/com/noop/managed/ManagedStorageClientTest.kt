@@ -789,6 +789,258 @@ class ManagedStorageClientTest {
         }
     }
 
+    @Test
+    fun managedSafetyContractIsBoundedAndLocationIsLatestOnly() = runTest {
+        val ownerId = UUID.fromString("00000000-0000-0000-0000-000000000101")
+        val firstId = UUID.fromString("00000000-0000-0000-0000-000000000102")
+        val secondId = UUID.fromString("00000000-0000-0000-0000-000000000103")
+        val incidentId = UUID.fromString("00000000-0000-0000-0000-000000000104")
+        val token = "fcm-token:ABC_def-1234567890"
+        val client = ManagedStorageClient(
+            config,
+            client { request ->
+                val body = when (request.url.encodedPath) {
+                    "/v1/managed/push/installations/current" -> {
+                        val requestBody = request.jsonBody()
+                        assertEquals("android", requestBody.getString("platform"))
+                        assertEquals(
+                            "development",
+                            requestBody.getString("environment"),
+                        )
+                        assertEquals(
+                            "token",
+                            requestBody.getString("target_kind"),
+                        )
+                        assertEquals(token, requestBody.getString("token"))
+                        JSONObject().put(
+                            "registration",
+                            JSONObject()
+                                .put("installation_id", "android-installation")
+                                .put("platform", "android")
+                                .put("environment", "development")
+                                .put("target_kind", "token")
+                                .put("status", "active")
+                                .put("updated_at", "2026-09-08T10:00:00Z")
+                                .put("duplicate", false),
+                        )
+                    }
+                    "/v1/managed/safety/contacts" -> JSONObject()
+                        .put(
+                            "contacts",
+                            org.json.JSONArray()
+                                .put(safetyContact(firstId, "First"))
+                                .put(safetyContact(secondId, "Second")),
+                        )
+                        .put("minimum_required", 2)
+                        .put("maximum_allowed", 5)
+                    "/v1/managed/safety/incidents" -> {
+                        val requestBody = request.jsonBody()
+                        assertEquals(8, requestBody.getInt("duration_hours"))
+                        assertTrue(requestBody.getBoolean("share_location"))
+                        JSONObject()
+                            .put(
+                                "incident",
+                                safetyIncident(
+                                    incidentId,
+                                    ownerId,
+                                    firstId,
+                                    secondId,
+                                ),
+                            )
+                            .put("push_outcome", "attempted")
+                    }
+                    "/v1/managed/safety/incidents/" +
+                        "${incidentId.toString().lowercase()}/location" -> {
+                        val requestBody = request.jsonBody()
+                        assertEquals(99L, requestBody.getLong("sequence"))
+                        JSONObject().put(
+                            "location",
+                            JSONObject()
+                                .put("sequence", 3)
+                                .put("latitude", 17.385)
+                                .put("longitude", 78.4867)
+                                .put("horizontal_accuracy_m", 12.5)
+                                .put("captured_at", "2026-09-08T10:01:00Z")
+                                .put("received_at", "2026-09-08T10:01:01Z")
+                                .put("duplicate", false),
+                        )
+                    }
+                    else -> error("Unexpected request ${request.url.encodedPath}")
+                }
+                response(request, 200, body.toString())
+            },
+        )
+
+        val registration = client.registerPushInstallation(
+            authorization,
+            ManagedPushEnvironment.DEVELOPMENT,
+            token,
+        )
+        assertEquals("android-installation", registration.installationId)
+        assertEquals("token", registration.targetKind)
+        assertEquals(2, client.safetyContacts(authorization).contacts.size)
+        val creation = client.createSafetyIncident(
+            authorization = authorization,
+            requestId = UUID.randomUUID(),
+            durationHours = 8,
+            shareLocation = true,
+        )
+        assertEquals(incidentId, creation.incident.incidentId)
+        assertEquals("attempted", creation.pushOutcome)
+        val location = client.updateSafetyLocation(
+            authorization = authorization,
+            incidentId = incidentId,
+            sequence = 99,
+            latitude = 17.385,
+            longitude = 78.4867,
+            horizontalAccuracyM = 12.5,
+            capturedAt = "2026-09-08T10:01:00Z",
+        )
+        assertEquals(3L, location.sequence)
+    }
+
+    @Test
+    fun retainedOwnerIncidentAllowsErasedParticipants() = runTest {
+        val incidentId = UUID.fromString("00000000-0000-0000-0000-000000000204")
+        val ownerId = UUID.fromString("00000000-0000-0000-0000-000000000205")
+        val participantId =
+            UUID.fromString("00000000-0000-0000-0000-000000000206")
+
+        for (participantCount in 0..1) {
+            val client = ManagedStorageClient(
+                config,
+                client { request ->
+                    assertEquals(
+                        "/v1/managed/safety/incidents",
+                        request.url.encodedPath,
+                    )
+                    val participants = org.json.JSONArray()
+                    if (participantCount == 1) {
+                        participants.put(
+                            JSONObject()
+                                .put("profile_id", participantId.toString())
+                                .put("display_name", "Former contact")
+                                .put("status", "revoked")
+                                .put("paged_at", "2026-09-08T10:00:00Z")
+                                .put("responded_at", "2026-09-08T10:05:00Z")
+                                .put(
+                                    "push",
+                                    JSONObject()
+                                        .put("configured", false)
+                                        .put("reached", false),
+                                ),
+                        )
+                    }
+                    val incident = JSONObject()
+                        .put("incident_id", incidentId.toString())
+                        .put("role", "owner")
+                        .put("owner_profile_id", ownerId.toString())
+                        .put("owner_display_name", "Owner")
+                        .put("trigger", "manual_sos")
+                        .put("status", "expired")
+                        .put("duration_hours", 8)
+                        .put("share_location", false)
+                        .put("created_at", "2026-09-08T10:00:00Z")
+                        .put("expires_at", "2026-09-08T18:00:00Z")
+                        .put("acknowledged_at", JSONObject.NULL)
+                        .put("ended_at", "2026-09-08T18:00:00Z")
+                        .put("participants", participants)
+                        .put("location", JSONObject.NULL)
+                        .put(
+                            "delivery",
+                            JSONObject()
+                                .put("contacts_targeted", 0)
+                                .put("contacts_reached", 0)
+                                .put("installations_targeted", 0)
+                                .put("installations_reached", 0)
+                                .put("installations_retryable", 0)
+                                .put("installations_terminal", 0),
+                        )
+                        .put("duplicate", false)
+                    response(
+                        request,
+                        200,
+                        JSONObject()
+                            .put(
+                                "incidents",
+                                org.json.JSONArray().put(incident),
+                            )
+                            .toString(),
+                    )
+                },
+            )
+
+            val incidents = client.safetyIncidents(authorization)
+
+            assertEquals(1, incidents.size)
+            assertEquals(participantCount, incidents.single().participants.size)
+        }
+    }
+
+    private fun safetyContact(profileId: UUID, name: String): JSONObject =
+        JSONObject()
+            .put("profile_id", profileId.toString())
+            .put("display_name", name)
+            .put("role", "contact")
+            .put("accepted_at", "2026-09-08T09:00:00Z")
+
+    private fun safetyIncident(
+        incidentId: UUID,
+        ownerId: UUID,
+        firstId: UUID,
+        secondId: UUID,
+    ): JSONObject = JSONObject()
+        .put("incident_id", incidentId.toString())
+        .put("role", "owner")
+        .put("owner_profile_id", ownerId.toString())
+        .put("owner_display_name", "Owner")
+        .put("trigger", "manual_sos")
+        .put("status", "open")
+        .put("duration_hours", 8)
+        .put("share_location", true)
+        .put("created_at", "2026-09-08T10:00:00Z")
+        .put("expires_at", "2026-09-08T18:00:00Z")
+        .put("acknowledged_at", JSONObject.NULL)
+        .put("ended_at", JSONObject.NULL)
+        .put(
+            "participants",
+            org.json.JSONArray()
+                .put(safetyParticipant(firstId, "First", true))
+                .put(safetyParticipant(secondId, "Second", false)),
+        )
+        .put("location", JSONObject.NULL)
+        .put(
+            "delivery",
+            JSONObject()
+                .put("contacts_targeted", 2)
+                .put("contacts_reached", 1)
+                .put("installations_targeted", 2)
+                .put("installations_reached", 1)
+                .put("installations_retryable", 1)
+                .put("installations_terminal", 0),
+        )
+        .put("duplicate", false)
+
+    private fun safetyParticipant(
+        profileId: UUID,
+        name: String,
+        reached: Boolean,
+    ): JSONObject = JSONObject()
+        .put("profile_id", profileId.toString())
+        .put("display_name", name)
+        .put("status", "pending")
+        .put("paged_at", "2026-09-08T10:00:00Z")
+        .put("responded_at", JSONObject.NULL)
+        .put(
+            "push",
+            JSONObject()
+                .put("configured", true)
+                .put("reached", reached),
+        )
+
+    private fun Request.jsonBody(): JSONObject =
+        JSONObject(okio.Buffer().also { body!!.writeTo(it) }.readUtf8())
+
     private fun client(block: (Request) -> Response): OkHttpClient =
         OkHttpClient.Builder().addInterceptor(Interceptor { chain -> block(chain.request()) }).build()
 

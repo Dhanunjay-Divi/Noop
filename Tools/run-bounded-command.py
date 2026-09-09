@@ -9,6 +9,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -16,6 +17,8 @@ TIMEOUT_EXIT_CODE = 124
 START_FAILURE_EXIT_CODE = 127
 MAX_TIMEOUT_SECONDS = 3_600
 MAX_GRACE_SECONDS = 60
+DEFAULT_HEARTBEAT_SECONDS = 60
+MAX_HEARTBEAT_SECONDS = 300
 FINAL_KILL_WAIT_SECONDS = 10
 SAFE_LABEL = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 
@@ -57,6 +60,7 @@ def run_command(
     grace_seconds: float,
     label: str,
     status_file: Path | None = None,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
 ) -> int:
     if not command:
         raise ValueError("command is required")
@@ -66,6 +70,8 @@ def run_command(
         raise ValueError("timeout is invalid")
     if not 0 < grace_seconds <= MAX_GRACE_SECONDS:
         raise ValueError("grace period is invalid")
+    if not 0 < heartbeat_seconds <= MAX_HEARTBEAT_SECONDS:
+        raise ValueError("heartbeat interval is invalid")
 
     try:
         process = subprocess.Popen(command, start_new_session=True)
@@ -83,9 +89,26 @@ def run_command(
         )
         return START_FAILURE_EXIT_CODE
 
-    try:
-        exit_code = process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
+    deadline = time.monotonic() + timeout_seconds
+    heartbeat = 0
+    exit_code: int | None = None
+    while exit_code is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            exit_code = process.wait(timeout=min(heartbeat_seconds, remaining))
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                break
+            heartbeat += 1
+            print(
+                f"bounded-command: label={label} status=running heartbeat={heartbeat}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    if exit_code is None:
         print(
             f"bounded-command: label={label} status=timeout",
             file=sys.stderr,
@@ -122,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout-seconds", type=int, required=True)
     parser.add_argument("--grace-seconds", type=int, default=30)
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=int,
+        default=DEFAULT_HEARTBEAT_SECONDS,
+    )
     parser.add_argument("--label", required=True)
     parser.add_argument("--status-file", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -137,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             grace_seconds=arguments.grace_seconds,
             label=arguments.label,
             status_file=arguments.status_file,
+            heartbeat_seconds=arguments.heartbeat_seconds,
         )
     except ValueError as error:
         parser.error(str(error))

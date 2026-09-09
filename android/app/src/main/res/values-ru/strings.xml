@@ -360,4 +360,6 @@
     <string name="strength_signal_honesty">Пульс описывает реакцию сердечно-сосудистой системы. Повторы и вес берутся только из ваших записей.</string>
     <string name="changelog_clearer_updates_and_reports_9_2_1">Понятные обновления и отчёты, которые помогают исправлять проблемы</string>
     <string name="whats_new_welcome_version">Добро пожаловать в версию %1$s</string>
+    <string name="managed_friends_delete_body">Дружеские связи, приглашения, общие сводки, значки, ожидающие подталкивания, контакты Safety, приглашения Safety и история инцидентов Safety будут удалены. Все активные оповещения Safety и передача местоположения завершатся. Резервная копия NOOP+ и данные на устройстве не изменятся.</string>
+    <string name="managed_cloud_error_forbidden">NOOP+ не разрешил это действие.</string>
 </resources>

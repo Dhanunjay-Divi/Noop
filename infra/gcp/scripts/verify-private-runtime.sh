@@ -15,9 +15,36 @@ project_id="$(tofu -chdir="${INFRA_DIR}" output -raw project_id)"
 region="$(tofu -chdir="${INFRA_DIR}" output -raw region)"
 instance="$(tofu -chdir="${INFRA_DIR}" output -raw database_instance)"
 service_name="$(tofu -chdir="${INFRA_DIR}" output -raw private_api_name)"
+migration_job="$(tofu -chdir="${INFRA_DIR}" output -raw migration_job)"
+migration_marker="$(
+  tofu -chdir="${INFRA_DIR}" output -raw migration_release_marker
+)"
+managed_api_output="$(tofu -chdir="${INFRA_DIR}" output -json managed_api)"
+managed_service_name="$(
+  python3 -c '
+import json
+import sys
+
+value = json.load(sys.stdin)
+if value is None:
+    print("")
+elif (
+    isinstance(value, dict)
+    and value.get("public") is False
+    and isinstance(value.get("name"), str)
+):
+    print(value["name"])
+else:
+    raise SystemExit(1)
+' <<<"${managed_api_output}"
+)"
 
 if [[ -z "${service_name}" ]]; then
   printf 'Private API is disabled.\n' >&2
+  exit 1
+fi
+if [[ -z "${migration_job}" || -z "${migration_marker}" ]]; then
+  printf 'Migration workload is disabled.\n' >&2
   exit 1
 fi
 
@@ -81,6 +108,118 @@ if {"allUsers", "allAuthenticatedUsers"} & members:
     raise SystemExit(1)
 ' <<<"${policy}"; then
   printf 'Private API has a broad invoker grant.\n' >&2
+  exit 1
+fi
+
+if [[ -n "${managed_service_name}" ]]; then
+  managed_service="$(
+    gcloud run services describe "${managed_service_name}" \
+      --project="${project_id}" \
+      --region="${region}" \
+      --format=json
+  )"
+  if ! python3 -c '
+import json
+import re
+import sys
+
+service = json.load(sys.stdin)
+conditions = service.get("status", {}).get("conditions", [])
+containers = service.get("spec", {}).get("template", {}).get("spec", {}).get(
+    "containers",
+    [],
+)
+image = containers[0].get("image", "") if containers else ""
+checks = {
+    "managed API Ready condition": any(
+        item.get("type") == "Ready" and item.get("status") == "True"
+        for item in conditions
+    ),
+    "managed API digest-pinned image": (
+        re.search(r"@sha256:[0-9a-f]{64}$", image) is not None
+    ),
+}
+failed = [name for name, passed in checks.items() if not passed]
+if failed:
+    print("Managed API checks failed: " + ", ".join(failed), file=sys.stderr)
+    raise SystemExit(1)
+' <<<"${managed_service}"; then
+    exit 1
+  fi
+
+  managed_policy="$(
+    gcloud run services get-iam-policy "${managed_service_name}" \
+      --project="${project_id}" \
+      --region="${region}" \
+      --format=json
+  )"
+  if ! python3 -c '
+import json
+import sys
+
+policy = json.load(sys.stdin)
+members = {
+    member
+    for binding in policy.get("bindings", [])
+    for member in binding.get("members", [])
+}
+if {"allUsers", "allAuthenticatedUsers"} & members:
+    raise SystemExit(1)
+' <<<"${managed_policy}"; then
+    printf 'Managed API has a broad invoker grant.\n' >&2
+    exit 1
+  fi
+fi
+
+migration="$(
+  gcloud run jobs describe "${migration_job}" \
+    --project="${project_id}" \
+    --region="${region}" \
+    --format=json
+)"
+if ! python3 -c '
+import hashlib
+import json
+import re
+import sys
+
+expected = sys.argv[1]
+job = json.load(sys.stdin)
+template = (
+    job.get("spec", {})
+    .get("template", {})
+    .get("spec", {})
+    .get("template", {})
+    .get("spec", {})
+)
+containers = template.get("containers", [])
+latest = job.get("status", {}).get("latestCreatedExecution", {})
+if len(containers) != 1:
+    raise SystemExit(1)
+container = containers[0]
+image = str(container.get("image") or "")
+environment = {
+    item.get("name"): item.get("value")
+    for item in container.get("env", [])
+    if isinstance(item, dict) and item.get("value") is not None
+}
+checks = {
+    "digest-pinned migration image": (
+        re.search(r"@sha256:[0-9a-f]{64}$", image) is not None
+    ),
+    "migration image marker": (
+        hashlib.sha256(image.encode("utf-8")).hexdigest()[:16] == expected
+        and environment.get("NOOP_RUNTIME_RELEASE") == expected
+    ),
+    "successful migration execution": (
+        latest.get("completionStatus") == "EXECUTION_SUCCEEDED"
+    ),
+}
+failed = [name for name, passed in checks.items() if not passed]
+if failed:
+    print("Migration checks failed: " + ", ".join(failed), file=sys.stderr)
+    raise SystemExit(1)
+' "${migration_marker}" <<<"${migration}"; then
   exit 1
 fi
 

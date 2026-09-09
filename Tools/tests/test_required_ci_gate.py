@@ -815,22 +815,33 @@ class RequiredCIGateTests(unittest.TestCase):
         source = (ROOT / ".github/workflows/android.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("timeout-minutes: 70", source)
-        self.assertEqual(source.count("continue-on-error: true"), 1)
+        self.assertEqual(source.count("timeout-minutes: 50"), 2)
+        self.assertEqual(source.count("continue-on-error: true"), 2)
         self.assertIn("Tools/android-managed-device-retry.py", source)
-        self.assertEqual(source.count("Tools/run-bounded-command.py"), 5)
-        self.assertEqual(source.count("--timeout-seconds 720"), 2)
-        self.assertEqual(source.count("--timeout-seconds 900"), 2)
-        self.assertEqual(source.count("--timeout-seconds 180"), 1)
-        self.assertEqual(source.count("--status-file "), 5)
-        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 7)
-        self.assertEqual(source.count("--no-configuration-cache"), 5)
+        self.assertEqual(source.count("Tools/run-bounded-command.py"), 8)
+        self.assertEqual(source.count("--timeout-seconds 1200"), 2)
+        self.assertEqual(source.count("--timeout-seconds 420"), 2)
+        self.assertEqual(source.count("--timeout-seconds 600"), 2)
+        self.assertEqual(source.count("--timeout-seconds 180"), 2)
+        self.assertEqual(source.count("--status-file "), 8)
+        self.assertEqual(source.count("app/build/noop-managed-device-status/"), 12)
+        self.assertEqual(source.count("--no-daemon"), 8)
+        self.assertEqual(source.count("--no-configuration-cache"), 8)
         self.assertIn("test_run_bounded_command.py", source)
         self.assertIn("test_android_managed_device_retry.py", source)
-        self.assertIn("assembleFullDebugAndroidTest", source)
-        self.assertIn("pixel2Api35Setup", source)
+        self.assertNotIn("Prepare managed-device artifacts", source)
+        self.assertEqual(source.count("without starting an emulator"), 2)
+        self.assertEqual(source.count("assembleFullDebugAndroidTest"), 2)
+        self.assertNotIn("pixel2Api35Setup", source)
         self.assertIn("cleanManagedDevices", source)
-        self.assertIn("--bounded-status-file ", source)
+        self.assertEqual(source.count("--bounded-status-file "), 2)
+        self.assertIn(
+            "--expected-label production-shell-instrumentation",
+            source,
+        )
+        self.assertIn("review-sample-shell:", source)
+        self.assertIn("android-production-shell-diagnostics", source)
+        self.assertIn("android-review-sample-diagnostics", source)
         self.assertIn(
             "android.testInstrumentationRunnerArguments.notClass="
             "com.noop.ui.ReviewSampleInstrumentedTest",

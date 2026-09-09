@@ -1,9 +1,9 @@
 {
   "categoryCounts": {
-    "compatibility": 1694,
-    "core": 4968,
+    "compatibility": 1697,
+    "core": 4970,
     "customer": 813,
-    "fixture": 5316,
+    "fixture": 5319,
     "generated": 13,
     "historical": 3019,
     "import": 870,
@@ -12409,7 +12409,7 @@
         172665,
         172870,
         173084,
-        173651
+        173430
       ],
       "occurrenceCount": 182,
       "path": "Strand/Resources/Localizable.xcstrings",
@@ -14569,7 +14569,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        223
+        227
       ],
       "occurrenceCount": 1,
       "path": "StrandTests/AppDiagnosticsRecorderTests.swift",
@@ -15773,11 +15773,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        471,
-        528,
-        528,
-        528,
-        529
+        1017,
+        1074,
+        1074,
+        1074,
+        1075
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -15807,8 +15807,8 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        389,
-        724
+        396,
+        731
       ],
       "occurrenceCount": 2,
       "path": "StrandTests/ScreenStateContractTests.swift",
@@ -16790,8 +16790,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        120,
-        1128
+        291,
+        1311
       ],
       "occurrenceCount": 2,
       "path": "StrandiOS/App/StrandiOSApp.swift",
@@ -16861,15 +16861,15 @@
     {
       "category": "core",
       "lineNumbers": [
-        10,
-        1161,
-        1733,
-        1738,
-        1752,
-        1759,
-        1761,
-        1837,
-        1843
+        13,
+        2270,
+        2968,
+        2973,
+        2987,
+        2994,
+        2996,
+        3072,
+        3078
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -18430,10 +18430,10 @@
       "lineNumbers": [
         136,
         138,
-        269,
-        273,
-        392,
-        396
+        302,
+        306,
+        425,
+        429
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -18447,7 +18447,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        418
+        424
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/AppDiagnosticsRecorder.kt",
@@ -18463,52 +18463,52 @@
         11,
         13,
         14,
-        52,
-        52,
-        54,
-        63,
-        182,
+        53,
+        53,
+        55,
+        64,
         183,
-        183,
-        187,
-        209,
-        239,
-        253,
-        298,
-        305,
-        311,
-        324,
-        325,
-        325,
-        325,
+        184,
+        184,
+        188,
+        210,
+        240,
+        254,
+        300,
+        307,
+        313,
         326,
+        327,
+        327,
+        327,
         328,
         330,
-        331,
-        334,
-        334,
-        345,
-        345,
-        346,
-        346,
-        349,
-        352,
-        352,
-        353,
-        353,
-        353,
+        332,
+        333,
+        336,
+        336,
+        347,
+        347,
+        348,
+        348,
+        351,
         354,
-        360,
-        366,
-        366,
-        367,
-        367,
+        354,
+        355,
+        355,
+        355,
+        356,
+        362,
+        368,
+        368,
         369,
         369,
-        370,
+        371,
+        371,
         372,
-        373,
-        373
+        374,
+        375,
+        375
       ],
       "occurrenceCount": 50,
       "path": "android/app/src/main/java/com/noop/NoopApplication.kt",
@@ -19624,8 +19624,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        49,
-        66
+        50,
+        70
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ble/BackgroundReconnectPolicy.kt",
@@ -20730,49 +20730,52 @@
       "category": "compatibility",
       "lineNumbers": [
         0,
-        66,
-        72,
-        110,
-        171,
-        302,
-        308,
-        329,
-        338,
-        344,
-        363,
-        380,
-        383,
-        395,
-        397,
-        407,
-        494,
-        512,
-        529,
+        83,
+        89,
+        127,
+        196,
+        349,
+        355,
+        376,
+        385,
+        391,
+        410,
+        427,
+        430,
+        442,
+        444,
+        454,
         538,
-        543,
-        552,
-        574,
+        558,
+        575,
+        584,
         589,
-        714,
-        782,
-        792,
-        799
+        598,
+        636,
+        647,
+        726,
+        741,
+        900,
+        970,
+        980,
+        997,
+        1024
       ],
-      "occurrenceCount": 28,
+      "occurrenceCount": 31,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
-      "sha256": "1e180c98abf702c8852ffab5e4dfd4fdc66b1d253468b435e610a332d854ae0f",
+      "sha256": "3074e443e291fd0ca12819b157df689b4057a88db0aa0de31eabd6d04bf5cd65",
       "tokenCounts": {
         "whoop": 2,
         "whoop5detected": 1,
         "whoopbleclient": 2,
-        "whoopconnectionservice": 23
+        "whoopconnectionservice": 26
       }
     },
     {
       "category": "persisted",
       "lineNumbers": [
-        273,
-        378
+        320,
+        425
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
@@ -22134,22 +22137,25 @@
     {
       "category": "core",
       "lineNumbers": [
-        20,
-        21,
-        97,
-        1640,
-        1640,
-        1649,
-        1649,
-        1662,
-        1663,
-        1664
+        26,
+        28,
+        29,
+        115,
+        1875,
+        2588,
+        2588,
+        2597,
+        2597,
+        2610,
+        2611,
+        2612
       ],
-      "occurrenceCount": 10,
+      "occurrenceCount": 12,
       "path": "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
-      "sha256": "302b64a57dd27c0470ad06c0cc3d43834c2b0e4406e699e6d149ac3e0f1c0dc6",
+      "sha256": "d5a3e59c981ccc4841eb3f970b4ebe1f9b0d08af5f340f04e8c51b47ce7b1b0c",
       "tokenCounts": {
         "whoop_source": 2,
+        "whoopconnectionservice": 2,
         "whoopdatabase": 2,
         "whooprepository": 6
       }
@@ -24772,24 +24778,24 @@
       "lineNumbers": [
         36,
         38,
-        94,
-        99,
-        341,
-        347,
-        354,
-        372,
-        378,
+        96,
+        101,
+        380,
         386,
-        394,
-        426,
-        527,
-        531,
-        534,
-        1197,
-        1205,
-        1208,
-        1209,
-        1209
+        393,
+        411,
+        417,
+        425,
+        433,
+        465,
+        566,
+        570,
+        573,
+        1236,
+        1244,
+        1247,
+        1248,
+        1248
       ],
       "occurrenceCount": 20,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -24807,7 +24813,7 @@
     {
       "category": "customer",
       "lineNumbers": [
-        529
+        568
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/ui/MainActivity.kt",
@@ -24946,7 +24952,7 @@
       "category": "core",
       "lineNumbers": [
         67,
-        1028
+        1051
       ],
       "occurrenceCount": 2,
       "path": "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
@@ -31020,6 +31026,20 @@
     {
       "category": "fixture",
       "lineNumbers": [
+        22,
+        23,
+        24
+      ],
+      "occurrenceCount": 3,
+      "path": "android/app/src/test/java/com/noop/managed/ManagedSafetyLocationContractTest.kt",
+      "sha256": "435df671731bdb590c3a316d0c7e85185178f3a1f492f16b37765080352cb37e",
+      "tokenCounts": {
+        "whoopconnectionservice": 3
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
         10
       ],
       "occurrenceCount": 1,
@@ -32678,10 +32698,10 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        159,
-        160,
-        161,
-        178
+        226,
+        227,
+        228,
+        245
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/test/java/com/noop/ui/SafetyCenterLocalizationContractTest.kt",
@@ -34107,11 +34127,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        530,
-        530,
+        531,
         531,
         532,
-        537
+        533,
+        538
       ],
       "occurrenceCount": 5,
       "path": "docs/FIRST_PRODUCTION_RELEASE_CHECKLIST.md",
@@ -34389,7 +34409,7 @@
     {
       "category": "historical",
       "lineNumbers": [
-        82
+        83
       ],
       "occurrenceCount": 1,
       "path": "docs/PRODUCTION_READINESS.md",
@@ -35034,8 +35054,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        30,
-        30
+        40,
+        40
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/INDEX.md",
@@ -36043,8 +36063,8 @@
         177,
         199,
         200,
-        422,
-        423
+        436,
+        437
       ],
       "occurrenceCount": 10,
       "path": "project.yml",
@@ -36236,7 +36256,7 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        147
+        174
       ],
       "occurrenceCount": 1,
       "path": "server/tests/test_production_deployment_contract.py",
@@ -37257,7 +37277,7 @@
       }
     }
   ],
-  "occurrenceCount": 17370,
+  "occurrenceCount": 17378,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

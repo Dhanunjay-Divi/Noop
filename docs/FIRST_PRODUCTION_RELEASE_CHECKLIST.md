@@ -63,10 +63,11 @@ position without changing its ID. This inbox intentionally starts empty.
   `ops/rounds/2026-09-05-band-ownership-onboarding.md`, 2026-09-05)
 - [ ] DEC-050 [OWNER] Confirm whether Friends is enabled in the first release.
 - [x] DEC-060 [OWNER] Include manual, user-confirmed app SOS paging to accepted
-  trusted contacts in the first public release. Share only the newest location
-  for the user's selected 8- or 12-hour incident window, and stop sharing when
-  the incident is cancelled, resolved, or expires. Band-triggered and automatic
-  origins follow their separate gates. (Evidence:
+  NOOP accounts in the first public release. Share only the newest location for
+  the user's selected 8- or 12-hour incident window, and stop sharing when the
+  incident is cancelled, resolved, disconnected, or expires. SMS/voice is a
+  later fallback; band-triggered and automatic origins follow their separate
+  gates. (Evidence:
   `ops/rounds/2026-09-07-launch-owner-decisions.md`, 2026-09-07)
 - [ ] DEC-070 [OWNER] Confirm that automatic medical, anomaly, Rhythm, SpO2,
   temperature, stress, and fall paging remains unavailable.
@@ -800,8 +801,9 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CLD-150 [ENG] Prove launch capacity and the documented 10,000-user target
   with a scaling plan beyond it.
 - [ ] CLD-160 [ENG] Add production HTTPS universal and Android app links.
-- [ ] CLD-170 [ENG] Implement opaque minimal APNs/FCM wake delivery with token
-  lifecycle and abuse controls.
+- [x] CLD-170 [ENG] Implement opaque minimal APNs/FCM wake delivery with token
+  lifecycle and abuse controls. (Evidence:
+  `ops/rounds/2026-09-08-managed-app-safety-paging.md`, 2026-09-08)
 - [ ] CLD-180 [ENG] Prove closed-app push delivery and deletion on physical
   Apple and Android devices.
 - [ ] CLD-190 [ENG] Prove NOOP+ OTP delivery, rate limits, retries, recovery,
@@ -811,11 +813,16 @@ position without changing its ID. This inbox intentionally starts empty.
 - [ ] CLD-210 [ENG] Add Friends abuse reporting, support, throttling, and
   incident operations before broader discovery.
 - [ ] CLD-220 [EXT] Complete country-specific sender, template, carrier, and
-  provider registration for manual app SOS paging.
+  provider registration for the optional SMS/voice Safety fallback.
 - [ ] CLD-230 [ENG] Prove SMS, voice, DTMF, callback, retry,
   cancellation, provider failover, worker restart, and all-contact failure.
-- [ ] CLD-240 [OWNER] Keep NOOP+ and paging enrollment disabled until every
-  applicable point above is complete.
+- [x] CLD-240 [OWNER] Keep NOOP+ health-data storage and SMS/voice paging
+  fallback disabled until their applicable gates are complete. Managed
+  app-to-app Safety paging may ship only after opaque push delivery, signed
+  physical-phone validation, security/legal review, monitoring, failover, and
+  staffed operations pass. (Evidence:
+  `ops/rounds/2026-09-07-launch-owner-decisions.md`,
+  `ops/rounds/2026-09-08-managed-app-safety-paging.md`)
 
 ## 12. Security, privacy, legal, and certification
 

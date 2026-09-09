@@ -1,7 +1,23 @@
 locals {
   prefix = "noop-${var.environment}"
+  migration_image = (
+    var.migration_image != null ? var.migration_image : var.runtime_image
+  )
+  migration_workloads_enabled = (
+    var.enable_managed_database && local.migration_image != null
+  )
   runtime_workloads_enabled = (
     var.enable_managed_database && var.runtime_image != null
+  )
+  migration_release_marker = (
+    local.migration_image == null
+    ? "disabled"
+    : substr(sha256(local.migration_image), 0, 16)
+  )
+  runtime_release_marker = (
+    var.runtime_image == null
+    ? "disabled"
+    : substr(sha256(var.runtime_image), 0, 16)
   )
   raw_bucket_name = coalesce(
     var.raw_bucket_name,
@@ -28,6 +44,7 @@ locals {
     "firebase.googleapis.com",
     "firebaseappcheck.googleapis.com",
     "firebaseinstallations.googleapis.com",
+    "fcm.googleapis.com",
     "iamcredentials.googleapis.com",
     "identitytoolkit.googleapis.com",
     "logging.googleapis.com",

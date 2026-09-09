@@ -67,13 +67,13 @@ RELEASE_SOURCE_DIGESTS = {
         "57bc7fc96412a5703578f55ae6a0776430f3079ab313f6d1dc84c31d1d07ffb8"
     ),
     "release/required-ci.json": (
-        "0c0461c76c64da59064e526517a9f25ad45f397bdf4ea5cfb7acfda50c916168"
+        "74f6978e7244bff50d17270a772b64d5b7f60a6cdc64f4d777e19dfb7231ec05"
     ),
     "release/terminology/active-allowlist.json": (
-        "fe1b6ab24a5d904d5925a491625799516333e125ec9ba5e0932a5444a829580b"
+        "ab8994c7133abad633395486d0676e0dcd26b58fc59a56f46a9ed51ee250b64b"
     ),
     "release/terminology/legacy-inventory.json": (
-        "f1b5ade97f201aa98286fb413c19957e399a3295ce3c85ef5e8e3f881b70cbf8"
+        "bae338cb9d8b39ab2c48eff952a0fe2c93fd430218b61a83d0153852262efaaa"
     ),
     "Tools/altstore-source.py": (
         "55c5ac0bb7a18ab5f81dd984e1563bd853d247a10539bfebe58264530dce32f0"
@@ -127,7 +127,7 @@ RELEASE_SOURCE_DIGESTS = {
         "8bda73730006cc4add6fa4533d76dcf5be6861167658d0c9212342ee8ea2c700"
     ),
     "Tools/release-legal-gate.py": (
-        "a4e138c742fa8be29e4c1dd803e6fdaba8e93306880bf7d652ec7ee54eaacc6a"
+        "33cf34fc61a1b47f44c0507ff69501e7a7527386e2fd5508d8cb81efd8c3cca2"
     ),
     "Tools/release-version-gate.py": (
         "b6c8bf64f657ee76ea63d26668ae0843fda097ba7b9c36f7071866c8730c950f"

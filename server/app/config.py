@@ -109,6 +109,13 @@ class Settings:
     managed_identity_cache_seconds: int = 5 * 60
     managed_identity_cache_entries: int = 10_000
     managed_app_check_cache_seconds: int = 6 * 60 * 60
+    managed_push_enabled: bool = False
+    managed_push_retry_enabled: bool = False
+    managed_push_token_secret: str | None = None
+    managed_push_token_previous_secret: str | None = None
+    managed_push_token_write_version: str = "v1"
+    managed_push_timeout_seconds: int = 5
+    managed_push_max_concurrency: int = 6
     ownership_service_enabled: bool = False
     ownership_project_id: str | None = None
     ownership_project_number: str | None = None
@@ -269,6 +276,31 @@ class Settings:
                 "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS",
                 6 * 60 * 60,
             ),
+            managed_push_enabled=_boolean(
+                "NOOP_MANAGED_PUSH_ENABLED",
+                False,
+            ),
+            managed_push_retry_enabled=_boolean(
+                "NOOP_MANAGED_PUSH_RETRY_ENABLED",
+                False,
+            ),
+            managed_push_token_secret=os.getenv("NOOP_MANAGED_PUSH_TOKEN_SECRET"),
+            managed_push_token_previous_secret=os.getenv(
+                "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+            ),
+            managed_push_token_write_version=_choice(
+                "NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION",
+                "v1",
+                frozenset({"v1", "v2"}),
+            ),
+            managed_push_timeout_seconds=_positive_int(
+                "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS",
+                5,
+            ),
+            managed_push_max_concurrency=_positive_int(
+                "NOOP_MANAGED_PUSH_MAX_CONCURRENCY",
+                6,
+            ),
             ownership_service_enabled=_boolean(
                 "NOOP_OWNERSHIP_SERVICE_ENABLED",
                 False,
@@ -400,6 +432,25 @@ class Settings:
             raise RuntimeError("NOOP_DATABASE_ENGINE must be postgresql or timescaledb")
         if self.auth_mode not in {"single_owner", "shared"}:
             raise RuntimeError("NOOP_AUTH_MODE must be single_owner or shared")
+        if self.managed_push_token_previous_secret:
+            if not self.managed_push_token_secret:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET requires "
+                    "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+                )
+            if len(self.managed_push_token_previous_secret.encode("utf-8")) < 32:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET must be at least 32 bytes"
+                )
+            if (
+                self.managed_push_token_previous_secret
+                == self.managed_push_token_secret
+            ):
+                raise RuntimeError(
+                    "current and previous managed push token secrets must differ"
+                )
+        if self.managed_push_token_write_version not in {"v1", "v2"}:
+            raise RuntimeError("NOOP_MANAGED_PUSH_TOKEN_WRITE_VERSION must be v1 or v2")
         if self.managed_entitlement_mode not in {
             "closed",
             "pilot",
@@ -537,6 +588,52 @@ class Settings:
             if not 300 <= self.managed_app_check_cache_seconds <= 21_600:
                 raise RuntimeError(
                     "NOOP_MANAGED_APP_CHECK_CACHE_SECONDS must be between 300 and 21600"
+                )
+            if self.managed_push_enabled:
+                if not self.managed_push_token_secret:
+                    raise RuntimeError(
+                        "NOOP_MANAGED_PUSH_TOKEN_SECRET is required when "
+                        "managed push is enabled"
+                    )
+                if len(self.managed_push_token_secret.encode("utf-8")) < 32:
+                    raise RuntimeError(
+                        "NOOP_MANAGED_PUSH_TOKEN_SECRET must be at least 32 bytes"
+                    )
+            if not 1 <= self.managed_push_timeout_seconds <= 30:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS must be between 1 and 30"
+                )
+            if not 1 <= self.managed_push_max_concurrency <= 20:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_MAX_CONCURRENCY must be between 1 and 20"
+                )
+        elif self.managed_push_enabled:
+            raise RuntimeError("NOOP_MANAGED_PUSH_ENABLED requires managed storage")
+        if self.managed_push_retry_enabled:
+            if not re.fullmatch(
+                r"[a-z][a-z0-9-]{4,28}[a-z0-9]",
+                self.managed_project_id or "",
+            ):
+                raise RuntimeError(
+                    "NOOP_MANAGED_PROJECT_ID must be valid when managed push "
+                    "retry is enabled"
+                )
+            if not self.managed_push_token_secret:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_SECRET is required when managed "
+                    "push retry is enabled"
+                )
+            if len(self.managed_push_token_secret.encode("utf-8")) < 32:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_SECRET must be at least 32 bytes"
+                )
+            if not 1 <= self.managed_push_timeout_seconds <= 30:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS must be between 1 and 30"
+                )
+            if not 1 <= self.managed_push_max_concurrency <= 20:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_MAX_CONCURRENCY must be between 1 and 20"
                 )
         if self.ownership_service_enabled:
             required_ownership = {

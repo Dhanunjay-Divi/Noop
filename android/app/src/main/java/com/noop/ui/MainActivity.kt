@@ -37,6 +37,8 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.managed.ManagedCloudScheduler
+import com.noop.managed.ManagedSafetyMessagingService
+import com.noop.managed.ManagedSafetyPushPayload
 import com.noop.notif.StaleSyncReminderScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -199,14 +201,51 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun stageManagedFriendsLink(intent: Intent) {
         if (!(application as NoopApplication).operationalRuntimeStarted) return
         val service = (application as NoopApplication).managedCloud
-        val staged = service.stageSocialProfileLink(intent.data) ||
+        val stagedFriends = service.stageSocialProfileLink(intent.data) ||
             service.stageSocialInviteLink(intent.data)
-        if (!staged) return
-        intent.data = null
-        intent.putExtra(
-            NotificationRouteBridge.EXTRA_ROUTE,
-            NoopNotificationRoute.FRIENDS.navRoute,
-        )
+        val stagedSafetyInvite = service.stageSafetyInviteLink(intent.data)
+        val safetyIncident = intent
+            .getStringExtra(ManagedSafetyMessagingService.EXTRA_INCIDENT_ID)
+            ?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+            ?: ManagedSafetyPushPayload.incidentId(
+                mapOf(
+                    "kind" to intent.getStringExtra("kind").orEmpty(),
+                    "schema" to intent.getStringExtra("schema").orEmpty(),
+                    "route" to intent.getStringExtra("route").orEmpty(),
+                    "incident_id" to intent.getStringExtra("incident_id").orEmpty(),
+                    "expires_at" to intent.getStringExtra("expires_at").orEmpty(),
+                ),
+            )
+        when {
+            stagedSafetyInvite || safetyIncident != null -> {
+                intent.data = null
+                intent.removeExtra(ManagedSafetyMessagingService.EXTRA_INCIDENT_ID)
+                listOf(
+                    "kind",
+                    "schema",
+                    "route",
+                    "incident_id",
+                    "expires_at",
+                ).forEach(intent::removeExtra)
+                intent.putExtra(
+                    NotificationRouteBridge.EXTRA_ROUTE,
+                    NoopNotificationRoute.SAFETY.navRoute,
+                )
+                safetyIncident?.let { incidentId ->
+                    lifecycleScope.launch {
+                        service.handleManagedSafetyPush(incidentId)
+                    }
+                }
+            }
+            stagedFriends -> {
+                intent.data = null
+                intent.putExtra(
+                    NotificationRouteBridge.EXTRA_ROUTE,
+                    NoopNotificationRoute.FRIENDS.navRoute,
+                )
+            }
+            else -> return
+        }
     }
 
     internal fun resumeAfterOperationalRuntimeStarted() {

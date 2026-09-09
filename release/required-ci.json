@@ -46,7 +46,8 @@
       "applicabilityJob": "changes",
       "heavyJobs": [
         "build-and-test",
-        "production-shell"
+        "production-shell",
+        "review-sample-shell"
       ],
       "path": ".github/workflows/android.yml",
       "requiredJob": "android-ci-required"

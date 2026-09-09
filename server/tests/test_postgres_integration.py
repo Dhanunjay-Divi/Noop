@@ -221,6 +221,68 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     assert "share_duration_hours" in escalation
 
 
+def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> None:
+    sql = (MIGRATIONS / "027_managed_app_safety.sql").read_text(encoding="utf-8")
+    lifecycle = (MIGRATIONS / "028_managed_safety_contact_lifecycle.sql").read_text(
+        encoding="utf-8"
+    )
+    push_contract = (MIGRATIONS / "029_managed_push_fcm_token_contract.sql").read_text(
+        encoding="utf-8"
+    )
+    account_quota = (MIGRATIONS / "030_managed_safety_account_quota.sql").read_text(
+        encoding="utf-8"
+    )
+    invite_quota = (MIGRATIONS / "031_managed_safety_invite_quota.sql").read_text(
+        encoding="utf-8"
+    )
+    request_quota = (MIGRATIONS / "032_managed_safety_request_quota.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_incidents" in sql
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_locations" in sql
+    assert "incident_id uuid PRIMARY KEY" in sql
+    assert "duration_hours IN (8, 12)" in sql
+    assert "attempts BETWEEN 0 AND 3" in sql
+    assert "token_hash char(64) NOT NULL UNIQUE" in sql
+    assert "token_ciphertext text NOT NULL" in sql
+    assert "managed_safety_invite_request_fk" in sql
+    assert "IF NOT EXISTS (" in sql
+    assert "managed_safety_contacts_accepted_request_id_fkey" in lifecycle
+    assert "ON DELETE CASCADE" in lifecycle
+    assert "target_kind IN ('token', 'fid')" in push_contract
+    assert "platform = 'android'" in push_contract
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_page_quota_events" in (
+        account_quota
+    )
+    assert "REFERENCES managed_accounts(account_id) ON DELETE CASCADE" in (
+        account_quota
+    )
+    assert "incident_id uuid NOT NULL UNIQUE" in account_quota
+    assert "REFERENCES managed_safety_incidents" not in account_quota
+    assert "ON CONFLICT DO NOTHING" in account_quota
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_invite_quota_events" in (
+        invite_quota
+    )
+    assert "REFERENCES managed_accounts(account_id) ON DELETE CASCADE" in (invite_quota)
+    assert "invite_id uuid NOT NULL UNIQUE" in invite_quota
+    assert "capability_hash char(64) NOT NULL UNIQUE" in invite_quota
+    assert "REFERENCES managed_safety_invites" not in invite_quota
+    assert "ON CONFLICT DO NOTHING" in invite_quota
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_request_quota_events" in (
+        request_quota
+    )
+    assert "REFERENCES managed_accounts(account_id) ON DELETE CASCADE" in (
+        request_quota
+    )
+    assert "safety_request_id uuid NOT NULL UNIQUE" in request_quota
+    assert "contact_account_id uuid NOT NULL" in request_quota
+    assert "REFERENCES managed_safety_requests" not in request_quota
+    assert "ON CONFLICT DO NOTHING" in request_quota
+
+
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:
     managed = (MIGRATIONS / "014_managed_storage_control_plane.sql").read_text(
         encoding="utf-8"

@@ -513,12 +513,35 @@ fun SafetyCenterScreen() {
             }
         }
 
+        ManagedSafetySection(
+            currentLocation = location,
+            locationReady = locationIsReady,
+            backgroundLocationReady = hasBackgroundLocation,
+            onRequestLocation = ::requestLocation,
+            onRequestBackgroundLocation = ::openAppSettings,
+            durationHours = shareDurationHours,
+            onDurationHoursChange = { hours ->
+                shareDurationHours = if (hours == 12) 12 else 8
+                SafetyPagingPrefs.setShareDurationHours(
+                    context,
+                    shareDurationHours,
+                )
+            },
+        )
+
         SectionHeader(
-            stringResource(R.string.safety_contacts_section),
-            overline = stringResource(R.string.safety_network_overline),
+            stringResource(R.string.managed_safety_fallback_title),
+            overline = stringResource(R.string.managed_safety_fallback_overline),
         )
         NoopCard {
-            SafetyContactsSetup(controller = pagingController)
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+                Text(
+                    stringResource(R.string.managed_safety_fallback_body),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+                SafetyContactsSetup(controller = pagingController)
+            }
         }
 
         SectionHeader(
