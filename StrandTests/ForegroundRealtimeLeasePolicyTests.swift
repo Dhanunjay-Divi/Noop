@@ -70,6 +70,8 @@ final class ForegroundRealtimeLeasePolicyTests: XCTestCase {
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/HealthView.swift"),
                                 encoding: .utf8)
         XCTAssertTrue(source.contains("@State private var liveTrackingOptedIn = false"))
+        XCTAssertTrue(source.contains("HealthLiveTrackingLeaseLifetime("))
+        XCTAssertTrue(source.contains("@Binding var liveTrackingOptedIn: Bool"))
         XCTAssertTrue(source.contains("liveTrackingLatestSample?.sequence ?? 0"),
                       "Start must wait for a newer sensor packet rather than displaying cached BPM.")
         XCTAssertTrue(source.contains(".onReceive(live.heartRateSamplePublisher)"),
@@ -78,7 +80,10 @@ final class ForegroundRealtimeLeasePolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("Stop Live HR"))
         XCTAssertTrue(source.contains("model.startRealtimeHR()"))
         XCTAssertTrue(source.contains("model.stopRealtimeHR()"))
-        XCTAssertTrue(source.contains(".onDisappear { stopLiveTracking() }"))
+        XCTAssertTrue(source.contains(".onAppear { prepareLiveDisplayForMountedRow() }"))
+        XCTAssertFalse(source.contains(".onDisappear { stopLiveTracking() }"),
+                       "Lazy row recycling must not consume the screen-owned lease.")
+        XCTAssertTrue(source.contains(".onDisappear {\n                guard liveTrackingOptedIn else { return }"))
         XCTAssertTrue(source.contains("if !hasLiveHR && !live.connected"),
                       "A connected first-time user must be able to reach Start Live HR before history exists.")
         XCTAssertFalse(source.contains(".onAppear { startLiveTracking() }"))

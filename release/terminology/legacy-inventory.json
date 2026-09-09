@@ -12941,12 +12941,12 @@
       "category": "core",
       "lineNumbers": [
         5,
-        307,
-        362,
-        713,
-        1059,
-        1446,
-        1562
+        345,
+        400,
+        758,
+        1104,
+        1491,
+        1607
       ],
       "occurrenceCount": 7,
       "path": "Strand/Screens/HealthView.swift",
@@ -12959,16 +12959,16 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        1216,
-        1229,
-        1230,
-        1237,
-        1239,
-        1591,
-        1592,
-        1594,
-        2537,
-        2538
+        1261,
+        1274,
+        1275,
+        1282,
+        1284,
+        1636,
+        1637,
+        1639,
+        2582,
+        2583
       ],
       "occurrenceCount": 10,
       "path": "Strand/Screens/HealthView.swift",
@@ -13834,12 +13834,12 @@
       "category": "core",
       "lineNumbers": [
         5,
-        1390,
-        1575,
-        1892,
-        2294,
-        2311,
-        2342
+        1420,
+        1605,
+        1922,
+        2324,
+        2341,
+        2372
       ],
       "occurrenceCount": 7,
       "path": "Strand/Screens/WorkoutsView.swift",
@@ -13852,13 +13852,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        1395,
-        1599,
-        2347,
-        3412,
-        3416,
-        3428,
-        3433
+        1425,
+        1629,
+        2377,
+        3442,
+        3446,
+        3458,
+        3463
       ],
       "occurrenceCount": 7,
       "path": "Strand/Screens/WorkoutsView.swift",
@@ -13870,9 +13870,9 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        759,
-        763,
-        767
+        789,
+        793,
+        797
       ],
       "occurrenceCount": 3,
       "path": "Strand/Screens/WorkoutsView.swift",

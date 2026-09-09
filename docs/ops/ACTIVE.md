@@ -116,8 +116,13 @@ plus build/lint/instrumentation compilation, 53 API 35 production-shell tests,
 fresh lifecycle review also
 fixed three Android realtime-HR surfaces that could skip their lease release
 after Stop, and strength video/GIF cleanup that could target a replacement
-resource. The app report now records only bounded realtime-lease categories and
-a zero/one/multiple ownership bucket. The first hosted release-control run
+resource. The final Apple lifetime review also preserves an off-screen
+Workouts recovery request across retained-tab suspension and moves Health's
+explicit Live HR lease outside the lazy row, so row recycling cannot stop a
+stream the user requested. Twenty-eight focused Apple lifetime contracts and
+the full 1,698-test macOS suite pass after those fixes. The app report now
+records only bounded realtime-lease categories and a zero/one/multiple
+ownership bucket. The first hosted release-control run
 exposed only a stale fail-closed terminology inventory; its reviewed
 regeneration has no forbidden mapping or active allowlist expansion. A
 reviewed shake-to-report ZIP from the affected phone on the integrated build

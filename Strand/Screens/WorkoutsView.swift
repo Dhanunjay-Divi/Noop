@@ -357,6 +357,10 @@ struct WorkoutsView: View {
     @State private var recoveryTrendLoadedKey: String?
     @State private var recoveryTrendLoadTask: Task<Void, Never>?
     @State private var recoveryTrendLoadKey: String?
+    @State private var recoveryTrendLoadToken: UUID?
+    /// Once the lazy recovery section has appeared, keep its request pending across retained-tab
+    /// suspension. Returning at the same lower scroll offset may not remount the off-screen sentinel.
+    @State private var recoveryTrendRequestedKey: String?
     @State private var activeZoneWeek: ActiveZoneWeekSnapshot?
     @State private var activeZoneLoaded = false
 
@@ -517,6 +521,7 @@ struct WorkoutsView: View {
                 range = defaultRange(for: allRows)
                 seededInitialRange = true
             }
+            resumeRecoveryTrendLoadIfRequested()
             #if DEBUG
             if Self.shouldPresentStrengthTrainerDemo && !didPresentStrengthTrainerDemo {
                 didPresentStrengthTrainerDemo = true
@@ -527,10 +532,10 @@ struct WorkoutsView: View {
             #endif
         }
         .onChangeCompat(of: recoveryTrendInputKey) { newKey in
-            cancelRecoveryTrendLoad(ifSupersededBy: newKey)
+            restartRecoveryTrendLoadIfRequested(for: newKey)
         }
         .onDisappear {
-            cancelRecoveryTrendLoad()
+            suspendRecoveryTrendLoad()
         }
         // #797: when the user picks a range wider than the bounded first-paint window (typically "All"),
         // page the full history in. A pick that fits the loaded window is a no-op. Empty selections stay
@@ -672,24 +677,49 @@ struct WorkoutsView: View {
         requestKey: String,
         rows: [WorkoutRow]
     ) {
+        recoveryTrendRequestedKey = requestKey
         guard recoveryTrendLoadedKey != requestKey,
               recoveryTrendLoadKey != requestKey else { return }
 
         recoveryTrendLoadTask?.cancel()
+        let requestToken = UUID()
         recoveryTrendLoadKey = requestKey
+        recoveryTrendLoadToken = requestToken
         recoveryTrendLoadTask = Task { @MainActor in
             await loadRecoveryTrend(requestKey: requestKey, rows: rows)
-            guard recoveryTrendLoadKey == requestKey else { return }
+            guard recoveryTrendLoadToken == requestToken else { return }
             recoveryTrendLoadTask = nil
             recoveryTrendLoadKey = nil
+            recoveryTrendLoadToken = nil
         }
     }
 
-    private func cancelRecoveryTrendLoad(ifSupersededBy activeKey: String? = nil) {
-        if let activeKey, recoveryTrendLoadKey == activeKey { return }
+    /// A retained tab can disappear while its scroll position stays below the lazy recovery sentinel.
+    /// Keep the requested key, cancel only the in-flight attempt, and restart it from the screen root.
+    private func suspendRecoveryTrendLoad() {
         recoveryTrendLoadTask?.cancel()
         recoveryTrendLoadTask = nil
         recoveryTrendLoadKey = nil
+        recoveryTrendLoadToken = nil
+    }
+
+    private func resumeRecoveryTrendLoadIfRequested() {
+        guard recoveryTrendRequestedKey != nil else { return }
+        let activeKey = recoveryTrendInputKey
+        recoveryTrendRequestedKey = activeKey
+        startRecoveryTrendLoad(requestKey: activeKey, rows: recoveryTrendRows)
+    }
+
+    private func restartRecoveryTrendLoadIfRequested(for activeKey: String) {
+        guard recoveryTrendRequestedKey != nil else {
+            suspendRecoveryTrendLoad()
+            return
+        }
+        recoveryTrendRequestedKey = activeKey
+        guard recoveryTrendLoadKey != activeKey,
+              recoveryTrendLoadedKey != activeKey else { return }
+        suspendRecoveryTrendLoad()
+        startRecoveryTrendLoad(requestKey: activeKey, rows: recoveryTrendRows)
     }
 
     private func loadRecoveryTrend(

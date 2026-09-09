@@ -40,6 +40,8 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
 
         XCTAssertTrue(root.contains("lazy: true"))
         XCTAssertTrue(root.contains("ForEach(HealthMonitorSection.allCases)"))
+        XCTAssertTrue(root.contains("@State private var liveTrackingOptedIn = false"))
+        XCTAssertTrue(root.contains("HealthLiveTrackingLeaseLifetime("))
         XCTAssertFalse(source.contains("HealthSectionsStack"))
 
         let rowStart = try XCTUnwrap(source.range(of: "private struct HealthMonitorSectionRow"))
@@ -49,7 +51,9 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
         XCTAssertFalse(row.contains("VStack(alignment: .leading, spacing: NoopMetrics.sectionGap)"))
 
         let sync = try XCTUnwrap(row.range(of: "SyncStatusSection()"))
-        let heartRate = try XCTUnwrap(row.range(of: "HeartRateSection()"))
+        let heartRate = try XCTUnwrap(
+            row.range(of: "HeartRateSection(liveTrackingOptedIn: $liveTrackingOptedIn)")
+        )
         let hubLinks = try XCTUnwrap(row.range(of: "HealthHubLinksSection()"))
         XCTAssertLessThan(sync.lowerBound, heartRate.lowerBound)
         XCTAssertLessThan(heartRate.lowerBound, hubLinks.lowerBound)
@@ -62,5 +66,7 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(source.contains("if liveTrackingOptedIn && !interactionInProgress"))
         XCTAssertTrue(source.contains("LiveHRSamplingClock"))
         XCTAssertFalse(source.contains("private let sampleTimer"))
+        XCTAssertTrue(source.contains(".onAppear { prepareLiveDisplayForMountedRow() }"))
+        XCTAssertFalse(source.contains(".onDisappear { stopLiveTracking() }"))
     }
 }

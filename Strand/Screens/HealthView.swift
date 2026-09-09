@@ -14,6 +14,9 @@ import WhoopStore
 struct HealthView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
+    /// The explicit Live HR choice belongs to the retained Health screen, not its independently lazy row.
+    /// Scrolling the row off-screen must never consume the foreground realtime lease.
+    @State private var liveTrackingOptedIn = false
     // NOTE: HealthView itself deliberately does NOT observe `LiveState`/`AppModel` for live HR. A
     // connected strap publishes at ~1 Hz; observing here would re-evaluate this body (and re-diff the
     // heavy vitals/skin-temp/age sections) on every tick. The ONLY live-dependent decision the parent
@@ -39,14 +42,24 @@ struct HealthView: View {
                 // on whether a strap is streaming live HR — a `live`-dependent choice. It's isolated to
                 // this leaf (which owns `live`/`model`) so a ~1 Hz HR tick re-renders only this branch,
                 // never the parent, and only while there's no history (a transient first-run state).
-                HealthFirstRunContent()
+                HealthFirstRunContent(
+                    liveTrackingOptedIn: $liveTrackingOptedIn
+                )
             } else {
                 // History present: `live` is irrelevant to the layout choice, so the parent renders the
                 // independently lazy rows directly without observing the HR stream.
                 ForEach(HealthMonitorSection.allCases) { section in
-                    HealthMonitorSectionRow(section: section)
+                    HealthMonitorSectionRow(
+                        section: section,
+                        liveTrackingOptedIn: $liveTrackingOptedIn
+                    )
                 }
             }
+        }
+        .background {
+            HealthLiveTrackingLeaseLifetime(
+                liveTrackingOptedIn: $liveTrackingOptedIn
+            )
         }
     }
 }
@@ -73,6 +86,7 @@ enum HealthMonitorSection: CaseIterable, Identifiable {
 
 private struct HealthMonitorSectionRow: View {
     let section: HealthMonitorSection
+    @Binding var liveTrackingOptedIn: Bool
 
     var body: some View {
         content
@@ -86,7 +100,7 @@ private struct HealthMonitorSectionRow: View {
         case .syncStatus:
             SyncStatusSection()
         case .heartRate:
-            HeartRateSection()
+            HeartRateSection(liveTrackingOptedIn: $liveTrackingOptedIn)
         case .vitals:
             VitalsSection()
         case .timeline:
@@ -117,6 +131,7 @@ private struct HealthFirstRunContent: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var profile: ProfileStore
+    @Binding var liveTrackingOptedIn: Bool
 
     /// HR to display: the spike-filtered median (model.bpm, #39) when available, else the reported
     /// value, else R-R-derived (the strap streams R-R even when its HR field reads 0).
@@ -148,9 +163,36 @@ private struct HealthFirstRunContent: View {
             // A connected first-time user must be able to reach the explicit Start Live HR control even
             // before the first packet/history row exists. The control itself remains default-off.
             ForEach(HealthMonitorSection.allCases) { section in
-                HealthMonitorSectionRow(section: section)
+                HealthMonitorSectionRow(
+                    section: section,
+                    liveTrackingOptedIn: $liveTrackingOptedIn
+                )
             }
         }
+    }
+}
+
+/// Owns the explicit Health realtime lease for the full retained screen lifetime. This leaf is attached
+/// outside the lazy scroll content, so row recycling cannot release the lease; leaving the Health screen
+/// still balances it exactly once. It also re-arms the existing lease after a new BLE connection.
+private struct HealthLiveTrackingLeaseLifetime: View {
+    @EnvironmentObject var live: LiveState
+    @EnvironmentObject var model: AppModel
+    @Binding var liveTrackingOptedIn: Bool
+
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChangeCompat(of: live.connected) { connected in
+                guard connected, liveTrackingOptedIn else { return }
+                model.rearmRealtimeIfWanted()
+            }
+            .onDisappear {
+                guard liveTrackingOptedIn else { return }
+                liveTrackingOptedIn = false
+                model.stopRealtimeHR()
+            }
     }
 }
 
@@ -267,6 +309,7 @@ private struct HeartRateSection: View {
     @Environment(\.noopInteractionInProgress) private var interactionInProgress
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
+    @Binding var liveTrackingOptedIn: Bool
 
     /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
     /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
@@ -277,11 +320,6 @@ private struct HeartRateSection: View {
     /// resets when the view is recreated, which is fine for a live trace.
     @State private var hrHistory: [LiveHRSample] = []
 
-    /// This card owns one foreground realtime lease only after the person explicitly starts it. The
-    /// choice is session-scoped: leaving Health releases the lease, and reopening never starts a
-    /// battery-heavier stream by surprise. Other owners (a workout, HRV reading, Live Session) keep
-    /// their own leases; this view never releases work it did not start.
-    @State private var liveTrackingOptedIn = false
     /// Packet identity captured at Start. Cached BPM/R-R from before the tap never qualifies as Live;
     /// the hero opens only after the transport accepts a newer sensor notification.
     @State private var liveTrackingStartSequence: UInt64?
@@ -382,14 +420,13 @@ private struct HeartRateSection: View {
                 ])
             }
         }
-        .onDisappear { stopLiveTracking() }
-        .onChangeCompat(of: live.connected) { connected in
+        .onAppear { prepareLiveDisplayForMountedRow() }
+        .onChangeCompat(of: live.connected) { _ in
             guard liveTrackingOptedIn else { return }
-            // A gap invalidates the last packet immediately. A reconnect re-arms this existing lease,
-            // never takes a second one, and waits for a genuinely newer packet before showing Live.
+            // A gap invalidates the last packet immediately. The screen-lifetime owner re-arms an
+            // existing lease on reconnect; this row waits for a genuinely newer packet before Live.
             liveTrackingLatestSample = nil
             liveTrackingStartSequence = live.heartRateSampleSequence
-            if connected { model.rearmRealtimeIfWanted() }
         }
         .onReceive(live.heartRateSamplePublisher) { sample in
             guard liveTrackingOptedIn,
@@ -476,6 +513,14 @@ private struct HeartRateSection: View {
         liveTrackingOptedIn = true
         hrHistory.removeAll(keepingCapacity: true)
         model.startRealtimeHR()
+    }
+
+    /// A lazy-row remount inherits the screen's existing lease without acquiring another one. Reset the
+    /// packet boundary so cached BPM never flashes as current; the next sensor notification resumes Live.
+    private func prepareLiveDisplayForMountedRow() {
+        guard liveTrackingOptedIn else { return }
+        liveTrackingStartSequence = live.heartRateSampleSequence
+        liveTrackingLatestSample = nil
     }
 
     private func stopLiveTracking() {
