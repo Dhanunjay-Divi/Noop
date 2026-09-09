@@ -810,11 +810,11 @@ class ManagedCloudService private constructor(context: Context) {
                 }
                 throw error
             }
+            preferences.clearSafetyContactRequest(request.requestId)
             preferences.safetyEnabled = true
             ManagedCloudScheduler.reconcile(appContext)
             setSafetyStatus(text(R.string.managed_safety_status_request_sent))
             refreshSafetyData()
-            preferences.clearSafetyContactRequest(request.requestId)
         }
 
     suspend fun decideSafetyRequest(requestId: UUID, accept: Boolean) =

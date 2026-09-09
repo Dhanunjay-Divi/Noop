@@ -732,12 +732,12 @@ final class ManagedCloudService: ObservableObject {
                 }
                 throw error
             }
+            clearSafetyContactRequest(request.requestID)
             defaults.set(true, forKey: Key.safetyEnabled)
             safetyStatus = String(
                 localized: "Safety contact request sent. Paging stays off until it is accepted."
             )
             try await refreshSafetyData()
-            clearSafetyContactRequest(request.requestID)
         }
     }
 

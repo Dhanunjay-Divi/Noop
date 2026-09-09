@@ -793,6 +793,58 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(androidDelete.contains("clearSafetyPresentation()"))
     }
 
+    func testSuccessfulSafetyContactRequestRetiresReplayBeforeRefresh() throws {
+        let apple = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let appleStart = try XCTUnwrap(
+            apple.range(of: "func createSafetyRequest(noopID: String) async")
+        )
+        let appleEnd = try XCTUnwrap(
+            apple.range(
+                of: "func decideSafetyRequest(",
+                range: appleStart.upperBound..<apple.endIndex
+            )
+        )
+        let appleRequest = String(
+            apple[appleStart.lowerBound..<appleEnd.lowerBound]
+        )
+        let appleClear = try XCTUnwrap(
+            appleRequest.range(
+                of: "clearSafetyContactRequest(request.requestID)"
+            )
+        )
+        let appleRefresh = try XCTUnwrap(
+            appleRequest.range(of: "try await refreshSafetyData()")
+        )
+        XCTAssertLessThan(appleClear.lowerBound, appleRefresh.lowerBound)
+
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        let androidStart = try XCTUnwrap(
+            android.range(of: "suspend fun createSafetyRequest(noopId: String)")
+        )
+        let androidEnd = try XCTUnwrap(
+            android.range(
+                of: "suspend fun decideSafetyRequest(",
+                range: androidStart.upperBound..<android.endIndex
+            )
+        )
+        let androidRequest = String(
+            android[androidStart.lowerBound..<androidEnd.lowerBound]
+        )
+        let androidClear = try XCTUnwrap(
+            androidRequest.range(
+                of: "preferences.clearSafetyContactRequest(request.requestId)"
+            )
+        )
+        let androidRefresh = try XCTUnwrap(
+            androidRequest.range(of: "refreshSafetyData()")
+        )
+        XCTAssertLessThan(androidClear.lowerBound, androidRefresh.lowerBound)
+    }
+
     func testManagedDisconnectFailsClosedUntilPushIsInvalidated() throws {
         let apple = try source(
             "StrandiOS/System/ManagedCloudService.swift"

@@ -232,6 +232,9 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     account_quota = (MIGRATIONS / "030_managed_safety_account_quota.sql").read_text(
         encoding="utf-8"
     )
+    invite_quota = (MIGRATIONS / "031_managed_safety_invite_quota.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
     assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
@@ -257,6 +260,14 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     assert "incident_id uuid NOT NULL UNIQUE" in account_quota
     assert "REFERENCES managed_safety_incidents" not in account_quota
     assert "ON CONFLICT DO NOTHING" in account_quota
+    assert "CREATE TABLE IF NOT EXISTS managed_safety_invite_quota_events" in (
+        invite_quota
+    )
+    assert "REFERENCES managed_accounts(account_id) ON DELETE CASCADE" in (invite_quota)
+    assert "invite_id uuid NOT NULL UNIQUE" in invite_quota
+    assert "capability_hash char(64) NOT NULL UNIQUE" in invite_quota
+    assert "REFERENCES managed_safety_invites" not in invite_quota
+    assert "ON CONFLICT DO NOTHING" in invite_quota
 
 
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:

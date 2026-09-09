@@ -26,14 +26,21 @@ post-acceptance bootstrap retries registration. A profile can receive at most
 40 pending contact requests while retaining 10 outgoing pending requests, with
 count and insert serialized under the contact profile/account lock and
 idempotent replay preserved. Due urgent Safety push retries now run before
-slower lifecycle cleanup. The fresh PostgreSQL server suite passed 391 tests
-with 19 expected skips, Android passed 4,142 tests plus lint/build/
-instrumentation-source compilation, the Apple Safety suite passed 32 tests,
-the full Strand suite passed 1,665 tests with one expected skip, and the
-`NOOPiOS` simulator graph builds. The complete local release-policy matrix is
-green. Protected checks, exact-head review, and normal merge remain. No public
-traffic or real
-participant paging was enabled. Evidence is recorded in
+slower lifecycle cleanup. The latest review follow-up also adds migration `031`
+to cap invitation create/revoke churn at 50 per account per rolling 24 hours
+without allowing profile recreation or retained-capability reuse to reset the
+limit. Deleting a responding profile now reopens a surviving incident when no
+responder remains, and both apps retire a confirmed contact-request replay
+before any fallible refresh.
+
+The fresh PostgreSQL server suite passed 393 tests with 19 expected skips,
+Android passed 4,142 tests plus lint/build/instrumentation-source compilation,
+the Apple Safety suite passed 33 tests, the full Strand suite passed 1,666 tests
+with one expected skip, and the complete iOS app/widget/watch simulator graph
+builds for arm64 and x86_64. The complete local release-policy matrix is green.
+The fully verified replacement head still requires commit, push, clean
+exact-head review, protected checks, and normal merge. No public traffic or
+real participant paging was enabled. Evidence is recorded in
 [Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
 
 The reported physical-phone lag is not evidence against the pending

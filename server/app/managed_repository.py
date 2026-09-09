@@ -5404,15 +5404,39 @@ class PostgresManagedRepository:
         principal: ManagedPrincipal,
     ) -> None:
         self._require_active(principal)
-        deleted = await self._pool().execute(
-            """
-            DELETE FROM managed_social_profiles
-            WHERE account_id = $1
-            """,
-            principal.account_id,
-        )
-        if deleted == "DELETE 0":
-            raise ManagedNotFoundError("managed Friends profile was not found")
+        async with self._pool().acquire() as connection:
+            async with connection.transaction():
+                profile = await self._social_profile(
+                    connection,
+                    account_id=principal.account_id,
+                    for_update=True,
+                )
+                incident_rows = await connection.fetch(
+                    """
+                    SELECT incident.incident_id
+                    FROM managed_safety_incidents incident
+                    JOIN managed_safety_participants participant
+                      ON participant.incident_id = incident.incident_id
+                    WHERE participant.contact_profile_id = $1
+                      AND incident.status IN ('open', 'acknowledged')
+                    ORDER BY incident.incident_id
+                    FOR UPDATE OF incident
+                    """,
+                    profile["profile_id"],
+                )
+                now = await connection.fetchval("SELECT clock_timestamp()")
+                await connection.execute(
+                    """
+                    DELETE FROM managed_social_profiles
+                    WHERE profile_id = $1
+                    """,
+                    profile["profile_id"],
+                )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=(row["incident_id"] for row in incident_rows),
+                    now=now,
+                )
 
     async def update_social_profile(
         self,

@@ -39,6 +39,7 @@ SAFETY_MAX_CONTACTS = 5
 SAFETY_MAX_OWNERS_PER_CONTACT = 20
 SAFETY_MIN_CONTACTS = 2
 SAFETY_MAX_ACTIVE_INVITES = 10
+SAFETY_MAX_INVITES_PER_DAY = 50
 SAFETY_MAX_PENDING_REQUESTS = 10
 SAFETY_REQUEST_LIST_LIMIT = 50
 # A profile can also own at most SAFETY_MAX_PENDING_REQUESTS outgoing rows. Keeping
@@ -532,17 +533,27 @@ class PostgresManagedSafetyRepository:
                     account_id=principal.account_id,
                     for_update=True,
                 )
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-managed-safety-invite:{owner['account_id']}",
+                )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 await self._expire(connection, now)
                 replay = await connection.fetchrow(
                     """
-                    SELECT *
-                    FROM managed_safety_invites
-                    WHERE owner_profile_id = $1
-                      AND creation_request_id = $2
-                    FOR UPDATE
+                    SELECT quota.*,
+                           invite.owner_profile_id,
+                           invite.status,
+                           invite.created_at AS invite_created_at,
+                           invite.expires_at
+                    FROM managed_safety_invite_quota_events quota
+                    LEFT JOIN managed_safety_invites invite
+                      ON invite.invite_id = quota.invite_id
+                    WHERE quota.owner_account_id = $1
+                      AND quota.client_request_id = $2
+                    FOR UPDATE OF quota
                     """,
-                    owner["profile_id"],
+                    owner["account_id"],
                     request.request_id,
                 )
                 if replay is not None:
@@ -553,34 +564,57 @@ class PostgresManagedSafetyRepository:
                         raise ManagedConflictError(
                             "Safety invite request id was reused"
                         )
+                    if replay["owner_profile_id"] != owner["profile_id"]:
+                        raise ManagedConflictError(
+                            "Safety invite request id was already consumed"
+                        )
                     return {
                         "invite_id": str(replay["invite_id"]),
                         "capability": capability,
                         "status": str(replay["status"]),
-                        "created_at": replay["created_at"],
+                        "created_at": replay["invite_created_at"],
                         "expires_at": replay["expires_at"],
                         "duplicate": True,
                     }
-                active_count = await connection.fetchval(
+                invite_counts = await connection.fetchrow(
                     """
-                    SELECT count(*)
-                    FROM managed_safety_invites
-                    WHERE owner_profile_id = $1
-                      AND status = 'active'
-                      AND expires_at > $2
+                    SELECT
+                        (
+                            SELECT count(*)
+                            FROM managed_safety_invites invite
+                            WHERE invite.owner_profile_id = $1
+                              AND invite.status = 'active'
+                              AND invite.expires_at > $3
+                        ) AS active_count,
+                        count(*) AS recent_count,
+                        min(quota.created_at) AS recent_oldest
+                    FROM managed_safety_invite_quota_events quota
+                    WHERE quota.owner_account_id = $2
+                      AND quota.created_at >
+                            $3::timestamptz - interval '24 hours'
                     """,
                     owner["profile_id"],
+                    owner["account_id"],
                     now,
                 )
-                if int(active_count) >= SAFETY_MAX_ACTIVE_INVITES:
+                if int(invite_counts["active_count"]) >= SAFETY_MAX_ACTIVE_INVITES:
                     raise ManagedConflictError(
                         "revoke an active Safety invitation first"
+                    )
+                if int(invite_counts["recent_count"]) >= SAFETY_MAX_INVITES_PER_DAY:
+                    retry_at = invite_counts["recent_oldest"] + timedelta(days=1)
+                    raise ManagedRateLimitError(
+                        "Safety invitation limit has been reached",
+                        retry_after_seconds=max(
+                            1,
+                            math.ceil((retry_at - now).total_seconds()),
+                        ),
                     )
                 conflict = await connection.fetchval(
                     """
                     SELECT EXISTS (
                         SELECT 1
-                        FROM managed_safety_invites
+                        FROM managed_safety_invite_quota_events
                         WHERE capability_hash = $1
                     )
                     """,
@@ -616,6 +650,24 @@ class PostgresManagedSafetyRepository:
                     capability_hash,
                     now,
                     request.expires_in_hours,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO managed_safety_invite_quota_events (
+                        owner_account_id,
+                        client_request_id,
+                        invite_id,
+                        capability_hash,
+                        created_at,
+                        purge_after
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    """,
+                    owner["account_id"],
+                    request.request_id,
+                    invite_id,
+                    capability_hash,
+                    now,
+                    row["purge_after"],
                 )
         return {
             "invite_id": str(row["invite_id"]),
@@ -2698,6 +2750,33 @@ class PostgresManagedSafetyRepository:
                     batch_size,
                 )
                 counts["managed_safety_invites_deleted"] = len(deleted_invites)
+                deleted_invite_quota_events = await connection.fetch(
+                    """
+                    WITH candidates AS (
+                        SELECT owner_account_id, client_request_id
+                        FROM managed_safety_invite_quota_events quota
+                        WHERE quota.purge_after <= $1
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM managed_safety_invites invite
+                              WHERE invite.invite_id = quota.invite_id
+                          )
+                        ORDER BY purge_after, owner_account_id, client_request_id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT $2
+                    )
+                    DELETE FROM managed_safety_invite_quota_events quota
+                    USING candidates
+                    WHERE quota.owner_account_id = candidates.owner_account_id
+                      AND quota.client_request_id = candidates.client_request_id
+                    RETURNING quota.client_request_id
+                    """,
+                    now,
+                    batch_size,
+                )
+                counts["managed_safety_invite_quota_events_deleted"] = len(
+                    deleted_invite_quota_events
+                )
         return counts
 
 

@@ -31,6 +31,7 @@ from app.managed_safety_models import (
     ManagedSafetyRequestCreate,
 )
 from app.managed_safety_repository import (
+    SAFETY_MAX_INVITES_PER_DAY,
     SAFETY_MAX_PENDING_REQUESTS,
     SAFETY_MAX_RECEIVED_PENDING_REQUESTS,
     SAFETY_REQUEST_LIST_LIMIT,
@@ -360,6 +361,121 @@ async def test_concurrent_contact_acceptance_preserves_owner_limit() -> None:
             )
             == 5
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_invite_churn_has_account_scoped_daily_quota() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"invite-quota-owner-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+
+        final_request_id = uuid4()
+        final_capability = ""
+        final_invite = None
+        for index in range(SAFETY_MAX_INVITES_PER_DAY):
+            request_id = (
+                final_request_id if index == SAFETY_MAX_INVITES_PER_DAY - 1 else uuid4()
+            )
+            capability = "noopsafety_" + f"{index:011d}" + uuid4().hex
+            invite = await safety.create_invite(
+                principal=owner,
+                request=ManagedSafetyInviteCreate(
+                    request_id=request_id,
+                    capability=capability,
+                ),
+            )
+            await safety.revoke_invite(
+                principal=owner,
+                invite_id=UUID(invite["invite_id"]),
+            )
+            final_capability = capability
+            final_invite = invite
+
+        replay = await safety.create_invite(
+            principal=owner,
+            request=ManagedSafetyInviteCreate(
+                request_id=final_request_id,
+                capability=final_capability,
+            ),
+        )
+        assert final_invite is not None
+        assert replay["duplicate"] is True
+        assert replay["invite_id"] == final_invite["invite_id"]
+        assert replay["status"] == "revoked"
+
+        with pytest.raises(ManagedRateLimitError) as limited:
+            await safety.create_invite(
+                principal=owner,
+                request=ManagedSafetyInviteCreate(
+                    request_id=uuid4(),
+                    capability="noopsafety_" + ("q" * 43),
+                ),
+            )
+        assert 1 <= limited.value.retry_after_seconds <= 24 * 60 * 60
+
+        await managed.delete_social_profile(principal=owner)
+        await _profile(managed, owner, display_name="Owner Again")
+
+        with pytest.raises(ManagedConflictError):
+            await safety.create_invite(
+                principal=owner,
+                request=ManagedSafetyInviteCreate(
+                    request_id=final_request_id,
+                    capability=final_capability,
+                ),
+            )
+        with pytest.raises(ManagedRateLimitError):
+            await safety.create_invite(
+                principal=owner,
+                request=ManagedSafetyInviteCreate(
+                    request_id=uuid4(),
+                    capability="noopsafety_" + ("w" * 43),
+                ),
+            )
+
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_invite_quota_events
+            SET created_at = created_at - interval '25 hours'
+            WHERE owner_account_id = $1
+            """,
+            owner.account_id,
+        )
+        with pytest.raises(ManagedConflictError):
+            await safety.create_invite(
+                principal=owner,
+                request=ManagedSafetyInviteCreate(
+                    request_id=uuid4(),
+                    capability=final_capability,
+                ),
+            )
+        after_window = await safety.create_invite(
+            principal=owner,
+            request=ManagedSafetyInviteCreate(
+                request_id=uuid4(),
+                capability="noopsafety_" + ("x" * 43),
+            ),
+        )
+        assert after_window["duplicate"] is False
     finally:
         await primary.shutdown()
 
@@ -1509,6 +1625,99 @@ async def test_social_profile_deletion_cascades_accepted_safety_contact() -> Non
                 UUID(contact_profile["profile_id"]),
             )
             == 1
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_contact_profile_deletion_reopens_surviving_incident() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=8,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"delete-ack-owner-{uuid4()}")
+        responding = await _principal(
+            primary,
+            label=f"delete-ack-responding-{uuid4()}",
+        )
+        pending = await _principal(
+            primary,
+            label=f"delete-ack-pending-{uuid4()}",
+        )
+        await _profile(managed, owner, display_name="Owner")
+        responding_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=responding,
+            contact_name="Responding",
+        )
+        pending_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=pending,
+            contact_name="Pending",
+        )
+        incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        incident_id = UUID(incident["incident_id"])
+        acknowledged = await safety.respond(
+            principal=responding,
+            incident_id=incident_id,
+            decision="responding",
+        )
+        assert acknowledged["status"] == "acknowledged"
+
+        await managed.delete_social_profile(principal=responding)
+
+        pool = primary._require_pool()
+        reopened = await pool.fetchrow(
+            """
+            SELECT status, acknowledged_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            incident_id,
+        )
+        assert reopened["status"] == "open"
+        assert reopened["acknowledged_at"] is None
+        participants = await pool.fetch(
+            """
+            SELECT contact_profile_id, status
+            FROM managed_safety_participants
+            WHERE incident_id = $1
+            ORDER BY contact_profile_id
+            """,
+            incident_id,
+        )
+        assert [(row["contact_profile_id"], row["status"]) for row in participants] == [
+            (UUID(pending_profile["profile_id"]), "pending")
+        ]
+        assert all(
+            row["contact_profile_id"] != UUID(responding_profile["profile_id"])
+            for row in participants
         )
     finally:
         await primary.shutdown()

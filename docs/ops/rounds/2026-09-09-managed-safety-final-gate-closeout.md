@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implemented and locally verified; replacement exact-head review pending`
+- State: `implemented and completely locally verified; exact-head review pending`
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `51f11179a2d50530320b6533d4f1716bd162ac5d`
@@ -20,6 +20,12 @@ urgent delivery semantics:
 2. bound pending requests received by one Safety profile and serialize that
    quota with request creation; and
 3. dispatch due urgent Safety pushes before slower storage-lifecycle cleanup.
+
+A later exact-head review of the previously green replacement head identified
+three additional correctness gaps: deleting a responding contact could leave a
+surviving incident falsely acknowledged, a successful contact request could
+retain its replay record if the following refresh failed, and active-row limits
+did not bound invitation create/revoke churn.
 
 Success requires focused regressions, complete affected-platform verification,
 clean repository policy gates, a replacement exact-head review, protected
@@ -40,6 +46,10 @@ external gates.
   rejected, and failed boundaries.
 - Protected review, hosted verification, merge, and local temporary-resource
   cleanup.
+- Account-scoped invitation churn limits that survive profile deletion, plus
+  incident-state reconciliation when a responding profile is deleted.
+- Apple and Android contact-request replay retirement immediately after the
+  server confirms success.
 
 ### Non-goals
 
@@ -88,12 +98,29 @@ external gates.
 - Existing mobile diagnostics now distinguish fixed `terms_required` and
   `invalid_payload` outcomes. No token, payload, identifier, location, health
   value, arbitrary error, or user content is recorded.
+- Migration `031` adds an account-scoped Safety invitation quota ledger. It
+  retains consumed request IDs and capability hashes independently of the
+  profile-scoped invitation row, caps creation at 50 per rolling 24 hours, and
+  preserves same-request replay. Profile deletion and recreation cannot reset
+  the limit or reuse a retained capability.
+- Deleting a social profile now locks every surviving active incident in which
+  that profile participates, lets the existing cascade remove the participant,
+  and recomputes acknowledgement from the remaining responders in the same
+  transaction.
+- Apple and Android clear a successful contact-request replay record before
+  applying local presentation state or refreshing Safety data. A refresh
+  failure therefore cannot resend a request already accepted by the server.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: none planned; the quota can use existing request
-  rows and active-profile serialization.
-- Existing-data retention impact: none planned.
+- Schema or migration impact: additive migration `031` creates
+  `managed_safety_invite_quota_events`, keyed by account and client request,
+  with unique invite and capability hashes. Existing retained invitations are
+  backfilled idempotently.
+- Existing-data retention impact: the new ledger retains only UUIDs, one
+  capability digest, and timestamps through the invitation's existing bounded
+  purge horizon. It contains no capability, profile, contact, location, or
+  health payload.
 - Source/provenance or formula impact: none.
 - Permissions/network disclosure impact: no new permission or payload;
   pre-Terms managed network work must remain disabled.
@@ -111,9 +138,10 @@ external gates.
   counts already expose push dispatch outcomes.
 - Existing evidence reused: Apple and Android `AppDiagnosticsRecorder`, server
   request middleware, and `emit_operational_event`.
-- New bounded events or operation spans: only if the existing events cannot
-  distinguish `terms_required` from malformed payload, scheduler failure, or
-  provider failure.
+- New bounded events or operation spans: none. Contact-request operations
+  already record fixed success/failure categories, typed rate-limit responses
+  are covered by request middleware, and profile deletion plus incident
+  reconciliation is one transaction whose failure rolls back the deletion.
 - Redaction, retention, and high-frequency controls: fixed categories and
   bounded counts only; no Terms content, identity, token, incident payload,
   location, health value, arbitrary error, or dynamic identifier.
@@ -127,9 +155,10 @@ external gates.
 |---|---|---|---|
 | Exact-head review | Three unresolved actionable findings on `51f11179` | The remaining source defects are explicitly identified before merge | That any replacement implementation is correct |
 | Focused server regressions | Lifecycle and policy: 9 passed. Fresh PostgreSQL recipient-race and replay cases: 2 passed. Ruff and Python compilation passed. | Urgent retry ordering, serialized recipient quota, and replay semantics execute against the changed paths | Provider delivery or production database behavior |
-| Complete local server suite | 391 passed, 19 expected skips, and one dependency deprecation warning against a fresh PostgreSQL database | Every locally available server path remains compatible with the quota and lifecycle changes | Real provider traffic, the unavailable external lanes, or hosted exact-head CI |
+| Late-review focused server regressions | Five fresh-PostgreSQL migration, invitation-churn, profile-deletion, cascade, and lock-order cases passed; Ruff and Python compilation passed | The account-scoped rolling quota, retained replay/capability rules, incident reconciliation, and deletion concurrency execute against migration `031` | Complete-suite compatibility or production database behavior |
+| Complete local server suite | 393 passed, 19 expected skips, and one dependency deprecation warning against a fresh PostgreSQL database | Every locally available server path remains compatible with the quota, migration `031`, profile-deletion reconciliation, and lifecycle changes | Real provider traffic, the unavailable external lanes, or hosted exact-head CI |
 | Android complete gate | 4,142 Full unit tests passed with zero failures/errors and 7 skips; lint, Full debug APK assembly, and instrumentation-source compilation passed | The current-Terms gate, scheduler, messaging service, app graph, and source contracts compile and pass repository tests | Physical FCM, process death, OEM background limits, location, haptic, battery, or band behavior |
-| Apple focused and complete gates | 32 Safety tests passed; the full Strand suite passed 1,665 tests with one expected data-dependent skip and zero failures; the `NOOPiOS` generic simulator graph built for arm64 and x86_64 | Runtime authorization, tap deferral, post-accept bootstrap, shared source, and iOS application compilation are intact | Signed physical APNs, terminated/background wake, location continuation, haptic, battery, or App Store behavior |
+| Apple focused and complete gates | 33 Safety tests passed; the full Strand suite passed 1,666 tests with one expected data-dependent skip and zero failures; the `NOOPiOS` generic simulator graph built for arm64 and x86_64 across the app, widget, and watch targets | Runtime authorization, replay retirement ordering, tap deferral, post-accept bootstrap, shared source, and iOS application compilation are intact | Signed physical APNs, terminated/background wake, location continuation, haptic, battery, or App Store behavior |
 | Fresh-eyes source review | Gate placement, post-accept retry, profile-lock serialization, replay ordering, request-list capacity, and expiry-before-claim behavior were re-read after tests | The implementation closes the three reviewed source defects without weakening idempotency or expiry | Runtime behavior unavailable without physical/provider evidence |
 | Repository release matrix | 227 Tools tests and 49 localization-audit tests passed; no-new-copy i18n, 9 release controls, required CI, calibration parity, terminology, health claims across 1,195 files, private-data, legal inventory across 230 runtime components, distribution provenance, workflow-scoped ShellCheck, Ruff, Python compilation, operations-record validation, and diff checks passed | The final local tree preserves protected-release, localization, claims, privacy, provenance, and evidence contracts | Hosted exact-SHA checks or protected merge |
 
@@ -156,6 +185,23 @@ external gates.
   collided with a deliberately single-use synthetic invitation capability. A
   fresh `template0` database passed all 27 lifecycle and managed-Safety tests;
   the temporary database was then removed.
+- The first late-review focused invocation used an outdated test function name
+  and collected no matching case. The corrected five-case selection passed
+  against a fresh throwaway database, which was removed by the test trap.
+- A replacement hosted iOS run on the preceding head was canceled after the
+  later exact-head review found three new actionable defects. It is not
+  evidence against the current implementation; a new exact-head run is
+  required after this patch is pushed.
+- The first complete late-review server run passed every runtime and migration
+  case but failed the immutable-backup manifest contract because migration
+  `031` had not yet been listed. Its exact SHA-256 was added to the manifest
+  before rerunning the contract and complete suite.
+- The first late-review Tools suite reported three errors from one expected
+  fail-closed condition: the reviewed source digest still named the prior
+  terminology inventory. Review confirmed the inventory delta was only five
+  shifted historical-test line numbers, with unchanged counts, unchanged
+  active allowlist, and zero forbidden mappings; the exact new digest was then
+  pinned before rerunning the suite.
 
 ## Physical device and deployment
 
@@ -171,11 +217,14 @@ external gates.
 ## Git and release state
 
 - Changed paths: Apple application delegate and notification routing, Android
-  application/runtime gate/scheduler/messaging service, managed Safety
-  repository/lifecycle, focused regressions, terminology inventory, required-CI
-  digest, and operations records.
-- Commits: commit containing this record pending push.
-- Branch and remote state: pull request `#10` open; prior head pushed and green.
+  application/runtime gate/scheduler/messaging service, managed Safety and
+  social repositories/lifecycle, migration `031`, focused regressions,
+  terminology inventory, required-CI digest, and operations records.
+- Commits: the replacement implementation is the commit containing this
+  record.
+- Branch and remote state: pull request `#10` remains the protected integration
+  path; the prior head is obsolete and this replacement requires exact-head
+  review and checks.
 - Repository visibility verified: inherited from the current protected round.
 - Version/build impact: no version change planned.
 - Release or distribution impact: none until replacement review and protected
@@ -194,14 +243,18 @@ external gates.
   physical background behavior.
 - A recipient quota must preserve idempotent replay and existing invitation
   semantics while preventing request-list starvation.
+- Invitation limits must survive create/revoke churn and profile recreation
+  without retaining the secret capability or exposing account identifiers in
+  diagnostics.
 - Urgent dispatch-first ordering improves retry latency but does not replace
   monitoring, failover, or staffed operations.
 
 ## Next round
 
-1. Push the replacement head and resolve the three exact-head threads.
-2. Require a clean review and every protected hosted check on that exact
-   replacement commit, then merge normally.
+1. Run the complete server, Android, Apple, policy, migration, and operations
+   gates for the late-review head.
+2. Push the replacement head, resolve all exact-head threads, and require a
+   clean review plus every protected hosted check before a normal merge.
 3. Integrate and reverify the separate large-data scroll-lag pull request. A
    friend pulling yesterday's `main` did not receive those performance fixes.
 4. Collect a reviewed shake-to-report ZIP while lag reproduces on the affected
