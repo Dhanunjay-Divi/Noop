@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `implemented and locally verified; protected exact-head review pending`
+- State: `implemented and locally verified; replacement exact-head review pending`
 - Owner: project team
 - Branch: `codex/managed-app-safety-paging-20260908`
 - Start commit: `94dfe9d04b54dee706f56361724640ded32f2773`
-- End implementation commit: `e1c02d0b`
+- End implementation commit: the replacement pull-request head containing this record
 - Record commit or PR: protected pull request `#10`
 
 ## Objective
@@ -14,7 +14,8 @@
 Close every actionable finding from the automated review of the replacement
 pull-request head while preserving tenant isolation, fail-closed responder
 state, durable latest-location-only sharing, localization, privacy, and the
-existing external launch gates.
+existing external launch gates. The final pass also closes the subsequent
+review findings in the iOS Firebase registration and FCM authorization path.
 
 ## Scope
 
@@ -27,6 +28,11 @@ existing external launch gates.
 - Make an active Apple location-sharing session recoverable after process
   termination without persisting coordinates.
 - Present localized app-owned incident status labels on Apple and Android.
+- Register the iOS Firebase Messaging value as an FCM registration token while
+  preserving rolling compatibility with pre-fix rows labeled `fid`.
+- Recheck iOS notification authorization at every token callback and retire an
+  installation that can no longer display alerts.
+- Invalidate and reacquire a rejected cached FCM OAuth token once after `401`.
 - Add focused regressions, rerun affected full gates, and obtain a clean exact
   protected-head review before merge.
 
@@ -45,6 +51,11 @@ existing external launch gates.
   findings were posted.
 - Four actionable findings identify one database deadlock race, two incident
   lifecycle failures, and one cross-platform localization gap.
+- The subsequent exact-head review of `eee0b733cc2f84cfefbb60504a8351ff01769c4c`
+  identified three additional delivery defects: iOS sent an FCM registration
+  token under the unsupported HTTP v1 `message.fid` field, token callbacks did
+  not recheck notification authorization, and an FCM `401` left the rejected
+  OAuth token cached through later delivery attempts.
 
 ## Delivered
 
@@ -75,10 +86,27 @@ existing external launch gates.
 - The first hosted macOS rerun correctly rejected a stale contract that still
   expected the pre-status catalog size of 304. The invariant now pins the
   generated 313-entry catalog, and the exact focused macOS test passes.
+- Apple now registers the Firebase Messaging delegate value as `token`.
+  Migration `029` allows both corrected iOS `token` rows and existing iOS
+  `fid`-labeled rows during a rolling update; the provider sends either stored
+  value through FCM HTTP v1 `message.token` and retains the existing APNs
+  localization, expiry, collapse, sound, and time-sensitive overrides.
+- Every iOS token callback now reads current notification settings. Denied,
+  undetermined, or unknown authorization retires the server installation and
+  records only a fixed rejection reason; an enrollment or disconnect change
+  while the settings read is suspended cancels publication.
+- The FCM provider clears a cached access token only when it is the token that
+  received `401`, reacquires metadata authorization, and retries once. A second
+  `401` remains retryable-unavailable instead of consuming later attempts with
+  the same stale credential. Concurrent refreshes cannot clear a newer token.
+- The immutable migration restore manifest includes the exact checksum for
+  migration `029`; the complete clean-database server suite passes.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: none expected.
+- Schema or migration impact: additive migration `029` replaces only the
+  push-target check constraint so iOS accepts `token` or legacy `fid` while
+  Android remains restricted to `token`. No encrypted token row is rewritten.
 - Existing-data retention impact: none expected.
 - Source/provenance or formula impact: none.
 - Permissions/network disclosure impact: latest location remains opt-in,
@@ -90,6 +118,12 @@ existing external launch gates.
 
 - Existing managed request correlation and bounded Safety operation events
   cover server success/rejection/failure.
+- `managed_safety.push_registration` records completed, canceled, rejected, or
+  fixed-category failure outcomes without recording the FCM token,
+  authorization value, installation, account, or provider payload.
+- Existing push batch and delivery receipt outcomes distinguish accepted,
+  invalid, rejected, transient, and unavailable provider results. OAuth token
+  values and FCM response bodies remain absent from operational evidence.
 - Apple restoration evidence must record only fixed lifecycle categories and
   bounded outcomes; it must never include coordinates, identifiers, account or
   contact data, payloads, provider errors, or arbitrary exception text.
@@ -109,6 +143,13 @@ existing external launch gates.
 | Server formatting and generated localization | Ruff check/format passed; 313 strings regenerated for nine locales; JSON, Ruby, and diff checks passed | Changed source is formatted and generated resources match the catalog | Human linguistic review of every translation |
 | Hosted macOS localization contract | The first exact-head run exposed the stale 304-entry assertion; the corrected 313-entry invariant passed locally in 0.074 seconds | The test now matches the reviewed generated catalog instead of masking a hosted failure | The replacement protected head still requires a green hosted rerun |
 | Terminology ratchet | 17,376 classified occurrences across 1,509 path/category groups; zero forbidden mappings; active allowlist unchanged | Generated line movement and new source text were reviewed and the fail-closed snapshot is current | Removal of existing compatibility terminology |
+| Subsequent exact-head review | Three actionable FCM registration, authorization, and cached-credential findings reproduced and addressed | The final replacement scope is tied to reviewed source | Physical APNs/FCM delivery |
+| Complete fresh PostgreSQL server suite | 390 passed and the one real-Twilio staging test remained intentionally opt-in; disposable database created from `template0` and removed by an exit trap | Migration `029`, restore checksum, an in-place legacy-`fid` to corrected-`token` registration upgrade, provider payload, `401` refresh, repositories, tenancy, and existing server behavior pass together | Live FCM, Twilio, Cloud Run, or production database behavior |
+| Full `NoopRemoteSync` package | 110 tests passed | Shared iOS/Android managed client models send and accept the corrected token contract | App callback or provider delivery behavior |
+| Apple Safety regression after final review | 30 tests passed with zero failures | The notification authorization recheck, server retirement path, corrected token kind, and prior Safety shell contracts remain mounted | A physical notification permission transition or APNs delivery |
+| Complete iOS simulator app graph after final review | Generic iOS simulator staging build completed with `BUILD SUCCEEDED` | Firebase Messaging, managed service, widgets, watch dependencies, and the corrected callback compile together | Signing, APNs acceptance, terminated execution, or battery behavior |
+| Server quality gate after final review | Ruff check and format check passed | Changed provider and repository source conforms to the pinned server quality rules | Future dependency advisories or live provider behavior |
+| Repository release-integrity matrix | 187 protected-control tests; 9 release checks; required CI, operations, terminology, calibration, localization, claims, legal/distribution, private-data, shell syntax, and shellcheck gates passed | The exact local replacement preserves immutable migration, trust-root, privacy, evidence, and release-policy contracts | Hosted execution or external launch approval |
 
 ## Physical device and deployment
 
@@ -123,12 +164,13 @@ existing external launch gates.
 
 ## Git and release state
 
-- Changed paths: managed server repositories and tests; Apple Safety runtime,
-  managed service, app delegate, view, and tests; Android Safety view and test;
-  generated nine-locale Safety resources; the macOS localization contract;
-  terminology snapshot and pinned digest; operations records.
-- Commits: implementation `e1c02d0b`; this record follow-up will become the
-  protected pull-request head used for hosted checks and review.
+- Changed paths: managed server provider, models, repository, migration,
+  restore manifest, and tests; shared managed client contract and tests; Apple
+  managed notification registration and Safety shell test; terminology
+  snapshot, pinned digest, and operations records.
+- Commits: prior implementation `e1c02d0b`; the replacement commit containing
+  migration `029`, the three final review remediations, and this record becomes
+  the protected pull-request head used for hosted checks and review.
 - Branch and remote state: protected pull request `#10` remains open.
 - Repository visibility verified: inherited from the exact-head review round.
 - Version/build impact: no version change planned.
@@ -143,6 +185,9 @@ existing external launch gates.
 
 - A simulator or source test cannot prove terminated-process location
   restoration on a physical iPhone.
+- A simulator cannot prove FCM-to-APNs acceptance, token rotation after an
+  installed-app upgrade, or notification authorization changes on a physical
+  phone.
 - Provider, legal, monitoring, failover, and staffed-operations gates remain
   outside this supplier-independent source round.
 
@@ -151,6 +196,9 @@ existing external launch gates.
 1. Commit and push the verified replacement head.
 2. Obtain a clean exact-head automated review and all protected hosted checks.
 3. Resolve only findings verified against that exact head, then merge normally.
+4. Keep public traffic and real participant paging disabled until physical
+   push/location, legal, monitoring, failover, and staffed-operations gates
+   pass.
 
 ## Privacy check
 

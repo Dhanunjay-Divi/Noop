@@ -56,6 +56,7 @@ class _DeliveryRepository:
         *,
         account_id,
         installation_id: str,
+        platform: str,
         target_kind: str,
         token_ciphertext: str,
     ) -> None:
@@ -63,6 +64,7 @@ class _DeliveryRepository:
         self.claim_id = uuid4()
         self.account_id = account_id
         self.installation_id = installation_id
+        self.platform = platform
         self.target_kind = target_kind
         self.token_ciphertext = token_ciphertext
         self.completed = []
@@ -83,6 +85,7 @@ class _DeliveryRepository:
                 "incident_id": uuid4(),
                 "account_id": self.account_id,
                 "installation_id": self.installation_id,
+                "platform": self.platform,
                 "target_kind": self.target_kind,
                 "token_ciphertext": self.token_ciphertext,
                 "expires_at": datetime.now(UTC) + timedelta(hours=8),
@@ -217,6 +220,7 @@ async def test_unexpected_provider_failure_becomes_retryable_unavailable() -> No
     repository = _DeliveryRepository(
         account_id=account_id,
         installation_id=installation_id,
+        platform="ios",
         target_kind="fid",
         token_ciphertext=codec.seal(
             "fcm-token:ABC_def-1234567890",
@@ -249,6 +253,7 @@ async def test_due_push_retry_reports_only_bounded_outcomes() -> None:
     repository = _DeliveryRepository(
         account_id=account_id,
         installation_id=installation_id,
+        platform="android",
         target_kind="token",
         token_ciphertext=codec.seal(
             "fcm-token:ABC_def-1234567890",
@@ -285,6 +290,7 @@ async def test_due_push_dispatch_claims_only_one_concurrency_wave_at_a_time() ->
                 "incident_id": uuid4(),
                 "account_id": account_id,
                 "installation_id": installation_id,
+                "platform": "android",
                 "target_kind": "token",
                 "token_ciphertext": codec.seal(
                     f"fcm-token:wave_{index}_1234567890",
@@ -332,6 +338,7 @@ async def test_initial_push_dispatch_claims_only_one_concurrency_wave_at_a_time(
                 "incident_id": uuid4(),
                 "account_id": account_id,
                 "installation_id": installation_id,
+                "platform": "ios",
                 "target_kind": "token",
                 "token_ciphertext": codec.seal(
                     f"fcm-token:initial_wave_{index}_1234567890",
@@ -372,10 +379,17 @@ def test_managed_safety_models_are_strict_and_bounded() -> None:
     registration = ManagedPushRegistration(
         platform="ios",
         environment="production",
-        target_kind="fid",
+        target_kind="token",
         token="fcm-token:ABC_def-1234567890",
     )
     assert registration.token.get_secret_value().startswith("fcm-token:")
+    legacy_registration = ManagedPushRegistration(
+        platform="ios",
+        environment="production",
+        target_kind="fid",
+        token="fcm-token:ABC_def-1234567890",
+    )
+    assert legacy_registration.target_kind == "fid"
     assert (
         ManagedSafetyIncidentCreate(
             request_id=uuid4(),
@@ -419,9 +433,9 @@ def test_managed_safety_models_are_strict_and_bounded() -> None:
         )
     with pytest.raises(ValidationError):
         ManagedPushRegistration(
-            platform="ios",
+            platform="android",
             environment="production",
-            target_kind="token",
+            target_kind="fid",
             token="fcm-token:ABC_def-1234567890",
         )
 
@@ -432,7 +446,7 @@ def test_fcm_payload_contains_only_generic_notification_and_opaque_reference() -
     expires_at = now + timedelta(hours=8)
     payload = FirebaseCloudMessagingProvider.payload(
         token="fcm-token:ABC_def-1234567890",
-        target_kind="token",
+        platform="android",
         incident_id=incident_id,
         expires_at=expires_at,
         now=now,
@@ -452,30 +466,30 @@ def test_fcm_payload_contains_only_generic_notification_and_opaque_reference() -
     assert payload["message"]["token"] == "fcm-token:ABC_def-1234567890"
     assert "fid" not in payload["message"]
 
-    fid_payload = FirebaseCloudMessagingProvider.payload(
-        token="firebase-installation-id",
-        target_kind="fid",
+    ios_payload = FirebaseCloudMessagingProvider.payload(
+        token="fcm-ios-token:ABC_def-1234567890",
+        platform="ios",
         incident_id=incident_id,
         expires_at=expires_at,
         now=now,
     )
-    assert fid_payload["message"]["fid"] == "firebase-installation-id"
-    assert "token" not in fid_payload["message"]
-    assert "android" not in fid_payload["message"]
-    assert "notification" not in fid_payload["message"]
-    assert fid_payload["message"]["apns"]["payload"]["aps"]["alert"] == {
+    assert ios_payload["message"]["token"] == "fcm-ios-token:ABC_def-1234567890"
+    assert "fid" not in ios_payload["message"]
+    assert "android" not in ios_payload["message"]
+    assert "notification" not in ios_payload["message"]
+    assert ios_payload["message"]["apns"]["payload"]["aps"]["alert"] == {
         "title-loc-key": "managed.safety.notification.title",
         "loc-key": "managed.safety.notification.body",
     }
-    assert fid_payload["message"]["apns"]["headers"] == {
+    assert ios_payload["message"]["apns"]["headers"] == {
         "apns-collapse-id": f"noop-safety-{incident_id}",
         "apns-expiration": str(int(expires_at.timestamp())),
         "apns-priority": "10",
         "apns-push-type": "alert",
     }
-    assert fid_payload["message"]["apns"]["payload"]["aps"]["sound"] == "default"
+    assert ios_payload["message"]["apns"]["payload"]["aps"]["sound"] == "default"
     assert (
-        fid_payload["message"]["apns"]["payload"]["aps"]["interruption-level"]
+        ios_payload["message"]["apns"]["payload"]["aps"]["interruption-level"]
         == "time-sensitive"
     )
 
@@ -486,6 +500,7 @@ async def test_unavailable_provider_fails_closed_without_delivery_claim() -> Non
     assert provider.available is False
     result = await provider.send_safety_incident(
         token="fcm-token:ABC_def-1234567890",
+        platform="android",
         target_kind="token",
         incident_id=uuid4(),
         expires_at=datetime.now(UTC) + timedelta(hours=8),
@@ -520,6 +535,7 @@ async def test_fcm_provider_uses_metadata_token_and_hashes_provider_reference() 
     )
     result = await provider.send_safety_incident(
         token="fcm-token:ABC_def-1234567890",
+        platform="android",
         target_kind="token",
         incident_id=uuid4(),
         expires_at=datetime.now(UTC) + timedelta(hours=8),
@@ -566,6 +582,7 @@ async def test_fcm_provider_invalidates_only_explicit_unregistered_tokens() -> N
     )
     result = await provider.send_safety_incident(
         token="fcm-token:ABC_def-1234567890",
+        platform="android",
         target_kind="token",
         incident_id=uuid4(),
         expires_at=datetime.now(UTC) + timedelta(hours=8),
@@ -574,7 +591,7 @@ async def test_fcm_provider_invalidates_only_explicit_unregistered_tokens() -> N
 
 
 @pytest.mark.asyncio
-async def test_fcm_provider_treats_unregistered_fid_404_as_invalid() -> None:
+async def test_fcm_provider_does_not_invalidate_ios_token_from_bare_404() -> None:
     calls = 0
 
     def opener(request, timeout):
@@ -600,12 +617,13 @@ async def test_fcm_provider_treats_unregistered_fid_404_as_invalid() -> None:
         opener=opener,
     )
     result = await provider.send_safety_incident(
-        token="firebase-installation-id",
+        token="fcm-ios-token:ABC_def-1234567890",
+        platform="ios",
         target_kind="fid",
         incident_id=uuid4(),
         expires_at=datetime.now(UTC) + timedelta(hours=8),
     )
-    assert result.outcome == "invalid"
+    assert result.outcome == "rejected"
 
 
 @pytest.mark.asyncio
@@ -636,8 +654,54 @@ async def test_fcm_provider_does_not_invalidate_from_unstructured_error_text() -
     )
     result = await provider.send_safety_incident(
         token="fcm-token:ABC_def-1234567890",
+        platform="android",
         target_kind="token",
         incident_id=uuid4(),
         expires_at=datetime.now(UTC) + timedelta(hours=8),
     )
     assert result.outcome == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_fcm_provider_refreshes_cached_token_once_after_401() -> None:
+    requests: list[tuple[str, str | None]] = []
+    metadata_tokens = iter(("stale-access-token", "fresh-access-token"))
+
+    def opener(request, timeout):
+        del timeout
+        if request.full_url.startswith("http://metadata."):
+            token = next(metadata_tokens)
+            requests.append(("metadata", token))
+            return _Response({"access_token": token, "expires_in": 3600})
+        authorization = request.get_header("Authorization")
+        requests.append(("send", authorization))
+        if authorization == "Bearer stale-access-token":
+            raise HTTPError(
+                request.full_url,
+                401,
+                "unauthorized",
+                {},
+                io.BytesIO(b'{"error":{"status":"UNAUTHENTICATED"}}'),
+            )
+        assert authorization == "Bearer fresh-access-token"
+        return _Response({"name": "projects/test/messages/refreshed"})
+
+    provider = FirebaseCloudMessagingProvider(
+        project_id="noop-test-project",
+        opener=opener,
+    )
+    result = await provider.send_safety_incident(
+        token="fcm-ios-token:ABC_def-1234567890",
+        platform="ios",
+        target_kind="token",
+        incident_id=uuid4(),
+        expires_at=datetime.now(UTC) + timedelta(hours=8),
+    )
+
+    assert result.outcome == "sent"
+    assert requests == [
+        ("metadata", "stale-access-token"),
+        ("send", "Bearer stale-access-token"),
+        ("metadata", "fresh-access-token"),
+        ("send", "Bearer fresh-access-token"),
+    ]

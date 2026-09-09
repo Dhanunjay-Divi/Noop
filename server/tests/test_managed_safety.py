@@ -183,13 +183,14 @@ class _RecordingPushProvider:
         self,
         *,
         token: str,
+        platform: str,
         target_kind: str,
         incident_id: UUID,
         expires_at: datetime,
     ) -> ManagedPushResult:
         assert expires_at > datetime.now(UTC)
         assert isinstance(incident_id, UUID)
-        self.tokens.append(f"{target_kind}:{token}")
+        self.tokens.append(f"{platform}:{target_kind}:{token}")
         return ManagedPushResult(
             outcome="sent",
             provider_reference_hash=hashlib.sha256(
@@ -210,11 +211,13 @@ class _RetryThenSendPushProvider:
         self,
         *,
         token: str,
+        platform: str,
         target_kind: str,
         incident_id: UUID,
         expires_at: datetime,
     ) -> ManagedPushResult:
-        assert target_kind == "fid"
+        assert platform == "ios"
+        assert target_kind == "token"
         assert token.startswith("fcm-token:")
         assert expires_at > datetime.now(UTC)
         self.calls += 1
@@ -805,13 +808,27 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
                 registration=ManagedPushRegistration(
                     platform=platform,
                     environment="development",
-                    target_kind="fid" if platform == "ios" else "token",
+                    target_kind=(
+                        "fid" if installation_id.startswith("ios") else "token"
+                    ),
                     token=token,
                 ),
             )
+        upgraded = await push.register(
+            principal=first,
+            installation_id=f"ios-safety-first-{run_id}",
+            registration=ManagedPushRegistration(
+                platform="ios",
+                environment="development",
+                target_kind="token",
+                token=first_token,
+            ),
+        )
+        assert upgraded["duplicate"] is False
+        assert upgraded["target_kind"] == "token"
         stored = await primary._require_pool().fetch(
             """
-            SELECT token_hash, token_ciphertext
+            SELECT platform, target_kind, token_hash, token_ciphertext
             FROM managed_push_installations
             WHERE account_id = ANY($1::uuid[])
             ORDER BY installation_id
@@ -820,6 +837,10 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
         )
         assert len(stored) == 2
         assert all("fcm-token:" not in row["token_ciphertext"] for row in stored)
+        assert {(row["platform"], row["target_kind"]) for row in stored} == {
+            ("android", "token"),
+            ("ios", "token"),
+        }
 
         incident = await safety.create_incident(
             principal=owner,
@@ -836,8 +857,8 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
         assert summary["contacts_targeted"] == 2
         assert summary["contacts_reached"] == 2
         assert sorted(provider.tokens) == [
-            f"fid:{first_token}",
-            f"token:{second_token}",
+            f"android:token:{second_token}",
+            f"ios:token:{first_token}",
         ]
         acknowledged = await safety.respond(
             principal=first,
@@ -920,7 +941,7 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
                             registration=ManagedPushRegistration(
                                 platform="ios",
                                 environment="development",
-                                target_kind="fid",
+                                target_kind="token",
                                 token=race_token,
                             ),
                         )
@@ -971,7 +992,7 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
                 registration=ManagedPushRegistration(
                     platform="ios",
                     environment="development",
-                    target_kind="fid",
+                    target_kind="token",
                     token=first_token,
                 ),
             )
@@ -1007,12 +1028,12 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
             registration=ManagedPushRegistration(
                 platform="ios",
                 environment="development",
-                target_kind="fid",
+                target_kind="token",
                 token=first_token,
             ),
         )
         assert transferred["status"] == "active"
-        assert transferred["target_kind"] == "fid"
+        assert transferred["target_kind"] == "token"
         retired = await primary._require_pool().fetchrow(
             """
             SELECT status, token_hash, token_ciphertext
@@ -1062,7 +1083,7 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
                 registration=ManagedPushRegistration(
                     platform="ios",
                     environment="development",
-                    target_kind="fid",
+                    target_kind="token",
                     token=f"fcm-token:surplus_{index}_{run_id}",
                 ),
             )
@@ -1221,7 +1242,7 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             registration=ManagedPushRegistration(
                 platform="ios",
                 environment="development",
-                target_kind="fid",
+                target_kind="token",
                 token=f"fcm-token:retry_{run_id}",
             ),
         )
@@ -1466,7 +1487,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             registration=ManagedPushRegistration(
                 platform="ios",
                 environment="development",
-                target_kind="fid",
+                target_kind="token",
                 token=first_token,
             ),
         )
@@ -1486,7 +1507,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
         first_delivery = await push.dispatch_due(limit=20)
         assert first_delivery.claimed == 1
         assert first_delivery.provider_accepted == 1
-        assert provider.tokens == [f"fid:{first_token}"]
+        assert provider.tokens == [f"ios:token:{first_token}"]
 
         second_installation = f"ios-late-second-{run_id}"
         await _installation(
@@ -1499,7 +1520,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
         registration = ManagedPushRegistration(
             platform="ios",
             environment="development",
-            target_kind="fid",
+            target_kind="token",
             token=old_second_token,
         )
         await push.register(
@@ -1551,7 +1572,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             registration=ManagedPushRegistration(
                 platform="ios",
                 environment="development",
-                target_kind="fid",
+                target_kind="token",
                 token=new_second_token,
             ),
         )
@@ -1630,7 +1651,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             registration=ManagedPushRegistration(
                 platform="ios",
                 environment="development",
-                target_kind="fid",
+                target_kind="token",
                 token=f"fcm-token:after_response_{run_id}",
             ),
         )

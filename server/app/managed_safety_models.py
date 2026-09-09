@@ -40,9 +40,8 @@ class ManagedPushRegistration(StrictModel):
 
     @model_validator(mode="after")
     def valid_target_kind(self) -> ManagedPushRegistration:
-        expected = "fid" if self.platform == "ios" else "token"
-        if self.target_kind != expected:
-            raise ValueError(f"{self.platform} push registrations must use {expected}")
+        if self.platform == "android" and self.target_kind != "token":
+            raise ValueError("android push registrations must use token")
         return self
 
 

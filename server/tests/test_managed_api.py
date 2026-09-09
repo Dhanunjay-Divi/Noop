@@ -1265,7 +1265,7 @@ def test_managed_safety_push_registration_never_echoes_token() -> None:
             json={
                 "platform": "ios",
                 "environment": "production",
-                "target_kind": "fid",
+                "target_kind": "token",
                 "token": token,
             },
         )
@@ -1275,7 +1275,7 @@ def test_managed_safety_push_registration_never_echoes_token() -> None:
             json={
                 "platform": "ios",
                 "environment": "production",
-                "target_kind": "fid",
+                "target_kind": "token",
                 "token": "bad token value",
             },
         )

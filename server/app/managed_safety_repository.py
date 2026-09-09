@@ -2120,6 +2120,7 @@ class PostgresManagedSafetyRepository:
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
+                           push.platform,
                            push.target_kind,
                            push.token_hash,
                            push.token_ciphertext,
@@ -2219,6 +2220,7 @@ class PostgresManagedSafetyRepository:
                 candidates = await connection.fetch(
                     """
                     SELECT delivery.*,
+                           push.platform,
                            push.target_kind,
                            push.token_hash,
                            push.token_ciphertext,
@@ -2304,6 +2306,7 @@ class PostgresManagedSafetyRepository:
                     "contact_profile_id": candidate["contact_profile_id"],
                     "account_id": candidate["account_id"],
                     "installation_id": str(candidate["installation_id"]),
+                    "platform": str(candidate["platform"]),
                     "target_kind": str(candidate["target_kind"]),
                     "token_hash": str(candidate["token_hash"]).strip(),
                     "token_ciphertext": str(candidate["token_ciphertext"]),
@@ -2621,6 +2624,7 @@ class ManagedSafetyPushService:
                     )
                     result = await self.provider.send_safety_incident(
                         token=token,
+                        platform=delivery["platform"],
                         target_kind=delivery["target_kind"],
                         incident_id=delivery["incident_id"],
                         expires_at=delivery["expires_at"],

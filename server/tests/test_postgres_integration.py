@@ -226,6 +226,9 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     lifecycle = (MIGRATIONS / "028_managed_safety_contact_lifecycle.sql").read_text(
         encoding="utf-8"
     )
+    push_contract = (MIGRATIONS / "029_managed_push_fcm_token_contract.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS managed_push_installations" in sql
     assert "CREATE TABLE IF NOT EXISTS managed_safety_contacts" in sql
@@ -240,6 +243,8 @@ def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> Non
     assert "IF NOT EXISTS (" in sql
     assert "managed_safety_contacts_accepted_request_id_fkey" in lifecycle
     assert "ON DELETE CASCADE" in lifecycle
+    assert "target_kind IN ('token', 'fid')" in push_contract
+    assert "platform = 'android'" in push_contract
 
 
 def test_managed_storage_migration_covers_control_and_data_planes() -> None:

@@ -341,8 +341,7 @@ public actor ManagedStorageClient {
         token: String,
         authorization: ManagedAuthorization
     ) async throws -> ManagedPushRegistrationInfo {
-        let expectedTargetKind: ManagedPushTargetKind =
-            platform == .iOS ? .fid : .token
+        let expectedTargetKind = ManagedPushTargetKind.token
         guard targetKind == expectedTargetKind else {
             throw ManagedStorageError.invalidResponse
         }

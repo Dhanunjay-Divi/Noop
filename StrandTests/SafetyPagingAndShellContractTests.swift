@@ -635,14 +635,36 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
                         }
             """
         ))
-        XCTAssertTrue(service.contains(
-            """
-            guard authorized else {
-                        await retireManagedPushInstallationForNotificationSettings()
-                        return
-                    }
-            """
+        XCTAssertGreaterThanOrEqual(
+            service.components(
+                separatedBy: "guard authorized else {"
+            ).count,
+            3
+        )
+        let registrationStart = try XCTUnwrap(
+            service.range(
+                of: "func registerManagedPushToken(_ token: String) async"
+            )
+        )
+        let registrationEnd = try XCTUnwrap(
+            service.range(
+                of: "@discardableResult\n    func enableManagedSafetyNotifications()",
+                range: registrationStart.upperBound..<service.endIndex
+            )
+        )
+        let registration = String(
+            service[
+                registrationStart.lowerBound..<registrationEnd.lowerBound
+            ]
+        )
+        XCTAssertTrue(registration.contains(
+            "UNUserNotificationCenter.current()"
         ))
+        XCTAssertTrue(registration.contains(
+            "await retireManagedPushInstallationForNotificationSettings()"
+        ))
+        XCTAssertTrue(registration.contains("targetKind: .token"))
+        XCTAssertFalse(registration.contains("targetKind: .fid"))
         XCTAssertTrue(service.contains(
             "Messaging.messaging().isAutoInitEnabled = false"
         ))

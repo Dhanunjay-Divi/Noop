@@ -15773,11 +15773,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        763,
-        820,
-        820,
-        820,
-        821
+        785,
+        842,
+        842,
+        842,
+        843
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -16862,14 +16862,14 @@
       "category": "core",
       "lineNumbers": [
         13,
-        2189,
-        2887,
-        2892,
-        2906,
-        2913,
-        2915,
-        2991,
-        2997
+        2218,
+        2916,
+        2921,
+        2935,
+        2942,
+        2944,
+        3020,
+        3026
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",

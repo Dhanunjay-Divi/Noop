@@ -79,14 +79,18 @@ acceptance now follows the same profile-before-request lock order as blocking;
 incident acknowledgement is recomputed whenever responders withdraw or are
 revoked; Apple persists only a bounded opaque location-session reference and
 uses significant-location monitoring for system-managed relaunch; and both
-apps map every wire status to localized app-owned copy. A fresh extension-free
-PostgreSQL Safety file passed 10 tests, the full server suite passed 371 tests
-with 19 environment-gated skips, the Apple Safety suite passed 30 tests, the
-Android Safety suite passed 29 tests, and the complete iOS simulator app graph
-builds. The first final-review hosted macOS run found one stale 304-entry
-localization assertion; the corrected contract pins the generated 313-entry
-catalog and passes locally. Protected exact-head review, hosted checks, and
-normal merge remain.
+apps map every wire status to localized app-owned copy. The next exact-head
+review found three additional push defects. Apple now labels the Firebase
+Messaging callback value as an FCM registration token, rechecks notification
+authorization before each registration, and retires unauthorized
+installations. The server always addresses that value through FCM HTTP v1
+`message.token`, keeps legacy iOS `fid`-labeled rows rolling-compatible through
+migration `029`, and invalidates and reacquires a cached OAuth token once after
+`401`. The complete fresh PostgreSQL suite passed 390 tests with only the
+explicit real-Twilio staging test skipped, all 110 shared managed-client tests
+passed, the Apple Safety suite passed 30 tests, Ruff passed, and the complete
+iOS simulator app graph builds. Protected replacement-head review, hosted
+checks, and normal merge remain.
 No public traffic or real participant paging is enabled. Evidence is recorded
 in
 [Managed Safety final review](rounds/2026-09-09-managed-safety-final-review.md).

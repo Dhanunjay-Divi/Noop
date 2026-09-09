@@ -485,6 +485,35 @@ final class ManagedCloudService: ObservableObject {
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_safety.push_registration"
         )
+        let settings = await UNUserNotificationCenter.current()
+            .notificationSettings()
+        let authorized: Bool
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            authorized = true
+        case .notDetermined, .denied:
+            authorized = false
+        @unknown default:
+            authorized = false
+        }
+        guard phase == .enrolled, !disconnecting else {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "canceled"
+            )
+            return
+        }
+        guard authorized else {
+            await retireManagedPushInstallationForNotificationSettings()
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "rejected",
+                fields: [
+                    "reason": "notification_not_authorized",
+                ]
+            )
+            return
+        }
         do {
             #if DEBUG
             let environment = ManagedPushEnvironment.development
@@ -494,7 +523,7 @@ final class ManagedCloudService: ObservableObject {
             _ = try await client().registerPushInstallation(
                 platform: .iOS,
                 environment: environment,
-                targetKind: .fid,
+                targetKind: .token,
                 token: token,
                 authorization: try await authorization(forceRefresh: false)
             )

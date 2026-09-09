@@ -1097,14 +1097,14 @@ final class ManagedStorageClientTests: XCTestCase {
                 )
                 XCTAssertEqual(body["platform"] as? String, "ios")
                 XCTAssertEqual(body["environment"] as? String, "development")
-                XCTAssertEqual(body["target_kind"] as? String, "fid")
+                XCTAssertEqual(body["target_kind"] as? String, "token")
                 XCTAssertEqual(body["token"] as? String, token)
                 json = """
                 {"registration":{
                   "installation_id":"ios-installation",
                   "platform":"ios",
                   "environment":"development",
-                  "target_kind":"fid",
+                  "target_kind":"token",
                   "status":"active",
                   "updated_at":"2026-09-08T10:00:00Z",
                   "duplicate":false
@@ -1191,12 +1191,12 @@ final class ManagedStorageClientTests: XCTestCase {
         let registration = try await client.registerPushInstallation(
             platform: .iOS,
             environment: .development,
-            targetKind: .fid,
+            targetKind: .token,
             token: token,
             authorization: authorization
         )
         XCTAssertEqual(registration.installationID, "ios-installation")
-        XCTAssertEqual(registration.targetKind, .fid)
+        XCTAssertEqual(registration.targetKind, .token)
         let contacts = try await client.safetyContacts(
             authorization: authorization
         )

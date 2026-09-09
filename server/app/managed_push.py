@@ -54,6 +54,7 @@ class ManagedPushSending(Protocol):
         self,
         *,
         token: str,
+        platform: Literal["ios", "android"],
         target_kind: Literal["token", "fid"],
         incident_id: UUID,
         expires_at: datetime,
@@ -130,11 +131,12 @@ class UnavailableManagedPushProvider:
         self,
         *,
         token: str,
+        platform: Literal["ios", "android"],
         target_kind: Literal["token", "fid"],
         incident_id: UUID,
         expires_at: datetime,
     ) -> ManagedPushResult:
-        del token, target_kind, incident_id, expires_at
+        del token, platform, target_kind, incident_id, expires_at
         return ManagedPushResult(outcome="unavailable")
 
 
@@ -167,13 +169,13 @@ class FirebaseCloudMessagingProvider:
     def payload(
         *,
         token: str,
-        target_kind: Literal["token", "fid"],
+        platform: Literal["ios", "android"],
         incident_id: UUID,
         expires_at: datetime,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        if target_kind not in {"token", "fid"}:
-            raise ValueError("push target kind is unsupported")
+        if platform not in {"ios", "android"}:
+            raise ValueError("push platform is unsupported")
         if expires_at.tzinfo is None or expires_at.utcoffset() is None:
             raise ValueError("push expiry must include a UTC offset")
         current = now or datetime.now(UTC)
@@ -188,7 +190,7 @@ class FirebaseCloudMessagingProvider:
         expiry = expiry_value.isoformat().replace("+00:00", "Z")
         collapse_id = f"noop-safety-{incident_id}"
         message: dict[str, Any] = {
-            target_kind: token,
+            "token": token,
             "data": {
                 "kind": "managed_safety_incident",
                 "incident_id": str(incident_id),
@@ -197,7 +199,7 @@ class FirebaseCloudMessagingProvider:
                 "schema": "1",
             },
         }
-        if target_kind == "token":
+        if platform == "android":
             # Android receives data-only high-priority delivery so
             # FirebaseMessagingService always creates the incident-specific
             # immutable PendingIntent, including while the app is backgrounded.
@@ -206,9 +208,9 @@ class FirebaseCloudMessagingProvider:
                 "ttl": f"{remaining_seconds}s",
             }
         else:
-            # FID mode is currently the iOS registration contract. APNs shows
-            # the private generic alert while the app fetches all incident
-            # details only after authenticated entry.
+            # FCM routes the registration token through APNs. APNs shows the
+            # private generic alert while the app fetches incident details only
+            # after authenticated entry.
             message["apns"] = {
                 "headers": {
                     "apns-collapse-id": collapse_id,
@@ -246,6 +248,12 @@ class FirebaseCloudMessagingProvider:
             self._access_token_expires_at = now + expires_in
             return token
 
+    async def _invalidate_access_token(self, rejected_token: str) -> None:
+        async with self._token_lock:
+            if self._access_token == rejected_token:
+                self._access_token = None
+                self._access_token_expires_at = 0.0
+
     def _read_metadata_token(self) -> tuple[str, int]:
         request = Request(
             self.token_url,
@@ -272,22 +280,34 @@ class FirebaseCloudMessagingProvider:
         self,
         *,
         token: str,
+        platform: Literal["ios", "android"],
         target_kind: Literal["token", "fid"],
         incident_id: UUID,
         expires_at: datetime,
     ) -> ManagedPushResult:
         if expires_at <= datetime.now(UTC):
             return ManagedPushResult(outcome="rejected")
+        if platform == "android" and target_kind != "token":
+            return ManagedPushResult(outcome="rejected")
         try:
-            access_token = await self._metadata_access_token()
-            return await asyncio.to_thread(
-                self._send,
-                access_token,
-                token,
-                target_kind,
-                incident_id,
-                expires_at,
-            )
+            for attempt in range(2):
+                access_token = await self._metadata_access_token()
+                try:
+                    return await asyncio.to_thread(
+                        self._send,
+                        access_token,
+                        token,
+                        platform,
+                        incident_id,
+                        expires_at,
+                    )
+                except HTTPError as error:
+                    if error.code != 401:
+                        raise
+                    await self._invalidate_access_token(access_token)
+                    if attempt == 1:
+                        raise
+            raise AssertionError("unreachable")
         except (
             ManagedPushError,
             HTTPError,
@@ -302,7 +322,7 @@ class FirebaseCloudMessagingProvider:
         self,
         access_token: str,
         token: str,
-        target_kind: Literal["token", "fid"],
+        platform: Literal["ios", "android"],
         incident_id: UUID,
         expires_at: datetime,
     ) -> ManagedPushResult:
@@ -312,7 +332,7 @@ class FirebaseCloudMessagingProvider:
         body = json.dumps(
             self.payload(
                 token=token,
-                target_kind=target_kind,
+                platform=platform,
                 incident_id=incident_id,
                 expires_at=expires_at,
             ),
@@ -340,14 +360,14 @@ class FirebaseCloudMessagingProvider:
                 ).hexdigest(),
             )
         except HTTPError as error:
+            if error.code == 401:
+                raise
             provider_code = self._provider_error_code(error)
             if provider_code in {"UNREGISTERED", "SENDER_ID_MISMATCH"}:
                 return ManagedPushResult(outcome="invalid")
-            if target_kind == "fid" and error.code == 404:
-                return ManagedPushResult(outcome="invalid")
             if error.code == 429 or 500 <= error.code <= 599:
                 return ManagedPushResult(outcome="transient_failure")
-            if error.code in {401, 403}:
+            if error.code == 403:
                 return ManagedPushResult(outcome="unavailable")
             return ManagedPushResult(outcome="rejected")
 
