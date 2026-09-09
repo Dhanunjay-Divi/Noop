@@ -60,4 +60,26 @@ class ManagedSafetyLocationContractTest {
         assertFalse(service.contains("\"latitude\" to"))
         assertFalse(service.contains("\"longitude\" to"))
     }
+
+    @Test
+    fun managedSafetyLifecycleFailsClosedAndClearsCascadedState() {
+        val cloud = source(
+            "src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+        )
+        assumeTrue(cloud != null)
+        val text = cloud!!
+        val deletion = text
+            .substringAfter("suspend fun deleteSocialProfile()")
+            .substringBefore("suspend fun sendSocialPoke(")
+
+        assertTrue(deletion.contains("preferences.clearSocialState()"))
+        assertTrue(deletion.contains("preferences.clearSafetyState()"))
+        assertTrue(deletion.contains("clearSafetyPresentation()"))
+        assertTrue(text.contains(
+            "ManagedPushRevocationPolicy.canFinalizeDisconnect(",
+        ))
+        assertTrue(text.contains("scheduleManagedSafetyBootstrap()"))
+    }
 }

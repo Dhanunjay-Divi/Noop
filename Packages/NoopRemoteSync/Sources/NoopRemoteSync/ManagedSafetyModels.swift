@@ -379,6 +379,36 @@ public enum ManagedSafetyPushPayload {
         from values: [String: String],
         now: Date = Date()
     ) -> UUID? {
+        validatedIncidentID(
+            from: values,
+            now: now,
+            requiresUnexpiredDelivery: true
+        )
+    }
+
+    public static func incidentIDForUserResponse(
+        from userInfo: [AnyHashable: Any],
+        now: Date = Date()
+    ) -> UUID? {
+        let keys = ["kind", "schema", "route", "expires_at", "incident_id"]
+        let values = Dictionary(
+            uniqueKeysWithValues: keys.compactMap { key in
+                (userInfo[key] as? String).map { (key, $0) }
+            }
+        )
+        guard values.count == keys.count else { return nil }
+        return validatedIncidentID(
+            from: values,
+            now: now,
+            requiresUnexpiredDelivery: false
+        )
+    }
+
+    private static func validatedIncidentID(
+        from values: [String: String],
+        now: Date,
+        requiresUnexpiredDelivery: Bool
+    ) -> UUID? {
         guard values["kind"] == kind,
               values["schema"] == schema,
               values["route"] == route,
@@ -386,9 +416,10 @@ public enum ManagedSafetyPushPayload {
               let expiry = ManagedTimestamp.milliseconds(
                   iso8601: rawExpiry
               ),
-              expiry > Int64(
-                  (now.timeIntervalSince1970 * 1_000).rounded()
-              ),
+              !requiresUnexpiredDelivery
+                || expiry > Int64(
+                    (now.timeIntervalSince1970 * 1_000).rounded()
+                ),
               let rawIncidentID = values["incident_id"] else {
             return nil
         }
@@ -407,6 +438,16 @@ public enum ManagedSafetyPushPayload {
         )
         guard values.count == keys.count else { return nil }
         return incidentID(from: values, now: now)
+    }
+}
+
+public enum ManagedPushRevocationPolicy {
+    public static func canFinalizeDisconnect(
+        requiresRevocation: Bool,
+        serverRevoked: Bool,
+        providerTokenDeleted: Bool
+    ) -> Bool {
+        !requiresRevocation || serverRevoked || providerTokenDeleted
     }
 }
 

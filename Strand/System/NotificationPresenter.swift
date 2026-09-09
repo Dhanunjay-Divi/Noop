@@ -334,7 +334,7 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
             ContextualActionCenter.shared.capture(response.notification.request)
         }
         #if os(iOS)
-        if let incidentID = ManagedSafetyPushPayload.incidentID(
+        if let incidentID = ManagedSafetyPushPayload.incidentIDForUserResponse(
             from: response.notification.request.content.userInfo
         ) {
             NotificationRouteBridge.recordPending(.safety)

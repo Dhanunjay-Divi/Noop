@@ -1200,6 +1200,7 @@ final class ManagedCloudService: ObservableObject {
                 authorization: try await authorization(forceRefresh: true)
             )
             clearSocialState()
+            clearSafetyState()
             socialStatus = String(
                 localized: "Managed Friends was deleted. NOOP+ backup and on-device data are unchanged."
             )
@@ -1304,18 +1305,26 @@ final class ManagedCloudService: ObservableObject {
     func disconnect() async {
         guard !isBusy else { return }
         disconnecting = true
-        defer { disconnecting = false }
+        defer {
+            disconnecting = false
+            if phase == .enrolled {
+                reconcileManagedSafetyLocationSharing()
+                scheduleManagedSafetyBootstrap()
+            }
+        }
         safetyBootstrapTask?.cancel()
         safetyBootstrapTask = nil
         stopManagedSafetyLocationSharing(reason: "disconnect")
         isBusy = true
         defer { isBusy = false }
-        if phase == .enrolled || phase == .deletionScheduled {
+        let requiresPushRevocation =
+            phase == .enrolled || phase == .deletionScheduled
+        var revokeCompleted = false
+        var tokenDeletionCompleted = false
+        if requiresPushRevocation {
             let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
                 "managed_safety.push_revocation"
             )
-            var revokeCompleted = false
-            var tokenDeletionCompleted = false
             do {
                 try configureFirebaseIfNeeded()
                 try await client().revokePushInstallation(
@@ -1353,6 +1362,18 @@ final class ManagedCloudService: ObservableObject {
                     "provider": tokenDeletionCompleted ? "deleted" : "failed",
                 ]
             )
+        }
+        guard ManagedPushRevocationPolicy.canFinalizeDisconnect(
+            requiresRevocation: requiresPushRevocation,
+            serverRevoked: revokeCompleted,
+            providerTokenDeleted: tokenDeletionCompleted
+        ) else {
+            setStatus(
+                String(localized:
+                    "NOOP+ could not complete that request. Try again."
+                )
+            )
+            return
         }
         do {
             try configureFirebaseIfNeeded()
@@ -1603,18 +1624,7 @@ final class ManagedCloudService: ObservableObject {
                 ]
             )
         } catch ManagedStorageError.notFound {
-            defaults.set(false, forKey: Key.safetyEnabled)
-            defaults.removeObject(forKey: Key.safetyLastAttempt)
-            defaults.removeObject(forKey: Key.safetyInviteRequestID)
-            defaults.removeObject(forKey: Key.safetyContactRequest)
-            defaults.removeObject(forKey: Key.safetyIncidentRequest)
-            defaults.removeObject(forKey: Key.safetyLocationSequences)
-            if let scope = try? accountScopeHash() {
-                try? ManagedCloudSafetyInviteSecret.clear(
-                    accountScopeHash: scope
-                )
-            }
-            clearSafetyPresentation(preservingPendingInvite: true)
+            clearSafetyState(preservingPendingInvite: true)
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed",
@@ -3057,6 +3067,25 @@ final class ManagedCloudService: ObservableObject {
         defaults.removeObject(forKey: Key.socialPendingNOOPID)
         ManagedCloudSocialInviteSecret.clearAll()
         clearSocialPresentation()
+    }
+
+    private func clearSafetyState(
+        preservingPendingInvite: Bool = false
+    ) {
+        defaults.removeObject(forKey: Key.safetyEnabled)
+        defaults.removeObject(forKey: Key.safetyLastAttempt)
+        defaults.removeObject(forKey: Key.safetyInviteRequestID)
+        defaults.removeObject(forKey: Key.safetyContactRequest)
+        defaults.removeObject(forKey: Key.safetyIncidentRequest)
+        defaults.removeObject(forKey: Key.safetyLocationSequences)
+        if let scope = try? accountScopeHash() {
+            try? ManagedCloudSafetyInviteSecret.clear(
+                accountScopeHash: scope
+            )
+        }
+        clearSafetyPresentation(
+            preservingPendingInvite: preservingPendingInvite
+        )
     }
 
     private func clearSafetyPresentation(

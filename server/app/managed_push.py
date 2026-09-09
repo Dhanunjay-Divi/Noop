@@ -209,10 +209,6 @@ class FirebaseCloudMessagingProvider:
             # FID mode is currently the iOS registration contract. APNs shows
             # the private generic alert while the app fetches all incident
             # details only after authenticated entry.
-            message["notification"] = {
-                "title": "Safety page",
-                "body": "Open NOOP to review an urgent contact request.",
-            }
             message["apns"] = {
                 "headers": {
                     "apns-collapse-id": collapse_id,
@@ -222,6 +218,10 @@ class FirebaseCloudMessagingProvider:
                 },
                 "payload": {
                     "aps": {
+                        "alert": {
+                            "title-loc-key": "managed.safety.notification.title",
+                            "loc-key": "managed.safety.notification.body",
+                        },
                         "content-available": 1,
                         "interruption-level": "time-sensitive",
                         "sound": "default",

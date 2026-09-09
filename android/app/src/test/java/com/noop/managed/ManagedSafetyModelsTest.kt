@@ -3,6 +3,7 @@ package com.noop.managed
 import java.time.Instant
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,5 +94,37 @@ class ManagedSafetyModelsTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun disconnectRequiresOneCompletedPushInvalidation() {
+        assertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation = false,
+                serverRevoked = false,
+                providerTokenDeleted = false,
+            ),
+        )
+        assertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation = true,
+                serverRevoked = true,
+                providerTokenDeleted = false,
+            ),
+        )
+        assertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation = true,
+                serverRevoked = false,
+                providerTokenDeleted = true,
+            ),
+        )
+        assertFalse(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation = true,
+                serverRevoked = false,
+                providerTokenDeleted = false,
+            ),
+        )
     }
 }

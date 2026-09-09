@@ -591,6 +591,90 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedSafetyNotificationResponseCanRouteRetainedHistory() throws {
+        let presenter = try source(
+            "Strand/System/NotificationPresenter.swift"
+        )
+        let application = try source(
+            "StrandiOS/App/StrandiOSApp.swift"
+        )
+
+        XCTAssertTrue(presenter.contains(
+            "ManagedSafetyPushPayload.incidentIDForUserResponse("
+        ))
+        XCTAssertTrue(application.contains(
+            "ManagedSafetyPushPayload.incidentID("
+        ))
+        XCTAssertFalse(application.contains(
+            "ManagedSafetyPushPayload.incidentIDForUserResponse("
+        ))
+    }
+
+    func testDeletingSocialProfileClearsManagedSafetyOnBothPhones() throws {
+        let apple = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let appleStart = try XCTUnwrap(
+            apple.range(of: "func deleteSocialProfile() async")
+        )
+        let appleEnd = try XCTUnwrap(
+            apple.range(
+                of: "func sendSocialPoke(",
+                range: appleStart.upperBound..<apple.endIndex
+            )
+        )
+        let appleDelete = String(
+            apple[appleStart.lowerBound..<appleEnd.lowerBound]
+        )
+        XCTAssertTrue(appleDelete.contains("clearSocialState()"))
+        XCTAssertTrue(appleDelete.contains("clearSafetyState()"))
+
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+        let androidStart = try XCTUnwrap(
+            android.range(of: "suspend fun deleteSocialProfile()")
+        )
+        let androidEnd = try XCTUnwrap(
+            android.range(
+                of: "suspend fun sendSocialPoke(",
+                range: androidStart.upperBound..<android.endIndex
+            )
+        )
+        let androidDelete = String(
+            android[androidStart.lowerBound..<androidEnd.lowerBound]
+        )
+        XCTAssertTrue(androidDelete.contains(
+            "preferences.clearSocialState()"
+        ))
+        XCTAssertTrue(androidDelete.contains(
+            "preferences.clearSafetyState()"
+        ))
+        XCTAssertTrue(androidDelete.contains("clearSafetyPresentation()"))
+    }
+
+    func testManagedDisconnectFailsClosedUntilPushIsInvalidated() throws {
+        let apple = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let android = try source(
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt"
+        )
+
+        XCTAssertTrue(apple.contains(
+            "ManagedPushRevocationPolicy.canFinalizeDisconnect("
+        ))
+        XCTAssertTrue(apple.contains(
+            "scheduleManagedSafetyBootstrap()"
+        ))
+        XCTAssertTrue(android.contains(
+            "ManagedPushRevocationPolicy.canFinalizeDisconnect("
+        ))
+        XCTAssertTrue(android.contains(
+            "scheduleManagedSafetyBootstrap()"
+        ))
+    }
+
     func testAutomaticFallBoundaryRemainsVisibleAndRuntimeInert() throws {
         let center = try source("Strand/Screens/SafetyCenterView.swift")
         let appModel = try source("Strand/App/AppModel.swift")

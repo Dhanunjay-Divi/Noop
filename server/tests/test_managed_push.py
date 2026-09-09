@@ -462,9 +462,10 @@ def test_fcm_payload_contains_only_generic_notification_and_opaque_reference() -
     assert fid_payload["message"]["fid"] == "firebase-installation-id"
     assert "token" not in fid_payload["message"]
     assert "android" not in fid_payload["message"]
-    assert fid_payload["message"]["notification"] == {
-        "title": "Safety page",
-        "body": "Open NOOP to review an urgent contact request.",
+    assert "notification" not in fid_payload["message"]
+    assert fid_payload["message"]["apns"]["payload"]["aps"]["alert"] == {
+        "title-loc-key": "managed.safety.notification.title",
+        "loc-key": "managed.safety.notification.body",
     }
     assert fid_payload["message"]["apns"]["headers"] == {
         "apns-collapse-id": f"noop-safety-{incident_id}",

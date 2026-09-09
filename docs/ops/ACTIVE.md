@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-08**
+Last updated: **2026-09-09**
 
 ## Repository
 
@@ -53,6 +53,20 @@ Evidence is recorded in
 Signed physical terminated/background push, location permission and battery
 behavior, legal/security review, monitoring, failover, and staffed operations
 remain launch gates. SMS/voice is not on the app-paging critical path.
+
+The exact-head Safety review follow-up is implemented and locally verified on
+the same protected branch. Apple and Android now refuse to discard an account
+when both server and provider push invalidation fail, expired notification taps
+route to retained authenticated history while background delivery remains
+expiry-gated, APNs alerts use translated catalog keys, and social-profile
+deletion immediately clears cascaded Safety state on both phones. The full
+Apple, Android, and fresh-PostgreSQL server suites, dependency audits, and
+repository policy gates pass locally. Pull request `#10` still requires green
+replacement-head hosted checks, a clean exact-head review, and normal protected
+merge. Physical APNs/FCM, terminated/background execution, location, haptic,
+carrier, legal, monitoring, failover, and staffed-operations evidence remains
+open. Evidence is recorded in
+[Managed Safety exact-head review](rounds/2026-09-09-managed-safety-exact-head-review.md).
 
 The production-readiness execution round is complete for supplier-independent
 source and repository work. Current source adds

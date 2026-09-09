@@ -1308,8 +1308,10 @@ class ManagedCloudService private constructor(context: Context) {
                 authorization = authorization(forceRefresh = true),
             )
             preferences.clearSocialState()
-            ManagedCloudScheduler.reconcile(appContext)
+            preferences.clearSafetyState()
             clearSocialPresentation()
+            clearSafetyPresentation()
+            ManagedCloudScheduler.reconcile(appContext)
             setSocialStatus(text(R.string.managed_friends_status_profile_deleted))
         }
 
@@ -1330,20 +1332,80 @@ class ManagedCloudService private constructor(context: Context) {
         safetyBootstrapRunning = false
         stopManagedSafetyLocationSession("disconnect")
         try {
-            if (
+            val requiresPushRevocation =
                 state.value.phase == ManagedCloudPhase.ENROLLED ||
-                state.value.phase == ManagedCloudPhase.DELETION_SCHEDULED
-            ) {
-                runCatching {
+                    state.value.phase == ManagedCloudPhase.DELETION_SCHEDULED
+            var serverRevoked = false
+            var providerTokenDeleted = false
+            if (requiresPushRevocation) {
+                val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                    "managed_safety.push_revocation",
+                )
+                try {
                     client().revokePushInstallation(
                         authorization = authorization(forceRefresh = true),
                     )
+                    serverRevoked = true
+                } catch (error: CancellationException) {
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "canceled",
+                    )
+                    throw error
+                } catch (error: Throwable) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "managed_safety.push_revocation",
+                        fields = mapOf(
+                            "outcome" to "server_failed",
+                            "failure_kind" to diagnosticSyncFailureKind(error),
+                        ),
+                    )
                 }
-                runCatching {
+                try {
                     val messaging = runtime().messaging
                     messaging.isAutoInitEnabled = false
                     messaging.deleteToken().awaitManaged()
+                    providerTokenDeleted = true
+                } catch (error: CancellationException) {
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "canceled",
+                        fields = mapOf(
+                            "server" to if (serverRevoked) "revoked" else "failed",
+                        ),
+                    )
+                    throw error
+                } catch (error: Throwable) {
+                    com.noop.AppDiagnosticsRecorder.record(
+                        "managed_safety.push_revocation",
+                        fields = mapOf(
+                            "outcome" to "provider_failed",
+                            "failure_kind" to diagnosticSyncFailureKind(error),
+                        ),
+                    )
                 }
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = if (serverRevoked || providerTokenDeleted) {
+                        "completed"
+                    } else {
+                        "failed"
+                    },
+                    fields = mapOf(
+                        "server" to if (serverRevoked) "revoked" else "failed",
+                        "provider" to if (providerTokenDeleted) "deleted" else "failed",
+                    ),
+                )
+            }
+            if (
+                !ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                    requiresRevocation = requiresPushRevocation,
+                    serverRevoked = serverRevoked,
+                    providerTokenDeleted = providerTokenDeleted,
+                )
+            ) {
+                setStatus(text(R.string.managed_cloud_error_generic))
+                return
             }
             runCatching { runtime().auth.signOut() }
                 .onFailure {
@@ -1360,6 +1422,11 @@ class ManagedCloudService private constructor(context: Context) {
             ManagedCloudScheduler.reconcile(appContext)
         } finally {
             managedDisconnecting = false
+            if (state.value.phase == ManagedCloudPhase.ENROLLED) {
+                reconcileManagedSafetyLocationSession()
+                scheduleManagedSafetyBootstrap()
+                ManagedCloudScheduler.reconcile(appContext)
+            }
         }
     }
 

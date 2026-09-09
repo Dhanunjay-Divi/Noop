@@ -118,6 +118,62 @@ final class ManagedSafetyModelsTests: XCTestCase {
                 "accepted expired payload at \(expiry)"
             )
         }
+
+        var expiredResponse = values
+        expiredResponse["expires_at"] = "2026-09-08T07:59:59Z"
+        XCTAssertEqual(
+            ManagedSafetyPushPayload.incidentIDForUserResponse(
+                from: Dictionary(
+                    uniqueKeysWithValues: expiredResponse.map {
+                        (AnyHashable($0.key), $0.value as Any)
+                    }
+                ),
+                now: now
+            ),
+            incidentID
+        )
+        expiredResponse["route"] = "friends"
+        XCTAssertNil(
+            ManagedSafetyPushPayload.incidentIDForUserResponse(
+                from: Dictionary(
+                    uniqueKeysWithValues: expiredResponse.map {
+                        (AnyHashable($0.key), $0.value as Any)
+                    }
+                ),
+                now: now
+            )
+        )
+    }
+
+    func testDisconnectRequiresOneCompletedPushInvalidation() {
+        XCTAssertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation: false,
+                serverRevoked: false,
+                providerTokenDeleted: false
+            )
+        )
+        XCTAssertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation: true,
+                serverRevoked: true,
+                providerTokenDeleted: false
+            )
+        )
+        XCTAssertTrue(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation: true,
+                serverRevoked: false,
+                providerTokenDeleted: true
+            )
+        )
+        XCTAssertFalse(
+            ManagedPushRevocationPolicy.canFinalizeDisconnect(
+                requiresRevocation: true,
+                serverRevoked: false,
+                providerTokenDeleted: false
+            )
+        )
     }
 
     func testContactIdentityIncludesRelationshipRole() {

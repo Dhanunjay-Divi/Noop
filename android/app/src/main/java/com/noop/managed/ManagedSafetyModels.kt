@@ -190,3 +190,11 @@ object ManagedSafetyPushPayload {
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
     }
 }
+
+object ManagedPushRevocationPolicy {
+    fun canFinalizeDisconnect(
+        requiresRevocation: Boolean,
+        serverRevoked: Boolean,
+        providerTokenDeleted: Boolean,
+    ): Boolean = !requiresRevocation || serverRevoked || providerTokenDeleted
+}
