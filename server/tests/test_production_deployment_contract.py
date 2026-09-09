@@ -217,7 +217,9 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert "managed_api_push_sender" in runtime
     assert "managed_lifecycle_push_sender" in runtime
     assert "managed_api_push_token_secret" in runtime
+    assert "managed_api_push_token_previous_secret" in runtime
     assert "managed_lifecycle_push_token_secret" in runtime
+    assert "managed_lifecycle_push_token_previous_secret" in runtime
     assert "managed_push_token_secret=" in configure_script
     assert "managed_push_token_previous_secret=" in configure_script
     assert "openssl rand -hex 32" in configure_script

@@ -109,6 +109,36 @@ async def _principal(
     )
 
 
+async def _attach_external_identity(
+    primary: PostgresRepository,
+    principal: ManagedPrincipal,
+) -> None:
+    now = datetime.now(UTC)
+    await primary._require_pool().execute(
+        """
+        INSERT INTO managed_external_identities (
+            identity_id,
+            account_id,
+            issuer,
+            provider_tenant,
+            subject_hash,
+            status,
+            claims_version,
+            verified_at,
+            last_seen_at,
+            created_at
+        ) VALUES (
+            $1, $2, 'https://securetoken.google.com/noop-test-project',
+            'noop-staging', $3, 'active', 1, $4, $4, $4
+        )
+        """,
+        principal.identity_id,
+        principal.account_id,
+        principal.subject_hash,
+        now,
+    )
+
+
 async def _profile(
     repository: PostgresManagedRepository,
     principal: ManagedPrincipal,
@@ -2280,6 +2310,307 @@ async def test_safety_accept_locks_profiles_before_request_rows() -> None:
                 assert locked_request["request_id"] == request_id
         accepted = await asyncio.wait_for(accept_task, timeout=5)
         assert accepted["status"] == "accepted"
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_incident_locks_contact_profiles_before_contact_rows() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"incident-lock-owner-{uuid4()}")
+        first = await _principal(primary, label=f"incident-lock-first-{uuid4()}")
+        second = await _principal(primary, label=f"incident-lock-second-{uuid4()}")
+        owner_profile = await _profile(managed, owner, display_name="Owner")
+        first_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        second_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+        contact_profile_ids = [
+            UUID(first_profile["profile_id"]),
+            UUID(second_profile["profile_id"]),
+        ]
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.fetch(
+                    """
+                    SELECT profile_id
+                    FROM managed_social_profiles
+                    WHERE profile_id = ANY($1::uuid[])
+                    ORDER BY profile_id
+                    FOR UPDATE
+                    """,
+                    contact_profile_ids,
+                )
+                incident_task = asyncio.create_task(
+                    safety.create_incident(
+                        principal=owner,
+                        request=ManagedSafetyIncidentCreate(
+                            request_id=uuid4(),
+                            duration_hours=8,
+                            share_location=False,
+                        ),
+                    )
+                )
+                await _wait_for_database_waiter(pool)
+                assert not incident_task.done()
+                locked_contacts = await blocker.fetch(
+                    """
+                    SELECT contact_profile_id
+                    FROM managed_safety_contacts
+                    WHERE owner_profile_id = $1
+                      AND contact_profile_id = ANY($2::uuid[])
+                    ORDER BY contact_profile_id
+                    FOR UPDATE
+                    """,
+                    UUID(owner_profile["profile_id"]),
+                    contact_profile_ids,
+                    timeout=1,
+                )
+                assert [row["contact_profile_id"] for row in locked_contacts] == sorted(
+                    contact_profile_ids
+                )
+        incident = await asyncio.wait_for(incident_task, timeout=5)
+        assert incident["status"] == "open"
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_account_erasure_retires_active_safety_participation() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=8,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        push = ManagedSafetyPushService(
+            repository=safety,
+            token_codec=ManagedPushTokenCodec(PUSH_SECRET),
+            provider=_RecordingPushProvider(),
+        )
+        owner = await _principal(primary, label=f"erase-owner-{uuid4()}")
+        responding = await _principal(primary, label=f"erase-responding-{uuid4()}")
+        pending = await _principal(primary, label=f"erase-pending-{uuid4()}")
+        await _attach_external_identity(primary, owner)
+        await _attach_external_identity(primary, responding)
+        await _profile(managed, owner, display_name="Owner")
+        responding_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=responding,
+            contact_name="Responding",
+        )
+        pending_profile, _ = await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=pending,
+            contact_name="Pending",
+        )
+        installations = {}
+        for principal, profile, platform in (
+            (responding, responding_profile, "ios"),
+            (pending, pending_profile, "android"),
+        ):
+            installation_id = f"{platform}-erasure-{uuid4().hex}"
+            installations[UUID(profile["profile_id"])] = installation_id
+            await _installation(
+                primary,
+                principal,
+                installation_id=installation_id,
+                platform=platform,
+            )
+            await push.register(
+                principal=principal,
+                installation_id=installation_id,
+                registration=ManagedPushRegistration(
+                    platform=platform,
+                    environment="development",
+                    target_kind="token",
+                    token=f"fcm-token:erasure_{uuid4().hex}",
+                ),
+            )
+
+        incident = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=uuid4(),
+                duration_hours=8,
+                share_location=True,
+            ),
+        )
+        incident_id = UUID(incident["incident_id"])
+        await safety.update_location(
+            principal=owner,
+            incident_id=incident_id,
+            update=ManagedSafetyLocationUpdate(
+                sequence=1,
+                latitude=17.385,
+                longitude=78.4867,
+                horizontal_accuracy_m=12.5,
+                captured_at=datetime.now(UTC),
+            ),
+        )
+        acknowledged = await safety.respond(
+            principal=responding,
+            incident_id=incident_id,
+            decision="responding",
+        )
+        assert acknowledged["status"] == "acknowledged"
+
+        await managed.request_erasure(
+            principal=responding,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="a" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(days=1),
+        )
+
+        pool = primary._require_pool()
+        reopened = await pool.fetchrow(
+            """
+            SELECT status, acknowledged_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            incident_id,
+        )
+        assert reopened["status"] == "open"
+        assert reopened["acknowledged_at"] is None
+        participants = await pool.fetch(
+            """
+            SELECT contact_profile_id, status
+            FROM managed_safety_participants
+            WHERE incident_id = $1
+            ORDER BY contact_profile_id
+            """,
+            incident_id,
+        )
+        participant_statuses = {
+            row["contact_profile_id"]: row["status"] for row in participants
+        }
+        responding_profile_id = UUID(responding_profile["profile_id"])
+        pending_profile_id = UUID(pending_profile["profile_id"])
+        assert participant_statuses[responding_profile_id] == "revoked"
+        assert participant_statuses[pending_profile_id] == "pending"
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                  AND contact_profile_id = $2
+                  AND installation_id = $3
+                """,
+                incident_id,
+                responding_profile_id,
+                installations[responding_profile_id],
+            )
+            == "rejected"
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                  AND contact_profile_id = $2
+                  AND installation_id = $3
+                """,
+                incident_id,
+                pending_profile_id,
+                installations[pending_profile_id],
+            )
+            == "pending"
+        )
+
+        await managed.request_erasure(
+            principal=owner,
+            request_id=uuid4(),
+            scope="all_managed_data",
+            confirmation_sha256="b" * 64,
+            identity_deletion_ticket=None,
+            cooling_off=timedelta(days=1),
+        )
+
+        retired = await pool.fetchrow(
+            """
+            SELECT status, ended_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            incident_id,
+        )
+        assert retired["status"] == "canceled"
+        assert retired["ended_at"] is not None
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_locations
+                WHERE incident_id = $1
+                """,
+                incident_id,
+            )
+            == 0
+        )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT status
+                FROM managed_safety_push_deliveries
+                WHERE incident_id = $1
+                  AND contact_profile_id = $2
+                  AND installation_id = $3
+                """,
+                incident_id,
+                pending_profile_id,
+                installations[pending_profile_id],
+            )
+            == "rejected"
+        )
     finally:
         await primary.shutdown()
 

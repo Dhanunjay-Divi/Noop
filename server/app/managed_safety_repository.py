@@ -1519,7 +1519,7 @@ class PostgresManagedSafetyRepository:
                         ),
                         retry_after_seconds=math.ceil((retry_at - now).total_seconds()),
                     )
-                contacts = await connection.fetch(
+                contact_snapshot = await connection.fetch(
                     """
                     SELECT contact.contact_profile_id
                     FROM managed_safety_contacts contact
@@ -1544,9 +1544,46 @@ class PostgresManagedSafetyRepository:
                           )
                       )
                     ORDER BY contact.created_at, contact.contact_profile_id
+                    """,
+                    owner["profile_id"],
+                )
+                contact_snapshot_ids = [
+                    row["contact_profile_id"] for row in contact_snapshot
+                ]
+                await self._lock_active_profiles_and_accounts(
+                    connection,
+                    profile_ids=contact_snapshot_ids,
+                )
+                contacts = await connection.fetch(
+                    """
+                    SELECT contact.contact_profile_id
+                    FROM managed_safety_contacts contact
+                    JOIN managed_social_profiles profile
+                      ON profile.profile_id = contact.contact_profile_id
+                     AND profile.status = 'active'
+                    JOIN managed_accounts account
+                      ON account.account_id = profile.account_id
+                     AND account.status = 'active'
+                    WHERE contact.owner_profile_id = $1
+                      AND contact.contact_profile_id = ANY($2::uuid[])
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM managed_social_blocks block
+                          WHERE (
+                              block.blocker_profile_id = $1
+                              AND block.blocked_profile_id =
+                                    contact.contact_profile_id
+                          ) OR (
+                              block.blocker_profile_id =
+                                    contact.contact_profile_id
+                              AND block.blocked_profile_id = $1
+                          )
+                      )
+                    ORDER BY contact.created_at, contact.contact_profile_id
                     FOR UPDATE OF contact
                     """,
                     owner["profile_id"],
+                    contact_snapshot_ids,
                 )
                 if len(contacts) < SAFETY_MIN_CONTACTS:
                     raise ManagedConflictError(
