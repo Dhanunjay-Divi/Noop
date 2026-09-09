@@ -26,6 +26,8 @@ another broad erasure is live; and migration `032` bounds terminal
 contact-request churn with an account-scoped rolling ledger that survives
 profile recreation. The complete server collection contains 423 cases: 422
 passed and only the explicit real-provider Twilio staging case was skipped.
+Apple now implements Firebase Messaging's exact registration-token delegate
+selector; its focused contract and complete iOS simulator app graph pass.
 All local release, terminology, privacy, claims, calibration, localization,
 legal, and operations controls pass. Replacement exact-head review, hosted
 checks, normal protected merge, physical providers/devices, and external

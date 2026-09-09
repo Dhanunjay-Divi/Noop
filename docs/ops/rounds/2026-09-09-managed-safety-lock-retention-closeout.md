@@ -11,10 +11,10 @@
 
 ## Objective
 
-Close all four findings from the automated review of exact head `0e45f44a`
-without weakening tenant isolation, idempotency, erasure cooling-off behavior,
-Safety request usability, bounded retention, or the external paging launch
-gates.
+Close the four database findings from the automated review of exact head
+`0e45f44a` and the subsequent exact-head iOS Firebase callback finding without
+weakening tenant isolation, idempotency, erasure cooling-off behavior, Safety
+request usability, bounded retention, or the external paging launch gates.
 
 ## Scope
 
@@ -27,6 +27,8 @@ gates.
   job from reactivating an account while another live erasure remains.
 - Add an account-scoped rolling Safety contact-request ledger that counts
   terminal rows and survives contact removal and profile recreation.
+- Implement Firebase Messaging's exact iOS registration-token delegate
+  selector and pin it with an app-source contract regression.
 - Add deterministic PostgreSQL race, replay, quota, purge, and lifecycle
   regressions and rerun the complete affected release matrix.
 
@@ -41,7 +43,9 @@ gates.
 
 - Reproduction or observed symptom: exact-head automated review identified two
   cross-operation PostgreSQL deadlock cycles, one multi-job erasure
-  reactivation race, and unbounded accepted/remove request churn.
+  reactivation race, unbounded accepted/remove request churn, and an iOS
+  Firebase delegate method whose incorrect external label compiled only
+  because the Objective-C protocol requirement is optional.
 - Relevant source/device/OS/firmware class: PostgreSQL managed Safety and
   managed account lifecycle only; no device behavior changes.
 - Existing tests, logs, exports, screenshots, or documents: all local source
@@ -80,6 +84,12 @@ gates.
 - Raw/derived-only erasure jobs remain claimable only for active accounts.
   Idempotent request replay is preserved, while a fresh erasure request is
   rejected when the account is not active.
+- The iOS application delegate now implements
+  `messaging(_:didReceiveRegistrationToken:)`, the selector declared by
+  Firebase Messaging 12.18.0. Initial and refreshed FCM registration tokens
+  therefore reach the existing notification-consent and managed-state guarded
+  registration path. A source-contract regression rejects the former silently
+  unused label.
 
 ## Data, privacy, and medical truth
 
@@ -99,6 +109,9 @@ gates.
 - Evidence that diagnoses success, stall/rejection, and failure: existing
   managed request middleware and operational events already record fixed route,
   status-family, latency, and correlation evidence for these server paths.
+  The existing bounded `managed_safety.push_registration` mobile operation
+  records registration success, cancellation, notification rejection, and
+  stable failure categories without recording the token.
 - Why existing evidence is sufficient, or why new evidence is required:
   changes are transactional ordering and durable quota enforcement; no new
   externally meaningful lifecycle state is introduced.
@@ -126,6 +139,7 @@ gates.
 | Tooling and release controls | 227 tests and 30 subtests passed; trusted release controls, all 10 required CI contexts, and all 9 release-control checks passed | The replacement preserves the fail-closed release-control implementation | Hosted exact-head execution |
 | Terminology inventory | 17,376 classified occurrences, unchanged category totals, unchanged active allowlist, zero forbidden mappings, and one reviewed historical index line shift | The new round record did not introduce customer-facing legacy terminology or broaden an allowlist | Runtime copy on physical devices |
 | Policy and repository checks | Calibration, health-claims, private-data, legal/distribution, localization, ShellCheck, shell syntax, operations, and diff checks passed | The server-only replacement preserves repository policy contracts | Hosted or physical behavior |
+| Firebase callback contract and iOS simulator build | All 34 Apple Safety shell contract tests passed and the complete Debug iOS app/widget/watch simulator graph built against Firebase Messaging 12.18.0 | The application delegate uses Firebase's exact registration-token callback and the shipping source graph compiles | Physical APNs/FCM token delivery or provider reachability |
 
 ### Failed and corrected attempts
 
@@ -146,12 +160,18 @@ gates.
   and one trusted-control command omitted its required root argument. The
   pinned isolated server environment and explicit repository root were used
   for the successful complete reruns.
+- The replacement exact-head review found that the prior iOS callback label
+  was accepted by the optional Objective-C protocol but was never the
+  registration-token selector. Firebase 12.18.0 source confirmed the declared
+  selector, the method label was corrected, and a focused source contract plus
+  complete iOS simulator build passed.
 
 ## Physical device and deployment
 
-- Install/update action: not run; this server-only closeout does not create a
-  new app binary.
-- Generalized device and OS class: not applicable.
+- Install/update action: no physical install; a Debug iOS simulator app graph
+  was rebuilt after the callback correction.
+- Generalized device and OS class: iPhone 17 Pro simulator on iOS 26.5 for
+  compile evidence only.
 - Data-preservation result: no physical or real-user data touched.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: all physical Safety paging and band gates.
@@ -159,8 +179,9 @@ gates.
 ## Git and release state
 
 - Changed paths: managed Safety and erasure repositories, migration `032`,
-  migration manifest, focused PostgreSQL tests, terminology inventory and
-  required-CI digest, this round record, index, and active handoff.
+  migration manifest, focused PostgreSQL tests, the iOS application delegate
+  and Safety shell contract tests, terminology inventory and required-CI
+  digest, this round record, index, and active handoff.
 - Commits: commit containing this record is pending until the final local
   documentation gate passes.
 - Branch and remote state: pull request `#10` remains open and unmerged.
@@ -186,7 +207,8 @@ gates.
   operations remain unproven external or physical gates.
 - The protected replacement head still requires a clean exact-head automated
   review, every hosted required check, resolved verified conversations, and a
-  normal protected merge.
+  normal protected merge. Simulator compilation does not prove physical
+  APNs/FCM registration or urgent delivery.
 
 ## Next round
 

@@ -137,7 +137,7 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 
     func messaging(
         _ messaging: Messaging,
-        didReceiveRegistration registrationID: String?
+        didReceiveRegistrationToken registrationID: String?
     ) {
         guard let registrationID, !registrationID.isEmpty else { return }
         Task { @MainActor in

@@ -673,6 +673,22 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedSafetyUsesFirebaseRegistrationTokenDelegateSelector() throws {
+        let application = try source(
+            "StrandiOS/App/StrandiOSApp.swift"
+        )
+
+        XCTAssertTrue(application.contains(
+            "didReceiveRegistrationToken registrationID: String?"
+        ))
+        XCTAssertFalse(application.contains(
+            "didReceiveRegistration registrationID: String?"
+        ))
+        XCTAssertTrue(application.contains(
+            "registerManagedPushToken("
+        ))
+    }
+
     func testManagedSafetyNotificationResponseCanRouteRetainedHistory() throws {
         let presenter = try source(
             "Strand/System/NotificationPresenter.swift"
