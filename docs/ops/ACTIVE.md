@@ -96,17 +96,21 @@ ordinary indexed reads remain bounded while one-million-row active writes
 measurably increased concurrent read latency. Apple Liquid Today restores an
 exact revision-bound query snapshot across tab remounts, scopes it to the active
 device, defers repeated same-day reads during bulk backfill, and discards
-pre-backfill state before the completion reload. Android shares one Rest-history
-read, keys it to the active device and metric revision, retries failed reads
-instead of banking an empty result, and pauses decorative liquid clocks during
-drag/fling. Across both platforms, Health avoids sensor-rate root updates, Sleep
-parallelizes independent history reads and batches motion lookups, Stress moves
-deterministic analysis off the UI executor, and Workouts defers historical
-recovery scans until their lazy section mounts. Device switches invalidate or
-supersede every affected cache and task. No local history was deleted and no
-retention or formula contract changed. The branch is now being integrated after
-the Safety merge and still requires complete local and hosted verification and
-protected merge. The first hosted
+pre-backfill state before the completion reload. Historical snapshots expire
+after five minutes so an incomplete failed read cannot be retained forever.
+Android shares one
+Rest-history read, keys it to the active device and metric revision, retries
+failed reads instead of banking an empty result, and pauses decorative liquid
+clocks during drag/fling. Across both platforms, Health avoids sensor-rate root
+updates, Sleep parallelizes independent history reads and batches motion
+lookups, with Android preserving canonical computed motion after a re-pair.
+Stress moves deterministic analysis off the UI executor, and Workouts defers
+historical recovery scans until their lazy section mounts; Android then owns
+the long load at screen lifetime so scrolling the placeholder away cannot
+cancel it. Device switches now invalidate or supersede every affected cache and
+task. No local history was deleted and no retention or formula contract
+changed. The branch is now being integrated after the Safety merge and still
+requires complete local and hosted verification and protected merge. The first hosted
 release-control run exposed only a stale fail-closed terminology inventory;
 its reviewed regeneration has no forbidden mapping or active allowlist
 expansion. A reviewed shake-to-report ZIP from the affected phone on the

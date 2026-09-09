@@ -2664,6 +2664,7 @@ struct LiquidTodayView: View {
     // MARK: - Data
 
     private static let queryCacheMaxAge: TimeInterval = 120
+    private static let historicalQueryCacheMaxAge: TimeInterval = 5 * 60
 
     static func shouldRestoreQueryCache(
         cachedKey: LiquidTodayQueryKey,
@@ -2673,8 +2674,8 @@ struct LiquidTodayView: View {
         isToday: Bool
     ) -> Bool {
         guard cachedKey == requestKey else { return false }
-        guard isToday else { return true }
-        return max(0, now.timeIntervalSince(bankedAt)) < queryCacheMaxAge
+        let maxAge = isToday ? queryCacheMaxAge : historicalQueryCacheMaxAge
+        return max(0, now.timeIntervalSince(bankedAt)) < maxAge
     }
 
     static func shouldDeferQueryLoad(isBackfilling: Bool) -> Bool { isBackfilling }

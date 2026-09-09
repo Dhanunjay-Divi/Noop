@@ -4286,12 +4286,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 69,
+      "occurrenceCount": 61,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "55236d596793101541406eb7114b337d74ed0527161f8e75aece8f2e81fea03a"
+      "sha256": "1f4253bd7328860bfa0f5da022e8b3659c2d03b2352417b2b8b4f2ce5fb442bf"
     },
     {
       "category": "customer",

@@ -75,6 +75,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
@@ -121,8 +122,10 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
@@ -197,6 +200,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     var postLogNote by remember { mutableStateOf<String?>(null) }
     var recoveryTrend by remember { mutableStateOf<List<WorkoutRecoveryTrendPoint>>(emptyList()) }
     var recoveryTrendLoadedKey by remember { mutableStateOf<String?>(null) }
+    val recoveryLoadScope = rememberCoroutineScope()
+    var recoveryTrendLoadJob by remember { mutableStateOf<Job?>(null) }
+    var recoveryTrendLoadKey by remember { mutableStateOf<String?>(null) }
     var activeZoneWeek by remember { mutableStateOf<ActiveZoneWeekSnapshot?>(null) }
     var activeZoneLoaded by remember { mutableStateOf(false) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
@@ -251,6 +257,13 @@ fun WorkoutsScreen(vm: AppViewModel) {
             append('|').append(customStartDate).append('|').append(customEndDate)
             append('|').append(activeDeviceId).append('|').append(lastHistorySyncAt ?: 0L)
             recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
+        }
+    }
+    LaunchedEffect(recoveryInputKey) {
+        if (recoveryTrendLoadKey != null && recoveryTrendLoadKey != recoveryInputKey) {
+            recoveryTrendLoadJob?.cancel()
+            recoveryTrendLoadJob = null
+            recoveryTrendLoadKey = null
         }
     }
     LaunchedEffect(activeDeviceId, lastHistorySyncAt) {
@@ -378,20 +391,66 @@ fun WorkoutsScreen(vm: AppViewModel) {
                     loadedKey = recoveryTrendLoadedKey,
                     points = recoveryTrend,
                     rangeCaption = recoveryRangeCaption(range, customStartDate, customEndDate),
-                    load = {
-                        val built = ArrayList<WorkoutRecoveryTrendPoint>()
-                        for (row in recoveryRows) {
-                            currentCoroutineContext().ensureActive()
-                            val result = vm.workoutHeartRateRecovery(row.startTs, row.endTs) ?: continue
-                            built += WorkoutRecoveryTrendPoint(row.startTs, result)
-                        }
-                        currentCoroutineContext().ensureActive()
-                        built
-                    },
-                    onLoaded = { key, built ->
-                        if (key == recoveryInputKey) {
-                            recoveryTrend = built
-                            recoveryTrendLoadedKey = key
+                    onLoadRequested = { requestedKey ->
+                        if (
+                            requestedKey == recoveryInputKey &&
+                            recoveryTrendLoadedKey != requestedKey &&
+                            recoveryTrendLoadKey != requestedKey
+                        ) {
+                            recoveryTrendLoadJob?.cancel()
+                            recoveryTrendLoadKey = requestedKey
+                            val requestDeviceId = activeDeviceId
+                            val requestRows = recoveryRows
+                            recoveryTrendLoadJob = recoveryLoadScope.launch {
+                                val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                                    "workouts.recovery_trend_load",
+                                )
+                                var outcome = "completed"
+                                var fields = emptyMap<String, String>()
+                                try {
+                                    val built = ArrayList<WorkoutRecoveryTrendPoint>()
+                                    for (row in requestRows) {
+                                        currentCoroutineContext().ensureActive()
+                                        val result = vm.workoutHeartRateRecovery(
+                                            row.startTs,
+                                            row.endTs,
+                                        ) ?: continue
+                                        built += WorkoutRecoveryTrendPoint(row.startTs, result)
+                                    }
+                                    currentCoroutineContext().ensureActive()
+                                    if (
+                                        requestedKey != recoveryInputKey ||
+                                        vm.activeStrapId != requestDeviceId
+                                    ) {
+                                        outcome = "superseded"
+                                    } else {
+                                        recoveryTrend = built
+                                        recoveryTrendLoadedKey = requestedKey
+                                        fields = mapOf(
+                                            "result_bucket" to workoutRecoveryResultBucket(built.size),
+                                        )
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    outcome = if (requestedKey == recoveryInputKey) {
+                                        "canceled"
+                                    } else {
+                                        "superseded"
+                                    }
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    outcome = "failed"
+                                } finally {
+                                    com.noop.AppDiagnosticsRecorder.endOperation(
+                                        diagnostic,
+                                        outcome = outcome,
+                                        fields = fields,
+                                    )
+                                    if (recoveryTrendLoadKey == requestedKey) {
+                                        recoveryTrendLoadKey = null
+                                        recoveryTrendLoadJob = null
+                                    }
+                                }
+                            }
                         }
                     },
                 )
@@ -501,7 +560,8 @@ internal fun workoutRecoveryResultBucket(count: Int): String = when {
 
 /**
  * Mounted at the recovery chart's real LazyColumn position. The expensive historical HR reads therefore
- * begin only when the user scrolls near this section, while the first Workouts viewport stays query-light.
+ * begin only when the user scrolls near this section. The callback launches them from the retained
+ * Workouts screen scope so LazyColumn disposal cannot cancel an in-flight load.
  */
 @Composable
 private fun RecoveryTrendLazySection(
@@ -509,32 +569,10 @@ private fun RecoveryTrendLazySection(
     loadedKey: String?,
     points: List<WorkoutRecoveryTrendPoint>,
     rangeCaption: String,
-    load: suspend () -> List<WorkoutRecoveryTrendPoint>,
-    onLoaded: (String, List<WorkoutRecoveryTrendPoint>) -> Unit,
+    onLoadRequested: (String) -> Unit,
 ) {
-    LaunchedEffect(inputKey) {
-        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
-            "workouts.recovery_trend_load",
-        )
-        var outcome = "completed"
-        var fields = emptyMap<String, String>()
-        try {
-            val loaded = load()
-            currentCoroutineContext().ensureActive()
-            onLoaded(inputKey, loaded)
-            fields = mapOf("result_bucket" to workoutRecoveryResultBucket(loaded.size))
-        } catch (cancelled: CancellationException) {
-            outcome = "canceled"
-            throw cancelled
-        } catch (_: Exception) {
-            outcome = "failed"
-        } finally {
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = outcome,
-                fields = fields,
-            )
-        }
+    LaunchedEffect(inputKey, loadedKey) {
+        if (loadedKey != inputKey) onLoadRequested(inputKey)
     }
 
     if (loadedKey == inputKey && points.isNotEmpty()) {

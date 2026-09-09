@@ -132,7 +132,7 @@ internal data class DashboardLiveSnapshot(
     val connected: Boolean,
     val bonded: Boolean,
     val batteryPct: Double?,
-    val whoop5: Boolean,
+    val isGeneration5: Boolean,
     val charging: Boolean?,
 )
 
@@ -141,7 +141,7 @@ internal fun LiveState.dashboardLiveSnapshot(): DashboardLiveSnapshot =
         connected = connected,
         bonded = bonded,
         batteryPct = batteryPct,
-        whoop5 = whoop5Detected,
+        isGeneration5 = isGeneration5,
         charging = charging,
     )
 

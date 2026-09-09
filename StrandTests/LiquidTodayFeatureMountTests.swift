@@ -81,7 +81,14 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertTrue(LiquidTodayView.shouldRestoreQueryCache(
             cachedKey: key,
             requestKey: key,
-            bankedAt: now.addingTimeInterval(-10_000),
+            bankedAt: now.addingTimeInterval(-240),
+            now: now,
+            isToday: false
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-301),
             now: now,
             isToday: false
         ))

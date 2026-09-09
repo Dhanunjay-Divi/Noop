@@ -802,7 +802,7 @@ fun TodayScreen(
     LaunchedEffect(
         liveSnap.connected,
         liveSnap.batteryPct,
-        liveSnap.whoop5,
+        liveSnap.isGeneration5,
         liveSnap.charging,
         deferHistoricalQueries,
     ) {
@@ -817,7 +817,7 @@ fun TodayScreen(
                 val from = now - 14L * 86_400
                 val samples = viewModel.repo.batterySamples("my-whoop", from, now, limit = 2_000)
                     .mapNotNull { s -> s.soc?.let { s.ts to it } }
-                val rated = if (liveSnap.whoop5) BatteryEstimator.ratedLifeHoursWhoop5
+                val rated = if (liveSnap.isGeneration5) BatteryEstimator.ratedLifeHoursWhoop5
                             else BatteryEstimator.ratedLifeHoursWhoop4
                 // Battery test mode (Test Centre #713): emit the discharge-run / fitted-slope / gate ANALYSIS
                 // trace, not only the per-reading "bank soc=" line. This LaunchedEffect re-runs on a natural

@@ -76,8 +76,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
 - Apple Liquid Today now banks one exact revision/day/profile query snapshot on
   the long-lived repository. A same-state tab return restores it without
   reopening the same history, current-day snapshots expire after 120 seconds,
-  historical snapshots remain revision-bound, and age/workout mutations
-  invalidate the bank.
+  historical snapshots remain revision-bound but expire after five minutes so
+  a swallowed store/open failure cannot bank an incomplete historical view
+  indefinitely, and age/workout mutations invalidate the bank.
 - Apple snapshots are also scoped to the active device. Adopting another device
   clears the bank, publishes the device change to the view task identity, and
   prevents values from the prior device from being restored.
@@ -124,15 +125,20 @@ Android where applicable, and leave physical-phone conclusions explicit.
   batched reads. Each platform now publishes sessions, learned timing, motion,
   confidence, and evidence only as a coherent current-device snapshot; an
   active backfill cancels and defers these history reads until its completion
-  edge. Android has a dedicated Rest-data revision covering every Sleep/Today
-  series and daily-score mutation.
+  edge. Android motion batches read the active-plus-canonical computed-source
+  union in active-first order, so re-pairing a band does not orphan earlier
+  canonical motion evidence. Android has a dedicated Rest-data revision
+  covering every Sleep/Today series and daily-score mutation.
 - Apple and Android Stress read the active-plus-canonical HR/R-R union, perform
   deterministic daytime analysis off the UI executor, propagate cancellation,
   and reject superseded or cross-device results before publication.
 - Apple and Android Workouts defer the historical recovery trend until its lazy
   section mounts, preserve cancellation through each HR query, and reject stale
-  device results. Apple auto-workout detection also starts HR, motion, and saved
-  span reads together and performs dense preprocessing off the main actor.
+  device results. Android transfers the long recovery load to the retained
+  screen scope after that first lazy mount, so scrolling the 1dp placeholder out
+  of composition no longer cancels a trend that is still loading. Apple
+  auto-workout detection also starts HR, motion, and saved span reads together
+  and performs dense preprocessing off the main actor.
 - Every new cache and history task is device-owned. Android observes the
   selected-device flow directly and scopes Today card/footer/Rest caches, Sleep,
   Stress, and Workouts work to that immutable device snapshot; Apple includes the
@@ -173,8 +179,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
   `sleep.history_metrics_load`, `stress.daytime_analysis`,
   `workouts.recovery_trend_load`, and `workouts.auto_detect_scan` record only
   outcome class, selected scope where already applicable, and bounded result
-  counts. No row values, metric values, dates, identifiers, exception messages,
-  or payloads are recorded.
+  counts. The retained Android recovery load distinguishes completed, canceled,
+  superseded, and failed outcomes. No row values, metric values, dates,
+  identifiers, exception messages, or payloads are recorded.
 - Redaction, retention, and high-frequency controls: no sensor values, rows,
   identifiers, payloads, or free-form content; summaries remain throttled and
   local until a user reviews and shares them.
@@ -191,14 +198,14 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | 30-day high-rate synthetic fixture | 4,207,350 rows; 440.6 MB database; 1.32 GB temporary peak | Current schema can hold a phone-sized dense local history and supports exact size attribution | Physical-phone memory, flash, thermal, or background behavior |
 | Read benchmark | Daily/trend reads below 0.4 ms; HR buckets 31.45 ms; fingerprint 10.62 ms; storage attribution 1.81 s | Ordinary indexed history reads remain bounded at this size and the broad diagnostic read is identifiable | Smoothness while a real BLE stream and OS services compete |
 | Concurrent write benchmark | About 82 ms mean and 96 ms maximum reads during one-million-row writes versus about 30 ms at rest | Active ingestion creates measurable contention even though the database remains readable | A specific tester's lag without their reviewed report |
-| Android production gate | Debug APK assembly, 4,144 tests with zero failures or errors and 7 skips, lint with zero errors, and instrumentation-source compilation passed after the final sync-leaf review in 2m | Android source, cache, retry, diagnostics, cancellation, device-switch, query-gate, and animation-budget changes compile and pass repository tests | GPU pacing, OEM behavior, or physical scrolling |
+| Android production gate | Debug APK assembly, 4,144 tests with zero failures or errors and 7 skips, lint with zero errors, and instrumentation-source compilation passed after the final hosted-review fixes in 3m14s | Android source, cache, retry, diagnostics, cancellation, device-switch, query-gate, lazy-job lifetime, and animation-budget changes compile and pass repository tests | GPU pacing, OEM behavior, or physical scrolling |
 | Backfill-contention follow-up | Focused Android compile/tests passed after the final quiet-edge, HR-card, and sync-leaf changes. The Apple app compiled and 18 retained-screen/Liquid-Today contracts passed | Query-heavy Today/Sleep work now defers through continuation gaps, Android no longer reloads the HR card or full Today/Sleep/Intelligence roots per chunk, cancellation remains structured, and cross-device partial snapshots are rejected | Physical frame pacing during a real band offload |
-| Apple focused regression | The final passes ran 30 performance/model tests, then 10 device-ownership and sleep-decode tests, with zero failures | Exact cache aging, defer policy, device invalidation, cancellation, off-main analysis, and sleep decoding remain mounted | Physical collection or real-device frame pacing |
+| Apple focused regression | The final passes ran 30 performance/model tests, 10 device-ownership and sleep-decode tests, and 10 final Liquid Today cache tests, with zero failures | Exact cache aging, defer policy, device invalidation, cancellation, off-main analysis, and sleep decoding remain mounted | Physical collection or real-device frame pacing |
 | Apple simulator build and UI performance | The exact review-fix iOS build passed; repeated five-tab navigation passed in 81.637 s and Today scroll passed with a 5.213 s average measured window, 0.180 s CPU, and 41,375 KB peak app memory | The optimized simulator path is functional, nonblank, and emits no severe over-150 ms scroll hitch | Representative phone thermal, storage, BLE, or long-running performance |
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |
 | Repository policy matrix | 222 Tools tests passed; operations records, terminology, required CI, localization, health claims, release controls, calibration parity, legal/distribution, private-data, shell syntax, and shellcheck gates all passed | The exact local branch preserves repository release, privacy, terminology, and evidence contracts | Hosted checks and protected review on the pushed exact head |
-| Hosted release-control diagnosis | The first pull-request run failed only because the fail-closed terminology inventory had not yet been regenerated; the reviewed snapshot now records 17,369 classified occurrences, no forbidden mapping, and one fewer persisted compatibility occurrence after consolidating the Android Rest read | The performance change introduces no forbidden terminology mapping or active allowlist expansion | The rebased exact head still requires a green hosted rerun |
-| Exact-head automated and fresh review | Four hosted cache-lifecycle findings were reproduced and corrected: Android metric revision, Android failed-read retry, Apple device identity, and Apple post-backfill invalidation. The fresh local pass additionally removed Compose `StateFlow.value` reads from composition, made Health history queries observe the selected Android device, and made Apple auto-workout scans cancel and reject cross-device results | The final local patch closes concrete stale-data, retry, cancellation, and cross-device publication defects before protected merge | A clean review and hosted checks on the rebased exact head |
+| Hosted release-control diagnosis | The first pull-request run failed only because the fail-closed terminology inventory had not yet been regenerated; the final reviewed snapshot records 17,356 classified occurrences, no forbidden mapping, and 13 fewer classified legacy occurrences overall. The active ratchet only shrinks, removing eight core occurrences from the optimized Android Today screen | The performance change introduces no forbidden terminology mapping or active allowlist expansion | The rebased exact head still requires a green hosted rerun |
+| Exact-head automated and fresh review | The initial four hosted cache-lifecycle findings were reproduced and corrected: Android metric revision, Android failed-read retry, Apple device identity, and Apple post-backfill invalidation. A later hosted pass found three more concrete defects: re-paired Android Sleep motion read only the active computed source, historical Apple Today failures could remain cached forever, and Android Workouts recovery was owned by a disposable lazy row. The current local patch reads the active-plus-canonical motion union, age-bounds historical cache recovery, and retains the recovery job at screen lifetime. The fresh local pass also removed Compose `StateFlow.value` reads from composition, made Health history queries observe the selected Android device, and made Apple auto-workout scans cancel and reject cross-device results | The final local patch closes concrete stale-data, retry, lazy-lifetime, cancellation, and cross-device publication defects before protected merge | A clean review and hosted checks on the rebased exact head |
 
 ## Physical device and deployment
 

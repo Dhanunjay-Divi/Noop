@@ -911,21 +911,21 @@ class WhoopRepository private constructor(
         dao.sessionMotionJson(deviceId, sessionStart)?.let { decodeDoubleArray(it) }
 
     /** Per-epoch MOTION series for each of [starts] (detected session start keys), keyed by start (#407).
-     *  Motion is written ONLY under the computed ("-noop") source by the engine, so we read there; an
-     *  imported-only night (no computed twin) has no motion (absent stays absent , an honest empty state,
-     *  never a fabricated zero array). Does NOT resolve the night: the caller has already chosen the
-     *  main-night GROUP and passes those blocks' starts. A start with no stored series is omitted. Mirrors
-     *  iOS Repository.sessionMotions. */
+     *  Motion is written ONLY under computed ("-noop") sources by the engine. Read the active-plus-canonical
+     *  computed union so a re-added strap retains motion stored under "my-whoop-noop"; active-device rows
+     *  win if both sources contain the same detected start. An imported-only night (no computed twin) has no
+     *  motion (absent stays absent, never a fabricated zero array). Mirrors iOS Repository.sessionMotions. */
     suspend fun sessionMotions(strapDeviceId: String, starts: List<Long>): Map<Long, List<Double>> {
         if (starts.isEmpty()) return emptyMap()
-        val computedId = computedDeviceId(strapDeviceId)
+        val uniqueStarts = starts.distinct()
         val out = HashMap<Long, List<Double>>()
-        // One query per bounded IN-list chunk replaces one Room suspension/SELECT per historical session.
-        // The result contract is unchanged: absent, invalid, and empty arrays remain omitted.
-        for (chunk in starts.distinct().chunked(500)) {
-            for (row in dao.sessionMotionRows(computedId, chunk)) {
-                val motion = row.motionJSON?.let { decodeDoubleArray(it) }
-                if (!motion.isNullOrEmpty()) out[row.startTs] = motion
+        // At most one bounded query per source/chunk replaces one SELECT per historical session.
+        for (computedId in computedSourceIds(strapDeviceId)) {
+            for (chunk in uniqueStarts.chunked(500)) {
+                for (row in dao.sessionMotionRows(computedId, chunk)) {
+                    val motion = row.motionJSON?.let { decodeDoubleArray(it) }
+                    if (!motion.isNullOrEmpty()) out.putIfAbsent(row.startTs, motion)
+                }
             }
         }
         return out

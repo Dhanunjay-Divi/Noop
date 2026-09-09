@@ -105,8 +105,11 @@ class RetainedScreenPerformanceTest {
         val batchStart = repository.indexOf("suspend fun sessionMotions(")
         val batchEnd = repository.indexOf("/** Persist the decoded", startIndex = batchStart)
         val batch = repository.substring(batchStart, batchEnd)
-        assertTrue(batch.contains("starts.distinct().chunked(500)"))
+        assertTrue(batch.contains("val uniqueStarts = starts.distinct()"))
+        assertTrue(batch.contains("for (computedId in computedSourceIds(strapDeviceId))"))
+        assertTrue(batch.contains("uniqueStarts.chunked(500)"))
         assertTrue(batch.contains("dao.sessionMotionRows"))
+        assertTrue(batch.contains("out.putIfAbsent(row.startTs, motion)"))
         assertFalse(batch.contains("for (start in starts)"))
         assertTrue(dao.contains("suspend fun sessionMotionRows("))
     }
@@ -137,18 +140,27 @@ class RetainedScreenPerformanceTest {
     }
 
     @Test
-    fun workoutRecoveryWaitsForItsLazyItemAndPropagatesCancellation() {
+    fun workoutRecoveryStartsLazilyButSurvivesLazyItemDisposal() {
         val workouts = source("com/noop/ui/WorkoutsScreen.kt")
         val viewModel = source("com/noop/ui/AppViewModel.kt")
 
         assertTrue(workouts.contains("item(key = \"recovery-trend\")"))
         assertTrue(workouts.contains("private fun RecoveryTrendLazySection("))
-        assertTrue(workouts.contains("LaunchedEffect(inputKey)"))
-        assertFalse(workouts.contains("LaunchedEffect(recoveryInputKey"))
+        assertTrue(workouts.contains("val recoveryLoadScope = rememberCoroutineScope()"))
+        assertTrue(workouts.contains("LaunchedEffect(recoveryInputKey)"))
+        assertTrue(workouts.contains("recoveryLoadScope.launch"))
+        assertTrue(workouts.contains("onLoadRequested = { requestedKey ->"))
         assertTrue(workouts.contains("\"workouts.recovery_trend_load\""))
         assertTrue(workouts.contains("vm.selectedDeviceId.collectAsStateWithLifecycle()"))
         assertTrue(workouts.contains("loadActiveZoneWeek(vm, activeDeviceId)"))
         assertTrue(workouts.contains("if (vm.activeStrapId == activeDeviceId)"))
+
+        val lazyStart = workouts.indexOf("private fun RecoveryTrendLazySection(")
+        val lazyEnd = workouts.indexOf("internal data class ActiveZoneWeekSnapshot(", lazyStart)
+        val lazySection = workouts.substring(lazyStart, lazyEnd)
+        assertTrue(lazySection.contains("onLoadRequested(inputKey)"))
+        assertFalse(lazySection.contains("workoutHeartRateRecovery("))
+        assertFalse(lazySection.contains("beginOperation("))
 
         val start = viewModel.indexOf("suspend fun workoutHeartRateRecovery(")
         val end = viewModel.indexOf("/** Steps over", startIndex = start)
