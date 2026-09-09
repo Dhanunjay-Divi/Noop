@@ -1669,6 +1669,7 @@ struct TodayView: View {
         // day-scoped, so navigating must re-fetch them for the newly selected window.
         .task(id: TodayLoadKey(seq: repo.refreshSeq, ageMetricsSeq: repo.ageMetricsSeq,
                                workoutsSeq: repo.workoutsSeq,
+                               deviceId: repo.deviceId,
                                offset: selectedDayOffset,
                                ageMetricState: profile.ageMetricStateToken,
                                historyWriteGate: historyReadsBlocked)) { await loadAll() }
@@ -4203,16 +4204,19 @@ struct TodayView: View {
     /// Values + provenance are byte-identical to the old single-pass `loadAll` whenever each part runs.
     private func loadAll() async {
         let currentSeq = repo.refreshSeq
+        let currentDeviceId = repo.deviceId
         if backfillActivelyWriting {
             deferredDashboardReadsForHistoryWrite = true
             // Preserve the last coherent same-device snapshot even when the write worker has already
             // advanced refreshSeq. A cold screen has no cache and simply keeps its lightweight score
             // fields/placeholders until the stable quiet edge below.
             if repo.todayDayScopedLoadedDayKey == selectedDayKey,
-               let cached = repo.todayDayScopedCache {
+               let cached = repo.todayDayScopedCache,
+               cached.deviceId == currentDeviceId {
                 restoreDayScoped(cached)
             }
             if let cached = repo.todayHistoryWideCache,
+               cached.deviceId == currentDeviceId,
                cached.ageMetricStateToken == profile.ageMetricStateToken {
                 restoreHistoryWide(cached)
             }
@@ -4223,6 +4227,9 @@ struct TodayView: View {
         let forceAfterHistoryWrite = deferredDashboardReadsForHistoryWrite
         deferredDashboardReadsForHistoryWrite = false
         await loadDayScoped(forceReload: forceAfterHistoryWrite)
+        guard !Task.isCancelled,
+              currentSeq == repo.refreshSeq,
+              currentDeviceId == repo.deviceId else { return }
         // #849: a bare Today RE-MOUNT (tab-away + return, or an Apple-Health import that recreates the view)
         // re-fires this task with TodayView's `@State` reset, so the heavy history-wide pass re-ran in full
         // every time even when NOTHING in the data had changed: hundreds of redundant reads (incl. the
@@ -4240,6 +4247,7 @@ struct TodayView: View {
         // reload identical data. If the cache is somehow absent (defensive), fall through and reload.
         if !forceAfterHistoryWrite,
            repo.todayHistoryWideLoadedSeq == currentSeq, let cached = repo.todayHistoryWideCache,
+           cached.deviceId == currentDeviceId,
            cached.ageMetricStateToken == profile.ageMetricStateToken {
             restoreHistoryWide(cached)
             // #989: hydration is excluded from the snapshot (a drink logged since would be stale), so a
@@ -4248,10 +4256,9 @@ struct TodayView: View {
             announceNewDaysIfNeeded()
             return
         }
-        await loadHistoryWide()
-        // Record the seq we just loaded so a later re-mount with unchanged data short-circuits above.
-        repo.todayHistoryWideLoadedSeq = currentSeq
-        announceNewDaysIfNeeded()
+        if await loadHistoryWide() {
+            announceNewDaysIfNeeded()
+        }
     }
 
     /// True while the strap is mid history-offload, the SAME signal the "Syncing strap history…" note
@@ -4262,8 +4269,12 @@ struct TodayView: View {
     /// 14-day sparklines + the cross-source bundles + the "your cards" series + workouts, everything that
     /// does NOT depend on `selectedDayOffset`. The bulk of the dashboard's reads; deferred during an active
     /// backfill (see `loadAll`). Same reads, same derivations, same assignment order as before.
-    private func loadHistoryWide() async {
+    private func loadHistoryWide() async -> Bool {
+        let requestDeviceId = repo.deviceId
+        let requestRefreshSeq = repo.refreshSeq
         let requestedAgeMetricState = profile.ageMetricStateToken
+        let requestedProfileSex = profile.sex
+        let daysSnapshot = repo.days
         // 14-day sparklines, Whoop + Apple Health. These reads are mutually independent (distinct
         // metric keys/sources), so kick them all off concurrently with `async let` and await the
         // results below. Each hits the @MainActor Repository, fires its `await store.*` on the
@@ -4281,15 +4292,15 @@ struct TodayView: View {
         async let weightSpark        = sparkValues("weight", source: "apple-health", window: 90)
         async let activeKcalSpark    = sparkValues("active_kcal", source: "apple-health", window: 14)
 
-        sparks["recovery"]        = await recoverySpark
-        sparks["strain"]          = await strainSpark
-        sparks["sleep_total_min"] = await sleepTotalSpark
-        sparks["hrv"]             = await hrvSpark
-        sparks["rhr"]             = await rhrSpark
-        sparks["spo2"]            = await spo2Spark
-        sparks["resp_rate"]   = await respRateSpark
-        sparks["weight"]      = await weightSpark
-        sparks["active_kcal"] = await activeKcalSpark
+        let recoverySparkLocal = await recoverySpark
+        let strainSparkLocal = await strainSpark
+        let sleepTotalSparkLocal = await sleepTotalSpark
+        let hrvSparkLocal = await hrvSpark
+        let rhrSparkLocal = await rhrSpark
+        let spo2SparkLocal = await spo2Spark
+        let respRateSparkLocal = await respRateSpark
+        let weightSparkLocal = await weightSpark
+        let activeKcalSparkLocal = await activeKcalSpark
 
         // Steps ESTIMATE per day (WHOOP 4.0 motion → calibrated steps), the Mi-Band series, workout +
         // Apple-daily rows, and the three "your cards" series, all history-wide (none depends on the
@@ -4312,51 +4323,88 @@ struct TodayView: View {
         // Only consulted when a day has no @57 estimate or measured phone count (see the .steps tile), so
         // it never overrides either higher-precedence value; it fills the gap a 4.0 user would otherwise see.
         let stepsEstSeries = await stepsEstSeriesA
-        stepsEstByDay = Dictionary(stepsEstSeries.map { ($0.day, Int($0.value.rounded())) },
-                                   uniquingKeysWith: { _, last in last })
+        let stepsEstByDayLocal = Dictionary(
+            stepsEstSeries.map { ($0.day, Int($0.value.rounded())) },
+            uniquingKeysWith: { _, last in last })
         // Merge by day with the SAME measured-first contract as the visible Steps value and route.
         // Choosing one entire source would discard measured overlap days or leave gaps, so measured
         // Apple Health fills first, @57 motion estimates fill missing days, and calibration is last.
-        let motionPoints = trailingWindow(repo.days.compactMap { day in
+        let motionPoints = trailingWindow(daysSnapshot.compactMap { day in
             day.steps.map { (day: day.day, value: Double($0)) }
         }, days: 14)
         let calibratedPoints = trailingWindow(stepsEstSeries.map { ($0.day, $0.value) }, days: 14)
-        sparks["steps"] = MetricCatalog.todayStepsSeries(
+        let stepsSparkLocal = MetricCatalog.todayStepsSeries(
             imported: await stepsAppleSpark,
             motionDerived: motionPoints,
             calibratedEstimate: calibratedPoints
         ).map(\.value)
 
-        workouts = await workoutsA
-        appleDays = await appleDaysA
+        let workoutsLocal = await workoutsA
+        let appleDaysLocal = await appleDaysA
         // Mi Band (Mi Fitness import), distinct days across its representative metric keys.
         let xSteps = await xStepsA
         let xSleep = await xSleepA
-        xiaomiDays = Set(xSteps.map(\.day) + xSleep.map(\.day)).count
-        // Your cards (#582 / Design Reset): Stress / Fitness age / Vitality for the pinned home cards.
-        // Stress mirrors the detail screen's source-isolated causal model. Never merge WHOOP, NOOP and
-        // Apple Health into one synthetic baseline, and never carry an older score into the selected day.
-        // A stale model remains available (and honestly dated) in Stress detail, while Today stays blank.
-        let stressModel = StressModel(sourceRows: repo.vitalMetricRows)
-        stressToday = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
+        let xiaomiDaysLocal = Set(xSteps.map(\.day) + xSleep.map(\.day)).count
         let fitnessProfileToken = (await fitnessAgeProfileA).last?.value
         let vitalityProfileToken = (await vitalityProfileA).last?.value
         let readFitnessAge = (await fitnessAgeSeriesA).last?.value
         let readVitality = (await vitalitySeriesA).last?.value
-        guard !Task.isCancelled,
-              requestedAgeMetricState == profile.ageMetricStateToken else { return }
-        fitnessAgeToday = profile.acceptsFitnessAge(provenance: fitnessProfileToken)
+        let fitnessAgeLocal = profile.acceptsFitnessAge(provenance: fitnessProfileToken)
             ? readFitnessAge : nil
-        vitalityToday = profile.acceptsVitality(provenance: vitalityProfileToken)
+        let vitalityLocal = profile.acceptsVitality(provenance: vitalityProfileToken)
             ? readVitality : nil
-        ageMetricsLoadedProfileState = requestedAgeMetricState
-        // Hydration card (opt-in): today's stored total + the sex/Effort goal. Only loaded when the
-        // feature is on, so a disabled feature does zero work and the card stays hidden.
-        await reloadHydration()
+        let hydrationTotalLocal: Double?
+        let hydrationGoalLocal: Int?
+        if hydrationEnabled {
+            hydrationTotalLocal = await repo.hydrationTotal(
+                day: Repository.localDayKey(Date()))
+            hydrationGoalLocal = repo.hydrationGoalML(profileSex: requestedProfileSex)
+        } else {
+            hydrationTotalLocal = nil
+            hydrationGoalLocal = nil
+        }
+        let xiaomiSleepsLocal: Int
         if let store = await repo.storeHandle() {
             let farFuture = Int(Date.distantFuture.timeIntervalSince1970)
-            xiaomiSleeps = ((try? await store.sleepSessions(deviceId: "xiaomi-band", from: 0, to: farFuture, limit: 4000))?.count) ?? 0
+            xiaomiSleepsLocal = ((try? await store.sleepSessions(
+                deviceId: "xiaomi-band",
+                from: 0,
+                to: farFuture,
+                limit: 4000
+            ))?.count) ?? 0
+        } else {
+            xiaomiSleepsLocal = 0
         }
+
+        guard !Task.isCancelled,
+              requestDeviceId == repo.deviceId,
+              requestRefreshSeq == repo.refreshSeq,
+              requestedAgeMetricState == profile.ageMetricStateToken else { return false }
+
+        let historyWideSparks: [String: [Double]] = [
+            "recovery": recoverySparkLocal,
+            "strain": strainSparkLocal,
+            "sleep_total_min": sleepTotalSparkLocal,
+            "hrv": hrvSparkLocal,
+            "rhr": rhrSparkLocal,
+            "spo2": spo2SparkLocal,
+            "resp_rate": respRateSparkLocal,
+            "weight": weightSparkLocal,
+            "active_kcal": activeKcalSparkLocal,
+            "steps": stepsSparkLocal,
+        ]
+        sparks.merge(historyWideSparks) { _, loaded in loaded }
+        stepsEstByDay = stepsEstByDayLocal
+        workouts = workoutsLocal
+        appleDays = appleDaysLocal
+        xiaomiDays = xiaomiDaysLocal
+        xiaomiSleeps = xiaomiSleepsLocal
+        fitnessAgeToday = fitnessAgeLocal
+        vitalityToday = vitalityLocal
+        ageMetricsLoadedProfileState = requestedAgeMetricState
+        hydrationTotalML = hydrationTotalLocal
+        hydrationGoalML = hydrationGoalLocal
+
         // #849: snapshot everything just computed onto the long-lived `repo`, keyed by the seq we loaded for,
         // so a later re-mount with unchanged data restores it in-memory instead of re-running this pass.
         // Note the Rest-tile spark (`sparks["sleep_performance"]`) is written by loadDayScoped, which always
@@ -4364,20 +4412,22 @@ struct TodayView: View {
         // Exclude the day-scoped Rest-tile spark from the snapshot: loadDayScoped owns it and rewrites it for
         // the selected day on every pass, so caching it here (then merging it back on a same-seq day-switch)
         // would clobber the new day's value with a stale one. Every other spark key is history-wide.
-        var historyWideSparks = sparks
-        historyWideSparks["sleep_performance"] = nil
         repo.todayHistoryWideCache = TodayHistoryWideCache(
+            deviceId: requestDeviceId,
             sparks: historyWideSparks,
-            stepsEstByDay: stepsEstByDay,
-            workouts: workouts,
-            appleDays: appleDays,
-            xiaomiDays: xiaomiDays,
-            xiaomiSleeps: xiaomiSleeps,
-            stressToday: stressToday,
-            fitnessAgeToday: fitnessAgeToday,
-            vitalityToday: vitalityToday,
+            stepsEstByDay: stepsEstByDayLocal,
+            workouts: workoutsLocal,
+            appleDays: appleDaysLocal,
+            xiaomiDays: xiaomiDaysLocal,
+            xiaomiSleeps: xiaomiSleepsLocal,
+            fitnessAgeToday: fitnessAgeLocal,
+            vitalityToday: vitalityLocal,
             ageMetricStateToken: requestedAgeMetricState
         )
+        // Record only a fully published, same-device snapshot. A canceled or superseded pass never
+        // advances the marker and therefore cannot make a later mount restore incomplete values.
+        repo.todayHistoryWideLoadedSeq = requestRefreshSeq
+        return true
     }
 
     /// #849: restore the history-wide outputs from a same-seq cache on a re-mount, so the dashboard repaints
@@ -4392,7 +4442,6 @@ struct TodayView: View {
         appleDays = c.appleDays
         xiaomiDays = c.xiaomiDays
         xiaomiSleeps = c.xiaomiSleeps
-        stressToday = c.stressToday
         fitnessAgeToday = c.fitnessAgeToday
         vitalityToday = c.vitalityToday
         ageMetricsLoadedProfileState = c.ageMetricStateToken
@@ -4430,6 +4479,7 @@ struct TodayView: View {
         hrZoomDomain = Self.reclampHrZoom(hrZoomDomain, oldAxis: hrAxis, newAxis: c.hrAxis)
         hrAxis = c.hrAxis
         sleepToday = c.sleepToday
+        stressToday = c.stressToday
     }
 
     /// The reads that follow `selectedDayOffset`: the selected day's Rest score + provenance, its HR
@@ -4471,11 +4521,20 @@ struct TodayView: View {
         // without a query. Both key halves are captured HERE, before any await, so the snapshot at the tail
         // is keyed by the state this pass actually loaded for.
         let loadSeq = repo.refreshSeq
+        let loadDeviceId = repo.deviceId
         let loadDayKey = selectedDayKey
+        let loadDayOffset = selectedDayOffset
+        let loadLogicalDay = selectedLogicalDay
+        let loadBreakdownDay = chargeBreakdownRow?.day
+        let loadRestingHr = displayDay?.restingHr
+        let loadProfileAge = profile.age
+        let loadProfileSex = profile.sex
+        let vitalRowsSnapshot = repo.vitalMetricRows
         if !forceReload,
            repo.todayDayScopedLoadedSeq == loadSeq,
            repo.todayDayScopedLoadedDayKey == loadDayKey,
            let cached = repo.todayDayScopedCache,
+           cached.deviceId == loadDeviceId,
            selectedDayOffset != 0 || Date().timeIntervalSince(cached.bankedAt) < Self.todayCacheMaxAge {
             restoreDayScoped(cached)
             if selectedDayOffset == 0, let axis = hrAxis {
@@ -4510,17 +4569,15 @@ struct TodayView: View {
         // trend didn't track the score it sat under. Plot the SAME merged `sleep_performance` 0–100 series
         // the score reads instead, windowed to the trailing 14 calendar days like every other spark.
         let restSparkLocal = trailingWindow(restSeries, days: 14).map { $0.value }
-        sparks["sleep_performance"] = restSparkLocal
         // The selected day's Rest, falling back to the series tail only when today itself is selected (a
         // navigated past day with no Rest row shows ", " rather than borrowing the newest value) AND that
         // tail night is still fresh. #977: a live 5.0 whose sleep never scores used to pin Rest to the
         // weeks-old series tail forever; gate the tail-fallback on freshness so a stale tail falls through
         // to the No-Data state instead of freezing.
         let restScoreLocal = Self.freshRestScore(
-            todayValue: restByDay[selectedDayKey], lastDay: restSeries.last?.day,
-            lastValue: restSeries.last?.value, isTodaySelected: selectedDayOffset == 0,
-            todayKey: selectedDayKey)
-        restScore = restScoreLocal
+            todayValue: restByDay[loadDayKey], lastDay: restSeries.last?.day,
+            lastValue: restSeries.last?.value, isTodaySelected: loadDayOffset == 0,
+            todayKey: loadDayKey)
 
         // Component 4, resolve the REAL per-day merge winner for the selected day's derived scores. The
         // cross-source resolver applies the SAME imported-WHOOP > NOOP-computed > Apple-Health precedence
@@ -4529,33 +4586,30 @@ struct TodayView: View {
         // metric so the Charge ring and Rest tile each badge their own winner.
         var provenance: [String: String] = [:]
         let recoveryResolved = await recoveryResolvedA
-        if let win = recoveryResolved.points.last(where: { $0.day == selectedDayKey })?.source {
+        if let win = recoveryResolved.points.last(where: { $0.day == loadDayKey })?.source {
             provenance["recovery"] = win
         }
-        let breakdownSourceLocal = chargeBreakdownRow.flatMap { row in
-            recoveryResolved.points.last(where: { $0.day == row.day })?.source
+        let breakdownSourceLocal = loadBreakdownDay.flatMap { day in
+            recoveryResolved.points.last(where: { $0.day == day })?.source
         }
-        breakdownRecoverySource = breakdownSourceLocal
         let restResolved = await restResolvedA
-        if let win = restResolved.points.last(where: { $0.day == selectedDayKey })?.source {
+        if let win = restResolved.points.last(where: { $0.day == loadDayKey })?.source {
             provenance["sleep_performance"] = win
         }
-        provenanceByMetric = provenance
 
         // HR trend for the SELECTED day, 5-minute bucket means from that logical day's local midnight.
         // For today the window runs to now (an in-progress curve); for a navigated past day it runs the
         // full 24h to the next midnight. The logical day rolls at 04:00 (Repository.logicalDayStart), so
         // in the small hours after midnight today still starts at yesterday's midnight rather than
         // blanking to an empty new-calendar-day axis (#144).
-        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: selectedDayKey)
-            ?? WorkoutDateWindow.localDay(containing: selectedLogicalDay)
+        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: loadDayKey)
+            ?? WorkoutDateWindow.localDay(containing: loadLogicalDay)
         let windowStart = selectedCalendarWindow.lowerBound
-        let windowEnd: Int = selectedDayOffset == 0
+        let windowEnd: Int = loadDayOffset == 0
             ? Int(Date().timeIntervalSince1970)
             : selectedCalendarWindow.upperBound
         let hrPointsLocal = await repo.hrBuckets(from: windowStart, to: windowEnd, bucketSeconds: 300)
             .map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm) }
-        hrPoints = hrPointsLocal
 
         // #316 / @63, the selected day's representative activity class for the Steps tile icon. Reads the
         // day's step samples (now carrying `activityClass` after the v19 column) and takes the LAST non-nil
@@ -4564,7 +4618,6 @@ struct TodayView: View {
         // under its OWN fresh id, so a read pinned to the canonical "my-whoop" would drop the icon for a
         // re-added strap (the #904/#908 family). nil (no classed sample) hides the icon.
         let stepClassLocal = await repo.stepActivityClassLatest(from: windowStart, to: windowEnd)
-        stepActivityClassToday = stepClassLocal
 
         // #860 item 1: the launch auto-land (#605/#739 "snap to the most recent data day when today is
         // empty") is RETIRED here. A fresh launch lands on today via `launchDayOffset` against the plain
@@ -4579,15 +4632,20 @@ struct TodayView: View {
         // engine will eventually persist. Below StrainScorer.minReadings the scorer returns nil and the
         // gauge falls back to the stored row (never a fabricated value); a navigated past day clears it.
         let liveStrainLocal: Double?
-        if selectedDayOffset == 0 {
+        if loadDayOffset == 0 {
             let todayHr = await repo.hrSamples(from: windowStart, to: windowEnd)
-            let maxHR = profile.age > 0 ? StrainScorer.tanakaHRmax(age: Double(profile.age)) : nil
-            let restHR = displayDay?.restingHr.map(Double.init) ?? StrainScorer.defaultRestingHR
-            liveStrainLocal = StrainScorer.strain(todayHr, maxHR: maxHR, restingHR: restHR, sex: profile.sex)
+            let maxHR = loadProfileAge > 0
+                ? StrainScorer.tanakaHRmax(age: Double(loadProfileAge))
+                : nil
+            let restHR = loadRestingHr.map(Double.init) ?? StrainScorer.defaultRestingHR
+            liveStrainLocal = StrainScorer.strain(
+                todayHr,
+                maxHR: maxHR,
+                restingHR: restHR,
+                sex: loadProfileSex)
         } else {
             liveStrainLocal = nil
         }
-        liveTodayStrain = liveStrainLocal
         // Pin the chart axis to the loaded window, today midnight→now, a past day the full 24h, so
         // a gap (e.g. a morning the strap wasn't banking) shows as empty space, not a late start.
         let newAxis = Date(timeIntervalSince1970: TimeInterval(windowStart))
@@ -4597,8 +4655,6 @@ struct TodayView: View {
         // day opens at full scale; a same-day end-extension keeps the user's zoom but RE-CLAMPS it into the
         // grown bounds (preserving its span) so a live sync never yanks them out of their zoom yet the window
         // can never sit outside the day. `panned(deltaSeconds: 0)` is the pure re-clamp.
-        hrZoomDomain = Self.reclampHrZoom(hrZoomDomain, oldAxis: hrAxis, newAxis: newAxis)
-        hrAxis = newAxis
 
         // Sleep session overlapping the window. Uses `allSleepSessions` (BOTH the imported and the
         // on-device COMPUTED source), a Bluetooth-only user's sleep lives under the computed source,
@@ -4608,7 +4664,7 @@ struct TodayView: View {
         // single block" pick - that could disagree with the Sleep tab and the Coupled view's bed→wake
         // read for a night stored as more than one block (#294). Drives the HR sleep band + the recovery
         // marker's wake anchor.
-        let overlapping = await repo.allSleepSessions(days: selectedDayOffset + 2)
+        let overlapping = await repo.allSleepSessions(days: loadDayOffset + 2)
             .filter { $0.endTs > windowStart && $0.startTs < windowEnd }
         let habitualMidsleepSecLocal = await repo.habitualMidsleepSec()
         let sleepTodayLocal = SleepView.mainNightSpan(overlapping, habitualMidsleepSec: habitualMidsleepSecLocal)
@@ -4616,7 +4672,8 @@ struct TodayView: View {
                 CachedSleepSession(startTs: span.start, endTs: span.end,
                                    efficiency: nil, restingHr: nil, avgHrv: nil, stagesJSON: nil)
             }
-        sleepToday = sleepTodayLocal
+        let stressModel = StressModel(sourceRows: vitalRowsSnapshot)
+        let stressLocal = stressModel?.asOfDay == loadDayKey ? stressModel?.score : nil
 
         // #932: snapshot everything just computed onto the long-lived `repo`, keyed by the (seq, day) this
         // pass loaded FOR (both captured at entry), so a later re-mount with the same (seq, day) restores it
@@ -4627,8 +4684,26 @@ struct TodayView: View {
         // skipping here costs nothing but a cache miss. The snapshot is built from the LOCALS captured at
         // each computation point, never from `@State` at tail time: a cancelled sibling pass's interleaved
         // `@State` writes (its awaits still complete) can therefore never leak into this pass's bank.
-        guard loadDayKey == selectedDayKey, !Task.isCancelled else { return }
+        guard loadDeviceId == repo.deviceId,
+              loadSeq == repo.refreshSeq,
+              loadDayKey == selectedDayKey,
+              loadDayOffset == selectedDayOffset,
+              !Task.isCancelled else { return }
+
+        sparks["sleep_performance"] = restSparkLocal
+        restScore = restScoreLocal
+        provenanceByMetric = provenance
+        breakdownRecoverySource = breakdownSourceLocal
+        hrPoints = hrPointsLocal
+        stepActivityClassToday = stepClassLocal
+        liveTodayStrain = liveStrainLocal
+        hrZoomDomain = Self.reclampHrZoom(hrZoomDomain, oldAxis: hrAxis, newAxis: newAxis)
+        hrAxis = newAxis
+        sleepToday = sleepTodayLocal
+        stressToday = stressLocal
+
         repo.todayDayScopedCache = TodayDayScopedCache(
+            deviceId: loadDeviceId,
             restSpark: restSparkLocal,
             restScore: restScoreLocal,
             provenanceByMetric: provenance,
@@ -4638,6 +4713,7 @@ struct TodayView: View {
             liveTodayStrain: liveStrainLocal,
             hrAxis: newAxis,
             sleepToday: sleepTodayLocal,
+            stressToday: stressLocal,
             bankedAt: Date())
         repo.todayDayScopedLoadedSeq = loadSeq
         repo.todayDayScopedLoadedDayKey = loadDayKey
@@ -5032,6 +5108,7 @@ private struct TodayLoadKey: Equatable {
     let seq: Int
     let ageMetricsSeq: Int
     let workoutsSeq: Int
+    let deviceId: String
     let offset: Int
     let ageMetricState: String
     let historyWriteGate: Bool
@@ -5045,13 +5122,13 @@ private struct TodayLoadKey: Equatable {
 /// re-ran the full history-wide reload on every re-mount, which is the lag #849 reports returning to Today
 /// after an import. Built only after a real `loadHistoryWide()`; consumed when the seq still matches.
 struct TodayHistoryWideCache {
+    let deviceId: String
     let sparks: [String: [Double]]
     let stepsEstByDay: [String: Int]
     let workouts: [WorkoutRow]
     let appleDays: [AppleDaily]
     let xiaomiDays: Int
     let xiaomiSleeps: Int
-    let stressToday: Double?
     let fitnessAgeToday: Double?
     let vitalityToday: Double?
     let ageMetricStateToken: String
@@ -5070,6 +5147,7 @@ struct TodayHistoryWideCache {
 /// real `loadDayScoped()`; consumed when BOTH the seq AND the day key still match (see
 /// `Repository.todayDayScopedLoadedSeq` / `todayDayScopedLoadedDayKey`).
 struct TodayDayScopedCache {
+    let deviceId: String
     let restSpark: [Double]
     let restScore: Double?
     let provenanceByMetric: [String: String]
@@ -5079,6 +5157,7 @@ struct TodayDayScopedCache {
     let liveTodayStrain: Double?
     let hrAxis: ClosedRange<Date>
     let sleepToday: CachedSleepSession?
+    let stressToday: Double?
     /// When the snapshot was banked. TODAY hits are age-gated on this (`todayCacheMaxAge`): live banking
     /// does not bump `refreshSeq`, so an unbounded today snapshot would drift behind the 1Hz stream.
     let bankedAt: Date

@@ -60,6 +60,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             workoutsSeq: 3,
             deviceId: "device-a",
             dayKey: "2026-09-09",
+            isToday: true,
             profileState: "profile-a"
         )
         let now = Date(timeIntervalSince1970: 10_000)
@@ -99,6 +100,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             workoutsSeq: 3,
             deviceId: "device-a",
             dayKey: "2026-09-09",
+            isToday: true,
             profileState: "profile-a"
         )
         XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
@@ -115,6 +117,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             workoutsSeq: 3,
             deviceId: "device-b",
             dayKey: "2026-09-09",
+            isToday: true,
             profileState: "profile-a"
         )
         XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
@@ -138,6 +141,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             workoutsSeq: 3,
             deviceId: "device-a",
             dayKey: "2026-09-09",
+            isToday: true,
             profileState: "profile-a"
         )
         let newer = LiquidTodayQueryKey(
@@ -146,6 +150,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             workoutsSeq: 6,
             deviceId: "device-a",
             dayKey: "2026-09-09",
+            isToday: true,
             profileState: "profile-a"
         )
         XCTAssertTrue(LiquidTodayView.canRestoreDuringHistoryWrite(
@@ -160,6 +165,19 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
                 workoutsSeq: 6,
                 deviceId: "device-b",
                 dayKey: "2026-09-09",
+                isToday: true,
+                profileState: "profile-a"
+            )
+        ))
+        XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: LiquidTodayQueryKey(
+                refreshSeq: 9,
+                ageMetricsSeq: 5,
+                workoutsSeq: 6,
+                deviceId: "device-a",
+                dayKey: "2026-09-09",
+                isToday: false,
                 profileState: "profile-a"
             )
         ))

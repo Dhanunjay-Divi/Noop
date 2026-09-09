@@ -107,6 +107,46 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(text.contains("historyWriteGate: historyReadsBlocked"))
     }
 
+    func testClassicTodayCachesAndPublicationAreOwnedByTheActiveDevice() throws {
+        let today = try source("Strand/Screens/TodayView.swift")
+        let repository = try source("Strand/Data/Repository.swift")
+
+        XCTAssertTrue(today.contains("deviceId: repo.deviceId"))
+        XCTAssertTrue(today.contains("cached.deviceId == currentDeviceId"))
+        XCTAssertTrue(today.contains("cached.deviceId == loadDeviceId"))
+        XCTAssertTrue(today.contains("requestDeviceId == repo.deviceId"))
+        XCTAssertTrue(today.contains("loadDeviceId == repo.deviceId"))
+        XCTAssertTrue(today.contains("requestRefreshSeq == repo.refreshSeq"))
+        XCTAssertTrue(today.contains("loadSeq == repo.refreshSeq"))
+
+        let dayStart = try XCTUnwrap(today.range(of: "private func loadDayScoped"))
+        let dayEnd = try XCTUnwrap(
+            today.range(of: "private func announceNewDaysIfNeeded", range: dayStart.upperBound..<today.endIndex)
+        )
+        let dayBlock = today[dayStart.lowerBound..<dayEnd.lowerBound]
+        let publishGuard = try XCTUnwrap(dayBlock.range(of: "guard loadDeviceId == repo.deviceId"))
+        for assignment in [
+            "restScore = restScoreLocal",
+            "hrPoints = hrPointsLocal",
+            "liveTodayStrain = liveStrainLocal",
+            "sleepToday = sleepTodayLocal",
+        ] {
+            let write = try XCTUnwrap(dayBlock.range(of: assignment))
+            XCTAssertLessThan(publishGuard.lowerBound, write.lowerBound)
+        }
+
+        let adoptStart = try XCTUnwrap(repository.range(of: "func adoptActiveDeviceId"))
+        let adoptEnd = try XCTUnwrap(
+            repository.range(of: "#if DEBUG", range: adoptStart.upperBound..<repository.endIndex)
+        )
+        let adoptBlock = repository[adoptStart.lowerBound..<adoptEnd.lowerBound]
+        XCTAssertTrue(adoptBlock.contains("todayHistoryWideLoadedSeq = -1"))
+        XCTAssertTrue(adoptBlock.contains("todayHistoryWideCache = nil"))
+        XCTAssertTrue(adoptBlock.contains("todayDayScopedLoadedSeq = -1"))
+        XCTAssertTrue(adoptBlock.contains("todayDayScopedLoadedDayKey = \"\""))
+        XCTAssertTrue(adoptBlock.contains("todayDayScopedCache = nil"))
+    }
+
     func testSleepHistoryPublicationRejectsCancellationRefreshAndDeviceSupersession() {
         XCTAssertTrue(SleepView.shouldPublishHistoryLoad(
             requestRefreshSeq: 7,
@@ -141,6 +181,23 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
     func testSleepHeroDoesNotSpendScrollFramesOnDecorativeAtmosphere() throws {
         let text = try source("Strand/Screens/SleepView.swift")
         XCTAssertTrue(text.contains(".timeOfDayBackground(.night, animated: false)"))
+    }
+
+    func testSleepStressWaitsForStableHistoryWritesAndRejectsSupersededLoads() throws {
+        let text = try source("Strand/Screens/SleepView.swift")
+        let start = try XCTUnwrap(text.range(of: "private func sleepStressCard"))
+        let end = try XCTUnwrap(
+            text.range(of: "private func sleepStressTrace", range: start.upperBound..<text.endIndex)
+        )
+        let block = text[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(block.contains("SleepStressLoadKey("))
+        XCTAssertTrue(block.contains("historyReadsBlocked: historyReadsBlocked"))
+        XCTAssertTrue(block.contains(".task(id: loadKey)"))
+        XCTAssertTrue(block.contains("guard !loadKey.historyReadsBlocked else { return }"))
+        XCTAssertTrue(block.contains("repo.deviceId == loadKey.deviceId"))
+        XCTAssertTrue(block.contains("repo.refreshSeq == window.refreshSeq"))
+        XCTAssertTrue(block.contains("!historyReadsBlocked"))
     }
 
     func testTodayDecorativeStatusClocksPauseDuringScrollInteraction() throws {

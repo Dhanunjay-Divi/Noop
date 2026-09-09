@@ -60,6 +60,10 @@ class HealthScreenPerformanceTest {
         assertTrue(root.contains("activeDeviceId = activeDeviceId"))
         assertTrue(detail.contains("vm.selectedDeviceId.collectAsStateWithLifecycle()"))
         assertTrue(detail.contains("LaunchedEffect(key, refreshTick, profileVersion, ageMetricDataVersion, activeDeviceId)"))
+        assertTrue(detail.contains("val requestDeviceId = activeDeviceId"))
+        assertTrue(detail.contains("buildSeriesVitalDetail(vm, key, massUnit, requestDeviceId)"))
+        assertTrue(detail.contains("currentCoroutineContext().ensureActive()"))
+        assertTrue(detail.contains("vm.activeStrapId != requestDeviceId"))
         assertTrue(seriesBuilder.contains("strapDeviceId = activeDeviceId"))
         assertFalse(seriesBuilder.contains("vm.activeStrapId"))
     }

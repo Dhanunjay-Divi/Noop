@@ -101,6 +101,21 @@ class RetainedScreenPerformanceTest {
         assertTrue(root.contains("val isBackfilling by vm.historyBackfillActive"))
         assertTrue(root.contains("rememberHistoryQueryGate(isBackfilling)"))
         assertTrue(root.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
+        val stressStart = root.indexOf("val sleepStressWindow")
+        val stressEnd = root.indexOf("// #940:", startIndex = stressStart)
+        val stressBlock = root.substring(stressStart, stressEnd)
+        assertTrue(
+            stressBlock.contains(
+                "LaunchedEffect(sleepStressWindow, days, activeDeviceId, deferHistoricalQueries)",
+            ),
+        )
+        assertTrue(stressBlock.contains("if (deferHistoricalQueries) return@LaunchedEffect"))
+        assertTrue(stressBlock.contains("val heartRateJob = async"))
+        assertTrue(stressBlock.contains("val intervalsJob = async"))
+        assertTrue(stressBlock.contains("currentCoroutineContext().ensureActive()"))
+        assertTrue(stressBlock.contains("remember(activeDeviceId)"))
+        assertTrue(root.contains("it.deviceId == activeDeviceId"))
+        assertFalse(stressBlock.contains("runCatching"))
 
         val batchStart = repository.indexOf("suspend fun sessionMotions(")
         val batchEnd = repository.indexOf("/** Persist the decoded", startIndex = batchStart)

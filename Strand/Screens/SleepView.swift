@@ -907,7 +907,12 @@ struct SleepView: View {
             startTs: night.session.effectiveStartTs,
             endTs: night.session.endTs,
             refreshSeq: repo.refreshSeq)
+        let loadKey = SleepStressLoadKey(
+            window: window,
+            deviceId: repo.deviceId,
+            historyReadsBlocked: historyReadsBlocked)
         let finished = loadedSleepStress?.window == window
+            && loadedSleepStress?.deviceId == repo.deviceId
         let result = finished ? loadedSleepStress?.result : nil
 
         NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
@@ -969,10 +974,14 @@ struct SleepView: View {
                 }
             }
         }
-        .task(id: window) {
+        .task(id: loadKey) {
+            guard !loadKey.historyReadsBlocked else { return }
             loadedSleepStress = nil
             guard window.endTs > window.startTs else {
-                loadedSleepStress = LoadedSleepStress(window: window, result: nil)
+                loadedSleepStress = LoadedSleepStress(
+                    window: window,
+                    deviceId: loadKey.deviceId,
+                    result: nil)
                 return
             }
             async let hr = repo.hrSamples(
@@ -991,8 +1000,14 @@ struct SleepView: View {
                     startTs: window.startTs,
                     endTs: window.endTs)
             }.value
-            guard !Task.isCancelled else { return }
-            loadedSleepStress = LoadedSleepStress(window: window, result: stress)
+            guard !Task.isCancelled,
+                  repo.deviceId == loadKey.deviceId,
+                  repo.refreshSeq == window.refreshSeq,
+                  !historyReadsBlocked else { return }
+            loadedSleepStress = LoadedSleepStress(
+                window: window,
+                deviceId: loadKey.deviceId,
+                result: stress)
         }
     }
 
@@ -3486,8 +3501,15 @@ private struct SleepStressWindow: Hashable, Sendable {
     let refreshSeq: Int
 }
 
+private struct SleepStressLoadKey: Hashable, Sendable {
+    let window: SleepStressWindow
+    let deviceId: String
+    let historyReadsBlocked: Bool
+}
+
 private struct LoadedSleepStress: Sendable {
     let window: SleepStressWindow
+    let deviceId: String
     let result: SleepStress.Result?
 }
 

@@ -105,7 +105,9 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -2889,6 +2891,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     var loadedAgeMetricState by remember(key, activeDeviceId) { mutableStateOf<String?>(null) }
     if (isSeriesBacked) {
         LaunchedEffect(key, refreshTick, profileVersion, ageMetricDataVersion, activeDeviceId) {
+            val requestDeviceId = activeDeviceId
             val profileAllowsMetric = when (key) {
                 "fitness_age" -> profile.fitnessInputsConfirmed &&
                     FitnessAgeEngine.supportsAge(profile.age.toDouble()) &&
@@ -2899,21 +2902,24 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             val provenanceAllowsMetric = if (!profileAllowsMetric) false else when (key) {
                 "fitness_age" -> profile.acceptsFitnessAge(
                     vm.repo.latestMetricComputedUnion(
-                        activeDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
+                        requestDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
                     )?.value,
                 )
                 "vitality" -> profile.acceptsVitality(
                     vm.repo.latestMetricComputedUnion(
-                        activeDeviceId, AgeMetricProfile.VITALITY_KEY,
+                        requestDeviceId, AgeMetricProfile.VITALITY_KEY,
                     )?.value,
                 )
                 else -> true
             }
-            seriesDetail = if (provenanceAllowsMetric) {
-                buildSeriesVitalDetail(vm, key, massUnit, activeDeviceId)
+            val loadedDetail = if (provenanceAllowsMetric) {
+                buildSeriesVitalDetail(vm, key, massUnit, requestDeviceId)
             } else {
                 null
             }
+            currentCoroutineContext().ensureActive()
+            if (vm.activeStrapId != requestDeviceId) return@LaunchedEffect
+            seriesDetail = loadedDetail
             loadedAgeMetricState = ageMetricState
             seriesLoaded = true
         }

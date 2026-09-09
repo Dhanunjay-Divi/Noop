@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
-- End implementation commit: `1def2905`
+- End implementation commit: pending final Safety rebase
 - Record commit or PR: protected pull request `#12`
 
 ## Objective
@@ -79,7 +79,10 @@ Android where applicable, and leave physical-phone conclusions explicit.
   reopening the same history, current-day snapshots expire after 120 seconds,
   historical snapshots remain revision-bound but expire after five minutes so
   a swallowed store/open failure cannot bank an incomplete historical view
-  indefinitely, and age/workout mutations invalidate the bank.
+  indefinitely, and age/workout mutations invalidate the bank. The request key
+  now also distinguishes a live current-day window from a historical full-day
+  window, so an equal calendar key cannot restore data with the wrong time
+  boundary.
 - Apple snapshots are also scoped to the active device. Adopting another device
   clears the bank, publishes the device change to the view task identity, and
   prevents values from the prior device from being restored.
@@ -92,6 +95,18 @@ Android where applicable, and leave physical-phone conclusions explicit.
   through the short false edges between continuation sessions. Cold mounts do
   not run broad reads against active writes; same-device cached content stays
   visible, and one forced catch-up load runs after a two-second quiet edge.
+- A final cache-ownership audit found Classic Today's task and two retained
+  banks were still revision/day keyed but not device keyed. The task now
+  includes the active device, device adoption synchronously invalidates both
+  banks, cache entries carry their owner, and both day-scoped and history-wide
+  loads compute into locals before publishing one complete same-device,
+  same-revision snapshot. Day-specific Stress moved into the day-scoped bank,
+  preventing a historical day navigation from restoring another day's score.
+- The overnight Sleep Stress cards on Apple and Android now obey the same
+  history-write quiet gate as their parent Sleep loads. They keep the last
+  coherent result visible, avoid two 200,000-row reads during active offload,
+  run HR and R-R reads concurrently once quiet, preserve structured
+  cancellation, and reject cross-device or superseded publication.
 - A fresh cold-mount audit closed the remaining Apple ordering race. AppModel
   now mirrors only the deduplicated history-write boolean onto the already
   observed Repository before screens mount. Classic Today, Liquid Today, and
@@ -189,6 +204,9 @@ Android where applicable, and leave physical-phone conclusions explicit.
   selected-device flow directly and scopes Today card/footer/Rest caches, Sleep,
   Stress, and Workouts work to that immutable device snapshot; Apple includes the
   published repository device in Today, Sleep, and Workouts task identities.
+- Android Vital detail now captures the selected device before its multi-series
+  read, checks coroutine cancellation, and rejects publication if the active
+  strap changed while the read was suspended.
 - Existing bounded diagnostics now show the optimized Apple path directly:
   `today.liquid.load` distinguishes full, cache-restore, and backfill-deferred
   outcomes. Android `today.rest_composite_load` distinguishes success,
@@ -258,6 +276,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Apple interaction-wiring audit | The standard Apple scaffold and liquid Today now publish the shared interaction environment through an edge-coalesced offset tracker; the Android Health sampler uses the existing Compose interaction local. The production-flavor Android focused suite passed in 30 seconds, and the Apple app compiled and ran 15 Health/retained-screen contracts with zero failures. A follow-up no-churn audit replaced the first scheduler-sensitive lifecycle assertion with a pure latest-movement timing-policy test; all 13 focused retained-screen contracts then passed | Shared Apple motion consumers now receive a real drag/deceleration signal rather than the environment default, one settle task serves the full gesture instead of being recreated per frame, and Health has no one-second sampling clock while paused or scrolling on either platform | Physical touch latency, GPU pacing, or the tester's exact phone |
 | Large-store Apple simulator scroll | A verified 294.9 MB store with 2,376,000 active-device HR rows and 864,000 R-R rows was swapped into the installed iPhone 17 Pro simulator. `testTodayScrollPerformance` passed five up/down iterations with a 5.188 s average automation window, 0.167 s average app CPU time, and about 35.3 MB peak physical memory. The original 1.10 MB database was restored with integrity `ok` | The optimized Today path remains functional and bounded when the same active device owns a phone-sized production-schema store | Physical GPU pacing, thermal behavior, flash latency, active BLE ingestion, or the affected tester's phone |
 | Cold-mount history-write gate | The complete changed Apple graph compiled and 25 focused retained-screen/Liquid Today tests passed, including a runtime publisher regression proving only the initial value and true/false edges publish | A screen opened during an already-active history write sees the block synchronously, retains the two-second quiet release, and avoids sensor-rate root invalidation | Physical frame pacing during a real band offload |
+| Final device/cache audit | The macOS app compiled and 27 Liquid Today/retained-screen tests passed with zero failures. Android's production flavor compiled and 16 retained-screen/Health tests passed with zero failures | Current-vs-historical Liquid keys are distinct; Classic Today publishes atomic device-owned snapshots; overnight Sleep Stress waits for the quiet edge; Android Vital detail rejects an old-device result | Physical-phone frame pacing, active BLE/offload behavior, or the affected tester's exact database |
 | Old Android hosted production-shell run | Compilation and packaging completed, but the managed device task was terminated with exit 143 at the workflow's 900-second bound before any instrumentation result was emitted | The old failure was a bounded emulator/test-infrastructure timeout rather than a product assertion | The rebased exact head still requires a completed hosted production-shell run |
 | Post-review policy preflight | `git diff --check`, the 39-record operations validator, `required-ci-gate.py check`, and the terminology ratchet passed. The regenerated pre-rebase snapshot records 17,360 classified occurrences across 1,510 groups with no active-allowlist change. An initial no-subcommand `required-ci-gate.py` invocation returned its expected usage error and was corrected | The review patch remains structurally clean, keeps the required-context policy intact, and does not introduce an unreviewed active legacy term | Final regenerated snapshot and complete policy matrix after the Safety rebase |
 

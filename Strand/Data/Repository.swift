@@ -648,6 +648,11 @@ final class Repository: ObservableObject {
     func adoptActiveDeviceId(_ id: String) -> Bool {
         let trimmed = id.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != deviceId else { return false }
+        todayHistoryWideLoadedSeq = -1
+        todayHistoryWideCache = nil
+        todayDayScopedLoadedSeq = -1
+        todayDayScopedLoadedDayKey = ""
+        todayDayScopedCache = nil
         liquidTodayLoadCache = nil
         autoDetectCandidateCache = nil
         autoDetectScanGeneration &+= 1

@@ -2696,6 +2696,7 @@ struct LiquidTodayView: View {
     ) -> Bool {
         cachedKey.deviceId == requestKey.deviceId
             && cachedKey.dayKey == requestKey.dayKey
+            && cachedKey.isToday == requestKey.isToday
             && cachedKey.profileState == requestKey.profileState
     }
 
@@ -2727,15 +2728,16 @@ struct LiquidTodayView: View {
         let requestedDayKey = selectedDayKey
         let requestedLogicalDay = selectedLogicalDay
         let requestedAgeMetricState = profile.ageMetricStateToken
+        let isToday = requestedOffset == 0
         let requestKey = LiquidTodayQueryKey(
             refreshSeq: repo.refreshSeq,
             ageMetricsSeq: repo.ageMetricsSeq,
             workoutsSeq: repo.workoutsSeq,
             deviceId: repo.deviceId,
             dayKey: requestedDayKey,
+            isToday: isToday,
             profileState: requestedAgeMetricState
         )
-        let isToday = requestedOffset == 0
         let trace = AppDiagnosticsRecorder.shared.beginOperation(
             "today.liquid.load",
             fields: ["scope": isToday ? "today" : "historical"]
@@ -2765,6 +2767,7 @@ struct LiquidTodayView: View {
                 workoutsSeq: repo.workoutsSeq,
                 deviceId: repo.deviceId,
                 dayKey: selectedDayKey,
+                isToday: selectedDayOffset == 0,
                 profileState: profile.ageMetricStateToken
               ) else { return }
 
@@ -2999,6 +3002,7 @@ struct LiquidTodayView: View {
                 workoutsSeq: repo.workoutsSeq,
                 deviceId: repo.deviceId,
                 dayKey: selectedDayKey,
+                isToday: selectedDayOffset == 0,
                 profileState: profile.ageMetricStateToken
               ) else { return }
 
@@ -3394,6 +3398,7 @@ struct LiquidTodayQueryKey: Equatable {
     let workoutsSeq: Int
     let deviceId: String
     let dayKey: String
+    let isToday: Bool
     let profileState: String
 }
 

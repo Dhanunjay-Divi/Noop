@@ -529,30 +529,43 @@ fun SleepScreen(
             )
         }
     }
-    var loadedSleepStress by remember { mutableStateOf<LoadedSleepStress?>(null) }
-    LaunchedEffect(sleepStressWindow, days, activeDeviceId) {
+    var loadedSleepStress by remember(activeDeviceId) {
+        mutableStateOf<LoadedSleepStress?>(null)
+    }
+    LaunchedEffect(sleepStressWindow, days, activeDeviceId, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
         loadedSleepStress = null
         val window = sleepStressWindow ?: return@LaunchedEffect
         if (window.endTs <= window.startTs) {
-            loadedSleepStress = LoadedSleepStress(window, null)
+            loadedSleepStress = LoadedSleepStress(window, requestDeviceId, null)
             return@LaunchedEffect
         }
-        val heartRate = runCatching {
-            vm.repo.hrSamplesUnion(
-                activeDeviceId,
-                window.startTs,
-                window.endTs,
-                limit = 200_000,
-            )
-        }.getOrDefault(emptyList())
-        val intervals = runCatching {
-            vm.repo.rrIntervalsUnion(
-                activeDeviceId,
-                window.startTs,
-                window.endTs,
-                limit = 200_000,
-            )
-        }.getOrDefault(emptyList())
+        val (heartRate, intervals) = try {
+            coroutineScope {
+                val heartRateJob = async {
+                    vm.repo.hrSamplesUnion(
+                        requestDeviceId,
+                        window.startTs,
+                        window.endTs,
+                        limit = 200_000,
+                    )
+                }
+                val intervalsJob = async {
+                    vm.repo.rrIntervalsUnion(
+                        requestDeviceId,
+                        window.startTs,
+                        window.endTs,
+                        limit = 200_000,
+                    )
+                }
+                heartRateJob.await() to intervalsJob.await()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList<com.noop.data.HrSample>() to emptyList<com.noop.data.RrInterval>()
+        }
         val stress = withContext(Dispatchers.Default) {
             SleepStress.analyze(
                 heartRate,
@@ -561,7 +574,16 @@ fun SleepScreen(
                 window.endTs,
             )
         }
-        loadedSleepStress = LoadedSleepStress(window, stress)
+        currentCoroutineContext().ensureActive()
+        if (!shouldPublishSleepHistorySnapshot(
+                requestDeviceId = requestDeviceId,
+                currentDeviceId = vm.activeStrapId,
+                isCancelled = false,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        loadedSleepStress = LoadedSleepStress(window, requestDeviceId, stress)
     }
 
     // #940: ONE stage-less SELECTED day (typically the newest, after an impossible hand-edit staged
@@ -865,7 +887,9 @@ fun SleepScreen(
                 item {
                     SleepStressCard(
                         window = selectedStressWindow,
-                        loaded = loadedSleepStress?.takeIf { it.window == selectedStressWindow },
+                        loaded = loadedSleepStress?.takeIf {
+                            it.window == selectedStressWindow && it.deviceId == activeDeviceId
+                        },
                     )
                 }
             }
@@ -2639,6 +2663,7 @@ private data class SleepStressWindow(val startTs: Long, val endTs: Long)
 
 private data class LoadedSleepStress(
     val window: SleepStressWindow,
+    val deviceId: String,
     val result: SleepStress.Result?,
 )
 
