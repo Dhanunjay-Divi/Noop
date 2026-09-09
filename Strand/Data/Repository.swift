@@ -10,6 +10,24 @@ enum RepositoryReadError: Error {
     case incompleteSleepSnapshot
 }
 
+/// Runs dense auto-workout CPU work off the main actor while linking parent cancellation to the worker.
+/// Callers add checks between expensive phases so a dismissed/superseded scan cannot continue into the
+/// step query or classifier after its screen task has been canceled.
+enum AutoWorkoutBackgroundAnalysis {
+    static func run<Value: Sendable>(
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        let worker = Task.detached(priority: .utility) {
+            try operation()
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+}
+
 /// Stable identity for one suggestion. The endpoint is deliberately excluded: a later sync can extend
 /// the same bout or merge a nearby finalized span, but it must not create a second prompt/notification.
 /// Legacy `start:end` values remain readable so existing dismissals survive the migration.
@@ -4180,23 +4198,44 @@ final class Repository: ObservableObject {
         // tagged `.workouts`. Zero-cost when off: the gate is one UserDefaults bool read inside emitWorkouts,
         // and detectTrace is only called on that branch, so the default path runs the untraced detect.
         let shouldTrace = TestCentre.active(.workouts) && workoutsLog != nil
-        let detection = await Task.detached(priority: .utility) {
-            let hr = samples.map { (ts: $0.ts, bpm: $0.bpm) }
-            let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
-            if shouldTrace {
-                let (results, trace) = AutoWorkoutDetector.detectTrace(
-                    hr: hr, restingBpm: restingBpm, motion: motion,
-                    savedSpans: savedSpans, path: "autoDetect")
-                return (candidates: results, trace: trace)
-            }
-            return (
-                candidates: AutoWorkoutDetector.detect(
+        let detection: (candidates: [DetectedWorkout], trace: [String])
+        do {
+            detection = try await AutoWorkoutBackgroundAnalysis.run {
+                try Task.checkCancellation()
+                var hr: [(ts: Int, bpm: Int)] = []
+                hr.reserveCapacity(samples.count)
+                for (index, sample) in samples.enumerated() {
+                    if index.isMultiple(of: 2_048) { try Task.checkCancellation() }
+                    hr.append((ts: sample.ts, bpm: sample.bpm))
+                }
+                try Task.checkCancellation()
+                let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
+                try Task.checkCancellation()
+                if shouldTrace {
+                    let (results, trace) = AutoWorkoutDetector.detectTrace(
+                        hr: hr, restingBpm: restingBpm, motion: motion,
+                        savedSpans: savedSpans, path: "autoDetect")
+                    try Task.checkCancellation()
+                    return (candidates: results, trace: trace)
+                }
+                let candidates = AutoWorkoutDetector.detect(
                     hr: hr, restingBpm: restingBpm,
                     motion: motion, savedSpans: savedSpans
-                ),
-                trace: []
-            )
-        }.value
+                )
+                try Task.checkCancellation()
+                return (candidates: candidates, trace: [])
+            }
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            return nil
+        } catch {
+            diagnosticOutcome = "failed"
+            return nil
+        }
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
         for line in detection.trace { emitWorkouts(line) }
         // Drop anything the user already dismissed, then take the most recent.
         let dismissed = autoDetectDismissedSpans
@@ -4212,21 +4251,41 @@ final class Repository: ObservableObject {
         // its confidence floor; otherwise the candidate remains the honest generic "Workout". It is still
         // advisory: the card names it experimental and saving is an explicit acceptance.
         let steps = await stepSamplesUnion(from: candidate.startSec, to: candidate.endSec)
-        let prediction: WorkoutClassPrediction? = await Task.detached(priority: .utility) {
-            guard let features = WorkoutTypeFeatureExtractor.extract(
-                hr: samples, gravity: gravity, steps: steps,
-                start: candidate.startSec, end: candidate.endSec,
-                restingHR: restingBpm.map(Double.init)
-            ), features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else {
-                return nil
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
+        let prediction: WorkoutClassPrediction?
+        do {
+            prediction = try await AutoWorkoutBackgroundAnalysis.run {
+                try Task.checkCancellation()
+                guard let features = WorkoutTypeFeatureExtractor.extract(
+                    hr: samples, gravity: gravity, steps: steps,
+                    start: candidate.startSec, end: candidate.endSec,
+                    restingHR: restingBpm.map(Double.init)
+                ), features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else {
+                    return nil
+                }
+                try Task.checkCancellation()
+                let prediction = WorkoutTypeClassifier.classify(features)
+                try Task.checkCancellation()
+                guard prediction.predictedClass != .other,
+                      prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else {
+                    return nil
+                }
+                return prediction
             }
-            let prediction = WorkoutTypeClassifier.classify(features)
-            guard prediction.predictedClass != .other,
-                  prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else {
-                return nil
-            }
-            return prediction
-        }.value
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            return nil
+        } catch {
+            diagnosticOutcome = "failed"
+            return nil
+        }
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
         diagnosticOutcome = "candidate"
         guard let prediction else { return candidate }
         return DetectedWorkout(

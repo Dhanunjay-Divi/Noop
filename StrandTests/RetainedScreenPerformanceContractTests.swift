@@ -293,12 +293,15 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(text.contains("@State private var recoveryTrendLoadTask: Task<Void, Never>?"))
         XCTAssertTrue(text.contains("@State private var recoveryTrendLoadKey: String?"))
         XCTAssertTrue(text.contains("@State private var recoveryTrendLoadToken: UUID?"))
+        XCTAssertTrue(text.contains("@State private var recoveryTrendScreenVisible = false"))
         XCTAssertTrue(text.contains("@State private var recoveryTrendRequestedKey: String?"))
         XCTAssertTrue(text.contains("startRecoveryTrendLoad(requestKey: inputKey, rows: inputRows)"))
         XCTAssertTrue(text.contains(".onChangeCompat(of: recoveryTrendInputKey)"))
         XCTAssertTrue(text.contains("restartRecoveryTrendLoadIfRequested(for: newKey)"))
         XCTAssertTrue(text.contains("resumeRecoveryTrendLoadIfRequested()"))
-        XCTAssertTrue(text.contains(".onDisappear {\n            suspendRecoveryTrendLoad()"))
+        XCTAssertTrue(text.contains(".onDisappear {\n            recoveryTrendScreenVisible = false"))
+        XCTAssertTrue(text.contains("guard recoveryTrendScreenVisible else { return }"))
+        XCTAssertTrue(text.contains("guard recoveryTrendScreenVisible else {\n            suspendRecoveryTrendLoad()"))
         XCTAssertTrue(text.contains("guard recoveryTrendLoadToken == requestToken"))
         XCTAssertFalse(text.contains(".task(id: inputKey)"))
         XCTAssertTrue(text.contains(#"\(repo.deviceId)"#))
@@ -318,10 +321,43 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(block.contains("async let samplesTask"))
         XCTAssertTrue(block.contains("async let gravityTask"))
         XCTAssertTrue(block.contains("async let savedSpansTask"))
-        let detached = try XCTUnwrap(block.range(of: "Task.detached(priority: .utility)"))
-        let mapping = try XCTUnwrap(block.range(of: "let hr = samples.map"))
+        let detached = try XCTUnwrap(block.range(of: "AutoWorkoutBackgroundAnalysis.run"))
+        let mapping = try XCTUnwrap(block.range(of: "var hr: [(ts: Int, bpm: Int)]"))
         XCTAssertLessThan(detached.lowerBound, mapping.lowerBound)
+        XCTAssertTrue(block.contains("try Task.checkCancellation()"))
+        XCTAssertTrue(block.contains("guard !Task.isCancelled else"))
+        XCTAssertFalse(block.contains("Task.detached(priority: .utility)"))
         XCTAssertTrue(block.contains("\"workouts.auto_detect_scan\""))
+    }
+
+    func testAutoWorkoutBackgroundWorkerLinksParentCancellation() throws {
+        let text = try source("Strand/Data/Repository.swift")
+        let start = try XCTUnwrap(text.range(of: "enum AutoWorkoutBackgroundAnalysis"))
+        let end = try XCTUnwrap(
+            text.range(of: "/// Stable identity for one suggestion", range: start.upperBound..<text.endIndex)
+        )
+        let block = text[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(block.contains("Task.detached(priority: .utility)"))
+        XCTAssertTrue(block.contains("withTaskCancellationHandler"))
+        XCTAssertTrue(block.contains("worker.cancel()"))
+    }
+
+    func testClassicTodayHistoryCacheRetriesAfterItsBoundedAge() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        XCTAssertTrue(TodayView.historyWideCacheIsFresh(
+            bankedAt: now.addingTimeInterval(-119),
+            now: now
+        ))
+        XCTAssertFalse(TodayView.historyWideCacheIsFresh(
+            bankedAt: now.addingTimeInterval(-120),
+            now: now
+        ))
+        XCTAssertFalse(TodayView.historyWideCacheIsFresh(
+            bankedAt: now.addingTimeInterval(1),
+            now: now
+        ))
     }
 
     func testAutoWorkoutCacheAndPublicationAreOwnedByTheActiveDevice() throws {

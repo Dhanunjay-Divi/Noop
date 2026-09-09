@@ -54,6 +54,17 @@ class TodayRestLoadPolicyTest {
     }
 
     @Test
+    fun bestEffortResultDistinguishesARealNullFromReadFailure() = runBlocking {
+        val realNull = loadTodayBestEffortResult<String?> { null }
+        val failed = loadTodayBestEffortResult<String> { error("transient") }
+
+        assertEquals(true, realNull.succeeded)
+        assertEquals(null, realNull.value)
+        assertEquals(false, failed.succeeded)
+        assertEquals(null, failed.value)
+    }
+
+    @Test
     fun permanentFailureStopsAtTheBoundedAttemptLimit() = runBlocking {
         var calls = 0
         try {

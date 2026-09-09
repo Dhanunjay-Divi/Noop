@@ -164,6 +164,8 @@ class RetainedScreenPerformanceTest {
         assertTrue(workouts.contains("val recoveryLoadScope = rememberCoroutineScope()"))
         assertTrue(workouts.contains("LaunchedEffect(recoveryInputKey)"))
         assertTrue(workouts.contains("recoveryLoadScope.launch"))
+        assertTrue(workouts.contains("recoveryTrendLoadAttempt += 1"))
+        assertTrue(workouts.contains("recoveryTrendLoadAttempt == requestAttempt"))
         assertTrue(workouts.contains("onLoadRequested = { requestedKey ->"))
         assertTrue(workouts.contains("\"workouts.recovery_trend_load\""))
         assertTrue(workouts.contains("vm.selectedDeviceId.collectAsStateWithLifecycle()"))

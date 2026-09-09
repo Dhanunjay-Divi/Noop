@@ -178,6 +178,13 @@ class RuntimePerformanceContractTest {
         assertTrue(today.contains("viewModel.todayFooterLoadedDeviceId == activeStrapId"))
         assertTrue(today.contains("rememberHistoryQueryGate(historyBackfilling)"))
         assertTrue(today.contains("loadTodayBestEffort"))
+        assertTrue(today.contains("allPinnedCardReadsSucceeded"))
+        val pinnedMarker = today.indexOf("viewModel.todayCardsLoadedSig = sig")
+        val pinnedSuccessGate = today.lastIndexOf(
+            "if (!allPinnedCardReadsSucceeded) return@LaunchedEffect",
+            pinnedMarker,
+        )
+        assertTrue(pinnedSuccessGate >= 0 && pinnedSuccessGate < pinnedMarker)
         assertTrue(today.contains("currentCoroutineContext().ensureActive()"))
 
         val components = source("com/noop/ui/Components.kt")

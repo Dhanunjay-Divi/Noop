@@ -4217,7 +4217,8 @@ struct TodayView: View {
             }
             if let cached = repo.todayHistoryWideCache,
                cached.deviceId == currentDeviceId,
-               cached.ageMetricStateToken == profile.ageMetricStateToken {
+               cached.ageMetricStateToken == profile.ageMetricStateToken,
+               Self.historyWideCacheIsFresh(bankedAt: cached.bankedAt) {
                 restoreHistoryWide(cached)
             }
             await reloadHydration()
@@ -4248,7 +4249,8 @@ struct TodayView: View {
         if !forceAfterHistoryWrite,
            repo.todayHistoryWideLoadedSeq == currentSeq, let cached = repo.todayHistoryWideCache,
            cached.deviceId == currentDeviceId,
-           cached.ageMetricStateToken == profile.ageMetricStateToken {
+           cached.ageMetricStateToken == profile.ageMetricStateToken,
+           Self.historyWideCacheIsFresh(bankedAt: cached.bankedAt) {
             restoreHistoryWide(cached)
             // #989: hydration is excluded from the snapshot (a drink logged since would be stale), so a
             // restore re-reads it live, one cheap row.
@@ -4422,10 +4424,12 @@ struct TodayView: View {
             xiaomiSleeps: xiaomiSleepsLocal,
             fitnessAgeToday: fitnessAgeLocal,
             vitalityToday: vitalityLocal,
-            ageMetricStateToken: requestedAgeMetricState
+            ageMetricStateToken: requestedAgeMetricState,
+            bankedAt: Date()
         )
-        // Record only a fully published, same-device snapshot. A canceled or superseded pass never
-        // advances the marker and therefore cannot make a later mount restore incomplete values.
+        // Record only a completed, same-device snapshot. A canceled or superseded pass never advances
+        // the marker. Legacy read facades can still map a transient query failure to an empty value, so
+        // the cache's age bound above forces a genuine retry instead of treating that result as permanent.
         repo.todayHistoryWideLoadedSeq = requestRefreshSeq
         return true
     }
@@ -4502,6 +4506,17 @@ struct TodayView: View {
     /// hitch) sits comfortably inside it, and even a genuine load runs up to ~30s behind live anyway (the
     /// Collector flush cadence), so two minutes of cache is the same order of freshness the screen had.
     private static let todayCacheMaxAge: TimeInterval = 120
+
+    /// Repository read facades intentionally map a transient store failure to an empty value for ordinary
+    /// UI callers. A history-wide snapshot can therefore be incomplete even though the pass reached its
+    /// publication boundary. Keep rapid tab returns fast, but force a genuine retry instead of pinning such
+    /// a snapshot for the rest of the process.
+    static let historyWideCacheMaxAge: TimeInterval = 120
+
+    static func historyWideCacheIsFresh(bankedAt: Date, now: Date = Date()) -> Bool {
+        let age = now.timeIntervalSince(bankedAt)
+        return age >= 0 && age < historyWideCacheMaxAge
+    }
 
     private func loadDayScoped(forceReload: Bool = false) async {
         // #932: same-state re-mount → restore the prior day-scoped snapshot (no store queries). The exact
@@ -5132,6 +5147,9 @@ struct TodayHistoryWideCache {
     let fitnessAgeToday: Double?
     let vitalityToday: Double?
     let ageMetricStateToken: String
+    /// Bounds accidental empty snapshots caused by a transient read failure; same-sequence restores retry
+    /// after `TodayView.historyWideCacheMaxAge` instead of persisting for the process lifetime.
+    let bankedAt: Date
     // Hydration total/goal intentionally absent (#989): mutations don't bump refreshSeq, so a cached
     // value could restore stale. TodayView re-reads hydration live on restore instead.
 }

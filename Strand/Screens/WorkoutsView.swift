@@ -358,6 +358,7 @@ struct WorkoutsView: View {
     @State private var recoveryTrendLoadTask: Task<Void, Never>?
     @State private var recoveryTrendLoadKey: String?
     @State private var recoveryTrendLoadToken: UUID?
+    @State private var recoveryTrendScreenVisible = false
     /// Once the lazy recovery section has appeared, keep its request pending across retained-tab
     /// suspension. Returning at the same lower scroll offset may not remount the off-screen sentinel.
     @State private var recoveryTrendRequestedKey: String?
@@ -516,6 +517,7 @@ struct WorkoutsView: View {
             }
         }
         .onAppear {
+            recoveryTrendScreenVisible = true
             // Preview-seeded rows skip `.task`; still choose a range that has data.
             if loaded && !seededInitialRange {
                 range = defaultRange(for: allRows)
@@ -535,6 +537,7 @@ struct WorkoutsView: View {
             restartRecoveryTrendLoadIfRequested(for: newKey)
         }
         .onDisappear {
+            recoveryTrendScreenVisible = false
             suspendRecoveryTrendLoad()
         }
         // #797: when the user picks a range wider than the bounded first-paint window (typically "All"),
@@ -678,6 +681,7 @@ struct WorkoutsView: View {
         rows: [WorkoutRow]
     ) {
         recoveryTrendRequestedKey = requestKey
+        guard recoveryTrendScreenVisible else { return }
         guard recoveryTrendLoadedKey != requestKey,
               recoveryTrendLoadKey != requestKey else { return }
 
@@ -716,6 +720,10 @@ struct WorkoutsView: View {
             return
         }
         recoveryTrendRequestedKey = activeKey
+        guard recoveryTrendScreenVisible else {
+            suspendRecoveryTrendLoad()
+            return
+        }
         guard recoveryTrendLoadKey != activeKey,
               recoveryTrendLoadedKey != activeKey else { return }
         suspendRecoveryTrendLoad()

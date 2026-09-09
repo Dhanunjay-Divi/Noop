@@ -110,17 +110,25 @@ own the long load at screen lifetime so scrolling the placeholder away cannot
 cancel it. Device switches now invalidate or supersede every affected cache and
 task. No local history was deleted and no retention or formula contract
 changed. Protected integration and exact-head check history are tracked by pull
-request `#12`. The complete post-rebase local gates pass: 4,175 Android tests
+request `#12`. The complete replacement local gates pass: 4,176 Android tests
 plus build/lint/instrumentation compilation, 53 API 35 production-shell tests,
-1,698 macOS tests, the unsigned iOS graph, and 35 iOS production-shell tests. A
+1,700 macOS tests, the unsigned iOS graph, and 35 iOS production-shell tests. A
 fresh lifecycle review also
 fixed three Android realtime-HR surfaces that could skip their lease release
 after Stop, and strength video/GIF cleanup that could target a replacement
 resource. The final Apple lifetime review also preserves an off-screen
 Workouts recovery request across retained-tab suspension and moves Health's
 explicit Live HR lease outside the lazy row, so row recycling cannot stop a
-stream the user requested. Twenty-eight focused Apple lifetime contracts and
-the full 1,698-test macOS suite pass after those fixes. The app report now
+stream the user requested. The latest exact-head review additionally prevents
+hidden Apple Workouts restarts, protects Android recovery cleanup through an
+A-B-A request cycle, keeps failed Android pinned-card reads retryable, expires
+Classic Today's fallback-empty cache after two minutes, and links Apple
+auto-workout CPU workers to cancellation before the step query and classifier.
+Focused Android tests and 19 Apple retained-screen contracts pass after those
+corrections. The final iOS shell scroll pass averaged 5.185 seconds of
+automation time and 0.172 seconds of app CPU across five repetitions. All 227
+repository tooling tests and local policy gates pass after regenerating the
+fail-closed terminology snapshot and its reviewed digest. The app report now
 records only bounded realtime-lease categories and a zero/one/multiple
 ownership bucket. The first hosted release-control run
 exposed only a stale fail-closed terminology inventory; its reviewed

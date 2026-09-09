@@ -203,6 +203,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val recoveryLoadScope = rememberCoroutineScope()
     var recoveryTrendLoadJob by remember { mutableStateOf<Job?>(null) }
     var recoveryTrendLoadKey by remember { mutableStateOf<String?>(null) }
+    var recoveryTrendLoadAttempt by remember { mutableStateOf(0L) }
     var activeZoneWeek by remember { mutableStateOf<ActiveZoneWeekSnapshot?>(null) }
     var activeZoneLoaded by remember { mutableStateOf(false) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
@@ -399,6 +400,8 @@ fun WorkoutsScreen(vm: AppViewModel) {
                         ) {
                             recoveryTrendLoadJob?.cancel()
                             recoveryTrendLoadKey = requestedKey
+                            recoveryTrendLoadAttempt += 1
+                            val requestAttempt = recoveryTrendLoadAttempt
                             val requestDeviceId = activeDeviceId
                             val requestRows = recoveryRows
                             recoveryTrendLoadJob = recoveryLoadScope.launch {
@@ -445,7 +448,10 @@ fun WorkoutsScreen(vm: AppViewModel) {
                                         outcome = outcome,
                                         fields = fields,
                                     )
-                                    if (recoveryTrendLoadKey == requestedKey) {
+                                    if (
+                                        recoveryTrendLoadAttempt == requestAttempt &&
+                                        recoveryTrendLoadKey == requestedKey
+                                    ) {
                                         recoveryTrendLoadKey = null
                                         recoveryTrendLoadJob = null
                                     }

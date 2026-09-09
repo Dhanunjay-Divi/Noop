@@ -277,14 +277,24 @@ internal suspend fun <T> loadTodayRestWithRetry(
 }
 
 /** Best-effort UI read that never converts structured cancellation into an empty/stale publication. */
-internal suspend fun <T> loadTodayBestEffort(load: suspend () -> T): T? =
+internal data class TodayBestEffortRead<out T>(
+    val value: T?,
+    val succeeded: Boolean,
+)
+
+internal suspend fun <T> loadTodayBestEffortResult(
+    load: suspend () -> T,
+): TodayBestEffortRead<T> =
     try {
-        load()
+        TodayBestEffortRead(value = load(), succeeded = true)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
-        null
+        TodayBestEffortRead(value = null, succeeded = false)
     }
+
+internal suspend fun <T> loadTodayBestEffort(load: suspend () -> T): T? =
+    loadTodayBestEffortResult(load).value
 
 internal fun todayRestResultBucket(count: Int): String = when {
     count <= 0 -> "empty"
@@ -754,32 +764,44 @@ fun TodayScreen(
         // recompute off `days`, so the pinned card stays in sync. null (no usable signal) keeps the honest
         // "Calibrating" placeholder, matching StressScreen's empty state.
         val requestDeviceId = activeStrapId
-        val loadedStress = loadTodayBestEffort {
+        val loadedStress = loadTodayBestEffortResult {
             val stored = viewModel.repo.metricSeries("my-whoop", "stress", "0000-01-01", "9999-12-31")
                 .associate { it.day to it.value.coerceIn(0.0, 3.0) }
             StressModel.build(days, stored)?.score
         }
-        val newFitnessAge = loadTodayBestEffort {
+        val newFitnessAge = loadTodayBestEffortResult {
             viewModel.repo.latestMetricComputedUnion(requestDeviceId, "fitness_age")?.value
         }
-        val newVitality = loadTodayBestEffort {
+        val newVitality = loadTodayBestEffortResult {
             viewModel.repo.latestMetricComputedUnion(requestDeviceId, "vitality")?.value
         }
-        val fitnessProfile = loadTodayBestEffort {
+        val fitnessProfile = loadTodayBestEffortResult {
             viewModel.repo.latestMetricComputedUnion(
                 requestDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
             )?.value
         }
-        val vitalityProfile = loadTodayBestEffort {
+        val vitalityProfile = loadTodayBestEffortResult {
             viewModel.repo.latestMetricComputedUnion(
                 requestDeviceId, AgeMetricProfile.VITALITY_KEY,
             )?.value
         }
         currentCoroutineContext().ensureActive()
         if (viewModel.activeStrapId != requestDeviceId) return@LaunchedEffect
-        stressToday = loadedStress
-        fitnessAgeToday = newFitnessAge.takeIf { profileStore.acceptsFitnessAge(fitnessProfile) }
-        vitalityToday = newVitality.takeIf { profileStore.acceptsVitality(vitalityProfile) }
+        val allPinnedCardReadsSucceeded = listOf(
+            loadedStress,
+            newFitnessAge,
+            newVitality,
+            fitnessProfile,
+            vitalityProfile,
+        ).all { it.succeeded }
+        if (!allPinnedCardReadsSucceeded) return@LaunchedEffect
+        stressToday = loadedStress.value
+        fitnessAgeToday = newFitnessAge.value.takeIf {
+            profileStore.acceptsFitnessAge(fitnessProfile.value)
+        }
+        vitalityToday = newVitality.value.takeIf {
+            profileStore.acceptsVitality(vitalityProfile.value)
+        }
         // Cache the computed triple + signature so a later re-mount with unchanged data restores them and
         // short-circuits the history-wide read above.
         viewModel.todayStressCache = stressToday
