@@ -2155,6 +2155,11 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
     val hrHistory = remember { mutableStateListOf<LiveHrSample>() }
     val latestDisplayHr by rememberUpdatedState(displayHr)
     val lifecycleOwner = LocalLifecycleOwner.current
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
+    val samplingClockEnabled = liveHrSamplingClockEnabled(
+        optedIn = liveTrackingOptedIn,
+        interactionInProgress = interactionInProgress,
+    )
 
     // This card owns one foreground realtime lease after an explicit Start. Stopping or leaving
     // Health disposes the true-keyed effect and releases only this card's lease.
@@ -2174,7 +2179,8 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
         }
     }
 
-    LaunchedEffect(lifecycleOwner) {
+    LaunchedEffect(lifecycleOwner, samplingClockEnabled) {
+        if (!samplingClockEnabled) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 appendLiveHrSample(hrHistory, latestDisplayHr, System.currentTimeMillis())
@@ -2372,6 +2378,11 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
         }
     }
 }
+
+internal fun liveHrSamplingClockEnabled(
+    optedIn: Boolean,
+    interactionInProgress: Boolean,
+): Boolean = optedIn && !interactionInProgress
 
 private fun zoneLabel(
     liveTrackingOptedIn: Boolean,

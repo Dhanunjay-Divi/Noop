@@ -70,6 +70,19 @@ class HealthScreenPerformanceTest {
         assertTrue(source.contains(".timeOfDayBackground(animated = false)"))
     }
 
+    @Test
+    fun liveHeartRateSamplingClockRunsOnlyWhenOptedInAndNotScrolling() {
+        assertFalse(liveHrSamplingClockEnabled(optedIn = false, interactionInProgress = false))
+        assertFalse(liveHrSamplingClockEnabled(optedIn = false, interactionInProgress = true))
+        assertFalse(liveHrSamplingClockEnabled(optedIn = true, interactionInProgress = true))
+        assertTrue(liveHrSamplingClockEnabled(optedIn = true, interactionInProgress = false))
+
+        val source = source("com/noop/ui/HealthScreen.kt")
+        assertTrue(source.contains("LocalLiquidInteractionInProgress.current"))
+        assertTrue(source.contains("LaunchedEffect(lifecycleOwner, samplingClockEnabled)"))
+        assertTrue(source.contains("if (!samplingClockEnabled) return@LaunchedEffect"))
+    }
+
     private fun source(relative: String): String {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         return listOf(

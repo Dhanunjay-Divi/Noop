@@ -54,4 +54,13 @@ final class HealthScreenPerformanceContractTests: XCTestCase {
         XCTAssertLessThan(sync.lowerBound, heartRate.lowerBound)
         XCTAssertLessThan(heartRate.lowerBound, hubLinks.lowerBound)
     }
+
+    func testLiveHeartRateClockExistsOnlyWhileOptedInAndNotScrolling() throws {
+        let source = try sourceText()
+
+        XCTAssertTrue(source.contains("@Environment(\\.noopInteractionInProgress)"))
+        XCTAssertTrue(source.contains("if liveTrackingOptedIn && !interactionInProgress"))
+        XCTAssertTrue(source.contains("LiveHRSamplingClock"))
+        XCTAssertFalse(source.contains("private let sampleTimer"))
+    }
 }

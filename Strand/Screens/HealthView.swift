@@ -264,6 +264,7 @@ private struct HeartRateSection: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
     @EnvironmentObject var model: AppModel
+    @Environment(\.noopInteractionInProgress) private var interactionInProgress
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
@@ -285,15 +286,6 @@ private struct HeartRateSection: View {
     /// the hero opens only after the transport accepts a newer sensor notification.
     @State private var liveTrackingStartSequence: UInt64?
     @State private var liveTrackingLatestSample: LiveState.HeartRateSample?
-
-    /// The 1 Hz sampling clock for the hero trace (#941, reimplemented from ryanbr's PR). The buffer
-    /// used to append only when `displayHR` CHANGED, but AppModel deliberately republishes `bpm` only
-    /// when the smoothed median actually moves, so a steady heart rate banked ZERO points and the
-    /// time-axis chart drew one long phantom ramp from the last change to the next. Banking the current
-    /// median once a second draws steady HR flat. Same let-property pattern as HRVSnapshotView's
-    /// `secondTimer` (parent re-init resetting the tick phase is a non-issue here: this section is
-    /// isolated and observes via @EnvironmentObject, per the perf note above).
-    private let sampleTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     /// HR to display: the spike-filtered median (model.bpm, #39) when available — raw live.heartRate
     /// carries PPG harmonic spikes (real ~92 read as 170+); AppModel.bpm's doc mandates "every screen
@@ -404,16 +396,23 @@ private struct HeartRateSection: View {
                   sample.sequence > (liveTrackingStartSequence ?? UInt64.max) else { return }
             liveTrackingLatestSample = sample
         }
-        .onReceive(sampleTimer) { now in
-            // Bank the CURRENT spike-filtered HR once a second, stamped with the tick's real wall-clock
-            // time: this feeds the time x-axis (#198) and the #105 trace without the phantom ramp that
-            // on-change sampling drew through steady stretches (#941). The 30...220 physiological guard
-            // mirrors the Android chart's existing range check; nil banks nothing (disconnect clears the
-            // median on both platforms), so a stale value never flat-lines a dead trace.
-            guard hasFreshPacket,
-                  let v = displayHR, (30...220).contains(v) else { return }
-            hrHistory.append(LiveHRSample(date: now, bpm: Double(v)))
-            if hrHistory.count > 180 { hrHistory.removeFirst(hrHistory.count - 180) }
+        .background {
+            // Do not even subscribe to a one-second clock while this explicitly opt-in display is paused.
+            // During drag/deceleration the last truthful trace stays visible and the clock yields the frame
+            // budget; a fresh subscription resumes automatically after the scroll settles.
+            if liveTrackingOptedIn && !interactionInProgress {
+                LiveHRSamplingClock { now in
+                    // Bank the CURRENT spike-filtered HR once a second, stamped with the tick's real
+                    // wall-clock time. Nil/out-of-range values bank nothing, so a stale value never
+                    // flat-lines a disconnected trace.
+                    guard hasFreshPacket,
+                          let v = displayHR, (30...220).contains(v) else { return }
+                    hrHistory.append(LiveHRSample(date: now, bpm: Double(v)))
+                    if hrHistory.count > 180 {
+                        hrHistory.removeFirst(hrHistory.count - 180)
+                    }
+                }
+            }
         }
     }
 
@@ -539,6 +538,20 @@ private struct HeartRateSection: View {
 }
 
 // MARK: - Live HR sample + time chart
+
+/// Exists only while the user-enabled Health live trace is actively sampling. Removing this leaf cancels
+/// the autoconnected publisher, so paused/off-screen/scrolling Health surfaces have no idle timer wake-up.
+private struct LiveHRSamplingClock: View {
+    let onTick: (Date) -> Void
+    private let timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onReceive(timer, perform: onTick)
+    }
+}
 
 /// One streamed live-HR reading with the wall-clock time it arrived. Carrying the time
 /// (rather than a bare bpm) is what lets the hero render a real time x-axis (#198).

@@ -140,6 +140,25 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(components.contains(".task(id: shouldAnimatePulse)"))
     }
 
+    func testAppleScrollRootsPublishTheSharedInteractionBudget() throws {
+        let scaffold = try source("Strand/Screens/ScreenScaffold.swift")
+        let liquidToday = try source("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(scaffold.contains("final class ScrollInteractionTracker"))
+        XCTAssertTrue(scaffold.contains("scrollInteraction.observe(offset: offset)"))
+        XCTAssertTrue(
+            scaffold.contains(
+                ".environment(\\.noopInteractionInProgress, scrollInteraction.isActive)"
+            )
+        )
+        XCTAssertTrue(liquidToday.contains("scrollInteraction.observe(offset: offset)"))
+        XCTAssertTrue(
+            liquidToday.contains(
+                ".environment(\\.noopInteractionInProgress, scrollInteraction.isActive)"
+            )
+        )
+    }
+
     func testWorkoutRecoveryHistoryLoadsOnlyAtItsLazyMount() throws {
         let text = try source("Strand/Screens/WorkoutsView.swift")
 

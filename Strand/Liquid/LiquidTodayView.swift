@@ -187,6 +187,7 @@ struct LiquidTodayView: View {
     /// Raw offsets arrive every display-linked scroll update. Reference storage keeps that bookkeeping
     /// from invalidating this entire dashboard; only visible pull-state transitions remain `@State`.
     @State private var scrollTracker = LiquidTodayScrollTracker()
+    @StateObject private var scrollInteraction = ScrollInteractionTracker()
     @State private var pullGestureStartedAtTop: Bool?
     @State private var refreshArmed = false
     @State private var refreshing = false
@@ -455,9 +456,12 @@ struct LiquidTodayView: View {
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
             scrollTracker.offset = offset
+            scrollInteraction.observe(offset: offset)
             handlePull(offset)
             reportScrollPosition(offset)
         }
+        .environment(\.noopInteractionInProgress, scrollInteraction.isActive)
+        .onDisappear { scrollInteraction.reset() }
         // The original satin-obsidian field is a FIXED full-bleed backdrop behind the scroll content,
         // edge-to-edge under the status bar. It does not scroll, so the UI reads as glass moving over
         // physical hardware rather than wallpaper moving with the cards.
