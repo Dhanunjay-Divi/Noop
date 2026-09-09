@@ -19,11 +19,13 @@ from app.managed_repository import (
     ManagedConflictError,
     ManagedNotFoundError,
     ManagedPrincipal,
+    ManagedRateLimitError,
     PostgresManagedRepository,
 )
 from app.managed_safety_models import (
     ManagedPushRegistration,
     ManagedSafetyIncidentCreate,
+    ManagedSafetyInviteCreate,
     ManagedSafetyLocationUpdate,
     ManagedSafetyRequestCreate,
 )
@@ -330,6 +332,284 @@ async def test_concurrent_contact_acceptance_preserves_owner_limit() -> None:
                 UUID(owner_profile["profile_id"]),
             )
             == 5
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_relationships_require_active_managed_accounts() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"active-owner-{uuid4()}")
+        contact = await _principal(primary, label=f"active-contact-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Contact",
+        )
+        capability = "noopsafety_" + ("a" * 43)
+        await safety.create_invite(
+            principal=owner,
+            request=ManagedSafetyInviteCreate(
+                request_id=uuid4(),
+                capability=capability,
+            ),
+        )
+        pool = primary._require_pool()
+        await pool.execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'suspended',
+                suspended_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            owner.account_id,
+        )
+
+        with pytest.raises(ManagedNotFoundError):
+            await safety.redeem_invite(
+                principal=contact,
+                request_id=uuid4(),
+                capability=capability,
+            )
+        with pytest.raises(ManagedNotFoundError):
+            await safety.create_request(
+                principal=owner,
+                request=ManagedSafetyRequestCreate(
+                    request_id=uuid4(),
+                    noop_id=contact_profile["noop_id"],
+                ),
+            )
+
+        await pool.execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'active', updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            owner.account_id,
+        )
+        request = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=contact_profile["noop_id"],
+            ),
+        )
+        await pool.execute(
+            """
+            UPDATE managed_accounts
+            SET status = 'erasure_pending',
+                erasure_requested_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE account_id = $1
+            """,
+            owner.account_id,
+        )
+
+        with pytest.raises(ManagedConflictError):
+            await safety.decide_request(
+                principal=contact,
+                request_id=UUID(request["request_id"]),
+                decision="accept",
+            )
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_contacts
+                WHERE accepted_request_id = $1
+                """,
+                UUID(request["request_id"]),
+            )
+            == 0
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_incident_creation_has_durable_owner_quota() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"quota-owner-{uuid4()}")
+        first = await _principal(primary, label=f"quota-first-{uuid4()}")
+        second = await _principal(primary, label=f"quota-second-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=first,
+            contact_name="First",
+        )
+        await _accept_contact(
+            managed,
+            safety,
+            owner=owner,
+            contact=second,
+            contact_name="Second",
+        )
+
+        pool = primary._require_pool()
+        incident_ids: list[UUID] = []
+        last_request_id = uuid4()
+        last_incident = None
+        for index in range(4):
+            request_id = last_request_id if index == 3 else uuid4()
+            incident = await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=request_id,
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+            await safety.end_incident(
+                principal=owner,
+                incident_id=UUID(incident["incident_id"]),
+                outcome="canceled",
+            )
+            incident_ids.append(UUID(incident["incident_id"]))
+            last_incident = incident
+
+        replay = await safety.create_incident(
+            principal=owner,
+            request=ManagedSafetyIncidentCreate(
+                request_id=last_request_id,
+                duration_hours=8,
+                share_location=False,
+            ),
+        )
+        assert replay["incident_id"] == last_incident["incident_id"]
+        assert replay["duplicate"] is True
+
+        with pytest.raises(ManagedRateLimitError) as error:
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+        assert 1 <= error.value.retry_after_seconds <= 3600
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_incidents incident
+                JOIN managed_social_profiles profile
+                  ON profile.profile_id = incident.owner_profile_id
+                WHERE profile.account_id = $1
+                """,
+                owner.account_id,
+            )
+            == 4
+        )
+
+        await pool.execute(
+            """
+            UPDATE managed_safety_incidents
+            SET created_at = created_at - interval '6 hours',
+                expires_at = expires_at - interval '6 hours',
+                acknowledged_at = acknowledged_at - interval '6 hours',
+                ended_at = ended_at - interval '6 hours',
+                purge_after = purge_after - interval '6 hours'
+            WHERE incident_id = ANY($1::uuid[])
+            """,
+            incident_ids,
+        )
+        for hours_ago in (4, 2):
+            group: list[UUID] = []
+            for _ in range(4):
+                incident = await safety.create_incident(
+                    principal=owner,
+                    request=ManagedSafetyIncidentCreate(
+                        request_id=uuid4(),
+                        duration_hours=8,
+                        share_location=False,
+                    ),
+                )
+                incident_id = UUID(incident["incident_id"])
+                await safety.end_incident(
+                    principal=owner,
+                    incident_id=incident_id,
+                    outcome="canceled",
+                )
+                group.append(incident_id)
+            await pool.execute(
+                """
+                UPDATE managed_safety_incidents
+                SET created_at = created_at - $2::int * interval '1 hour',
+                    expires_at = expires_at - $2::int * interval '1 hour',
+                    acknowledged_at =
+                        acknowledged_at - $2::int * interval '1 hour',
+                    ended_at = ended_at - $2::int * interval '1 hour',
+                    purge_after = purge_after - $2::int * interval '1 hour'
+                WHERE incident_id = ANY($1::uuid[])
+                """,
+                group,
+                hours_ago,
+            )
+
+        with pytest.raises(ManagedRateLimitError) as daily_error:
+            await safety.create_incident(
+                principal=owner,
+                request=ManagedSafetyIncidentCreate(
+                    request_id=uuid4(),
+                    duration_hours=8,
+                    share_location=False,
+                ),
+            )
+        assert 3600 < daily_error.value.retry_after_seconds <= 24 * 60 * 60
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_incidents incident
+                JOIN managed_social_profiles profile
+                  ON profile.profile_id = incident.owner_profile_id
+                WHERE profile.account_id = $1
+                """,
+                owner.account_id,
+            )
+            == 12
         )
     finally:
         await primary.shutdown()
@@ -1395,12 +1675,13 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             installation_id,
             "v1." + ("a" * 40),
         )
-        invalid_delivery = await push.dispatch(
+        unavailable_delivery = await push.dispatch(
             principal=owner,
             incident_id=UUID(invalid_incident["incident_id"]),
         )
-        assert invalid_delivery["installations_terminal"] == 1
-        invalid = await primary._require_pool().fetchrow(
+        assert unavailable_delivery["installations_retryable"] == 1
+        assert unavailable_delivery["installations_terminal"] == 0
+        retained = await primary._require_pool().fetchrow(
             """
             SELECT status, token_hash, token_ciphertext
             FROM managed_push_installations
@@ -1409,8 +1690,8 @@ async def test_managed_safety_due_push_retries_without_owner_session() -> None:
             first.account_id,
             installation_id,
         )
-        assert invalid["status"] == "invalid"
-        assert invalid["token_ciphertext"] == f"invalid.{invalid['token_hash']}"
+        assert retained["status"] == "active"
+        assert retained["token_ciphertext"] == "v1." + ("a" * 40)
         assert provider.calls == 2
     finally:
         await primary.shutdown()

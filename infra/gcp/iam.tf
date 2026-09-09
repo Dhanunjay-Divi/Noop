@@ -315,6 +315,22 @@ resource "google_secret_manager_secret" "managed_push_token_secret" {
   depends_on = [google_project_service.required]
 }
 
+resource "google_secret_manager_secret" "managed_push_token_previous_secret" {
+  project   = var.project_id
+  secret_id = "${local.prefix}-managed-push-token-previous-secret"
+  labels    = local.labels
+
+  replication {
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_secret_manager_secret_iam_member" "api_admin_token" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.bootstrap_admin_token.secret_id
@@ -377,6 +393,24 @@ resource "google_secret_manager_secret_iam_member" "managed_lifecycle_push_token
 
   project   = var.project_id
   secret_id = google_secret_manager_secret.managed_push_token_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "managed_api_push_token_previous_secret" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.managed_api.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "managed_lifecycle_push_token_previous_secret" {
+  count = var.enable_managed_runtime ? 1 : 0
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.managed_lifecycle.email}"
 }

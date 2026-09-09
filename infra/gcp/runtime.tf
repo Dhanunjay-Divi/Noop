@@ -496,6 +496,15 @@ resource "google_cloud_run_v2_service" "managed_api" {
           }
         }
       }
+      env {
+        name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
 
       resources {
         limits = {
@@ -959,6 +968,15 @@ resource "google_cloud_run_v2_job" "managed_lifecycle" {
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.managed_push_token_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed_push_token_previous_secret.secret_id
               version = "latest"
             }
           }

@@ -17,7 +17,11 @@ from app.managed_identity import (
     StaticManagedTokenVerifier,
 )
 from app.managed_object_store import ManagedObjectCapability, ManagedObjectMetadata
-from app.managed_repository import ManagedForbiddenError, ManagedPrincipal
+from app.managed_repository import (
+    ManagedForbiddenError,
+    ManagedPrincipal,
+    ManagedRateLimitError,
+)
 from app.repository import MemoryRepository
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-0123456789"
@@ -1210,6 +1214,15 @@ class FakeManagedSafetyRepository:
         }
 
 
+class RateLimitedManagedSafetyRepository(FakeManagedSafetyRepository):
+    async def create_incident(self, **kwargs):
+        self.calls.append(("create_incident", kwargs))
+        raise ManagedRateLimitError(
+            "Safety paging limit reached; wait before paging again",
+            retry_after_seconds=45,
+        )
+
+
 class FakeManagedSafetyPushService:
     def __init__(self, repository: FakeManagedSafetyRepository) -> None:
         self.repository = repository
@@ -1365,3 +1378,25 @@ def test_managed_safety_account_flow_is_identity_and_installation_bound() -> Non
     assert location.json()["location"]["sequence"] == 1
     assert response.json()["incident"]["status"] == "acknowledged"
     assert ended.json()["incident"]["status"] == "resolved"
+
+
+def test_managed_safety_incident_quota_returns_retry_after() -> None:
+    safety = RateLimitedManagedSafetyRepository()
+    client, _ = _managed_client(managed_safety_repository=safety)
+
+    with client:
+        response = client.post(
+            "/v1/managed/safety/incidents",
+            headers=_managed_headers(),
+            json={
+                "request_id": str(uuid4()),
+                "duration_hours": 8,
+                "share_location": False,
+            },
+        )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "45"
+    assert response.json() == {
+        "detail": "Safety paging limit reached; wait before paging again"
+    }

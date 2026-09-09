@@ -200,16 +200,21 @@ def test_gcp_managed_safety_push_is_private_encrypted_and_state_safe() -> None:
     assert "firebasecloudmessaging.admin" not in iam
     assert "var.enable_managed_runtime ? 1 : 0" in iam
     assert 'secret_id = "${local.prefix}-managed-push-token-secret"' in iam
+    assert 'secret_id = "${local.prefix}-managed-push-token-previous-secret"' in iam
     assert "managed_api_push_token_secret" in iam
     assert "managed_lifecycle_push_token_secret" in iam
+    assert "managed_api_push_token_previous_secret" in iam
+    assert "managed_lifecycle_push_token_previous_secret" in iam
     assert 'name  = "NOOP_MANAGED_PUSH_ENABLED"' in runtime
     assert 'name  = "NOOP_MANAGED_PUSH_RETRY_ENABLED"' in runtime
     assert 'name = "NOOP_MANAGED_PUSH_TOKEN_SECRET"' in runtime
+    assert 'name = "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"' in runtime
     assert "managed_api_push_sender" in runtime
     assert "managed_lifecycle_push_sender" in runtime
     assert "managed_api_push_token_secret" in runtime
     assert "managed_lifecycle_push_token_secret" in runtime
     assert "managed_push_token_secret=" in configure_script
+    assert "managed_push_token_previous_secret=" in configure_script
     assert "openssl rand -hex 32" in configure_script
     assert "--data-file=-" in configure_script
 

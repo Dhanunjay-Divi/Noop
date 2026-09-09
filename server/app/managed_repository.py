@@ -150,6 +150,12 @@ class ManagedConflictError(ManagedStorageError):
     pass
 
 
+class ManagedRateLimitError(ManagedStorageError):
+    def __init__(self, message: str, *, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = max(1, retry_after_seconds)
+
+
 class ManagedQuotaExceededError(ManagedStorageError):
     def __init__(self, *, maximum_bytes: int | None, used_bytes: int) -> None:
         super().__init__("managed storage quota would be exceeded")

@@ -1115,7 +1115,12 @@ def create_app(
             runtime_managed_safety_push_service = ManagedSafetyPushService(
                 repository=runtime_managed_safety_repository,
                 token_codec=ManagedPushTokenCodec(
-                    runtime_settings.managed_push_token_secret
+                    runtime_settings.managed_push_token_secret,
+                    previous_secrets=(
+                        (runtime_settings.managed_push_token_previous_secret,)
+                        if runtime_settings.managed_push_token_previous_secret
+                        else ()
+                    ),
                 ),
                 provider=push_provider,
                 max_concurrency=(runtime_settings.managed_push_max_concurrency),

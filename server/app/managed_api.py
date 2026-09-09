@@ -79,6 +79,7 @@ from app.managed_repository import (
     ManagedNotFoundError,
     ManagedPrincipal,
     ManagedQuotaExceededError,
+    ManagedRateLimitError,
     ManagedStorageError,
     PostgresManagedRepository,
 )
@@ -1913,6 +1914,12 @@ def _raise_managed(error: ManagedStorageError) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(error),
+        )
+    if isinstance(error, ManagedRateLimitError):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(error),
+            headers={"Retry-After": str(error.retry_after_seconds)},
         )
     if isinstance(error, ManagedQuotaExceededError):
         raise HTTPException(

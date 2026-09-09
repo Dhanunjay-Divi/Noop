@@ -86,6 +86,9 @@ def test_managed_push_retry_can_run_in_private_lifecycle_job() -> None:
         managed_project_id="noop-test-project",
         managed_push_retry_enabled=True,
         managed_push_token_secret="managed-push-secret-at-least-32-bytes",
+        managed_push_token_previous_secret=(
+            "previous-managed-push-secret-at-least-32-bytes"
+        ),
     ).validate_for_startup(
         needs_database=True,
         needs_api_token=False,
@@ -101,6 +104,34 @@ def test_managed_push_retry_can_run_in_private_lifecycle_job() -> None:
             needs_database=True,
             needs_api_token=False,
         )
+
+    with pytest.raises(RuntimeError, match="must differ"):
+        Settings(
+            api_token=None,
+            database_url="postgresql://noop:test@db/noop",
+            managed_project_id="noop-test-project",
+            managed_push_retry_enabled=True,
+            managed_push_token_secret="managed-push-secret-at-least-32-bytes",
+            managed_push_token_previous_secret=(
+                "managed-push-secret-at-least-32-bytes"
+            ),
+        ).validate_for_startup(
+            needs_database=True,
+            needs_api_token=False,
+        )
+
+
+def test_managed_push_previous_secret_is_loaded_without_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET",
+        "previous-managed-push-secret-at-least-32-bytes",
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.managed_push_token_previous_secret is not None
 
 
 def test_ownership_service_requires_project_bound_apps_and_bounded_freshness() -> None:

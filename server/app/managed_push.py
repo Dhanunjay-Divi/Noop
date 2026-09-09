@@ -7,6 +7,7 @@ import json
 import math
 import os
 import time
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
@@ -32,6 +33,12 @@ class ManagedPushError(Exception):
 
 class ManagedPushTokenError(ManagedPushError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedPushOpenedToken:
+    token: str
+    needs_reseal: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +69,29 @@ class ManagedPushSending(Protocol):
 
 
 class ManagedPushTokenCodec:
-    def __init__(self, secret: str) -> None:
-        if len(secret.encode("utf-8")) < 32:
-            raise ValueError("managed push token secret must be at least 32 bytes")
-        self._key = HKDF(
+    def __init__(
+        self,
+        secret: str,
+        *,
+        previous_secrets: Collection[str] = (),
+    ) -> None:
+        secrets = [secret, *previous_secrets]
+        if any(len(value.encode("utf-8")) < 32 for value in secrets):
+            raise ValueError("managed push token secrets must be at least 32 bytes")
+        if len(set(secrets)) != len(secrets):
+            raise ValueError("managed push token secrets must be distinct")
+        self._current_key_id = self._key_id(secret)
+        self._keys = {self._key_id(value): self._derive_key(value) for value in secrets}
+        if len(self._keys) != len(secrets):
+            raise ValueError("managed push token key identifiers must be distinct")
+
+    @staticmethod
+    def _key_id(secret: str) -> str:
+        return hashlib.sha256(secret.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _derive_key(secret: str) -> bytes:
+        return HKDF(
             algorithm=hashes.SHA256(),
             length=32,
             salt=None,
@@ -88,13 +114,62 @@ class ManagedPushTokenCodec:
         installation_id: str,
     ) -> str:
         nonce = os.urandom(12)
-        ciphertext = AESGCM(self._key).encrypt(
+        ciphertext = AESGCM(self._keys[self._current_key_id]).encrypt(
             nonce,
             token.encode("utf-8"),
             self._aad(account_id, installation_id),
         )
         encoded = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
-        return "v1." + encoded.rstrip("=")
+        return f"v2.{self._current_key_id}." + encoded.rstrip("=")
+
+    @staticmethod
+    def _decode_payload(value: str) -> bytes:
+        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        if len(decoded) < 29:
+            raise ValueError("short envelope")
+        return decoded
+
+    def open_with_rotation(
+        self,
+        sealed: str,
+        *,
+        account_id: UUID,
+        installation_id: str,
+    ) -> ManagedPushOpenedToken:
+        candidates: list[tuple[str, bytes]]
+        needs_reseal = True
+        if sealed.startswith("v1."):
+            raw = sealed.removeprefix("v1.")
+            candidates = list(self._keys.items())
+        elif sealed.startswith("v2."):
+            parts = sealed.split(".", 2)
+            if len(parts) != 3 or parts[1] not in self._keys:
+                raise ManagedPushTokenError("push token envelope key is unavailable")
+            raw = parts[2]
+            candidates = [(parts[1], self._keys[parts[1]])]
+            needs_reseal = parts[1] != self._current_key_id
+        else:
+            raise ManagedPushTokenError("push token envelope is unsupported")
+        try:
+            decoded = self._decode_payload(raw)
+        except (ValueError, TypeError) as exc:
+            raise ManagedPushTokenError(
+                "push token envelope could not be opened"
+            ) from exc
+        for _, key in candidates:
+            try:
+                plaintext = AESGCM(key).decrypt(
+                    decoded[:12],
+                    decoded[12:],
+                    self._aad(account_id, installation_id),
+                )
+                return ManagedPushOpenedToken(
+                    token=plaintext.decode("utf-8"),
+                    needs_reseal=needs_reseal,
+                )
+            except (InvalidTag, UnicodeDecodeError):
+                continue
+        raise ManagedPushTokenError("push token envelope could not be opened")
 
     def open(
         self,
@@ -103,23 +178,11 @@ class ManagedPushTokenCodec:
         account_id: UUID,
         installation_id: str,
     ) -> str:
-        if not sealed.startswith("v1."):
-            raise ManagedPushTokenError("push token envelope is unsupported")
-        raw = sealed.removeprefix("v1.")
-        try:
-            decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
-            if len(decoded) < 29:
-                raise ValueError("short envelope")
-            plaintext = AESGCM(self._key).decrypt(
-                decoded[:12],
-                decoded[12:],
-                self._aad(account_id, installation_id),
-            )
-            return plaintext.decode("utf-8")
-        except (InvalidTag, ValueError, UnicodeDecodeError) as exc:
-            raise ManagedPushTokenError(
-                "push token envelope could not be opened"
-            ) from exc
+        return self.open_with_rotation(
+            sealed,
+            account_id=account_id,
+            installation_id=installation_id,
+        ).token
 
 
 class UnavailableManagedPushProvider:

@@ -112,6 +112,7 @@ class Settings:
     managed_push_enabled: bool = False
     managed_push_retry_enabled: bool = False
     managed_push_token_secret: str | None = None
+    managed_push_token_previous_secret: str | None = None
     managed_push_timeout_seconds: int = 5
     managed_push_max_concurrency: int = 6
     ownership_service_enabled: bool = False
@@ -283,6 +284,9 @@ class Settings:
                 False,
             ),
             managed_push_token_secret=os.getenv("NOOP_MANAGED_PUSH_TOKEN_SECRET"),
+            managed_push_token_previous_secret=os.getenv(
+                "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET"
+            ),
             managed_push_timeout_seconds=_positive_int(
                 "NOOP_MANAGED_PUSH_TIMEOUT_SECONDS",
                 5,
@@ -422,6 +426,23 @@ class Settings:
             raise RuntimeError("NOOP_DATABASE_ENGINE must be postgresql or timescaledb")
         if self.auth_mode not in {"single_owner", "shared"}:
             raise RuntimeError("NOOP_AUTH_MODE must be single_owner or shared")
+        if self.managed_push_token_previous_secret:
+            if not self.managed_push_token_secret:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET requires "
+                    "NOOP_MANAGED_PUSH_TOKEN_SECRET"
+                )
+            if len(self.managed_push_token_previous_secret.encode("utf-8")) < 32:
+                raise RuntimeError(
+                    "NOOP_MANAGED_PUSH_TOKEN_PREVIOUS_SECRET must be at least 32 bytes"
+                )
+            if (
+                self.managed_push_token_previous_secret
+                == self.managed_push_token_secret
+            ):
+                raise RuntimeError(
+                    "current and previous managed push token secrets must differ"
+                )
         if self.managed_entitlement_mode not in {
             "closed",
             "pilot",

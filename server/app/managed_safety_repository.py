@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import math
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -19,6 +20,7 @@ from app.managed_repository import (
     ManagedForbiddenError,
     ManagedNotFoundError,
     ManagedPrincipal,
+    ManagedRateLimitError,
     ManagedStorageError,
     _lock_active_managed_safety_incidents_for_profile_pair,
     _reconcile_managed_safety_incident_acknowledgement,
@@ -39,6 +41,8 @@ SAFETY_MAX_PENDING_REQUESTS = 10
 SAFETY_MAX_ACTIVE_PUSH_INSTALLATIONS = 4
 SAFETY_PUSH_CLAIM_SECONDS = 60
 SAFETY_PUSH_RETRY_DELAY_SECONDS = 60
+SAFETY_MAX_INCIDENTS_PER_HOUR = 4
+SAFETY_MAX_INCIDENTS_PER_DAY = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,11 +87,14 @@ class PostgresManagedSafetyRepository:
         account_id: UUID,
         for_update: bool = False,
     ) -> Any:
-        lock = " FOR UPDATE OF profile" if for_update else ""
+        lock = " FOR UPDATE OF account, profile" if for_update else ""
         row = await connection.fetchrow(
             f"""
             SELECT profile.*, alias.alias_value AS noop_id
             FROM managed_social_profiles profile
+            JOIN managed_accounts account
+              ON account.account_id = profile.account_id
+             AND account.status = 'active'
             JOIN managed_social_aliases alias
               ON alias.profile_id = profile.profile_id
              AND alias.status = 'active'
@@ -113,6 +120,27 @@ class PostgresManagedSafetyRepository:
         await connection.execute(
             "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
             (f"noop-managed-safety-pair:{owner_profile_id}:{contact_profile_id}"),
+        )
+
+    @staticmethod
+    async def _lock_active_profiles_and_accounts(
+        connection: Any,
+        *,
+        profile_ids: Collection[UUID],
+    ) -> list[Any]:
+        return await connection.fetch(
+            """
+            SELECT profile.profile_id, profile.display_name
+            FROM managed_social_profiles profile
+            JOIN managed_accounts account
+              ON account.account_id = profile.account_id
+             AND account.status = 'active'
+            WHERE profile.profile_id = ANY($1::uuid[])
+              AND profile.status = 'active'
+            ORDER BY profile.profile_id
+            FOR UPDATE OF account, profile
+            """,
+            list(profile_ids),
         )
 
     @staticmethod
@@ -647,15 +675,9 @@ class PostgresManagedSafetyRepository:
             owner_profile_id=owner_profile_id,
             contact_profile_id=contact_profile_id,
         )
-        profiles = await connection.fetch(
-            """
-            SELECT profile_id, display_name
-            FROM managed_social_profiles
-            WHERE profile_id = ANY($1::uuid[]) AND status = 'active'
-            ORDER BY profile_id
-            FOR UPDATE
-            """,
-            [owner_profile_id, contact_profile_id],
+        profiles = await self._lock_active_profiles_and_accounts(
+            connection,
+            profile_ids=[owner_profile_id, contact_profile_id],
         )
         if len(profiles) != 2:
             raise ManagedNotFoundError("NOOP profile was not found")
@@ -977,16 +999,9 @@ class PostgresManagedSafetyRepository:
                     contact_profile_id=request_snapshot["contact_profile_id"],
                 )
                 if decision == "accept":
-                    profiles = await connection.fetch(
-                        """
-                        SELECT profile_id
-                        FROM managed_social_profiles
-                        WHERE profile_id = ANY($1::uuid[])
-                          AND status = 'active'
-                        ORDER BY profile_id
-                        FOR UPDATE
-                        """,
-                        [
+                    profiles = await self._lock_active_profiles_and_accounts(
+                        connection,
+                        profile_ids=[
                             request_snapshot["owner_profile_id"],
                             request_snapshot["contact_profile_id"],
                         ],
@@ -1357,6 +1372,42 @@ class PostgresManagedSafetyRepository:
                 )
                 if active:
                     raise ManagedConflictError("a Safety incident is already active")
+                limits = await connection.fetchrow(
+                    """
+                    SELECT
+                        count(*) FILTER (
+                            WHERE created_at > $2::timestamptz - interval '1 hour'
+                        ) AS hourly_count,
+                        min(created_at) FILTER (
+                            WHERE created_at > $2::timestamptz - interval '1 hour'
+                        ) AS hourly_oldest,
+                        count(*) AS daily_count,
+                        min(created_at) AS daily_oldest
+                    FROM managed_safety_incidents
+                    WHERE owner_profile_id = $1
+                      AND created_at > $2::timestamptz - interval '24 hours'
+                    """,
+                    owner["profile_id"],
+                    now,
+                )
+                retry_windows: list[datetime] = []
+                if int(limits["hourly_count"]) >= SAFETY_MAX_INCIDENTS_PER_HOUR:
+                    retry_windows.append(limits["hourly_oldest"] + timedelta(hours=1))
+                daily_limited = (
+                    int(limits["daily_count"]) >= SAFETY_MAX_INCIDENTS_PER_DAY
+                )
+                if daily_limited:
+                    retry_windows.append(limits["daily_oldest"] + timedelta(days=1))
+                if retry_windows:
+                    retry_at = max(retry_windows)
+                    raise ManagedRateLimitError(
+                        (
+                            "daily Safety paging limit reached"
+                            if daily_limited
+                            else "Safety paging limit reached; wait before paging again"
+                        ),
+                        retry_after_seconds=math.ceil((retry_at - now).total_seconds()),
+                    )
                 contacts = await connection.fetch(
                     """
                     SELECT contact.contact_profile_id
@@ -2398,6 +2449,31 @@ class PostgresManagedSafetyRepository:
                         now,
                     )
 
+    async def reencrypt_push_installation_token(
+        self,
+        *,
+        account_id: UUID,
+        installation_id: str,
+        expected_ciphertext: str,
+        replacement_ciphertext: str,
+    ) -> bool:
+        result = await self._pool().execute(
+            """
+            UPDATE managed_push_installations
+            SET token_ciphertext = $4,
+                updated_at = clock_timestamp()
+            WHERE account_id = $1
+              AND installation_id = $2
+              AND token_ciphertext = $3
+              AND status = 'active'
+            """,
+            account_id,
+            installation_id,
+            expected_ciphertext,
+            replacement_ciphertext,
+        )
+        return result == "UPDATE 1"
+
     async def delivery_summary(
         self,
         *,
@@ -2617,13 +2693,31 @@ class ManagedSafetyPushService:
         async def send(delivery: dict[str, Any]) -> tuple[str, bool]:
             async with semaphore:
                 try:
-                    token = self.token_codec.open(
+                    opened = self.token_codec.open_with_rotation(
                         delivery["token_ciphertext"],
                         account_id=delivery["account_id"],
                         installation_id=delivery["installation_id"],
                     )
+                    if opened.needs_reseal:
+                        replacement = self.token_codec.seal(
+                            opened.token,
+                            account_id=delivery["account_id"],
+                            installation_id=delivery["installation_id"],
+                        )
+                        try:
+                            await self.repository.reencrypt_push_installation_token(
+                                account_id=delivery["account_id"],
+                                installation_id=delivery["installation_id"],
+                                expected_ciphertext=delivery["token_ciphertext"],
+                                replacement_ciphertext=replacement,
+                            )
+                        except Exception:
+                            # Delivery remains possible with the successfully
+                            # opened token; a later attempt can retry the
+                            # best-effort compare-and-swap rekey.
+                            pass
                     result = await self.provider.send_safety_incident(
-                        token=token,
+                        token=opened.token,
                         platform=delivery["platform"],
                         target_kind=delivery["target_kind"],
                         incident_id=delivery["incident_id"],
@@ -2632,7 +2726,9 @@ class ManagedSafetyPushService:
                     outcome = result.outcome
                     provider_reference_hash = result.provider_reference_hash
                 except ManagedPushTokenError:
-                    outcome = "invalid"
+                    # A missing previous key is a server configuration failure,
+                    # not evidence that the provider registration is invalid.
+                    outcome = "unavailable"
                     provider_reference_hash = None
                 except Exception:
                     # Provider implementations are an external boundary. Keep

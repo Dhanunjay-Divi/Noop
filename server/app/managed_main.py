@@ -82,7 +82,14 @@ def create_managed_app(*, settings: Settings | None = None) -> FastAPI:
     safety_repository = PostgresManagedSafetyRepository(primary)
     safety_push_service = None
     if runtime_settings.managed_push_token_secret:
-        token_codec = ManagedPushTokenCodec(runtime_settings.managed_push_token_secret)
+        token_codec = ManagedPushTokenCodec(
+            runtime_settings.managed_push_token_secret,
+            previous_secrets=(
+                (runtime_settings.managed_push_token_previous_secret,)
+                if runtime_settings.managed_push_token_previous_secret
+                else ()
+            ),
+        )
         provider = (
             FirebaseCloudMessagingProvider(
                 project_id=runtime_settings.managed_project_id or "",

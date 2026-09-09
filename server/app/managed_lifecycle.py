@@ -404,7 +404,14 @@ async def _run() -> ManagedLifecycleResult:
     if settings.managed_push_retry_enabled:
         safety_push_service = ManagedSafetyPushService(
             repository=safety_repository,
-            token_codec=ManagedPushTokenCodec(settings.managed_push_token_secret or ""),
+            token_codec=ManagedPushTokenCodec(
+                settings.managed_push_token_secret or "",
+                previous_secrets=(
+                    (settings.managed_push_token_previous_secret,)
+                    if settings.managed_push_token_previous_secret
+                    else ()
+                ),
+            ),
             provider=FirebaseCloudMessagingProvider(
                 project_id=settings.managed_project_id or "",
                 timeout_seconds=settings.managed_push_timeout_seconds,

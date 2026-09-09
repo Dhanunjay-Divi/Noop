@@ -68,6 +68,7 @@ class _DeliveryRepository:
         self.target_kind = target_kind
         self.token_ciphertext = token_ciphertext
         self.completed = []
+        self.reencrypted = []
         self.due_claimed = False
 
     async def claim_push_deliveries(
@@ -101,6 +102,11 @@ class _DeliveryRepository:
 
     async def complete_push_delivery(self, **values):
         self.completed.append(values)
+
+    async def reencrypt_push_installation_token(self, **values):
+        self.reencrypted.append(values)
+        self.token_ciphertext = values["replacement_ciphertext"]
+        return True
 
     async def delivery_summary(self, **_):
         return {
@@ -194,6 +200,7 @@ def test_managed_push_token_codec_binds_ciphertext_to_installation() -> None:
         account_id=account_id,
         installation_id="ios-test-1",
     )
+    assert sealed.startswith("v2.")
     assert token not in sealed
     assert codec.token_hash(token) != token
     assert (
@@ -209,6 +216,76 @@ def test_managed_push_token_codec_binds_ciphertext_to_installation() -> None:
             sealed,
             account_id=account_id,
             installation_id="android-test-2",
+        )
+
+
+def test_managed_push_token_codec_preserves_previous_and_legacy_envelopes() -> None:
+    previous_secret = "managed-push-previous-" + ("p" * 32)
+    current_secret = "managed-push-current-" + ("c" * 32)
+    previous = ManagedPushTokenCodec(previous_secret)
+    rotated = ManagedPushTokenCodec(
+        current_secret,
+        previous_secrets=(previous_secret,),
+    )
+    account_id = uuid4()
+    installation_id = "ios-key-rotation"
+    token = "fcm-token:key_rotation_1234567890"
+    old_v2 = previous.seal(
+        token,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    old_v1 = "v1." + old_v2.split(".", 2)[2]
+
+    opened_v2 = rotated.open_with_rotation(
+        old_v2,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    opened_v1 = rotated.open_with_rotation(
+        old_v1,
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+
+    assert opened_v2.token == token
+    assert opened_v2.needs_reseal is True
+    assert opened_v1.token == token
+    assert opened_v1.needs_reseal is True
+    current = rotated.open_with_rotation(
+        rotated.seal(
+            token,
+            account_id=account_id,
+            installation_id=installation_id,
+        ),
+        account_id=account_id,
+        installation_id=installation_id,
+    )
+    assert current.needs_reseal is False
+
+    staged = ManagedPushTokenCodec(
+        previous_secret,
+        previous_secrets=(current_secret,),
+    )
+    assert (
+        staged.open(
+            rotated.seal(
+                token,
+                account_id=account_id,
+                installation_id=installation_id,
+            ),
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+        == token
+    )
+
+    without_previous = ManagedPushTokenCodec(current_secret)
+    with pytest.raises(ManagedPushTokenError, match="key is unavailable"):
+        without_previous.open(
+            old_v2,
+            account_id=account_id,
+            installation_id=installation_id,
         )
 
 
@@ -243,6 +320,79 @@ async def test_unexpected_provider_failure_becomes_retryable_unavailable() -> No
     assert len(repository.completed) == 1
     assert repository.completed[0]["outcome"] == "unavailable"
     assert repository.completed[0]["provider_reference_hash"] is None
+
+
+@pytest.mark.asyncio
+async def test_push_key_rotation_reseals_before_delivery() -> None:
+    previous_secret = "managed-push-previous-" + ("p" * 32)
+    current_secret = "managed-push-current-" + ("c" * 32)
+    previous = ManagedPushTokenCodec(previous_secret)
+    rotated = ManagedPushTokenCodec(
+        current_secret,
+        previous_secrets=(previous_secret,),
+    )
+    account_id = uuid4()
+    installation_id = "android-key-rotation"
+    repository = _DeliveryRepository(
+        account_id=account_id,
+        installation_id=installation_id,
+        platform="android",
+        target_kind="token",
+        token_ciphertext=previous.seal(
+            "fcm-token:key_rotation_1234567890",
+            account_id=account_id,
+            installation_id=installation_id,
+        ),
+    )
+    service = ManagedSafetyPushService(
+        repository=repository,
+        token_codec=rotated,
+        provider=_ConcurrentAcceptingProvider(),
+    )
+
+    await service.dispatch(principal=object(), incident_id=uuid4())
+
+    assert len(repository.reencrypted) == 1
+    replacement = repository.reencrypted[0]["replacement_ciphertext"]
+    assert replacement.startswith("v2.")
+    assert (
+        rotated.open(
+            replacement,
+            account_id=account_id,
+            installation_id=installation_id,
+        )
+        == "fcm-token:key_rotation_1234567890"
+    )
+    assert repository.completed[0]["outcome"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_unavailable_push_token_key_does_not_invalidate_registration() -> None:
+    current = ManagedPushTokenCodec("managed-push-current-" + ("c" * 32))
+    previous = ManagedPushTokenCodec("managed-push-previous-" + ("p" * 32))
+    account_id = uuid4()
+    installation_id = "ios-missing-key"
+    repository = _DeliveryRepository(
+        account_id=account_id,
+        installation_id=installation_id,
+        platform="ios",
+        target_kind="token",
+        token_ciphertext=previous.seal(
+            "fcm-token:missing_key_1234567890",
+            account_id=account_id,
+            installation_id=installation_id,
+        ),
+    )
+    service = ManagedSafetyPushService(
+        repository=repository,
+        token_codec=current,
+        provider=_ConcurrentAcceptingProvider(),
+    )
+
+    await service.dispatch(principal=object(), incident_id=uuid4())
+
+    assert repository.completed[0]["outcome"] == "unavailable"
+    assert repository.reencrypted == []
 
 
 @pytest.mark.asyncio

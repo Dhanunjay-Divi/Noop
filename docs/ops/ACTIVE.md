@@ -18,6 +18,19 @@ Last updated: **2026-09-09**
 
 ## Active work
 
+The managed Safety review-hardening round is implemented and locally verified
+on protected pull request `#10`. Relationship creation and acceptance now
+require and lock both active managed accounts; manual paging is durably limited
+to four incidents per rolling hour and twelve per rolling day with exact replay
+preserved; and push-token encryption now uses versioned envelopes, two-phase
+previous-key grace, compare-and-swap resealing, and non-invalidating local
+decryption failure. The complete two-database server suite collected 398 tests:
+397 passed and only real-Twilio staging remained explicitly skipped. GCP
+secondary-secret source validates. Replacement protected checks, a clean
+exact-head review, and normal merge remain. No public traffic or real
+participant paging was enabled. Evidence is recorded in
+[Managed Safety review hardening](rounds/2026-09-09-managed-safety-review-hardening.md).
+
 The trusted release-control activation round is complete. Pull request `#8`
 passed the preceding protected rule and exact-head trust check, merged normally
 as `d8cee4f6`, and then passed all ten exact-SHA contexts on protected `main`.
