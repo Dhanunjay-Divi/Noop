@@ -124,6 +124,22 @@ final class RetainedScreenPerformanceContractTests: XCTestCase {
         XCTAssertTrue(statusPill.contains(".task(id: shouldAnimatePulse)"))
     }
 
+    func testSharedWorkoutAndScoreMotionYieldToScrollInteraction() throws {
+        let illustration = try source(
+            "Packages/StrandDesign/Sources/StrandDesign/SemanticBodyIllustration.swift"
+        )
+        let components = try source(
+            "Packages/StrandDesign/Sources/StrandDesign/Components.swift"
+        )
+
+        XCTAssertTrue(illustration.contains("@Environment(\\.noopInteractionInProgress)"))
+        XCTAssertTrue(illustration.contains("interactionInProgress: interactionInProgress"))
+        XCTAssertTrue(illustration.contains("paused: !repeatsMotion"))
+        XCTAssertTrue(components.contains("@Environment(\\.noopInteractionInProgress)"))
+        XCTAssertTrue(components.contains("requested: pulsing && scheme == .dark"))
+        XCTAssertTrue(components.contains(".task(id: shouldAnimatePulse)"))
+    }
+
     func testWorkoutRecoveryHistoryLoadsOnlyAtItsLazyMount() throws {
         let text = try source("Strand/Screens/WorkoutsView.swift")
 
