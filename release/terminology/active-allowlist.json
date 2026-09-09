@@ -1753,7 +1753,7 @@
       "path": "Strand/Screens/StressView.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "ba8a62286bfeb0580ff7999c59ebe4a6f0ad43e46c477e83ad3140f469bbf1e0"
+      "sha256": "af7954487db3058e714d4e0a2849be4e3fbccec7dca932dfd75ba3b227ab2342"
     },
     {
       "category": "core",
@@ -4147,7 +4147,7 @@
       "path": "android/app/src/main/java/com/noop/ui/SleepScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "b0838bc1e7d46a842efafa66138045dc06f4956ded86ed80b5a5db86e5aa7eac"
+      "sha256": "1fc1b5427f162709bd960d9b44d51af889b2191bc47556fb2fc5f404d235c5b9"
     },
     {
       "category": "core",
@@ -4291,7 +4291,7 @@
       "path": "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "150ad66261c05d7732474d3801f664a867ff8f0d0c86453c835dd957aaaf6247"
+      "sha256": "55236d596793101541406eb7114b337d74ed0527161f8e75aece8f2e81fea03a"
     },
     {
       "category": "customer",

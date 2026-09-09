@@ -106,6 +106,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 // MARK: - Health Monitor (ported from Strand/Screens/HealthView.swift)
@@ -121,6 +124,9 @@ import kotlinx.coroutines.launch
 // matching Settings/onboarding. SpO2 / respiratory / skin-temp are sleep-window
 // aggregates, so the "Vital Signs" grid is sourced from today's DailyMetric.
 
+internal fun Flow<LiveState>.healthConnectionChanges(): Flow<Boolean> =
+    map { it.connected }.distinctUntilChanged()
+
 @Composable
 fun HealthScreen(
     vm: AppViewModel,
@@ -132,6 +138,7 @@ fun HealthScreen(
     val profile = remember { ProfileStore.from(context.applicationContext) }
     val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val metricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val cycleProfileEligible = remember(profileVersion) { cycleOptInApplies(profile.sex) }
     val today by vm.today.collectAsStateWithLifecycle()
     // Full merged daily history — feeds the personal-baseline banding of the vitals grid.
@@ -146,9 +153,11 @@ fun HealthScreen(
     val cycleScope = rememberCoroutineScope()
     val hrMax = profile.hrMax
 
-    // The parent observes connection state only for the first-run gate. HeartRateSection owns the
-    // ticking BPM stream, so a ~1 Hz packet never re-renders this full screen.
-    val live by vm.live.collectAsStateWithLifecycle()
+    // The parent observes one deduplicated Boolean for the first-run gate. HeartRateSection owns the
+    // full ticking state, so sensor-only packets never recompose this query-heavy screen root.
+    val connected by remember(vm.live) {
+        vm.live.healthConnectionChanges()
+    }.collectAsStateWithLifecycle(initialValue = false)
 
     // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles into
     // the theme canvas behind this screen's top region, full-bleed up behind the status bar via the
@@ -167,7 +176,7 @@ fun HealthScreen(
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
-        if (days.isEmpty() && !live.connected) {
+        if (days.isEmpty() && !connected) {
             // Even with no history yet, a freshly-connected strap can be told to sync now (#364) — the
             // manual "Sync now" + honest status sits above the empty state so it's always reachable.
             item { SyncStatusSection(vm = vm, onSyncNow = { vm.syncNow() }) }
@@ -226,6 +235,7 @@ fun HealthScreen(
                     profile = profile,
                     refreshKey = metricDataVersion,
                     recentDays = days,
+                    activeDeviceId = activeDeviceId,
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -234,6 +244,7 @@ fun HealthScreen(
                     vm = vm,
                     refreshKey = metricDataVersion,
                     recentDays = days,
+                    activeDeviceId = activeDeviceId,
                     onVitalClick = onVitalClick,
                 )
             }
@@ -241,8 +252,22 @@ fun HealthScreen(
             // age), with an honest readiness checklist behind a tap. Authoritative value comes from the
             // metricSeries the IntelligenceEngine writes; readiness is derived from what this screen sees.
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            item { FitnessAgeSection(vm = vm, days = days, profile = profile) }
-            item { VitalitySection(vm = vm, days = days, profile = profile) }
+            item {
+                FitnessAgeSection(
+                    vm = vm,
+                    days = days,
+                    profile = profile,
+                    activeDeviceId = activeDeviceId,
+                )
+            }
+            item {
+                VitalitySection(
+                    vm = vm,
+                    days = days,
+                    profile = profile,
+                    activeDeviceId = activeDeviceId,
+                )
+            }
             // SKIN TEMPERATURE (v5 pillar) — Cycle awareness (opt-in), Body clock + an illness heads-up,
             // each from a pure engine RESULT the ViewModel publishes. A section of Health, never its own
             // destination (umbrella §2.4). Non-clinical observations about your own numbers.
@@ -329,13 +354,14 @@ private fun BodyCompositionSection(
     profile: ProfileStore,
     refreshKey: Long,
     recentDays: List<DailyMetric>,
+    activeDeviceId: String,
 ) {
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
     var snapshot by remember { mutableStateOf(BodyCompositionSnapshot()) }
     var loaded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(refreshKey, recentDays, vm.activeStrapId) {
+    LaunchedEffect(refreshKey, recentDays, activeDeviceId) {
         val (weight, bmi, bodyFat, leanMass) = coroutineScope {
             listOf("weight", "bmi", "body_fat", "lean_mass").map { key ->
                 async {
@@ -345,7 +371,7 @@ private fun BodyCompositionSection(
                             preferredSource = "apple-health",
                             from = "0000-01-01",
                             to = "9999-12-31",
-                            strapDeviceId = vm.activeStrapId,
+                            strapDeviceId = activeDeviceId,
                         ).points.lastOrNull()
                     }.getOrNull()
                 }
@@ -664,6 +690,7 @@ private fun BiomarkerTrendsSection(
     vm: AppViewModel,
     refreshKey: Long,
     recentDays: List<DailyMetric>,
+    activeDeviceId: String,
     onVitalClick: (String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -671,7 +698,7 @@ private fun BiomarkerTrendsSection(
     var trends by remember { mutableStateOf<List<BiomarkerTrend>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(refreshKey, recentDays, vm.activeStrapId) {
+    LaunchedEffect(refreshKey, recentDays, activeDeviceId) {
         val specs = listOf(
             "weight" to "Weight",
             "hrv" to "HRV",
@@ -691,7 +718,7 @@ private fun BiomarkerTrendsSection(
                             preferredSource = preferredSource,
                             from = "0000-01-01",
                             to = "9999-12-31",
-                            strapDeviceId = vm.activeStrapId,
+                            strapDeviceId = activeDeviceId,
                         ).values
                     }.getOrDefault(emptyList())
                     BiomarkerTrend(key = key, title = title, points = points)
@@ -1299,7 +1326,12 @@ private fun rememberFitnessReadiness(
 }
 
 @Composable
-private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile: ProfileStore) {
+private fun FitnessAgeSection(
+    vm: AppViewModel,
+    days: List<DailyMetric>,
+    profile: ProfileStore,
+    activeDeviceId: String,
+) {
     val context = LocalContext.current
     // Latest weekly value + its optional VO₂max companion, read once (metricSeries has no Flow, so we
     // re-read whenever the merged history changes — a fresh sync/import is what moves these).
@@ -1315,7 +1347,7 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
     val profileState = remember(profileVersion) { profile.ageMetricStateToken }
     var loadedProfileState by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(days, refreshTick, profileVersion, ageMetricDataVersion) {
+    LaunchedEffect(days, refreshTick, profileVersion, ageMetricDataVersion, activeDeviceId) {
         if (!profile.fitnessInputsConfirmed ||
             !FitnessAgeEngine.supportsAge(profile.age.toDouble()) ||
             !FitnessAgeEngine.supportsSex(profile.sex)
@@ -1330,12 +1362,12 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
         // Fitness Age is weekly and sparse; retain the last eight persisted points for the visible graph.
         val faSeries = runCatching {
             vm.repo.metricSeriesComputedUnion(
-                vm.activeStrapId, "fitness_age", "0000-01-01", "9999-12-31",
+                activeDeviceId, "fitness_age", "0000-01-01", "9999-12-31",
             ).takeLast(8)
         }.getOrDefault(emptyList())
         val fa = faSeries.lastOrNull()?.value
         val vo2 = runCatching {
-            vm.repo.latestMetricComputedUnion(vm.activeStrapId, "vo2max_est")?.value
+            vm.repo.latestMetricComputedUnion(activeDeviceId, "vo2max_est")?.value
         }.getOrNull()
         val measuredVo2 = runCatching {
             val appleHealth = vm.repo.appleDaily(
@@ -1353,17 +1385,17 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
                 preferredSource = WhoopRepository.APPLE_HEALTH_SOURCE,
                 from = "0000-01-01",
                 to = "9999-12-31",
-                strapDeviceId = vm.activeStrapId,
+                strapDeviceId = activeDeviceId,
             ).points.lastOrNull()?.value
         }.getOrNull()
         val faProfile = runCatching {
             vm.repo.latestMetricComputedUnion(
-                vm.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+                activeDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
             )?.value
         }.getOrNull()
         val vo2Profile = runCatching {
             vm.repo.latestMetricComputedUnion(
-                vm.activeStrapId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                activeDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
             )?.value
         }.getOrNull()
         val acceptsFitnessAge = profile.acceptsFitnessAge(faProfile)
@@ -1440,14 +1472,19 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
 /** Vitality / Wellness Age: an experimental weekly wellness score + age-shaped comparison. It is not
  *  WHOOP Age or biological age. Recomputes the live best/worst factor for the why. */
 @Composable
-private fun VitalitySection(vm: AppViewModel, days: List<DailyMetric>, profile: ProfileStore) {
+private fun VitalitySection(
+    vm: AppViewModel,
+    days: List<DailyMetric>,
+    profile: ProfileStore,
+    activeDeviceId: String,
+) {
     var vitality by remember { mutableStateOf<Double?>(null) }
     var bodyAge by remember { mutableStateOf<Double?>(null) }
     val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
     val profileState = remember(profileVersion) { profile.ageMetricStateToken }
     var loadedProfileState by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(days, profileVersion, ageMetricDataVersion) {
+    LaunchedEffect(days, profileVersion, ageMetricDataVersion, activeDeviceId) {
         if (!profile.ageInputConfirmed || profile.age !in 20..80) {
             vitality = null
             bodyAge = null
@@ -1456,14 +1493,14 @@ private fun VitalitySection(vm: AppViewModel, days: List<DailyMetric>, profile: 
         }
         // Latest-value reads (LIMIT-1 per source) — the full-series `.lastOrNull()` scan is gone (perf).
         val newVitality = runCatching {
-            vm.repo.latestMetricComputedUnion(vm.activeStrapId, "vitality")?.value
+            vm.repo.latestMetricComputedUnion(activeDeviceId, "vitality")?.value
         }.getOrNull()
         val newBodyAge = runCatching {
-            vm.repo.latestMetricComputedUnion(vm.activeStrapId, "body_age")?.value
+            vm.repo.latestMetricComputedUnion(activeDeviceId, "body_age")?.value
         }.getOrNull()
         val provenance = runCatching {
             vm.repo.latestMetricComputedUnion(
-                vm.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+                activeDeviceId, AgeMetricProfile.VITALITY_KEY,
             )?.value
         }.getOrNull()
         val accepted = profile.acceptsVitality(provenance)
@@ -2816,6 +2853,7 @@ private val SERIES_BACKED_VITAL_KEYS = setOf(
 @Composable
 fun VitalDetailScreen(vm: AppViewModel, key: String) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val tempUnit = UnitPrefs.temperature(context)
     val massUnit = UnitPrefs.mass(context)
@@ -2831,15 +2869,15 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     // Series-backed metrics are loaded async from metricSeries; the plain daily vitals build synchronously
     // off the cached `days`. `seriesLoaded` guards the empty-state so a still-loading trend doesn't flash
     // "not enough history" before its rows arrive.
-    var seriesDetail by remember(key) { mutableStateOf<VitalDetailModel?>(null) }
-    var seriesLoaded by remember(key) { mutableStateOf(false) }
+    var seriesDetail by remember(key, activeDeviceId) { mutableStateOf<VitalDetailModel?>(null) }
+    var seriesLoaded by remember(key, activeDeviceId) { mutableStateOf(false) }
     // Manual-refresh plumbing for the Fitness Age not-ready state (readiness branch below): the refresh
     // button recomputes then bumps this tick, re-running the series read so a fresh value shows at once.
     var refreshTick by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
-    var loadedAgeMetricState by remember(key) { mutableStateOf<String?>(null) }
+    var loadedAgeMetricState by remember(key, activeDeviceId) { mutableStateOf<String?>(null) }
     if (isSeriesBacked) {
-        LaunchedEffect(key, refreshTick, profileVersion, ageMetricDataVersion) {
+        LaunchedEffect(key, refreshTick, profileVersion, ageMetricDataVersion, activeDeviceId) {
             val profileAllowsMetric = when (key) {
                 "fitness_age" -> profile.fitnessInputsConfirmed &&
                     FitnessAgeEngine.supportsAge(profile.age.toDouble()) &&
@@ -2850,18 +2888,18 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             val provenanceAllowsMetric = if (!profileAllowsMetric) false else when (key) {
                 "fitness_age" -> profile.acceptsFitnessAge(
                     vm.repo.latestMetricComputedUnion(
-                        vm.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+                        activeDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
                     )?.value,
                 )
                 "vitality" -> profile.acceptsVitality(
                     vm.repo.latestMetricComputedUnion(
-                        vm.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+                        activeDeviceId, AgeMetricProfile.VITALITY_KEY,
                     )?.value,
                 )
                 else -> true
             }
             seriesDetail = if (provenanceAllowsMetric) {
-                buildSeriesVitalDetail(vm, key, massUnit)
+                buildSeriesVitalDetail(vm, key, massUnit, activeDeviceId)
             } else {
                 null
             }
@@ -3066,9 +3104,8 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
         // from the WHOOP strap, a Health Connect / Apple Health import, or the on-device pipeline — not
         // just the "N readings" count. Rows derive from the SAME [filteredReadings] the header counts,
         // newest first, and reuse [provenanceDisplayLabel] for the source words (task #8).
-        val strapId = vm.activeStrapId
-        val readingRows = remember(filteredReadings, detail, strapId) {
-            vitalReadingRows(filteredReadings, detail.unit, strapId, detail.format)
+        val readingRows = remember(filteredReadings, detail, activeDeviceId) {
+            vitalReadingRows(filteredReadings, detail.unit, activeDeviceId, detail.format)
         }
         VitalReadingsTable(rows = readingRows)
     }
@@ -3246,6 +3283,7 @@ private suspend fun buildSeriesVitalDetail(
     vm: AppViewModel,
     key: String,
     massUnit: MassUnit,
+    activeDeviceId: String,
 ): VitalDetailModel? = when (key) {
     // The Today Key-Metrics Rest tile's drill-in: the Rest composite (sleep_performance) trend, read via
     // the SAME imported-wins resolvedSeries merge the tile's score/sparkline use, so the detail can never
@@ -3256,7 +3294,7 @@ private suspend fun buildSeriesVitalDetail(
         unit = "%",
         color = Palette.restColor,
         readings = vm.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = vm.activeStrapId)
+            strapDeviceId = activeDeviceId)
             .points.map { VitalReading(it.day, it.value, it.source) },
         format = { it.roundToInt().toString() },
     )
@@ -3265,7 +3303,7 @@ private suspend fun buildSeriesVitalDetail(
         title = uiString(R.string.l10n_health_screen_fitness_age_12383b4a),
         unit = "",
         color = Palette.chargeColor,
-        readings = vm.repo.metricSeriesComputedUnion(vm.activeStrapId, "fitness_age", "0000-01-01", "9999-12-31")
+        readings = vm.repo.metricSeriesComputedUnion(activeDeviceId, "fitness_age", "0000-01-01", "9999-12-31")
             .map { VitalReading(it.day, it.value, it.deviceId) },
         format = FitnessAgePresentation::value,
     )
@@ -3274,7 +3312,7 @@ private suspend fun buildSeriesVitalDetail(
         title = uiString(R.string.l10n_health_screen_vitality_be320b06),
         unit = "",
         color = Palette.metricPurple,
-        readings = vm.repo.metricSeriesComputedUnion(vm.activeStrapId, "vitality", "0000-01-01", "9999-12-31")
+        readings = vm.repo.metricSeriesComputedUnion(activeDeviceId, "vitality", "0000-01-01", "9999-12-31")
             .map { VitalReading(it.day, it.value, it.deviceId) },
         format = { it.roundToInt().toString() },
     )
@@ -3285,7 +3323,7 @@ private suspend fun buildSeriesVitalDetail(
             preferredSource = preferredSource,
             from = "0000-01-01",
             to = "9999-12-31",
-            strapDeviceId = vm.activeStrapId,
+            strapDeviceId = activeDeviceId,
         )
         val title = when (key) {
             "weight" -> "Weight"
@@ -3329,7 +3367,7 @@ private suspend fun buildSeriesVitalDetail(
         // estimate in the "steps_est" series - three disjoint stores, so the
         // per-day `?:` chain never double-counts.
         val motionDerived = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = vm.activeStrapId)
+            strapDeviceId = activeDeviceId)
             .points.associateBy({ it.day }, {
                 VitalReading(it.day, it.value, MOTION_DERIVED_STEPS_SOURCE)
             })
@@ -3345,7 +3383,7 @@ private suspend fun buildSeriesVitalDetail(
             }
         }
         val calibratedEstimate = vm.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = vm.activeStrapId)
+            strapDeviceId = activeDeviceId)
             .points.associateBy({ it.day }, {
                 VitalReading(it.day, it.value, CALIBRATED_MOTION_STEPS_SOURCE)
             })
@@ -3367,7 +3405,7 @@ private suspend fun buildSeriesVitalDetail(
         // IMPORTED-FIRST (the phone's activeKcal, else NOOP's on-device estimate) — matching the tile + card
         // so the chart + Readings agree, while keeping every imported day in the union.
         val real = vm.repo.resolvedSeries("active_kcal", "my-whoop", "0000-00-00", "9999-99-99",
-            strapDeviceId = vm.activeStrapId)
+            strapDeviceId = activeDeviceId)
             .points.associateBy({ it.day }, { VitalReading(it.day, it.value, it.source) })
         val imported = LinkedHashMap<String, VitalReading>()
         for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +

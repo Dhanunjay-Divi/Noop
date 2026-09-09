@@ -90,12 +90,23 @@ real participant paging was enabled. Evidence is recorded in
 [Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
 
 The reported physical-phone lag is not evidence against the large-data fix yet:
-yesterday's protected `main` did not contain pull request `#12`. That branch
-has measured a 4.2-million-row, approximately 441 MB local database and removes
-active backfill/write contention, repeated retained-screen queries, unnecessary
-per-chunk reads, and scroll-time animation work across Apple and Android. It is
-now being integrated after the Safety merge and still requires complete local
-and hosted verification and protected merge. The first hosted
+yesterday's protected `main` did not contain pull request `#12`. Its
+deterministic 4,207,350-row fixture produced a 440.6 MB database and showed
+ordinary indexed reads remain bounded while one-million-row active writes
+measurably increased concurrent read latency. Apple Liquid Today restores an
+exact revision-bound query snapshot across tab remounts, scopes it to the active
+device, defers repeated same-day reads during bulk backfill, and discards
+pre-backfill state before the completion reload. Android shares one Rest-history
+read, keys it to the active device and metric revision, retries failed reads
+instead of banking an empty result, and pauses decorative liquid clocks during
+drag/fling. Across both platforms, Health avoids sensor-rate root updates, Sleep
+parallelizes independent history reads and batches motion lookups, Stress moves
+deterministic analysis off the UI executor, and Workouts defers historical
+recovery scans until their lazy section mounts. Device switches invalidate or
+supersede every affected cache and task. No local history was deleted and no
+retention or formula contract changed. The branch is now being integrated after
+the Safety merge and still requires complete local and hosted verification and
+protected merge. The first hosted
 release-control run exposed only a stale fail-closed terminology inventory;
 its reviewed regeneration has no forbidden mapping or active allowlist
 expansion. A reviewed shake-to-report ZIP from the affected phone on the
@@ -293,8 +304,8 @@ protected-main commit `d8cee4f6` has green exact-SHA Apple, Android, server,
 Swift-package/study, localization, health-claims, runtime-license, operations,
 release-control, and trusted-release-control evidence. Strict branch
 protection, active tag rulesets, and immutable releases are enabled; external
-release gates remain open. The frozen terminology inventory classifies 17,370
-legacy-name occurrences across 1,508 path/category groups; active customer/core
+release gates remain open. The frozen terminology inventory classifies 17,369
+legacy-name occurrences across 1,509 path/category groups; active customer/core
 removal must use a reviewed allowlist and additive migration rather than
 destructive replacement. Evidence is recorded
 in

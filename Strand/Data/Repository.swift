@@ -515,7 +515,7 @@ final class Repository: ObservableObject {
     /// raw under THAT id while the dashboard kept reading "my-whoop" and snapped to a stale day. Now the
     /// read side follows the same active id the write side does. NOT a `let` for that reason; `private(set)`
     /// so only `adoptActiveDeviceId` can move it.
-    private(set) var deviceId: String
+    @Published private(set) var deviceId: String
     /// Source id for on-device computed scores (recovery/strain/sleep derived from the raw strap
     /// streams by IntelligenceEngine). Merged UNDER the imported `deviceId` rows at read time, so a
     /// real WHOOP import always wins and the strap-only user still gets a populated dashboard.
@@ -639,6 +639,12 @@ final class Repository: ObservableObject {
     func adoptActiveDeviceId(_ id: String) -> Bool {
         let trimmed = id.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != deviceId else { return false }
+        liquidTodayLoadCache = nil
+        autoDetectCandidateCache = nil
+        autoDetectScanGeneration &+= 1
+        autoDetectScanTask?.cancel()
+        autoDetectScanTask = nil
+        autoDetectScanTaskKey = nil
         deviceId = trimmed
         return true
     }
@@ -4016,6 +4022,7 @@ final class Repository: ObservableObject {
     private struct AutoDetectCandidateCacheKey: Equatable {
         let refreshSeq: Int
         let decisionSeq: Int
+        let deviceId: String
         let daysBack: Int
         let minuteBucket: Int
     }
@@ -4087,6 +4094,7 @@ final class Repository: ObservableObject {
         let key = AutoDetectCandidateCacheKey(
             refreshSeq: refreshSeq,
             decisionSeq: autoDetectDecisionSeq,
+            deviceId: deviceId,
             daysBack: daysBack,
             minuteBucket: now / 60
         )
@@ -4101,6 +4109,7 @@ final class Repository: ObservableObject {
 
         autoDetectScanGeneration &+= 1
         let generation = autoDetectScanGeneration
+        let requestDeviceId = deviceId
         let task = Task<DetectedWorkout?, Never> { @MainActor [weak self] in
             guard let self else { return nil }
             return await self.computeAutoDetectCandidate(daysBack: daysBack, now: now)
@@ -4108,27 +4117,49 @@ final class Repository: ObservableObject {
         autoDetectScanTask = task
         autoDetectScanTaskKey = key
         let candidate = await task.value
-        if autoDetectScanGeneration == generation {
+        if autoDetectScanGeneration == generation, deviceId == requestDeviceId {
             autoDetectCandidateCache = AutoDetectCandidateCache(key: key, candidate: candidate)
             autoDetectScanTask = nil
             autoDetectScanTaskKey = nil
+            return candidate
         }
-        return candidate
+        return nil
     }
 
     private func computeAutoDetectCandidate(daysBack: Int, now: Int) async -> DetectedWorkout? {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("workouts.auto_detect_scan")
+        var diagnosticOutcome = "no_candidate"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: diagnosticOutcome,
+                fields: diagnosticFields
+            )
+        }
+
         let from = now - daysBack * 86_400
-        let samples = await hrSamples(from: from, to: now, limit: 200_000)
-        guard samples.count >= 2 else { return nil }
-        let hr = samples.map { (ts: $0.ts, bpm: $0.bpm) }
-        let gravity = await gravitySamples(from: from, to: now, limit: 200_000)
-        let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
+        async let samplesTask = hrSamples(from: from, to: now, limit: 200_000)
+        async let gravityTask = gravitySamples(from: from, to: now, limit: 200_000)
+        async let savedSpansTask = autoDetectSavedSpans(from: from, to: now)
+        let (samples, gravity, savedSpans) =
+            await (samplesTask, gravityTask, savedSpansTask)
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
+        diagnosticFields = [
+            "hr_bucket": Self.autoDetectCountBucket(samples.count),
+            "motion_bucket": Self.autoDetectCountBucket(gravity.count),
+            "saved_span_bucket": Self.autoDetectCountBucket(savedSpans.count),
+        ]
+        guard samples.count >= 2 else {
+            diagnosticOutcome = "insufficient_hr"
+            return nil
+        }
 
         // Resting HR: most recent nightly RHR in range, else the detector's own default (60).
         let restingBpm = days.last(where: { $0.restingHr != nil })?.restingHr
-
-        // Exclude every already-saved workout window (any source , strap, manual, imported, detected).
-        let savedSpans = await autoDetectSavedSpans(from: from, to: now)
 
         // Workouts & GPS test mode: when on, run the diagnostic twin which returns the SAME candidates
         // detect(...) does (it reuses detect verbatim) plus the inputs / thresholds / per-window why trace,
@@ -4136,6 +4167,8 @@ final class Repository: ObservableObject {
         // and detectTrace is only called on that branch, so the default path runs the untraced detect.
         let shouldTrace = TestCentre.active(.workouts) && workoutsLog != nil
         let detection = await Task.detached(priority: .utility) {
+            let hr = samples.map { (ts: $0.ts, bpm: $0.bpm) }
+            let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
             if shouldTrace {
                 let (results, trace) = AutoWorkoutDetector.detectTrace(
                     hr: hr, restingBpm: restingBpm, motion: motion,
@@ -4180,6 +4213,7 @@ final class Repository: ObservableObject {
             }
             return prediction
         }.value
+        diagnosticOutcome = "candidate"
         guard let prediction else { return candidate }
         return DetectedWorkout(
             startSec: candidate.startSec, endSec: candidate.endSec,
@@ -4191,6 +4225,15 @@ final class Repository: ObservableObject {
             eventConfidence: candidate.eventConfidence,
             confidenceStatus: candidate.confidenceStatus,
             evidenceProvenance: candidate.evidenceProvenance)
+    }
+
+    private nonisolated static func autoDetectCountBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...100: return "up_to_100"
+        case 101...10_000: return "101_to_10000"
+        default: return "over_10000"
+        }
     }
 
     /// Persist a detector-qualified window under the computed `<strap>-noop` source so it is honestly

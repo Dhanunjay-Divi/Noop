@@ -120,6 +120,9 @@ import java.time.temporal.WeekFields
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.math.roundToInt
 
 /**
@@ -193,6 +196,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // solid/building ActivityCost entry - "Sessions like this usually …" (#439). Auto-clears.
     var postLogNote by remember { mutableStateOf<String?>(null) }
     var recoveryTrend by remember { mutableStateOf<List<WorkoutRecoveryTrendPoint>>(emptyList()) }
+    var recoveryTrendLoadedKey by remember { mutableStateOf<String?>(null) }
     var activeZoneWeek by remember { mutableStateOf<ActiveZoneWeekSnapshot?>(null) }
     var activeZoneLoaded by remember { mutableStateOf(false) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
@@ -233,28 +237,42 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val recoveryRows = remember(windowRows) {
         latestWorkoutRows(windowRows, maximumDays = 90).sortedBy { it.startTs }
     }
-    val recoveryInputKey = remember(range, customStartDate, customEndDate, recoveryRows) {
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
+    val recoveryInputKey = remember(
+        range,
+        customStartDate,
+        customEndDate,
+        recoveryRows,
+        activeDeviceId,
+        lastHistorySyncAt,
+    ) {
         buildString {
             append(range.name)
             append('|').append(customStartDate).append('|').append(customEndDate)
+            append('|').append(activeDeviceId).append('|').append(lastHistorySyncAt ?: 0L)
             recoveryRows.forEach { append('|').append(it.startTs).append(':').append(it.endTs) }
         }
     }
-    LaunchedEffect(recoveryInputKey, vm.activeStrapId, lastHistorySyncAt) {
-        val built = ArrayList<WorkoutRecoveryTrendPoint>()
-        for (row in recoveryRows) {
-            val result = vm.workoutHeartRateRecovery(row.startTs, row.endTs) ?: continue
-            built += WorkoutRecoveryTrendPoint(row.startTs, result)
-        }
-        recoveryTrend = built
-    }
-    LaunchedEffect(vm.activeStrapId, lastHistorySyncAt) {
+    LaunchedEffect(activeDeviceId, lastHistorySyncAt) {
         activeZoneLoaded = false
-        activeZoneWeek = runCatching { loadActiveZoneWeek(vm) }.getOrNull()
-        activeZoneLoaded = true
+        try {
+            val loadedWeek = loadActiveZoneWeek(vm, activeDeviceId)
+            currentCoroutineContext().ensureActive()
+            if (vm.activeStrapId == activeDeviceId) {
+                activeZoneWeek = loadedWeek
+                activeZoneLoaded = true
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (vm.activeStrapId == activeDeviceId) {
+                activeZoneWeek = null
+                activeZoneLoaded = true
+            }
+        }
     }
 
-    LaunchedEffect(vm.activeStrapId, workoutDataVersion) {
+    LaunchedEffect(activeDeviceId, workoutDataVersion) {
         vm.loadWorkouts()
         loaded = true
     }
@@ -354,13 +372,29 @@ fun WorkoutsScreen(vm: AppViewModel) {
             item { SummarySection(rows = windowRows, effectiveRange = resolvedRange, groups = windowGroups) }
             item { BreakdownSection(groups = windowGroups, rows = windowRows) }
             item { ZonesSection(windowRows) }
-            if (recoveryTrend.isNotEmpty()) {
-                item {
-                    RecoveryTrendSection(
-                        recoveryTrend,
-                        recoveryRangeCaption(range, customStartDate, customEndDate),
-                    )
-                }
+            item(key = "recovery-trend") {
+                RecoveryTrendLazySection(
+                    inputKey = recoveryInputKey,
+                    loadedKey = recoveryTrendLoadedKey,
+                    points = recoveryTrend,
+                    rangeCaption = recoveryRangeCaption(range, customStartDate, customEndDate),
+                    load = {
+                        val built = ArrayList<WorkoutRecoveryTrendPoint>()
+                        for (row in recoveryRows) {
+                            currentCoroutineContext().ensureActive()
+                            val result = vm.workoutHeartRateRecovery(row.startTs, row.endTs) ?: continue
+                            built += WorkoutRecoveryTrendPoint(row.startTs, result)
+                        }
+                        currentCoroutineContext().ensureActive()
+                        built
+                    },
+                    onLoaded = { key, built ->
+                        if (key == recoveryInputKey) {
+                            recoveryTrend = built
+                            recoveryTrendLoadedKey = key
+                        }
+                    },
+                )
             }
             item {
             SessionsSection(
@@ -443,7 +477,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
             workouts = dayWorkouts,
             metricRows = emptyList(),
             journal = emptyList(),
-            activeStrapId = vm.activeStrapId,
+            activeStrapId = activeDeviceId,
             loading = false,
             onDismiss = { selectedOverviewDay = null },
         )
@@ -457,6 +491,58 @@ private data class WorkoutRecoveryTrendPoint(
     val startTs: Long,
     val result: HeartRateRecovery.Result,
 )
+
+internal fun workoutRecoveryResultBucket(count: Int): String = when {
+    count <= 0 -> "empty"
+    count <= 10 -> "up_to_10"
+    count <= 30 -> "11_to_30"
+    else -> "over_30"
+}
+
+/**
+ * Mounted at the recovery chart's real LazyColumn position. The expensive historical HR reads therefore
+ * begin only when the user scrolls near this section, while the first Workouts viewport stays query-light.
+ */
+@Composable
+private fun RecoveryTrendLazySection(
+    inputKey: String,
+    loadedKey: String?,
+    points: List<WorkoutRecoveryTrendPoint>,
+    rangeCaption: String,
+    load: suspend () -> List<WorkoutRecoveryTrendPoint>,
+    onLoaded: (String, List<WorkoutRecoveryTrendPoint>) -> Unit,
+) {
+    LaunchedEffect(inputKey) {
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "workouts.recovery_trend_load",
+        )
+        var outcome = "completed"
+        var fields = emptyMap<String, String>()
+        try {
+            val loaded = load()
+            currentCoroutineContext().ensureActive()
+            onLoaded(inputKey, loaded)
+            fields = mapOf("result_bucket" to workoutRecoveryResultBucket(loaded.size))
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
+    }
+
+    if (loadedKey == inputKey && points.isNotEmpty()) {
+        RecoveryTrendSection(points, rangeCaption)
+    } else {
+        Spacer(Modifier.height(1.dp))
+    }
+}
 
 internal data class ActiveZoneWeekSnapshot(
     val minutes: ActiveZoneMinutes,
@@ -1536,25 +1622,28 @@ internal fun activeZoneWeekSnapshot(
     )
 }
 
-private suspend fun loadActiveZoneWeek(vm: AppViewModel): ActiveZoneWeekSnapshot? {
+private suspend fun loadActiveZoneWeek(
+    vm: AppViewModel,
+    deviceId: String,
+): ActiveZoneWeekSnapshot? {
     val today = LocalDate.now()
     val from = today.minusDays(6).toString()
     val to = today.toString()
     val includedDays = (0L..6L).mapTo(linkedSetOf()) { today.minusDays(it).toString() }
     val moderate = vm.repo.metricSeriesComputedUnion(
-        vm.activeStrapId,
+        deviceId,
         ActiveZoneMinutesCalculator.MODERATE_SERIES_KEY,
         from,
         to,
     )
     val vigorous = vm.repo.metricSeriesComputedUnion(
-        vm.activeStrapId,
+        deviceId,
         ActiveZoneMinutesCalculator.VIGOROUS_SERIES_KEY,
         from,
         to,
     )
     val observed = vm.repo.metricSeriesComputedUnion(
-        vm.activeStrapId,
+        deviceId,
         ActiveZoneMinutesCalculator.OBSERVED_SERIES_KEY,
         from,
         to,

@@ -58,6 +58,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             refreshSeq: 4,
             ageMetricsSeq: 2,
             workoutsSeq: 3,
+            deviceId: "device-a",
             dayKey: "2026-09-09",
             profileState: "profile-a"
         )
@@ -89,12 +90,29 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             refreshSeq: 5,
             ageMetricsSeq: 2,
             workoutsSeq: 3,
+            deviceId: "device-a",
             dayKey: "2026-09-09",
             profileState: "profile-a"
         )
         XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
             cachedKey: key,
             requestKey: newer,
+            bankedAt: now,
+            now: now,
+            isToday: false
+        ))
+
+        let otherDevice = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-b",
+            dayKey: "2026-09-09",
+            profileState: "profile-a"
+        )
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: otherDevice,
             bankedAt: now,
             now: now,
             isToday: false
@@ -128,7 +146,7 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         ))
     }
 
-    func testLiquidTodayReloadsWhenBackfillFinishes() throws {
+    func testLiquidTodayUsesDurableRefreshInsteadOfRawBackfillEdgeInvalidation() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let task = try slice(
             source,
@@ -136,8 +154,16 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
             to: "#if DEBUG"
         )
 
+        XCTAssertTrue(task.contains("\\(repo.refreshSeq)"))
         XCTAssertTrue(task.contains("\\(liveBackfillingFlag)"))
+        XCTAssertTrue(task.contains("\\(repo.deviceId)"))
+        XCTAssertFalse(task.contains("repo.liquidTodayLoadCache = nil"))
         XCTAssertTrue(task.contains("await load()"))
+
+        let appModel = try sourceText("Strand/App/AppModel.swift")
+        XCTAssertTrue(appModel.contains("persistedHistoryRefreshWorker"))
+        XCTAssertTrue(appModel.contains("refreshAfterPersistedHistory()"))
+        XCTAssertTrue(appModel.contains("await repo.refresh(days: 120)"))
     }
 
     func testChargeV2UpgradeForcesFullHistoryUntilPassCompletes() {

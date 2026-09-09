@@ -354,6 +354,7 @@ struct WorkoutsView: View {
     /// workout ranges intentionally keep this trend capped at 90 days so opening a deep history never
     /// launches hundreds of raw-HR reads.
     @State private var recoveryTrend: [WorkoutRecoveryTrendPoint] = []
+    @State private var recoveryTrendLoadedKey: String?
     @State private var activeZoneWeek: ActiveZoneWeekSnapshot?
     @State private var activeZoneLoaded = false
 
@@ -485,12 +486,12 @@ struct WorkoutsView: View {
                     if let z = zonesSummary {
                         zonesSection(z, totalSessions: windowRows.count)
                     }
-                    recoveryTrendSection
+                    recoveryTrendLazySection
                     sessionsSection(rows: windowRows)
                 }
             }
         }
-        .task(id: "\(repo.refreshSeq)|\(repo.workoutsSeq)") {
+        .task(id: "\(repo.refreshSeq)|\(repo.workoutsSeq)|\(repo.deviceId)") {
             guard !usesPreviewRows else { return }
             // #797: read only the currently-loaded window (bounded on first paint), not the whole history.
             let r = await repo.workoutRows(days: loadedWindowDays ?? 4000)
@@ -529,10 +530,7 @@ struct WorkoutsView: View {
         .onChangeCompat(of: range) { newRange in
             Task { await expandWindowIfNeeded(for: newRange) }
         }
-        .task(id: recoveryTrendInputKey) {
-            await loadRecoveryTrend()
-        }
-        .task(id: repo.refreshSeq) {
+        .task(id: "\(repo.refreshSeq)|\(repo.deviceId)") {
             guard !usesPreviewRows else {
                 activeZoneLoaded = true
                 return
@@ -643,7 +641,7 @@ struct WorkoutsView: View {
     /// Stable task identity: changing the range/filter/rows or HRmax cancels and rebuilds the trend.
     private var recoveryTrendInputKey: String {
         let rows = recoveryTrendRows
-        return "\(repo.refreshSeq)|\(model.profile.hrMax)|"
+        return "\(repo.refreshSeq)|\(repo.deviceId)|\(model.profile.hrMax)|"
             + rows.map { "\($0.startTs):\($0.endTs)" }.joined(separator: ",")
     }
 
@@ -660,18 +658,60 @@ struct WorkoutsView: View {
         return rangeDisplayLabel(for: range)
     }
 
-    private func loadRecoveryTrend() async {
-        guard !usesPreviewRows else { recoveryTrend = []; return }
+    private func loadRecoveryTrend(
+        requestKey: String,
+        rows: [WorkoutRow]
+    ) async {
+        guard !usesPreviewRows else {
+            recoveryTrend = []
+            recoveryTrendLoadedKey = requestKey
+            return
+        }
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+            "workouts.recovery_trend_load",
+            fields: ["candidate_bucket": Self.recoveryTrendCountBucket(rows.count)]
+        )
+        var outcome = "completed"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: outcome,
+                fields: diagnosticFields
+            )
+        }
+
         var built: [WorkoutRecoveryTrendPoint] = []
-        for row in recoveryTrendRows {
-            if Task.isCancelled { return }
+        for row in rows {
+            if Task.isCancelled {
+                outcome = "canceled"
+                return
+            }
             if let result = await repo.workoutHeartRateRecovery(
                 from: row.startTs, to: row.endTs, maxHR: Double(model.profile.hrMax)) {
                 built.append(WorkoutRecoveryTrendPoint(startTs: row.startTs, result: result))
             }
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            outcome = "canceled"
+            return
+        }
+        guard requestKey == recoveryTrendInputKey else {
+            outcome = "superseded"
+            return
+        }
         recoveryTrend = built
+        recoveryTrendLoadedKey = requestKey
+        diagnosticFields["result_bucket"] = Self.recoveryTrendCountBucket(built.count)
+    }
+
+    private static func recoveryTrendCountBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...10: return "up_to_10"
+        case 11...30: return "11_to_30"
+        default: return "over_30"
+        }
     }
 
     private func loadActiveZoneWeek() async {
@@ -800,8 +840,10 @@ struct WorkoutsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private var recoveryTrendSection: some View {
-        if !recoveryTrend.isEmpty {
+    @ViewBuilder private var recoveryTrendLazySection: some View {
+        let inputKey = recoveryTrendInputKey
+        let inputRows = recoveryTrendRows
+        if recoveryTrendLoadedKey == inputKey, !recoveryTrend.isEmpty {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("Recovery Trend", overline: "Heart-rate recovery · \(recoveryTrendCaption)",
                               trailing: recoveryTrend.count == 1
@@ -825,6 +867,15 @@ struct WorkoutsView: View {
                 }
             }
         }
+        // The transparent mount sits at the chart's actual position in ScreenScaffold's LazyVStack.
+        // Its task therefore starts only when the user scrolls near this section, rather than issuing
+        // dozens of narrow HR reads while Workouts is trying to paint its first screen.
+        Color.clear
+            .frame(height: 1)
+            .accessibilityHidden(true)
+            .task(id: inputKey) {
+                await loadRecoveryTrend(requestKey: inputKey, rows: inputRows)
+            }
     }
 
     private func recoveryLegend(_ label: LocalizedStringKey, color: Color) -> some View {

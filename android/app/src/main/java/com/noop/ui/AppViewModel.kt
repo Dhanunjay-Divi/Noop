@@ -119,6 +119,12 @@ internal object ActiveZoneUpgradeGate {
         completedRevision != CURRENT_REVISION
 }
 
+internal data class TodayRestCompositeCacheKey(
+    val dailyDataSignature: Int,
+    val activeStrapId: String,
+    val restDataVersion: Long,
+)
+
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
  * repository, re-publishes the BLE [LiveState], maintains a spike-filtered/smoothed
@@ -389,6 +395,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Repository-backed revisions also advance for background imports/scoring without an Activity owner. */
     val metricDataVersion: StateFlow<Long> = repository.metricDataVersion
     val ageMetricDataVersion: StateFlow<Long> = metricDataVersion
+    val restDataVersion: StateFlow<Long> = repository.restDataVersion
     val workoutDataVersion: StateFlow<Long> = repository.workoutDataVersion
     private var lastAgeMetricReconciliationTarget: AgeMetricReconciliationTarget? =
         NoopPrefs.of(appContext).let { prefs ->
@@ -652,6 +659,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * the screen's local state. `null` = never loaded this process. Pure load-bookkeeping; never drives UI.
      */
     var todayFooterLoadedSig: Int? = null
+    var todayFooterLoadedDeviceId: String? = null
 
     /**
      * #849: the last computed Today footer state, cached so a re-mount can RESTORE it without recomputing.
@@ -669,6 +677,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * loaded this process; the cached triple is restored into the screen's local state on first composition.
      */
     var todayCardsLoadedSig: Int? = null
+    var todayCardsLoadedDeviceId: String? = null
     var todayCardsLoadedProfileSig: String? = null
     var todayCardsLoadedAgeMetricVersion: Long? = null
     var todayStressCache: Double? = null
@@ -680,8 +689,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * compact day/value map across Today re-mounts so one Room read serves both outputs and a day swipe
      * performs only in-memory filtering.
      */
-    var todayRestCompositeLoadedSig: Int? = null
-    var todayRestCompositeCache: Map<String, Double> = emptyMap()
+    internal var todayRestCompositeLoadedKey: TodayRestCompositeCacheKey? = null
+    internal var todayRestCompositeCache: Map<String, Double> = emptyMap()
 
     /**
      * Recent daily metrics (newest last), backing the Today grid + illness watch.
@@ -2201,9 +2210,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (to <= from) return null
         val readFrom = maxOf(from, to - com.noop.analytics.HeartRateRecovery.eligibilityLookbackSeconds)
         val readTo = to + 5 * 60 + com.noop.analytics.HeartRateRecovery.measurementToleranceSeconds
-        val samples = runCatching {
+        val samples = try {
             repository.hrSamplesUnion(activeStrapId, readFrom, readTo, limit = 2_000)
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
         return com.noop.analytics.HeartRateRecovery.calculate(
             samples = samples,
             workoutStart = from,

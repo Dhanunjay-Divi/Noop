@@ -1,9 +1,21 @@
 package com.noop.ui
 
+import com.noop.analytics.DaytimeStress
+import com.noop.analytics.HrvFreqDomain
+import com.noop.analytics.StressIndex
 import com.noop.data.DailyMetric
+import com.noop.data.HrSample
+import com.noop.data.RrInterval
+import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -50,5 +62,107 @@ class StressModelTest {
         val model = StressModel.build(days, mapOf("2026-07-02" to 2.5))
         assertNotNull(model)
         assertEquals("the latest day's stored stress must win over a carry", 2.5, model!!.score, 0.001)
+    }
+
+    @Test
+    fun postQueryAnalysisPreservesAllThreeFormulaOutputs() = runTest {
+        val start = 1_780_300_800L // 2026-06-01 08:00 UTC
+        val hr = (0 until 900).map { offset ->
+            HrSample(deviceId = "test", ts = start + offset, bpm = 58 + (offset / 300) * 4)
+        }
+        val rr = (0 until 520).map { offset ->
+            RrInterval(
+                deviceId = "test",
+                ts = start + (offset * 82L / 100L),
+                rrMs = 770 + (offset % 9) * 8,
+            )
+        }
+
+        val readout = analyzeDaytimeStressOffMain(hr, rr, tzOffsetSeconds = 0)
+
+        assertEquals(DaytimeStress.analyze(hr, rr, 0), readout.daytime)
+        assertEquals(StressIndex.components(rr), readout.stressIndex)
+        assertEquals(HrvFreqDomain.freqDomain(rr), readout.freqHrv)
+    }
+
+    @Test
+    fun canceledAndSupersededRequestsCannotPublish() = runTest {
+        var publications = 0
+        val started = CompletableDeferred<Unit>()
+        val canceled = launch {
+            publishStressAnalysisIfCurrent(
+                load = {
+                    started.complete(Unit)
+                    CompletableDeferred<Int>().await()
+                },
+                isCurrent = { true },
+            ) { _: Int ->
+                publications += 1
+            }
+        }
+        started.await()
+        canceled.cancelAndJoin()
+        assertEquals(0, publications)
+
+        publishStressAnalysisIfCurrent(
+            load = { 7 },
+            isCurrent = { false },
+        ) {
+            publications += 1
+        }
+        assertEquals(0, publications)
+
+        publishStressAnalysisIfCurrent(
+            load = { 8 },
+            isCurrent = { true },
+        ) {
+            publications += 1
+        }
+        assertEquals(1, publications)
+    }
+
+    @Test
+    fun stressSourceUsesCpuDispatcherCancellationAndBoundedTiming() {
+        val source = stressSource()
+        val analysisStart = source.indexOf("internal suspend fun analyzeDaytimeStressOffMain(")
+        val analysisEnd = source.indexOf(
+            "private suspend fun analyzeDaytimeStressTimed(",
+            analysisStart,
+        )
+        assertTrue(analysisStart >= 0 && analysisEnd > analysisStart)
+
+        val analysis = source.substring(analysisStart, analysisEnd)
+        assertTrue(analysis.contains("dispatcher: CoroutineDispatcher = Dispatchers.Default"))
+        assertTrue(analysis.contains("withContext(dispatcher)"))
+        assertTrue(analysis.contains("currentCoroutineContext().ensureActive()"))
+        assertTrue(analysis.contains("DaytimeStress.analyze(hr, rr, tzOffsetSeconds)"))
+        assertTrue(analysis.contains("StressIndex.components(rr)"))
+        assertTrue(analysis.contains("HrvFreqDomain.freqDomain(rr)"))
+        assertFalse(analysis.contains("deviceId"))
+        assertFalse(analysis.contains("rrMs"))
+        assertFalse(analysis.contains("bpm"))
+
+        val timedStart = source.indexOf("private suspend fun analyzeDaytimeStressTimed(")
+        val timedEnd = source.indexOf("/**\n * Read TODAY", timedStart)
+        assertTrue(timedStart >= 0 && timedEnd > timedStart)
+        val timed = source.substring(timedStart, timedEnd)
+        assertTrue(timed.contains("\"stress.daytime_analysis\""))
+        assertTrue(timed.contains("catch (cancelled: CancellationException)"))
+        assertTrue(timed.contains("outcome = \"canceled\""))
+        assertTrue(timed.contains("outcome = \"failed\""))
+        assertTrue(timed.contains("throw cancelled"))
+        assertFalse(timed.contains("deviceId"))
+        assertFalse(timed.contains("rrMs"))
+        assertFalse(timed.contains("bpm"))
+    }
+
+    private fun stressSource(): String {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val file = listOf(
+            File(root, "src/main/java/com/noop/ui/StressScreen.kt"),
+            File(root, "app/src/main/java/com/noop/ui/StressScreen.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/StressScreen.kt"),
+        ).firstOrNull(File::isFile)
+        return checkNotNull(file) { "Could not locate StressScreen.kt from $root" }.readText()
     }
 }

@@ -2,14 +2,75 @@ import SwiftUI
 import Foundation
 import StrandDesign
 import StrandAnalytics
+import WhoopProtocol
 import WhoopStore
+
+private struct StressDaytimeTaskIdentity: Hashable {
+    let refreshSeq: Int
+    let deviceId: String
+}
+
+/// All values produced from one immutable HR/R-R snapshot. Keeping the three
+/// outputs together prevents a newer request from displaying a mixed result.
+struct StressDaytimeReadout: Equatable, Sendable {
+    let daytime: DaytimeStress.Result
+    let stressIndex: StressIndex.Components?
+    let freqHRV: HRVFreqDomain.Bands?
+}
+
+/// Runs synchronous CPU work on the cooperative global executor and links
+/// parent cancellation to the detached worker.
+enum StressBackgroundAnalysis {
+    static func run<Value: Sendable>(
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        let worker = Task.detached(priority: .utility) {
+            try operation()
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+}
+
+enum StressDaytimeAnalysis {
+    static func analyze(
+        hr: [HRSample],
+        rr: [RRInterval],
+        tzOffsetSeconds: Int
+    ) async throws -> StressDaytimeReadout {
+        try await StressBackgroundAnalysis.run {
+            try Task.checkCancellation()
+            let daytime = DaytimeStress.analyze(
+                hr: hr,
+                rr: rr,
+                tzOffsetSeconds: tzOffsetSeconds
+            )
+            try Task.checkCancellation()
+
+            // These additive readouts use the same immutable R-R snapshot and
+            // remain independent of the 0...3 daytime score.
+            let stressIndex = StressIndex.components(rr: rr)
+            try Task.checkCancellation()
+            let freqHRV = HRVFreqDomain.freqDomain(rr: rr)
+            try Task.checkCancellation()
+            return StressDaytimeReadout(
+                daytime: daytime,
+                stressIndex: stressIndex,
+                freqHRV: freqHRV
+            )
+        }
+    }
+}
 
 // MARK: - Daily autonomic load
 //
 // This screen presents NOOP's experimental, non-clinical 0–3 autonomic-load
 // estimate. It is derived locally from resting HR and HRV against strictly prior
 // personal days through `DailyAutonomicLoad`; it is not an emotional-stress
-// measurement, a diagnosis, or an attempt to reproduce WHOOP's proprietary score.
+// measurement, a diagnosis, or an attempt to reproduce another vendor's proprietary score.
 // Every historical point has its own causal baseline, so later data cannot rewrite it.
 
 struct StressView: View {
@@ -36,6 +97,9 @@ struct StressView: View {
     @State private var stressIndex: StressIndex.Components?
     /// Frequency-domain HRV bands (LF / HF / LF-HF / total power).
     @State private var freqHRV: HRVFreqDomain.Bands?
+    /// Monotonic request identity. A refresh or device change supersedes an older
+    /// analysis even if its CPU worker finishes after cooperative cancellation.
+    @State private var daytimeAnalysisGeneration: UInt64 = 0
 
     /// Cached StressModel + the input signature it was built from. Rebuilding the
     /// model is expensive (z-score derivation + per-day date parsing over the full
@@ -64,7 +128,12 @@ struct StressView: View {
         }
         .onAppear { rebuildModelIfNeeded() }
         .onChangeCompat(of: repo.days) { _ in rebuildModelIfNeeded() }
-        .task(id: repo.refreshSeq) { await load() }
+        .task(id: StressDaytimeTaskIdentity(
+            refreshSeq: repo.refreshSeq,
+            deviceId: repo.deviceId
+        )) {
+            await load()
+        }
     }
 
     private func load() async {
@@ -77,6 +146,9 @@ struct StressView: View {
     /// window [midnight, now]; the helper buckets it into waking hours and reuses the
     /// daily score's math, so this is the same proxy at a finer grain — never a new score.
     private func loadDaytime() async {
+        daytimeAnalysisGeneration &+= 1
+        let requestGeneration = daytimeAnalysisGeneration
+        let requestDeviceId = repo.deviceId
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: Date())
         let from = Int(startOfDay.timeIntervalSince1970)
@@ -84,6 +156,14 @@ struct StressView: View {
         let tz = TimeZone.current.secondsFromGMT(for: Date())
 
         let hr = await repo.hrSamples(from: from, to: to, limit: 200_000)
+        guard Self.shouldPublishDaytimeAnalysis(
+            requestGeneration: requestGeneration,
+            currentGeneration: daytimeAnalysisGeneration,
+            requestDeviceId: requestDeviceId,
+            currentDeviceId: repo.deviceId,
+            isCancelled: Task.isCancelled
+        ) else { return }
+
         // Too few HR samples: empty the timeline AND clear the advanced readouts in lockstep. Without this
         // reset a later refresh that hits this path would leave the Advanced HRV card showing stale values
         // next to an empty timeline (the readouts are only recomputed past this guard).
@@ -93,17 +173,62 @@ struct StressView: View {
             freqHRV = nil
             return
         }
-        let rr = (try? await repo.storeHandle()?.rrIntervals(
-            deviceId: repo.deviceId, from: from, to: to, limit: 200_000)) ?? []
+        let rr = await repo.rrIntervals(from: from, to: to, limit: 200_000)
+        guard Self.shouldPublishDaytimeAnalysis(
+            requestGeneration: requestGeneration,
+            currentGeneration: daytimeAnalysisGeneration,
+            requestDeviceId: requestDeviceId,
+            currentDeviceId: repo.deviceId,
+            isCancelled: Task.isCancelled
+        ) else { return }
 
-        daytime = DaytimeStress.analyze(hr: hr, rr: rr, tzOffsetSeconds: tz)
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("stress.daytime_analysis")
+        var diagnosticOutcome = "completed"
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: diagnosticOutcome
+            )
+        }
 
-        // ADDITIVE advanced readouts, computed on-demand from the SAME `rr` (no extra fetch, no
-        // DB / schema change, and no effect on the 0..3 score above). Each engine returns nil when
-        // its own gate is not met (Baevsky needs >= 20 clean beats; freq-HRV needs >= 60 s span),
-        // in which case its row is simply hidden.
-        stressIndex = StressIndex.components(rr: rr)
-        freqHRV = HRVFreqDomain.freqDomain(rr: rr)
+        do {
+            let readout = try await StressDaytimeAnalysis.analyze(
+                hr: hr,
+                rr: rr,
+                tzOffsetSeconds: tz
+            )
+            guard Self.shouldPublishDaytimeAnalysis(
+                requestGeneration: requestGeneration,
+                currentGeneration: daytimeAnalysisGeneration,
+                requestDeviceId: requestDeviceId,
+                currentDeviceId: repo.deviceId,
+                isCancelled: Task.isCancelled
+            ) else {
+                diagnosticOutcome = Task.isCancelled ? "canceled" : "superseded"
+                return
+            }
+            daytime = readout.daytime
+            stressIndex = readout.stressIndex
+            freqHRV = readout.freqHRV
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+        } catch {
+            diagnosticOutcome = "failed"
+        }
+    }
+
+    /// Pure publication gate shared with focused tests. It prevents a canceled task,
+    /// a newer refresh, or a device switch from publishing an obsolete analysis.
+    static func shouldPublishDaytimeAnalysis(
+        requestGeneration: UInt64,
+        currentGeneration: UInt64,
+        requestDeviceId: String,
+        currentDeviceId: String,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled
+            && requestGeneration == currentGeneration
+            && requestDeviceId == currentDeviceId
     }
 
     /// Recompute the cached `StressModel` only when daily inputs

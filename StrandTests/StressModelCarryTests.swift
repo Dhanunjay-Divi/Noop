@@ -1,5 +1,6 @@
 import XCTest
 import StrandAnalytics
+import WhoopProtocol
 import WhoopStore
 @testable import Strand
 
@@ -131,6 +132,113 @@ final class StressModelCarryTests: XCTestCase {
         XCTAssertNil(map["legacy-import-only"],
                      "Report input must come from the causal source series, never an opaque stored stress point")
         XCTAssertTrue(map.values.allSatisfy { (0...3).contains($0) })
+    }
+
+    func testDaytimeAnalysisPreservesAllThreeFormulaOutputs() async throws {
+        let start = 1_780_300_800 // 2026-06-01 08:00 UTC
+        let hr = (0..<900).map { offset in
+            HRSample(ts: start + offset, bpm: 58 + (offset / 300) * 4)
+        }
+        let rr = (0..<520).map { offset in
+            RRInterval(
+                ts: start + Int(Double(offset) * 0.82),
+                rrMs: 770 + (offset % 9) * 8
+            )
+        }
+
+        let readout = try await StressDaytimeAnalysis.analyze(
+            hr: hr,
+            rr: rr,
+            tzOffsetSeconds: 0
+        )
+
+        XCTAssertEqual(
+            readout.daytime,
+            DaytimeStress.analyze(hr: hr, rr: rr, tzOffsetSeconds: 0)
+        )
+        XCTAssertEqual(readout.stressIndex, StressIndex.components(rr: rr))
+        XCTAssertEqual(readout.freqHRV, HRVFreqDomain.freqDomain(rr: rr))
+    }
+
+    @MainActor
+    func testStressBackgroundAnalysisLeavesMainExecution() async throws {
+        let ranOnMainThread = try await StressBackgroundAnalysis.run {
+            Thread.isMainThread
+        }
+        XCTAssertFalse(ranOnMainThread)
+    }
+
+    func testStressBackgroundAnalysisPropagatesCancellation() async {
+        let started = AsyncStream<Void>.makeStream()
+        let analysis = Task {
+            try await StressBackgroundAnalysis.run { () throws -> Int in
+                started.continuation.yield()
+                while !Task.isCancelled {
+                    Thread.sleep(forTimeInterval: 0.001)
+                }
+                throw CancellationError()
+            }
+        }
+
+        var startedIterator = started.stream.makeAsyncIterator()
+        _ = await startedIterator.next()
+        analysis.cancel()
+        do {
+            _ = try await analysis.value
+            XCTFail("A canceled stress analysis must not complete normally")
+        } catch is CancellationError {
+            // Expected: parent cancellation reaches the detached CPU worker.
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        started.continuation.finish()
+    }
+
+    func testDaytimePublicationRejectsCanceledStaleAndCrossDeviceResults() {
+        XCTAssertTrue(StressView.shouldPublishDaytimeAnalysis(
+            requestGeneration: 4,
+            currentGeneration: 4,
+            requestDeviceId: "band-a",
+            currentDeviceId: "band-a",
+            isCancelled: false
+        ))
+        XCTAssertFalse(StressView.shouldPublishDaytimeAnalysis(
+            requestGeneration: 3,
+            currentGeneration: 4,
+            requestDeviceId: "band-a",
+            currentDeviceId: "band-a",
+            isCancelled: false
+        ))
+        XCTAssertFalse(StressView.shouldPublishDaytimeAnalysis(
+            requestGeneration: 4,
+            currentGeneration: 4,
+            requestDeviceId: "band-a",
+            currentDeviceId: "band-b",
+            isCancelled: false
+        ))
+        XCTAssertFalse(StressView.shouldPublishDaytimeAnalysis(
+            requestGeneration: 4,
+            currentGeneration: 4,
+            requestDeviceId: "band-a",
+            currentDeviceId: "band-a",
+            isCancelled: true
+        ))
+    }
+
+    func testStressSourceKeepsAnalysisDetachedTimedAndPublicationGuarded() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Strand/Screens/StressView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("Task.detached(priority: .utility)"))
+        XCTAssertTrue(source.contains("withTaskCancellationHandler"))
+        XCTAssertTrue(source.contains("\"stress.daytime_analysis\""))
+        XCTAssertTrue(source.contains("requestGeneration == currentGeneration"))
+        XCTAssertTrue(source.contains("requestDeviceId == currentDeviceId"))
     }
 
     private func variedDays(startDay: Int, count: Int, month: Int) -> [DailyMetric] {

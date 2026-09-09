@@ -376,6 +376,12 @@ data class SleepSession(
     }
 }
 
+/** Narrow projection for batched Sleep-screen motion reads. */
+data class SleepMotionJsonRow(
+    val startTs: Long,
+    val motionJSON: String?,
+)
+
 /**
  * Generic long-format metric store. Swift `metricSeries` (v9).
  * Natural key (deviceId, day, key); `value` is always a REAL. The secondary index

@@ -138,6 +138,10 @@ import androidx.compose.ui.zIndex
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -245,6 +249,38 @@ private const val CARD_CALIBRATING = "calibratingBaseline"
 // a small × tucks it into Updates (restorable), so it never sits permanently between the header and the
 // hero throwing off the compact liquid look. Local-only id (iOS has no twin), matching the dismiss plumbing.
 private const val CARD_CARRIED_SLEEP = "carriedSleep"
+
+internal suspend fun <T> loadTodayRestWithRetry(
+    maxAttempts: Int = 3,
+    pause: suspend (Long) -> Unit = { delay(it) },
+    load: suspend () -> T,
+): T {
+    require(maxAttempts > 0)
+    var lastFailure: Throwable? = null
+    repeat(maxAttempts) { attempt ->
+        currentCoroutineContext().ensureActive()
+        try {
+            val result = load()
+            currentCoroutineContext().ensureActive()
+            return result
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            lastFailure = failure
+            if (attempt + 1 < maxAttempts) {
+                pause(if (attempt == 0) 150L else 500L)
+            }
+        }
+    }
+    throw checkNotNull(lastFailure)
+}
+
+internal fun todayRestResultBucket(count: Int): String = when {
+    count <= 0 -> "empty"
+    count <= 30 -> "up_to_30"
+    count <= 365 -> "31_to_365"
+    else -> "over_365"
+}
 
 /** #860 item 1: process-lifetime guard for the launch snap-to-today. `selectedDayOffset` is rememberSaveable
  *  so a tab-away keeps the user's chosen day (#614/#739). The same persistence, however, rides the
@@ -413,6 +449,7 @@ fun TodayScreen(
     val healthSignals by viewModel.v5Signals.collectAsStateWithLifecycle()
     val illnessWatchEnabled by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
+    val activeStrapId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
     // The in-flight manual workout (single source of truth, survives an app kill via rehydration), so the
     // indicator card auto-appears/clears off this alone. Null↔non-null + the start drive the card; the
@@ -450,7 +487,13 @@ fun TodayScreen(
     }
     // #849: seed from the ViewModel cache so a re-mount (tab-return / post-import) restores the last footer
     // immediately instead of flashing empty while the heavy reload is (now) skipped for unchanged data.
-    var footer by remember { mutableStateOf(viewModel.todayFooterCache ?: TodayFooterState()) }
+    var footer by remember(activeStrapId) {
+        mutableStateOf(
+            viewModel.todayFooterCache.takeIf {
+                viewModel.todayFooterLoadedDeviceId == activeStrapId
+            } ?: TodayFooterState(),
+        )
+    }
     // rememberSaveable (not plain remember): the bottom-tab NavHost (AppRoot) navigates with
     // saveState/restoreState, which only restores rememberSaveable-backed state. With plain remember a
     // tab-away wiped the chosen day back to 0, so on return the dashboard "shifted" off the day the user was
@@ -633,6 +676,7 @@ fun TodayScreen(
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
     val ageMetricDataVersion by viewModel.ageMetricDataVersion.collectAsStateWithLifecycle()
+    val restDataVersion by viewModel.restDataVersion.collectAsStateWithLifecycle()
     val workoutDataVersion by viewModel.workoutDataVersion.collectAsStateWithLifecycle()
 
     // Editable Key-Metrics layout (#251), an ordered list of the pinned tiles, persisted display-only.
@@ -699,27 +743,36 @@ fun TodayScreen(
     // #849: seed from the ViewModel cache so a re-mount restores the pinned-card numbers instead of flashing
     // dashes while the heavy history-wide read is (now) skipped for unchanged data.
     val cardsSig = days.hashCode()
-    var stressToday by remember { mutableStateOf(viewModel.todayStressCache) }
-    var fitnessAgeToday by remember(ageMetricState) {
+    var stressToday by remember(activeStrapId) {
+        mutableStateOf(
+            viewModel.todayStressCache.takeIf {
+                viewModel.todayCardsLoadedDeviceId == activeStrapId
+            },
+        )
+    }
+    var fitnessAgeToday by remember(ageMetricState, activeStrapId) {
         mutableStateOf(viewModel.todayFitnessAgeCache.takeIf {
             viewModel.todayCardsLoadedSig == cardsSig &&
+                viewModel.todayCardsLoadedDeviceId == activeStrapId &&
                 viewModel.todayCardsLoadedProfileSig == ageMetricState &&
                 viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         })
     }
-    var vitalityToday by remember(ageMetricState) {
+    var vitalityToday by remember(ageMetricState, activeStrapId) {
         mutableStateOf(viewModel.todayVitalityCache.takeIf {
             viewModel.todayCardsLoadedSig == cardsSig &&
+                viewModel.todayCardsLoadedDeviceId == activeStrapId &&
                 viewModel.todayCardsLoadedProfileSig == ageMetricState &&
                 viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         })
     }
-    LaunchedEffect(days, ageMetricProfileVersion, ageMetricDataVersion) {
+    LaunchedEffect(days, activeStrapId, ageMetricProfileVersion, ageMetricDataVersion) {
         // #849 re-mount guard: skip the whole-history scan when `days` is content-identical to the last load
         // (data class hashCode is a stable structural signature). The marker + cached values live on the
         // long-lived ViewModel, so a tab-return / post-import re-mount restores the numbers without re-reading.
         val sig = cardsSig
         if (viewModel.todayCardsLoadedSig == sig &&
+            viewModel.todayCardsLoadedDeviceId == activeStrapId &&
             viewModel.todayCardsLoadedProfileSig == ageMetricState &&
             viewModel.todayCardsLoadedAgeMetricVersion == ageMetricDataVersion
         ) return@LaunchedEffect
@@ -744,19 +797,19 @@ fun TodayScreen(
             StressModel.build(days, stored)?.score
         }.getOrNull()
         val newFitnessAge = runCatching {
-            viewModel.repo.latestMetricComputedUnion(viewModel.activeStrapId, "fitness_age")?.value
+            viewModel.repo.latestMetricComputedUnion(activeStrapId, "fitness_age")?.value
         }.getOrNull()
         val newVitality = runCatching {
-            viewModel.repo.latestMetricComputedUnion(viewModel.activeStrapId, "vitality")?.value
+            viewModel.repo.latestMetricComputedUnion(activeStrapId, "vitality")?.value
         }.getOrNull()
         val fitnessProfile = runCatching {
             viewModel.repo.latestMetricComputedUnion(
-                viewModel.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+                activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
             )?.value
         }.getOrNull()
         val vitalityProfile = runCatching {
             viewModel.repo.latestMetricComputedUnion(
-                viewModel.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+                activeStrapId, AgeMetricProfile.VITALITY_KEY,
             )?.value
         }.getOrNull()
         fitnessAgeToday = newFitnessAge.takeIf { profileStore.acceptsFitnessAge(fitnessProfile) }
@@ -767,6 +820,7 @@ fun TodayScreen(
         viewModel.todayFitnessAgeCache = fitnessAgeToday
         viewModel.todayVitalityCache = vitalityToday
         viewModel.todayCardsLoadedSig = sig
+        viewModel.todayCardsLoadedDeviceId = activeStrapId
         viewModel.todayCardsLoadedProfileSig = ageMetricState
         viewModel.todayCardsLoadedAgeMetricVersion = ageMetricDataVersion
     }
@@ -823,10 +877,10 @@ fun TodayScreen(
     // Keyed by day; `caloriesByDay` feeds the SELECTED-day value the dashboard card + Key-Metrics tile both
     // read — day-scoped like every other card, and like steps.
     var caloriesByDay by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
-    LaunchedEffect(days) {
+    LaunchedEffect(days, activeStrapId) {
         caloriesByDay = runCatching {
             val onDevice = viewModel.repo.resolvedSeries("active_kcal", "my-whoop", "0000-00-00", "9999-99-99",
-                strapDeviceId = viewModel.activeStrapId).points.associate { it.day to it.value }
+                strapDeviceId = activeStrapId).points.associate { it.day to it.value }
             val imported = LinkedHashMap<String, Double>()
             for (r in viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
                 viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
@@ -1037,10 +1091,10 @@ fun TodayScreen(
     // the Explore "steps_est" metric. Null until loaded / no estimate for the day. (#150)
     var stepsEstForDay by remember { mutableStateOf<Int?>(null) }
     var stepsEstByDay by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    LaunchedEffect(days, selectedDayKey) {
+    LaunchedEffect(days, selectedDayKey, activeStrapId) {
         val byDay = runCatching {
             viewModel.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
-                strapDeviceId = viewModel.activeStrapId)
+                strapDeviceId = activeStrapId)
                 .values.associate { it.first to it.second }
         }.getOrDefault(emptyMap())
         stepsEstByDay = byDay.mapValues { Math.round(it.value).toInt() }
@@ -1054,7 +1108,7 @@ fun TodayScreen(
     // the tile shows NO icon. Mirrors the iOS Today step-activity read exactly. Best-effort: a read hiccup just
     // drops the optional icon.
     var stepActivityClassForDay by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(days, selectedDay, today) {
+    LaunchedEffect(days, selectedDay, today, activeStrapId) {
         val zone = ZoneId.systemDefault()
         val start = selectedDay.atStartOfDay(zone).toEpochSecond()
         val nextStart = selectedDay.plusDays(1).atStartOfDay(zone).toEpochSecond()
@@ -1065,33 +1119,70 @@ fun TodayScreen(
         // own fresh id, so a pinned "my-whoop" read dropped the tile icon for a re-added strap. Single-WHOOP ⇒
         // one id ⇒ byte-identical read. Mirrors the iOS Repository.stepActivityClassLatest union.
         stepActivityClassForDay = runCatching {
-            viewModel.repo.stepActivityClassLatestUnion(viewModel.activeStrapId, start, end)
+            viewModel.repo.stepActivityClassLatestUnion(activeStrapId, start, end)
         }.getOrNull()
     }
 
     // Rest number + sparkline share one resolved history read. The day/value map lives on the ViewModel so
     // a tab return restores it without touching Room, and changing the selected day only filters memory.
-    val restCompositeSig = 31 * days.hashCode() + viewModel.activeStrapId.hashCode()
-    var restCompositeByDay by remember(restCompositeSig) {
+    val restCompositeKey = TodayRestCompositeCacheKey(
+        dailyDataSignature = days.hashCode(),
+        activeStrapId = activeStrapId,
+        restDataVersion = restDataVersion,
+    )
+    var restCompositeByDay by remember(restCompositeKey) {
         mutableStateOf(
             viewModel.todayRestCompositeCache.takeIf {
-                viewModel.todayRestCompositeLoadedSig == restCompositeSig
+                viewModel.todayRestCompositeLoadedKey?.activeStrapId ==
+                    restCompositeKey.activeStrapId
             } ?: emptyMap(),
         )
     }
-    LaunchedEffect(days, viewModel.activeStrapId) {
-        if (viewModel.todayRestCompositeLoadedSig == restCompositeSig) {
+    LaunchedEffect(days, activeStrapId, restDataVersion) {
+        if (viewModel.todayRestCompositeLoadedKey == restCompositeKey) {
             restCompositeByDay = viewModel.todayRestCompositeCache
+            com.noop.AppDiagnosticsRecorder.record(
+                "today.rest_composite_load",
+                fields = mapOf(
+                    "outcome" to "cache_restore",
+                    "result_bucket" to todayRestResultBucket(restCompositeByDay.size),
+                ),
+            )
             return@LaunchedEffect
         }
-        val loaded = runCatching {
-            viewModel.repo.resolvedSeries("sleep_performance", "my-whoop", "0000-00-00", "9999-99-99",
-                strapDeviceId = viewModel.activeStrapId)
-                .values.associate { it.first to it.second }
-        }.getOrDefault(emptyMap())
-        restCompositeByDay = loaded
-        viewModel.todayRestCompositeCache = loaded
-        viewModel.todayRestCompositeLoadedSig = restCompositeSig
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+            "today.rest_composite_load",
+        )
+        var diagnosticOutcome = "cancelled"
+        var diagnosticFields = emptyMap<String, String>()
+        try {
+            val loaded = loadTodayRestWithRetry {
+                viewModel.repo.resolvedSeries(
+                    "sleep_performance",
+                    "my-whoop",
+                    "0000-00-00",
+                    "9999-99-99",
+                    strapDeviceId = activeStrapId,
+                ).values.associate { it.first to it.second }
+            }
+            restCompositeByDay = loaded
+            viewModel.todayRestCompositeCache = loaded
+            viewModel.todayRestCompositeLoadedKey = restCompositeKey
+            diagnosticOutcome = "success"
+            diagnosticFields = mapOf(
+                "result_bucket" to todayRestResultBucket(loaded.size),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            diagnosticOutcome = "failed"
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = diagnosticOutcome,
+                fields = diagnosticFields,
+            )
+        }
     }
 
     // #977: the tail fallback is freshness-gated, so an old scored night cannot pose as today's Rest.
@@ -1125,7 +1216,7 @@ fun TodayScreen(
     } else {
         emptyMap()
     }
-    LaunchedEffect(days, selectedDayKey, keyMetricsWindowDays, viewModel.activeStrapId) {
+    LaunchedEffect(days, selectedDayKey, keyMetricsWindowDays, activeStrapId) {
         val anchor = runCatching { LocalDate.parse(selectedDayKey) }.getOrDefault(selectedDay)
         val lookbackDays = maxOf(30, keyMetricsWindowDays)
         val values = runCatching {
@@ -1134,7 +1225,7 @@ fun TodayScreen(
                 preferredSource = "my-whoop",
                 from = anchor.minusDays((lookbackDays - 1).toLong()).toString(),
                 to = anchor.toString(),
-                strapDeviceId = viewModel.activeStrapId,
+                strapDeviceId = activeStrapId,
             ).points
                 .filter { it.value.isFinite() && it.value > 0.0 && it.value <= 100.0 }
                 .associate { it.day to it.value }
@@ -1150,12 +1241,12 @@ fun TodayScreen(
     // that day's scores rather than making a blanket day-level claim. Mirrors the Swift Today lane's
     // `provenanceByMetric` resolution exactly (the winner is the last resolved point on selectedDayKey).
     var provenanceByMetric by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    LaunchedEffect(days, selectedDayKey, viewModel.activeStrapId) {
+    LaunchedEffect(days, selectedDayKey, activeStrapId) {
         val resolved = mutableMapOf<String, String>()
         for (key in listOf("recovery", "strain", "sleep_performance")) {
             val win = runCatching {
                 viewModel.repo.resolvedSeries(key, "my-whoop", selectedDayKey, selectedDayKey,
-                    strapDeviceId = viewModel.activeStrapId)
+                    strapDeviceId = activeStrapId)
                     .points.lastOrNull { it.day == selectedDayKey }?.source
             }.getOrNull()
             if (win != null) resolved[key] = win
@@ -1173,7 +1264,7 @@ fun TodayScreen(
     // fabricated number. Any past day → null (the gauge uses the stored strain). Keyed on the same inputs
     // as the day-scoped loads so it reloads as the selector moves and as a sync/import grows the HR window.
     var liveTodayStrain by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(days, selectedDayKey, selectedDayOffset) {
+    LaunchedEffect(days, selectedDayKey, selectedDayOffset, activeStrapId) {
         liveTodayStrain = if (selectedDayOffset == 0) {
             val zone = ZoneId.systemDefault()
             val start = selectedDay.atStartOfDay(zone).toEpochSecond()
@@ -1182,7 +1273,7 @@ fun TodayScreen(
             // re-added through the device manager banks its live HR under its own fresh id, so a pinned
             // "my-whoop" read returned nothing and Effort integrated to 0 off an empty series. Single-WHOOP
             // install resolves to "my-whoop" ⇒ one id ⇒ byte-identical read.
-            val todayHr = runCatching { viewModel.repo.hrSamplesUnion(viewModel.activeStrapId, start, now) }
+            val todayHr = runCatching { viewModel.repo.hrSamplesUnion(activeStrapId, start, now) }
                 .getOrDefault(emptyList())
             // effMaxHR resolution matches AnalyticsEngine: manual HR-max override first, else Tanaka from age.
             val effMaxHR = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble()
@@ -1301,14 +1392,14 @@ fun TodayScreen(
         }
     }
     var carriedRecoverySource by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(lastScoredRecoveryDay?.day, viewModel.activeStrapId) {
+    LaunchedEffect(lastScoredRecoveryDay?.day, activeStrapId) {
         val carriedDay = lastScoredRecoveryDay?.day
         carriedRecoverySource = if (carriedDay == null) {
             null
         } else {
             runCatching {
                 viewModel.repo.resolvedSeries("recovery", "my-whoop", carriedDay, carriedDay,
-                    strapDeviceId = viewModel.activeStrapId)
+                    strapDeviceId = activeStrapId)
                     .points.lastOrNull { it.day == carriedDay }
                     ?.source
             }.getOrNull()
@@ -1333,12 +1424,18 @@ fun TodayScreen(
 
     // One honest card-level badge, matching LiquidTodayView: identical winners collapse to one label;
     // mixed winners show at most two sources in Charge / Effort / Rest order so the pill stays compact.
-    val heroSourceLabel = remember(provenanceByMetric, carriedRecoverySource, displayMetric?.recovery, lastScoredCharge, viewModel.activeStrapId) {
+    val heroSourceLabel = remember(
+        provenanceByMetric,
+        carriedRecoverySource,
+        displayMetric?.recovery,
+        lastScoredCharge,
+        activeStrapId,
+    ) {
         scoreHeroSourceLabel(
             provenanceByMetric = provenanceByMetric,
             carriedRecoverySource = carriedRecoverySource,
             usesCarriedRecovery = displayMetric?.recovery == null && lastScoredCharge != null,
-            deviceId = viewModel.activeStrapId,
+            deviceId = activeStrapId,
         )
     }
 
@@ -1349,7 +1446,7 @@ fun TodayScreen(
         resolvedSpo2ByDay,
     )
 
-    LaunchedEffect(days, workoutDataVersion) {
+    LaunchedEffect(days, activeStrapId, workoutDataVersion) {
         // #849: this footer pass is the heavy one. It derives HR per imported workout from raw strap samples
         // (fillWorkoutHrFromStrap = potentially hundreds of raw-HR reads) and counts every workout / Apple /
         // Health-Connect row across ALL history. A bare Today re-mount (tab-away + return, or an Apple-Health
@@ -1368,14 +1465,16 @@ fun TodayScreen(
             .minusDays(13)
             .atStartOfDay(ZoneId.systemDefault())
             .toEpochSecond()
-        val recentUnion = viewModel.repo.workoutsAllSources(viewModel.deviceId, recentCutoff, now)
+        val recentUnion = viewModel.repo.workoutsAllSources(activeStrapId, recentCutoff, now)
             .sortedByDescending { it.startTs }
         val sig = 31 * days.hashCode() + recentUnion.hashCode()
-        if (viewModel.todayFooterLoadedSig == sig) return@LaunchedEffect
+        if (viewModel.todayFooterLoadedSig == sig &&
+            viewModel.todayFooterLoadedDeviceId == activeStrapId
+        ) return@LaunchedEffect
         // Union of the active strap id + legacy "my-whoop" (#814), NOT the literal id alone: after a
         // re-pair the fresh recordings live under "whoop-<id>", and a pinned read undercounted them
         // in the Whoop pill exactly like the feed dropped them from "Latest Workouts".
-        val whoopWorkouts = viewModel.repo.workoutsUnion(viewModel.deviceId, 0L, now)
+        val whoopWorkouts = viewModel.repo.workoutsUnion(activeStrapId, 0L, now)
         // Apple Health and Health Connect are separate sources (since #34), keep them separate in the
         // provenance footer too, so Health Connect data isn't mislabelled under the "Apple Health" pill
         // (issue #53). The recent-workouts list below still unions all sources for a combined feed.
@@ -1399,6 +1498,7 @@ fun TodayScreen(
         // and short-circuits the heavy reload above.
         viewModel.todayFooterCache = footer
         viewModel.todayFooterLoadedSig = sig
+        viewModel.todayFooterLoadedDeviceId = activeStrapId
     }
 
     // #817 - horizontal swipe to change day, alongside the header chevrons. `detectHorizontalDragGestures`

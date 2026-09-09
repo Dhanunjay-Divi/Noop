@@ -625,6 +625,16 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT motionJSON FROM sleepSession WHERE deviceId = :deviceId AND startTs = :sessionStart")
     suspend fun sessionMotionJson(deviceId: String, sessionStart: Long): String?
 
+    /** Batched twin of [sessionMotionJson]. The repository chunks the IN list below SQLite's bind cap. */
+    @Query(
+        "SELECT startTs, motionJSON FROM sleepSession " +
+            "WHERE deviceId = :deviceId AND startTs IN (:sessionStarts) AND motionJSON IS NOT NULL"
+    )
+    suspend fun sessionMotionRows(
+        deviceId: String,
+        sessionStarts: List<Long>,
+    ): List<SleepMotionJsonRow>
+
     /**
      * v18 (H2 persist half): write the decoded v18 band sleep_state per epoch (compact JSON int array) for
      * one session. Keyed by (deviceId, startTs). `null` clears the column. Port of iOS

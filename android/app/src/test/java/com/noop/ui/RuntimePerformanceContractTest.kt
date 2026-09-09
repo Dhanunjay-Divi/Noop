@@ -112,15 +112,33 @@ class RuntimePerformanceContractTest {
     @Test
     fun todayUsesOneCachedRestHistoryForTheNumberAndSparkline() {
         val today = source("com/noop/ui/TodayScreen.kt")
-        val start = today.indexOf("val restCompositeSig =")
+        val start = today.indexOf("val restCompositeKey =")
         val end = today.indexOf("// Calibrated SpO2", start)
         assertTrue(start >= 0 && end > start)
 
         val restBlock = today.substring(start, end)
-        assertEquals(1, Regex("""resolvedSeries\("sleep_performance"""").findAll(restBlock).count())
-        assertTrue(restBlock.contains("viewModel.todayRestCompositeLoadedSig"))
+        assertEquals(
+            1,
+            Regex("""resolvedSeries\(\s*"sleep_performance"""")
+                .findAll(restBlock)
+                .count(),
+        )
+        assertTrue(restBlock.contains("restDataVersion = restDataVersion"))
+        assertTrue(restBlock.contains("LaunchedEffect(days, activeStrapId, restDataVersion)"))
+        assertTrue(restBlock.contains("viewModel.todayRestCompositeLoadedKey"))
+        assertTrue(restBlock.contains("loadTodayRestWithRetry"))
+        assertTrue(restBlock.contains("catch (cancelled: CancellationException)"))
+        assertTrue(restBlock.contains("AppDiagnosticsRecorder.beginOperation"))
+        assertTrue(restBlock.contains("AppDiagnosticsRecorder.endOperation"))
+        assertTrue(restBlock.contains("\"result_bucket\""))
+        assertFalse(restBlock.contains("getOrDefault(emptyMap())"))
+        assertTrue(restBlock.contains("\"today.rest_composite_load\""))
         assertTrue(restBlock.contains("remember(restCompositeByDay, selectedDayKey, selectedDayOffset)"))
         assertTrue(restBlock.contains("remember(restCompositeByDay, selectedDay, keyMetricsWindowDays)"))
+
+        assertTrue(today.contains("viewModel.selectedDeviceId.collectAsStateWithLifecycle()"))
+        assertTrue(today.contains("viewModel.todayCardsLoadedDeviceId == activeStrapId"))
+        assertTrue(today.contains("viewModel.todayFooterLoadedDeviceId == activeStrapId"))
     }
 
     private fun source(relative: String): String {

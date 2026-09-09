@@ -42,56 +42,68 @@ struct HealthView: View {
                 HealthFirstRunContent()
             } else {
                 // History present: `live` is irrelevant to the layout choice, so the parent renders the
-                // full section stack directly without observing the HR stream.
-                HealthSectionsStack()
+                // independently lazy rows directly without observing the HR stream.
+                ForEach(HealthMonitorSection.allCases) { section in
+                    HealthMonitorSectionRow(section: section)
+                }
             }
         }
     }
 }
 
-// MARK: - Content stacks
+// MARK: - Lazy health section rows
 
-/// The full Health section stack (live HR hero + the static vitals/age/skin-temp sections). Each section
-/// is its own leaf owning exactly what it needs, so only the `HeartRateSection` hero re-renders on a ~1 Hz
-/// HR tick — the static sections depend on `repo`/`profile`/`model` snapshots only. Shared by the
-/// history-present path and the first-run live path so the stack is defined once.
-private struct HealthSectionsStack: View {
+/// Stable visual order for the Health monitor. `ForEach` hands each case to the scaffold's
+/// `LazyVStack` as an independent row, so off-screen query-owning sections are not mounted together.
+enum HealthMonitorSection: CaseIterable, Identifiable {
+    case syncStatus
+    case heartRate
+    case vitals
+    case timeline
+    case fitnessAge
+    case vitality
+    case recoveryContributors
+    case bodyComposition
+    case biomarkerTrends
+    case skinTemperature
+    case hubLinks
+
+    var id: Self { self }
+}
+
+private struct HealthMonitorSectionRow: View {
+    let section: HealthMonitorSection
+
     var body: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-            // Manual "Sync now" + honest sync status (#364). Its own view so the ~1Hz HR stream
-            // doesn't re-render it; depends on `live` (connection/backfill state) + `model`.
+        content
+            // ScreenScaffold contributes 20pt between rows. The prior section stack used the
+            // canonical 24pt section gap, so preserve that rhythm without nesting another stack.
+            .padding(.bottom, section == .hubLinks ? 0 : NoopMetrics.space1)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch section {
+        case .syncStatus:
             SyncStatusSection()
-            // The live HR section is its own view: it owns `live`/`profile`,
-            // so the ~1Hz HR stream re-renders only this subtree — the static
-            // vitals grid below does not re-render on each HR tick.
+        case .heartRate:
             HeartRateSection()
-            // Six useful headline readings. Raw optical ADC stays in diagnostics instead of
-            // masquerading as a calibrated health vital.
+        case .vitals:
             VitalsSection()
-            // Factual recorded sleep/workout chronology. Wear gaps remain gaps.
+        case .timeline:
             HealthTimelineSection()
-            // Fitness Age (weekly, computed by IntelligenceEngine and read back from the
-            // "fitness_age" metricSeries). Its own view depending only on `repo`/`profile`,
-            // so the live HR stream never re-renders it.
+        case .fitnessAge:
             FitnessAgeSection()
-            // Vitality / Wellness Age (weekly experimental lifestyle composite). Its own view depends
-            // only on repo/profile.
+        case .vitality:
             VitalitySection()
-            // Screen-5 recovery detail: the CONTRIBUTORS to today's recovery as
-            // labelled progress bars (HRV / Resting HR / Sleep / Respiratory), each
-            // scored against the on-device baseline. Depends only on `repo`.
+        case .recoveryContributors:
             RecoveryContributorsSection()
-            // Whole-body measurements only: weight, BMI, body fat, lean mass and the
-            // user's optional target. NOOP never invents segmental limb distribution.
+        case .bodyComposition:
             BodyCompositionSection()
-            // Measured body-composition and cardio history, separate from age-shaped estimates.
+        case .biomarkerTrends:
             BiomarkerTrendsSection()
-            // v5 skin-temperature suite: the illness "heads-up", body clock, and (opt-in) cycle
-            // awareness, each driven by a pure StrandAnalytics engine result the analytics pass
-            // computed and AppModel publishes. Its own view depending on `model` + `repo`.
+        case .skinTemperature:
             SkinTempSection()
-            // v5 deep-links: the records logbook + the multi-device fused record, reachable
-            // from their honest Health home as drill-in rows (not their own destinations).
+        case .hubLinks:
             HealthHubLinksSection()
         }
     }
@@ -115,24 +127,29 @@ private struct HealthFirstRunContent: View {
         return nil
     }
     private var hasLiveHR: Bool { displayHR != nil }
+    private var showsCycleSetup: Bool {
+        profile.cycleAwarenessApplies || model.cycleAwarenessEnabled
+    }
 
     var body: some View {
         if !hasLiveHR && !live.connected {
-            VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-                // Even with no history yet, a freshly-connected strap can be told to sync now (#364) —
-                // so the control is reachable before the screen has any data to show.
-                SyncStatusSection()
-                ComingSoon(what: "No biometrics yet. Import your wearable export (and Apple Health if you have it) in Data Sources to fill this in.")
-                // Reproductive-health setup must not disappear just because a new user has no band rows.
-                // Profile remains the primary entry point; Health also exposes the same private opt-in.
-                if profile.cycleAwarenessApplies || model.cycleAwarenessEnabled {
-                    SkinTempSection()
-                }
+            // These remain separate children of ScreenScaffold's LazyVStack. The 4pt trailing
+            // padding preserves the prior 24pt section rhythm on top of the scaffold's 20pt spacing.
+            SyncStatusSection()
+                .padding(.bottom, NoopMetrics.space1)
+            ComingSoon(what: "No biometrics yet. Import your wearable export (and Apple Health if you have it) in Data Sources to fill this in.")
+                .padding(.bottom, showsCycleSetup ? NoopMetrics.space1 : 0)
+            // Reproductive-health setup must not disappear just because a new user has no band rows.
+            // Profile remains the primary entry point; Health also exposes the same private opt-in.
+            if showsCycleSetup {
+                SkinTempSection()
             }
         } else {
             // A connected first-time user must be able to reach the explicit Start Live HR control even
             // before the first packet/history row exists. The control itself remains default-off.
-            HealthSectionsStack()
+            ForEach(HealthMonitorSection.allCases) { section in
+                HealthMonitorSectionRow(section: section)
+            }
         }
     }
 }

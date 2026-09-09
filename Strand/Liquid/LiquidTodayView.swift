@@ -482,7 +482,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(liveBackfillingFlag)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(liveBackfillingFlag)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -2717,6 +2717,7 @@ struct LiquidTodayView: View {
             refreshSeq: repo.refreshSeq,
             ageMetricsSeq: repo.ageMetricsSeq,
             workoutsSeq: repo.workoutsSeq,
+            deviceId: repo.deviceId,
             dayKey: requestedDayKey,
             profileState: requestedAgeMetricState
         )
@@ -2748,6 +2749,7 @@ struct LiquidTodayView: View {
                 refreshSeq: repo.refreshSeq,
                 ageMetricsSeq: repo.ageMetricsSeq,
                 workoutsSeq: repo.workoutsSeq,
+                deviceId: repo.deviceId,
                 dayKey: selectedDayKey,
                 profileState: profile.ageMetricStateToken
               ) else { return }
@@ -2968,6 +2970,7 @@ struct LiquidTodayView: View {
                 refreshSeq: repo.refreshSeq,
                 ageMetricsSeq: repo.ageMetricsSeq,
                 workoutsSeq: repo.workoutsSeq,
+                deviceId: repo.deviceId,
                 dayKey: selectedDayKey,
                 profileState: profile.ageMetricStateToken
               ) else { return }
@@ -3362,6 +3365,7 @@ struct LiquidTodayQueryKey: Equatable {
     let refreshSeq: Int
     let ageMetricsSeq: Int
     let workoutsSeq: Int
+    let deviceId: String
     let dayKey: String
     let profileState: String
 }
