@@ -18,6 +18,33 @@ Last updated: **2026-09-09**
 
 ## Active work
 
+The latest managed Safety final-gate closeout is implemented and locally
+verified on protected pull request `#10`. Apple and Android now reject every
+managed push wake, token-refresh, notification, and worker entry point until
+launch access and the exact current Terms version are valid; normal
+post-acceptance bootstrap retries registration. A profile can receive at most
+40 pending contact requests while retaining 10 outgoing pending requests, with
+count and insert serialized under the contact profile/account lock and
+idempotent replay preserved. Due urgent Safety push retries now run before
+slower lifecycle cleanup. The fresh PostgreSQL server suite passed 391 tests
+with 19 expected skips, Android passed 4,142 tests plus lint/build/
+instrumentation-source compilation, the Apple Safety suite passed 32 tests,
+the full Strand suite passed 1,665 tests with one expected skip, and the
+`NOOPiOS` simulator graph builds. The complete local release-policy matrix is
+green. Protected checks, exact-head review, and normal merge remain. No public
+traffic or real
+participant paging was enabled. Evidence is recorded in
+[Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
+
+The reported physical-phone lag is not evidence against the pending
+large-data fix yet: yesterday's protected `main` did not contain pull request
+`#12`. That branch has measured a 4.2-million-row, approximately 441 MB local
+database and removes active backfill/write contention, repeated retained-screen
+queries, unnecessary per-chunk reads, and scroll-time animation work across
+Apple and Android. It still requires integration after Safety, complete local
+and hosted verification, protected merge, and a reviewed shake-to-report ZIP
+from the affected phone on the merged-main build.
+
 The latest managed Safety race closeout is implemented and locally verified on
 protected pull request `#10`. Invitation and contact deletes are idempotent,
 invalid provider receipts are bound to the exact claimed token hash, Apple and

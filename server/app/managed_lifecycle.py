@@ -116,6 +116,11 @@ class ManagedLifecycleRunner:
             return ManagedLifecycleResult(lease_acquired=False)
 
         try:
+            push_result = None
+            if self.safety_push_service is not None:
+                push_result = await self.safety_push_service.dispatch_due(
+                    limit=min(self.batch_size, 200),
+                )
             (
                 reconciled,
                 deferred,
@@ -164,11 +169,6 @@ class ManagedLifecycleRunner:
                 now=now,
                 batch_size=self.batch_size,
             )
-            push_result = None
-            if self.safety_push_service is not None:
-                push_result = await self.safety_push_service.dispatch_due(
-                    limit=min(self.batch_size, 200),
-                )
             if self.safety_repository is not None:
                 purged.update(
                     await self.safety_repository.purge_expired_rows(

@@ -338,11 +338,21 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
             from: response.notification.request.content.userInfo
         ) {
             NotificationRouteBridge.recordPending(.safety)
-            AppDiagnosticsRecorder.shared.record(
-                "managed_safety.push_opened",
-                fields: ["outcome": "accepted"]
-            )
             Task { @MainActor in
+                guard ManagedRuntimeAuthorization.isAllowed else {
+                    AppDiagnosticsRecorder.shared.record(
+                        "managed_safety.push_opened",
+                        fields: [
+                            "outcome": "deferred",
+                            "failure_kind": "terms_required",
+                        ]
+                    )
+                    return
+                }
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_opened",
+                    fields: ["outcome": "accepted"]
+                )
                 _ = await ManagedCloudService.shared
                     .handleManagedSafetyPush(incidentID: incidentID)
             }

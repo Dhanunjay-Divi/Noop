@@ -7,6 +7,17 @@ import com.noop.notif.ManagedSafetyNotifier
 class ManagedSafetyMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         if (token.isBlank()) return
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.push_token_refresh",
+                fields = mapOf(
+                    "outcome" to "deferred",
+                    "failure_kind" to "terms_required",
+                    "worker" to "not_scheduled",
+                ),
+            )
+            return
+        }
         val scheduled = ManagedCloudScheduler.enqueuePushRegistration(applicationContext)
         com.noop.AppDiagnosticsRecorder.record(
             "managed_safety.push_token_refresh",
@@ -18,6 +29,18 @@ class ManagedSafetyMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            com.noop.AppDiagnosticsRecorder.record(
+                "managed_safety.push_received",
+                fields = mapOf(
+                    "outcome" to "deferred",
+                    "failure_kind" to "terms_required",
+                    "notification" to "suppressed",
+                    "worker" to "not_scheduled",
+                ),
+            )
+            return
+        }
         val incidentId = ManagedSafetyPushPayload.incidentId(message.data)
         if (incidentId == null) {
             com.noop.AppDiagnosticsRecorder.record(

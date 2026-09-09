@@ -175,6 +175,42 @@ class SafetyCenterLocalizationContractTest {
     }
 
     @Test
+    fun managedPushEntryPointsFailClosedUntilCurrentTermsAreAccepted() {
+        val gate = first(
+            "src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+            "app/src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedRuntimeGate.kt",
+        )
+        val scheduler = first(
+            "src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudScheduler.kt",
+        )
+        val messaging = first(
+            "src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+            "app/src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedSafetyMessagingService.kt",
+        )
+        assumeTrue(
+            "Managed push sources unavailable",
+            gate != null && scheduler != null && messaging != null,
+        )
+
+        val gateSource = gate!!.readText()
+        val schedulerSource = scheduler!!.readText()
+        val messagingSource = messaging!!.readText()
+        assertTrue(gateSource.contains("acceptedVersion == Terms.CURRENT_VERSION"))
+        assertTrue(
+            schedulerSource.split("ManagedRuntimeGate.isAuthorized").size - 1 >= 8,
+        )
+        assertTrue(
+            messagingSource.split("ManagedRuntimeGate.isAuthorized").size - 1 == 2,
+        )
+        assertTrue(messagingSource.contains("\"failure_kind\" to \"terms_required\""))
+        assertTrue(messagingSource.contains("\"notification\" to \"suppressed\""))
+    }
+
+    @Test
     fun sosPermissionMonitoringAndFallBoundaryRemainExplicit() {
         val screen = first(
             "src/main/java/com/noop/ui/SafetyCenterScreen.kt",

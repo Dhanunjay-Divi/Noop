@@ -692,6 +692,43 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
     }
 
+    func testManagedPushEntryPointsRequireCurrentTermsAndLaunchAccess() throws {
+        let application = try source(
+            "StrandiOS/App/StrandiOSApp.swift"
+        )
+        let presenter = try source(
+            "Strand/System/NotificationPresenter.swift"
+        )
+
+        XCTAssertTrue(application.contains(
+            "enum ManagedRuntimeAuthorization"
+        ))
+        XCTAssertTrue(application.contains(
+            #"forKey: "noop.acceptedTermsVersion""#
+        ))
+        XCTAssertGreaterThanOrEqual(
+            application.components(
+                separatedBy: "guard ManagedRuntimeAuthorization.isAllowed"
+            ).count,
+            6
+        )
+        XCTAssertTrue(application.contains(
+            #""failure_kind": "terms_required""#
+        ))
+        XCTAssertTrue(application.contains(
+            """
+            model.startOperationalWorkAfterLaunchAccess()
+                    ManagedCloudService.shared.bootstrap()
+            """
+        ))
+        XCTAssertTrue(presenter.contains(
+            "guard ManagedRuntimeAuthorization.isAllowed else"
+        ))
+        XCTAssertTrue(presenter.contains(
+            #""outcome": "deferred""#
+        ))
+    }
+
     func testManagedSafetyHistoryLocalizesEveryWireStatus() throws {
         let view = try source(
             "StrandiOS/System/ManagedSafetyView.swift"

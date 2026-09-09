@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app import managed_safety_repository
 from app.managed_models import (
     ManagedSocialProfileCreate,
 )
@@ -30,6 +31,9 @@ from app.managed_safety_models import (
     ManagedSafetyRequestCreate,
 )
 from app.managed_safety_repository import (
+    SAFETY_MAX_PENDING_REQUESTS,
+    SAFETY_MAX_RECEIVED_PENDING_REQUESTS,
+    SAFETY_REQUEST_LIST_LIMIT,
     ManagedSafetyPushService,
     PostgresManagedSafetyRepository,
 )
@@ -187,6 +191,13 @@ async def _accept_contact(
         decision="accept",
     )
     return profile, accepted
+
+
+def test_pending_request_quotas_fit_the_complete_request_list() -> None:
+    assert (
+        SAFETY_MAX_PENDING_REQUESTS + SAFETY_MAX_RECEIVED_PENDING_REQUESTS
+        == SAFETY_REQUEST_LIST_LIMIT
+    )
 
 
 class _RecordingPushProvider:
@@ -349,6 +360,157 @@ async def test_concurrent_contact_acceptance_preserves_owner_limit() -> None:
             )
             == 5
         )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_concurrent_received_request_quota_serializes_on_contact_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        managed_safety_repository,
+        "SAFETY_MAX_RECEIVED_PENDING_REQUESTS",
+        1,
+    )
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=6,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        contact = await _principal(primary, label=f"quota-contact-{uuid4()}")
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Quota contact",
+        )
+        owners: list[tuple[ManagedPrincipal, UUID]] = []
+        for index in range(2):
+            owner = await _principal(
+                primary,
+                label=f"quota-owner-{index}-{uuid4()}",
+            )
+            await _profile(
+                managed,
+                owner,
+                display_name=f"Quota owner {index}",
+            )
+            owners.append((owner, uuid4()))
+
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.execute(
+                    """
+                    SELECT profile_id
+                    FROM managed_social_profiles
+                    WHERE profile_id = $1
+                    FOR UPDATE
+                    """,
+                    UUID(contact_profile["profile_id"]),
+                )
+                tasks = [
+                    asyncio.create_task(
+                        safety.create_request(
+                            principal=owner,
+                            request=ManagedSafetyRequestCreate(
+                                request_id=request_id,
+                                noop_id=contact_profile["noop_id"],
+                            ),
+                        )
+                    )
+                    for owner, request_id in owners
+                ]
+                await _wait_for_database_waiter(pool)
+                assert all(not task.done() for task in tasks)
+        results = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=10,
+        )
+        assert sum(isinstance(result, dict) for result in results) == 1
+        assert sum(
+            isinstance(result, ManagedConflictError) for result in results
+        ) == 1
+        assert (
+            await pool.fetchval(
+                """
+                SELECT count(*)
+                FROM managed_safety_requests
+                WHERE contact_profile_id = $1
+                  AND status = 'pending'
+                """,
+                UUID(contact_profile["profile_id"]),
+            )
+            == 1
+        )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_received_request_quota_preserves_idempotent_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        managed_safety_repository,
+        "SAFETY_MAX_RECEIVED_PENDING_REQUESTS",
+        1,
+    )
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"replay-owner-{uuid4()}")
+        contact = await _principal(primary, label=f"replay-contact-{uuid4()}")
+        await _profile(managed, owner, display_name="Replay owner")
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Replay contact",
+        )
+        request = ManagedSafetyRequestCreate(
+            request_id=uuid4(),
+            noop_id=contact_profile["noop_id"],
+        )
+        first = await safety.create_request(
+            principal=owner,
+            request=request,
+        )
+        replay = await safety.create_request(
+            principal=owner,
+            request=request,
+        )
+
+        assert first["duplicate"] is False
+        assert replay["duplicate"] is True
+        assert replay["request_id"] == first["request_id"]
     finally:
         await primary.shutdown()
 

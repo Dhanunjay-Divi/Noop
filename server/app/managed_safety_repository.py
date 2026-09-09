@@ -40,6 +40,12 @@ SAFETY_MAX_OWNERS_PER_CONTACT = 20
 SAFETY_MIN_CONTACTS = 2
 SAFETY_MAX_ACTIVE_INVITES = 10
 SAFETY_MAX_PENDING_REQUESTS = 10
+SAFETY_REQUEST_LIST_LIMIT = 50
+# A profile can also own at most SAFETY_MAX_PENDING_REQUESTS outgoing rows. Keeping
+# the two bounds additive means list_requests never hides a still-actionable row.
+SAFETY_MAX_RECEIVED_PENDING_REQUESTS = (
+    SAFETY_REQUEST_LIST_LIMIT - SAFETY_MAX_PENDING_REQUESTS
+)
 SAFETY_MAX_ACTIVE_PUSH_INSTALLATIONS = 4
 SAFETY_PUSH_CLAIM_SECONDS = 60
 SAFETY_PUSH_RETRY_DELAY_SECONDS = 60
@@ -756,15 +762,32 @@ class PostgresManagedSafetyRepository:
                     WHERE owner_profile_id = $1
                       AND status = 'pending'
                       AND expires_at > $2
-                ) AS pending
+                ) AS pending,
+                (
+                    SELECT count(*)
+                    FROM managed_safety_requests
+                    WHERE contact_profile_id = $3
+                      AND status = 'pending'
+                      AND expires_at > $2
+                ) AS pending_received
             """,
             owner_profile_id,
             now,
+            contact_profile_id,
         )
+        # _lock_active_profiles_and_accounts holds the contact profile row through
+        # this count and insert, serializing distinct senders at the receiver cap.
         if int(counts["accepted"]) >= SAFETY_MAX_CONTACTS:
             raise ManagedConflictError("Safety contact limit has been reached")
         if int(counts["pending"]) >= SAFETY_MAX_PENDING_REQUESTS:
             raise ManagedConflictError("too many Safety contact requests are pending")
+        if (
+            int(counts["pending_received"])
+            >= SAFETY_MAX_RECEIVED_PENDING_REQUESTS
+        ):
+            raise ManagedConflictError(
+                "Safety contact is not accepting more requests right now"
+            )
         row = await connection.fetchrow(
             """
             INSERT INTO managed_safety_requests (
@@ -994,10 +1017,11 @@ class PostgresManagedSafetyRepository:
                       AND request.status = 'pending'
                       AND request.expires_at > $2
                     ORDER BY request.created_at DESC, request.request_id
-                    LIMIT 50
+                    LIMIT $3
                     """,
                     profile["profile_id"],
                     now,
+                    SAFETY_REQUEST_LIST_LIMIT,
                 )
         return [self._public_request(row, profile["profile_id"]) for row in rows]
 

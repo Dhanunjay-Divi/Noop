@@ -14,9 +14,15 @@ from app.managed_safety_repository import ManagedPushBatchResult
 
 
 class FakeLifecycleRepository:
-    def __init__(self, *, acquired: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        acquired: bool = True,
+        events: list[str] | None = None,
+    ) -> None:
         self.now = datetime(2026, 9, 3, 12, tzinfo=UTC)
         self.acquired = acquired
+        self.events = events
         self.released_lease = False
         self.deleted: list = []
         self.purged = {
@@ -64,6 +70,8 @@ class FakeLifecycleRepository:
         return self.now
 
     async def acquire_worker_lease(self, **kwargs):
+        if self.events is not None:
+            self.events.append("lease")
         return self.acquired
 
     async def release_worker_lease(self, **kwargs):
@@ -73,6 +81,8 @@ class FakeLifecycleRepository:
         return [{"chunk_id": self.pending[1]["chunk_id"]}]
 
     async def processing_reconciliation_candidates(self, **kwargs):
+        if self.events is not None:
+            self.events.append("reconcile")
         return self.reconciliation_candidates
 
     async def claim_retention_deletions(self, **kwargs):
@@ -157,11 +167,19 @@ class FakeChunkProcessor:
 
 
 class FakeSafetyPushService:
-    def __init__(self, result: ManagedPushBatchResult) -> None:
+    def __init__(
+        self,
+        result: ManagedPushBatchResult,
+        *,
+        events: list[str] | None = None,
+    ) -> None:
         self.result = result
+        self.events = events
         self.limits: list[int] = []
 
     async def dispatch_due(self, *, limit: int) -> ManagedPushBatchResult:
+        if self.events is not None:
+            self.events.append("push")
         self.limits.append(limit)
         return self.result
 
@@ -300,14 +318,16 @@ async def test_lifecycle_reconciles_stranded_uploads_and_reports_retry_state() -
 
 @pytest.mark.asyncio
 async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
-    repository = FakeLifecycleRepository()
+    events: list[str] = []
+    repository = FakeLifecycleRepository(events=events)
     push = FakeSafetyPushService(
         ManagedPushBatchResult(
             claimed=4,
             provider_accepted=2,
             retryable_failures=1,
             terminal_failures=1,
-        )
+        ),
+        events=events,
     )
 
     result = await ManagedLifecycleRunner(
@@ -320,6 +340,7 @@ async def test_lifecycle_retries_due_managed_safety_pushes() -> None:
     ).run_once(owner_id=uuid4())
 
     assert push.limits == [200]
+    assert events[:3] == ["lease", "push", "reconcile"]
     assert result.safety_push_claimed == 4
     assert result.safety_push_provider_accepted == 2
     assert result.safety_push_retryable_failures == 1

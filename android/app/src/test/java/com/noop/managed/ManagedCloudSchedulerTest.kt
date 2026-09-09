@@ -1,6 +1,7 @@
 package com.noop.managed
 
 import androidx.work.NetworkType
+import com.noop.ui.Terms
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,6 +10,14 @@ import org.junit.Test
 import java.util.UUID
 
 class ManagedCloudSchedulerTest {
+    @Test
+    fun managedRuntimeRequiresTheExactCurrentTermsVersion() {
+        assertTrue(ManagedRuntimeGate.acceptsCurrentTerms(Terms.CURRENT_VERSION))
+        assertFalse(ManagedRuntimeGate.acceptsCurrentTerms(null))
+        assertFalse(ManagedRuntimeGate.acceptsCurrentTerms(""))
+        assertFalse(ManagedRuntimeGate.acceptsCurrentTerms("2.4"))
+    }
+
     @Test
     fun backgroundBackupWaitsForNetworkBatteryAndStorageHeadroom() {
         val constraints = ManagedCloudScheduler.constraints

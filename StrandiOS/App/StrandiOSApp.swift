@@ -10,6 +10,16 @@ import UserNotifications
 import UIKit
 import WidgetKit
 
+@MainActor
+enum ManagedRuntimeAuthorization {
+    static var isAllowed: Bool {
+        LaunchAccessController().isUnlocked
+            && UserDefaults.standard.string(
+                forKey: "noop.acceptedTermsVersion"
+            ) == Terms.currentVersion
+    }
+}
+
 final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
     MessagingDelegate {
     private var pendingAPNSToken: Data?
@@ -21,13 +31,7 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
     ) -> Bool {
         guard launchOptions?[.location] != nil else { return true }
         Task { @MainActor in
-            let access = LaunchAccessController()
-            guard access.isUnlocked,
-                  UserDefaults.standard.string(
-                      forKey: "noop.acceptedTermsVersion"
-                  ) == Terms.currentVersion else {
-                return
-            }
+            guard ManagedRuntimeAuthorization.isAllowed else { return }
             ManagedCloudService.shared.bootstrap()
         }
         return true
@@ -38,7 +42,19 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         pendingAPNSToken = deviceToken
-        forwardPendingAPNSTokenIfPossible()
+        Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_token_refresh",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                return
+            }
+            forwardPendingAPNSTokenIfPossible()
+        }
     }
 
     func application(
@@ -46,16 +62,34 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        _ = Self.configuredAuths().contains {
-            $0.canHandleNotification(userInfo)
-        }
-        guard let incidentID = ManagedSafetyPushPayload.incidentID(
-            from: userInfo
-        ) else {
-            completionHandler(.noData)
-            return
-        }
         Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_received",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                completionHandler(.noData)
+                return
+            }
+            _ = Self.configuredAuths().contains {
+                $0.canHandleNotification(userInfo)
+            }
+            guard let incidentID = ManagedSafetyPushPayload.incidentID(
+                from: userInfo
+            ) else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_received",
+                    fields: [
+                        "outcome": "rejected",
+                        "failure_kind": "invalid_payload",
+                    ]
+                )
+                completionHandler(.noData)
+                return
+            }
             NotificationRouteBridge.recordPending(.safety)
             let updated = await ManagedCloudService.shared
                 .handleManagedSafetyPush(incidentID: incidentID)
@@ -71,7 +105,9 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
         Self.handleOpenURL(url)
     }
 
+    @MainActor
     func forwardPendingAPNSTokenIfPossible() {
+        guard ManagedRuntimeAuthorization.isAllowed else { return }
         guard let pendingAPNSToken else { return }
         Self.configuredAuths().forEach {
             $0.setAPNSToken(pendingAPNSToken, type: .unknown)
@@ -81,12 +117,15 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
         }
     }
 
+    @MainActor
     static func forwardPendingAPNSTokenIfPossible() {
         (UIApplication.shared.delegate as? ManagedFirebaseApplicationDelegate)?
             .forwardPendingAPNSTokenIfPossible()
     }
 
+    @MainActor
     static func configureManagedMessagingIfPossible() {
+        guard ManagedRuntimeAuthorization.isAllowed else { return }
         guard FirebaseApp.app() != nil,
               let delegate = UIApplication.shared.delegate
                 as? ManagedFirebaseApplicationDelegate else {
@@ -102,6 +141,16 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
     ) {
         guard let registrationID, !registrationID.isEmpty else { return }
         Task { @MainActor in
+            guard ManagedRuntimeAuthorization.isAllowed else {
+                AppDiagnosticsRecorder.shared.record(
+                    "managed_safety.push_token_refresh",
+                    fields: [
+                        "outcome": "deferred",
+                        "failure_kind": "terms_required",
+                    ]
+                )
+                return
+            }
             await ManagedCloudService.shared.registerManagedPushToken(
                 registrationID
             )
@@ -840,6 +889,7 @@ struct StrandiOSApp: App {
         guard launchAccess.isUnlocked,
               acceptedTermsVersion == Terms.currentVersion else { return }
         model.startOperationalWorkAfterLaunchAccess()
+        ManagedCloudService.shared.bootstrap()
         ScheduledDebugExport.activateIfEnabled()
         health.registerObserversAtLaunchIfPreviouslyRequested()
         configureWatchHandlers()

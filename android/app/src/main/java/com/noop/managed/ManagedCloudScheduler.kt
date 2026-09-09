@@ -38,6 +38,7 @@ object ManagedCloudScheduler {
 
     fun reconcile(context: Context) {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
         val service = ManagedCloudService.get(appContext)
         val workManager = WorkManager.getInstance(appContext)
         if (!service.shouldSchedule()) {
@@ -65,6 +66,7 @@ object ManagedCloudScheduler {
         nowMs: Long = System.currentTimeMillis(),
     ) {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
         val service = ManagedCloudService.get(appContext)
         if (!service.shouldSchedule()) return
         if (nowMs - service.schedulerLastAttemptMs() < CATCH_UP_INTERVAL_MS) return
@@ -82,6 +84,7 @@ object ManagedCloudScheduler {
     /** Continue a bounded manual pass without waiting for the next periodic 15-minute window. */
     fun enqueueContinuation(context: Context) {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return
         val service = ManagedCloudService.get(appContext)
         if (!service.shouldSchedule()) return
         val request = OneTimeWorkRequestBuilder<ManagedCloudWorker>()
@@ -100,6 +103,7 @@ object ManagedCloudScheduler {
 
     fun enqueueSafetyPush(context: Context, incidentId: UUID): Boolean = runCatching {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return@runCatching false
         val request = OneTimeWorkRequestBuilder<ManagedSafetyPushWorker>()
             .setInputData(
                 workDataOf(
@@ -119,6 +123,7 @@ object ManagedCloudScheduler {
 
     fun enqueuePushRegistration(context: Context): Boolean = runCatching {
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return@runCatching false
         val request = OneTimeWorkRequestBuilder<ManagedPushRegistrationWorker>()
             .setConstraints(urgentNetworkConstraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -145,6 +150,9 @@ class ManagedCloudWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(appContext, parameters) {
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            return Result.success()
+        }
         val service = ManagedCloudService.get(applicationContext)
         service.bootstrap()
         if (!service.shouldSchedule()) return Result.success()
@@ -191,6 +199,9 @@ class ManagedSafetyPushWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(appContext, parameters) {
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            return Result.success()
+        }
         val incidentId = ManagedCloudScheduler.safetyPushIncidentId(
             inputData.getString(ManagedCloudScheduler.SAFETY_PUSH_INCIDENT_ID),
         ) ?: return Result.failure()
@@ -220,6 +231,9 @@ class ManagedPushRegistrationWorker(
     parameters: WorkerParameters,
 ) : CoroutineWorker(appContext, parameters) {
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            return Result.success()
+        }
         val service = ManagedCloudService.get(applicationContext)
         service.bootstrap()
         if (!service.shouldSchedule() || !service.shouldRunSafetyForWorker()) {
