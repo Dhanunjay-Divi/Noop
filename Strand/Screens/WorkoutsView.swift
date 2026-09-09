@@ -355,6 +355,8 @@ struct WorkoutsView: View {
     /// launches hundreds of raw-HR reads.
     @State private var recoveryTrend: [WorkoutRecoveryTrendPoint] = []
     @State private var recoveryTrendLoadedKey: String?
+    @State private var recoveryTrendLoadTask: Task<Void, Never>?
+    @State private var recoveryTrendLoadKey: String?
     @State private var activeZoneWeek: ActiveZoneWeekSnapshot?
     @State private var activeZoneLoaded = false
 
@@ -524,6 +526,12 @@ struct WorkoutsView: View {
             }
             #endif
         }
+        .onChangeCompat(of: recoveryTrendInputKey) { newKey in
+            cancelRecoveryTrendLoad(ifSupersededBy: newKey)
+        }
+        .onDisappear {
+            cancelRecoveryTrendLoad()
+        }
         // #797: when the user picks a range wider than the bounded first-paint window (typically "All"),
         // page the full history in. A pick that fits the loaded window is a no-op. Empty selections stay
         // empty: the screen never silently widens the user's requested dates.
@@ -656,6 +664,32 @@ struct WorkoutsView: View {
             return String(localized: "latest 90 days within \(rangeDisplayLabel(for: range))")
         }
         return rangeDisplayLabel(for: range)
+    }
+
+    /// The lazy mount only decides when to start. The retained screen owns the actual task so scrolling
+    /// onward cannot cancel a long recovery read when LazyVStack recycles the one-point sentinel.
+    private func startRecoveryTrendLoad(
+        requestKey: String,
+        rows: [WorkoutRow]
+    ) {
+        guard recoveryTrendLoadedKey != requestKey,
+              recoveryTrendLoadKey != requestKey else { return }
+
+        recoveryTrendLoadTask?.cancel()
+        recoveryTrendLoadKey = requestKey
+        recoveryTrendLoadTask = Task { @MainActor in
+            await loadRecoveryTrend(requestKey: requestKey, rows: rows)
+            guard recoveryTrendLoadKey == requestKey else { return }
+            recoveryTrendLoadTask = nil
+            recoveryTrendLoadKey = nil
+        }
+    }
+
+    private func cancelRecoveryTrendLoad(ifSupersededBy activeKey: String? = nil) {
+        if let activeKey, recoveryTrendLoadKey == activeKey { return }
+        recoveryTrendLoadTask?.cancel()
+        recoveryTrendLoadTask = nil
+        recoveryTrendLoadKey = nil
     }
 
     private func loadRecoveryTrend(
@@ -873,8 +907,11 @@ struct WorkoutsView: View {
         Color.clear
             .frame(height: 1)
             .accessibilityHidden(true)
-            .task(id: inputKey) {
-                await loadRecoveryTrend(requestKey: inputKey, rows: inputRows)
+            .onAppear {
+                startRecoveryTrendLoad(requestKey: inputKey, rows: inputRows)
+            }
+            .onChangeCompat(of: inputKey) { newKey in
+                startRecoveryTrendLoad(requestKey: newKey, rows: recoveryTrendRows)
             }
     }
 

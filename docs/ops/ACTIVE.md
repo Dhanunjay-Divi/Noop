@@ -105,23 +105,23 @@ clocks during drag/fling. Across both platforms, Health avoids sensor-rate root
 updates, Sleep parallelizes independent history reads and batches motion
 lookups, with Android preserving canonical computed motion after a re-pair.
 Stress moves deterministic analysis off the UI executor, and Workouts defers
-historical recovery scans until their lazy section mounts; Android then owns
-the long load at screen lifetime so scrolling the placeholder away cannot
+historical recovery scans until their lazy section mounts; both platforms then
+own the long load at screen lifetime so scrolling the placeholder away cannot
 cancel it. Device switches now invalidate or supersede every affected cache and
 task. No local history was deleted and no retention or formula contract
-changed. The branch is now being integrated after the Safety merge and still
-requires hosted exact-head verification and protected merge. The complete
-post-rebase local gates pass: 4,175 Android tests plus build/lint/instrumentation
-compilation, 53 API 35 production-shell tests, 1,698 macOS tests, the unsigned
-iOS graph, and 35 iOS production-shell tests. A fresh lifecycle review also
+changed. Protected integration and exact-head check history are tracked by pull
+request `#12`. The complete post-rebase local gates pass: 4,175 Android tests
+plus build/lint/instrumentation compilation, 53 API 35 production-shell tests,
+1,698 macOS tests, the unsigned iOS graph, and 35 iOS production-shell tests. A
+fresh lifecycle review also
 fixed three Android realtime-HR surfaces that could skip their lease release
 after Stop, and strength video/GIF cleanup that could target a replacement
 resource. The app report now records only bounded realtime-lease categories and
 a zero/one/multiple ownership bucket. The first hosted release-control run
 exposed only a stale fail-closed terminology inventory; its reviewed
 regeneration has no forbidden mapping or active allowlist expansion. A
-reviewed shake-to-report ZIP from the affected phone on the
-merged-main build plus representative large-database, active-collection,
+reviewed shake-to-report ZIP from the affected phone on the integrated build
+plus representative large-database, active-collection,
 low-storage, thermal, memory-pressure, and in-place-upgrade physical-device
 runs remain required. Evidence is recorded in
 [Large-data scroll lag](rounds/2026-09-09-large-data-scroll-lag.md).

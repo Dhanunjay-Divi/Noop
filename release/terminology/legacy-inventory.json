@@ -13834,12 +13834,12 @@
       "category": "core",
       "lineNumbers": [
         5,
-        1353,
-        1538,
-        1855,
-        2257,
-        2274,
-        2305
+        1390,
+        1575,
+        1892,
+        2294,
+        2311,
+        2342
       ],
       "occurrenceCount": 7,
       "path": "Strand/Screens/WorkoutsView.swift",
@@ -13852,13 +13852,13 @@
     {
       "category": "customer",
       "lineNumbers": [
-        1358,
-        1562,
-        2310,
-        3375,
-        3379,
-        3391,
-        3396
+        1395,
+        1599,
+        2347,
+        3412,
+        3416,
+        3428,
+        3433
       ],
       "occurrenceCount": 7,
       "path": "Strand/Screens/WorkoutsView.swift",
@@ -13870,9 +13870,9 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        725,
-        729,
-        733
+        759,
+        763,
+        767
       ],
       "occurrenceCount": 3,
       "path": "Strand/Screens/WorkoutsView.swift",

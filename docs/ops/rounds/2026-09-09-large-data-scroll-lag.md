@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `implemented and completely locally verified after Safety rebase; protected review and physical-device evidence pending`
+- State: `implementation complete and locally verified through the final review fix; protected integration tracked by PR #12; physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/large-data-scroll-lag-20260909`
 - Start commit: `812ac0615257596d7ec1690eb7a0f54bf0695f1d`
@@ -194,10 +194,11 @@ Android where applicable, and leave physical-phone conclusions explicit.
   deterministic daytime analysis off the UI executor, propagate cancellation,
   and reject superseded or cross-device results before publication.
 - Apple and Android Workouts defer the historical recovery trend until its lazy
-  section mounts, preserve cancellation through each HR query, and reject stale
-  device results. Android transfers the long recovery load to the retained
-  screen scope after that first lazy mount, so scrolling the 1dp placeholder out
-  of composition no longer cancels a trend that is still loading. Apple
+  section mounts, then transfer the long recovery load to retained screen-owned
+  task scope. Scrolling the one-point placeholder out of the lazy stack no
+  longer cancels a trend that is still loading; range/device supersession and
+  actual screen departure still cancel the owned task. Both platforms preserve
+  cancellation through each HR query and reject stale device results. Apple
   auto-workout detection also starts HR, motion, and saved span reads together
   and performs dense preprocessing off the main actor.
 - Every new cache and history task is device-owned. Android observes the
@@ -264,7 +265,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
   `sleep.history_metrics_load`, `stress.daytime_analysis`,
   `workouts.recovery_trend_load`, and `workouts.auto_detect_scan` record only
   outcome class, selected scope where already applicable, and bounded result
-  counts. The retained Android recovery load distinguishes completed, canceled,
+  counts. The retained recovery loads distinguish completed, canceled,
   superseded, and failed outcomes. `realtime_hr.lease` adds only fixed lifecycle
   categories, booleans, and a zero/one/multiple ownership bucket. No row values,
   metric values, dates, identifiers, exception messages, raw counts, or
@@ -292,7 +293,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Apple bounded diagnostics | First full Liquid Today load recorded 1093/270 ms phases; same-state restores recorded 4 ms; worst observed frame gap was 69 ms | The cache removes repeated query work and the tested scroll stayed below the severe-hitch threshold | Performance on the tester's exact database and device |
 | Repository policy matrix | 222 Tools tests passed; operations records, terminology, required CI, localization, health claims, release controls, calibration parity, legal/distribution, private-data, shell syntax, and shellcheck gates all passed | The exact local branch preserves repository release, privacy, terminology, and evidence contracts | Hosted checks and protected review on the pushed exact head |
 | Hosted release-control diagnosis | The first pull-request run failed only because the fail-closed terminology inventory had not yet been regenerated; the final reviewed snapshot records 17,356 classified occurrences, no forbidden mapping, and 13 fewer classified legacy occurrences overall. The active ratchet only shrinks, removing eight core occurrences from the optimized Android Today screen | The performance change introduces no forbidden terminology mapping or active allowlist expansion | The rebased exact head still requires a green hosted rerun |
-| Exact-head automated and fresh review | The initial four hosted cache-lifecycle findings were reproduced and corrected: Android metric revision, Android failed-read retry, Apple device identity, and Apple post-backfill invalidation. A later hosted pass found three more concrete defects: re-paired Android Sleep motion read only the active computed source, historical Apple Today failures could remain cached forever, and Android Workouts recovery was owned by a disposable lazy row. The next exact-head review identified that device-data deletion advanced only the age/general revision and could retain deleted Rest history. The branch now reads the active-plus-canonical motion union, age-bounds historical cache recovery, retains the recovery job at screen lifetime, and conservatively advances the Rest revision after device-data deletion. The fresh local pass also removed Compose `StateFlow.value` reads from composition, made Health history queries observe the selected Android device, and made Apple auto-workout scans cancel and reject cross-device results | The final local patch closes concrete stale-data, retry, lazy-lifetime, cancellation, and cross-device publication defects before protected merge | A clean review and hosted checks on the rebased exact head |
+| Exact-head automated and fresh review | The initial four hosted cache-lifecycle findings were reproduced and corrected: Android metric revision, Android failed-read retry, Apple device identity, and Apple post-backfill invalidation. Later passes found re-paired Android Sleep motion reading only the active computed source, unbounded historical Apple Today cache recovery, disposable Android and Apple Workouts recovery tasks, and Android device-data deletion advancing only the age/general revision. The branch now reads the active-plus-canonical motion union, age-bounds historical cache recovery, retains both recovery jobs at screen lifetime, and conservatively advances the Rest revision after deletion. The fresh local pass also removed Compose `StateFlow.value` reads from composition, made Health history queries observe the selected Android device, and made Apple auto-workout scans cancel and reject cross-device results | The final local patch closes concrete stale-data, retry, lazy-lifetime, cancellation, and cross-device publication defects before protected merge | Physical-device behavior and the affected tester's reviewed report |
 | Device-data deletion regression | `RestDataVersionPolicyTest` and `RuntimePerformanceContractTest` passed in 17 seconds after the exact-head review fix. The first invocation failed before compilation because this temporary worktree lacked its ignored `local.properties`; the rerun supplied the known SDK through `ANDROID_HOME` | The conservative repository notifier advances both revisions without a DAO read, and the deletion path is pinned to that notifier | Room deletion behavior or a physical-device cache remount beyond the covered source contract |
 | Decorative-atmosphere follow-up | Android `HealthScreenPerformanceTest` and `RetainedScreenPerformanceTest` passed in 17 seconds; Apple compiled and ran 11 Health/retained-screen performance contracts with zero failures | The remaining Apple Sleep and Android Health card atmospheres are pinned static and cannot consume a separate 20 fps clock while their lists scroll | Physical GPU timing or the tester's exact phone |
 | Scroll-interaction clock follow-up | Android compiled and ran 22 retained-screen, Health, and frame-pacer contracts with zero failures in 23 seconds. After the shared status-pill follow-up, all 52 StrandDesign tests and 22 Apple retained-screen, Health, and Liquid Today contracts passed with zero failures | Connection/status pulses, band-sync sweeps, and Daily Signal waveforms stop their decorative clocks while drag or fling owns the frame budget on both platforms; every shared Apple `StatePill` receives the shell gate | Physical GPU timing, hidden OS work, or the tester's exact phone |
@@ -306,7 +307,7 @@ Android where applicable, and leave physical-phone conclusions explicit.
 | Post-rebase lifecycle review | Health, Live, and spot-HRV use immutable effect-local realtime-HR ownership; strength video and GIF disposal capture the exact player/animation; focused production-flavor contracts passed | Stop/navigation and media replacement can no longer skip the owned release or dispose a newly installed resource | Physical transport timing, battery drain, and exercise-media decoder behavior on an OEM phone |
 | Final Android local production lane | 4,175 JVM tests passed with zero failures or errors and 7 skips; APK assembly, lint, and instrumentation-source compilation passed in 2m55s after the bounded lease event was added | The exact Android source compiles, packages, preserves diagnostics privacy contracts, and passes its complete local unit/lint gate | OEM frame pacing, BLE, background survival, and physical battery impact |
 | Final Android API 35 managed device | 53 production-shell tests passed with zero failures and 2 expected private-pilot skips in 44s under the repository's 900-second bound. The first invocation failed before provisioning because the SDK environment was omitted; the corrected rerun and final exact-source rerun both passed | The app shell, migrations, storage reconciliation, body-map multi-selection, switch styling, and report-review surface execute on a managed Android device | Real-band transport, OEM process policy, physical scrolling, haptics, location, or battery |
-| Final Apple local production lanes | The regenerated unsigned iOS graph built; the macOS scheme passed 1,698 tests with zero failures and 1 expected skip; the iPhone 17 Pro simulator production shell passed 35 tests with zero failures and 1 expected skip in 611.6s | The exact Apple source and generated dependency graph compile, the shared suite passes, and production-shell journeys execute on iOS 26.5 simulator | Physical iPhone frame pacing, BLE/background survival, energy, thermal behavior, or signing |
+| Final Apple local production lanes | After the final retained-recovery review fix, 17 focused performance contracts passed; the macOS scheme passed 1,698 tests with zero failures and 1 expected skip; the iPhone 17 Pro simulator production shell passed 35 tests with zero failures and 1 expected skip in 592.9s | The exact Apple source compiles, a lazy mount starts screen-owned recovery work without owning its lifetime, the shared suite passes, and production-shell journeys execute on iOS 26.5 simulator | Physical iPhone frame pacing, BLE/background survival, energy, thermal behavior, or signing |
 
 ## Physical device and deployment
 
@@ -329,12 +330,12 @@ Android where applicable, and leave physical-phone conclusions explicit.
   diagnostics, and tests; Android Today, Health, Sleep, Stress, Workouts,
   repository/Room, liquid scaffolds, realtime-HR ownership, strength-media
   ownership, diagnostics, and tests; plus this operations record.
-- Commits: the implementation chain was rebased onto Safety `main` and ends at
-  `0237bdef` before this final lifecycle/observability closeout; the closeout is
-  the final protected pull-request head.
-- Branch and remote state: local rebased branch
-  `codex/large-data-scroll-lag-20260909`; protected pull request `#12` remains
-  open and requires a force-with-lease update to replace its pre-rebase head.
+- Commits: the implementation chain was rebased onto Safety `main`; exact
+  implementation and review-fix commits are retained in protected pull request
+  `#12`.
+- Branch and remote state: protected integration and exact-head check history
+  are tracked by pull request `#12` from
+  `codex/large-data-scroll-lag-20260909`.
 - Repository visibility verified: not repeated.
 - Version/build impact: no version change.
 - Release or distribution impact: none until reviewed and merged.
