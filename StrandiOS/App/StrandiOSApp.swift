@@ -16,6 +16,25 @@ final class ManagedFirebaseApplicationDelegate: NSObject, UIApplicationDelegate,
 
     func application(
         _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions:
+            [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        guard launchOptions?[.location] != nil else { return true }
+        Task { @MainActor in
+            let access = LaunchAccessController()
+            guard access.isUnlocked,
+                  UserDefaults.standard.string(
+                      forKey: "noop.acceptedTermsVersion"
+                  ) == Terms.currentVersion else {
+                return
+            }
+            ManagedCloudService.shared.bootstrap()
+        }
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         pendingAPNSToken = deviceToken
@@ -235,6 +254,9 @@ struct StrandiOSApp: App {
         _model = StateObject(wrappedValue: model)
         ManagedCloudService.shared.configureSocialPokeHaptic { [weak model] in
             model?.requestManagedSocialPokeHaptic() ?? false
+        }
+        if operationallyAllowed {
+            ManagedCloudService.shared.bootstrap()
         }
         let bridge = HealthKitBridge(
             repo: model.repo,

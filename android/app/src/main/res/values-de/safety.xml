@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">Warten auf die Annahme durch %1$s.</string>
     <string name="managed_safety_page_body">Nur manuell. Mindestens zwei angenommene App-Kontakte sind erforderlich. Wellness-Messwerte und mögliche Sturzsignale starten diese Alarmierung niemals.</string>
     <string name="managed_safety_page_title">App-Kontakte alarmieren</string>
+    <string name="managed_safety_participant_status_cannot_respond">Kann nicht reagieren</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">Antwort ausstehend</string>
+    <string name="managed_safety_participant_status_responding">Reagiert</string>
+    <string name="managed_safety_participant_status_revoked">Kein Safety-Kontakt mehr</string>
+    <string name="managed_safety_participant_status_unavailable">Nicht verfügbar</string>
     <string name="managed_safety_pending_requests">Kontaktanfragen</string>
     <string name="managed_safety_remove_contact">Safety-Kontakt entfernen</string>
     <string name="managed_safety_remove_contact_body">Dadurch wird die Safety-Beziehung in beide Richtungen entfernt.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Safety-Einladung bereit. Sie läuft innerhalb von 72 Stunden ab und muss noch angenommen werden.</string>
     <string name="managed_safety_status_invite_redeemed">Safety-Anfrage aus der Einladung gesendet. Die andere Person muss sie annehmen.</string>
     <string name="managed_safety_status_invite_revoked">Safety-Einladung widerrufen.</string>
+    <string name="managed_safety_status_label_canceled">Abgebrochen</string>
+    <string name="managed_safety_status_label_expired">Abgelaufen</string>
+    <string name="managed_safety_status_label_resolved">Gelöst</string>
+    <string name="managed_safety_status_label_unavailable">Nicht verfügbar</string>
     <string name="managed_safety_status_page_started">Safety-Alarmierung gestartet. Push-Zustellung erfolgt nach bestem Bemühen; kontaktiere bei unmittelbarer Gefahr den Rettungsdienst.</string>
     <string name="managed_safety_status_request_sent">Safety-Kontaktanfrage gesendet. Die Alarmierung bleibt aus, bis sie angenommen wird.</string>
     <string name="managed_safety_status_resolved">Safety-Alarmierung gelöst.</string>

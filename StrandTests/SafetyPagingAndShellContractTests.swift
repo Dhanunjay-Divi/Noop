@@ -88,6 +88,39 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
     }
 
+    func testManagedSafetyLocationSessionRestoreIsBoundedAndValidated() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let incidentID = UUID()
+        let restored = ManagedSafetyLocationSessionPolicy.restoredSession(
+            incidentID: incidentID.uuidString,
+            expiresAtUnix: now.addingTimeInterval(24 * 60 * 60)
+                .timeIntervalSince1970,
+            now: now
+        )
+
+        XCTAssertEqual(restored?.incidentID, incidentID)
+        XCTAssertEqual(
+            restored?.expiresAt,
+            now.addingTimeInterval(
+                ManagedSafetyLocationSessionPolicy.maximumSessionDuration
+            )
+        )
+        XCTAssertNil(
+            ManagedSafetyLocationSessionPolicy.restoredSession(
+                incidentID: "not-an-identifier",
+                expiresAtUnix: now.addingTimeInterval(60).timeIntervalSince1970,
+                now: now
+            )
+        )
+        XCTAssertNil(
+            ManagedSafetyLocationSessionPolicy.restoredSession(
+                incidentID: incidentID.uuidString,
+                expiresAtUnix: now.timeIntervalSince1970,
+                now: now
+            )
+        )
+    }
+
     func testSafetyPageIdempotencyKeySurvivesAmbiguousOutcomes() {
         XCTAssertTrue(
             SafetyPagingService.shouldRetainPageIdempotencyKey(serverStatus: nil)
@@ -495,6 +528,9 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         let runtime = try source(
             "Strand/System/SafetySOSRuntime.swift"
         )
+        let application = try source(
+            "StrandiOS/App/StrandiOSApp.swift"
+        )
         let project = try source("project.yml")
 
         XCTAssertTrue(service.contains(
@@ -515,6 +551,18 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(service.contains(
             "managedSafetyLocationExpiryTask"
         ))
+        XCTAssertTrue(service.contains(
+            "restoreManagedSafetyLocationSharingIfNeeded()"
+        ))
+        XCTAssertTrue(service.contains(
+            "persistManagedSafetyLocationSession("
+        ))
+        XCTAssertTrue(service.contains(
+            "managedCloud.safety.locationIncidentID.v1"
+        ))
+        XCTAssertTrue(service.contains(
+            "managedCloud.safety.locationExpiresAt.v1"
+        ))
         XCTAssertTrue(view.contains(
             "locationProvider.requestBackgroundAuthorization()"
         ))
@@ -523,6 +571,18 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
         XCTAssertTrue(runtime.contains(
             "enum SubmissionDisposition"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "manager.startMonitoringSignificantLocationChanges()"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "manager.stopMonitoringSignificantLocationChanges()"
+        ))
+        XCTAssertTrue(application.contains(
+            "launchOptions?[.location]"
+        ))
+        XCTAssertTrue(application.contains(
+            "ManagedCloudService.shared.bootstrap()"
         ))
         XCTAssertTrue(project.contains("- location"))
         XCTAssertFalse(service.contains(
@@ -607,6 +667,27 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         ))
         XCTAssertFalse(application.contains(
             "ManagedSafetyPushPayload.incidentIDForUserResponse("
+        ))
+    }
+
+    func testManagedSafetyHistoryLocalizesEveryWireStatus() throws {
+        let view = try source(
+            "StrandiOS/System/ManagedSafetyView.swift"
+        )
+
+        XCTAssertTrue(view.contains("private func incidentStatusLabel("))
+        XCTAssertTrue(view.contains("private func participantStatusLabel("))
+        XCTAssertTrue(view.contains(
+            "managed.safety.status.label.unavailable"
+        ))
+        XCTAssertTrue(view.contains(
+            "managed.safety.participant.status.unavailable"
+        ))
+        XCTAssertFalse(view.contains(
+            "incident.status.replacingOccurrences(of: \"_\""
+        ))
+        XCTAssertFalse(view.contains(
+            "participant.status.replacingOccurrences(of: \"_\""
         ))
     }
 

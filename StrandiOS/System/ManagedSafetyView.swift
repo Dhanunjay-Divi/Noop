@@ -689,7 +689,7 @@ struct ManagedSafetyView: View {
     ) -> String {
         localizedFormat(
             "managed.safety.last.closed.format",
-            incident.status.replacingOccurrences(of: "_", with: " ")
+            incidentStatusLabel(incident.status)
         )
     }
 
@@ -727,8 +727,42 @@ struct ManagedSafetyView: View {
         localizedFormat(
             "managed.safety.participant.status.format",
             participant.displayName,
-            participant.status.replacingOccurrences(of: "_", with: " ")
+            participantStatusLabel(participant.status)
         )
+    }
+
+    private func incidentStatusLabel(_ status: String) -> String {
+        switch status {
+        case "open":
+            String(localized: "managed.safety.status.active")
+        case "acknowledged":
+            String(localized: "managed.safety.status.acknowledged")
+        case "resolved":
+            String(localized: "managed.safety.status.label.resolved")
+        case "canceled":
+            String(localized: "managed.safety.status.label.canceled")
+        case "expired":
+            String(localized: "managed.safety.status.label.expired")
+        default:
+            String(localized: "managed.safety.status.label.unavailable")
+        }
+    }
+
+    private func participantStatusLabel(_ status: String) -> String {
+        switch status {
+        case "pending":
+            String(localized: "managed.safety.participant.status.pending")
+        case "responding":
+            String(localized: "managed.safety.participant.status.responding")
+        case "cannot_respond":
+            String(
+                localized: "managed.safety.participant.status.cannot.respond"
+            )
+        case "revoked":
+            String(localized: "managed.safety.participant.status.revoked")
+        default:
+            String(localized: "managed.safety.participant.status.unavailable")
+        }
     }
 
     private func localizedFormat(

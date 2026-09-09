@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">A aguardar que %1$s aceite.</string>
     <string name="managed_safety_page_body">Apenas manual. São necessários pelo menos dois contactos aceites na app. As métricas de bem-estar e os sinais de possível queda nunca iniciam este alerta.</string>
     <string name="managed_safety_page_title">Alertar contactos da app</string>
+    <string name="managed_safety_participant_status_cannot_respond">Não pode responder</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">A aguardar resposta</string>
+    <string name="managed_safety_participant_status_responding">A responder</string>
+    <string name="managed_safety_participant_status_revoked">Já não é um contacto Safety</string>
+    <string name="managed_safety_participant_status_unavailable">Indisponível</string>
     <string name="managed_safety_pending_requests">Pedidos de contacto</string>
     <string name="managed_safety_remove_contact">Remover contacto Safety</string>
     <string name="managed_safety_remove_contact_body">Isto remove a relação Safety em ambas as direções.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Convite Safety pronto. Expira no prazo de 72 horas e ainda tem de ser aceite.</string>
     <string name="managed_safety_status_invite_redeemed">Pedido Safety enviado a partir do convite. A outra pessoa tem de o aceitar.</string>
     <string name="managed_safety_status_invite_revoked">Convite Safety revogado.</string>
+    <string name="managed_safety_status_label_canceled">Cancelado</string>
+    <string name="managed_safety_status_label_expired">Expirado</string>
+    <string name="managed_safety_status_label_resolved">Resolvido</string>
+    <string name="managed_safety_status_label_unavailable">Indisponível</string>
     <string name="managed_safety_status_page_started">Alerta Safety iniciado. A entrega push é feita na medida do possível; contacte os serviços de emergência em caso de perigo imediato.</string>
     <string name="managed_safety_status_request_sent">Pedido de contacto Safety enviado. Os alertas permanecem desativados até ser aceite.</string>
     <string name="managed_safety_status_resolved">Alerta Safety resolvido.</string>

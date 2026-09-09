@@ -114,6 +114,10 @@ final class ManagedCloudService: ObservableObject {
             "managedCloud.safety.incidentRequest.v1"
         static let safetyLocationSequences =
             "managedCloud.safety.locationSequences.v1"
+        static let safetyLocationIncidentID =
+            "managedCloud.safety.locationIncidentID.v1"
+        static let safetyLocationExpiresAt =
+            "managedCloud.safety.locationExpiresAt.v1"
     }
 
     private static let automaticInterval: TimeInterval = 15 * 60
@@ -159,6 +163,7 @@ final class ManagedCloudService: ObservableObject {
 
     func bootstrap() {
         reconcilePersistedManagedState()
+        restoreManagedSafetyLocationSharingIfNeeded()
         scheduleManagedSafetyBootstrap()
     }
 
@@ -1681,12 +1686,90 @@ final class ManagedCloudService: ObservableObject {
                 for: incident.incidentID
             )
         }
-        let startingSequence = currentSafetyLocationSequence(
-            for: incident.incidentID
+        startManagedSafetyLocationSharing(
+            incidentID: incident.incidentID,
+            expiresAt: expiresAt,
+            startingSequence: currentSafetyLocationSequence(
+                for: incident.incidentID
+            ),
+            outcome: "started",
+            durationClass:
+                incident.durationHours == 12 ? "12_hours" : "8_hours",
+            now: now
         )
+    }
+
+    private func restoreManagedSafetyLocationSharingIfNeeded(
+        now: Date = Date()
+    ) {
+        guard managedSafetyLocationIncidentID == nil else { return }
+        let storedIncidentID = defaults.string(
+            forKey: Key.safetyLocationIncidentID
+        )
+        let storedExpiry = defaults.double(
+            forKey: Key.safetyLocationExpiresAt
+        )
+        guard storedIncidentID != nil || storedExpiry > 0 else { return }
+        guard phase == .enrolled else {
+            clearPersistedManagedSafetyLocationSession()
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_session",
+                fields: [
+                    "outcome": "restoration_skipped",
+                    "reason": "account_inactive",
+                ]
+            )
+            return
+        }
+        guard let restored = ManagedSafetyLocationSessionPolicy.restoredSession(
+            incidentID: storedIncidentID,
+            expiresAtUnix: storedExpiry,
+            now: now
+        ) else {
+            clearPersistedManagedSafetyLocationSession()
+            AppDiagnosticsRecorder.shared.record(
+                "managed_safety.location_session",
+                fields: [
+                    "outcome": "restoration_skipped",
+                    "reason": "invalid_or_expired",
+                ]
+            )
+            return
+        }
+        startManagedSafetyLocationSharing(
+            incidentID: restored.incidentID,
+            expiresAt: restored.expiresAt,
+            startingSequence: currentSafetyLocationSequence(
+                for: restored.incidentID
+            ),
+            outcome: "restored",
+            durationClass: nil,
+            now: now
+        )
+    }
+
+    private func startManagedSafetyLocationSharing(
+        incidentID: UUID,
+        expiresAt requestedExpiry: Date,
+        startingSequence: Int64,
+        outcome: String,
+        durationClass: String?,
+        now: Date
+    ) {
+        guard let expiresAt = ManagedSafetyLocationSessionPolicy.boundedExpiry(
+            requestedExpiry: requestedExpiry,
+            now: now
+        ) else {
+            stopManagedSafetyLocationSharing(reason: "expired")
+            return
+        }
         let isNewSession =
-            managedSafetyLocationIncidentID != incident.incidentID
-        managedSafetyLocationIncidentID = incident.incidentID
+            managedSafetyLocationIncidentID != incidentID
+        persistManagedSafetyLocationSession(
+            incidentID: incidentID,
+            expiresAt: expiresAt
+        )
+        managedSafetyLocationIncidentID = incidentID
         managedSafetyLocationExpiryTask?.cancel()
         managedSafetyLocationExpiryTask = Task { @MainActor [weak self] in
             let delay = max(expiresAt.timeIntervalSinceNow, 0)
@@ -1697,46 +1780,49 @@ final class ManagedCloudService: ObservableObject {
             )
             guard !Task.isCancelled,
                   self?.managedSafetyLocationIncidentID
-                    == incident.incidentID else {
+                    == incidentID else {
                 return
             }
             self?.stopManagedSafetyLocationSharing(reason: "expired")
         }
         managedSafetyLocationStreamer.start(
-            dispatchId: incident.incidentID,
+            dispatchId: incidentID,
             expiresAt: expiresAt,
             startingSequence: startingSequence
         ) { [weak self] location, sequence in
             guard let self,
                   self.managedSafetyLocationIncidentID
-                    == incident.incidentID else {
+                    == incidentID else {
                 return .stop
             }
             return await self.submitManagedSafetyLocation(
-                incidentID: incident.incidentID,
+                incidentID: incidentID,
                 sequence: sequence,
                 location: location,
                 source: "stream"
             )
         }
         if isNewSession {
+            var fields = ["outcome": outcome]
+            if let durationClass {
+                fields["duration_class"] = durationClass
+            }
             AppDiagnosticsRecorder.shared.record(
                 "managed_safety.location_session",
-                fields: [
-                    "outcome": "started",
-                    "duration_class":
-                        incident.durationHours == 12 ? "12_hours" : "8_hours",
-                ]
+                fields: fields
             )
         }
     }
 
     private func stopManagedSafetyLocationSharing(reason: String) {
         let hadSession = managedSafetyLocationIncidentID != nil
+            || defaults.string(forKey: Key.safetyLocationIncidentID) != nil
+            || defaults.double(forKey: Key.safetyLocationExpiresAt) > 0
         managedSafetyLocationIncidentID = nil
         managedSafetyLocationExpiryTask?.cancel()
         managedSafetyLocationExpiryTask = nil
         managedSafetyLocationStreamer.stop()
+        clearPersistedManagedSafetyLocationSession()
         guard hadSession else { return }
         AppDiagnosticsRecorder.shared.record(
             "managed_safety.location_session",
@@ -1745,6 +1831,25 @@ final class ManagedCloudService: ObservableObject {
                 "reason": reason,
             ]
         )
+    }
+
+    private func persistManagedSafetyLocationSession(
+        incidentID: UUID,
+        expiresAt: Date
+    ) {
+        defaults.set(
+            incidentID.uuidString.lowercased(),
+            forKey: Key.safetyLocationIncidentID
+        )
+        defaults.set(
+            expiresAt.timeIntervalSince1970,
+            forKey: Key.safetyLocationExpiresAt
+        )
+    }
+
+    private func clearPersistedManagedSafetyLocationSession() {
+        defaults.removeObject(forKey: Key.safetyLocationIncidentID)
+        defaults.removeObject(forKey: Key.safetyLocationExpiresAt)
     }
 
     private func submitManagedSafetyLocation(

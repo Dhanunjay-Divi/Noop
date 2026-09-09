@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">Ожидание принятия от %1$s.</string>
     <string name="managed_safety_page_body">Только вручную. Требуются как минимум два принятых контакта приложения. Показатели самочувствия и сигналы возможного падения никогда не запускают это оповещение.</string>
     <string name="managed_safety_page_title">Оповестить контакты приложения</string>
+    <string name="managed_safety_participant_status_cannot_respond">Не может ответить</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">Ожидается ответ</string>
+    <string name="managed_safety_participant_status_responding">Отвечает</string>
+    <string name="managed_safety_participant_status_revoked">Больше не контакт Safety</string>
+    <string name="managed_safety_participant_status_unavailable">Недоступно</string>
     <string name="managed_safety_pending_requests">Запросы контактов</string>
     <string name="managed_safety_remove_contact">Удалить контакт Safety</string>
     <string name="managed_safety_remove_contact_body">Это удалит связь Safety в обоих направлениях.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Приглашение Safety готово. Оно истекает в течение 72 часов и всё ещё требует принятия.</string>
     <string name="managed_safety_status_invite_redeemed">Запрос Safety отправлен из приглашения. Другой человек должен его принять.</string>
     <string name="managed_safety_status_invite_revoked">Приглашение Safety отозвано.</string>
+    <string name="managed_safety_status_label_canceled">Отменено</string>
+    <string name="managed_safety_status_label_expired">Истекло</string>
+    <string name="managed_safety_status_label_resolved">Завершено</string>
+    <string name="managed_safety_status_label_unavailable">Недоступно</string>
     <string name="managed_safety_status_page_started">Оповещение Safety запущено. Push-доставка выполняется по возможности; при непосредственной опасности свяжитесь с экстренными службами.</string>
     <string name="managed_safety_status_request_sent">Запрос контакта Safety отправлен. Оповещения не включатся до его принятия.</string>
     <string name="managed_safety_status_resolved">Оповещение Safety завершено.</string>

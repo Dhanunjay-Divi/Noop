@@ -581,6 +581,46 @@ enum ManagedSafetyLocationRetryPolicy {
     }
 }
 
+struct ManagedSafetyLocationSessionPolicy {
+    struct RestoredSession: Equatable {
+        let incidentID: UUID
+        let expiresAt: Date
+    }
+
+    static let maximumSessionDuration: TimeInterval = 12 * 60 * 60
+
+    static func boundedExpiry(
+        requestedExpiry: Date,
+        now: Date = Date()
+    ) -> Date? {
+        guard requestedExpiry > now else { return nil }
+        return min(
+            requestedExpiry,
+            now.addingTimeInterval(maximumSessionDuration)
+        )
+    }
+
+    static func restoredSession(
+        incidentID: String?,
+        expiresAtUnix: Double,
+        now: Date = Date()
+    ) -> RestoredSession? {
+        guard let incidentID,
+              let identifier = UUID(uuidString: incidentID),
+              expiresAtUnix > 0,
+              let expiry = boundedExpiry(
+                  requestedExpiry: Date(timeIntervalSince1970: expiresAtUnix),
+                  now: now
+              ) else {
+            return nil
+        }
+        return RestoredSession(
+            incidentID: identifier,
+            expiresAt: expiry
+        )
+    }
+}
+
 #if os(iOS)
 @MainActor
 final class SafetyIncidentLocationStreamer: NSObject {
@@ -642,6 +682,7 @@ final class SafetyIncidentLocationStreamer: NSObject {
 
     func stop() {
         manager.stopUpdatingLocation()
+        manager.stopMonitoringSignificantLocationChanges()
         manager.allowsBackgroundLocationUpdates = false
         sendTask?.cancel()
         expiryTask?.cancel()
@@ -658,6 +699,7 @@ final class SafetyIncidentLocationStreamer: NSObject {
         case .authorizedAlways:
             manager.allowsBackgroundLocationUpdates = true
             manager.showsBackgroundLocationIndicator = true
+            manager.startMonitoringSignificantLocationChanges()
             manager.startUpdatingLocation()
         case .authorizedWhenInUse:
             manager.allowsBackgroundLocationUpdates = false

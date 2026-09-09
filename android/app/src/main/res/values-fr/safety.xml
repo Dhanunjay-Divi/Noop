@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">En attente de l’acceptation de %1$s.</string>
     <string name="managed_safety_page_body">Manuel uniquement. Au moins deux contacts acceptés dans l’app sont requis. Les mesures de bien-être et les signaux de chute possible ne déclenchent jamais cette alerte.</string>
     <string name="managed_safety_page_title">Alerter les contacts dans l’app</string>
+    <string name="managed_safety_participant_status_cannot_respond">Ne peut pas répondre</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">En attente de réponse</string>
+    <string name="managed_safety_participant_status_responding">Répond</string>
+    <string name="managed_safety_participant_status_revoked">N’est plus un contact Safety</string>
+    <string name="managed_safety_participant_status_unavailable">Indisponible</string>
     <string name="managed_safety_pending_requests">Demandes de contact</string>
     <string name="managed_safety_remove_contact">Supprimer le contact Safety</string>
     <string name="managed_safety_remove_contact_body">Cela supprime la relation Safety dans les deux sens.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Invitation Safety prête. Elle expire dans les 72 heures et doit encore être acceptée.</string>
     <string name="managed_safety_status_invite_redeemed">Demande Safety envoyée depuis l’invitation. L’autre personne doit l’accepter.</string>
     <string name="managed_safety_status_invite_revoked">Invitation Safety révoquée.</string>
+    <string name="managed_safety_status_label_canceled">Annulée</string>
+    <string name="managed_safety_status_label_expired">Expirée</string>
+    <string name="managed_safety_status_label_resolved">Résolue</string>
+    <string name="managed_safety_status_label_unavailable">Indisponible</string>
     <string name="managed_safety_status_page_started">Alerte Safety démarrée. La livraison push est faite au mieux ; contactez les services d’urgence en cas de danger immédiat.</string>
     <string name="managed_safety_status_request_sent">Demande de contact Safety envoyée. Les alertes restent désactivées jusqu’à son acceptation.</string>
     <string name="managed_safety_status_resolved">Alerte Safety résolue.</string>

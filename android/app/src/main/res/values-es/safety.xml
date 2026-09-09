@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">Esperando a que %1$s acepte.</string>
     <string name="managed_safety_page_body">Solo manual. Se necesitan al menos dos contactos de la app aceptados. Las métricas de bienestar y las señales de posible caída nunca inician esta alerta.</string>
     <string name="managed_safety_page_title">Avisar a contactos de la app</string>
+    <string name="managed_safety_participant_status_cannot_respond">No puede responder</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">Esperando respuesta</string>
+    <string name="managed_safety_participant_status_responding">Respondiendo</string>
+    <string name="managed_safety_participant_status_revoked">Ya no es contacto de Safety</string>
+    <string name="managed_safety_participant_status_unavailable">No disponible</string>
     <string name="managed_safety_pending_requests">Solicitudes de contacto</string>
     <string name="managed_safety_remove_contact">Eliminar contacto de Safety</string>
     <string name="managed_safety_remove_contact_body">Esto elimina la relación de Safety en ambas direcciones.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Invitación de Safety lista. Caduca en un plazo de 72 horas y aún debe aceptarse.</string>
     <string name="managed_safety_status_invite_redeemed">Solicitud de Safety enviada desde la invitación. La otra persona debe aceptarla.</string>
     <string name="managed_safety_status_invite_revoked">Invitación de Safety revocada.</string>
+    <string name="managed_safety_status_label_canceled">Cancelada</string>
+    <string name="managed_safety_status_label_expired">Caducada</string>
+    <string name="managed_safety_status_label_resolved">Resuelta</string>
+    <string name="managed_safety_status_label_unavailable">No disponible</string>
     <string name="managed_safety_status_page_started">Alerta de Safety iniciada. La entrega push es de mejor esfuerzo; contacta con los servicios de emergencia si hay peligro inmediato.</string>
     <string name="managed_safety_status_request_sent">Solicitud de contacto de Safety enviada. Las alertas permanecen desactivadas hasta que se acepte.</string>
     <string name="managed_safety_status_resolved">Alerta de Safety resuelta.</string>

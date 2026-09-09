@@ -817,9 +817,7 @@ private fun ManagedSafetyIncidents(
             Text(
                 stringResource(
                     R.string.managed_safety_last_closed_format,
-                    it.status.replaceFirstChar { character ->
-                        character.titlecase(Locale.getDefault())
-                    },
+                    stringResource(managedSafetyIncidentStatusResource(it.status)),
                 ),
                 style = NoopType.caption,
                 color = Palette.textTertiary,
@@ -881,7 +879,11 @@ private fun ManagedSafetyIncidents(
                     stringResource(
                         R.string.managed_safety_participant_status_format,
                         participant.displayName,
-                        participant.status.replace('_', ' '),
+                        stringResource(
+                            managedSafetyParticipantStatusResource(
+                                participant.status,
+                            ),
+                        ),
                     ),
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
@@ -954,3 +956,23 @@ private fun ManagedSafetyIncidents(
         }
     }
 }
+
+internal fun managedSafetyIncidentStatusResource(status: String): Int =
+    when (status) {
+        "open" -> R.string.managed_safety_status_active
+        "acknowledged" -> R.string.managed_safety_status_acknowledged
+        "resolved" -> R.string.managed_safety_status_label_resolved
+        "canceled" -> R.string.managed_safety_status_label_canceled
+        "expired" -> R.string.managed_safety_status_label_expired
+        else -> R.string.managed_safety_status_label_unavailable
+    }
+
+internal fun managedSafetyParticipantStatusResource(status: String): Int =
+    when (status) {
+        "pending" -> R.string.managed_safety_participant_status_pending
+        "responding" -> R.string.managed_safety_participant_status_responding
+        "cannot_respond" ->
+            R.string.managed_safety_participant_status_cannot_respond
+        "revoked" -> R.string.managed_safety_participant_status_revoked
+        else -> R.string.managed_safety_participant_status_unavailable
+    }

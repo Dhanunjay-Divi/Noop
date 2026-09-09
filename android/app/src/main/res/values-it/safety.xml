@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">In attesa che %1$s accetti.</string>
     <string name="managed_safety_page_body">Solo manuale. Sono necessari almeno due contatti dell’app accettati. Le metriche di benessere e i segnali di possibile caduta non avviano mai questa allerta.</string>
     <string name="managed_safety_page_title">Avvisa i contatti dell’app</string>
+    <string name="managed_safety_participant_status_cannot_respond">Non può rispondere</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">In attesa di risposta</string>
+    <string name="managed_safety_participant_status_responding">Sta rispondendo</string>
+    <string name="managed_safety_participant_status_revoked">Non è più un contatto Safety</string>
+    <string name="managed_safety_participant_status_unavailable">Non disponibile</string>
     <string name="managed_safety_pending_requests">Richieste di contatto</string>
     <string name="managed_safety_remove_contact">Rimuovi contatto Safety</string>
     <string name="managed_safety_remove_contact_body">Questo rimuove la relazione Safety in entrambe le direzioni.</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Invito Safety pronto. Scade entro 72 ore e deve ancora essere accettato.</string>
     <string name="managed_safety_status_invite_redeemed">Richiesta Safety inviata dall’invito. L’altra persona deve accettarla.</string>
     <string name="managed_safety_status_invite_revoked">Invito Safety revocato.</string>
+    <string name="managed_safety_status_label_canceled">Annullata</string>
+    <string name="managed_safety_status_label_expired">Scaduta</string>
+    <string name="managed_safety_status_label_resolved">Risolta</string>
+    <string name="managed_safety_status_label_unavailable">Non disponibile</string>
     <string name="managed_safety_status_page_started">Allerta Safety avviata. La consegna push è basata sul miglior tentativo; contatta i servizi di emergenza in caso di pericolo immediato.</string>
     <string name="managed_safety_status_request_sent">Richiesta di contatto Safety inviata. Gli avvisi restano disattivati finché non viene accettata.</string>
     <string name="managed_safety_status_resolved">Allerta Safety risolta.</string>

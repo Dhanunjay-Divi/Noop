@@ -525,6 +525,28 @@ async def test_managed_safety_is_tenant_scoped_latest_only_and_idempotent() -> N
         )
         assert owner_view["status"] == "acknowledged"
         assert len(owner_view["participants"]) == 2
+        withdrawn = await safety.respond(
+            principal=first,
+            incident_id=UUID(incident["incident_id"]),
+            decision="cannot_respond",
+        )
+        assert withdrawn["status"] == "open"
+        status_after_withdrawal = await primary._require_pool().fetchrow(
+            """
+            SELECT status, acknowledged_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            UUID(incident["incident_id"]),
+        )
+        assert status_after_withdrawal["status"] == "open"
+        assert status_after_withdrawal["acknowledged_at"] is None
+        resumed = await safety.respond(
+            principal=first,
+            incident_id=UUID(incident["incident_id"]),
+            decision="responding",
+        )
+        assert resumed["status"] == "acknowledged"
 
         ended = await safety.end_incident(
             principal=owner,
@@ -817,6 +839,12 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
             f"fid:{first_token}",
             f"token:{second_token}",
         ]
+        acknowledged = await safety.respond(
+            principal=first,
+            incident_id=UUID(incident["incident_id"]),
+            decision="responding",
+        )
+        assert acknowledged["status"] == "acknowledged"
 
         await managed.block_social_profile(
             principal=owner,
@@ -845,6 +873,16 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
             UUID(first_profile["profile_id"]),
         )
         assert participant_status == "revoked"
+        incident_status = await primary._require_pool().fetchrow(
+            """
+            SELECT status, acknowledged_at
+            FROM managed_safety_incidents
+            WHERE incident_id = $1
+            """,
+            UUID(incident["incident_id"]),
+        )
+        assert incident_status["status"] == "open"
+        assert incident_status["acknowledged_at"] is None
         with pytest.raises(ManagedNotFoundError):
             await safety.get_incident(
                 principal=first,
@@ -1039,6 +1077,88 @@ async def test_managed_safety_push_is_encrypted_and_block_revokes_access() -> No
         )
         assert surplus["status"] == "revoked"
         assert surplus["token_ciphertext"] == f"revoked.{surplus['token_hash']}"
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_safety_accept_locks_profiles_before_request_rows() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"lock-owner-{uuid4()}")
+        contact = await _principal(primary, label=f"lock-contact-{uuid4()}")
+        owner_profile = await _profile(
+            managed,
+            owner,
+            display_name="Lock owner",
+        )
+        contact_profile = await _profile(
+            managed,
+            contact,
+            display_name="Lock contact",
+        )
+        request = await safety.create_request(
+            principal=owner,
+            request=ManagedSafetyRequestCreate(
+                request_id=uuid4(),
+                noop_id=contact_profile["noop_id"],
+            ),
+        )
+        request_id = UUID(request["request_id"])
+        pool = primary._require_pool()
+        async with pool.acquire() as blocker:
+            async with blocker.transaction():
+                await blocker.fetch(
+                    """
+                    SELECT profile_id
+                    FROM managed_social_profiles
+                    WHERE profile_id = ANY($1::uuid[])
+                    ORDER BY profile_id
+                    FOR UPDATE
+                    """,
+                    [
+                        UUID(owner_profile["profile_id"]),
+                        UUID(contact_profile["profile_id"]),
+                    ],
+                )
+                accept_task = asyncio.create_task(
+                    safety.decide_request(
+                        principal=contact,
+                        request_id=request_id,
+                        decision="accept",
+                    )
+                )
+                await asyncio.sleep(0.1)
+                assert not accept_task.done()
+                locked_request = await blocker.fetchrow(
+                    """
+                    SELECT request_id
+                    FROM managed_safety_requests
+                    WHERE request_id = $1
+                    FOR UPDATE
+                    """,
+                    request_id,
+                    timeout=1,
+                )
+                assert locked_request["request_id"] == request_id
+        accepted = await asyncio.wait_for(accept_task, timeout=5)
+        assert accepted["status"] == "accepted"
     finally:
         await primary.shutdown()
 

@@ -15773,11 +15773,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        682,
-        739,
-        739,
-        739,
-        740
+        763,
+        820,
+        820,
+        820,
+        821
       ],
       "occurrenceCount": 5,
       "path": "StrandTests/SafetyPagingAndShellContractTests.swift",
@@ -16790,8 +16790,8 @@
     {
       "category": "core",
       "lineNumbers": [
-        160,
-        1176
+        179,
+        1198
       ],
       "occurrenceCount": 2,
       "path": "StrandiOS/App/StrandiOSApp.swift",
@@ -16862,14 +16862,14 @@
       "category": "core",
       "lineNumbers": [
         13,
-        2084,
-        2782,
-        2787,
-        2801,
-        2808,
-        2810,
-        2886,
-        2892
+        2189,
+        2887,
+        2892,
+        2906,
+        2913,
+        2915,
+        2991,
+        2997
       ],
       "occurrenceCount": 9,
       "path": "StrandiOS/System/ManagedCloudService.swift",
@@ -32696,10 +32696,10 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        159,
-        160,
-        161,
-        178
+        190,
+        191,
+        192,
+        209
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/test/java/com/noop/ui/SafetyCenterLocalizationContractTest.kt",
@@ -35052,8 +35052,8 @@
     {
       "category": "historical",
       "lineNumbers": [
-        33,
-        33
+        34,
+        34
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/INDEX.md",

@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import secrets
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -50,6 +51,87 @@ SOCIAL_MAX_RECEIVED_REQUESTS_PER_DAY = 100
 SOCIAL_MAX_FRIENDS = 500
 SOCIAL_MAX_SENT_POKES_PER_DAY = 10
 SOCIAL_MAX_RECEIVED_POKES_PER_DAY = 20
+
+
+async def _lock_active_managed_safety_incidents_for_profile_pair(
+    connection: Any,
+    *,
+    first_profile_id: UUID,
+    second_profile_id: UUID,
+) -> tuple[UUID, ...]:
+    rows = await connection.fetch(
+        """
+        SELECT incident.incident_id
+        FROM managed_safety_incidents incident
+        WHERE incident.status IN ('open', 'acknowledged')
+          AND (
+              (
+                incident.owner_profile_id = $1
+                AND EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.contact_profile_id = $2
+                      AND participant.status <> 'revoked'
+                )
+              ) OR (
+                incident.owner_profile_id = $2
+                AND EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.contact_profile_id = $1
+                      AND participant.status <> 'revoked'
+                )
+              )
+          )
+        ORDER BY incident.incident_id
+        FOR UPDATE OF incident
+        """,
+        first_profile_id,
+        second_profile_id,
+    )
+    return tuple(row["incident_id"] for row in rows)
+
+
+async def _reconcile_managed_safety_incident_acknowledgement(
+    connection: Any,
+    *,
+    incident_ids: Collection[UUID],
+    now: datetime,
+) -> None:
+    ordered_ids = sorted(set(incident_ids), key=str)
+    if not ordered_ids:
+        return
+    await connection.execute(
+        """
+        UPDATE managed_safety_incidents incident
+        SET status = CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.status = 'responding'
+                )
+                THEN 'acknowledged'
+                ELSE 'open'
+            END,
+            acknowledged_at = CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM managed_safety_participants participant
+                    WHERE participant.incident_id = incident.incident_id
+                      AND participant.status = 'responding'
+                )
+                THEN COALESCE(incident.acknowledged_at, $2)
+                ELSE NULL
+            END
+        WHERE incident.incident_id = ANY($1::uuid[])
+          AND incident.status IN ('open', 'acknowledged')
+        """,
+        ordered_ids,
+        now,
+    )
 
 
 class ManagedStorageError(Exception):
@@ -6695,6 +6777,13 @@ class PostgresManagedRepository:
                     profile["profile_id"],
                     blocked_profile_id,
                 )
+                active_incident_ids = (
+                    await _lock_active_managed_safety_incidents_for_profile_pair(
+                        connection,
+                        first_profile_id=profile["profile_id"],
+                        second_profile_id=blocked_profile_id,
+                    )
+                )
                 await connection.execute(
                     """
                     UPDATE managed_safety_requests
@@ -6735,6 +6824,11 @@ class PostgresManagedRepository:
                     profile["profile_id"],
                     blocked_profile_id,
                     now,
+                )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=active_incident_ids,
+                    now=now,
                 )
                 await connection.execute(
                     """

@@ -49,7 +49,12 @@
     <string name="managed_safety_outgoing_request_format">正在等待 %1$s 接受。</string>
     <string name="managed_safety_page_body">僅可手動啟動。至少需要兩位已接受的 App 聯絡人。健康指標和可能跌倒訊號絕不會啟動此求助通知。</string>
     <string name="managed_safety_page_title">通知 App 聯絡人</string>
+    <string name="managed_safety_participant_status_cannot_respond">無法回應</string>
     <string name="managed_safety_participant_status_format">%1$s: %2$s</string>
+    <string name="managed_safety_participant_status_pending">等待回應</string>
+    <string name="managed_safety_participant_status_responding">正在回應</string>
+    <string name="managed_safety_participant_status_revoked">不再是 Safety 聯絡人</string>
+    <string name="managed_safety_participant_status_unavailable">無法使用</string>
     <string name="managed_safety_pending_requests">聯絡人要求</string>
     <string name="managed_safety_remove_contact">移除 Safety 聯絡人</string>
     <string name="managed_safety_remove_contact_body">這會移除雙方的 Safety 關係。</string>
@@ -75,6 +80,10 @@
     <string name="managed_safety_status_invite_ready">Safety 邀請已就緒。它會在 72 小時內到期，仍需對方接受。</string>
     <string name="managed_safety_status_invite_redeemed">已透過邀請傳送 Safety 要求。對方必須接受。</string>
     <string name="managed_safety_status_invite_revoked">Safety 邀請已撤銷。</string>
+    <string name="managed_safety_status_label_canceled">已取消</string>
+    <string name="managed_safety_status_label_expired">已過期</string>
+    <string name="managed_safety_status_label_resolved">已解決</string>
+    <string name="managed_safety_status_label_unavailable">無法使用</string>
     <string name="managed_safety_status_page_started">Safety 求助通知已啟動。推播會盡力送達；如有迫在眉睫的危險，請聯絡緊急服務。</string>
     <string name="managed_safety_status_request_sent">Safety 聯絡人要求已傳送。在被接受前不會啟用求助通知。</string>
     <string name="managed_safety_status_resolved">Safety 求助通知已解決。</string>

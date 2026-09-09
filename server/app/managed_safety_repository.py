@@ -20,6 +20,8 @@ from app.managed_repository import (
     ManagedNotFoundError,
     ManagedPrincipal,
     ManagedStorageError,
+    _lock_active_managed_safety_incidents_for_profile_pair,
+    _reconcile_managed_safety_incident_acknowledgement,
 )
 from app.managed_safety_models import (
     ManagedPushRegistration,
@@ -974,6 +976,25 @@ class PostgresManagedSafetyRepository:
                     owner_profile_id=request_snapshot["owner_profile_id"],
                     contact_profile_id=request_snapshot["contact_profile_id"],
                 )
+                if decision == "accept":
+                    profiles = await connection.fetch(
+                        """
+                        SELECT profile_id
+                        FROM managed_social_profiles
+                        WHERE profile_id = ANY($1::uuid[])
+                          AND status = 'active'
+                        ORDER BY profile_id
+                        FOR UPDATE
+                        """,
+                        [
+                            request_snapshot["owner_profile_id"],
+                            request_snapshot["contact_profile_id"],
+                        ],
+                    )
+                    if len(profiles) != 2:
+                        raise ManagedConflictError(
+                            "Safety contact request can no longer be accepted"
+                        )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 await self._expire(connection, now)
                 request = await connection.fetchrow(
@@ -1005,24 +1026,6 @@ class PostgresManagedSafetyRepository:
                 if request["expires_at"] <= now:
                     raise ManagedConflictError("Safety contact request has expired")
                 if decision == "accept":
-                    profiles = await connection.fetch(
-                        """
-                        SELECT profile_id
-                        FROM managed_social_profiles
-                        WHERE profile_id = ANY($1::uuid[])
-                          AND status = 'active'
-                        ORDER BY profile_id
-                        FOR UPDATE
-                        """,
-                        [
-                            request["owner_profile_id"],
-                            request["contact_profile_id"],
-                        ],
-                    )
-                    if len(profiles) != 2:
-                        raise ManagedConflictError(
-                            "Safety contact request can no longer be accepted"
-                        )
                     blocked = await connection.fetchval(
                         """
                         SELECT EXISTS (
@@ -1196,6 +1199,13 @@ class PostgresManagedSafetyRepository:
                         "Safety contact relationship was not found"
                     )
                 now = await connection.fetchval("SELECT clock_timestamp()")
+                active_incident_ids = (
+                    await _lock_active_managed_safety_incidents_for_profile_pair(
+                        connection,
+                        first_profile_id=profile["profile_id"],
+                        second_profile_id=other_profile_id,
+                    )
+                )
                 await connection.execute(
                     """
                     UPDATE managed_safety_requests
@@ -1250,6 +1260,11 @@ class PostgresManagedSafetyRepository:
                     profile["profile_id"],
                     other_profile_id,
                     now,
+                )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=active_incident_ids,
+                    now=now,
                 )
                 await connection.execute(
                     """
@@ -1899,17 +1914,11 @@ class PostgresManagedSafetyRepository:
                         decision,
                         now,
                     )
-                if decision == "responding" and incident["status"] == "open":
-                    await connection.execute(
-                        """
-                        UPDATE managed_safety_incidents
-                        SET status = 'acknowledged',
-                            acknowledged_at = $2
-                        WHERE incident_id = $1 AND status = 'open'
-                        """,
-                        incident_id,
-                        now,
-                    )
+                await _reconcile_managed_safety_incident_acknowledgement(
+                    connection,
+                    incident_ids=(incident_id,),
+                    now=now,
+                )
                 await connection.execute(
                     """
                     UPDATE managed_safety_push_deliveries
