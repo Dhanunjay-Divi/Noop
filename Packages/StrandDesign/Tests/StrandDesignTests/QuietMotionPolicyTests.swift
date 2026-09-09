@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import StrandDesign
 
@@ -9,5 +10,13 @@ final class QuietMotionPolicyTests: XCTestCase {
     @MainActor
     func testAccessibilityReduceMotionAlwaysWins() {
         XCTAssertTrue(NoopMotionState.shared.poseStill(true))
+    }
+
+    func testInteractionMotionBudgetDefaultsInactiveAndCanBePublishedByTheShell() {
+        var environment = EnvironmentValues()
+        XCTAssertFalse(environment.noopInteractionInProgress)
+
+        environment.noopInteractionInProgress = true
+        XCTAssertTrue(environment.noopInteractionInProgress)
     }
 }

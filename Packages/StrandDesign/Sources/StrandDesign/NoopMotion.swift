@@ -95,6 +95,23 @@ public enum QuietMotionPrefs {
     }
 }
 
+// MARK: - Interaction motion budget
+
+/// Shell-owned signal that a direct manipulation or inertial scroll currently owns the frame budget.
+///
+/// Shared design-system components use this to pose non-essential repeating motion without learning
+/// anything about the app's navigation shell. The semantic state, layout, and hit targets remain live.
+private struct NoopInteractionInProgressKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+public extension EnvironmentValues {
+    var noopInteractionInProgress: Bool {
+        get { self[NoopInteractionInProgressKey.self] }
+        set { self[NoopInteractionInProgressKey.self] = newValue }
+    }
+}
+
 /// One process-wide source of truth for non-essential animation policy.
 ///
 /// Views supply SwiftUI's live Reduce Motion environment value to `poseStill(_:)`; this object

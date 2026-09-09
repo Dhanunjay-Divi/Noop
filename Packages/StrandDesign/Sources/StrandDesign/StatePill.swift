@@ -79,6 +79,7 @@ public struct ConnectionDot: View {
 
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.noopInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
     private var poseStill: Bool { motion.poseStill(reduceMotion) }
     @Environment(\.colorScheme) private var scheme
@@ -90,11 +91,16 @@ public struct ConnectionDot: View {
     }
 
     public var body: some View {
+        let shouldAnimatePulse = pulsing
+            && scheme == .dark
+            && !poseStill
+            && !interactionInProgress
+
         ZStack {
             // Dark-mode only (#review): AdditiveBloom used to hide this expanding ring on light
             // (content.opacity(0)); now that we drop the offscreen bloom, gate it explicitly so light
             // mode stays ring-free (the resting dot + its shadow carry the live state there).
-            if pulsing && scheme == .dark {
+            if shouldAnimatePulse {
                 Circle()
                     .fill(tone.color)
                     .frame(width: size, height: size)
@@ -111,10 +117,16 @@ public struct ConnectionDot: View {
                 .shadow(color: tone.color.opacity(0.8), radius: pulsing ? 4 : 2)
         }
         .frame(width: size, height: size)
-        // Honour Reduce Motion: don't kick off the looping pulse (settles at the
-        // resting dot) and never attach the repeatForever breathe animation.
-        .onAppear { if pulsing && !poseStill { animate = true } }
-        .animation(pulsing && !poseStill ? StrandMotion.breathe : nil, value: animate)
+        // Reset before restarting so a pulse removed during drag/deceleration resumes from its resting
+        // frame. Light mode, Reduce Motion, Low Power, quiet-motion, and interaction all create no loop.
+        .task(id: shouldAnimatePulse) {
+            animate = false
+            guard shouldAnimatePulse else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            animate = true
+        }
+        .animation(shouldAnimatePulse ? StrandMotion.breathe : nil, value: animate)
         .accessibilityHidden(true)
     }
 }

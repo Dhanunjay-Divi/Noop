@@ -11,17 +11,10 @@ import StrandDesign
 
 // MARK: - Interaction budget
 
-/// The iOS shell sets this only while a vertically dominant content drag is active. Decorative liquid
-/// clocks pose at their current value during the gesture so scrolling owns the frame budget; the semantic
-/// value, layout, and hit targets are unchanged, and animation resumes as soon as the finger lifts.
-private struct LiquidInteractionInProgressKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 extension EnvironmentValues {
     var liquidInteractionInProgress: Bool {
-        get { self[LiquidInteractionInProgressKey.self] }
-        set { self[LiquidInteractionInProgressKey.self] = newValue }
+        get { noopInteractionInProgress }
+        set { noopInteractionInProgress = newValue }
     }
 }
 
