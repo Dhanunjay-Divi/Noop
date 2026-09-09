@@ -776,6 +776,80 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertTrue(android.contains(
             "scheduleManagedSafetyBootstrap()"
         ))
+
+        let appleDisconnectStart = try XCTUnwrap(
+            apple.range(of: "func disconnect() async")
+        )
+        let appleDisconnectEnd = try XCTUnwrap(
+            apple.range(
+                of: "private func unregisterManagedMessagingInstallation()",
+                range: appleDisconnectStart.upperBound..<apple.endIndex
+            )
+        )
+        let appleDisconnect = String(
+            apple[
+                appleDisconnectStart.lowerBound..<appleDisconnectEnd.lowerBound
+            ]
+        )
+        let appleWait = try XCTUnwrap(
+            appleDisconnect.range(of: "await waitForManagedPushRegistrations()")
+        )
+        let appleRevoke = try XCTUnwrap(
+            appleDisconnect.range(of: "client().revokePushInstallation(")
+        )
+        XCTAssertLessThan(appleWait.lowerBound, appleRevoke.lowerBound)
+        XCTAssertTrue(apple.contains(
+            "guard beginManagedPushRegistration() else { return }"
+        ))
+        XCTAssertTrue(apple.contains(
+            "defer { endManagedPushRegistration() }"
+        ))
+
+        let androidDisconnectStart = try XCTUnwrap(
+            android.range(of: "suspend fun disconnect()")
+        )
+        let androidDisconnectEnd = try XCTUnwrap(
+            android.range(
+                of: "suspend fun sendDeletionCode(",
+                range: androidDisconnectStart.upperBound..<android.endIndex
+            )
+        )
+        let androidDisconnect = String(
+            android[
+                androidDisconnectStart.lowerBound..<androidDisconnectEnd.lowerBound
+            ]
+        )
+        XCTAssertTrue(android.contains(
+            "managedPushRegistrationMutex.withLock"
+        ))
+        XCTAssertTrue(androidDisconnect.contains(
+            "managedPushRegistrationMutex.withLock"
+        ))
+        let disconnecting = try XCTUnwrap(
+            androidDisconnect.range(of: "managedDisconnecting = true")
+        )
+        let serialization = try XCTUnwrap(
+            androidDisconnect.range(of: "managedPushRegistrationMutex.withLock")
+        )
+        XCTAssertLessThan(disconnecting.lowerBound, serialization.lowerBound)
+    }
+
+    func testManagedInviteRedemptionExplainsWhoMustAccept() throws {
+        let apple = try source(
+            "StrandiOS/System/ManagedCloudService.swift"
+        )
+        let catalog = try source(
+            "Tools/SafetyLocalization/safety_strings.json"
+        )
+        let corrected =
+            "Safety request added from the invitation. Accept it in Contact requests to finish setup."
+        let reversed =
+            "Safety request sent from the invitation. The other person must accept it."
+
+        XCTAssertTrue(apple.contains(corrected))
+        XCTAssertTrue(catalog.contains(corrected))
+        XCTAssertFalse(apple.contains(reversed))
+        XCTAssertFalse(catalog.contains(reversed))
     }
 
     func testAutomaticFallBoundaryRemainsVisibleAndRuntimeInert() throws {

@@ -18,6 +18,21 @@ Last updated: **2026-09-09**
 
 ## Active work
 
+The latest managed Safety race closeout is implemented and locally verified on
+protected pull request `#10`. Invitation and contact deletes are idempotent,
+invalid provider receipts are bound to the exact claimed token hash, Apple and
+Android serialize push registration with disconnect revocation, and all nine
+supported locales tell an invitation redeemer to accept the request. The
+locally available server suite passed 388 tests with 19 expected skips, Android
+passed 4,140 tests plus lint/build/instrumentation compilation, 31 Apple Safety
+tests passed, the clean iOS graph builds, and the complete repository policy
+matrix passes. Replacement protected checks, a clean review of the exact
+replacement head, and normal merge remain. Physical APNs/FCM,
+terminated/background execution, location, haptic, battery, legal, monitoring,
+failover, and staffed-operations evidence remains open. No public traffic or
+real participant paging was enabled. Evidence is recorded in
+[Managed Safety race closeout](rounds/2026-09-09-managed-safety-race-closeout.md).
+
 The managed Safety review-hardening round is implemented and locally verified
 on protected pull request `#10`. Migration `030` preserves account-scoped page
 quotas and consumed request IDs across social-profile recreation; invitation

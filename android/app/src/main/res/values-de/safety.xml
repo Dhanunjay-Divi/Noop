@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Safety-Kontaktanfrage abgelehnt.</string>
     <string name="managed_safety_status_contact_removed">Safety-Beziehung in beide Richtungen entfernt.</string>
     <string name="managed_safety_status_invite_ready">Safety-Einladung bereit. Sie läuft innerhalb von 72 Stunden ab und muss noch angenommen werden.</string>
-    <string name="managed_safety_status_invite_redeemed">Safety-Anfrage aus der Einladung gesendet. Die andere Person muss sie annehmen.</string>
+    <string name="managed_safety_status_invite_redeemed">Safety-Anfrage aus der Einladung hinzugefügt. Nimm sie unter Kontaktanfragen an, um die Einrichtung abzuschließen.</string>
     <string name="managed_safety_status_invite_revoked">Safety-Einladung widerrufen.</string>
     <string name="managed_safety_status_label_canceled">Abgebrochen</string>
     <string name="managed_safety_status_label_expired">Abgelaufen</string>

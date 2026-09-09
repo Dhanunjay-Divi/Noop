@@ -138,6 +138,9 @@ final class ManagedCloudService: ObservableObject {
     private var safetyRunning = false
     private var safetyBootstrapTask: Task<Void, Never>?
     private var disconnecting = false
+    private var managedPushRegistrationsInFlight = 0
+    private var managedPushRegistrationWaiters:
+        [CheckedContinuation<Void, Never>] = []
     private var socialPokeHaptic: (() -> Bool)?
     private let managedSafetyLocationStreamer =
         SafetyIncidentLocationStreamer()
@@ -481,7 +484,8 @@ final class ManagedCloudService: ObservableObject {
     }
 
     func registerManagedPushToken(_ token: String) async {
-        guard phase == .enrolled, !disconnecting else { return }
+        guard beginManagedPushRegistration() else { return }
+        defer { endManagedPushRegistration() }
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "managed_safety.push_registration"
         )
@@ -527,6 +531,16 @@ final class ManagedCloudService: ObservableObject {
                 token: token,
                 authorization: try await authorization(forceRefresh: false)
             )
+            guard phase == .enrolled, !disconnecting else {
+                AppDiagnosticsRecorder.shared.endOperation(
+                    diagnostic,
+                    outcome: "canceled",
+                    fields: [
+                        "reason": "managed_state_changed",
+                    ]
+                )
+                return
+            }
             AppDiagnosticsRecorder.shared.endOperation(
                 diagnostic,
                 outcome: "completed"
@@ -539,6 +553,33 @@ final class ManagedCloudService: ObservableObject {
                     "failure_kind": Self.diagnosticSyncFailureKind(error),
                 ]
             )
+        }
+    }
+
+    private func beginManagedPushRegistration() -> Bool {
+        guard phase == .enrolled, !disconnecting else { return false }
+        managedPushRegistrationsInFlight += 1
+        return true
+    }
+
+    private func endManagedPushRegistration() {
+        precondition(managedPushRegistrationsInFlight > 0)
+        managedPushRegistrationsInFlight -= 1
+        guard managedPushRegistrationsInFlight == 0 else { return }
+        let waiters = managedPushRegistrationWaiters
+        managedPushRegistrationWaiters.removeAll(keepingCapacity: true)
+        waiters.forEach { $0.resume() }
+    }
+
+    private func waitForManagedPushRegistrations() async {
+        guard managedPushRegistrationsInFlight > 0 else { return }
+        await withCheckedContinuation {
+            (continuation: CheckedContinuation<Void, Never>) in
+            if managedPushRegistrationsInFlight == 0 {
+                continuation.resume()
+            } else {
+                managedPushRegistrationWaiters.append(continuation)
+            }
         }
     }
 
@@ -662,7 +703,7 @@ final class ManagedCloudService: ObservableObject {
             clearPendingSafetyInvite()
             defaults.set(true, forKey: Key.safetyEnabled)
             safetyStatus = String(
-                localized: "Safety request sent from the invitation. The other person must accept it."
+                localized: "Safety request added from the invitation. Accept it in Contact requests to finish setup."
             )
             try await refreshSafetyData()
         }
@@ -1351,6 +1392,7 @@ final class ManagedCloudService: ObservableObject {
         stopManagedSafetyLocationSharing(reason: "disconnect")
         isBusy = true
         defer { isBusy = false }
+        await waitForManagedPushRegistrations()
         let requiresPushRevocation =
             phase == .enrolled || phase == .deletionScheduled
         var revokeCompleted = false

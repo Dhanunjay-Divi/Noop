@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Safety 聯絡人要求已拒絕。</string>
     <string name="managed_safety_status_contact_removed">雙方的 Safety 關係均已移除。</string>
     <string name="managed_safety_status_invite_ready">Safety 邀請已就緒。它會在 72 小時內到期，仍需對方接受。</string>
-    <string name="managed_safety_status_invite_redeemed">已透過邀請傳送 Safety 要求。對方必須接受。</string>
+    <string name="managed_safety_status_invite_redeemed">已從邀請新增 Safety 要求。請在「聯絡人要求」中接受，以完成設定。</string>
     <string name="managed_safety_status_invite_revoked">Safety 邀請已撤銷。</string>
     <string name="managed_safety_status_label_canceled">已取消</string>
     <string name="managed_safety_status_label_expired">已過期</string>

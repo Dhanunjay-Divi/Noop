@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Запрос контакта Safety отклонён.</string>
     <string name="managed_safety_status_contact_removed">Связь Safety удалена в обоих направлениях.</string>
     <string name="managed_safety_status_invite_ready">Приглашение Safety готово. Оно истекает в течение 72 часов и всё ещё требует принятия.</string>
-    <string name="managed_safety_status_invite_redeemed">Запрос Safety отправлен из приглашения. Другой человек должен его принять.</string>
+    <string name="managed_safety_status_invite_redeemed">Запрос Safety добавлен из приглашения. Примите его в разделе запросов контактов, чтобы завершить настройку.</string>
     <string name="managed_safety_status_invite_revoked">Приглашение Safety отозвано.</string>
     <string name="managed_safety_status_label_canceled">Отменено</string>
     <string name="managed_safety_status_label_expired">Истекло</string>

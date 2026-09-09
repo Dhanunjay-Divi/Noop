@@ -70,6 +70,7 @@ class _DeliveryRepository:
         self.platform = platform
         self.target_kind = target_kind
         self.token_ciphertext = token_ciphertext
+        self.token_hash = "a" * 64
         self.completed = []
         self.reencrypted = []
         self.due_claimed = False
@@ -91,6 +92,7 @@ class _DeliveryRepository:
                 "installation_id": self.installation_id,
                 "platform": self.platform,
                 "target_kind": self.target_kind,
+                "token_hash": self.token_hash,
                 "token_ciphertext": self.token_ciphertext,
                 "expires_at": datetime.now(UTC) + timedelta(hours=8),
                 "attempt": 1,
@@ -423,6 +425,7 @@ async def test_unexpected_provider_failure_becomes_retryable_unavailable() -> No
     assert len(repository.completed) == 1
     assert repository.completed[0]["outcome"] == "unavailable"
     assert repository.completed[0]["provider_reference_hash"] is None
+    assert repository.completed[0]["claimed_token_hash"] == repository.token_hash
 
 
 @pytest.mark.asyncio
@@ -593,6 +596,7 @@ async def test_due_push_dispatch_claims_only_one_concurrency_wave_at_a_time() ->
                 "installation_id": installation_id,
                 "platform": "android",
                 "target_kind": "token",
+                "token_hash": codec.token_hash(f"fcm-token:wave_{index}_1234567890"),
                 "token_ciphertext": codec.seal(
                     f"fcm-token:wave_{index}_1234567890",
                     account_id=account_id,
@@ -641,6 +645,9 @@ async def test_initial_push_dispatch_claims_only_one_concurrency_wave_at_a_time(
                 "installation_id": installation_id,
                 "platform": "ios",
                 "target_kind": "token",
+                "token_hash": codec.token_hash(
+                    f"fcm-token:initial_wave_{index}_1234567890"
+                ),
                 "token_ciphertext": codec.seal(
                     f"fcm-token:initial_wave_{index}_1234567890",
                     account_id=account_id,

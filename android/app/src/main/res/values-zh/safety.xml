@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Safety 联系人请求已拒绝。</string>
     <string name="managed_safety_status_contact_removed">双方的 Safety 关系均已移除。</string>
     <string name="managed_safety_status_invite_ready">Safety 邀请已就绪。它会在 72 小时内过期，仍需对方接受。</string>
-    <string name="managed_safety_status_invite_redeemed">已通过邀请发送 Safety 请求。对方必须接受。</string>
+    <string name="managed_safety_status_invite_redeemed">已从邀请添加 Safety 请求。请在“联系人请求”中接受，以完成设置。</string>
     <string name="managed_safety_status_invite_revoked">Safety 邀请已撤销。</string>
     <string name="managed_safety_status_label_canceled">已取消</string>
     <string name="managed_safety_status_label_expired">已过期</string>

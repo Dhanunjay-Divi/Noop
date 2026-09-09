@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Safety contact request declined.</string>
     <string name="managed_safety_status_contact_removed">Safety relationship removed in both directions.</string>
     <string name="managed_safety_status_invite_ready">Safety invitation ready. It expires within 72 hours and still requires acceptance.</string>
-    <string name="managed_safety_status_invite_redeemed">Safety request sent from the invitation. The other person must accept it.</string>
+    <string name="managed_safety_status_invite_redeemed">Safety request added from the invitation. Accept it in Contact requests to finish setup.</string>
     <string name="managed_safety_status_invite_revoked">Safety invitation revoked.</string>
     <string name="managed_safety_status_label_canceled">Cancelled</string>
     <string name="managed_safety_status_label_expired">Expired</string>

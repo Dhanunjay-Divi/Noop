@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Richiesta di contatto Safety rifiutata.</string>
     <string name="managed_safety_status_contact_removed">Relazione Safety rimossa in entrambe le direzioni.</string>
     <string name="managed_safety_status_invite_ready">Invito Safety pronto. Scade entro 72 ore e deve ancora essere accettato.</string>
-    <string name="managed_safety_status_invite_redeemed">Richiesta Safety inviata dall’invito. L’altra persona deve accettarla.</string>
+    <string name="managed_safety_status_invite_redeemed">Richiesta Safety aggiunta dall’invito. Accettala in Richieste di contatto per completare la configurazione.</string>
     <string name="managed_safety_status_invite_revoked">Invito Safety revocato.</string>
     <string name="managed_safety_status_label_canceled">Annullata</string>
     <string name="managed_safety_status_label_expired">Scaduta</string>

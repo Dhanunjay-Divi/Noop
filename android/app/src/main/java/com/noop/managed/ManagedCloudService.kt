@@ -118,6 +118,7 @@ class ManagedCloudService private constructor(context: Context) {
     private val syncMutex = Mutex()
     private val socialMutex = Mutex()
     private val safetyMutex = Mutex()
+    private val managedPushRegistrationMutex = Mutex()
     private val safetyLocationUpdateMutex = Mutex()
     private val firebaseLock = Any()
     private val stateLock = Any()
@@ -605,60 +606,75 @@ class ManagedCloudService private constructor(context: Context) {
         replaceState { it.copy(hasPendingSafetyInvite = false) }
     }
 
-    suspend fun registerManagedPushToken(token: String): Boolean {
-        if (
-            state.value.phase != ManagedCloudPhase.ENROLLED ||
-            managedDisconnecting
-        ) {
-            return false
-        }
-        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
-            "managed_safety.push_registration",
-        )
-        if (!managedSafetyNotificationPermissionGranted()) {
-            retireManagedPushInstallationForNotificationSettings()
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = "rejected",
-                fields = mapOf(
-                    "failure_kind" to "notification_not_authorized",
-                ),
+    suspend fun registerManagedPushToken(token: String): Boolean =
+        managedPushRegistrationMutex.withLock {
+            if (
+                state.value.phase != ManagedCloudPhase.ENROLLED ||
+                managedDisconnecting
+            ) {
+                return@withLock false
+            }
+            val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
+                "managed_safety.push_registration",
             )
-            return false
-        }
-        return try {
-            client().registerPushInstallation(
-                authorization = authorization(forceRefresh = false),
-                environment = if (com.noop.BuildConfig.DEBUG) {
-                    ManagedPushEnvironment.DEVELOPMENT
+            if (!managedSafetyNotificationPermissionGranted()) {
+                retireManagedPushInstallationForNotificationSettings()
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "rejected",
+                    fields = mapOf(
+                        "failure_kind" to "notification_not_authorized",
+                    ),
+                )
+                return@withLock false
+            }
+            try {
+                client().registerPushInstallation(
+                    authorization = authorization(forceRefresh = false),
+                    environment = if (com.noop.BuildConfig.DEBUG) {
+                        ManagedPushEnvironment.DEVELOPMENT
+                    } else {
+                        ManagedPushEnvironment.PRODUCTION
+                    },
+                    token = token,
+                )
+                if (
+                    state.value.phase != ManagedCloudPhase.ENROLLED ||
+                    managedDisconnecting
+                ) {
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "canceled",
+                        fields = mapOf(
+                            "reason" to "managed_state_changed",
+                        ),
+                    )
+                    false
                 } else {
-                    ManagedPushEnvironment.PRODUCTION
-                },
-                token = token,
-            )
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = "completed",
-            )
-            true
-        } catch (error: CancellationException) {
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = "canceled",
-                fields = mapOf("failure_kind" to "canceled"),
-            )
-            throw error
-        } catch (error: Throwable) {
-            com.noop.AppDiagnosticsRecorder.endOperation(
-                diagnostic,
-                outcome = "failed",
-                fields = mapOf(
-                    "failure_kind" to diagnosticSyncFailureKind(error),
-                ),
-            )
-            false
+                    com.noop.AppDiagnosticsRecorder.endOperation(
+                        diagnostic,
+                        outcome = "completed",
+                    )
+                    true
+                }
+            } catch (error: CancellationException) {
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "canceled",
+                    fields = mapOf("failure_kind" to "canceled"),
+                )
+                throw error
+            } catch (error: Throwable) {
+                com.noop.AppDiagnosticsRecorder.endOperation(
+                    diagnostic,
+                    outcome = "failed",
+                    fields = mapOf(
+                        "failure_kind" to diagnosticSyncFailureKind(error),
+                    ),
+                )
+                false
+            }
         }
-    }
 
     suspend fun registerCurrentManagedPushToken(): Boolean {
         if (state.value.phase != ManagedCloudPhase.ENROLLED) return false
@@ -1338,64 +1354,66 @@ class ManagedCloudService private constructor(context: Context) {
             var serverRevoked = false
             var providerTokenDeleted = false
             if (requiresPushRevocation) {
-                val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
-                    "managed_safety.push_revocation",
-                )
-                try {
-                    client().revokePushInstallation(
-                        authorization = authorization(forceRefresh = true),
-                    )
-                    serverRevoked = true
-                } catch (error: CancellationException) {
-                    com.noop.AppDiagnosticsRecorder.endOperation(
-                        diagnostic,
-                        outcome = "canceled",
-                    )
-                    throw error
-                } catch (error: Throwable) {
-                    com.noop.AppDiagnosticsRecorder.record(
+                managedPushRegistrationMutex.withLock {
+                    val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation(
                         "managed_safety.push_revocation",
-                        fields = mapOf(
-                            "outcome" to "server_failed",
-                            "failure_kind" to diagnosticSyncFailureKind(error),
-                        ),
                     )
-                }
-                try {
-                    val messaging = runtime().messaging
-                    messaging.isAutoInitEnabled = false
-                    messaging.deleteToken().awaitManaged()
-                    providerTokenDeleted = true
-                } catch (error: CancellationException) {
+                    try {
+                        client().revokePushInstallation(
+                            authorization = authorization(forceRefresh = true),
+                        )
+                        serverRevoked = true
+                    } catch (error: CancellationException) {
+                        com.noop.AppDiagnosticsRecorder.endOperation(
+                            diagnostic,
+                            outcome = "canceled",
+                        )
+                        throw error
+                    } catch (error: Throwable) {
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "managed_safety.push_revocation",
+                            fields = mapOf(
+                                "outcome" to "server_failed",
+                                "failure_kind" to diagnosticSyncFailureKind(error),
+                            ),
+                        )
+                    }
+                    try {
+                        val messaging = runtime().messaging
+                        messaging.isAutoInitEnabled = false
+                        messaging.deleteToken().awaitManaged()
+                        providerTokenDeleted = true
+                    } catch (error: CancellationException) {
+                        com.noop.AppDiagnosticsRecorder.endOperation(
+                            diagnostic,
+                            outcome = "canceled",
+                            fields = mapOf(
+                                "server" to if (serverRevoked) "revoked" else "failed",
+                            ),
+                        )
+                        throw error
+                    } catch (error: Throwable) {
+                        com.noop.AppDiagnosticsRecorder.record(
+                            "managed_safety.push_revocation",
+                            fields = mapOf(
+                                "outcome" to "provider_failed",
+                                "failure_kind" to diagnosticSyncFailureKind(error),
+                            ),
+                        )
+                    }
                     com.noop.AppDiagnosticsRecorder.endOperation(
                         diagnostic,
-                        outcome = "canceled",
+                        outcome = if (serverRevoked || providerTokenDeleted) {
+                            "completed"
+                        } else {
+                            "failed"
+                        },
                         fields = mapOf(
                             "server" to if (serverRevoked) "revoked" else "failed",
-                        ),
-                    )
-                    throw error
-                } catch (error: Throwable) {
-                    com.noop.AppDiagnosticsRecorder.record(
-                        "managed_safety.push_revocation",
-                        fields = mapOf(
-                            "outcome" to "provider_failed",
-                            "failure_kind" to diagnosticSyncFailureKind(error),
+                            "provider" to if (providerTokenDeleted) "deleted" else "failed",
                         ),
                     )
                 }
-                com.noop.AppDiagnosticsRecorder.endOperation(
-                    diagnostic,
-                    outcome = if (serverRevoked || providerTokenDeleted) {
-                        "completed"
-                    } else {
-                        "failed"
-                    },
-                    fields = mapOf(
-                        "server" to if (serverRevoked) "revoked" else "failed",
-                        "provider" to if (providerTokenDeleted) "deleted" else "failed",
-                    ),
-                )
             }
             if (
                 !ManagedPushRevocationPolicy.canFinalizeDisconnect(

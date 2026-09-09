@@ -81,5 +81,43 @@ class ManagedSafetyLocationContractTest {
             "ManagedPushRevocationPolicy.canFinalizeDisconnect(",
         ))
         assertTrue(text.contains("scheduleManagedSafetyBootstrap()"))
+        assertTrue(text.contains("managedPushRegistrationMutex.withLock"))
+
+        val registration = text
+            .substringAfter("suspend fun registerManagedPushToken(token: String): Boolean")
+            .substringBefore("suspend fun registerCurrentManagedPushToken()")
+        val disconnect = text
+            .substringAfter("suspend fun disconnect()")
+            .substringBefore("suspend fun sendDeletionCode(")
+        assertTrue(registration.contains("managedPushRegistrationMutex.withLock"))
+        assertTrue(registration.contains("\"reason\" to \"managed_state_changed\""))
+        assertTrue(disconnect.contains("managedPushRegistrationMutex.withLock"))
+        assertTrue(
+            disconnect.indexOf("managedDisconnecting = true") <
+                disconnect.indexOf("managedPushRegistrationMutex.withLock"),
+        )
+    }
+
+    @Test
+    fun inviteRedemptionExplainsThatTheRedeemerMustAccept() {
+        val cloud = source(
+            "src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+            "android/app/src/main/java/com/noop/managed/ManagedCloudService.kt",
+        )
+        val strings = source(
+            "src/main/res/values/safety.xml",
+            "app/src/main/res/values/safety.xml",
+            "android/app/src/main/res/values/safety.xml",
+        )
+        assumeTrue(cloud != null && strings != null)
+        val corrected =
+            "Safety request added from the invitation. Accept it in Contact requests to finish setup."
+        val reversed =
+            "Safety request sent from the invitation. The other person must accept it."
+
+        assertTrue(cloud!!.contains("managed_safety_status_invite_redeemed"))
+        assertTrue(strings!!.contains(corrected))
+        assertFalse(strings.contains(reversed))
     }
 }

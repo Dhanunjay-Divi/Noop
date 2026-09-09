@@ -628,7 +628,7 @@ class PostgresManagedSafetyRepository:
     ) -> None:
         self._require_active(principal)
         now = await self._pool().fetchval("SELECT clock_timestamp()")
-        result = await self._pool().execute(
+        await self._pool().execute(
             """
             UPDATE managed_safety_invites invite
             SET status = 'revoked', revoked_at = $3
@@ -642,22 +642,9 @@ class PostgresManagedSafetyRepository:
             principal.account_id,
             now,
         )
-        if result == "UPDATE 0":
-            row = await self._pool().fetchrow(
-                """
-                SELECT invite.status
-                FROM managed_safety_invites invite
-                JOIN managed_social_profiles owner
-                  ON owner.profile_id = invite.owner_profile_id
-                WHERE invite.invite_id = $1 AND owner.account_id = $2
-                """,
-                invite_id,
-                principal.account_id,
-            )
-            if row is None:
-                raise ManagedNotFoundError("Safety invitation was not found")
-            if row["status"] != "revoked":
-                raise ManagedConflictError("Safety invitation is no longer active")
+        # DELETE semantics are intentionally idempotent. A lost response,
+        # expiry, redemption, prior revocation, or bounded purge must not leave
+        # a client retaining an invitation that can no longer be used.
 
     async def _create_request(
         self,
@@ -1240,7 +1227,7 @@ class PostgresManagedSafetyRepository:
                         owner_profile_id=owner_profile_id,
                         contact_profile_id=contact_profile_id,
                     )
-                pairs = await connection.fetch(
+                await connection.fetch(
                     """
                     SELECT owner_profile_id, contact_profile_id
                     FROM managed_safety_contacts
@@ -1257,10 +1244,6 @@ class PostgresManagedSafetyRepository:
                     profile["profile_id"],
                     other_profile_id,
                 )
-                if not pairs:
-                    raise ManagedNotFoundError(
-                        "Safety contact relationship was not found"
-                    )
                 now = await connection.fetchval("SELECT clock_timestamp()")
                 active_incident_ids = (
                     await _lock_active_managed_safety_incidents_for_profile_pair(
@@ -2450,6 +2433,7 @@ class PostgresManagedSafetyRepository:
         *,
         delivery_id: UUID,
         claim_id: UUID,
+        claimed_token_hash: str,
         outcome: str,
         provider_reference_hash: str | None,
     ) -> None:
@@ -2516,14 +2500,16 @@ class PostgresManagedSafetyRepository:
                         UPDATE managed_push_installations
                         SET status = 'invalid',
                             token_ciphertext = 'invalid.' || token_hash,
-                            revoked_at = $3,
-                            updated_at = $3
+                            revoked_at = $4,
+                            updated_at = $4
                         WHERE account_id = $1
                           AND installation_id = $2
+                          AND token_hash = $3::char(64)
                           AND status = 'active'
                         """,
                         row["account_id"],
                         row["installation_id"],
+                        claimed_token_hash,
                         now,
                     )
 
@@ -2854,6 +2840,7 @@ class ManagedSafetyPushService:
                     await self.repository.complete_push_delivery(
                         delivery_id=delivery["delivery_id"],
                         claim_id=delivery["claim_id"],
+                        claimed_token_hash=delivery["token_hash"],
                         outcome=outcome,
                         provider_reference_hash=provider_reference_hash,
                     )

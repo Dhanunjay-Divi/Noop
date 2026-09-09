@@ -1199,6 +1199,10 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
             principal=first,
             other_profile_id=UUID(second_profile["profile_id"]),
         )
+        await safety.remove_contact(
+            principal=first,
+            other_profile_id=UUID(second_profile["profile_id"]),
+        )
         assert await safety.list_contacts(principal=first) == []
         assert await safety.list_contacts(principal=second) == []
         assert (
@@ -1218,6 +1222,63 @@ async def test_remove_contact_deletes_both_directional_roles() -> None:
                 request_id=UUID(stale_reciprocal_request["request_id"]),
                 decision="accept",
             )
+    finally:
+        await primary.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason=(
+        "NOOP_TEST_POSTGRESQL_DATABASE_URL is required for PostgreSQL-overlay "
+        "integration tests"
+    ),
+)
+@pytest.mark.asyncio
+async def test_invite_revoke_is_idempotent_after_redemption() -> None:
+    primary = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=4,
+        run_migrations=True,
+        database_engine=DATABASE_ENGINE,
+    )
+    await primary.startup()
+    try:
+        managed = _managed(primary)
+        safety = PostgresManagedSafetyRepository(primary)
+        owner = await _principal(primary, label=f"revoke-owner-{uuid4()}")
+        contact = await _principal(primary, label=f"revoke-contact-{uuid4()}")
+        await _profile(managed, owner, display_name="Owner")
+        await _profile(managed, contact, display_name="Contact")
+        capability = "noopsafety_" + ("i" * 11) + uuid4().hex
+        invite = await safety.create_invite(
+            principal=owner,
+            request=ManagedSafetyInviteCreate(
+                request_id=uuid4(),
+                capability=capability,
+            ),
+        )
+        await safety.redeem_invite(
+            principal=contact,
+            request_id=uuid4(),
+            capability=capability,
+        )
+
+        invite_id = UUID(invite["invite_id"])
+        await safety.revoke_invite(principal=owner, invite_id=invite_id)
+        await safety.revoke_invite(principal=owner, invite_id=invite_id)
+
+        assert (
+            await primary._require_pool().fetchval(
+                """
+                SELECT status
+                FROM managed_safety_invites
+                WHERE invite_id = $1
+                """,
+                invite_id,
+            )
+            == "redeemed"
+        )
     finally:
         await primary.shutdown()
 
@@ -2273,6 +2334,7 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
                     second_installation,
                 ),
                 claim_id=old_claim_id,
+                claimed_token_hash=codec.token_hash(old_second_token),
                 outcome="invalid",
                 provider_reference_hash=None,
             )
@@ -2308,6 +2370,70 @@ async def test_push_registration_joins_active_incident_and_response_stops_retry(
             == "rejected"
         )
         assert (await push.dispatch_due(limit=20)).claimed == 0
+
+        stale_claim_id = uuid4()
+        delivery_id = await primary._require_pool().fetchval(
+            """
+            SELECT delivery_id
+            FROM managed_safety_push_deliveries
+            WHERE incident_id = $1
+              AND installation_id = $2
+            """,
+            incident_id,
+            second_installation,
+        )
+        rotated_token = f"fcm-token:late_second_rotated_{run_id}"
+        rotated_hash = codec.token_hash(rotated_token)
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_push_installations
+            SET token_hash = $3,
+                token_ciphertext = $4,
+                updated_at = clock_timestamp(),
+                last_seen_at = clock_timestamp()
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            second_installation,
+            rotated_hash,
+            codec.seal(
+                rotated_token,
+                account_id=second.account_id,
+                installation_id=second_installation,
+            ),
+        )
+        await primary._require_pool().execute(
+            """
+            UPDATE managed_safety_push_deliveries
+            SET status = 'sending',
+                attempts = 1,
+                claim_id = $2,
+                claim_expires_at = clock_timestamp() + interval '1 minute',
+                last_attempt_at = clock_timestamp(),
+                updated_at = clock_timestamp()
+            WHERE delivery_id = $1
+            """,
+            delivery_id,
+            stale_claim_id,
+        )
+        await safety.complete_push_delivery(
+            delivery_id=delivery_id,
+            claim_id=stale_claim_id,
+            claimed_token_hash=codec.token_hash(new_second_token),
+            outcome="invalid",
+            provider_reference_hash=None,
+        )
+        rotated_registration = await primary._require_pool().fetchrow(
+            """
+            SELECT status, token_hash
+            FROM managed_push_installations
+            WHERE account_id = $1 AND installation_id = $2
+            """,
+            second.account_id,
+            second_installation,
+        )
+        assert rotated_registration["status"] == "active"
+        assert str(rotated_registration["token_hash"]).strip() == rotated_hash
 
         responded_installation = f"ios-after-response-{run_id}"
         await _installation(

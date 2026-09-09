@@ -78,7 +78,7 @@
     <string name="managed_safety_status_contact_declined">Solicitud de contacto de Safety rechazada.</string>
     <string name="managed_safety_status_contact_removed">Relación de Safety eliminada en ambas direcciones.</string>
     <string name="managed_safety_status_invite_ready">Invitación de Safety lista. Caduca en un plazo de 72 horas y aún debe aceptarse.</string>
-    <string name="managed_safety_status_invite_redeemed">Solicitud de Safety enviada desde la invitación. La otra persona debe aceptarla.</string>
+    <string name="managed_safety_status_invite_redeemed">Solicitud de Safety añadida desde la invitación. Acéptala en Solicitudes de contacto para terminar la configuración.</string>
     <string name="managed_safety_status_invite_revoked">Invitación de Safety revocada.</string>
     <string name="managed_safety_status_label_canceled">Cancelada</string>
     <string name="managed_safety_status_label_expired">Caducada</string>
