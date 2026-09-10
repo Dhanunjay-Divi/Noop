@@ -51,6 +51,14 @@ class ReviewSampleModeContractTest {
         assertTrue(source.contains("availableWidth = maxWidth"))
         assertTrue(block.contains("label = if (showVisualLabels)"))
         assertTrue(block.contains("contentDescription = tabLabel"))
+        assertTrue(block.contains("if (showVisualLabels) {"))
+        assertTrue(block.contains("Modifier.semantics { contentDescription = tabLabel }"))
+        assertFalse(
+            block.contains(
+                """.testTag("noop.review.tab.${'$'}{tab.name.lowercase()}")
+                                .semantics""",
+            ),
+        )
         assertFalse(block.contains("TextOverflow.Ellipsis"))
     }
 

@@ -375,7 +375,13 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
                             alwaysShowLabel = showVisualLabels,
                             modifier = Modifier
                                 .testTag("noop.review.tab.${tab.name.lowercase()}")
-                                .semantics { contentDescription = tabLabel },
+                                .then(
+                                    if (showVisualLabels) {
+                                        Modifier
+                                    } else {
+                                        Modifier.semantics { contentDescription = tabLabel }
+                                    },
+                                ),
                         )
                     }
                 }

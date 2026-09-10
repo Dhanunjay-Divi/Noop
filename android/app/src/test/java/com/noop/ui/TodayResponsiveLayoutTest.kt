@@ -47,6 +47,51 @@ class TodayResponsiveLayoutTest {
         assertFalse(fallback.contains("Row("))
     }
 
+    @Test
+    fun dailySignalHeaderUsesMeasuredLocalizedContentInsteadOfWidthThresholds() {
+        assertFalse(
+            dailySignalHeaderFitsSingleRow(
+                fontScale = 1.15f,
+                availableWidthPx = 340,
+                identityTextWidthPx = 142,
+                stateTextWidthPx = 82,
+                sourceTextWidthPx = null,
+                fixedContentWidthPx = 120,
+            ),
+        )
+        assertTrue(
+            dailySignalHeaderFitsSingleRow(
+                fontScale = 1.15f,
+                availableWidthPx = 360,
+                identityTextWidthPx = 142,
+                stateTextWidthPx = 82,
+                sourceTextWidthPx = null,
+                fixedContentWidthPx = 120,
+            ),
+        )
+        assertFalse(
+            dailySignalHeaderFitsSingleRow(
+                fontScale = 1.16f,
+                availableWidthPx = 500,
+                identityTextWidthPx = 142,
+                stateTextWidthPx = 82,
+                sourceTextWidthPx = null,
+                fixedContentWidthPx = 120,
+            ),
+        )
+
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val block = today.substring(
+            today.indexOf("private fun DailySignalHeader("),
+            today.indexOf("@Composable\nprivate fun DailySignalSourceBadgeLive("),
+        )
+        assertTrue(block.contains("rememberTextMeasurer(cacheSize = 6)"))
+        assertTrue(block.contains("identityTextWidthPx = textMeasurer.measure("))
+        assertTrue(block.contains("stateTextWidthPx = textMeasurer.measure("))
+        assertTrue(block.contains("sourceTextWidthPx = sourceText?.let"))
+        assertFalse(block.contains("singleRowMinimum"))
+    }
+
     private fun source(relative: String): String {
         val userDir = checkNotNull(System.getProperty("user.dir"))
         return listOf(

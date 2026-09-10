@@ -176,6 +176,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -4274,6 +4275,21 @@ private fun LiquidWordmark(
 
 // MARK: - Daily Signal header
 
+internal fun dailySignalHeaderFitsSingleRow(
+    fontScale: Float,
+    availableWidthPx: Int,
+    identityTextWidthPx: Int,
+    stateTextWidthPx: Int,
+    sourceTextWidthPx: Int?,
+    fixedContentWidthPx: Int,
+): Boolean {
+    val requiredWidthPx = identityTextWidthPx +
+        stateTextWidthPx +
+        (sourceTextWidthPx ?: 0) +
+        fixedContentWidthPx
+    return fontScale <= 1.15f && requiredWidthPx <= availableWidthPx
+}
+
 @Composable
 private fun DailySignalHeader(
     status: DailySignalStatus,
@@ -4304,14 +4320,48 @@ private fun DailySignalHeader(
             )
             .padding(start = Metrics.space16, end = Metrics.space16, top = Metrics.space14),
     ) {
-        val fontScale = LocalDensity.current.fontScale
-        val sourceNeedsWideRow = sourceLabel?.contains(" + ") == true
-        val singleRowMinimum = when {
-            sourceLabel == null -> 260.dp
-            sourceNeedsWideRow -> 440.dp
-            else -> 360.dp
+        val density = LocalDensity.current
+        val textMeasurer = rememberTextMeasurer(cacheSize = 6)
+        val identityText = uiString(R.string.appwide_daily_signal_label).uppercase()
+        val stateText = label.uppercase()
+        val sourceText = sourceLabel?.uppercase()
+        val identityTextWidthPx = textMeasurer.measure(
+            text = identityText,
+            style = NoopType.overline,
+            softWrap = false,
+            maxLines = 1,
+        ).size.width
+        val stateTextWidthPx = textMeasurer.measure(
+            text = stateText,
+            style = NoopType.overline,
+            softWrap = false,
+            maxLines = 1,
+        ).size.width
+        val sourceTextWidthPx = sourceText?.let {
+            textMeasurer.measure(
+                text = it,
+                style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+                softWrap = false,
+                maxLines = 1,
+            ).size.width
         }
-        val fitsSingleRow = maxWidth >= singleRowMinimum && fontScale <= 1.15f
+        val outerGapCount = if (sourceText == null) 2 else 3
+        val fixedContentWidth = (
+            30f + // waveform
+                Metrics.space8.value + // identity's internal gap
+                20f + // state pill horizontal padding
+                (Metrics.space8.value * outerGapCount) +
+                (if (sourceText == null) 0f else Metrics.space16.value) +
+                Metrics.space4.value // rounding and font-renderer safety
+            ).dp
+        val fitsSingleRow = dailySignalHeaderFitsSingleRow(
+            fontScale = density.fontScale,
+            availableWidthPx = with(density) { maxWidth.roundToPx() },
+            identityTextWidthPx = identityTextWidthPx,
+            stateTextWidthPx = stateTextWidthPx,
+            sourceTextWidthPx = sourceTextWidthPx,
+            fixedContentWidthPx = with(density) { fixedContentWidth.roundToPx() },
+        )
         val semantics = Modifier.semantics {
             contentDescription = uiString(
                 R.string.appwide_a11y_state_format,
