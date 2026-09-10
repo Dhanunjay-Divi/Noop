@@ -327,13 +327,13 @@ final class MoreListParityTests: XCTestCase {
                       "The photographic Today scene must retain its explicit dark-scrim contract.")
         XCTAssertFalse(liquidToday.contains("usesDarkSkyBehindCards"),
                        "Liquid Today cannot infer fixed-white ink from an adaptive scene preference.")
-        // Indentation-insensitive on purpose: the previous form embedded 28 spaces, so re-indenting the
-        // view broke the test while the ink was still correct. What matters is that the compact 30pt day
-        // title is followed by adaptive textPrimary rather than a hard-coded white.
+        // Indentation-insensitive on purpose: re-indenting the view must not break the contract. The
+        // responsive title size is tested separately; what matters here is that its font is followed by
+        // adaptive textPrimary rather than hard-coded white.
         let dayTitleUsesAdaptiveInk = liquidToday
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "\n", with: "")
-            .contains(".font(StrandFont.rounded(30,weight:.bold)).foregroundStyle(StrandPalette.textPrimary)")
+            .contains(".font(StrandFont.rounded(todayGreetingSize,weight:.bold)).foregroundStyle(StrandPalette.textPrimary)")
         XCTAssertTrue(dayTitleUsesAdaptiveInk,
                       "Liquid Today's day title must use adaptive ink on pearl/obsidian backgrounds.")
         XCTAssertTrue(liquidToday.contains("compact ? StrandPalette.textSecondary : StrandPalette.textTertiary"),

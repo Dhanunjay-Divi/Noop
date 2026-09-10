@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/mobile-desktop-visual-parity-20260910`
 - Start commit: `beb0e88f70141766c32a0bcd270f5f8889c6f10d`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `e51c56e5f7397e4eec511d4d1fe607768f108dac`
+- Record commit or PR: protected pull request `#13`
 
 ## Objective
 
@@ -121,6 +121,8 @@ physical-device, and external-service evidence.
 | iOS runtime capture | Synthetic Today rendered on an iOS 26.5 phone at ordinary and accessibility-large text and on an iPad simulator; phone captures are 1170 x 2532 and the tablet capture is 1640 x 2360 | The current iOS app renders phone, accessibility-text, and regular-width tablet branches without clipped Daily Signal labels | Physical-device frame pacing, background execution, BLE, battery, or haptics |
 | Independent review | Five findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. A later rendered pass also found and corrected Android weather and navigation ellipses in both shells | The final source and evidence reflect a fresh review rather than only the implementation author’s assumptions | Independent physical-device review |
 | Visual hierarchy review | Desktop, Android, and iOS first viewports compared directly despite different synthetic data states | Both phones share the approved hierarchy, visual weight, section order, and score geometry while preserving native chrome; tablet and large-text branches remain coherent | State-for-state screenshot parity, pixel identity across rendering engines, physical rendering, or every non-Today screen |
+| Hosted Apple first attempt | Protected pull request `#13` ran the full macOS suite: 1,701 tests executed with one expected skip and one failure in `MoreListParityTests.testAdaptiveScaffoldBackgroundUsesDynamicInk` | The hosted matrix reached the changed Apple source and exposed that an older source-contract assertion still required the pre-responsive fixed `30pt` title | A green replacement head |
+| Hosted assertion correction | The contract now verifies responsive `todayGreetingSize` followed by adaptive `StrandPalette.textPrimary`; the exact `MoreListParityTests` suite passed 14 tests locally with zero failures or skips | The corrected test still rejects hard-coded white ink while accepting the intentional `28/30pt` responsive title policy | The replacement hosted universal macOS build and full suite, which remain required |
 | Terminology snapshot review | Regenerated inventory retains 17,367 classified occurrences across 1,511 groups with identical category totals, a byte-identical active allowlist, and zero forbidden mappings; only source line locations changed | The UI edit introduces no new or modified active customer/core legacy terminology and the fail-closed inventory matches the source tree | Independent provenance review of pre-existing compatibility terminology |
 | Repository policy matrix | All 227 Tools tests passed; required CI verified 5 conditional workflows, 5 universal workflows, and 10 contexts; 9 release controls, 12-metric calibration parity, no-new-copy localization, 1,203-file health-claims scan, 230-component legal inventory, distribution provenance, private-data, 50 operations records, terminology, and diff checks passed | The exact local tree preserves release, metric, localization, claims, provenance, privacy, and durable-evidence contracts | Hosted exact-SHA checks, external legal approval, or physical behavior |
 | Resource cleanup | API 35 emulator stopped, Gradle and Kotlin daemons stopped, both temporary DerivedData roots and the temporary terminology candidate removed, and no Android or Apple simulator remains booted | Temporary runtime and build resources created by this round are no longer consuming device or daemon resources | The pre-existing Gradle-managed AVD cache, repository build products, or unrelated user resources |
@@ -137,11 +139,16 @@ physical-device, and external-service evidence.
 
 - Changed paths: Apple Today source and feature-mount tests; Android Today,
   bottom-bar, Review Sample, and responsive/navigation contract sources;
+  the Apple adaptive-ink source contract;
   `release/terminology/legacy-inventory.json`; `Tools/required-ci-gate.py`;
   this record; `docs/ops/rounds/INDEX.md`; and `docs/ops/ACTIVE.md`
-- Commits: pending
-- Branch and remote state: local branch from exact protected `main`; push and
-  hosted checks pending
+- Commits: `290cefb0` (`Align mobile Today with desktop hierarchy`) and
+  `e51c56e5` (`Harden Today responsive accessibility`); hosted assertion
+  correction pending commit
+- Branch and remote state:
+  `codex/mobile-desktop-visual-parity-20260910` is pushed to `origin` and open
+  as protected pull request `#13`; replacement hosted checks and normal merge
+  remain
 - Repository visibility verified: standalone GitHub repository relationship
   inherited from the current active handoff; exact protected integration
   remains pending
@@ -169,11 +176,15 @@ physical-device, and external-service evidence.
 - Simulator and emulator captures cover the intended phone, large-text, and
   tablet branches, but they do not replace physical-device accessibility,
   frame-pacing, OLED, OEM, or touch-target review.
+- The first protected Apple run failed one stale source-contract assertion.
+  The exact suite passes after correction, but protected integration remains
+  incomplete until the replacement head passes every required check.
 
 ## Next round
 
-1. Extend the approved visual language to the next highest-traffic mobile
-   surface after this focused Today change is reviewed.
+1. Merge this focused visual change only after the replacement protected
+   matrix is green, then implement the already-recorded single explainable
+   customer-day recommendation arbiter as a separate reviewable round.
 
 ## Privacy check
 
