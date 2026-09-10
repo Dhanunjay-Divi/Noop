@@ -18,6 +18,23 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
+    fun largeTextUsesNamedIconOnlyBottomBarSlots() {
+        assertTrue(bottomBarShowsVisualLabels(fontScale = 1.30f))
+        assertFalse(bottomBarShowsVisualLabels(fontScale = 1.31f))
+
+        val source = appRootSource()
+        assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
+        val text = source!!
+        val barSlot = text
+            .substringAfter("private fun BarSlot(")
+            .substringBefore("\n}\n\nprivate enum class QuickActionKind")
+
+        assertTrue(barSlot.contains("contentDescription = label"))
+        assertTrue(barSlot.contains("if (showLabel) {"))
+        assertFalse(barSlot.contains("TextOverflow.Ellipsis"))
+    }
+
+    @Test
     fun workoutsStayPrimaryAndMoreDoesNotClaimTheirSelection() {
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)

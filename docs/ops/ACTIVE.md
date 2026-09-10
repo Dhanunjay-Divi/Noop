@@ -23,13 +23,15 @@ verified on `codex/mobile-desktop-visual-parity-20260910`. Apple and Android
 phones now share the desktop reference's compact masthead, dominant Daily
 Signal hierarchy, score geometry, integrated Fitness Age row, and immediate
 workout-coach placement while preserving native navigation and accessibility.
-Matched synthetic captures were reviewed at 1170 x 2532 and 1080 x 2400. The
-focused Apple suite passed 80 tests; Android passed 19 focused contracts plus
-the full debug build, lint, and instrumentation-source compilation; and the
-complete iOS simulator app graph builds. No formula, provenance, storage, sync,
-collection, account, or network behavior changed. Protected push, hosted
-checks, review, and merge remain, along with physical-device smoothness and
-hardware-dependent evidence. Details are in
+Paired synthetic phone, large-text, and tablet captures were reviewed. The
+follow-up Apple suite passed 77 tests; Android passed 31 focused contracts plus
+both debug builds, lint, and instrumentation-source compilation; and the
+complete iOS simulator app graph builds. Android large-text weather and normal
+plus Review Sample navigation retain full accessibility names without
+ellipsized visual fragments. No formula, provenance, storage, sync, collection,
+account, or network behavior changed. Protected push, hosted checks, review,
+and merge remain, along with physical-device smoothness and hardware-dependent
+evidence. Details are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged

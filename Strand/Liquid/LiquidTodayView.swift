@@ -33,6 +33,7 @@ struct LiquidTodayView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var weather = TodayWeatherStore()
     @AppStorage(TodayWeatherStore.enabledKey) private var todayWeatherEnabled = false
     @State private var showWeatherDetails = false
@@ -209,10 +210,16 @@ struct LiquidTodayView: View {
     /// dimensions so labels never clip.
     private var usesCompactPhoneTodayLayout: Bool {
         #if os(iOS)
-        return dynamicTypeSize != .xxxLarge && !dynamicTypeSize.isAccessibilitySize
+        return Self.shouldUseCompactTodayLayout(
+            compactWidth: horizontalSizeClass == .compact,
+            largeText: dynamicTypeSize == .xxxLarge || dynamicTypeSize.isAccessibilitySize
+        )
         #else
         return false
         #endif
+    }
+    static func shouldUseCompactTodayLayout(compactWidth: Bool, largeText: Bool) -> Bool {
+        compactWidth && !largeText
     }
     private var todayHeroArcSize: CGFloat { usesCompactPhoneTodayLayout ? 136 : 156 }
     private var todaySatelliteSize: CGFloat { usesCompactPhoneTodayLayout ? 54 : 60 }

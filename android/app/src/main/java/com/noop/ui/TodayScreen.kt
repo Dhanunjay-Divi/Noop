@@ -163,6 +163,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -318,18 +319,36 @@ private var todayDidSnapToTodayThisLaunch = false
 //
 // The hero card the score vessels float on, ported from the iOS LiquidTodayView. `heroFill` is a
 // translucent near-black (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessels + white
-// count-up numbers read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge.
+// count-up numbers read crisp on it. Phone radius 24 / roomy radius 26 plus a white@0.11 hairline give
+// the frosted-glass edge.
 private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
 private val LIQUID_HERO_BASE: Color = Color(red = 7f / 255f, green = 9f / 255f, blue = 8f / 255f, alpha = 1f)
-private val LIQUID_HERO_RADIUS: Dp = 24.dp
+private val LIQUID_HERO_COMPACT_RADIUS: Dp = 24.dp
+private val LIQUID_HERO_ROOMY_RADIUS: Dp = 26.dp
 private val DAILY_SIGNAL_ALERT_TINT = Color(0xFFFF453A)
+
+internal fun todayUsesCompactLayout(screenWidthDp: Int, fontScale: Float): Boolean =
+    screenWidthDp < 600 && fontScale <= 1.30f
+
+internal fun todayWeatherShowsVisualText(hasSnapshot: Boolean, fontScale: Float): Boolean =
+    hasSnapshot || fontScale <= 1.30f
+
+@Composable
+private fun currentTodayLayoutIsCompact(): Boolean =
+    todayUsesCompactLayout(
+        screenWidthDp = LocalConfiguration.current.screenWidthDp,
+        fontScale = LocalDensity.current.fontScale,
+    )
 
 private fun Modifier.liquidTodayHeroSurface(tint: Color): Modifier = composed {
     val opacity = CardAppearance.opacity
-    val shape = RoundedCornerShape(LIQUID_HERO_RADIUS)
+    val compactLayout = currentTodayLayoutIsCompact()
+    val shape = RoundedCornerShape(
+        if (compactLayout) LIQUID_HERO_COMPACT_RADIUS else LIQUID_HERO_ROOMY_RADIUS,
+    )
     this
         .shadow(
-            elevation = (18f * opacity).dp,
+            elevation = ((if (compactLayout) 18f else 22f) * opacity).dp,
             shape = shape,
             clip = false,
         )
@@ -3329,9 +3348,12 @@ private fun LiquidTodayHeader(
     modifier: Modifier = Modifier,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val compactLayout = currentTodayLayoutIsCompact()
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+        verticalArrangement = Arrangement.spacedBy(
+            if (compactLayout) Metrics.space12 else Metrics.space16,
+        ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -3465,7 +3487,10 @@ private fun LiquidTodayHeader(
             ) {
                 Text(
                     headline,
-                    style = NoopType.number(28f, weight = FontWeight.Bold).copy(
+                    style = NoopType.number(
+                        if (compactLayout) 28f else 30f,
+                        weight = FontWeight.Bold,
+                    ).copy(
                         shadow = Shadow(
                             color = Color.Black.copy(alpha = 0.4f),
                             offset = Offset(0f, 1f),
@@ -3495,7 +3520,12 @@ private fun TodayWeatherChip(
     temperatureUnit: TemperatureUnit,
     onClick: () -> Unit,
 ) {
+    val compactLayout = currentTodayLayoutIsCompact()
     val snapshot = state.snapshot
+    val showVisualText = todayWeatherShowsVisualText(
+        hasSnapshot = snapshot != null,
+        fontScale = LocalDensity.current.fontScale,
+    )
     val condition = snapshot?.let { TodayWeatherCode.condition(it.weatherCode) }
     val conditionLabel = condition?.let { todayWeatherConditionLabel(it) }
     val accessibilityLabel = when {
@@ -3517,8 +3547,14 @@ private fun TodayWeatherChip(
 
     Row(
         modifier = Modifier
-            .width(82.dp)
-            .height(34.dp)
+            .width(
+                when {
+                    !showVisualText -> if (compactLayout) 32.dp else 34.dp
+                    compactLayout -> 76.dp
+                    else -> 82.dp
+                },
+            )
+            .height(if (compactLayout) 32.dp else 34.dp)
             .liquidPress(interaction)
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.055f))
@@ -3551,14 +3587,15 @@ private fun TodayWeatherChip(
                     color = tint,
                     strokeWidth = 1.5.dp,
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = stringResource(R.string.today_weather),
-                    style = NoopType.captionNumber,
-                    color = tint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (showVisualText) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.today_weather),
+                        style = NoopType.captionNumber,
+                        color = tint,
+                        maxLines = 1,
+                    )
+                }
             }
             snapshot != null && condition != null -> {
                 Icon(
@@ -3573,7 +3610,6 @@ private fun TodayWeatherChip(
                     style = NoopType.captionNumber,
                     color = tint,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             state.status == TodayWeatherStatus.DENIED -> {
@@ -3583,14 +3619,15 @@ private fun TodayWeatherChip(
                     tint = tint,
                     modifier = Modifier.size(16.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = stringResource(R.string.today_weather),
-                    style = NoopType.captionNumber,
-                    color = tint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (showVisualText) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.today_weather),
+                        style = NoopType.captionNumber,
+                        color = tint,
+                        maxLines = 1,
+                    )
+                }
             }
             else -> {
                 Icon(
@@ -3599,14 +3636,15 @@ private fun TodayWeatherChip(
                     tint = tint,
                     modifier = Modifier.size(16.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = stringResource(R.string.today_weather),
-                    style = NoopType.captionNumber,
-                    color = tint,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (showVisualText) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.today_weather),
+                        style = NoopType.captionNumber,
+                        color = tint,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -4278,15 +4316,12 @@ private fun DailySignalHeader(
                 modifier = semantics.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space4),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    DailySignalIdentity(status = status, tint = tint)
-                    Spacer(Modifier.weight(1f))
-                    DailySignalStatePill(title = label, tint = tint)
-                }
+                DailySignalIdentity(status = status, tint = tint)
+                DailySignalStatePill(
+                    title = label,
+                    tint = tint,
+                    modifier = Modifier.align(Alignment.End),
+                )
                 if (sourceLabel != null) {
                     DailySignalSourceBadgeLive(
                         text = sourceLabel,
@@ -4456,6 +4491,7 @@ private fun DailySignalBandSyncSweep(modifier: Modifier = Modifier) {
 private fun DailySignalStatePill(
     title: String,
     tint: Color,
+    modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(50)
     Text(
@@ -4465,7 +4501,7 @@ private fun DailySignalStatePill(
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
-        modifier = Modifier
+        modifier = modifier
             .clip(shape)
             .background(tint.copy(alpha = 0.12f))
             .border(0.75.dp, tint.copy(alpha = 0.24f), shape)
@@ -4568,9 +4604,9 @@ private fun ScoreHeroRow(
     onChargeTap: (() -> Unit)? = null,
     onFitnessAgeTap: (() -> Unit)? = null,
 ) {
-    val compactInstruments = LocalDensity.current.fontScale <= 1.30f
-    val heroSize = if (compactInstruments) 136.dp else 156.dp
-    val satelliteSize = if (compactInstruments) 54.dp else 60.dp
+    val compactLayout = currentTodayLayoutIsCompact()
+    val heroSize = if (compactLayout) 136.dp else 156.dp
+    val satelliteSize = if (compactLayout) 54.dp else 60.dp
     val ownRecovery = day?.recovery
     val recovery = ownRecovery ?: lastScoredCharge?.value
     val recoveryColors = recovery?.let(Palette::recoveryGaugeColors)
@@ -4603,9 +4639,14 @@ private fun ScoreHeroRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Metrics.space14, vertical = Metrics.space10),
+            .padding(
+                horizontal = if (compactLayout) Metrics.space14 else Metrics.space16,
+                vertical = if (compactLayout) Metrics.space10 else Metrics.space12,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+        verticalArrangement = Arrangement.spacedBy(
+            if (compactLayout) Metrics.space12 else Metrics.space16,
+        ),
     ) {
         V2HeroArc(
             label = uiString(R.string.l10n_today_screen_recovery_ea924f72),
@@ -4623,7 +4664,10 @@ private fun ScoreHeroRow(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(
+                if (compactLayout) 24.dp else 28.dp,
+                Alignment.CenterHorizontally,
+            ),
             verticalAlignment = Alignment.Top,
         ) {
             V2SatelliteRing(

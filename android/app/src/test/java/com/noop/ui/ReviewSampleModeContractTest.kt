@@ -40,6 +40,20 @@ class ReviewSampleModeContractTest {
     }
 
     @Test
+    fun reviewSampleBottomBarKeepsFullNamesWithoutLargeTextEllipses() {
+        val source = source("com/noop/ui/ReviewSampleMode.kt")
+        val block = source.substring(
+            source.indexOf("bottomBar = {"),
+            source.indexOf("\n        },\n    ) { inner ->"),
+        )
+
+        assertTrue(source.contains("bottomBarShowsVisualLabels(LocalDensity.current.fontScale)"))
+        assertTrue(block.contains("label = if (showVisualLabels)"))
+        assertTrue(block.contains("contentDescription = tabLabel"))
+        assertFalse(block.contains("TextOverflow.Ellipsis"))
+    }
+
+    @Test
     fun applicationStartupDefersOperationalRuntimeUntilCurrentTerms() {
         val application = source("com/noop/NoopApplication.kt")
         val onCreate = application.substring(

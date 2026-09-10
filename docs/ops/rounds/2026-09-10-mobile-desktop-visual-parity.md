@@ -60,16 +60,24 @@ secondary rows, matched iOS and Android screenshots, and clean platform builds.
 - Fixed-format score instruments scale down together on ordinary phone text
   sizes, while large Dynamic Type keeps the roomier dimensions so labels do
   not clip.
-- The narrow Daily Signal header keeps the status beside the title and moves
-  provenance to a quieter trailing line. Wider layouts retain the established
-  single-row presentation.
+- Compact geometry is limited to phone-width layouts. iPad, Android tablet,
+  and phone accessibility-text layouts use the roomier geometry instead of
+  inheriting phone-only dimensions.
+- The narrow Daily Signal header stacks status and provenance below the title
+  when the actual width or text scale cannot fit them. Wider layouts retain
+  the established single-row presentation.
+- At Android text scales above 1.30, the weather placeholder and both normal
+  and Review Sample bottom bars use familiar icon-only controls with complete
+  accessibility names. Temperature remains visible when a weather reading is
+  available; no label is ellipsized to an ambiguous fragment.
 - Card radius, padding, spacing, weather control dimensions, and shadow depth
   now match across the two phone implementations without changing source
   selection, formulas, navigation, gestures, accessibility labels, or stored
   data.
-- Matched synthetic Today captures were reviewed at 1080 x 2400 on Android and
-  1170 x 2532 on iOS. Both preserve native system chrome and mobile navigation
-  while using the desktop visual hierarchy.
+- Paired synthetic Today captures were reviewed at 1080 x 2400 on Android and
+  1170 x 2532 on iOS. They use different fixture states, but both preserve
+  native system chrome and mobile navigation while using the desktop visual
+  hierarchy.
 
 ## Data, privacy, and medical truth
 
@@ -106,15 +114,16 @@ physical-device, and external-service evidence.
 | Evidence | Result | What it proves | What it does not prove |
 |---|---|---|---|
 | Source preflight | Desktop reference and both Today implementations inspected | Existing hierarchy and parity points are understood before edits | Final appearance or device performance |
-| Android focused and app gates | `:app:assembleFullDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and 19 focused Today/performance contracts passed in one Gradle invocation | The full Android variant compiles, lint is clean, instrumentation sources compile, and the retained-screen/runtime/Today source contracts still hold | Physical-device frame pacing, OEM rendering, collection, or BLE behavior |
-| Apple focused contracts | 80 tests across `TodayExplainabilityTests`, `TodayHeroRingLayoutTests`, `LiquidTodayFeatureMountTests`, and `RetainedScreenPerformanceContractTests` passed with zero failures or skips | The shared Today source retains its explainability, layout, feature-mount, and retained-screen contracts | iOS-only runtime behavior or physical-device smoothness |
+| Android focused and app gates | Final exact-source invocation passed `:app:assembleFullDebug`, `:app:assembleDemoDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and 31 focused Today, shell, Review Sample, and performance contracts in 3 minutes | Both Android variants compile, lint is clean, instrumentation sources compile, and the responsive, navigation, retained-screen, runtime, and Today contracts hold together | Physical-device frame pacing, OEM rendering, collection, or BLE behavior |
+| Apple focused contracts | Follow-up suite passed 77 tests across `LiquidTodayFeatureMountTests`, `TodayExplainabilityTests`, and `RetainedScreenPerformanceContractTests` with zero failures or skips | The shared Today source retains explainability, feature mounting, retained-screen behavior, and the compact-width/large-text selection policy | Physical-device smoothness or hardware-dependent behavior |
 | iOS app build | `NOOPiOS` built for an arm64 iOS 26.5 simulator with signing disabled after regenerating the ignored XcodeGen project from `project.yml` | The changed shared Swift source and complete iOS dependency graph compile together | Signing, installation on a physical phone, or store acceptance |
-| Android runtime capture | Demo Today route launched on an isolated API 35 arm64 emulator; 1080 x 2400 screenshot reviewed; captured error log contained no NOOP fatal exception or ANR | The current APK renders the intended hierarchy and remains running in the exercised synthetic state | Physical OLED appearance, OEM variance, sensor data, or sustained frame pacing |
-| iOS runtime capture | Synthetic Today route launched on an iOS 26.5 phone simulator; 1170 x 2532 screenshot reviewed | The current iOS app renders the intended hierarchy at phone size | Physical-device frame pacing, background execution, BLE, battery, or haptics |
-| Visual parity review | Desktop, Android, and iOS first viewports compared directly | Both phones share the approved hierarchy, visual weight, section order, and compact score geometry while preserving native chrome | Pixel identity across rendering engines or every non-Today screen |
+| Android runtime capture | Demo Today rendered at ordinary and 1.5x text on an isolated API 35 arm64 emulator; phone captures are 1080 x 2400 and the tablet capture is 2560 x 1600. The corrected large-text Today and Review Sample captures each left a zero-byte crash buffer | Current APKs render compact phone, large-text phone, and regular-width tablet branches; the weather and navigation labels no longer truncate in either Android shell | Physical OLED appearance, OEM variance, sensor data, or sustained frame pacing |
+| iOS runtime capture | Synthetic Today rendered on an iOS 26.5 phone at ordinary and accessibility-large text and on an iPad simulator; phone captures are 1170 x 2532 and the tablet capture is 1640 x 2360 | The current iOS app renders phone, accessibility-text, and regular-width tablet branches without clipped Daily Signal labels | Physical-device frame pacing, background execution, BLE, battery, or haptics |
+| Independent review | Five findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. A later rendered pass also found and corrected Android weather and navigation ellipses in both shells | The final source and evidence reflect a fresh review rather than only the implementation author’s assumptions | Independent physical-device review |
+| Visual hierarchy review | Desktop, Android, and iOS first viewports compared directly despite different synthetic data states | Both phones share the approved hierarchy, visual weight, section order, and score geometry while preserving native chrome; tablet and large-text branches remain coherent | State-for-state screenshot parity, pixel identity across rendering engines, physical rendering, or every non-Today screen |
 | Terminology snapshot review | Regenerated inventory retains 17,367 classified occurrences across 1,511 groups with identical category totals, a byte-identical active allowlist, and zero forbidden mappings; only source line locations changed | The UI edit introduces no new or modified active customer/core legacy terminology and the fail-closed inventory matches the source tree | Independent provenance review of pre-existing compatibility terminology |
 | Repository policy matrix | All 227 Tools tests passed; required CI verified 5 conditional workflows, 5 universal workflows, and 10 contexts; 9 release controls, 12-metric calibration parity, no-new-copy localization, 1,203-file health-claims scan, 230-component legal inventory, distribution provenance, private-data, 50 operations records, terminology, and diff checks passed | The exact local tree preserves release, metric, localization, claims, provenance, privacy, and durable-evidence contracts | Hosted exact-SHA checks, external legal approval, or physical behavior |
-| Resource cleanup | Isolated API 35 emulator stopped, Gradle daemon stopped, temporary AVD root removed, and both temporary DerivedData roots removed; no Android emulator remains attached | Temporary runtime and build resources created by this round are no longer consuming device or daemon resources | Pre-existing repository build products or unrelated user resources |
+| Resource cleanup | API 35 emulator stopped, Gradle and Kotlin daemons stopped, both temporary DerivedData roots and the temporary terminology candidate removed, and no Android or Apple simulator remains booted | Temporary runtime and build resources created by this round are no longer consuming device or daemon resources | The pre-existing Gradle-managed AVD cache, repository build products, or unrelated user resources |
 
 ## Physical device and deployment
 
@@ -126,11 +135,10 @@ physical-device, and external-service evidence.
 
 ## Git and release state
 
-- Changed paths: `Strand/Liquid/LiquidTodayView.swift`,
-  `android/app/src/main/java/com/noop/ui/TodayScreen.kt`,
-  `release/terminology/legacy-inventory.json`,
-  `Tools/required-ci-gate.py`, this record, `docs/ops/rounds/INDEX.md`, and
-  `docs/ops/ACTIVE.md`
+- Changed paths: Apple Today source and feature-mount tests; Android Today,
+  bottom-bar, Review Sample, and responsive/navigation contract sources;
+  `release/terminology/legacy-inventory.json`; `Tools/required-ci-gate.py`;
+  this record; `docs/ops/rounds/INDEX.md`; and `docs/ops/ACTIVE.md`
 - Commits: pending
 - Branch and remote state: local branch from exact protected `main`; push and
   hosted checks pending
@@ -158,6 +166,9 @@ physical-device, and external-service evidence.
 - The iOS simulator fixture was still calibrating while the Android fixture
   contained scored values. That difference validates responsive content
   states, not numerical parity between fixtures.
+- Simulator and emulator captures cover the intended phone, large-text, and
+  tablet branches, but they do not replace physical-device accessibility,
+  frame-pacing, OLED, OEM, or touch-target review.
 
 ## Next round
 

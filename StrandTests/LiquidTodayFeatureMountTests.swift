@@ -6,6 +6,27 @@ import XCTest
 /// opt-in without requiring a rendered SwiftUI hierarchy or a live wearable.
 @MainActor
 final class LiquidTodayFeatureMountTests: XCTestCase {
+    func testCompactTodayLayoutRequiresCompactWidthAndOrdinaryText() {
+        XCTAssertTrue(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: true,
+                largeText: false
+            )
+        )
+        XCTAssertFalse(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: false,
+                largeText: false
+            )
+        )
+        XCTAssertFalse(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: true,
+                largeText: true
+            )
+        )
+    }
+
     func testAutoDetectedWorkoutSuggestionIsMountedOnDefaultToday() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let body = try slice(source, from: "var body: some View", to: ".coordinateSpace(name: Self.pullSpace)")

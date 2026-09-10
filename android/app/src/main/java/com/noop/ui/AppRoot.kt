@@ -1134,6 +1134,8 @@ private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
 )
 
+internal fun bottomBarShowsVisualLabels(fontScale: Float): Boolean = fontScale <= 1.30f
+
 @Composable
 private fun GlassBottomBar(
     selected: Destination,
@@ -1141,6 +1143,7 @@ private fun GlassBottomBar(
     onQuickActions: () -> Unit,
 ) {
     val barShape = RoundedCornerShape(50)
+    val showVisualLabels = bottomBarShowsVisualLabels(LocalDensity.current.fontScale)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1175,6 +1178,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
+                            showLabel = showVisualLabels,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1185,6 +1189,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
+                            showLabel = showVisualLabels,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1194,6 +1199,7 @@ private fun GlassBottomBar(
                         label = stringResource(R.string.nav_more),
                         active = selected == Destination.More,
                         testTag = "noop.tab.more",
+                        showLabel = showVisualLabels,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
                     )
@@ -1339,6 +1345,7 @@ private fun BarSlot(
     label: String,
     active: Boolean,
     testTag: String,
+    showLabel: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -1381,30 +1388,31 @@ private fun BarSlot(
                 selected = active
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
     ) {
         Icon(
             icon,
             contentDescription = null,
             tint = tint,
             modifier = Modifier
-                .size(Metrics.iconSmall)
+                .size(if (showLabel) Metrics.iconSmall else 22.dp)
                 .graphicsLayer {
                     scaleX = selectedScale
                     scaleY = selectedScale
                     translationY = if (active) -1.dp.toPx() else 0f
                 },
         )
-        Text(
-            label,
-            style = NoopType.footnote.copy(
-                fontSize = 10.sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-            color = tint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (showLabel) {
+            Text(
+                label,
+                style = NoopType.footnote.copy(
+                    fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                color = tint,
+                maxLines = 1,
+            )
+        }
     }
 }
 

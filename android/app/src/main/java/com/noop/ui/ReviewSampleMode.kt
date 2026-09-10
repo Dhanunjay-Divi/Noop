@@ -59,8 +59,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -325,6 +327,7 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
     var selectedTab by remember { mutableStateOf(ReviewSampleTab.TODAY) }
     var metricDetail by remember { mutableStateOf<ReviewSampleMetric?>(null) }
     var moreDetail by remember { mutableStateOf<ReviewSampleMoreDestination?>(null) }
+    val showVisualLabels = bottomBarShowsVisualLabels(LocalDensity.current.fontScale)
 
     if (metricDetail != null) {
         ReviewSampleMetricDetail(metricDetail!!, onBack = { metricDetail = null }, onExit = onExit)
@@ -347,18 +350,25 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
                 modifier = Modifier.navigationBarsPadding(),
             ) {
                 ReviewSampleTab.entries.forEach { tab ->
+                    val tabLabel = stringResource(tab.title)
                     NavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
                         icon = { Icon(tab.icon, null) },
-                        label = {
-                            Text(
-                                stringResource(tab.title),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        label = if (showVisualLabels) {
+                            {
+                                Text(
+                                    tabLabel,
+                                    maxLines = 1,
+                                )
+                            }
+                        } else {
+                            null
                         },
-                        modifier = Modifier.testTag("noop.review.tab.${tab.name.lowercase()}"),
+                        alwaysShowLabel = showVisualLabels,
+                        modifier = Modifier
+                            .testTag("noop.review.tab.${tab.name.lowercase()}")
+                            .semantics { contentDescription = tabLabel },
                     )
                 }
             }
