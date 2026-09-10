@@ -90,9 +90,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   contain the setting, permission, Today, deficit, and notification copy.
 - Debug-only Apple and Android fixtures reproduce 6h12 sleep against a 7h30
   personal usual and a 17:30 planned workout without reading a real calendar.
-  The iOS visual matrix records whether the adjustment was actually present
-  before accepting its screenshot, and Android exposes the same fixture through
-  the private `today-planned-workout` demo route.
+  The iOS visual matrix writes and verifies a fixed-category state marker before
+  accepting each screenshot, propagates every warm-up/capture assertion failure,
+  and safely handles an empty output directory. Android exposes the same fixture
+  through the private `today-planned-workout` demo route.
 
 ## Data, privacy, and medical truth
 
@@ -138,6 +139,8 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Focused macOS app tests | 19 passed | Calendar bridge, private routing, truthful signal evidence, cooldown ordering, and affected contextual policies pass | iOS EventKit permission sheet or notification presentation |
 | `DailyActionTodayContractTests` | 4 passed | The Apple visual harness requires the real planner state and positively verifies whether planned-workout context was present | A rendered simulator screenshot or physical-device layout |
 | Unsigned iOS simulator build | Passed | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
+| Fail-closed iOS daily-plan visual matrix | Seven states passed on a disposable iPhone simulator, including large text, increased contrast, dark mode, and the 6h12/17:30 planned-workout fixture | Every accepted image had the expected planner availability and planned-workout category, nonblank rendered pixels, and a live app process; the simulator was removed afterward | Physical-device layout, real calendar permission/provider behavior, or background delivery |
+| Planned-workout visual inspection | `planned-workout.png`, 1170x2532 and 535,203 bytes, reviewed | Sleep, start time, exact 1h18 deficit, guidance, range, and bottom navigation are visible without overlap in the deterministic fixture | Every device size, locale, accessibility setting, or real user history |
 | Android full gate | 4,191 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 
@@ -158,6 +161,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   records
 - Commits:
 - Branch and remote state: local child branch of pull request `#13`
+- Parent integration state: visual-parity pull request `#13` merged normally to
+  protected `main` as `2efd5e89`; this branch still requires rebase, replacement
+  full verification, protected review, and normal merge.
 - Repository visibility verified: private GitHub repository already verified by
   the preceding round
 - Version/build impact: none planned

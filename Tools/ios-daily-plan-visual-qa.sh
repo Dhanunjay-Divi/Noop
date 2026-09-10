@@ -53,6 +53,8 @@ runtime_id=$(
 )
 device_type="com.apple.CoreSimulator.SimDeviceType.iPhone-17e"
 udid=""
+app_data_dir=""
+qa_state_file=""
 
 cleanup() {
     if [[ -z "$udid" ]]; then
@@ -97,24 +99,32 @@ validate_capture() {
     fi
 }
 
-assert_log_state() {
-    local log="$1"
+wait_for_qa_state() {
+    local pid="$1"
     local expected="$2"
     local planned_workout="$3"
     local expected_planned="false"
     if (( planned_workout == 1 )); then
         expected_planned="true"
     fi
-    grep -Fq "Daily Plan QA availability=$expected" "$log" || {
-        print -u2 -r -- "Expected availability=$expected in ${log:t}"
-        tail -n 30 "$log" >&2
-        return 1
-    }
-    grep -Fq "plannedWorkout=$expected_planned" "$log" || {
-        print -u2 -r -- "Expected plannedWorkout=$expected_planned in ${log:t}"
-        tail -n 30 "$log" >&2
-        return 1
-    }
+    for _ in {1..60}; do
+        if [[ -f "$qa_state_file" ]] &&
+            grep -Fq "Daily Plan QA availability=$expected" "$qa_state_file" &&
+            grep -Fq "plannedWorkout=$expected_planned" "$qa_state_file"; then
+            return 0
+        fi
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            print -u2 -r -- "App exited before daily-plan QA state became available."
+            return 1
+        fi
+        sleep 0.25
+    done
+    print -u2 -r -- \
+        "Expected availability=$expected plannedWorkout=$expected_planned in ${qa_state_file:t}"
+    if [[ -f "$qa_state_file" ]]; then
+        cat "$qa_state_file" >&2
+    fi
+    return 1
 }
 
 warm_up_seed() {
@@ -122,10 +132,10 @@ warm_up_seed() {
     local stderr_log="$output_dir/warmup.stderr.log"
     local result
     local pid
-    local seeded=0
 
     : > "$stdout_log"
     : > "$stderr_log"
+    rm -f -- "$qa_state_file"
     result=$(
         xcrun simctl launch \
             --terminate-running-process \
@@ -134,23 +144,13 @@ warm_up_seed() {
             "$udid" \
             "$bundle_id" \
             --demo-seed \
-            --demo-tab today
+            --demo-tab today \
+            --demo-daily-plan \
+            --demo-daily-plan-check-in asUsual
     )
     pid="${result##*: }"
-    for _ in {1..30}; do
-        if grep -Fq "AppleDemoSeeder: seeded" "$stderr_log"; then
-            seeded=1
-            break
-        fi
-        kill -0 "$pid" >/dev/null
-        sleep 1
-    done
-    if (( seeded == 0 )); then
-        print -u2 -r -- "Demo seed did not finish during simulator warm-up."
-        tail -n 30 "$stderr_log" >&2
-        return 1
-    fi
-    sleep 2
+    wait_for_qa_state "$pid" ready 0 || return 1
+    sleep 1
     xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
 }
 
@@ -173,6 +173,7 @@ capture() {
     xcrun simctl ui "$udid" appearance "$appearance"
     xcrun simctl ui "$udid" content_size "$content_size"
     xcrun simctl ui "$udid" increase_contrast "$contrast"
+    rm -f -- "$qa_state_file"
     : > "$stdout_log"
     : > "$stderr_log"
     launch_args=(
@@ -194,11 +195,11 @@ capture() {
             "${launch_args[@]}"
     )
     pid="${result##*: }"
-    sleep 5
-    kill -0 "$pid" >/dev/null
+    wait_for_qa_state "$pid" "$expected" "$planned_workout" || return 1
+    sleep 2
+    kill -0 "$pid" >/dev/null || return 1
     xcrun simctl io "$udid" screenshot "$screenshot" >/dev/null
-    validate_capture "$screenshot"
-    assert_log_state "$stderr_log" "$expected" "$planned_workout"
+    validate_capture "$screenshot" || return 1
     if grep -Eiq 'fatal error|uncaught exception|terminating app due|segmentation fault' "$stderr_log"; then
         print -u2 -r -- "Crash signature found in ${stderr_log:t}"
         return 1
@@ -207,7 +208,14 @@ capture() {
 }
 
 mkdir -p "$output_dir"
-rm -f "$output_dir"/*.png "$output_dir"/*.stdout.log "$output_dir"/*.stderr.log
+stale_outputs=(
+    "$output_dir"/*.png(N)
+    "$output_dir"/*.stdout.log(N)
+    "$output_dir"/*.stderr.log(N)
+)
+if (( ${#stale_outputs[@]} > 0 )); then
+    rm -f -- "${stale_outputs[@]}"
+fi
 
 udid=$(
     xcrun simctl create \
@@ -225,15 +233,17 @@ xcrun simctl status_bar "$udid" override \
     --batteryState charged \
     --batteryLevel 100
 xcrun simctl install "$udid" "$app_path"
-warm_up_seed
+app_data_dir=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
+qa_state_file="$app_data_dir/Library/Caches/noop-daily-plan-qa.txt"
+warm_up_seed || exit 1
 
-capture check-in-needed unanswered light large disabled checkInNeeded
-capture as-usual asUsual light large disabled ready
-capture recovery-shift belowUsual light large disabled recoveryShift
-capture stop painOrUnwell light large disabled stop
-capture accessibility-stop painOrUnwell light accessibility-large disabled stop
-capture dark-contrast-ready asUsual dark large enabled ready
-capture planned-workout asUsual light large disabled ready 1
+capture check-in-needed unanswered light large disabled checkInNeeded || exit 1
+capture as-usual asUsual light large disabled ready || exit 1
+capture recovery-shift belowUsual light large disabled recoveryShift || exit 1
+capture stop painOrUnwell light large disabled stop || exit 1
+capture accessibility-stop painOrUnwell light accessibility-large disabled stop || exit 1
+capture dark-contrast-ready asUsual dark large enabled ready || exit 1
+capture planned-workout asUsual light large disabled ready 1 || exit 1
 
 if cmp -s "$output_dir/check-in-needed.png" "$output_dir/stop.png"; then
     print -u2 -r -- "Distinct planner states produced identical captures."

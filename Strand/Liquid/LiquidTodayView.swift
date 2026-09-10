@@ -2982,12 +2982,19 @@ struct LiquidTodayView: View {
         cachedDailyActionPlan = dailyPlan
         #if DEBUG
         if CommandLine.arguments.contains("--demo-daily-plan") {
-            NSLog(
+            let qaState =
                 "Daily Plan QA availability=\(dailyPlan.availability.rawValue) " +
-                "checkIn=\(currentDailyActionCheckIn.rawValue) " +
-                "target=\(dailyPlan.target.map { "\($0.lower)-\($0.upper)" } ?? "none") " +
                 "plannedWorkout=\(dailyPlan.workoutAdjustment != nil)"
-            )
+            if let caches = FileManager.default.urls(
+                for: .cachesDirectory,
+                in: .userDomainMask
+            ).first {
+                try? qaState.write(
+                    to: caches.appendingPathComponent("noop-daily-plan-qa.txt"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
         }
         #endif
         // Prior-day vitals carry, resolved ONCE here (never in body). Bound to today's own key so it can't
