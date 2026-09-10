@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `implementation complete and locally verified; protected integration and physical-device evidence pending`
+- State: `post-rebase local verification complete; protected integration and physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/calendar-aware-daily-guidance-20260910`
 - Start commit: `67ffd848094bbc3e7cbab682feed592c68a10f88`
-- End implementation commit: commit containing this record
+- End implementation commit: `0222fe1a410943ce6bd849361308e889f14911f2`
 - Record commit or PR: pending protected review
 
 ## Objective
@@ -141,8 +141,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Unsigned iOS simulator build | Passed | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Fail-closed iOS daily-plan visual matrix | Seven states passed on a disposable iPhone simulator, including large text, increased contrast, dark mode, and the 6h12/17:30 planned-workout fixture | Every accepted image had the expected planner availability and planned-workout category, nonblank rendered pixels, and a live app process; the simulator was removed afterward | Physical-device layout, real calendar permission/provider behavior, or background delivery |
 | Planned-workout visual inspection | `planned-workout.png`, 1170x2532 and 535,203 bytes, reviewed | Sleep, start time, exact 1h18 deficit, guidance, range, and bottom navigation are visible without overlap in the deterministic fixture | Every device size, locale, accessibility setting, or real user history |
-| Android full gate | 4,191 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
+| Android full gate | 4,194 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
+| Post-rebase Apple graph | Unsigned `NOOPiOS` Debug build completed with exit 0 and `BUILD SUCCEEDED`, including the iPhone app, widgets, and watch app | The complete Apple dependency graph still compiles after rebasing onto protected `main` at `2efd5e89` | Signing, installation, physical calendar access, background delivery, or hardware behavior |
+| Repository policy and terminology | 227 Tools tests passed; all 51 operations records validated; terminology audit retained 17,367 occurrences across 1,511 groups, a byte-identical active allowlist, and zero forbidden mappings | The rebased source and evidence preserve required CI, durable-record, privacy, and terminology controls | Independent legal review or physical-device behavior |
 
 ## Physical device and deployment
 
@@ -159,11 +161,16 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 - Changed paths: shared planners/classifiers and tests; Apple/Android calendar,
   Today, Automations, notification, permission, localization, privacy, and ops
   records
-- Commits:
-- Branch and remote state: local child branch of pull request `#13`
+- Commits: `b8ae332d` (private calendar-aware guidance), `4b8c010e`
+  (refresh cancellation), `28a75392` (fatal provider errors), `b752de56`
+  (deterministic visual fixtures), and `0222fe1a` (fail-closed visual
+  verification)
+- Branch and remote state: rebased child branch of merged pull request `#13`;
+  protected review and merge for this feature remain pending
 - Parent integration state: visual-parity pull request `#13` merged normally to
-  protected `main` as `2efd5e89`; this branch still requires rebase, replacement
-  full verification, protected review, and normal merge.
+  protected `main` as `2efd5e89`; this branch is now rebased onto that exact
+  commit, has completed replacement local verification, and still requires
+  protected review and normal merge.
 - Repository visibility verified: private GitHub repository already verified by
   the preceding round
 - Version/build impact: none planned
@@ -188,7 +195,8 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Run the permission, provider-change, foreground/background notification,
+1. Complete protected review and normal merge without bypass.
+2. Run the permission, provider-change, foreground/background notification,
    accessibility-size, and battery matrix on representative iOS and Android
    physical devices before release.
 

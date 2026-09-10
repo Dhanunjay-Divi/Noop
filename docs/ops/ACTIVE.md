@@ -30,16 +30,17 @@ changes invalidate reads already in flight, and action-center evidence names
 only signals that actually supported the prompt. Calendar edits update the
 visible plan, the adjustment expires at its start time, and spectator,
 shopping, ticket, or equipment-service titles fail closed. Shared analytics
-passed 1,459 tests with seven skips; 19 focused Apple app tests passed; the
-complete unsigned iOS simulator graph builds; and Android passed 4,191 tests
-with seven skips plus production compile and lint. Protected review/merge and
-physical iOS/Android permission, provider, background-delivery, accessibility,
-and battery evidence remain. Details are in
+passed 1,459 tests with seven skips; 23 affected Apple app tests passed; the
+complete unsigned iOS simulator graph builds; and Android passed 4,194 tests
+with seven skips plus production compile and lint. All 227 repository-tool
+tests and the 51-record operations validator also pass after rebasing onto
+protected `main`. Protected review/merge and physical iOS/Android permission,
+provider, background-delivery, accessibility, and battery evidence remain.
+Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 
-The mobile and desktop Today visual-parity round is implemented and locally
-verified on protected pull request `#13` from
-`codex/mobile-desktop-visual-parity-20260910`. Apple and Android
+The mobile and desktop Today visual-parity round is merged on protected
+`main` as `2efd5e89` through pull request `#13`. Apple and Android
 phones now share the desktop reference's compact masthead, dominant Daily
 Signal hierarchy, score geometry, integrated Fitness Age row, and immediate
 workout-coach placement while preserving native navigation and accessibility.
@@ -65,10 +66,10 @@ Review Sample could announce a visible tab twice. Commit `4ff38930` now measures
 the complete localized identity, state, optional source, and fixed chrome before
 retaining one row, and adds an explicit tab accessibility name only in icon-only
 mode. Both Android variants, lint, instrumentation-source compilation, the three
-focused suites, terminology, and required-CI unit contracts pass. The final
-correction and evidence update still require push, replacement protected
-checks, two resolved review conversations, and normal merge, along with
-physical-device smoothness and hardware-dependent evidence. Details are in
+focused suites, terminology, and required-CI unit contracts pass. All six
+review conversations were resolved and every required hosted context passed
+before the normal protected merge. Physical-device smoothness and
+hardware-dependent evidence remain. Details are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged
