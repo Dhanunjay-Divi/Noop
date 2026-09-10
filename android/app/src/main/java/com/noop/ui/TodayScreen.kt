@@ -430,6 +430,43 @@ private fun Modifier.liquidTodayCompactSurface(): Modifier = composed {
 // the mini "Your cards" vessel so Vitality reads the same purple as iOS.
 private val LIQUID_PURPLE: Color = Color(red = 0x9b / 255f, green = 0x7b / 255f, blue = 0xff / 255f, alpha = 1f)
 
+internal data class PlannedWorkoutTodayDemoContext(
+    val nowSec: Long,
+    val recentSleep: List<DailyActionPlanner.SleepDay>,
+    val workout: DailyActionPlanner.PlannedWorkout,
+)
+
+internal fun plannedWorkoutTodayDemoContext(
+    dayKey: String,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): PlannedWorkoutTodayDemoContext? {
+    val day = runCatching { LocalDate.parse(dayKey) }.getOrNull()
+        ?.takeIf { it.toString() == dayKey }
+        ?: return null
+    val now = day.atTime(9, 41).atZone(zoneId)
+    val start = day.atTime(17, 30).atZone(zoneId)
+    val recentSleep = buildList {
+        add(DailyActionPlanner.SleepDay(dayKey, 6.0 * 60.0 + 12.0))
+        for (offset in 1L..7L) {
+            add(
+                DailyActionPlanner.SleepDay(
+                    day = day.minusDays(offset).toString(),
+                    minutes = 7.0 * 60.0 + 30.0,
+                ),
+            )
+        }
+    }
+    return PlannedWorkoutTodayDemoContext(
+        nowSec = now.toEpochSecond(),
+        recentSleep = recentSleep,
+        workout = DailyActionPlanner.PlannedWorkout(
+            day = dayKey,
+            startSec = start.toEpochSecond(),
+            endSec = start.plusHours(1).toEpochSecond(),
+        ),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodayScreen(
@@ -464,6 +501,8 @@ fun TodayScreen(
     onOpenJournal: () -> Unit = {},
     // The calendar icon opens the same month-at-a-glance history surface as iOS.
     onOpenCalendar: () -> Unit = {},
+    // Debug-only deterministic visual fixture; AppRoot enables it only for the private demo route.
+    demoPlannedWorkout: Boolean = false,
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -647,13 +686,25 @@ fun TodayScreen(
     val dailyActionReadiness = remember(days, selectedDayKey) {
         ReadinessEngine.evaluate(days, today = selectedDayKey)
     }
+    val plannedWorkoutDemo = remember(
+        demoPlannedWorkout,
+        selectedDayKey,
+        selectedDayOffset,
+    ) {
+        if (com.noop.BuildConfig.DEBUG && demoPlannedWorkout && selectedDayOffset == 0) {
+            plannedWorkoutTodayDemoContext(selectedDayKey)
+        } else {
+            null
+        }
+    }
     var planningClockRevision by remember { mutableLongStateOf(0L) }
     val planningNowSec = remember(
         plannedWorkoutSnapshot?.revision,
         selectedDayKey,
         planningClockRevision,
+        plannedWorkoutDemo,
     ) {
-        System.currentTimeMillis() / 1_000L
+        plannedWorkoutDemo?.nowSec ?: System.currentTimeMillis() / 1_000L
     }
 
     fun buildDailyActionPlan(checkIn: DailyActionPlanner.CheckIn): DailyActionPlanner.Plan =
@@ -664,15 +715,16 @@ fun TodayScreen(
             recentEffort = days.map {
                 DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
             },
-            recentSleep = days.map {
+            recentSleep = plannedWorkoutDemo?.recentSleep ?: days.map {
                 DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
             },
             sleepTargetMinutes = sleepTargetMinutes,
-            plannedWorkout = if (selectedDayOffset == 0) {
-                plannedWorkoutSnapshot?.asPlannedWorkout(selectedDayKey)
-            } else {
-                null
-            },
+            plannedWorkout = plannedWorkoutDemo?.workout
+                ?: if (selectedDayOffset == 0) {
+                    plannedWorkoutSnapshot?.asPlannedWorkout(selectedDayKey)
+                } else {
+                    null
+                },
             nowSec = planningNowSec,
         )
 
@@ -728,6 +780,7 @@ fun TodayScreen(
         buildDailyActionPlan(dailyActionCheckIn)
     }
     LaunchedEffect(dailyActionPlan.workoutAdjustment?.startSec) {
+        if (plannedWorkoutDemo != null) return@LaunchedEffect
         val startSec = dailyActionPlan.workoutAdjustment?.startSec ?: return@LaunchedEffect
         val delayMillis = (startSec * 1_000L - System.currentTimeMillis()).coerceAtLeast(0L)
         if (delayMillis > 0L) delay(delayMillis)

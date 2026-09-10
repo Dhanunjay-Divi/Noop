@@ -100,8 +100,18 @@ validate_capture() {
 assert_log_state() {
     local log="$1"
     local expected="$2"
+    local planned_workout="$3"
+    local expected_planned="false"
+    if (( planned_workout == 1 )); then
+        expected_planned="true"
+    fi
     grep -Fq "Daily Plan QA availability=$expected" "$log" || {
         print -u2 -r -- "Expected availability=$expected in ${log:t}"
+        tail -n 30 "$log" >&2
+        return 1
+    }
+    grep -Fq "plannedWorkout=$expected_planned" "$log" || {
+        print -u2 -r -- "Expected plannedWorkout=$expected_planned in ${log:t}"
         tail -n 30 "$log" >&2
         return 1
     }
@@ -151,11 +161,13 @@ capture() {
     local content_size="$4"
     local contrast="$5"
     local expected="$6"
+    local planned_workout="${7:-0}"
     local screenshot="$output_dir/$name.png"
     local stdout_log="$output_dir/$name.stdout.log"
     local stderr_log="$output_dir/$name.stderr.log"
     local result
     local pid
+    local -a launch_args
 
     xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
     xcrun simctl ui "$udid" appearance "$appearance"
@@ -163,6 +175,15 @@ capture() {
     xcrun simctl ui "$udid" increase_contrast "$contrast"
     : > "$stdout_log"
     : > "$stderr_log"
+    launch_args=(
+        --demo-seed
+        --demo-tab today
+        --demo-daily-plan
+        --demo-daily-plan-check-in "$check_in"
+    )
+    if (( planned_workout == 1 )); then
+        launch_args+=(--demo-planned-workout)
+    fi
     result=$(
         xcrun simctl launch \
             --terminate-running-process \
@@ -170,17 +191,14 @@ capture() {
             --stderr="$stderr_log" \
             "$udid" \
             "$bundle_id" \
-            --demo-seed \
-            --demo-tab today \
-            --demo-daily-plan \
-            --demo-daily-plan-check-in "$check_in"
+            "${launch_args[@]}"
     )
     pid="${result##*: }"
     sleep 5
     kill -0 "$pid" >/dev/null
     xcrun simctl io "$udid" screenshot "$screenshot" >/dev/null
     validate_capture "$screenshot"
-    assert_log_state "$stderr_log" "$expected"
+    assert_log_state "$stderr_log" "$expected" "$planned_workout"
     if grep -Eiq 'fatal error|uncaught exception|terminating app due|segmentation fault' "$stderr_log"; then
         print -u2 -r -- "Crash signature found in ${stderr_log:t}"
         return 1
@@ -215,6 +233,7 @@ capture recovery-shift belowUsual light large disabled recoveryShift
 capture stop painOrUnwell light large disabled stop
 capture accessibility-stop painOrUnwell light accessibility-large disabled stop
 capture dark-contrast-ready asUsual dark large enabled ready
+capture planned-workout asUsual light large disabled ready 1
 
 if cmp -s "$output_dir/check-in-needed.png" "$output_dir/stop.png"; then
     print -u2 -r -- "Distinct planner states produced identical captures."

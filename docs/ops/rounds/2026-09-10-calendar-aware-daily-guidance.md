@@ -88,8 +88,11 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   errors are never mislabeled as an ordinary provider failure.
 - Nine-localization source catalogs and generated Apple/Android resources now
   contain the setting, permission, Today, deficit, and notification copy.
-- A debug-only fixture reproduces 6h12 sleep against a 7h30 personal usual and
-  a 17:30 planned workout without reading a real calendar.
+- Debug-only Apple and Android fixtures reproduce 6h12 sleep against a 7h30
+  personal usual and a 17:30 planned workout without reading a real calendar.
+  The iOS visual matrix records whether the adjustment was actually present
+  before accepting its screenshot, and Android exposes the same fixture through
+  the private `today-planned-workout` demo route.
 
 ## Data, privacy, and medical truth
 
@@ -133,9 +136,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Source audit | Existing morning recap, journal, wind-down, adaptive day, and daily-plan paths confirmed | The new work can extend established local-first paths | Real-device delivery or calendar permission behavior |
 | `swift test --package-path Packages/StrandAnalytics` | 1,459 passed, 7 skipped | Planner, title classifier, formula, and existing analytics contracts pass | App integration or physical sensors |
 | Focused macOS app tests | 19 passed | Calendar bridge, private routing, truthful signal evidence, cooldown ordering, and affected contextual policies pass | iOS EventKit permission sheet or notification presentation |
+| `DailyActionTodayContractTests` | 4 passed | The Apple visual harness requires the real planner state and positively verifies whether planned-workout context was present | A rendered simulator screenshot or physical-device layout |
 | Unsigned iOS simulator build | Passed | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Android full gate | 4,191 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
-| `:app:testFullDebugUnitTest --tests com.noop.calendar.PlannedWorkoutCalendarSnapshotTest` | 2 passed | Logical-day bridging, cancellation-before-generic-failure ordering, and fatal-error propagation remain enforced | A real Calendar Provider query or OEM cancellation latency |
+| Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 
 ## Physical device and deployment
 

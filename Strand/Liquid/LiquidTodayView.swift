@@ -2985,7 +2985,8 @@ struct LiquidTodayView: View {
             NSLog(
                 "Daily Plan QA availability=\(dailyPlan.availability.rawValue) " +
                 "checkIn=\(currentDailyActionCheckIn.rawValue) " +
-                "target=\(dailyPlan.target.map { "\($0.lower)-\($0.upper)" } ?? "none")"
+                "target=\(dailyPlan.target.map { "\($0.lower)-\($0.upper)" } ?? "none") " +
+                "plannedWorkout=\(dailyPlan.workoutAdjustment != nil)"
             )
         }
         #endif

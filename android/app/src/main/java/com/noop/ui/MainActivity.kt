@@ -315,6 +315,7 @@ internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
 internal const val DEMO_RELEASE_WELCOME_ROUTE = "release_welcome"
 internal const val DEMO_APP_REPORT_ROUTE = "app-report"
 internal const val DEMO_REVIEW_SAMPLE_ROUTE = "review-sample"
+internal const val DEMO_PLANNED_WORKOUT_ROUTE = "today-planned-workout"
 
 internal fun appLaunchIntent(context: Context): Intent =
     context.packageManager.getLaunchIntentForPackage(context.packageName)

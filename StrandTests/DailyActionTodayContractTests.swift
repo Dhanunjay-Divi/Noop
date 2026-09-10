@@ -86,7 +86,9 @@ final class DailyActionTodayContractTests: XCTestCase {
 
         XCTAssertTrue(today.contains(#""--demo-daily-plan""#))
         XCTAssertTrue(today.contains(#""--demo-daily-plan-check-in""#))
+        XCTAssertTrue(today.contains(#""--demo-planned-workout""#))
         XCTAssertTrue(today.contains("Daily Plan QA availability="))
+        XCTAssertTrue(today.contains("plannedWorkout="))
         for state in ["unanswered", "asUsual", "belowUsual", "painOrUnwell"] {
             XCTAssertTrue(script.contains(state), state)
         }
@@ -99,6 +101,7 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(script.contains("warm_up_seed"))
         XCTAssertTrue(script.contains("AppleDemoSeeder: seeded"))
         XCTAssertTrue(script.contains("signalstats"))
+        XCTAssertTrue(script.contains("capture planned-workout"))
     }
 
     func testGeneratedDailyPlanCopyCoversNineLocalesAndBothPlatforms() throws {
