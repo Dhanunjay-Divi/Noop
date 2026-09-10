@@ -260,6 +260,14 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   owns the notification slot. A process stop between notification post and
   private state save therefore remains recoverable without erasing a newer
   adaptive-day prompt.
+- Review of that replacement found two localized UI correctness gaps. Swift and
+  Kotlin now normalize every configured workout and work-context term with the
+  same case, width, and diacritic folding applied to incoming calendar titles,
+  so terms such as Russian `Йога` remain eligible while German
+  `Vorstellungsgespräch` still excludes a work event. The mounted Apple Today
+  view also refreshes its lightweight cached daily plan whenever contextual
+  intervention inputs change, so an edited sleep target updates visible
+  planned-workout guidance without requiring navigation or a full query reload.
 
 ## Data, privacy, and medical truth
 
@@ -320,7 +328,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Source audit | Existing morning recap, journal, wind-down, adaptive day, and daily-plan paths confirmed | The new work can extend established local-first paths | Real-device delivery or calendar permission behavior |
 | `swift test --package-path Packages/StrandAnalytics` | 1,461 passed, 7 skipped | Planner, title classifier, formula, and existing analytics contracts pass | App integration or physical sensors |
 | Focused review-correction tests | 32 final Apple tests passed; focused Android permission, delivery, route, provider-change, declined-invitation, boundary-lifetime, active-device, forced-opt-out, and production-compile gates passed | Durable boundary scheduling, exact action and notification expiry, evidence preservation, persisted active-device resolution, enablement reevaluation, provider-change reevaluation, cancellation after EventKit return, declined invitations, persisted Workouts routing, permission-before-cache ordering, access-change clearing, cooldown ownership restoration, forced opt-out, and cooldown-before-`PendingIntent` ordering are covered | Physical permission/provider behavior or notification presentation |
-| `DailyActionTodayContractTests` | 4 passed | The Apple visual harness requires the real planner state and positively verifies whether planned-workout context was present | A rendered simulator screenshot or physical-device layout |
+| `DailyActionTodayContractTests` | 5 passed | The Apple visual harness requires the real planner state, positively verifies whether planned-workout context was present, and refreshes its cached plan when contextual inputs change | A rendered simulator screenshot or physical-device layout |
 | Latest protected-review correction tests | 27 Apple tests and 16 Android tests passed | Authorization-before-cache ordering, queued-request reconciliation, app-wide Android observer ownership, stale-evaluation cancellation, and consent checks around Android posting are pinned directly | Physical provider callbacks, OS delivery timing, or permission-sheet behavior |
 | Final invalidation correction tests | 45 Apple tests passed across boundary, action, intervention, and calendar contracts; the focused Android notifier/action tests and production compile passed; a defensive Apple 30-test and Android notifier rerun also passed | Apple has no pre-materialized time-trigger request, rechecks consent before boundary reevaluation, exact-start fingerprints change on a five-minute move, and both platforms retract stale state/actions while recomputing cooldown | Physical background wake timing, provider callbacks, or notification presentation |
 | Latest input-invalidation correction tests | 37 Apple tests passed; focused Android notifier and Today input-contract suites passed | Check-in and sleep-target changes trigger bounded reevaluation, Android post-success consent loss reconciles global prompt ownership, and Apple diagnostics keep the fixed adaptive-day identity | Physical provider callbacks, OS delivery timing, or notification presentation |
@@ -330,6 +338,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Final cooldown and natural-expiry correction tests | 42 focused Apple tests and the focused Android notifier suite passed | Quiet/global cooldown suppression retries only within the remaining workout window; duplicates remain terminal; natural expiry preserves accepted delivery state; a later no-adjustment pass distinguishes elapsed workouts from future retractions; malformed fingerprints fail closed; and stale Android expiry work cannot clear a newer workout prompt | OS scheduling precision, notification presentation, or process suspension on physical devices |
 | Final unsegmented-title correction | All 1,461 analytics tests passed with seven expected skips; the complete Android unit/compile/lint wall passed 4,220 tests with seven expected skips | Swift and Kotlin recognize reviewed Han-script workout terms inside natural Simplified and Traditional Chinese phrases, while embedded meeting and seminar terms retain fail-closed priority | Unreviewed vocabulary, real user calendars, or independent translation review |
 | Final replacement-lifetime correction | All 19 focused Apple Calendar tests passed; the focused Android adaptive-day notifier suite passed; `git diff --check` passed | Apple rejects superseded provider results before planning or reconciliation, queued replacement work invalidates the prior generation immediately, and Android orphan cleanup preserves notification-slot ownership while cancelling inside the ledger lock before owner removal | Process termination at every machine instruction, OS notification presentation, or physical provider behavior |
+| Final localized-vocabulary and live-cache correction | The focused Swift and Android title-classifier suites passed, all 5 Apple Today contract tests passed, all 1,461 analytics tests passed with 7 expected skips, and `git diff --check` passed | Configured title vocabularies and incoming titles share one normalization path on both platforms, localized work exclusions remain authoritative, and mounted Apple Today recomputes guidance when contextual inputs change | Unreviewed calendar vocabulary, physical provider behavior, or rendered physical-device layout |
 | Complete macOS app suite | 1,739 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, current check-in and sleep-target invalidation, cancellation contract, generation supersession, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
 | App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
 | Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
@@ -338,7 +347,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Android full gate | 4,223 passed, 7 skipped; APK assembly, production compile, lint, and instrumentation-source compilation passed on the final local source | Kotlin parity, app integration, localization contracts, exact-start identity, stale delivery/action reconciliation, preserved natural-expiry history, bounded transient-suppression retry, owner-aware shared cooldown and notification-slot restoration, crash-recoverable orphan cleanup, forced master-opt-out cleanup, app-wide calendar observation, consent-at-post enforcement, durable worker boundary, persisted active-device resolution, reviewed permission/routing/provider corrections, and static Android policy pass | OEM Calendar Provider, WorkManager timing, process termination at every instruction, or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 | Final Apple graph | Unsigned `NOOPiOS` Debug build completed with exit 0 and `BUILD SUCCEEDED`, including the iPhone app, widgets, and watch app after the consent-safe boundary and stale-artifact correction | The complete Apple dependency graph compiles on the final local source | Signing, installation, physical calendar access, background delivery, or hardware behavior |
-| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `55c76c9e83dd087eff8dd2d698c64c4c0a6dd1d3a24f345c158c662c02ca2893`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source and test locations moved with the correction | Independent legal review or physical-device behavior |
+| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `3c1c711cf9401f49c7ecc31a658a8d1c733dbb28828ab71aa7055400a8691d7f`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source and test locations moved with the correction | Independent legal review or physical-device behavior |
 
 ## Physical device and deployment
 
@@ -364,9 +373,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   delivery-boundary correction plus latest consent/lifecycle correction
   containing this record
 - Branch and remote state: protected pull request `#14` remains open; the final
-  provider-supersession and notification-owner corrections are locally
-  verified, and normal merge is pending commit, push, fresh exact-head review,
-  and replacement required checks
+  localized-vocabulary and live-cache corrections are locally verified, and
+  normal merge is pending commit, push, fresh exact-head review, and replacement
+  required checks
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires
@@ -399,10 +408,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Commit and push the final provider-supersession and notification-owner
-   correction, obtain a fresh exact-head review, resolve the two replacement-
-   head conversations with evidence, and complete a normal protected merge
-   without bypass.
+1. Commit and push the final localized-vocabulary and live-cache correction,
+   obtain a fresh exact-head review, resolve the two replacement-head
+   conversations with evidence, and complete a normal protected merge without
+   bypass.
 2. Run the permission, provider-change, foreground/background notification,
    accessibility-size, and battery matrix on representative iOS and Android
    physical devices before release.

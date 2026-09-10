@@ -83,6 +83,25 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertFalse(today.contains("A solid session is well supported"))
     }
 
+    func testAppleTodayRefreshesItsCachedPlanWhenContextualInputsChange() throws {
+        let today = try text("Strand/Liquid/LiquidTodayView.swift")
+        let observer = try XCTUnwrap(
+            today.range(
+                of: "NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)"
+            )
+        )
+        let refresh = try XCTUnwrap(
+            today.range(
+                of: "refreshCachedDailyActionPlanForCalendar()",
+                range: observer.upperBound..<today.endIndex
+            )
+        )
+
+        XCTAssertLessThan(observer.lowerBound, refresh.lowerBound)
+        XCTAssertTrue(today.contains("sleepTargetMinutes: WindDownNudge.sleepNeedMinutes"))
+        XCTAssertTrue(today.contains("sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed"))
+    }
+
     func testDailyPlanVisualMatrixUsesRealPlannerStatesAndDisposableSimulator() throws {
         let today = try text("Strand/Liquid/LiquidTodayView.swift")
         let script = try text("Tools/ios-daily-plan-visual-qa.sh")

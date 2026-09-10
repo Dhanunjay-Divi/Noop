@@ -527,6 +527,11 @@ struct LiquidTodayView: View {
         .onChangeCompat(of: plannedWorkoutCalendar.snapshot) { _ in
             refreshCachedDailyActionPlanForCalendar()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+        ) { _ in
+            refreshCachedDailyActionPlanForCalendar()
+        }
         .task(id: cachedDailyActionPlan?.workoutAdjustment?.startSec) {
             guard let startSec = cachedDailyActionPlan?.workoutAdjustment?.startSec else {
                 return

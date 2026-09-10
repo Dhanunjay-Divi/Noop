@@ -10,7 +10,19 @@ import java.util.Locale
  * fail closed so a meeting called "training" cannot become a health-planning signal.
  */
 object PlannedWorkoutTitleClassifier {
-    private val directActivityTokens = setOf(
+    private val combiningMarks = Regex("\\p{M}+")
+
+    private fun normalizeForComparison(value: String): String = Normalizer
+        .normalize(value.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(combiningMarks, "")
+
+    private fun normalizedTokenSet(vararg values: String): Set<String> =
+        values.mapTo(linkedSetOf(), ::normalizeForComparison)
+
+    private fun normalizedPhrases(vararg values: String): List<String> =
+        values.map(::normalizeForComparison)
+
+    private val directActivityTokens = normalizedTokenSet(
         "workout", "gym", "exercise", "hiit", "crossfit", "pilates", "yoga", "barre",
         "cardio", "lifting", "weights", "jog", "jogging", "ride",
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
@@ -37,16 +49,16 @@ object PlannedWorkoutTitleClassifier {
         "健身", "锻炼", "鍛鍊", "运动", "運動", "游泳", "跑步", "骑行", "騎行",
         "瑜伽", "普拉提", "皮拉提斯", "拳击", "拳擊", "力量训练", "重量訓練",
     )
-    private val ambiguousActivityTokens = setOf(
+    private val ambiguousActivityTokens = normalizedTokenSet(
         "run", "running", "spin",
     )
-    private val fitnessContextTokens = setOf(
+    private val fitnessContextTokens = normalizedTokenSet(
         "strength", "fitness", "marathon", "triathlon", "race", "5k", "10k",
         "morning", "afternoon", "evening", "night", "lunch", "trail", "track",
         "treadmill", "tempo", "interval", "intervals", "easy", "long", "recovery",
         "outdoor", "indoor", "club", "class", "practice",
     )
-    private val workContextTokens = setOf(
+    private val workContextTokens = normalizedTokenSet(
         "meeting", "interview", "webinar", "workshop", "conference", "standup",
         "onboarding", "presentation", "planning", "demo", "review", "sync", "project",
         "payroll", "backup", "backups", "staging", "deploy", "deployment", "server",
@@ -59,20 +71,16 @@ object PlannedWorkoutTitleClassifier {
         "встреча", "собеседование", "конференция",
         "会议", "會議", "面试", "面試", "研讨会", "研討會",
     )
-    private val nonParticipationContextTokens = setOf(
+    private val nonParticipationContextTokens = normalizedTokenSet(
         "repair", "service", "shop", "shopping", "watch", "party", "ticket", "tickets",
         "viewing",
     )
-    private val excludedPhrases = listOf(
+    private val excludedPhrases = normalizedPhrases(
         "run errands", "school run", "coffee run", "dry run", "test run",
     )
 
     fun isWorkoutTitle(title: String?): Boolean {
-        val normalizedTitle = title
-            ?.lowercase(Locale.ROOT)
-            ?.let { Normalizer.normalize(it, Normalizer.Form.NFD) }
-            ?.replace(Regex("\\p{M}+"), "")
-            ?: return false
+        val normalizedTitle = title?.let(::normalizeForComparison) ?: return false
         val tokens = normalizedTitle
             .split(Regex("[^\\p{L}\\p{N}]+"))
             .filter { it.isNotEmpty() }

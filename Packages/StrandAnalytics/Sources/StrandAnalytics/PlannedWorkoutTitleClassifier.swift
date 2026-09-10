@@ -1,11 +1,26 @@
 import Foundation
 
+private let plannedWorkoutComparisonLocale = Locale(identifier: "en_US_POSIX")
+
+private func normalizedPlannedWorkoutText(_ value: String) -> String {
+    value
+        .lowercased(with: plannedWorkoutComparisonLocale)
+        .folding(
+            options: [.diacriticInsensitive, .widthInsensitive],
+            locale: plannedWorkoutComparisonLocale
+        )
+}
+
+private func normalizedPlannedWorkoutTokenSet(_ values: [String]) -> Set<String> {
+    Set(values.map { normalizedPlannedWorkoutText($0) })
+}
+
 /// Conservative, local-only classification for calendar titles.
 ///
 /// Callers must discard the title immediately after this boolean decision. Ambiguous work-oriented
 /// titles fail closed so a meeting called "training" cannot become a health-planning signal.
 public enum PlannedWorkoutTitleClassifier {
-    private static let directActivityTokens: Set<String> = [
+    private static let directActivityTokens = normalizedPlannedWorkoutTokenSet([
         "workout", "gym", "exercise", "hiit", "crossfit", "pilates", "yoga", "barre",
         "cardio", "lifting", "weights", "jog", "jogging", "ride",
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
@@ -31,20 +46,20 @@ public enum PlannedWorkoutTitleClassifier {
         // Simplified and Traditional Chinese
         "健身", "锻炼", "鍛鍊", "运动", "運動", "游泳", "跑步", "骑行", "騎行",
         "瑜伽", "普拉提", "皮拉提斯", "拳击", "拳擊", "力量训练", "重量訓練",
-    ]
+    ])
 
-    private static let ambiguousActivityTokens: Set<String> = [
+    private static let ambiguousActivityTokens = normalizedPlannedWorkoutTokenSet([
         "run", "running", "spin",
-    ]
+    ])
 
-    private static let fitnessContextTokens: Set<String> = [
+    private static let fitnessContextTokens = normalizedPlannedWorkoutTokenSet([
         "strength", "fitness", "marathon", "triathlon", "race", "5k", "10k",
         "morning", "afternoon", "evening", "night", "lunch", "trail", "track",
         "treadmill", "tempo", "interval", "intervals", "easy", "long", "recovery",
         "outdoor", "indoor", "club", "class", "practice",
-    ]
+    ])
 
-    private static let workContextTokens: Set<String> = [
+    private static let workContextTokens = normalizedPlannedWorkoutTokenSet([
         "meeting", "interview", "webinar", "workshop", "conference", "standup",
         "onboarding", "presentation", "planning", "demo", "review", "sync", "project",
         "payroll", "backup", "backups", "staging", "deploy", "deployment", "server",
@@ -56,25 +71,20 @@ public enum PlannedWorkoutTitleClassifier {
         "reuniao",
         "встреча", "собеседование", "конференция",
         "会议", "會議", "面试", "面試", "研讨会", "研討會",
-    ]
+    ])
 
-    private static let nonParticipationContextTokens: Set<String> = [
+    private static let nonParticipationContextTokens = normalizedPlannedWorkoutTokenSet([
         "repair", "service", "shop", "shopping", "watch", "party", "ticket", "tickets",
         "viewing",
-    ]
+    ])
 
     private static let excludedPhrases = [
         "run errands", "school run", "coffee run", "dry run", "test run",
-    ]
+    ].map { normalizedPlannedWorkoutText($0) }
 
     public static func isWorkoutTitle(_ title: String?) -> Bool {
         guard let title else { return false }
-        let normalizedTitle = title
-            .lowercased(with: Locale(identifier: "en_US_POSIX"))
-            .folding(
-                options: [.diacriticInsensitive, .widthInsensitive],
-                locale: Locale(identifier: "en_US_POSIX")
-            )
+        let normalizedTitle = normalizedPlannedWorkoutText(title)
         let tokens = normalizedTitle
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
