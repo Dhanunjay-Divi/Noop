@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `post-rebase local verification complete; protected integration and physical-device evidence pending`
+- State: `review corrections locally verified; replacement protected integration and physical-device evidence pending`
 - Owner: project team
 - Branch: `codex/calendar-aware-daily-guidance-20260910`
 - Start commit: `67ffd848094bbc3e7cbab682feed592c68a10f88`
-- End implementation commit: `0222fe1a410943ce6bd849361308e889f14911f2`
+- End implementation commit: `ceeab3f0be927d2df02c3393d8af7015d0ffba20`
 - Record commit or PR: pull request `#14`
 
 ## Objective
@@ -94,6 +94,19 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   accepting each screenshot, propagates every warm-up/capture assertion failure,
   and safely handles an empty output directory. Android exposes the same fixture
   through the private `today-planned-workout` demo route.
+- Exact-head review found four integration defects and all are corrected in
+  `ceeab3f0`: Android rechecks Calendar permission before returning a cached
+  snapshot and clears stale state when access changes; Apple calendar-provider
+  changes force a refresh and schedule a new adaptive-guidance evaluation;
+  accepted contextual actions persist their trusted Workouts destination across
+  relaunch on both platforms instead of falling back to Sleep; and Android does
+  not create or mutate the shared adaptive-day `PendingIntent` until the global
+  prompt cooldown has accepted delivery.
+- The first hosted Apple run exposed one independent release-contract mismatch:
+  five new translated keys brought the app-wide source from 631 to 636 entries
+  while the fail-closed count still expected 631. The ratchet now expects exactly
+  636 and continues to require the same nine locales and exact Apple/Android key
+  parity.
 
 ## Data, privacy, and medical truth
 
@@ -136,15 +149,17 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 |---|---|---|---|
 | Source audit | Existing morning recap, journal, wind-down, adaptive day, and daily-plan paths confirmed | The new work can extend established local-first paths | Real-device delivery or calendar permission behavior |
 | `swift test --package-path Packages/StrandAnalytics` | 1,459 passed, 7 skipped | Planner, title classifier, formula, and existing analytics contracts pass | App integration or physical sensors |
-| Focused macOS app tests | 19 passed | Calendar bridge, private routing, truthful signal evidence, cooldown ordering, and affected contextual policies pass | iOS EventKit permission sheet or notification presentation |
+| Focused review-correction tests | 26 Apple tests passed; focused Android permission, delivery, route, and production-compile gates passed | Provider-change reevaluation, legacy action decoding, persisted Workouts routing, permission-before-cache ordering, access-change clearing, and cooldown-before-`PendingIntent` ordering are covered | Physical permission/provider behavior or notification presentation |
 | `DailyActionTodayContractTests` | 4 passed | The Apple visual harness requires the real planner state and positively verifies whether planned-workout context was present | A rendered simulator screenshot or physical-device layout |
-| Unsigned iOS simulator build | Passed | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
+| Complete macOS app suite | 1,709 passed, 1 expected skip, 0 failures | The complete shared app integration, generated localization, persisted action, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
+| App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
+| Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Fail-closed iOS daily-plan visual matrix | Seven states passed on a disposable iPhone simulator, including large text, increased contrast, dark mode, and the 6h12/17:30 planned-workout fixture | Every accepted image had the expected planner availability and planned-workout category, nonblank rendered pixels, and a live app process; the simulator was removed afterward | Physical-device layout, real calendar permission/provider behavior, or background delivery |
 | Planned-workout visual inspection | `planned-workout.png`, 1170x2532 and 535,203 bytes, reviewed | Sleep, start time, exact 1h18 deficit, guidance, range, and bottom navigation are visible without overlap in the deterministic fixture | Every device size, locale, accessibility setting, or real user history |
-| Android full gate | 4,194 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
+| Android full gate | 4,197 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, reviewed permission/routing corrections, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 | Post-rebase Apple graph | Unsigned `NOOPiOS` Debug build completed with exit 0 and `BUILD SUCCEEDED`, including the iPhone app, widgets, and watch app | The complete Apple dependency graph still compiles after rebasing onto protected `main` at `2efd5e89` | Signing, installation, physical calendar access, background delivery, or hardware behavior |
-| Repository policy and terminology | 227 Tools tests passed; all 51 operations records validated; terminology audit retained 17,367 occurrences across 1,511 groups, a byte-identical active allowlist, and zero forbidden mappings | The rebased source and evidence preserve required CI, durable-record, privacy, and terminology controls | Independent legal review or physical-device behavior |
+| Repository policy and terminology | 227 Tools tests passed; all 51 operations records validated; terminology audit retained 17,367 occurrences across 1,511 semantically identical groups, a byte-identical active allowlist, and zero forbidden mappings | The replacement source and evidence preserve required CI, durable-record, privacy, and terminology controls; only source line locations changed | Independent legal review or physical-device behavior |
 
 ## Physical device and deployment
 
@@ -164,9 +179,11 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 - Commits: `b8ae332d` (private calendar-aware guidance), `4b8c010e`
   (refresh cancellation), `28a75392` (fatal provider errors), `b752de56`
   (deterministic visual fixtures), and `0222fe1a` (fail-closed visual
-  verification)
-- Branch and remote state: rebased branch synchronized to `origin` at
-  `61651bbc`; protected pull request `#14` is open and merge remains pending
+  verification), plus `ceeab3f0` (exact-head review corrections and hosted
+  localization ratchet)
+- Branch and remote state: replacement branch contains `ceeab3f0` and this
+  evidence update; protected pull request `#14` remains open and normal merge
+  is pending fresh exact-head review and required checks
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires
@@ -195,7 +212,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Complete protected review and normal merge without bypass.
+1. Push the replacement head, obtain a fresh exact-head review, resolve the four
+   corrected conversations with evidence, and complete a normal protected merge
+   without bypass.
 2. Run the permission, provider-change, foreground/background notification,
    accessibility-size, and battery matrix on representative iOS and Android
    physical devices before release.
