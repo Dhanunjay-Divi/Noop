@@ -1248,6 +1248,15 @@ object AdaptiveDayNotifier {
         val app = context.applicationContext
         val state = loadState(app)
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        if (currentFingerprint != null) {
+            ContextualActionCenter.migrateRecoveryAction(
+                context = app,
+                route = NoopNotificationRoute.WORKOUTS,
+                toFingerprint = currentFingerprint,
+            ) {
+                plannedWorkoutFingerprintsMatch(it, currentFingerprint)
+            }
+        }
         if (prior == null) {
             ContextualActionCenter.reconcileRecoveryActions(
                 context = app,
@@ -1281,7 +1290,7 @@ object AdaptiveDayNotifier {
         ContextualActionCenter.reconcileRecoveryActions(
             context = app,
             route = NoopNotificationRoute.WORKOUTS,
-            keepingFingerprint = if (remainsCurrent) prior.fingerprint else currentFingerprint,
+            keepingFingerprint = currentFingerprint,
         )
         if (remainsCurrent) {
             val migrated = reconciledPlannedWorkoutState(state, currentFingerprint)

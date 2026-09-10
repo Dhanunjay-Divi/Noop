@@ -469,6 +469,28 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun plannedWorkoutReconciliationMigratesActionBeforeRemovingStaleIds() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull { it.exists() }?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val method = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts"),
+            text.indexOf("private fun cancelAdaptiveDayNotification"),
+        )
+        val migration = method.indexOf("ContextualActionCenter.migrateRecoveryAction")
+        val reconciliation = method.indexOf("ContextualActionCenter.reconcileRecoveryActions")
+
+        assertTrue(migration >= 0)
+        assertTrue(reconciliation > migration)
+        assertTrue(method.contains("toFingerprint = currentFingerprint"))
+        assertTrue(method.contains("plannedWorkoutFingerprintsMatch(it, currentFingerprint)"))
+        assertTrue(method.contains("keepingFingerprint = currentFingerprint"))
+    }
+
     @Test fun stalePlannedWorkoutDeliveryIsRemovedAndGlobalCooldownRecomputed() {
         val state = AdaptiveDayDeliveryState(
             lastGlobalDeliveryMillis = 2_000L,

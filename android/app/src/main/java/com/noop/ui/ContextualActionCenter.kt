@@ -56,6 +56,60 @@ internal object ContextualActionPolicy {
             .take(limit.coerceAtLeast(0))
 }
 
+internal data class ContextualActionIdentityState(
+    val actions: List<ContextualAction>,
+    val processingIds: Set<String>,
+    val dismissedIds: Set<String>,
+    val completedIds: Set<String>,
+)
+
+internal object ContextualActionIdentityMigration {
+    fun recovery(
+        state: ContextualActionIdentityState,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ): ContextualActionIdentityState {
+        val idPrefix = "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:"
+        val newId = "$idPrefix$toFingerprint"
+        fun matchesLegacyId(id: String): Boolean =
+            id != newId &&
+                id.startsWith(idPrefix) &&
+                matchingFingerprint(id.removePrefix(idPrefix))
+
+        val matchingActions = state.actions.filter {
+            it.kind == ContextualActionKind.RECOVERY &&
+                it.resolvedRecoveryRoute() == route &&
+                matchesLegacyId(it.id)
+        }
+        val actions = if (matchingActions.isEmpty()) {
+            state.actions
+        } else {
+            val prior = matchingActions.maxBy { it.createdAtMillis }
+            buildList {
+                addAll(state.actions.filterNot {
+                    it.kind == ContextualActionKind.RECOVERY &&
+                        it.resolvedRecoveryRoute() == route &&
+                        matchesLegacyId(it.id)
+                })
+                if (none { it.id == newId }) add(prior.copy(id = newId))
+            }
+        }
+
+        fun migrateIds(ids: Set<String>): Set<String> {
+            val legacyIds = ids.filterTo(hashSetOf(), ::matchesLegacyId)
+            return if (legacyIds.isEmpty()) ids else (ids - legacyIds) + newId
+        }
+
+        return ContextualActionIdentityState(
+            actions = actions,
+            processingIds = migrateIds(state.processingIds),
+            dismissedIds = migrateIds(state.dismissedIds),
+            completedIds = migrateIds(state.completedIds),
+        )
+    }
+}
+
 /**
  * Durable in-app companion to accepted wellness notifications.
  *
@@ -254,6 +308,36 @@ internal object ContextualActionCenter {
 
     fun complete(context: Context, action: ContextualAction) {
         if (begin(context, action)) finish(context, action, succeeded = true)
+    }
+
+    fun migrateRecoveryAction(
+        context: Context,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val prior = ContextualActionIdentityState(
+                actions = storedActions,
+                processingIds = _processingIds.value,
+                dismissedIds = dismissedIds,
+                completedIds = completedIds,
+            )
+            val migrated = ContextualActionIdentityMigration.recovery(
+                state = prior,
+                route = route,
+                toFingerprint = toFingerprint,
+                matchingFingerprint = matchingFingerprint,
+            )
+            if (migrated == prior) return@synchronized
+            storedActions = migrated.actions.toMutableList()
+            _processingIds.value = migrated.processingIds
+            dismissedIds = migrated.dismissedIds.toCollection(linkedSetOf())
+            completedIds = migrated.completedIds.toCollection(linkedSetOf())
+            persistLocked(app)
+        }
     }
 
     fun reconcileRecoveryActions(

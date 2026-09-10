@@ -552,14 +552,16 @@ final class AppModel: ObservableObject {
         }
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in
-            self?.evaluateIllness(days)
-            self?.evaluateStrainTarget()
+            guard let self, self.operationalWorkStarted else { return }
+            self.evaluateIllness(days)
+            self.evaluateStrainTarget()
             ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
-            self?.scheduleContextualInterventionEvaluation()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
+            guard let self, self.operationalWorkStarted else { return }
             ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
-            self?.scheduleContextualInterventionEvaluation()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
         // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
@@ -700,6 +702,8 @@ final class AppModel: ObservableObject {
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
         startAnalysisLoop()
+        ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+        scheduleContextualInterventionEvaluation()
     }
 
     /// Turn the strap's offloaded raw data into dashboard scores on launch and every 30 minutes. Kept in
@@ -2688,6 +2692,7 @@ final class AppModel: ObservableObject {
     /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
     /// and evaluating newly imported sleep/vital evidence.
     func reevaluateContextualInterventionsNow() async {
+        guard operationalWorkStarted else { return }
         adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = nil
@@ -2695,6 +2700,7 @@ final class AppModel: ObservableObject {
     }
 
     private func scheduleContextualInterventionEvaluation() {
+        guard operationalWorkStarted else { return }
         adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
@@ -2709,6 +2715,7 @@ final class AppModel: ObservableObject {
     /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
     /// rule and is never treated as body temperature.
     private func evaluateContextualInterventions() async {
+        guard operationalWorkStarted else { return }
         await evaluateAdaptiveDayGuidance()
 
         if ContextualInterventionSettings.vitalReviewEnabled {
@@ -2802,6 +2809,7 @@ final class AppModel: ObservableObject {
     /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
     /// later cannot resurrect an old trip as a new observation.
     private func evaluateAdaptiveDayGuidance(now: Date = Date()) async {
+        guard operationalWorkStarted else { return }
         let evaluationGeneration = adaptiveDayEvaluationGate.begin()
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)

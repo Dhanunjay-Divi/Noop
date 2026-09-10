@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,5 +71,37 @@ class ContextualActionPolicyTest {
                 route = NoopNotificationRoute.WORKOUTS,
             ).resolvedRecoveryRoute(),
         )
+    }
+
+    @Test fun equivalentLegacyWorkoutActionAndHistoryIdsMigrateTogether() {
+        val legacyFingerprint =
+            "planned-workout|2026-08-22|1700000123|SLEEP_DEFICIT"
+        val currentFingerprint = "planned-workout|2026-08-22|1700000123"
+        val legacyId = "recovery:$legacyFingerprint"
+        val currentId = "recovery:$currentFingerprint"
+        val migrated = ContextualActionIdentityMigration.recovery(
+            state = ContextualActionIdentityState(
+                actions = listOf(
+                    action(
+                        kind = ContextualActionKind.RECOVERY,
+                        id = legacyId,
+                        route = NoopNotificationRoute.WORKOUTS,
+                    ),
+                ),
+                processingIds = setOf(legacyId),
+                dismissedIds = setOf(legacyId),
+                completedIds = setOf(legacyId),
+            ),
+            route = NoopNotificationRoute.WORKOUTS,
+            toFingerprint = currentFingerprint,
+        ) {
+            it.substringBeforeLast('|') == currentFingerprint
+        }
+
+        assertEquals(listOf(currentId), migrated.actions.map { it.id })
+        assertEquals(setOf(currentId), migrated.processingIds)
+        assertEquals(setOf(currentId), migrated.dismissedIds)
+        assertEquals(setOf(currentId), migrated.completedIds)
+        assertFalse(migrated.actions.any { it.id == legacyId })
     }
 }

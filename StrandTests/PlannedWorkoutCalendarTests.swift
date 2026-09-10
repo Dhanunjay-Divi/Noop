@@ -426,6 +426,66 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         }
     }
 
+    func testCalendarGuidanceWaitsForOperationalRuntime() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let daysStart = try XCTUnwrap(source.range(of: "repo.$days.sink"))
+        let daysEnd = try XCTUnwrap(
+            source.range(
+                of: "}.store(in: &hrCancellables)",
+                range: daysStart.upperBound..<source.endIndex
+            )
+        )
+        let daysSubscription = source[daysStart.lowerBound..<daysEnd.upperBound]
+        XCTAssertTrue(daysSubscription.contains(
+            "guard let self, self.operationalWorkStarted else { return }"
+        ))
+
+        let scheduleStart = try XCTUnwrap(
+            source.range(of: "private func scheduleContextualInterventionEvaluation()")
+        )
+        let scheduleTail = source[scheduleStart.lowerBound...]
+        let scheduleGate = try XCTUnwrap(
+            scheduleTail.range(of: "guard operationalWorkStarted else { return }")
+        )
+        let scheduledTask = try XCTUnwrap(
+            scheduleTail.range(
+                of: "contextualEvaluationTask = Task",
+                range: scheduleGate.upperBound..<scheduleTail.endIndex
+            )
+        )
+        XCTAssertLessThan(scheduleGate.lowerBound, scheduledTask.lowerBound)
+
+        let evaluationStart = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let evaluationTail = source[evaluationStart.lowerBound...]
+        let evaluationGate = try XCTUnwrap(
+            evaluationTail.range(of: "guard operationalWorkStarted else { return }")
+        )
+        let calendarRefresh = try XCTUnwrap(
+            evaluationTail.range(
+                of: "PlannedWorkoutCalendarStore.shared.refreshOutcome",
+                range: evaluationGate.upperBound..<evaluationTail.endIndex
+            )
+        )
+        XCTAssertLessThan(evaluationGate.lowerBound, calendarRefresh.lowerBound)
+
+        let startupStart = try XCTUnwrap(
+            source.range(of: "func startOperationalWorkAfterLaunchAccess()")
+        )
+        let startupTail = source[startupStart.lowerBound...]
+        let openRuntime = try XCTUnwrap(
+            startupTail.range(of: "operationalWorkStarted = true")
+        )
+        let initialEvaluation = try XCTUnwrap(
+            startupTail.range(
+                of: "scheduleContextualInterventionEvaluation()",
+                range: openRuntime.upperBound..<startupTail.endIndex
+            )
+        )
+        XCTAssertLessThan(openRuntime.lowerBound, initialEvaluation.lowerBound)
+    }
+
     func testQueuedWorkoutReplacementKeepsItsDeliveryGateUntilQueueDrains() throws {
         let source = try source("Strand/System/ContextualInterventions.swift")
         let drainStart = try XCTUnwrap(

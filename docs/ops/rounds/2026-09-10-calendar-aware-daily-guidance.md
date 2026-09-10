@@ -293,6 +293,19 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   three-field ID before stale-action reconciliation. Existing copy, evidence,
   route, creation, and expiry remain unchanged, and a prior dismissal cannot
   reappear after migration.
+- The latest exact-head review found two final launch and migration defects.
+  Apple's repository publishers could queue contextual evaluation before the
+  launch receipt and current Terms had opened the operational runtime. Every
+  contextual scheduling and evaluation entry point now fails closed until that
+  runtime opens, and the first evaluation is requested only after
+  `operationalWorkStarted` becomes true. EventKit access and contextual
+  notification work therefore cannot run behind the launch gate.
+- Android canonicalized the delivery fingerprint but could leave the active
+  Workouts action and its processing, dismissal, or completion identity under
+  the legacy four-field ID. Recovery now migrates the active action and all
+  bounded identity sets together before stale-action reconciliation. Copy,
+  evidence, route, creation, expiry, and the user's prior decision remain
+  unchanged under the canonical three-field ID.
 
 ## Data, privacy, and medical truth
 
@@ -302,8 +315,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   needed for reevaluation. No event content or provider identifier is
   persisted.
 - Existing-data retention impact: no health or history rows change. Legacy
-  contextual action IDs and their bounded dismissal/completion tombstones
-  migrate in place without recreating a dismissed action.
+  Apple and Android contextual action IDs and their bounded
+  dismissal/completion tombstones migrate in place without recreating a
+  dismissed action.
 - Source/provenance or formula impact: a new advisory planner context; existing
   Charge, Effort, Rest, readiness, and sleep formulas remain unchanged.
 - Permissions/network disclosure impact: calendar access is explicit opt-in and
@@ -349,6 +363,13 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   Apple changes only bounded local action state before the existing
   reconciliation lifecycle. Neither path records action fingerprints, calendar
   values, health values, user text, or arbitrary errors.
+- Final launch-gate and Android migration coverage: no new diagnostic event is
+  needed. Apple prevents calendar and contextual work before the operational
+  runtime rather than emitting another state transition. Android migrates only
+  bounded private action identity state before the existing accepted, stale,
+  cancelled, and suppressed lifecycle. Neither path records action
+  fingerprints, calendar values, health values, user text, or arbitrary
+  errors.
 - Redaction, retention, and high-frequency controls: no event title, notes,
   attendees, location, calendar/event identifiers, health values, or exact
   dynamic errors; refresh only on explicit enable and bounded lifecycle/data
@@ -379,7 +400,8 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Final localized-vocabulary and live-cache correction | The focused Swift and Android title-classifier suites passed, all 5 Apple Today contract tests passed, all 1,461 analytics tests passed with 7 expected skips, and `git diff --check` passed | Configured title vocabularies and incoming titles share one normalization path on both platforms, localized work exclusions remain authoritative, and mounted Apple Today recomputes guidance when contextual inputs change | Unreviewed calendar vocabulary, physical provider behavior, or rendered physical-device layout |
 | Final workout-identity, post-clock, and priority correction | 51 focused Apple tests passed; the focused Android notifier suite passed; all 1,461 analytics tests passed with 7 skips; all 1,745 Apple app tests passed with 1 expected external-data skip; all 4,227 Android tests passed with 7 skips alongside APK assembly, production compile, lint, and instrumentation-source compilation; the complete unsigned iPhone/widget/watch graph built successfully | A reason-only evidence change retains one exact workout identity and cooldown, legacy identity state migrates without loss, policy uses the actual delivery clock, and an armed workout boundary suppresses weaker adaptive prompts on both platforms | Physical notification timing, OEM/provider behavior, process suspension, signing, or store distribution |
 | Final stale-evaluation and action-ID closeout | 40 focused Apple tests passed; both focused Android Calendar and adaptive-day suites passed | A new health-data emission invalidates and cancels the older Android evaluation before it can commit; Apple preserves the active Workouts action and prior dismissal across legacy-to-canonical fingerprint migration and process reload | Physical provider callbacks, process termination at every instruction, notification presentation, or background execution |
-| Complete macOS app suite | 1,746 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, current check-in and sleep-target invalidation, latest-only Android parity contract, action-ID migration, cancellation contract, generation supersession, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
+| Final launch-gate and Android action-migration closeout | 22 focused Apple Calendar tests and both focused Android adaptive-day/action suites passed | Calendar and contextual notification work cannot run before the accepted launch/runtime gate, and Android preserves the active Workouts action plus processing, dismissal, and completion history while canonicalizing legacy identity | Physical launch transitions, provider callbacks, process termination at every instruction, or notification presentation |
+| Complete macOS app suite | 1,748 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, current check-in and sleep-target invalidation, launch-gated contextual work, latest-only Android parity contract, cross-platform action-ID migration, cancellation contract, generation supersession, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
 | App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
 | Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Fail-closed iOS daily-plan visual matrix | Seven states passed on a disposable iPhone simulator, including large text, increased contrast, dark mode, and the 6h12/17:30 planned-workout fixture | Every accepted image had the expected planner availability and planned-workout category, nonblank rendered pixels, and a live app process; the simulator was removed afterward | Physical-device layout, real calendar permission/provider behavior, or background delivery |
@@ -387,7 +409,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Android full gate | 4,228 passed, 7 skipped; APK assembly, full debug compile, lint, and instrumentation-source compilation passed on the final local source | Kotlin parity, app integration, localization contracts, exact-start identity, stale delivery/action reconciliation, latest-only health-data evaluation, preserved natural-expiry history, bounded transient-suppression retry, owner-aware shared cooldown and notification-slot restoration, crash-recoverable orphan cleanup, forced master-opt-out cleanup, app-wide calendar observation, consent-at-post enforcement, durable worker boundary, persisted active-device resolution, reviewed permission/routing/provider corrections, and static Android policy pass | OEM Calendar Provider, WorkManager timing, process termination at every instruction, or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 | Final Apple graph | Unsigned `NOOPiOS` Debug build completed with exit 0 and `BUILD SUCCEEDED`, including the iPhone app, widgets, and watch app after the consent-safe boundary and stale-artifact correction | The complete Apple dependency graph compiles on the final local source | Signing, installation, physical calendar access, background delivery, or hardware behavior |
-| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `a4b933657448f3db7e417a7a034513ef04d2ef8fcca8e3d5a409e60cfbbcdc26`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source and test locations moved with the correction | Independent legal review or physical-device behavior |
+| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `af387b652ccabf900c9f6ef40bd466300c7edd22232d44d8e3bb6c51df3ac82e`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source and test locations moved with the correction | Independent legal review or physical-device behavior |
 
 ## Physical device and deployment
 
@@ -417,9 +439,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   delivery-boundary correction plus latest consent/lifecycle correction
   containing this record
 - Branch and remote state: protected pull request `#14` remains open; the final
-  stale-evaluation and action-ID corrections and local policy matrix are
-  verified, and normal merge is pending fresh exact-head review and replacement
-  required checks
+  launch-gate and Android action-ID migration corrections are locally verified,
+  and normal merge is pending fresh exact-head review and replacement required
+  checks
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires

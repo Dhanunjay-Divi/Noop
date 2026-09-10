@@ -146,7 +146,15 @@ now discovers and migrates any equivalent legacy Workouts action ID, processing
 state, and bounded dismissed/completed tombstones even when delivery state is
 already canonical, preserving the action and the user's prior decision under
 the three-field identity. The focused closeout passes 40 Apple tests and the
-two Android regression suites. The complete replacement wall passes 1,746
+two Android regression suites. The latest exact-head review then found that
+Apple repository publishers could queue calendar-backed contextual work before
+the accepted launch/runtime gate and that Android could canonicalize delivery
+state without migrating the active Workouts action or its bounded history.
+Apple now fails closed at every scheduling and evaluation entry point until
+operational work starts; Android migrates the action, processing state, and
+dismissed/completed identities together before stale reconciliation. The
+focused closeout passes 22 Apple tests and both Android regression suites. The
+complete replacement wall passes 1,748
 Apple app tests with one expected external-data skip, 4,228 Android tests with
 seven skips plus APK assembly, full debug compile, lint, and instrumentation-
 source compilation, and the complete unsigned iPhone/widget/watch graph. The
