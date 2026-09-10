@@ -28,6 +28,14 @@ struct PlannedWorkoutCalendarSnapshot: Equatable, Sendable {
     }
 }
 
+#if os(iOS)
+private func plannedWorkoutWasDeclinedByCurrentUser(_ event: EKEvent) -> Bool {
+    event.attendees?.contains { participant in
+        participant.isCurrentUser && participant.participantStatus == .declined
+    } == true
+}
+#endif
+
 /// Ephemeral calendar boundary for planned-workout guidance.
 ///
 /// Event content is classified inside the query and discarded there. The only published state is a
@@ -271,6 +279,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
             for event in events {
                 guard !event.isAllDay,
                       event.status != .canceled,
+                      !plannedWorkoutWasDeclinedByCurrentUser(event),
                       event.startDate > now,
                       event.endDate > event.startDate,
                       PlannedWorkoutTitleClassifier.isWorkoutTitle(event.title)

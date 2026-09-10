@@ -232,6 +232,7 @@ object PlannedWorkoutCalendarStore {
             CalendarContract.Instances.TITLE,
             CalendarContract.Instances.ALL_DAY,
             CalendarContract.Events.STATUS,
+            CalendarContract.Instances.SELF_ATTENDEE_STATUS,
         )
         val cursor = context.contentResolver.query(
             uriBuilder.build(),
@@ -248,6 +249,8 @@ object PlannedWorkoutCalendarStore {
             val titleIndex = it.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
             val allDayIndex = it.getColumnIndexOrThrow(CalendarContract.Instances.ALL_DAY)
             val statusIndex = it.getColumnIndexOrThrow(CalendarContract.Events.STATUS)
+            val attendeeStatusIndex =
+                it.getColumnIndexOrThrow(CalendarContract.Instances.SELF_ATTENDEE_STATUS)
             while (it.moveToNext()) {
                 val begin = it.getLong(beginIndex)
                 val end = it.getLong(endIndex)
@@ -255,11 +258,16 @@ object PlannedWorkoutCalendarStore {
                 val cancelled =
                     !it.isNull(statusIndex) &&
                         it.getInt(statusIndex) == CalendarContract.Events.STATUS_CANCELED
+                val declined =
+                    !it.isNull(attendeeStatusIndex) &&
+                        it.getInt(attendeeStatusIndex) ==
+                        CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED
                 val title = if (it.isNull(titleIndex)) null else it.getString(titleIndex)
                 val durationMinutes = (end - begin) / 60_000L
                 if (
                     !allDay &&
                     !cancelled &&
+                    !declined &&
                     begin > now.toInstant().toEpochMilli() &&
                     end > begin &&
                     durationMinutes in

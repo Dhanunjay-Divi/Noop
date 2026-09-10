@@ -55,4 +55,45 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
 
         await fulfillment(of: [requested], timeout: 1)
     }
+
+    func testAdaptiveEvaluationStopsAfterCalendarRefreshWhenCancelled() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let refresh = try XCTUnwrap(
+            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refresh")
+        )
+        let cancellation = try XCTUnwrap(
+            tail.range(
+                of: "guard !Task.isCancelled else { return }",
+                range: refresh.upperBound..<tail.endIndex
+            )
+        )
+        let plan = try XCTUnwrap(
+            tail.range(
+                of: "let plan = DailyActionPlanner.plan",
+                range: cancellation.upperBound..<tail.endIndex
+            )
+        )
+        XCTAssertLessThan(cancellation.lowerBound, plan.lowerBound)
+    }
+
+    func testEventKitQueryRejectsCurrentUserDeclinedInvitations() throws {
+        let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
+        XCTAssertTrue(source.contains("!plannedWorkoutWasDeclinedByCurrentUser(event)"))
+        XCTAssertTrue(source.contains("participant.isCurrentUser"))
+        XCTAssertTrue(source.contains("participant.participantStatus == .declined"))
+    }
+
+    private func source(_ relativePath: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: root.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
 }

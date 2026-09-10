@@ -2993,6 +2993,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { evaluateAdaptiveDayGuidance() }
     }
 
+    fun onPlannedWorkoutCalendarChanged() {
+        viewModelScope.launch {
+            PlannedWorkoutCalendarStore.refresh(
+                context = appContext,
+                force = true,
+            )
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
     /**
      * Rank current sleep, personal timing, and a persisted timezone transition. Missing or stale data
      * fails closed in the pure engine; the notifier independently owns permission, quiet hours, and

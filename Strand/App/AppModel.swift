@@ -2799,6 +2799,7 @@ final class AppModel: ObservableObject {
             timeZoneChange: change
         ))
         if let recommendation, recommendation.kind == .travelAdjustment {
+            guard !Task.isCancelled else { return }
             ContextualInterventionCenter.post(
                 AdaptiveDayInterventionFactory.candidate(from: recommendation),
                 now: now
@@ -2807,6 +2808,7 @@ final class AppModel: ObservableObject {
         }
 
         let plannedWorkout = await PlannedWorkoutCalendarStore.shared.refresh(now: now)
+        guard !Task.isCancelled else { return }
         let plan = DailyActionPlanner.plan(
             today: today,
             readiness: ReadinessEngine.evaluate(days: repo.days, today: today),

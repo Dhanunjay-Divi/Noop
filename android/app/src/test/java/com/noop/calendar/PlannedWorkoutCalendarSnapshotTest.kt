@@ -62,15 +62,49 @@ class PlannedWorkoutCalendarSnapshotTest {
         assertTrue(rejectedBranch.contains("lastRefreshAtMillis = nowMillis"))
     }
 
+    @Test
+    fun providerChangesForceRefreshBeforeAdaptiveGuidanceReevaluation() {
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val viewModel = source("com/noop/ui/AppViewModel.kt")
+        val observer = today.substring(
+            today.indexOf("val providerObserver = object"),
+            today.indexOf("fun ensureProviderObserver()"),
+        )
+        assertTrue(observer.contains("viewModel.onPlannedWorkoutCalendarChanged()"))
+
+        val methodStart = viewModel.indexOf("fun onPlannedWorkoutCalendarChanged()")
+        val methodEnd = viewModel.indexOf("private suspend fun evaluateAdaptiveDayGuidance", methodStart)
+        assertTrue(methodStart >= 0 && methodEnd > methodStart)
+        val method = viewModel.substring(methodStart, methodEnd)
+        val refresh = method.indexOf("PlannedWorkoutCalendarStore.refresh(")
+        val evaluate = method.indexOf("evaluateAdaptiveDayGuidance()")
+        assertTrue(refresh >= 0 && evaluate > refresh)
+        assertTrue(method.contains("force = true"))
+    }
+
+    @Test
+    fun declinedInvitationsAreRejectedBeforeWorkoutTitleClassification() {
+        val source = plannedWorkoutCalendarStoreSource()
+        assertTrue(source.contains("CalendarContract.Instances.SELF_ATTENDEE_STATUS"))
+        assertTrue(source.contains("CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED"))
+        val declinedGuard = source.indexOf("!declined &&")
+        val titleClassifier = source.indexOf("PlannedWorkoutTitleClassifier.isWorkoutTitle(title)")
+        assertTrue(declinedGuard >= 0 && titleClassifier > declinedGuard)
+    }
+
     private fun plannedWorkoutCalendarStoreSource(): String {
+        return source("com/noop/calendar/PlannedWorkoutCalendarStore.kt")
+    }
+
+    private fun source(relativePath: String): String {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val file = listOf(
-            File(root, "src/main/java/com/noop/calendar/PlannedWorkoutCalendarStore.kt"),
-            File(root, "app/src/main/java/com/noop/calendar/PlannedWorkoutCalendarStore.kt"),
-            File(root, "android/app/src/main/java/com/noop/calendar/PlannedWorkoutCalendarStore.kt"),
+            File(root, "src/main/java/$relativePath"),
+            File(root, "app/src/main/java/$relativePath"),
+            File(root, "android/app/src/main/java/$relativePath"),
         ).firstOrNull(File::isFile)
         return checkNotNull(file) {
-            "Could not locate PlannedWorkoutCalendarStore.kt from $root"
+            "Could not locate $relativePath from $root"
         }.readText()
     }
 }

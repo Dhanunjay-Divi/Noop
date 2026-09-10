@@ -603,9 +603,7 @@ fun TodayScreen(
         var providerObserverRegistered = false
         val providerObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                plannedWorkoutCalendarScope.launch {
-                    PlannedWorkoutCalendarStore.refresh(context, force = true)
-                }
+                viewModel.onPlannedWorkoutCalendarChanged()
             }
         }
         fun ensureProviderObserver() {
