@@ -1108,6 +1108,7 @@ object AdaptiveDayNotifier {
         context: Context,
         now: ZonedDateTime = ZonedDateTime.now(),
     ) {
+        if (!ManagedRuntimeGate.isAuthorized(context.applicationContext)) return
         val nowSec = now.toEpochSecond()
         val change = AdaptiveDayTimeZoneStore.observe(context, now.offset.totalSeconds, nowSec)
         if (!NoopPrefs.adaptiveDayGuidance(context)) {

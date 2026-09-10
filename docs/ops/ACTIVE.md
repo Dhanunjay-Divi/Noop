@@ -183,6 +183,14 @@ app-report case passes 1/1, and the final Android unit wall passes 4,233 tests
 with seven skips plus APK assembly, full debug compile, lint, and
 instrumentation-source compilation. Replacement hosted checks must confirm the
 complete managed-device production shell.
+Fresh replacement-head review found one additional launch-boundary defect:
+Android's manifest-delivered timezone entry point could observe and post travel
+guidance while the current Terms receipt was absent. It now checks
+`ManagedRuntimeGate` before timezone state, settings, scheduling, diagnostics,
+or delivery. The focused notifier suite and the complete 4,233-test Android
+wall pass with seven expected skips plus APK assembly, full debug compile,
+lint, and instrumentation-source compilation. A replacement commit, exact-head
+review, protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

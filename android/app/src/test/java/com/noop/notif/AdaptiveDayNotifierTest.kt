@@ -503,12 +503,18 @@ class AdaptiveDayNotifierTest {
             text.indexOf("fun onTimeZoneChanged("),
             text.indexOf("fun prepareAndCanNotify("),
         )
+        val terms = method.indexOf(
+            "ManagedRuntimeGate.isAuthorized(context.applicationContext)",
+        )
+        val observe = method.indexOf("AdaptiveDayTimeZoneStore.observe(")
         val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
         val cancel = method.indexOf("AdaptivePlannedWorkoutScheduler.cancel(context)")
         val reconcile = method.indexOf("reconcilePlannedWorkoutArtifacts(")
         val post = method.indexOf("onRecommendation(context, it)")
 
-        assertTrue(invalidate >= 0)
+        assertTrue(terms >= 0)
+        assertTrue(observe > terms)
+        assertTrue(invalidate > observe)
         assertTrue(cancel > invalidate)
         assertTrue(reconcile > cancel)
         assertTrue(method.contains("currentFingerprint = null"))
