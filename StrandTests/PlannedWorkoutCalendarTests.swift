@@ -159,6 +159,73 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(accessCheck.lowerBound, reevaluation.lowerBound)
     }
 
+    func testImmediateDeliveryRechecksCalendarConsentAcrossNotificationAwaits() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let start = try XCTUnwrap(
+            source.range(of: "private static func deliver(")
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "private static func deliveryConsentCurrent",
+                range: start.upperBound..<source.endIndex
+            )
+        )
+        let delivery = source[start.lowerBound..<end.lowerBound]
+        let ensureCategory = try XCTUnwrap(
+            delivery.range(of: "await DailyReviewNotifications.ensurePrivacyCategory")
+        )
+        let schedule = try XCTUnwrap(
+            delivery.range(
+                of: "try await LocalNotificationLifecycle.schedule",
+                range: ensureCategory.upperBound..<delivery.endIndex
+            )
+        )
+        let postScheduleConsent = try XCTUnwrap(
+            delivery.range(
+                of: "guard deliveryConsentCurrent(for: candidate)",
+                range: schedule.upperBound..<delivery.endIndex
+            )
+        )
+        let action = try XCTUnwrap(
+            delivery.range(
+                of: "ContextualActionCenter.shared.presentRecovery",
+                range: postScheduleConsent.upperBound..<delivery.endIndex
+            )
+        )
+
+        XCTAssertTrue(
+            delivery[ensureCategory.upperBound..<schedule.lowerBound]
+                .contains("deliveryConsentCurrent(for: candidate)")
+        )
+        XCTAssertLessThan(schedule.lowerBound, postScheduleConsent.lowerBound)
+        XCTAssertLessThan(postScheduleConsent.lowerBound, action.lowerBound)
+        XCTAssertTrue(source.contains("PlannedWorkoutCalendarStore.hasCurrentReadAccess()"))
+        XCTAssertTrue(source.contains("PlannedWorkoutCalendarSettings.enabled"))
+    }
+
+    func testDeliveredPlannedWorkoutHasStartTimeCleanupAndRestartWake() throws {
+        let schedulerSource = try source("Strand/System/ContextualInterventions.swift")
+        let start = try XCTUnwrap(
+            schedulerSource.range(of: "enum AdaptivePlannedWorkoutScheduler")
+        )
+        let end = try XCTUnwrap(
+            schedulerSource.range(
+                of: "struct WorkoutCautionNotificationState",
+                range: start.upperBound..<schedulerSource.endIndex
+            )
+        )
+        let scheduler = schedulerSource[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(scheduler.contains("scheduleDeliveryExpiry"))
+        XCTAssertTrue(scheduler.contains("deliveredStartSecKey"))
+        XCTAssertTrue(scheduler.contains("deliveredFingerprintKey"))
+        XCTAssertTrue(scheduler.contains("ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts"))
+        XCTAssertTrue(scheduler.contains("BackgroundSyncScheduler.requestWake"))
+
+        let appModel = try source("Strand/App/AppModel.swift")
+        XCTAssertTrue(appModel.contains("if leadSeconds <= 0"))
+    }
+
     func testEventKitQueryRejectsCurrentUserDeclinedInvitations() throws {
         let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
         XCTAssertTrue(source.contains("!plannedWorkoutWasDeclinedByCurrentUser(event)"))

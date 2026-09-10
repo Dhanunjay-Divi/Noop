@@ -259,6 +259,30 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun plannedWorkoutNotificationExpiresAtTheWorkoutStart() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val builder = text.indexOf("val notificationBuilder = NotificationCompat.Builder")
+        val timeout = text.indexOf(
+            "notificationBuilder.setTimeoutAfter(candidate.maximumAgeMillis)",
+            builder,
+        )
+        val build = text.indexOf("val notification = notificationBuilder.build()", timeout)
+
+        assertTrue(builder >= 0)
+        assertTrue(timeout > builder)
+        assertTrue(build > timeout)
+        assertTrue(
+            text.substring(builder, timeout)
+                .contains("candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT"),
+        )
+    }
+
     @Test fun movingWorkoutWithinThirtyMinutesChangesItsFingerprint() {
         val first = DailyActionPlanner.WorkoutAdjustment(
             startSec = nowMillis / 1_000L + 60L * 60L,
@@ -305,6 +329,68 @@ class AdaptiveDayNotifierTest {
             AdaptiveDayNotifier.reconciledPlannedWorkoutState(
                 state,
                 currentFingerprint = "planned-a",
+            ),
+        )
+    }
+
+    @Test fun sharedPromptLedgerRestoresThePreviousOwnerWhenPlannedWorkoutIsRetracted() {
+        val state = ContextualPromptDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                ContextualPromptDeliveryOwner.VITAL_REVIEW to 1_000L,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT to 2_000L,
+            ),
+        )
+
+        assertEquals(
+            ContextualPromptDeliveryState(
+                lastGlobalDeliveryMillis = 1_000L,
+                deliveries = mapOf(ContextualPromptDeliveryOwner.VITAL_REVIEW to 1_000L),
+            ),
+            ContextualPromptDeliveryLedger.reconciledState(
+                state,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                expectedAtMillis = 2_000L,
+            ),
+        )
+        assertEquals(
+            state,
+            ContextualPromptDeliveryLedger.reconciledState(
+                state,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                expectedAtMillis = 1_500L,
+            ),
+        )
+    }
+
+    @Test fun sharedPromptLedgerCanReconcileALegacyUnownedPlannedWorkoutTimestamp() {
+        assertEquals(
+            ContextualPromptDeliveryState(),
+            ContextualPromptDeliveryLedger.reconciledState(
+                ContextualPromptDeliveryState(lastGlobalDeliveryMillis = 2_000L),
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                expectedAtMillis = 2_000L,
+            ),
+        )
+    }
+
+    @Test fun sharedPromptLedgerCanForceRemoveARecordedPlannedWorkoutOwner() {
+        val state = ContextualPromptDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                ContextualPromptDeliveryOwner.VITAL_REVIEW to 1_000L,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT to 2_000L,
+            ),
+        )
+
+        assertEquals(
+            ContextualPromptDeliveryState(
+                lastGlobalDeliveryMillis = 1_000L,
+                deliveries = mapOf(ContextualPromptDeliveryOwner.VITAL_REVIEW to 1_000L),
+            ),
+            ContextualPromptDeliveryLedger.reconciledOwnerState(
+                state,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
             ),
         )
     }
@@ -436,6 +522,7 @@ class AdaptiveDayNotifierTest {
 
         assertTrue(evaluatorSource.contains("reconcilePlannedWorkoutArtifacts"))
         assertTrue(evaluatorSource.contains("currentFingerprint = null"))
+        assertTrue(evaluatorSource.contains("if (leadSeconds <= 0L)"))
         assertTrue(saveState >= 0)
         assertTrue(text.substring(saveState).contains(".clear()"))
     }

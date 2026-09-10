@@ -2833,7 +2833,7 @@ final class AppModel: ObservableObject {
         )
         if let adjustment = plan.workoutAdjustment {
             let leadSeconds = adjustment.startSec - nowSec
-            if leadSeconds < 0 {
+            if leadSeconds <= 0 {
                 AdaptivePlannedWorkoutScheduler.cancelPending()
                 ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
                     keepingFingerprint: nil

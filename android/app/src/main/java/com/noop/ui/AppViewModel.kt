@@ -66,6 +66,7 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.AdaptivePlannedWorkoutScheduler
 import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.ContextualVitalNotifier
@@ -3007,6 +3008,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             PlannedWorkoutCalendarStore.clear()
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                appContext,
+                currentFingerprint = null,
+                forceCancelSharedNotification = true,
+            )
             reconcilePlannedWorkoutCalendarObserver()
             return
         }

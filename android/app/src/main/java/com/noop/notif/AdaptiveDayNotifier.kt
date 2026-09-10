@@ -468,7 +468,7 @@ object AdaptiveDayEvaluator {
         )
         plan.workoutAdjustment?.let { adjustment ->
             val leadSeconds = adjustment.startSec - nowSec
-            if (leadSeconds < 0L) {
+            if (leadSeconds <= 0L) {
                 AdaptivePlannedWorkoutScheduler.cancel(appContext)
                 AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
                     appContext,
@@ -667,6 +667,11 @@ object AdaptiveDayNotifier {
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 now.toInstant().toEpochMilli(),
+                if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT
+                } else {
+                    ContextualPromptDeliveryOwner.ADAPTIVE_DAY
+                },
             ) {
                 if (
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
@@ -680,7 +685,7 @@ object AdaptiveDayNotifier {
                     NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
                     NotificationRouteBridge.launchIntent(context, route),
                 )
-                val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
                     .setContentTitle(title)
                     .setContentText(body)
@@ -690,7 +695,13 @@ object AdaptiveDayNotifier {
                     .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                    .build()
+                if (
+                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                    candidate.maximumAgeMillis > 0L
+                ) {
+                    notificationBuilder.setTimeoutAfter(candidate.maximumAgeMillis)
+                }
+                val notification = notificationBuilder.build()
                 val posted = NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.ADAPTIVE_DAY,
@@ -865,6 +876,7 @@ object AdaptiveDayNotifier {
     internal fun reconcilePlannedWorkoutArtifacts(
         context: Context,
         currentFingerprint: String?,
+        forceCancelSharedNotification: Boolean = false,
     ) {
         val app = context.applicationContext
         ContextualActionCenter.reconcileRecoveryActions(
@@ -873,19 +885,38 @@ object AdaptiveDayNotifier {
             keepingFingerprint = currentFingerprint,
         )
         val state = loadState(app)
-        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT] ?: return
+        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        if (prior == null) {
+            if (forceCancelSharedNotification) {
+                ContextualPromptDeliveryLedger.reconcileOwner(
+                    context = app,
+                    owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                )
+                cancelAdaptiveDayNotification(app)
+            }
+            return
+        }
         if (currentFingerprint != null && prior.fingerprint == currentFingerprint) return
 
+        ContextualPromptDeliveryLedger.reconcileIfOwned(
+            context = app,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            expectedAtMillis = prior.atMillis,
+        )
         saveState(app, reconciledPlannedWorkoutState(state, currentFingerprint))
-        if (state.lastGlobalDeliveryMillis == prior.atMillis) {
-            val manager = NotificationManagerCompat.from(app)
-            NotificationLifecycleLedger.cancelled(
-                app,
-                NotificationLifecycleId.ADAPTIVE_DAY,
-                NotificationLifecycleCategory.RECOMMENDATION,
-            ) {
-                manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
-            }
+        if (forceCancelSharedNotification || state.lastGlobalDeliveryMillis == prior.atMillis) {
+            cancelAdaptiveDayNotification(app)
+        }
+    }
+
+    private fun cancelAdaptiveDayNotification(context: Context) {
+        val manager = NotificationManagerCompat.from(context)
+        NotificationLifecycleLedger.cancelled(
+            context,
+            NotificationLifecycleId.ADAPTIVE_DAY,
+            NotificationLifecycleCategory.RECOMMENDATION,
+        ) {
+            manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
         }
     }
 

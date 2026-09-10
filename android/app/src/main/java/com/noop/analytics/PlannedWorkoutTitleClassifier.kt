@@ -11,17 +11,25 @@ import java.util.Locale
 object PlannedWorkoutTitleClassifier {
     private val directActivityTokens = setOf(
         "workout", "gym", "exercise", "hiit", "crossfit", "pilates", "yoga", "barre",
-        "cardio", "lifting", "weights", "run", "running", "jog", "jogging", "ride",
+        "cardio", "lifting", "weights", "jog", "jogging", "ride",
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
-        "tennis", "soccer", "football", "basketball", "volleyball", "climbing", "spin",
+        "tennis", "soccer", "football", "basketball", "volleyball", "climbing",
         "bootcamp",
+    )
+    private val ambiguousActivityTokens = setOf(
+        "run", "running", "spin",
     )
     private val fitnessContextTokens = setOf(
         "strength", "fitness", "marathon", "triathlon", "race", "5k", "10k",
+        "morning", "afternoon", "evening", "night", "lunch", "trail", "track",
+        "treadmill", "tempo", "interval", "intervals", "easy", "long", "recovery",
+        "outdoor", "indoor", "club", "class", "practice",
     )
     private val workContextTokens = setOf(
         "meeting", "interview", "webinar", "workshop", "conference", "standup",
         "onboarding", "presentation", "planning", "demo", "review", "sync", "project",
+        "payroll", "backup", "backups", "staging", "deploy", "deployment", "server",
+        "database", "script", "pipeline", "batch", "runbook",
     )
     private val nonParticipationContextTokens = setOf(
         "repair", "service", "shop", "shopping", "watch", "party", "ticket", "tickets",
@@ -46,6 +54,9 @@ object PlannedWorkoutTitleClassifier {
         if (tokenSet.any(workContextTokens::contains)) return false
         if (tokenSet.any(nonParticipationContextTokens::contains)) return false
         if (tokenSet.any(directActivityTokens::contains)) return true
+        if (tokenSet.any(ambiguousActivityTokens::contains)) {
+            return tokens.size == 1 || tokenSet.any(fitnessContextTokens::contains)
+        }
         return "training" in tokenSet && tokenSet.any(fitnessContextTokens::contains)
     }
 }

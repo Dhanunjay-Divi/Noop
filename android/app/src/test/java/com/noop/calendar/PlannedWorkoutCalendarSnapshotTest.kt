@@ -107,6 +107,27 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
+    fun disablingAdaptiveGuidanceImmediatelyRetractsPlannedWorkoutArtifacts() {
+        val viewModel = source("com/noop/ui/AppViewModel.kt")
+        val start = viewModel.indexOf("fun setAdaptiveDayGuidanceEnabled(enabled: Boolean)")
+        val end = viewModel.indexOf("fun onPlannedWorkoutCalendarChanged()", start)
+        assertTrue(start >= 0 && end > start)
+        val method = viewModel.substring(start, end)
+
+        val disabled = method.indexOf("if (!enabled)")
+        val reconcile = method.indexOf("AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts")
+        val returnIndex = method.indexOf("return", disabled)
+        assertTrue(disabled >= 0)
+        assertTrue(reconcile > disabled)
+        assertTrue(returnIndex > reconcile)
+        assertTrue(method.substring(reconcile, returnIndex).contains("currentFingerprint = null"))
+        assertTrue(
+            method.substring(reconcile, returnIndex)
+                .contains("forceCancelSharedNotification = true"),
+        )
+    }
+
+    @Test
     fun declinedInvitationsAreRejectedBeforeWorkoutTitleClassification() {
         val source = plannedWorkoutCalendarStoreSource()
         assertTrue(source.contains("CalendarContract.Instances.SELF_ATTENDEE_STATUS"))

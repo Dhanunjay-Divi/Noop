@@ -49,12 +49,18 @@ background-refresh lane a one-shot earliest-wake hint; every path reruns current
 consent and evidence before creating a prompt. Android retains WorkManager
 reevaluation. Both platforms use the exact start in the fingerprint and
 reconcile stale delivery state, cooldowns, actions, and notifications on every
-disabled, superseded, moved, removed, or expired plan. The complete replacement
-local wall passes: 1,459 analytics tests with seven skips, 1,723 Apple app tests
-with one expected skip, the complete unsigned iOS app/widget/watch graph, and
-4,206 Android tests with seven skips plus APK assembly, production compile,
-lint, and instrumentation-source compilation. Repository policy totals are
-refreshed in the round record. The first hosted Apple attempt exposed
+disabled, superseded, moved, removed, or expired plan. The newest exact-head
+review also closed consent changes across Apple notification awaits, Android
+master-opt-out cleanup, owner-aware cross-topic cooldown restoration,
+workout-start notification expiry, and ambiguous work uses of `run` and `spin`.
+A final local review covered the Android process-death window between posting
+and private-state persistence, so master opt-out still retracts the shared
+notification and planned-workout cooldown owner. The complete replacement local
+wall passes: 1,459 analytics tests with seven skips, 1,725 Apple app tests with
+one expected skip, the complete unsigned iOS app/widget/watch graph, and 4,211
+Android tests with seven skips plus APK assembly, production compile, lint, and
+instrumentation-source compilation. Repository policy totals are refreshed in
+the round record. The first hosted Apple attempt exposed
 only the app-wide localization ratchet still
 expecting 631 rather than the exact new total of 636; that contract is corrected
 and passes locally. Fresh protected review/checks and normal merge remain, along
