@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -61,6 +62,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -342,24 +344,46 @@ internal fun ReviewSampleRoot(onExit: () -> Unit) {
         containerColor = Palette.surfaceBase,
         topBar = { ReviewSampleBanner(onExit) },
         bottomBar = {
-            NavigationBar(
-                containerColor = Palette.surfaceRaised,
-                modifier = Modifier.navigationBarsPadding(),
-            ) {
-                ReviewSampleTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
-                        icon = { Icon(tab.icon, null) },
-                        label = {
-                            Text(
-                                stringResource(tab.title),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        modifier = Modifier.testTag("noop.review.tab.${tab.name.lowercase()}"),
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val tabLabels = ReviewSampleTab.entries.map { stringResource(it.title) }
+                val showVisualLabels = rememberBottomBarShowsVisualLabels(
+                    labels = tabLabels,
+                    availableWidth = maxWidth,
+                    labelHorizontalSafetyPadding = 8.dp,
+                    labelFontSize = 12.sp,
+                )
+                NavigationBar(
+                    containerColor = Palette.surfaceRaised,
+                    modifier = Modifier.navigationBarsPadding(),
+                ) {
+                    ReviewSampleTab.entries.forEachIndexed { index, tab ->
+                        val tabLabel = tabLabels[index]
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            icon = { Icon(tab.icon, null) },
+                            label = if (showVisualLabels) {
+                                {
+                                    Text(
+                                        tabLabel,
+                                        maxLines = 1,
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            alwaysShowLabel = showVisualLabels,
+                            modifier = Modifier
+                                .testTag("noop.review.tab.${tab.name.lowercase()}")
+                                .then(
+                                    if (showVisualLabels) {
+                                        Modifier
+                                    } else {
+                                        Modifier.semantics { contentDescription = tabLabel }
+                                    },
+                                ),
+                        )
+                    }
                 }
             }
         },

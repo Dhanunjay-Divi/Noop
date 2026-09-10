@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-09**
+Last updated: **2026-09-10**
 
 ## Repository
 
@@ -17,6 +17,40 @@ Last updated: **2026-09-09**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The mobile and desktop Today visual-parity round is implemented and locally
+verified on protected pull request `#13` from
+`codex/mobile-desktop-visual-parity-20260910`. Apple and Android
+phones now share the desktop reference's compact masthead, dominant Daily
+Signal hierarchy, score geometry, integrated Fitness Age row, and immediate
+workout-coach placement while preserving native navigation and accessibility.
+Paired synthetic phone, large-text, and tablet captures were reviewed. The
+follow-up Apple suite passed 77 tests; Android passed 31 focused contracts plus
+both debug builds, lint, and instrumentation-source compilation; and the
+complete iOS simulator app graph builds. Android large-text weather and normal
+plus Review Sample navigation retain full accessibility names without
+ellipsized visual fragments. Exact-head review later found three additional
+Android accessibility defects. Commit `133cb5d8` now measures localized
+bottom-bar labels before showing them, preserves a 48 x 48 dp weather hit
+target, and lets the large-text weather surface expand for signed Fahrenheit
+values. Both variants, lint, instrumentation-source compilation, and the three
+focused suites pass; API 35 runtime evidence confirms a 48 dp target and
+unclipped `-148 F` presentation. No formula, provenance, storage, sync,
+collection, account, or network behavior changed. A final exact-head review
+found that the compact Apple weather capsule exposed only a 32-point hit
+region. Commit `02594534` keeps the capsule compact while wrapping it in the
+shared 48-point control target; all 12 focused Apple contracts and the complete
+unsigned iOS simulator graph pass. Review of that exact head then found that a
+source-less localized Daily Signal row still relied on a width guess and that
+Review Sample could announce a visible tab twice. Commit `4ff38930` now measures
+the complete localized identity, state, optional source, and fixed chrome before
+retaining one row, and adds an explicit tab accessibility name only in icon-only
+mode. Both Android variants, lint, instrumentation-source compilation, the three
+focused suites, terminology, and required-CI unit contracts pass. The final
+correction and evidence update still require push, replacement protected
+checks, two resolved review conversations, and normal merge, along with
+physical-device smoothness and hardware-dependent evidence. Details are in
+[Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged
 on `main` as `035dec3c` after all 35 hosted checks passed. Apple and Android require a

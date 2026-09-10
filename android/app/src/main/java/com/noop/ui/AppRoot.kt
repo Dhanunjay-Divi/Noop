@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -126,9 +127,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -1134,6 +1137,56 @@ private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bed, R.string.nav_sleep),
 )
 
+internal fun bottomBarShowsVisualLabels(
+    fontScale: Float,
+    availableSlotWidthPx: Int = Int.MAX_VALUE,
+    widestLabelWidthPx: Int = 0,
+    horizontalSafetyPaddingPx: Int = 0,
+): Boolean = fontScale <= 1.30f &&
+    widestLabelWidthPx + horizontalSafetyPaddingPx <= availableSlotWidthPx
+
+@Composable
+internal fun rememberBottomBarShowsVisualLabels(
+    labels: List<String>,
+    availableWidth: Dp,
+    horizontalContentPadding: Dp = 0.dp,
+    interItemSpacing: Dp = 0.dp,
+    labelHorizontalSafetyPadding: Dp = 6.dp,
+    labelFontSize: TextUnit = 10.sp,
+): Boolean {
+    if (labels.isEmpty()) return false
+
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer(cacheSize = labels.size * 2)
+    val labelStyle = NoopType.footnote.copy(
+        fontSize = labelFontSize,
+        fontWeight = FontWeight.SemiBold,
+    )
+    val usableWidth = (availableWidth - horizontalContentPadding - interItemSpacing)
+        .coerceAtLeast(0.dp)
+    val availableSlotWidthPx = with(density) {
+        (usableWidth.value / labels.size).dp.roundToPx()
+    }
+    val widestLabelWidthPx = labels.maxOf { label ->
+        textMeasurer.measure(
+            text = label,
+            style = labelStyle,
+            softWrap = false,
+            maxLines = 1,
+        ).size.width
+    }
+    val horizontalSafetyPaddingPx = with(density) {
+        labelHorizontalSafetyPadding.roundToPx()
+    }
+
+    return bottomBarShowsVisualLabels(
+        fontScale = density.fontScale,
+        availableSlotWidthPx = availableSlotWidthPx,
+        widestLabelWidthPx = widestLabelWidthPx,
+        horizontalSafetyPaddingPx = horizontalSafetyPaddingPx,
+    )
+}
+
 @Composable
 private fun GlassBottomBar(
     selected: Destination,
@@ -1156,12 +1209,23 @@ private fun GlassBottomBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
                     .navigationGlassSurface(barShape),
             ) {
+                val tabLabels = buildList {
+                    barLeadingTabs.forEach { add(stringResource(it.labelRes)) }
+                    barTrailingTabs.forEach { add(stringResource(it.labelRes)) }
+                    add(stringResource(R.string.nav_more))
+                }
+                val showVisualLabels = rememberBottomBarShowsVisualLabels(
+                    labels = tabLabels,
+                    availableWidth = maxWidth,
+                    horizontalContentPadding = 12.dp,
+                    interItemSpacing = 4.dp,
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1175,6 +1239,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
+                            showLabel = showVisualLabels,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1185,6 +1250,7 @@ private fun GlassBottomBar(
                             label = stringResource(tab.labelRes),
                             active = selected == tab.dest,
                             testTag = "noop.tab.${tab.dest.route}",
+                            showLabel = showVisualLabels,
                             modifier = Modifier.weight(1f),
                             onClick = { onTabSelected(tab.dest) },
                         )
@@ -1194,6 +1260,7 @@ private fun GlassBottomBar(
                         label = stringResource(R.string.nav_more),
                         active = selected == Destination.More,
                         testTag = "noop.tab.more",
+                        showLabel = showVisualLabels,
                         modifier = Modifier.weight(1f),
                         onClick = { onTabSelected(Destination.More) },
                     )
@@ -1339,6 +1406,7 @@ private fun BarSlot(
     label: String,
     active: Boolean,
     testTag: String,
+    showLabel: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -1381,30 +1449,31 @@ private fun BarSlot(
                 selected = active
             },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
     ) {
         Icon(
             icon,
             contentDescription = null,
             tint = tint,
             modifier = Modifier
-                .size(Metrics.iconSmall)
+                .size(if (showLabel) Metrics.iconSmall else 22.dp)
                 .graphicsLayer {
                     scaleX = selectedScale
                     scaleY = selectedScale
                     translationY = if (active) -1.dp.toPx() else 0f
                 },
         )
-        Text(
-            label,
-            style = NoopType.footnote.copy(
-                fontSize = 10.sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-            color = tint,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (showLabel) {
+            Text(
+                label,
+                style = NoopType.footnote.copy(
+                    fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                color = tint,
+                maxLines = 1,
+            )
+        }
     }
 }
 

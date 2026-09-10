@@ -6,6 +6,50 @@ import XCTest
 /// opt-in without requiring a rendered SwiftUI hierarchy or a live wearable.
 @MainActor
 final class LiquidTodayFeatureMountTests: XCTestCase {
+    func testCompactTodayLayoutRequiresCompactWidthAndOrdinaryText() {
+        XCTAssertTrue(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: true,
+                largeText: false
+            )
+        )
+        XCTAssertFalse(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: false,
+                largeText: false
+            )
+        )
+        XCTAssertFalse(
+            LiquidTodayView.shouldUseCompactTodayLayout(
+                compactWidth: true,
+                largeText: true
+            )
+        )
+    }
+
+    func testCompactWeatherKeepsFullTouchTargetAroundCompactCapsule() throws {
+        let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let weather = try slice(
+            source,
+            from: "private var weatherChip",
+            to: "@ViewBuilder private var weatherChipContent"
+        )
+
+        let compactVisualHeight = try XCTUnwrap(
+            weather.range(of: "height: usesCompactPhoneTodayLayout ? 32 : 34")
+        )
+        let touchTarget = try XCTUnwrap(
+            weather.range(of: ".frame(minHeight: NoopMetrics.controlHeight)")
+        )
+        let buttonStyle = try XCTUnwrap(
+            weather.range(of: ".buttonStyle(LiquidPressStyle())")
+        )
+
+        XCTAssertLessThan(compactVisualHeight.lowerBound, touchTarget.lowerBound)
+        XCTAssertLessThan(touchTarget.lowerBound, buttonStyle.lowerBound)
+        XCTAssertTrue(weather.contains(".contentShape(Rectangle())"))
+    }
+
     func testAutoDetectedWorkoutSuggestionIsMountedOnDefaultToday() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let body = try slice(source, from: "var body: some View", to: ".coordinateSpace(name: Self.pullSpace)")
