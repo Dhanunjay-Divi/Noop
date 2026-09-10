@@ -906,6 +906,30 @@ class AdaptiveDayNotifierTest {
         assertTrue(repository > diagnostic)
     }
 
+    @Test fun adaptiveEvaluatorRequiresCurrentTermsBeforeStateOrDataAccess() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val evaluator = text.indexOf("object AdaptiveDayEvaluator")
+        val notifier = text.indexOf("object AdaptiveDayNotifier", evaluator)
+        val evaluatorSource = text.substring(evaluator, notifier)
+        val terms = evaluatorSource.indexOf("ManagedRuntimeGate.isAuthorized(appContext)")
+        val generation = evaluatorSource.indexOf("AdaptiveDayEvaluationGate.begin()")
+        val timeZone = evaluatorSource.indexOf("AdaptiveDayTimeZoneStore.observe(")
+        val repository = evaluatorSource.indexOf("repository.daysMerged(")
+        val calendar = evaluatorSource.indexOf("PlannedWorkoutCalendarStore.refresh(")
+
+        assertTrue(terms >= 0)
+        assertTrue(generation > terms)
+        assertTrue(timeZone > generation)
+        assertTrue(repository > timeZone)
+        assertTrue(calendar > repository)
+    }
+
     @Test fun newerAdaptiveEvaluationInvalidatesEveryOlderDeliveryToken() {
         val first = AdaptiveDayEvaluationGate.begin()
         assertTrue(AdaptiveDayEvaluationGate.isCurrent(first))

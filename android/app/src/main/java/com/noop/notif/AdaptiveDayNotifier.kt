@@ -519,8 +519,9 @@ object AdaptiveDayEvaluator {
         sleepTargetMinutes: Int = WindDownStore.from(context).sleepNeedMinutes,
         sleepTargetIsExplicit: Boolean = WindDownStore.from(context).hasExplicitSleepNeed,
     ): AdaptiveDayGuidance.Recommendation? {
-        val evaluationToken = AdaptiveDayEvaluationGate.begin()
         val appContext = context.applicationContext
+        if (!ManagedRuntimeGate.isAuthorized(appContext)) return null
+        val evaluationToken = AdaptiveDayEvaluationGate.begin()
         val nowSec = now.toEpochSecond()
         val offsetSec = now.offset.totalSeconds
         val timeZoneChange = AdaptiveDayTimeZoneStore.observe(

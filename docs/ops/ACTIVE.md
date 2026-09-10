@@ -203,6 +203,17 @@ the final Android wall passes 4,233 tests with seven skips plus APK assembly,
 full debug compile, lint, and instrumentation-source compilation. The
 replacement record and policy snapshot, commit, fresh exact-head review,
 protected checks, and normal merge remain required.
+The next exact-head review found one remaining background-entry gap:
+`HealthConnectSyncWorker` and other non-UI callers could reach the shared
+Android evaluator after a newly required Terms version made the runtime
+unauthorized. `AdaptiveDayEvaluator` now checks `ManagedRuntimeGate` before it
+creates a generation, observes timezone state, reads Room or Calendar, records
+guidance diagnostics, or posts a prompt, so every current and future caller
+shares the same fail-closed boundary. The focused contract passes in both
+variants, and the complete Android wall passes 4,234 tests with seven expected
+skips plus both APK assemblies, full debug compile, lint, and instrumentation-
+source compilation. The replacement record and policy snapshot, commit, fresh
+exact-head review, protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 
