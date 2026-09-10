@@ -83,6 +83,13 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
+    fun enablingCalendarAccessImmediatelyReevaluatesAdaptiveGuidance() {
+        val source = source("com/noop/ui/AutomationsScreen.kt")
+        assertTrue(!source.contains("PlannedWorkoutCalendarStore.refresh(ctx, force = true)"))
+        assertTrue(source.countOccurrences("viewModel.onPlannedWorkoutCalendarChanged()") >= 4)
+    }
+
+    @Test
     fun declinedInvitationsAreRejectedBeforeWorkoutTitleClassification() {
         val source = plannedWorkoutCalendarStoreSource()
         assertTrue(source.contains("CalendarContract.Instances.SELF_ATTENDEE_STATUS"))
@@ -107,4 +114,7 @@ class PlannedWorkoutCalendarSnapshotTest {
             "Could not locate $relativePath from $root"
         }.readText()
     }
+
+    private fun String.countOccurrences(needle: String): Int =
+        windowed(needle.length, 1).count { it == needle }
 }

@@ -148,4 +148,43 @@ final class ContextualActionPolicyTests: XCTestCase {
 
         XCTAssertTrue(center.visibleActions.isEmpty)
     }
+
+    @MainActor
+    func testScheduledPlannedWorkoutPreservesSupportingEvidenceAndExactExpiry() throws {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let center = ContextualActionCenter(
+            defaults: defaults,
+            storageKey: "state"
+        )
+        let observedAt = Date()
+        let start = observedAt.addingTimeInterval(15 * 60)
+        let evidence = [String(localized: "daily_plan.evidence.readiness")]
+        let content = UNMutableNotificationContent()
+        content.userInfo = [
+            AdaptivePlannedWorkoutScheduler.startSecUserInfoKey:
+                NSNumber(value: start.timeIntervalSince1970),
+            AdaptivePlannedWorkoutScheduler.fingerprintUserInfoKey:
+                "recovery-only",
+            AdaptivePlannedWorkoutScheduler.evidenceUserInfoKey:
+                evidence,
+        ]
+        let request = UNNotificationRequest(
+            identifier: AdaptivePlannedWorkoutScheduler.requestID,
+            content: content,
+            trigger: nil
+        )
+
+        center.capture(request, observedAt: observedAt)
+
+        let action = try XCTUnwrap(center.visibleActions.first)
+        XCTAssertEqual(action.evidence, evidence)
+        XCTAssertEqual(action.route, .workouts)
+        XCTAssertEqual(
+            action.expiresAt.timeIntervalSince1970,
+            start.timeIntervalSince1970,
+            accuracy: 0.001
+        )
+    }
 }

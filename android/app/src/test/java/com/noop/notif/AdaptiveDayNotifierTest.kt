@@ -234,6 +234,31 @@ class AdaptiveDayNotifierTest {
         assertFalse(mapped.maximumAgeMillis <= 0)
     }
 
+    @Test fun plannedWorkoutBoundaryAndActionLifetimeTrackTheWorkoutStart() {
+        val startSec = nowMillis / 1_000L + 3L * 60L * 60L
+
+        assertEquals(
+            60L * 60L * 1_000L,
+            AdaptivePlannedWorkoutSchedulePolicy.boundaryDelayMillis(
+                startSec = startSec,
+                nowMillis = nowMillis,
+            ),
+        )
+        assertNull(
+            AdaptivePlannedWorkoutSchedulePolicy.boundaryDelayMillis(
+                startSec = nowMillis / 1_000L + 90L * 60L,
+                nowMillis = nowMillis,
+            ),
+        )
+        assertEquals(
+            15L * 60L * 1_000L,
+            AdaptiveDayNotifier.plannedWorkoutMaximumAgeMillis(
+                startSec = nowMillis / 1_000L + 15L * 60L,
+                observedAtMillis = nowMillis,
+            ),
+        )
+    }
+
     @Test fun plannedWorkoutEvidenceMatchesTheSupportingSignals() {
         assertEquals(
             listOf(
@@ -283,5 +308,22 @@ class AdaptiveDayNotifierTest {
         assertTrue(postGate >= 0)
         assertTrue(pendingIntent > postGate)
         assertTrue(notificationPost > pendingIntent)
+    }
+
+    @Test fun plannedWorkoutWorkerResolvesThePersistedActiveDeviceBeforeEvaluation() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val worker = text.indexOf("class AdaptivePlannedWorkoutWorker")
+        val registry = text.indexOf("deviceRegistry?.activeDeviceId()", worker)
+        val evaluate = text.indexOf("AdaptiveDayEvaluator.evaluateAndNotify", worker)
+
+        assertTrue(worker >= 0)
+        assertTrue(registry > worker)
+        assertTrue(evaluate > registry)
     }
 }

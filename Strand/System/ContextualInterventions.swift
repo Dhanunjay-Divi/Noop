@@ -333,6 +333,21 @@ enum ContextualInterventionCenter {
         defaults.set(data, forKey: stateKey)
     }
 
+    static func recordScheduledPlannedWorkoutDelivery(
+        fingerprint: String,
+        deliveredAt: Date,
+        defaults: UserDefaults = .standard
+    ) {
+        var state = loadState(defaults: defaults)
+        let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
+        if state.deliveries[key]?.fingerprint == fingerprint { return }
+        if state.lastGlobalDelivery.map({ $0 < deliveredAt }) ?? true {
+            state.lastGlobalDelivery = deliveredAt
+        }
+        state.deliveries[key] = .init(at: deliveredAt, fingerprint: fingerprint)
+        saveState(state, defaults: defaults)
+    }
+
     private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {
         switch status {
         case .authorized, .provisional, .ephemeral: return true
@@ -456,6 +471,10 @@ enum AdaptiveDayInterventionFactory {
         day: String,
         observedAt: Date
     ) -> ContextualInterventionCandidate {
+        let maximumAge = max(
+            0,
+            TimeInterval(adjustment.startSec) - observedAt.timeIntervalSince1970
+        )
         let evidence = switch adjustment.reason {
         case .sleepDeficit:
             [
@@ -477,7 +496,7 @@ enum AdaptiveDayInterventionFactory {
         return ContextualInterventionCandidate(
             kind: .adaptivePlannedWorkout,
             observedAt: observedAt,
-            maximumAge: 2 * 60 * 60,
+            maximumAge: maximumAge,
             fingerprint: [
                 "planned-workout",
                 day,
@@ -489,6 +508,111 @@ enum AdaptiveDayInterventionFactory {
             route: .workouts,
             evidence: evidence
         )
+    }
+}
+
+/// Durable pre-workout delivery at the two-hour boundary.
+///
+/// iOS does not guarantee background code execution at an exact time, so this uses the OS notification
+/// queue instead of a foreground-only timer. One stable request identifier makes calendar edits
+/// idempotent, and foreground reevaluation cancels the fallback before posting richer live guidance.
+@MainActor
+enum AdaptivePlannedWorkoutScheduler {
+    static let requestID = "contextual-adaptivePlannedWorkout-boundary"
+    static let startSecUserInfoKey = "noop.plannedWorkout.startSec"
+    static let fingerprintUserInfoKey = "noop.plannedWorkout.fingerprint"
+    static let evidenceUserInfoKey = "noop.plannedWorkout.evidence"
+    static let leadTime: TimeInterval = 2 * 60 * 60
+
+    @discardableResult
+    static func schedule(
+        adjustment: DailyActionPlanner.WorkoutAdjustment,
+        day: String,
+        now: Date = Date(),
+        center: UNUserNotificationCenter = .current()
+    ) async -> Bool {
+        let start = Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+        let boundary = start.addingTimeInterval(-leadTime)
+        guard boundary > now else {
+            cancelPending(on: center)
+            return false
+        }
+
+        let settings = await center.notificationSettings()
+        guard isAuthorized(settings.authorizationStatus),
+              ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+              PlannedWorkoutCalendarSettings.enabled else {
+            cancelPending(on: center)
+            return false
+        }
+
+        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+            from: adjustment,
+            day: day,
+            observedAt: boundary
+        )
+        let defaults = UserDefaults.standard
+        let decision = ContextualInterventionPolicy.evaluate(
+            candidate,
+            state: ContextualInterventionCenter.loadState(defaults: defaults),
+            now: boundary,
+            quietHoursEnabled: defaults.bool(forKey: "notif.quietHoursEnabled"),
+            quietStartMinutes: defaults.object(forKey: "notif.quietStartMinutes") as? Int
+                ?? 22 * 60,
+            quietEndMinutes: defaults.object(forKey: "notif.quietEndMinutes") as? Int
+                ?? 7 * 60,
+            calendar: .autoupdatingCurrent
+        )
+        guard decision.shouldDeliver else {
+            cancelPending(on: center)
+            return false
+        }
+
+        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+        let content = UNMutableNotificationContent()
+        content.title = candidate.title
+        content.body = candidate.body
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.contextual.\(candidate.kind.rawValue)"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: candidate.route.rawValue,
+            startSecUserInfoKey: adjustment.startSec,
+            fingerprintUserInfoKey: candidate.fingerprint,
+            evidenceUserInfoKey: candidate.evidence
+        ]
+        do {
+            try await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: requestID,
+                    content: content,
+                    trigger: UNTimeIntervalNotificationTrigger(
+                        timeInterval: max(1, boundary.timeIntervalSince(now)),
+                        repeats: false
+                    )
+                ),
+                on: center
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static func cancelPending(
+        on center: UNUserNotificationCenter = .current()
+    ) {
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestID],
+            on: center
+        )
+    }
+
+    private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral: return true
+        default: return false
+        }
     }
 }
 

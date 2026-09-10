@@ -59,6 +59,7 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.AdaptivePlannedWorkoutScheduler
 import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.ContextualVitalNotifier
 import com.noop.notif.HydrationReminderPrefs
@@ -2988,6 +2989,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!enabled) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             PlannedWorkoutCalendarStore.clear()
+            AdaptivePlannedWorkoutScheduler.cancel(appContext)
             return
         }
         viewModelScope.launch { evaluateAdaptiveDayGuidance() }

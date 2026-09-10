@@ -226,6 +226,38 @@ final class ContextualActionCenter: ObservableObject {
                 observedAt: observedAt,
                 expiresAfter: 6 * 60 * 60
             )
+        } else if identifier == AdaptivePlannedWorkoutScheduler.requestID {
+            let startSec = (content.userInfo[
+                AdaptivePlannedWorkoutScheduler.startSecUserInfoKey
+            ] as? NSNumber)?.doubleValue
+            let scheduledFingerprint = content.userInfo[
+                AdaptivePlannedWorkoutScheduler.fingerprintUserInfoKey
+            ] as? String ?? fingerprint
+            let scheduledEvidence = content.userInfo[
+                AdaptivePlannedWorkoutScheduler.evidenceUserInfoKey
+            ] as? [String] ?? [
+                String(localized: "Today’s planned workout time")
+            ]
+            let expiresAfter = startSec.map {
+                max(0, $0 - observedAt.timeIntervalSince1970)
+            } ?? AdaptivePlannedWorkoutScheduler.leadTime
+            present(
+                kind: .recovery,
+                fingerprint: scheduledFingerprint,
+                title: content.title.isEmpty
+                    ? String(localized: "Adjust today’s workout")
+                    : content.title,
+                detail: content.body,
+                evidence: scheduledEvidence,
+                observedAt: observedAt,
+                expiresAfter: expiresAfter,
+                route: .workouts
+            )
+            ContextualInterventionCenter.recordScheduledPlannedWorkoutDelivery(
+                fingerprint: scheduledFingerprint,
+                deliveredAt: observedAt,
+                defaults: defaults
+            )
         } else if identifier.hasPrefix("contextual-stressBreathing") || route == .breathe {
             presentStress(
                 fastRMSSD: nil,
@@ -337,7 +369,7 @@ final class ContextualActionCenter: ObservableObject {
         route: NoopNotificationRoute? = nil
     ) {
         let id = "\(kind.rawValue):\(fingerprint)"
-        let expiresAt = observedAt.addingTimeInterval(max(60, expiresAfter))
+        let expiresAt = observedAt.addingTimeInterval(max(0, expiresAfter))
         let now = Date()
         guard expiresAt > now,
               !dismissedIDs.contains(id),

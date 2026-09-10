@@ -985,6 +985,7 @@ struct AutomationsView: View {
                     adaptiveDayGuidance = false
                     #if os(iOS)
                     PlannedWorkoutCalendarStore.shared.clear()
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
                     #endif
                     model.reevaluateContextualInterventions()
                     return
@@ -998,10 +999,12 @@ struct AutomationsView: View {
                         model.reevaluateContextualInterventions()
                     case .denied:
                         adaptiveDayGuidance = false
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
                         notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:
                         adaptiveDayGuidance = false
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
                     }
                 }
             }
@@ -1017,6 +1020,7 @@ struct AutomationsView: View {
                     plannedWorkoutCalendarEnabled = false
                     plannedWorkoutCalendarPermissionUnavailable = false
                     PlannedWorkoutCalendarStore.shared.clear()
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
                     model.reevaluateContextualInterventions()
                     return
                 }
@@ -1033,6 +1037,7 @@ struct AutomationsView: View {
                         plannedWorkoutCalendarEnabled = false
                         plannedWorkoutCalendarPermissionUnavailable = true
                         PlannedWorkoutCalendarStore.shared.clear()
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
                     }
                 }
             }
@@ -1043,6 +1048,7 @@ struct AutomationsView: View {
         guard plannedWorkoutCalendarEnabled else {
             plannedWorkoutCalendarPermissionUnavailable = false
             PlannedWorkoutCalendarStore.shared.clear()
+            AdaptivePlannedWorkoutScheduler.cancelPending()
             return
         }
         PlannedWorkoutCalendarStore.shared.requestAccess { outcome in
@@ -1056,6 +1062,7 @@ struct AutomationsView: View {
                 plannedWorkoutCalendarEnabled = false
                 plannedWorkoutCalendarPermissionUnavailable = true
                 PlannedWorkoutCalendarStore.shared.clear()
+                AdaptivePlannedWorkoutScheduler.cancelPending()
             }
         }
     }

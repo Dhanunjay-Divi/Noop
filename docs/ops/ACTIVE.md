@@ -37,11 +37,19 @@ calendar edits, contextual actions opening Sleep instead of Workouts, and
 Android adaptive-day `PendingIntent` mutation before global cooldown approval.
 Replacement-head review then corrected Android provider-change reevaluation,
 Apple cancellation after EventKit return, and declined invitations on both
-providers. The complete replacement local wall passes: 1,459 analytics tests
-with seven skips, 1,711 Apple app tests with one expected skip, the complete
-unsigned iOS app/widget/watch graph, 4,199 Android tests with seven skips plus production
-compile and lint, 227 repository-tool tests, and all 51 operations records. The
-first hosted Apple attempt exposed only the app-wide localization ratchet still
+providers. Final review then added durable two-hour boundary delivery,
+workout-start action expiry, exact supporting-evidence preservation, persisted
+active-device resolution, and immediate Android reevaluation after every
+Calendar enablement or permission transition. Apple queues a private local
+notification; Android queues a WorkManager reevaluation, with fixed bounded
+lifecycle evidence and cancellation on opt-out, permission loss, plan removal,
+or foreground delivery. The complete replacement local wall passes: 1,459
+analytics tests with seven skips, 1,716 Apple app tests with one expected skip,
+the complete unsigned iOS app/widget/watch graph, and 4,202 Android tests with
+seven skips plus APK assembly, production compile, lint, and
+instrumentation-source compilation. Repository policy totals are refreshed in
+the round record. The first hosted Apple attempt exposed only the app-wide
+localization ratchet still
 expecting 631 rather than the exact new total of 636; that contract is corrected
 and passes locally. Fresh protected review/checks and normal merge remain, along
 with physical iOS/Android permission, provider, background-delivery,

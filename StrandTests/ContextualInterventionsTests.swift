@@ -286,6 +286,38 @@ final class ContextualInterventionsTests: XCTestCase {
         }
     }
 
+    func testPlannedWorkoutCandidateExpiresAtWorkoutStart() {
+        let observedAt = date(2026, 8, 22, 17, 15)
+        let adjustment = DailyActionPlanner.WorkoutAdjustment(
+            startSec: Int(date(2026, 8, 22, 17, 30).timeIntervalSince1970),
+            durationMinutes: 60,
+            reason: .sleepDeficit,
+            measuredSleepMinutes: 372,
+            referenceSleepMinutes: 450,
+            sleepDeficitMinutes: 78,
+            sleepReference: .personalUsual,
+            confidence: .solid
+        )
+
+        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+            from: adjustment,
+            day: "2026-08-22",
+            observedAt: observedAt
+        )
+
+        XCTAssertEqual(candidate.maximumAge, 15 * 60, accuracy: 0.001)
+        XCTAssertEqual(candidate.route, .workouts)
+    }
+
+    func testPlannedWorkoutBoundaryUsesAdaptiveDayDiagnosticIdentity() {
+        XCTAssertEqual(
+            LocalNotificationLifecycleLedger.stableIdentifier(
+                AdaptivePlannedWorkoutScheduler.requestID
+            ),
+            "adaptive_day"
+        )
+    }
+
     func testTimeZoneObservationIgnoresDSTAndSurvivesRestartForTravelRetry() {
         let suiteName = "adaptive-time-zone.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -349,7 +381,7 @@ final class ContextualInterventionsTests: XCTestCase {
 
         XCTAssertEqual(candidate.kind, .adaptivePlannedWorkout)
         XCTAssertEqual(candidate.route, .workouts)
-        XCTAssertEqual(candidate.maximumAge, 2 * 60 * 60)
+        XCTAssertEqual(candidate.maximumAge, 60 * 60)
         XCTAssertEqual(candidate.evidence.count, 3)
         XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.workout_adjustment.sleep_label")))
         XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.evidence.readiness")))

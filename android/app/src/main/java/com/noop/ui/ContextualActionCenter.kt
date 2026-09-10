@@ -301,7 +301,7 @@ internal object ContextualActionCenter {
             val app = context.applicationContext
             ensureLoadedLocked(app)
             val now = System.currentTimeMillis()
-            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(60_000L)
+            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(0L)
             val id = "${kind.name.lowercase(Locale.ROOT)}:$fingerprint"
             if (expiresAt <= now || id in dismissedIds || id in completedIds) return@synchronized
             if (storedActions.any { it.id == id }) {

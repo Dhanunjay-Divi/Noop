@@ -80,6 +80,32 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(cancellation.lowerBound, plan.lowerBound)
     }
 
+    func testAdaptiveEvaluationSchedulesTheTwoHourBoundaryAndCancelsBeforeLiveDelivery() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let schedule = try XCTUnwrap(
+            tail.range(of: "AdaptivePlannedWorkoutScheduler.schedule")
+        )
+        let cancel = try XCTUnwrap(
+            tail.range(
+                of: "AdaptivePlannedWorkoutScheduler.cancelPending()",
+                range: schedule.upperBound..<tail.endIndex
+            )
+        )
+        let post = try XCTUnwrap(
+            tail.range(
+                of: "ContextualInterventionCenter.post",
+                range: cancel.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(schedule.lowerBound, cancel.lowerBound)
+        XCTAssertLessThan(cancel.lowerBound, post.lowerBound)
+    }
+
     func testEventKitQueryRejectsCurrentUserDeclinedInvitations() throws {
         let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
         XCTAssertTrue(source.contains("!plannedWorkoutWasDeclinedByCurrentUser(event)"))

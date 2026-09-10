@@ -116,7 +116,6 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val batteryAlerts by viewModel.batteryAlertsEnabled.collectAsStateWithLifecycle()
     val predictiveBatteryAlerts by viewModel.predictiveBatteryAlertsEnabled.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
-    val plannedWorkoutCalendarScope = rememberCoroutineScope()
     var adaptiveNotificationsUnavailable by remember {
         mutableStateOf(
             adaptiveDayGuidance && !AdaptiveDayNotifier.canNotify(ctx),
@@ -278,11 +277,10 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         plannedWorkoutCalendarPermissionUnavailable = !granted
         NoopPrefs.setPlannedWorkoutCalendar(ctx, granted)
         if (granted) {
-            plannedWorkoutCalendarScope.launch {
-                PlannedWorkoutCalendarStore.refresh(ctx, force = true)
-            }
+            viewModel.onPlannedWorkoutCalendarChanged()
         } else {
             PlannedWorkoutCalendarStore.clear()
+            viewModel.onPlannedWorkoutCalendarChanged()
         }
     }
     DisposableEffect(lifecycleOwner) {
@@ -298,14 +296,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     ) == PackageManager.PERMISSION_GRANTED
                     if (calendarGranted) {
                         plannedWorkoutCalendarPermissionUnavailable = false
-                        plannedWorkoutCalendarScope.launch {
-                            PlannedWorkoutCalendarStore.refresh(ctx, force = true)
-                        }
+                        viewModel.onPlannedWorkoutCalendarChanged()
                     } else {
                         plannedWorkoutCalendarEnabled = false
                         plannedWorkoutCalendarPermissionUnavailable = true
                         NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
                         PlannedWorkoutCalendarStore.clear()
+                        viewModel.onPlannedWorkoutCalendarChanged()
                     }
                 }
             }
@@ -367,6 +364,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             plannedWorkoutCalendarPermissionUnavailable = false
             NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
             PlannedWorkoutCalendarStore.clear()
+            viewModel.onPlannedWorkoutCalendarChanged()
             return
         }
         if (
@@ -379,9 +377,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         plannedWorkoutCalendarEnabled = true
         plannedWorkoutCalendarPermissionUnavailable = false
         NoopPrefs.setPlannedWorkoutCalendar(ctx, true)
-        plannedWorkoutCalendarScope.launch {
-            PlannedWorkoutCalendarStore.refresh(ctx, force = true)
-        }
+        viewModel.onPlannedWorkoutCalendarChanged()
     }
 
     fun setWorkoutGuidanceEnabled(enabled: Boolean) {

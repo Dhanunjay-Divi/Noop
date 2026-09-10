@@ -2782,6 +2782,7 @@ final class AppModel: ObservableObject {
         )
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             AdaptiveDayTimeZoneStore.discardPending()
+            AdaptivePlannedWorkoutScheduler.cancelPending()
             return
         }
         let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
@@ -2825,7 +2826,17 @@ final class AppModel: ObservableObject {
         )
         if let adjustment = plan.workoutAdjustment {
             let leadSeconds = adjustment.startSec - nowSec
-            if leadSeconds >= 0, leadSeconds <= 2 * 60 * 60 {
+            if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                _ = await AdaptivePlannedWorkoutScheduler.schedule(
+                    adjustment: adjustment,
+                    day: today,
+                    now: now
+                )
+            } else {
+                AdaptivePlannedWorkoutScheduler.cancelPending()
+            }
+            if leadSeconds >= 0,
+               leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
                 ContextualInterventionCenter.post(
                     AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
                         from: adjustment,
@@ -2836,6 +2847,8 @@ final class AppModel: ObservableObject {
                 )
                 return
             }
+        } else {
+            AdaptivePlannedWorkoutScheduler.cancelPending()
         }
 
         if let recommendation {

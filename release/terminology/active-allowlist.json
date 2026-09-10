@@ -3269,12 +3269,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 2,
+      "occurrenceCount": 5,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "76754445af51f53f8f09a8b5d0c9c98a61078510fc5469676dd09bb5857a5ce6"
+      "sha256": "6c569314a9c905294ba6782f022efba4dd7ae0c2910715c1cfd2b584a288e4e7"
     },
     {
       "category": "core",

@@ -10,11 +10,20 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import com.noop.AppDiagnosticsRecorder
+import com.noop.NoopApplication
 import com.noop.R
 import com.noop.alarm.WindDownStore
 import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ReadinessEngine
+import com.noop.ble.WhoopBleClient
 import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
@@ -27,6 +36,7 @@ import com.noop.ui.logicalDay
 import kotlinx.coroutines.CancellationException
 import java.time.Duration
 import java.time.ZonedDateTime
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 internal enum class AdaptiveDayDeliveryKind {
@@ -252,6 +262,101 @@ object AdaptiveDayTimeZoneStore {
     }
 }
 
+internal object AdaptivePlannedWorkoutSchedulePolicy {
+    const val LEAD_SECONDS = 2L * 60L * 60L
+
+    fun boundaryDelayMillis(startSec: Long, nowMillis: Long): Long? {
+        val boundaryMillis = (startSec - LEAD_SECONDS) * 1_000L
+        return (boundaryMillis - nowMillis).takeIf { it > 0L }
+    }
+}
+
+/** Durable two-hour boundary reevaluation. WorkManager survives process death and app dismissal. */
+internal object AdaptivePlannedWorkoutScheduler {
+    private const val WORK_NAME = "noop_adaptive_planned_workout_boundary"
+    internal const val EXPECTED_START_SEC_KEY = "expected_start_sec"
+
+    fun schedule(
+        context: Context,
+        startSec: Long,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val delayMillis = AdaptivePlannedWorkoutSchedulePolicy.boundaryDelayMillis(
+            startSec = startSec,
+            nowMillis = nowMillis,
+        ) ?: run {
+            cancel(context)
+            return false
+        }
+        val request = OneTimeWorkRequestBuilder<AdaptivePlannedWorkoutWorker>()
+            .setInputData(workDataOf(EXPECTED_START_SEC_KEY to startSec))
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.planned_workout_boundary",
+            fields = mapOf("outcome" to "enqueue_requested"),
+        )
+        return true
+    }
+
+    fun cancel(context: Context) {
+        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(WORK_NAME)
+    }
+}
+
+class AdaptivePlannedWorkoutWorker(
+    appContext: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(appContext, params) {
+    override suspend fun doWork(): Result {
+        val diagnostic = AppDiagnosticsRecorder.beginOperation(
+            "adaptive_day.planned_workout_boundary",
+        )
+        if (
+            !NoopPrefs.adaptiveDayGuidance(applicationContext) ||
+            !NoopPrefs.plannedWorkoutCalendar(applicationContext)
+        ) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "disabled")
+            return Result.success()
+        }
+        if (
+            inputData.getLong(
+                AdaptivePlannedWorkoutScheduler.EXPECTED_START_SEC_KEY,
+                Long.MIN_VALUE,
+            ) == Long.MIN_VALUE
+        ) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "invalid_input")
+            return Result.failure()
+        }
+        return try {
+            val app = applicationContext as? NoopApplication
+            val activeDeviceId = runCatching {
+                app?.deviceRegistry?.activeDeviceId()
+            }.getOrNull()
+                ?: app?.activeDeviceId?.takeIf(String::isNotBlank)
+                ?: WhoopBleClient.DEFAULT_DEVICE_ID
+            AdaptiveDayEvaluator.evaluateAndNotify(
+                context = applicationContext,
+                repository = WhoopRepository.from(applicationContext),
+                deviceId = activeDeviceId,
+            )
+            AppDiagnosticsRecorder.endOperation(diagnostic)
+            Result.success()
+        } catch (cancelled: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "cancelled")
+            throw cancelled
+        } catch (_: Exception) {
+            AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "retry")
+            Result.retry()
+        }
+    }
+}
+
 /**
  * Process-safe evaluation boundary shared by foreground UI, band post-offload analysis, and background
  * Health Connect ingestion. Every path ranks the same evidence and converges on the notifier's durable
@@ -276,6 +381,7 @@ object AdaptiveDayEvaluator {
         )
         if (!NoopPrefs.adaptiveDayGuidance(appContext)) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
+            AdaptivePlannedWorkoutScheduler.cancel(appContext)
             return null
         }
 
@@ -353,7 +459,16 @@ object AdaptiveDayEvaluator {
         )
         plan.workoutAdjustment?.let { adjustment ->
             val leadSeconds = adjustment.startSec - nowSec
-            if (leadSeconds in 0L..(2L * 60L * 60L)) {
+            if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
+                AdaptivePlannedWorkoutScheduler.schedule(
+                    context = appContext,
+                    startSec = adjustment.startSec,
+                    nowMillis = now.toInstant().toEpochMilli(),
+                )
+            } else {
+                AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            }
+            if (leadSeconds in 0L..AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
                 AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
                     appContext,
                     day = today,
@@ -362,7 +477,7 @@ object AdaptiveDayEvaluator {
                 )
                 return recommendation
             }
-        }
+        } ?: AdaptivePlannedWorkoutScheduler.cancel(appContext)
         recommendation?.let {
             AdaptiveDayNotifier.onRecommendation(appContext, it, now)
         }
@@ -419,7 +534,10 @@ object AdaptiveDayNotifier {
         val candidate = AdaptiveDayDeliveryCandidate(
             kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
             observedAtMillis = observedAtMillis,
-            maximumAgeMillis = Duration.ofHours(2).toMillis(),
+            maximumAgeMillis = plannedWorkoutMaximumAgeMillis(
+                startSec = adjustment.startSec,
+                observedAtMillis = observedAtMillis,
+            ),
             fingerprint = listOf(
                 "planned-workout",
                 day,
@@ -441,6 +559,11 @@ object AdaptiveDayNotifier {
             now = now,
         )
     }
+
+    internal fun plannedWorkoutMaximumAgeMillis(
+        startSec: Long,
+        observedAtMillis: Long,
+    ): Long = (startSec * 1_000L - observedAtMillis).coerceAtLeast(0L)
 
     internal fun plannedWorkoutEvidenceResources(
         reason: DailyActionPlanner.WorkoutAdjustmentReason,
