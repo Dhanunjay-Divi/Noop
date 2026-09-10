@@ -265,7 +265,6 @@ enum ContextualInterventionCenter {
     private static let quietEndMinutesKey = "notif.quietEndMinutes"
     private struct PendingDelivery {
         let candidate: ContextualInterventionCandidate
-        let now: Date
         let onRetry: (@MainActor @Sendable (Date) -> Void)?
     }
 
@@ -301,7 +300,6 @@ enum ContextualInterventionCenter {
 
     static func post(
         _ candidate: ContextualInterventionCandidate,
-        now: Date = Date(),
         onRetry: (@MainActor @Sendable (Date) -> Void)? = nil
     ) {
         guard deliveryConsentCurrent(for: candidate) else { return }
@@ -310,7 +308,6 @@ enum ContextualInterventionCenter {
             pendingDeliveries.removeAll { $0.candidate.kind == candidate.kind }
             pendingDeliveries.append(.init(
                 candidate: candidate,
-                now: now,
                 onRetry: onRetry
             ))
             return
@@ -318,7 +315,6 @@ enum ContextualInterventionCenter {
         deliveriesInFlight.insert(candidate.kind)
         pendingDeliveries.append(.init(
             candidate: candidate,
-            now: now,
             onRetry: onRetry
         ))
         guard !deliveryLoopRunning else { return }
@@ -333,7 +329,6 @@ enum ContextualInterventionCenter {
             let pending = pendingDeliveries.removeFirst()
             await deliver(
                 pending.candidate,
-                now: pending.now,
                 onRetry: pending.onRetry
             )
             if !pendingDeliveries.contains(where: {
@@ -347,13 +342,18 @@ enum ContextualInterventionCenter {
 
     private static func deliver(
         _ candidate: ContextualInterventionCandidate,
-        now: Date,
         onRetry: (@MainActor @Sendable (Date) -> Void)?
     ) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard deliveryConsentCurrent(for: candidate),
               isAuthorized(settings.authorizationStatus) else {
+            rejectDelivery(candidate, on: center)
+            return
+        }
+
+        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+        guard deliveryConsentCurrent(for: candidate) else {
             rejectDelivery(candidate, on: center)
             return
         }
@@ -365,10 +365,11 @@ enum ContextualInterventionCenter {
             defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60
         let quietEndMinutes =
             defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
+        let deliveryNow = Date()
         let decision = ContextualInterventionPolicy.evaluate(
             candidate,
             state: current,
-            now: now,
+            now: deliveryNow,
             quietHoursEnabled: quietHoursEnabled,
             quietStartMinutes: quietStartMinutes,
             quietEndMinutes: quietEndMinutes
@@ -381,7 +382,7 @@ enum ContextualInterventionCenter {
                let retryAt = ContextualInterventionPolicy.nextEligibleDate(
                    for: candidate,
                    state: current,
-                   notBefore: now,
+                   notBefore: deliveryNow,
                    quietHoursEnabled: quietHoursEnabled,
                    quietStartMinutes: quietStartMinutes,
                    quietEndMinutes: quietEndMinutes
@@ -395,11 +396,6 @@ enum ContextualInterventionCenter {
             return
         }
 
-        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
-        guard deliveryConsentCurrent(for: candidate) else {
-            rejectDelivery(candidate, on: center)
-            return
-        }
         let content = UNMutableNotificationContent()
         content.title = candidate.title
         content.body = candidate.body
@@ -472,7 +468,7 @@ enum ContextualInterventionCenter {
             saveState(decision.nextState, defaults: defaults)
             await AdaptivePlannedWorkoutScheduler.reconcilePending(
                 after: decision.nextState,
-                acceptedAt: now,
+                acceptedAt: deliveryNow,
                 center: center
             )
             if candidate.kind == .adaptiveTravel {
@@ -493,7 +489,10 @@ enum ContextualInterventionCenter {
         guard candidate.kind == .adaptivePlannedWorkout else { return true }
         return PlannedWorkoutCalendarSettings.enabled &&
             PlannedWorkoutCalendarStore.hasCurrentReadAccess() &&
-            currentPlannedWorkoutFingerprint == candidate.fingerprint
+            plannedWorkoutFingerprintsMatch(
+                currentPlannedWorkoutFingerprint,
+                candidate.fingerprint
+            )
     }
 
     static func invalidatePlannedWorkoutCandidate() {
@@ -503,7 +502,10 @@ enum ContextualInterventionCenter {
     fileprivate static func plannedWorkoutCandidateIsCurrent(
         _ fingerprint: String
     ) -> Bool {
-        currentPlannedWorkoutFingerprint == fingerprint
+        plannedWorkoutFingerprintsMatch(
+            currentPlannedWorkoutFingerprint,
+            fingerprint
+        )
     }
 
     private static func rejectDelivery(
@@ -544,9 +546,19 @@ enum ContextualInterventionCenter {
         keepingFingerprint: String?
     ) -> ContextualInterventionState {
         let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
-        guard state.deliveries[key]?.fingerprint != keepingFingerprint ||
-                keepingFingerprint == nil else {
-            return state
+        guard let prior = state.deliveries[key] else { return state }
+        if let keepingFingerprint,
+           plannedWorkoutFingerprintsMatch(
+               prior.fingerprint,
+               keepingFingerprint
+           ) {
+            guard prior.fingerprint != keepingFingerprint else { return state }
+            var migrated = state
+            migrated.deliveries[key] = .init(
+                at: prior.at,
+                fingerprint: keepingFingerprint
+            )
+            return migrated
         }
         var next = state
         next.deliveries.removeValue(forKey: key)
@@ -564,17 +576,23 @@ enum ContextualInterventionCenter {
         let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
         let prior = state.deliveries[key]
         let remainsCurrent =
-            keepingFingerprint != nil && prior?.fingerprint == keepingFingerprint
+            keepingFingerprint != nil &&
+            plannedWorkoutFingerprintsMatch(
+                prior?.fingerprint,
+                keepingFingerprint
+            )
+        let artifactFingerprint = remainsCurrent
+            ? prior?.fingerprint
+            : keepingFingerprint
         ContextualActionCenter.shared.reconcileRecoveryActions(
             route: .workouts,
-            keepingFingerprint: keepingFingerprint
+            keepingFingerprint: artifactFingerprint
         )
         AdaptivePlannedWorkoutScheduler.reconcileDeliveryExpiry(
-            keepingFingerprint: keepingFingerprint,
+            keepingFingerprint: artifactFingerprint,
             center: center,
             defaults: defaults
         )
-        guard !remainsCurrent else { return }
 
         let next = reconciledPlannedWorkoutState(
             state,
@@ -583,6 +601,7 @@ enum ContextualInterventionCenter {
         if next != state {
             saveState(next, defaults: defaults)
         }
+        guard !remainsCurrent else { return }
         LocalNotificationLifecycle.cancel(
             identifiers: [plannedWorkoutRequestID, AdaptivePlannedWorkoutScheduler.requestID],
             presented: true,
@@ -596,7 +615,10 @@ enum ContextualInterventionCenter {
         defaults: UserDefaults = .standard
     ) {
         guard currentPlannedWorkoutFingerprint == nil ||
-                currentPlannedWorkoutFingerprint == fingerprint else {
+                plannedWorkoutFingerprintsMatch(
+                    currentPlannedWorkoutFingerprint,
+                    fingerprint
+                ) else {
             return
         }
         currentPlannedWorkoutFingerprint = nil
@@ -640,13 +662,50 @@ enum ContextualInterventionCenter {
     }
 
     static func plannedWorkoutStartDate(from fingerprint: String) -> Date? {
+        guard let identity = plannedWorkoutIdentity(from: fingerprint) else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(identity.startSec))
+    }
+
+    static func plannedWorkoutFingerprintsMatch(
+        _ lhs: String?,
+        _ rhs: String?
+    ) -> Bool {
+        guard let lhs, let rhs else { return lhs == nil && rhs == nil }
+        if lhs == rhs { return true }
+        guard let lhsIdentity = plannedWorkoutIdentity(from: lhs),
+              let rhsIdentity = plannedWorkoutIdentity(from: rhs) else {
+            return false
+        }
+        return lhsIdentity.day == rhsIdentity.day &&
+            lhsIdentity.startSec == rhsIdentity.startSec
+    }
+
+    private static func plannedWorkoutIdentity(
+        from fingerprint: String
+    ) -> (day: String, startSec: Int)? {
         let fields = fingerprint.split(separator: "|", omittingEmptySubsequences: false)
-        guard fields.count == 4,
+        guard (fields.count == 3 || fields.count == 4),
               fields[0] == "planned-workout",
+              !fields[1].isEmpty,
               let startSec = Int(fields[2]) else {
             return nil
         }
-        return Date(timeIntervalSince1970: TimeInterval(startSec))
+        return (String(fields[1]), startSec)
+    }
+
+    private static func canonicalPlannedWorkoutFingerprint(
+        from fingerprint: String
+    ) -> String? {
+        guard let identity = plannedWorkoutIdentity(from: fingerprint) else {
+            return nil
+        }
+        return [
+            "planned-workout",
+            identity.day,
+            String(identity.startSec)
+        ].joined(separator: "|")
     }
 
     static func recordScheduledPlannedWorkoutDelivery(
@@ -656,11 +715,26 @@ enum ContextualInterventionCenter {
     ) {
         var state = loadState(defaults: defaults)
         let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
-        if state.deliveries[key]?.fingerprint == fingerprint { return }
+        let storedFingerprint =
+            canonicalPlannedWorkoutFingerprint(from: fingerprint) ?? fingerprint
+        if let prior = state.deliveries[key],
+           plannedWorkoutFingerprintsMatch(prior.fingerprint, storedFingerprint) {
+            if prior.fingerprint != storedFingerprint {
+                state.deliveries[key] = .init(
+                    at: prior.at,
+                    fingerprint: storedFingerprint
+                )
+                saveState(state, defaults: defaults)
+            }
+            return
+        }
         if state.lastGlobalDelivery.map({ $0 < deliveredAt }) ?? true {
             state.lastGlobalDelivery = deliveredAt
         }
-        state.deliveries[key] = .init(at: deliveredAt, fingerprint: fingerprint)
+        state.deliveries[key] = .init(
+            at: deliveredAt,
+            fingerprint: storedFingerprint
+        )
         saveState(state, defaults: defaults)
     }
 
@@ -828,8 +902,7 @@ enum AdaptiveDayInterventionFactory {
             fingerprint: [
                 "planned-workout",
                 day,
-                String(adjustment.startSec),
-                adjustment.reason.rawValue
+                String(adjustment.startSec)
             ].joined(separator: "|"),
             title: String(localized: "appwide.adaptive_day_guidance.planned_workout.title"),
             body: String(localized: "appwide.adaptive_day_guidance.planned_workout.body"),
@@ -1077,7 +1150,11 @@ enum AdaptivePlannedWorkoutScheduler {
         let hadExpiry = deliveryExpiryTask != nil ||
             deliveredStartSec(defaults: defaults) != nil ||
             priorFingerprint != nil
-        if let keepingFingerprint, priorFingerprint == keepingFingerprint {
+        if let keepingFingerprint,
+           ContextualInterventionCenter.plannedWorkoutFingerprintsMatch(
+               priorFingerprint,
+               keepingFingerprint
+           ) {
             if deliveryExpiryTask == nil,
                let startSec = deliveredStartSec(defaults: defaults) {
                 let start = Date(timeIntervalSince1970: TimeInterval(startSec))
@@ -1711,7 +1788,7 @@ enum CaffeineCutoffReminders {
         case .none:
             break
         case .notifyNow(let candidate):
-            ContextualInterventionCenter.post(candidate, now: now)
+            ContextualInterventionCenter.post(candidate)
         case .schedule(let fireDate):
             Task { @MainActor in
                 let center = UNUserNotificationCenter.current()

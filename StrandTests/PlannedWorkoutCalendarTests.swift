@@ -300,8 +300,76 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertTrue(source.contains("PlannedWorkoutCalendarStore.hasCurrentReadAccess()"))
         XCTAssertTrue(source.contains("PlannedWorkoutCalendarSettings.enabled"))
         XCTAssertTrue(source.contains(
-            "currentPlannedWorkoutFingerprint == candidate.fingerprint"
+            "plannedWorkoutFingerprintsMatch("
         ))
+    }
+
+    func testImmediateDeliveryUsesThePostBoundaryClockForPolicyAndCooldowns() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let start = try XCTUnwrap(
+            source.range(of: "private static func deliver(")
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "private static func deliveryConsentCurrent",
+                range: start.upperBound..<source.endIndex
+            )
+        )
+        let delivery = source[start.lowerBound..<end.lowerBound]
+        let settings = try XCTUnwrap(
+            delivery.range(of: "let settings = await center.notificationSettings()")
+        )
+        let category = try XCTUnwrap(
+            delivery.range(
+                of: "await DailyReviewNotifications.ensurePrivacyCategory",
+                range: settings.upperBound..<delivery.endIndex
+            )
+        )
+        let deliveryClock = try XCTUnwrap(
+            delivery.range(
+                of: "let deliveryNow = Date()",
+                range: category.upperBound..<delivery.endIndex
+            )
+        )
+        let policy = try XCTUnwrap(
+            delivery.range(
+                of: "ContextualInterventionPolicy.evaluate",
+                range: deliveryClock.upperBound..<delivery.endIndex
+            )
+        )
+
+        XCTAssertLessThan(settings.lowerBound, category.lowerBound)
+        XCTAssertLessThan(category.lowerBound, deliveryClock.lowerBound)
+        XCTAssertLessThan(deliveryClock.lowerBound, policy.lowerBound)
+        XCTAssertTrue(delivery.contains("now: deliveryNow"))
+        XCTAssertTrue(delivery.contains("notBefore: deliveryNow"))
+        XCTAssertTrue(delivery.contains("acceptedAt: deliveryNow"))
+    }
+
+    func testScheduledWorkoutSuppressesWeakerAdaptiveGuidance() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let scheduled = try XCTUnwrap(
+            tail.range(of: "let scheduled = await AdaptivePlannedWorkoutScheduler.schedule")
+        )
+        let priorityReturn = try XCTUnwrap(
+            tail.range(
+                of: "if scheduled { return }",
+                range: scheduled.upperBound..<tail.endIndex
+            )
+        )
+        let weakerRecommendation = try XCTUnwrap(
+            tail.range(
+                of: "if let recommendation {",
+                range: priorityReturn.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(scheduled.lowerBound, priorityReturn.lowerBound)
+        XCTAssertLessThan(priorityReturn.lowerBound, weakerRecommendation.lowerBound)
     }
 
     func testChangedInputsInvalidateQueuedWorkoutGuidanceBeforeReevaluation() throws {

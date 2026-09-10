@@ -595,7 +595,7 @@ object AdaptiveDayEvaluator {
                     appContext,
                     currentFingerprint = null,
                 )
-                AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+                AdaptiveDayNotifier.onRecommendation(appContext, recommendation)
                 true
             }
             return recommendation
@@ -646,11 +646,12 @@ object AdaptiveDayEvaluator {
                         currentFingerprint = fingerprint,
                     )
                     if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
-                        AdaptivePlannedWorkoutScheduler.schedule(
+                        val scheduled = AdaptivePlannedWorkoutScheduler.schedule(
                             context = appContext,
                             startSec = adjustment.startSec,
                             nowMillis = now.toInstant().toEpochMilli(),
                         )
+                        if (scheduled) return@commitIfCurrent true
                     }
                     if (leadSeconds <= AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
                         val snapshot = plannedWorkout ?: return@commitIfCurrent false
@@ -673,7 +674,7 @@ object AdaptiveDayEvaluator {
                 )
             }
             recommendation?.let {
-                AdaptiveDayNotifier.onRecommendation(appContext, it, now)
+                AdaptiveDayNotifier.onRecommendation(appContext, it)
             }
             true
         }
@@ -693,7 +694,6 @@ object AdaptiveDayNotifier {
     fun onRecommendation(
         context: Context,
         recommendation: AdaptiveDayGuidance.Recommendation,
-        now: ZonedDateTime = ZonedDateTime.now(),
     ) {
         val (title, body) = copy(context, recommendation.kind)
         postCandidate(
@@ -703,7 +703,6 @@ object AdaptiveDayNotifier {
             body = body,
             route = NoopNotificationRoute.SLEEP,
             evidence = recommendation.evidence,
-            now = now,
             onRejected = { reason ->
                 if (
                     recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT &&
@@ -751,7 +750,6 @@ object AdaptiveDayNotifier {
             ),
             route = NoopNotificationRoute.WORKOUTS,
             evidence = plannedWorkoutEvidenceResources(adjustment.reason).map(context::getString),
-            now = now,
         )
     }
 
@@ -762,13 +760,33 @@ object AdaptiveDayNotifier {
         "planned-workout",
         day,
         adjustment.startSec,
-        adjustment.reason.name,
     ).joinToString("|")
 
     internal fun plannedWorkoutStartSec(fingerprint: String): Long? {
+        return plannedWorkoutIdentity(fingerprint)?.second
+    }
+
+    internal fun plannedWorkoutFingerprintsMatch(
+        first: String?,
+        second: String?,
+    ): Boolean {
+        if (first == null || second == null) return first == null && second == null
+        if (first == second) return true
+        val firstIdentity = plannedWorkoutIdentity(first) ?: return false
+        val secondIdentity = plannedWorkoutIdentity(second) ?: return false
+        return firstIdentity == secondIdentity
+    }
+
+    private fun plannedWorkoutIdentity(fingerprint: String): Pair<String, Long>? {
         val fields = fingerprint.split('|')
-        if (fields.size != 4 || fields[0] != "planned-workout") return null
-        return fields[2].toLongOrNull()
+        if (
+            fields.size !in 3..4 ||
+            fields[0] != "planned-workout" ||
+            fields[1].isBlank()
+        ) {
+            return null
+        }
+        return fields[2].toLongOrNull()?.let { fields[1] to it }
     }
 
     internal fun plannedWorkoutMaximumAgeMillis(
@@ -814,7 +832,6 @@ object AdaptiveDayNotifier {
         body: String,
         route: NoopNotificationRoute,
         evidence: List<String>,
-        now: ZonedDateTime,
         onRejected: (AdaptiveDayDeliveryReason) -> Unit = {},
         onPosted: () -> Unit = {},
     ) {
@@ -834,18 +851,19 @@ object AdaptiveDayNotifier {
                 return
             }
             val deliveryState = loadState(context)
-            val deliveryAtMillis = now.toInstant().toEpochMilli()
             val quietHoursEnabled =
                 NotifPrefs.getBool(context, NotifPrefs.QUIET, false)
             val quietStartMinutes =
                 NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60)
             val quietEndMinutes =
                 NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60)
+            val deliveryNow = ZonedDateTime.now()
+            val deliveryAtMillis = deliveryNow.toInstant().toEpochMilli()
             val decision = AdaptiveDayDeliveryPolicy.evaluate(
                 candidate = candidate,
                 state = deliveryState,
                 nowMillis = deliveryAtMillis,
-                localMinuteOfDay = now.hour * 60 + now.minute,
+                localMinuteOfDay = deliveryNow.hour * 60 + deliveryNow.minute,
                 quietHoursEnabled = quietHoursEnabled,
                 quietStartMinutes = quietStartMinutes,
                 quietEndMinutes = quietEndMinutes,
@@ -856,7 +874,7 @@ object AdaptiveDayNotifier {
                     AdaptiveDayDeliveryPolicy.nextEligibleAtMillis(
                         candidate = candidate,
                         state = deliveryState,
-                        notBefore = now,
+                        notBefore = deliveryNow,
                         quietHoursEnabled = quietHoursEnabled,
                         quietStartMinutes = quietStartMinutes,
                         quietEndMinutes = quietEndMinutes,
@@ -1106,7 +1124,7 @@ object AdaptiveDayNotifier {
                 sleepWindows = emptyList(),
                 timeZoneChange = change,
             ),
-        )?.let { onRecommendation(context, it, now) }
+        )?.let { onRecommendation(context, it) }
     }
 
     fun prepareAndCanNotify(context: Context): Boolean {
@@ -1184,14 +1202,20 @@ object AdaptiveDayNotifier {
         val app = context.applicationContext
         val state = loadState(app)
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
-        if (prior != null && prior.fingerprint != fingerprint) return
+        if (
+            prior != null &&
+            !plannedWorkoutFingerprintsMatch(prior.fingerprint, fingerprint)
+        ) {
+            return
+        }
         ContextualActionCenter.reconcileRecoveryActions(
             context = app,
             route = NoopNotificationRoute.WORKOUTS,
             keepingFingerprint = null,
         )
         if (
-            prior?.fingerprint == fingerprint &&
+            prior != null &&
+            plannedWorkoutFingerprintsMatch(prior.fingerprint, fingerprint) &&
             state.lastGlobalDeliveryMillis == prior.atMillis
         ) {
             cancelAdaptiveDayNotification(app)
@@ -1222,14 +1246,14 @@ object AdaptiveDayNotifier {
         forceCancelSharedNotification: Boolean = false,
     ) {
         val app = context.applicationContext
-        ContextualActionCenter.reconcileRecoveryActions(
-            context = app,
-            route = NoopNotificationRoute.WORKOUTS,
-            keepingFingerprint = currentFingerprint,
-        )
         val state = loadState(app)
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
         if (prior == null) {
+            ContextualActionCenter.reconcileRecoveryActions(
+                context = app,
+                route = NoopNotificationRoute.WORKOUTS,
+                keepingFingerprint = currentFingerprint,
+            )
             val orphanedOwner = if (
                 currentFingerprint == null || forceCancelSharedNotification
             ) {
@@ -1251,7 +1275,19 @@ object AdaptiveDayNotifier {
             }
             return
         }
-        if (currentFingerprint != null && prior.fingerprint == currentFingerprint) return
+        val remainsCurrent =
+            currentFingerprint != null &&
+                plannedWorkoutFingerprintsMatch(prior.fingerprint, currentFingerprint)
+        ContextualActionCenter.reconcileRecoveryActions(
+            context = app,
+            route = NoopNotificationRoute.WORKOUTS,
+            keepingFingerprint = if (remainsCurrent) prior.fingerprint else currentFingerprint,
+        )
+        if (remainsCurrent) {
+            val migrated = reconciledPlannedWorkoutState(state, currentFingerprint)
+            if (migrated != state) saveState(app, migrated)
+            return
+        }
 
         ContextualPromptDeliveryLedger.reconcileIfOwned(
             context = app,
@@ -1281,8 +1317,16 @@ object AdaptiveDayNotifier {
     ): AdaptiveDayDeliveryState {
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
             ?: return state
-        if (currentFingerprint != null && prior.fingerprint == currentFingerprint) {
-            return state
+        if (
+            currentFingerprint != null &&
+            plannedWorkoutFingerprintsMatch(prior.fingerprint, currentFingerprint)
+        ) {
+            if (prior.fingerprint == currentFingerprint) return state
+            return state.copy(
+                deliveries = state.deliveries +
+                    (AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                        prior.copy(fingerprint = currentFingerprint)),
+            )
         }
         val remaining = state.deliveries - AdaptiveDayDeliveryKind.PLANNED_WORKOUT
         return state.copy(

@@ -124,6 +124,20 @@ phrases classify, while workout-plus-meeting or seminar phrases still fail
 closed. All 1,461 analytics tests and the complete 4,220-test Android
 unit/compile/lint wall pass on the replacement source. Commit, fresh exact-head
 review, protected checks, and normal merge remain required.
+The final replacement review then found three prompt-lifetime defects. Planned
+workout identity now consists only of the planning day and exact start, so a
+change from sleep-only to sleep-plus-readiness evidence updates explanation
+without consuming a second notification or erasing cooldown history; legacy
+four-field identities migrate in place. Apple and Android evaluate quiet hours,
+staleness, retry timing, and cooldowns from the actual delivery boundary rather
+than the earlier analytics timestamp. A successfully armed future workout also
+suppresses weaker routine or sleep guidance until that higher-priority
+reevaluation runs. The exact replacement source passes all 1,461 shared
+analytics tests with seven skips, all 1,745 Apple app tests with one expected
+external-data skip, all 4,227 Android tests with seven skips plus APK assembly,
+production compile, lint, and instrumentation-source compilation, and the
+complete unsigned iPhone/widget/watch graph. Fresh exact-head review, protected
+checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

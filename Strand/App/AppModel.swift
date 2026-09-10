@@ -1655,8 +1655,7 @@ final class AppModel: ObservableObject {
                     title: String(localized: "appwide.stress_checkin.notification_title"),
                     body: String(localized: "appwide.stress_checkin.notification_body"),
                     route: .breathe
-                ),
-                now: now
+                )
             )
         }
         live.append(log: "Stress check-in · short-window HRV moved below recent baseline")
@@ -2839,8 +2838,7 @@ final class AppModel: ObservableObject {
                 keepingFingerprint: nil
             )
             ContextualInterventionCenter.post(
-                AdaptiveDayInterventionFactory.candidate(from: recommendation),
-                now: now
+                AdaptiveDayInterventionFactory.candidate(from: recommendation)
             )
             return
         }
@@ -2881,7 +2879,7 @@ final class AppModel: ObservableObject {
                     keepingFingerprint: candidate.fingerprint
                 )
                 if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
-                    _ = await AdaptivePlannedWorkoutScheduler.schedule(
+                    let scheduled = await AdaptivePlannedWorkoutScheduler.schedule(
                         adjustment: adjustment,
                         day: today,
                         now: now
@@ -2892,13 +2890,13 @@ final class AppModel: ObservableObject {
                     guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else {
                         return
                     }
+                    if scheduled { return }
                 } else {
                     AdaptivePlannedWorkoutScheduler.cancelPending()
                 }
                 if leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
                     ContextualInterventionCenter.post(
-                        candidate,
-                        now: now
+                        candidate
                     ) { [weak self] retryAt in
                         _ = AdaptivePlannedWorkoutScheduler.scheduleRetry(
                             start: Date(
@@ -2922,8 +2920,7 @@ final class AppModel: ObservableObject {
 
         if let recommendation {
             ContextualInterventionCenter.post(
-                AdaptiveDayInterventionFactory.candidate(from: recommendation),
-                now: now
+                AdaptiveDayInterventionFactory.candidate(from: recommendation)
             )
         }
     }

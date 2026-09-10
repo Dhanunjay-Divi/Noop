@@ -385,7 +385,36 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun changingWorkoutEvidenceKeepsTheSameFingerprint() {
+        val first = DailyActionPlanner.WorkoutAdjustment(
+            startSec = nowMillis / 1_000L + 60L * 60L,
+            durationMinutes = 60,
+            reason = DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT,
+            measuredSleepMinutes = 372,
+            referenceSleepMinutes = 450,
+            sleepDeficitMinutes = 78,
+            sleepReference = DailyActionPlanner.SleepReference.PERSONAL_USUAL,
+            confidence = ScoreConfidence.SOLID,
+        )
+
+        assertEquals(
+            AdaptiveDayNotifier.plannedWorkoutFingerprint("2026-08-22", first),
+            AdaptiveDayNotifier.plannedWorkoutFingerprint(
+                "2026-08-22",
+                first.copy(
+                    reason = DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_AND_RECOVERY,
+                ),
+            ),
+        )
+    }
+
     @Test fun plannedWorkoutFingerprintExposesOnlyItsBoundedStartTimestamp() {
+        assertEquals(
+            1_700_000_123L,
+            AdaptiveDayNotifier.plannedWorkoutStartSec(
+                "planned-workout|2026-08-22|1700000123",
+            ),
+        )
         assertEquals(
             1_700_000_123L,
             AdaptiveDayNotifier.plannedWorkoutStartSec(
@@ -400,6 +429,42 @@ class AdaptiveDayNotifierTest {
         assertNull(
             AdaptiveDayNotifier.plannedWorkoutStartSec(
                 "other|2026-08-22|1700000123|SLEEP_DEFICIT",
+            ),
+        )
+    }
+
+    @Test fun legacyWorkoutIdentityMigratesWithoutDroppingCooldownHistory() {
+        val legacy = "planned-workout|2026-08-22|1700000123|SLEEP_DEFICIT"
+        val current = "planned-workout|2026-08-22|1700000123"
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(2_000L, legacy),
+            ),
+        )
+
+        val migrated = AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+            state,
+            currentFingerprint = current,
+        )
+
+        assertEquals(2_000L, migrated.lastGlobalDeliveryMillis)
+        assertEquals(
+            AdaptiveDayDelivery(2_000L, current),
+            migrated.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT],
+        )
+        assertTrue(AdaptiveDayNotifier.plannedWorkoutFingerprintsMatch(legacy, current))
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutFingerprintsMatch(
+                legacy,
+                "planned-workout|2026-08-23|1700000123",
+            ),
+        )
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutFingerprintsMatch(
+                "malformed-a",
+                "malformed-b",
             ),
         )
     }
@@ -663,9 +728,13 @@ class AdaptiveDayNotifierTest {
         ).firstOrNull(File::isFile)?.readText()
         val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
         val postCandidate = text.indexOf("private fun postCandidate(")
-        val deliveryAt = text.indexOf(
-            "val deliveryAtMillis = now.toInstant().toEpochMilli()",
+        val deliveryNow = text.indexOf(
+            "val deliveryNow = ZonedDateTime.now()",
             postCandidate,
+        )
+        val deliveryAt = text.indexOf(
+            "val deliveryAtMillis = deliveryNow.toInstant().toEpochMilli()",
+            deliveryNow,
         )
         val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed", deliveryAt)
         val postedResult = text.indexOf(
@@ -689,13 +758,64 @@ class AdaptiveDayNotifierTest {
             expectedTimestamp,
         )
 
-        assertTrue(deliveryAt > postCandidate)
+        assertTrue(deliveryNow > postCandidate)
+        assertTrue(deliveryAt > deliveryNow)
         assertTrue(postGate > deliveryAt)
         assertTrue(postedResult > postGate)
         assertTrue(postSuccessConsent > postedResult)
         assertTrue(reconcile > postSuccessConsent)
         assertTrue(expectedTimestamp > reconcile)
         assertTrue(cancellation > expectedTimestamp)
+    }
+
+    @Test fun deliveryPolicyUsesTheActualPostBoundaryClock() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val postCandidate = text.indexOf("private fun postCandidate(")
+        val deliveryNow = text.indexOf("val deliveryNow = ZonedDateTime.now()", postCandidate)
+        val policy = text.indexOf("AdaptiveDayDeliveryPolicy.evaluate(", deliveryNow)
+        val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed", policy)
+        val postSource = text.substring(postCandidate, postGate)
+
+        assertTrue(deliveryNow > postCandidate)
+        assertTrue(policy > deliveryNow)
+        assertTrue(postGate > policy)
+        assertTrue(postSource.contains("localMinuteOfDay = deliveryNow.hour"))
+        assertTrue(postSource.contains("notBefore = deliveryNow"))
+        assertFalse(postSource.contains("deliveryAtMillis = now.toInstant()"))
+    }
+
+    @Test fun scheduledWorkoutSuppressesWeakerAdaptiveGuidance() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val evaluator = text.indexOf("object AdaptiveDayEvaluator")
+        val notifier = text.indexOf("object AdaptiveDayNotifier", evaluator)
+        val evaluatorSource = text.substring(evaluator, notifier)
+        val scheduled = evaluatorSource.indexOf(
+            "val scheduled = AdaptivePlannedWorkoutScheduler.schedule",
+        )
+        val priorityReturn = evaluatorSource.indexOf(
+            "if (scheduled) return@commitIfCurrent true",
+            scheduled,
+        )
+        val weakerRecommendation = evaluatorSource.indexOf(
+            "recommendation?.let",
+            priorityReturn,
+        )
+
+        assertTrue(scheduled >= 0)
+        assertTrue(priorityReturn > scheduled)
+        assertTrue(weakerRecommendation > priorityReturn)
     }
 
     @Test fun plannedWorkoutWorkerResolvesThePersistedActiveDeviceBeforeEvaluation() {
@@ -799,7 +919,7 @@ class AdaptiveDayNotifierTest {
         assertTrue(expire >= 0)
         assertFalse(expireSource.contains("ContextualPromptDeliveryLedger.reconcile"))
         assertFalse(expireSource.contains("saveState("))
-        assertTrue(expireSource.contains("prior.fingerprint != fingerprint"))
+        assertTrue(expireSource.contains("plannedWorkoutFingerprintsMatch("))
         assertTrue(missingSource.contains("plannedWorkoutStartSec(prior.fingerprint)"))
         assertTrue(missingSource.contains("expirePlannedWorkoutArtifacts"))
         assertTrue(missingSource.contains("reconcilePlannedWorkoutArtifacts"))
