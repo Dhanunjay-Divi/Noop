@@ -259,6 +259,56 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun movingWorkoutWithinThirtyMinutesChangesItsFingerprint() {
+        val first = DailyActionPlanner.WorkoutAdjustment(
+            startSec = nowMillis / 1_000L + 60L * 60L,
+            durationMinutes = 60,
+            reason = DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT,
+            measuredSleepMinutes = 372,
+            referenceSleepMinutes = 450,
+            sleepDeficitMinutes = 78,
+            sleepReference = DailyActionPlanner.SleepReference.PERSONAL_USUAL,
+            confidence = ScoreConfidence.SOLID,
+        )
+
+        assertFalse(
+            AdaptiveDayNotifier.plannedWorkoutFingerprint("2026-08-22", first) ==
+                AdaptiveDayNotifier.plannedWorkoutFingerprint(
+                    "2026-08-22",
+                    first.copy(startSec = first.startSec + 5L * 60L),
+                ),
+        )
+    }
+
+    @Test fun stalePlannedWorkoutDeliveryIsRemovedAndGlobalCooldownRecomputed() {
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.SLEEP_RECOVERY to
+                    AdaptiveDayDelivery(1_000L, "sleep-a"),
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(2_000L, "planned-a"),
+            ),
+        )
+
+        val reconciled = AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+            state,
+            currentFingerprint = null,
+        )
+
+        assertFalse(
+            reconciled.deliveries.containsKey(AdaptiveDayDeliveryKind.PLANNED_WORKOUT),
+        )
+        assertEquals(1_000L, reconciled.lastGlobalDeliveryMillis)
+        assertEquals(
+            state,
+            AdaptiveDayNotifier.reconciledPlannedWorkoutState(
+                state,
+                currentFingerprint = "planned-a",
+            ),
+        )
+    }
+
     @Test fun plannedWorkoutEvidenceMatchesTheSupportingSignals() {
         assertEquals(
             listOf(
@@ -369,5 +419,24 @@ class AdaptiveDayNotifierTest {
         assertTrue(worker >= 0)
         assertTrue(registry > worker)
         assertTrue(evaluate > registry)
+    }
+
+    @Test fun adaptiveEvaluationReconcilesRemovedWorkoutAndDeliveryStateCanDeleteKeys() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val evaluator = text.indexOf("object AdaptiveDayEvaluator")
+        val notifier = text.indexOf("object AdaptiveDayNotifier", evaluator)
+        val evaluatorSource = text.substring(evaluator, notifier)
+        val saveState = text.indexOf("private fun saveState")
+
+        assertTrue(evaluatorSource.contains("reconcilePlannedWorkoutArtifacts"))
+        assertTrue(evaluatorSource.contains("currentFingerprint = null"))
+        assertTrue(saveState >= 0)
+        assertTrue(text.substring(saveState).contains(".clear()"))
     }
 }

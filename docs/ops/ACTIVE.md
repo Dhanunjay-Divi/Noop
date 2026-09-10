@@ -37,19 +37,25 @@ calendar edits, contextual actions opening Sleep instead of Workouts, and
 Android adaptive-day `PendingIntent` mutation before global cooldown approval.
 Replacement-head review then corrected Android provider-change reevaluation,
 Apple cancellation after EventKit return, and declined invitations on both
-providers. Final review then added durable two-hour boundary delivery,
+providers. Final review then added the two-hour boundary reevaluation,
 workout-start action expiry, exact supporting-evidence preservation, persisted
 active-device resolution, and immediate Android reevaluation after every
-Calendar enablement or permission transition. Apple queues a private local
-notification; Android queues a WorkManager reevaluation, with fixed bounded
-lifecycle evidence and cancellation on opt-out, permission loss, plan removal,
-or foreground delivery. The complete replacement local wall passes: 1,459
-analytics tests with seven skips, 1,716 Apple app tests with one expected skip,
-the complete unsigned iOS app/widget/watch graph, and 4,202 Android tests with
-seven skips plus APK assembly, production compile, lint, and
-instrumentation-source compilation. Repository policy totals are refreshed in
-the round record. The first hosted Apple attempt exposed only the app-wide
-localization ratchet still
+Calendar enablement or permission transition. The latest protected review found
+that Apple could still preload calendar-derived copy before consent changed and
+that either platform could retain a stale delivered prompt or Workouts action
+after a workout moved or disappeared. Apple now stores only generic boundary
+metadata, uses a process-local task while alive, and gives its existing
+background-refresh lane a one-shot earliest-wake hint; every path reruns current
+consent and evidence before creating a prompt. Android retains WorkManager
+reevaluation. Both platforms use the exact start in the fingerprint and
+reconcile stale delivery state, cooldowns, actions, and notifications on every
+disabled, superseded, moved, removed, or expired plan. The complete replacement
+local wall passes: 1,459 analytics tests with seven skips, 1,723 Apple app tests
+with one expected skip, the complete unsigned iOS app/widget/watch graph, and
+4,206 Android tests with seven skips plus APK assembly, production compile,
+lint, and instrumentation-source compilation. Repository policy totals are
+refreshed in the round record. The first hosted Apple attempt exposed
+only the app-wide localization ratchet still
 expecting 631 rather than the exact new total of 636; that contract is corrected
 and passes locally. Fresh protected review/checks and normal merge remain, along
 with physical iOS/Android permission, provider, background-delivery,

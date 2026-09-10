@@ -127,6 +127,45 @@ final class ContextualActionPolicyTests: XCTestCase {
     }
 
     @MainActor
+    func testPlannedWorkoutReconciliationKeepsCurrentAndRemovesOnlyStaleWorkoutAction() {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let center = ContextualActionCenter(defaults: defaults, storageKey: "state")
+        let now = Date()
+        center.presentRecovery(
+            title: "Sleep recovery",
+            detail: "Review sleep.",
+            fingerprint: "sleep-a",
+            evidence: [],
+            observedAt: now,
+            maximumAge: 60 * 60,
+            route: .sleep
+        )
+        center.presentRecovery(
+            title: "Planned workout",
+            detail: "Keep it lighter.",
+            fingerprint: "planned-a",
+            evidence: [],
+            observedAt: now.addingTimeInterval(1),
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+
+        center.reconcileRecoveryActions(
+            route: .workouts,
+            keepingFingerprint: "planned-a"
+        )
+        XCTAssertEqual(center.visibleActions.first?.route, .workouts)
+
+        center.reconcileRecoveryActions(
+            route: .workouts,
+            keepingFingerprint: nil
+        )
+        XCTAssertTrue(center.visibleActions.allSatisfy { $0.route != .workouts })
+    }
+
+    @MainActor
     func testStaleDeliveredNotificationDoesNotBecomeCurrentAction() {
         let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

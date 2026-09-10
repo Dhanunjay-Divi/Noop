@@ -382,6 +382,10 @@ object AdaptiveDayEvaluator {
         if (!NoopPrefs.adaptiveDayGuidance(appContext)) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                appContext,
+                currentFingerprint = null,
+            )
             return null
         }
 
@@ -435,6 +439,11 @@ object AdaptiveDayEvaluator {
             ),
         )
         if (recommendation?.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
+            AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                appContext,
+                currentFingerprint = null,
+            )
             AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
             return recommendation
         }
@@ -459,25 +468,47 @@ object AdaptiveDayEvaluator {
         )
         plan.workoutAdjustment?.let { adjustment ->
             val leadSeconds = adjustment.startSec - nowSec
-            if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
-                AdaptivePlannedWorkoutScheduler.schedule(
-                    context = appContext,
-                    startSec = adjustment.startSec,
-                    nowMillis = now.toInstant().toEpochMilli(),
+            if (leadSeconds < 0L) {
+                AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                    appContext,
+                    currentFingerprint = null,
                 )
             } else {
-                AdaptivePlannedWorkoutScheduler.cancel(appContext)
-            }
-            if (leadSeconds in 0L..AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
-                AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
-                    appContext,
+                val fingerprint = AdaptiveDayNotifier.plannedWorkoutFingerprint(
                     day = today,
                     adjustment = adjustment,
-                    now = now,
                 )
-                return recommendation
+                AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                    appContext,
+                    currentFingerprint = fingerprint,
+                )
+                if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
+                    AdaptivePlannedWorkoutScheduler.schedule(
+                        context = appContext,
+                        startSec = adjustment.startSec,
+                        nowMillis = now.toInstant().toEpochMilli(),
+                    )
+                } else {
+                    AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                }
+                if (leadSeconds <= AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
+                    AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
+                        appContext,
+                        day = today,
+                        adjustment = adjustment,
+                        now = now,
+                    )
+                    return recommendation
+                }
             }
-        } ?: AdaptivePlannedWorkoutScheduler.cancel(appContext)
+        } ?: run {
+            AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                appContext,
+                currentFingerprint = null,
+            )
+        }
         recommendation?.let {
             AdaptiveDayNotifier.onRecommendation(appContext, it, now)
         }
@@ -538,12 +569,7 @@ object AdaptiveDayNotifier {
                 startSec = adjustment.startSec,
                 observedAtMillis = observedAtMillis,
             ),
-            fingerprint = listOf(
-                "planned-workout",
-                day,
-                adjustment.startSec / (30L * 60L),
-                adjustment.reason.name,
-            ).joinToString("|"),
+            fingerprint = plannedWorkoutFingerprint(day, adjustment),
         )
         postCandidate(
             context = context,
@@ -559,6 +585,16 @@ object AdaptiveDayNotifier {
             now = now,
         )
     }
+
+    internal fun plannedWorkoutFingerprint(
+        day: String,
+        adjustment: DailyActionPlanner.WorkoutAdjustment,
+    ): String = listOf(
+        "planned-workout",
+        day,
+        adjustment.startSec,
+        adjustment.reason.name,
+    ).joinToString("|")
 
     internal fun plannedWorkoutMaximumAgeMillis(
         startSec: Long,
@@ -825,8 +861,54 @@ object AdaptiveDayNotifier {
         )
     }
 
+    @Synchronized
+    internal fun reconcilePlannedWorkoutArtifacts(
+        context: Context,
+        currentFingerprint: String?,
+    ) {
+        val app = context.applicationContext
+        ContextualActionCenter.reconcileRecoveryActions(
+            context = app,
+            route = NoopNotificationRoute.WORKOUTS,
+            keepingFingerprint = currentFingerprint,
+        )
+        val state = loadState(app)
+        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT] ?: return
+        if (currentFingerprint != null && prior.fingerprint == currentFingerprint) return
+
+        saveState(app, reconciledPlannedWorkoutState(state, currentFingerprint))
+        if (state.lastGlobalDeliveryMillis == prior.atMillis) {
+            val manager = NotificationManagerCompat.from(app)
+            NotificationLifecycleLedger.cancelled(
+                app,
+                NotificationLifecycleId.ADAPTIVE_DAY,
+                NotificationLifecycleCategory.RECOMMENDATION,
+            ) {
+                manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+            }
+        }
+    }
+
+    internal fun reconciledPlannedWorkoutState(
+        state: AdaptiveDayDeliveryState,
+        currentFingerprint: String?,
+    ): AdaptiveDayDeliveryState {
+        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+            ?: return state
+        if (currentFingerprint != null && prior.fingerprint == currentFingerprint) {
+            return state
+        }
+        val remaining = state.deliveries - AdaptiveDayDeliveryKind.PLANNED_WORKOUT
+        return state.copy(
+            lastGlobalDeliveryMillis = remaining.values.maxOfOrNull { it.atMillis },
+            deliveries = remaining,
+        )
+    }
+
     private fun saveState(context: Context, state: AdaptiveDayDeliveryState) {
-        val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit()
+        val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
         state.lastGlobalDeliveryMillis?.let { editor.putLong(KEY_GLOBAL_AT, it) }
         for ((kind, delivery) in state.deliveries) {
             editor.putLong("${kind.name}.at", delivery.atMillis)

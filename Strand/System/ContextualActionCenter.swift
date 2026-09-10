@@ -226,7 +226,19 @@ final class ContextualActionCenter: ObservableObject {
                 observedAt: observedAt,
                 expiresAfter: 6 * 60 * 60
             )
-        } else if identifier == AdaptivePlannedWorkoutScheduler.requestID {
+        } else if identifier == AdaptivePlannedWorkoutScheduler.requestID ||
+                    identifier == ContextualInterventionCenter.plannedWorkoutRequestID {
+            #if os(iOS)
+            guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+                  PlannedWorkoutCalendarSettings.enabled,
+                  PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
+                LocalNotificationLifecycle.cancel(
+                    identifiers: [identifier],
+                    presented: true
+                )
+                return
+            }
+            #endif
             let startSec = (content.userInfo[
                 AdaptivePlannedWorkoutScheduler.startSecUserInfoKey
             ] as? NSNumber)?.doubleValue
@@ -348,6 +360,24 @@ final class ContextualActionCenter: ObservableObject {
 
     func complete(_ action: ContextualAction) {
         finish(action, succeeded: begin(action))
+    }
+
+    func reconcileRecoveryActions(
+        route: NoopNotificationRoute,
+        keepingFingerprint: String?
+    ) {
+        let keepID = keepingFingerprint.map { "\(ContextualActionKind.recovery.rawValue):\($0)" }
+        let priorCount = actions.count
+        actions.removeAll { action in
+            action.kind == .recovery &&
+                action.resolvedRecoveryRoute == route &&
+                action.id != keepID
+        }
+        let validIDs = Set(actions.map(\.id))
+        processingIDs = processingIDs.intersection(validIDs)
+        if actions.count != priorCount {
+            persist()
+        }
     }
 
     func removeExpired(now: Date = Date()) {

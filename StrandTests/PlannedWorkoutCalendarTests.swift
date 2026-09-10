@@ -132,6 +132,33 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(cancel.lowerBound, post.lowerBound)
     }
 
+    func testBoundarySchedulerReevaluatesConsentInsteadOfPreloadingNotificationCopy() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let start = try XCTUnwrap(
+            source.range(of: "enum AdaptivePlannedWorkoutScheduler")
+        )
+        let end = try XCTUnwrap(
+            source.range(
+                of: "struct WorkoutCautionNotificationState",
+                range: start.upperBound..<source.endIndex
+            )
+        )
+        let scheduler = source[start.lowerBound..<end.lowerBound]
+        let accessCheck = try XCTUnwrap(
+            scheduler.range(of: "PlannedWorkoutCalendarStore.hasCurrentReadAccess()")
+        )
+        let reevaluation = try XCTUnwrap(
+            scheduler.range(
+                of: "await onBoundary()",
+                range: accessCheck.upperBound..<scheduler.endIndex
+            )
+        )
+
+        XCTAssertFalse(scheduler.contains("UNTimeIntervalNotificationTrigger"))
+        XCTAssertTrue(scheduler.contains("BackgroundSyncScheduler.requestWake"))
+        XCTAssertLessThan(accessCheck.lowerBound, reevaluation.lowerBound)
+    }
+
     func testEventKitQueryRejectsCurrentUserDeclinedInvitations() throws {
         let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
         XCTAssertTrue(source.contains("!plannedWorkoutWasDeclinedByCurrentUser(event)"))

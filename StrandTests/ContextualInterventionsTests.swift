@@ -422,9 +422,10 @@ final class ContextualInterventionsTests: XCTestCase {
 
     func testPlannedWorkoutCandidateUsesPrivateWorkoutRouteAndBoundedIdentity() {
         let observedAt = date()
+        let startSec = Int(observedAt.timeIntervalSince1970) + 60 * 60
         let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
             from: .init(
-                startSec: Int(observedAt.timeIntervalSince1970) + 60 * 60,
+                startSec: startSec,
                 durationMinutes: 60,
                 reason: .sleepAndRecovery,
                 measuredSleepMinutes: 372,
@@ -444,7 +445,82 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.workout_adjustment.sleep_label")))
         XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.evidence.readiness")))
         XCTAssertFalse(candidate.fingerprint.contains("372"))
+        XCTAssertTrue(candidate.fingerprint.contains(String(startSec)))
         XCTAssertFalse(candidate.body.contains("17:"))
+    }
+
+    func testMovingWorkoutWithinThirtyMinutesChangesItsFingerprint() {
+        let observedAt = date()
+        let first = DailyActionPlanner.WorkoutAdjustment(
+            startSec: Int(observedAt.timeIntervalSince1970) + 60 * 60,
+            durationMinutes: 60,
+            reason: .sleepDeficit,
+            measuredSleepMinutes: 372,
+            referenceSleepMinutes: 450,
+            sleepDeficitMinutes: 78,
+            sleepReference: .personalUsual,
+            confidence: .solid
+        )
+        let moved = DailyActionPlanner.WorkoutAdjustment(
+            startSec: first.startSec + 5 * 60,
+            durationMinutes: first.durationMinutes,
+            reason: first.reason,
+            measuredSleepMinutes: first.measuredSleepMinutes,
+            referenceSleepMinutes: first.referenceSleepMinutes,
+            sleepDeficitMinutes: first.sleepDeficitMinutes,
+            sleepReference: first.sleepReference,
+            confidence: first.confidence
+        )
+
+        XCTAssertNotEqual(
+            AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                from: first,
+                day: "2026-08-22",
+                observedAt: observedAt
+            ).fingerprint,
+            AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                from: moved,
+                day: "2026-08-22",
+                observedAt: observedAt
+            ).fingerprint
+        )
+    }
+
+    func testStalePlannedWorkoutDeliveryIsRemovedAndGlobalCooldownRecomputed() {
+        let older = date().addingTimeInterval(-2 * 60 * 60)
+        let planned = date().addingTimeInterval(-60 * 60)
+        let state = ContextualInterventionState(
+            lastGlobalDelivery: planned,
+            deliveries: [
+                ContextualInterventionKind.adaptiveSleepRecovery.rawValue: .init(
+                    at: older,
+                    fingerprint: "sleep-a"
+                ),
+                ContextualInterventionKind.adaptivePlannedWorkout.rawValue: .init(
+                    at: planned,
+                    fingerprint: "planned-a"
+                ),
+            ]
+        )
+
+        let reconciled = ContextualInterventionCenter.reconciledPlannedWorkoutState(
+            state,
+            keepingFingerprint: nil
+        )
+
+        XCTAssertNil(
+            reconciled.deliveries[
+                ContextualInterventionKind.adaptivePlannedWorkout.rawValue
+            ]
+        )
+        XCTAssertEqual(reconciled.lastGlobalDelivery, older)
+        XCTAssertEqual(
+            ContextualInterventionCenter.reconciledPlannedWorkoutState(
+                state,
+                keepingFingerprint: "planned-a"
+            ),
+            state
+        )
     }
 
     func testSleepOnlyPlannedWorkoutCandidateDoesNotClaimReadinessEvidence() {

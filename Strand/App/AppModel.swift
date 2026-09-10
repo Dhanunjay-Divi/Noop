@@ -2783,6 +2783,9 @@ final class AppModel: ObservableObject {
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             AdaptiveDayTimeZoneStore.discardPending()
             AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
             return
         }
         let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
@@ -2801,6 +2804,10 @@ final class AppModel: ObservableObject {
         ))
         if let recommendation, recommendation.kind == .travelAdjustment {
             guard !Task.isCancelled else { return }
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
             ContextualInterventionCenter.post(
                 AdaptiveDayInterventionFactory.candidate(from: recommendation),
                 now: now
@@ -2826,29 +2833,44 @@ final class AppModel: ObservableObject {
         )
         if let adjustment = plan.workoutAdjustment {
             let leadSeconds = adjustment.startSec - nowSec
-            if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
-                _ = await AdaptivePlannedWorkoutScheduler.schedule(
-                    adjustment: adjustment,
-                    day: today,
-                    now: now
+            if leadSeconds < 0 {
+                AdaptivePlannedWorkoutScheduler.cancelPending()
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: nil
                 )
             } else {
-                AdaptivePlannedWorkoutScheduler.cancelPending()
-            }
-            if leadSeconds >= 0,
-               leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
-                ContextualInterventionCenter.post(
-                    AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
-                        from: adjustment,
-                        day: today,
-                        observedAt: now
-                    ),
-                    now: now
+                let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                    from: adjustment,
+                    day: today,
+                    observedAt: now
                 )
-                return
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: candidate.fingerprint
+                )
+                if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    _ = await AdaptivePlannedWorkoutScheduler.schedule(
+                        adjustment: adjustment,
+                        day: today,
+                        now: now
+                    ) { [weak self] in
+                        await self?.evaluateAdaptiveDayGuidance(now: Date())
+                    }
+                } else {
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
+                }
+                if leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    ContextualInterventionCenter.post(
+                        candidate,
+                        now: now
+                    )
+                    return
+                }
             }
         } else {
             AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
         }
 
         if let recommendation {

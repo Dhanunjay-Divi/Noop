@@ -256,6 +256,29 @@ internal object ContextualActionCenter {
         if (begin(context, action)) finish(context, action, succeeded = true)
     }
 
+    fun reconcileRecoveryActions(
+        context: Context,
+        route: NoopNotificationRoute,
+        keepingFingerprint: String?,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val keepId = keepingFingerprint?.let {
+                "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:$it"
+            }
+            val changed = storedActions.removeAll {
+                it.kind == ContextualActionKind.RECOVERY &&
+                    it.resolvedRecoveryRoute() == route &&
+                    it.id != keepId
+            }
+            if (!changed) return@synchronized
+            val validIds = storedActions.mapTo(hashSetOf()) { it.id }
+            _processingIds.value = _processingIds.value.intersect(validIds)
+            persistLocked(app)
+        }
+    }
+
     fun applyDemoActions(context: Context, nowMillis: Long = System.currentTimeMillis()) {
         presentHydration(
             context = context,
