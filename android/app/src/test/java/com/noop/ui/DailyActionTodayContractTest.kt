@@ -56,7 +56,12 @@ class DailyActionTodayContractTest {
         assertTrue(today!!.contains("viewModel.onAdaptiveDayInputsChanged()"))
         assertTrue(viewModel!!.contains("fun onAdaptiveDayInputsChanged()"))
         assertTrue(viewModel.contains("adaptiveDayInputEvaluationJob?.cancel()"))
-        assertTrue(viewModel.contains("if (windDownStore.sleepNeedMinutes != prior)"))
+        assertTrue(viewModel.contains("val wasExplicit = windDownStore.hasExplicitSleepNeed"))
+        assertTrue(
+            viewModel.contains(
+                "if (!wasExplicit || windDownStore.sleepNeedMinutes != prior)"
+            )
+        )
         assertTrue(viewModel.contains("onAdaptiveDayInputsChanged()"))
     }
 

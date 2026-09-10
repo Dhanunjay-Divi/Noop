@@ -84,7 +84,13 @@ planner/Calendar/notifier suites pass on the replacement source. A final
 fresh-eyes review also keeps the Apple same-kind delivery gate active while a
 newer planned-workout candidate waits behind an in-flight delivery, preventing
 a third candidate from bypassing queue coalescing. The queue-specific regression
-suite and the exact current iOS source graph pass.
+suite and the exact current iOS source graph pass. The first hosted Android
+replacement run then exposed one stale source-contract assertion that still
+required the pre-explicit-target condition. The contract now pins both the
+explicit-target read and the intended first-write-or-value-change condition;
+the complete Android unit suite passes 4,217 tests with seven expected skips.
+All 227 Tools tests and the local policy matrix also pass. Fresh protected
+checks on the corrected head remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 
