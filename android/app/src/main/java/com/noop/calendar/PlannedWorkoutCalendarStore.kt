@@ -11,6 +11,7 @@ import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.PlannedWorkoutTitleClassifier
 import com.noop.ui.NoopPrefs
 import java.time.ZonedDateTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -118,6 +119,13 @@ object PlannedWorkoutCalendarStore {
             withContext(Dispatchers.IO) {
                 query(appContext, now)
             }
+        } catch (cancelled: CancellationException) {
+            AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = "cancelled",
+                fields = mapOf("candidate_bucket" to "zero"),
+            )
+            throw cancelled
         } catch (_: SecurityException) {
             AppDiagnosticsRecorder.endOperation(
                 diagnostic,

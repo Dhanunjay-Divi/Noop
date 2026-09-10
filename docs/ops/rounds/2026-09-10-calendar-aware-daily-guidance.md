@@ -80,6 +80,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   prompts; its action-center evidence names sleep and readiness only when each
   signal actually contributed. All existing quiet-hour, duplicate, global, and
   topic cooldowns remain active.
+- Android calendar-provider cancellation is preserved as coroutine cancellation
+  rather than converted into a generic failure. The bounded operation closes as
+  `cancelled` before rethrowing, so a disposed screen or worker cannot continue
+  through the publication path or leave misleading failure evidence.
 - Nine-localization source catalogs and generated Apple/Android resources now
   contain the setting, permission, Today, deficit, and notification copy.
 - A debug-only fixture reproduces 6h12 sleep against a 7h30 personal usual and
@@ -129,6 +133,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Focused macOS app tests | 19 passed | Calendar bridge, private routing, truthful signal evidence, cooldown ordering, and affected contextual policies pass | iOS EventKit permission sheet or notification presentation |
 | Unsigned iOS simulator build | Passed | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Android full gate | 4,191 passed, 7 skipped; production compile and lint passed | Kotlin parity, app integration, localization contracts, and static Android policy pass | OEM Calendar Provider or physical notification behavior |
+| `:app:testFullDebugUnitTest --tests com.noop.calendar.PlannedWorkoutCalendarSnapshotTest` | 2 passed | Logical-day bridging and cancellation-before-generic-failure ordering remain enforced | A real Calendar Provider query or OEM cancellation latency |
 
 ## Physical device and deployment
 
