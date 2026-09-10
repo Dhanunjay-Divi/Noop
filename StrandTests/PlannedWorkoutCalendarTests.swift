@@ -242,6 +242,38 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         ))
     }
 
+    func testRepositoryHealthInputsInvalidateWorkoutBeforeReevaluation() throws {
+        let source = try source("Strand/App/AppModel.swift")
+
+        for publisher in [
+            "repo.$days.sink",
+            "repo.$refreshSeq.dropFirst().sink"
+        ] {
+            let publisherStart = try XCTUnwrap(source.range(of: publisher))
+            let publisherEnd = try XCTUnwrap(
+                source.range(
+                    of: "}.store(in: &hrCancellables)",
+                    range: publisherStart.upperBound..<source.endIndex
+                )
+            )
+            let subscription =
+                source[publisherStart.lowerBound..<publisherEnd.upperBound]
+            let invalidate = try XCTUnwrap(
+                subscription.range(
+                    of: "ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()"
+                )
+            )
+            let schedule = try XCTUnwrap(
+                subscription.range(
+                    of: "scheduleContextualInterventionEvaluation()",
+                    range: invalidate.upperBound..<subscription.endIndex
+                )
+            )
+
+            XCTAssertLessThan(invalidate.lowerBound, schedule.lowerBound)
+        }
+    }
+
     func testQueuedWorkoutReplacementKeepsItsDeliveryGateUntilQueueDrains() throws {
         let source = try source("Strand/System/ContextualInterventions.swift")
         let drainStart = try XCTUnwrap(

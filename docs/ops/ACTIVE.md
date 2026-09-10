@@ -93,15 +93,18 @@ Exact-head review then found three final delivery-lifetime races. Apple now
 prevents a rejected stale candidate from clearing a newer exact fingerprint and
 stops a superseded boundary task immediately after notification authorization
 returns. Android computes notification expiry from the remaining lifetime at
-the actual post instant instead of restarting the original window. The focused
-regressions pass, the complete Apple suite executes 1,730 tests with one
-intentional external-data skip and no failures, and the final Android wall
-passes 4,217 tests with seven skips plus production compile, lint,
-instrumentation-source compile, and APK assembly. The complete unsigned
-iPhone/widget/watch graph also builds. All 227 Tools tests and the final local
-policy matrix pass after regenerating and pinning the reviewed terminology
-inventory. Commit, fresh exact-head review, protected checks, and normal merge
-remain required.
+the actual post instant instead of restarting the original window. A subsequent
+exact-head review found that new daily sleep/readiness state could still queue
+reevaluation without first invalidating a suspended candidate. Both Apple
+repository health-input publishers now invalidate that candidate synchronously
+before scheduling replacement evaluation. The focused regressions pass, the
+complete Apple rerun executes 1,730 tests with one intentional external-data
+skip and no failures, and the final Android wall passes 4,217 tests with seven
+skips plus production compile, lint, instrumentation-source compile, and APK
+assembly. The complete unsigned iPhone/widget/watch graph also builds. The
+final policy rerun also passes after regenerating and pinning the reviewed
+terminology inventory. Commit, fresh exact-head review, protected checks, and
+normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

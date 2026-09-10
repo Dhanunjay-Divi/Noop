@@ -534,9 +534,11 @@ final class AppModel: ObservableObject {
         repo.$days.sink { [weak self] days in
             self?.evaluateIllness(days)
             self?.evaluateStrainTarget()
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
             self?.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
             self?.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
