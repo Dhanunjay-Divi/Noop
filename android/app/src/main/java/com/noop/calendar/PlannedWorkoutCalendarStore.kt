@@ -78,9 +78,14 @@ object PlannedWorkoutCalendarStore {
 
         val day = now.toLocalDate().toString()
         val nowMillis = now.toInstant().toEpochMilli()
+        val granted = ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.READ_CALENDAR,
+        ) == PackageManager.PERMISSION_GRANTED
         val initialState = synchronized(stateLock) {
             Triple(
                 !force &&
+                    granted &&
                     lastRefreshDay == day &&
                     nowMillis >= lastRefreshAtMillis &&
                     nowMillis - lastRefreshAtMillis < CACHE_LIFETIME_MILLIS,
@@ -91,10 +96,6 @@ object PlannedWorkoutCalendarStore {
         if (initialState.first) return@withLock initialState.second
         val refreshGeneration = initialState.third
 
-        val granted = ContextCompat.checkSelfPermission(
-            appContext,
-            Manifest.permission.READ_CALENDAR,
-        ) == PackageManager.PERMISSION_GRANTED
         val diagnostic = AppDiagnosticsRecorder.beginOperation(
             "calendar.workout_plan_refresh",
             mapOf("permission_state" to if (granted) "granted" else "denied"),
@@ -171,6 +172,9 @@ object PlannedWorkoutCalendarStore {
                 !stillGranted
             ) {
                 rejectionOutcome = "access_changed"
+                _snapshot.value = null
+                lastRefreshAtMillis = nowMillis
+                lastRefreshDay = day
                 false
             } else {
                 revision += 1L

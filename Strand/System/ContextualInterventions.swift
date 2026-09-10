@@ -298,7 +298,8 @@ enum ContextualInterventionCenter {
                     fingerprint: candidate.fingerprint,
                     evidence: candidate.evidence,
                     observedAt: candidate.observedAt,
-                    maximumAge: candidate.maximumAge
+                    maximumAge: candidate.maximumAge,
+                    route: candidate.route
                 )
             } else if candidate.kind == .stressBreathing {
                 ContextualActionCenter.shared.presentStress(

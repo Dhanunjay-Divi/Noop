@@ -29,7 +29,11 @@ internal data class ContextualAction(
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     val amountMl: Int? = null,
+    val route: NoopNotificationRoute? = null,
 )
+
+internal fun ContextualAction.resolvedRecoveryRoute(): NoopNotificationRoute =
+    route ?: NoopNotificationRoute.SLEEP
 
 internal object ContextualActionPolicy {
     const val VISIBLE_LIMIT = 3
@@ -158,6 +162,7 @@ internal object ContextualActionCenter {
         evidence: List<String>,
         observedAtMillis: Long,
         maximumAgeMillis: Long,
+        route: NoopNotificationRoute = NoopNotificationRoute.SLEEP,
     ) {
         present(
             context = context,
@@ -168,6 +173,7 @@ internal object ContextualActionCenter {
             evidence = readableEvidence(context, evidence),
             observedAtMillis = observedAtMillis,
             expiresAfterMillis = maximumAgeMillis.coerceAtMost(18L * 60L * 60L * 1_000L),
+            route = route,
         )
     }
 
@@ -289,6 +295,7 @@ internal object ContextualActionCenter {
         observedAtMillis: Long,
         expiresAfterMillis: Long,
         amountMl: Int? = null,
+        route: NoopNotificationRoute? = null,
     ) {
         synchronized(lock) {
             val app = context.applicationContext
@@ -321,6 +328,7 @@ internal object ContextualActionCenter {
                 createdAtMillis = observedAtMillis,
                 expiresAtMillis = expiresAt,
                 amountMl = amountMl,
+                route = route,
             )
             persistLocked(app)
         }
@@ -396,6 +404,7 @@ internal object ContextualActionCenter {
         .put("evidence", JSONArray(action.evidence))
         .put("createdAt", action.createdAtMillis)
         .put("expiresAt", action.expiresAtMillis)
+        .apply { action.route?.let { put("route", it.navRoute) } }
         .apply { action.amountMl?.let { put("amountMl", it) } }
 
     private fun decodeActions(array: JSONArray?): List<ContextualAction> = buildList {
@@ -418,6 +427,7 @@ internal object ContextualActionCenter {
                     createdAtMillis = item.optLong("createdAt", 0L),
                     expiresAtMillis = expiresAt,
                     amountMl = item.optInt("amountMl").takeIf { item.has("amountMl") },
+                    route = NoopNotificationRoute.fromRaw(item.optString("route")),
                 ),
             )
         }

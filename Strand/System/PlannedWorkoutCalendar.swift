@@ -35,6 +35,9 @@ struct PlannedWorkoutCalendarSnapshot: Equatable, Sendable {
 @MainActor
 final class PlannedWorkoutCalendarStore: ObservableObject {
     static let shared = PlannedWorkoutCalendarStore()
+    static let providerDidChange = Notification.Name(
+        "noop.calendar.plannedWorkoutProviderDidChange"
+    )
 
     enum AccessOutcome: Equatable, Sendable {
         case enabled
@@ -63,8 +66,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.clear()
-                _ = await self.refresh(force: true)
+                await self.handleProviderChange()
             }
         }
         #endif
@@ -118,6 +120,14 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         snapshot = nil
         lastRefreshAt = nil
         lastRefreshDay = nil
+    }
+
+    func handleProviderChange() async {
+        clear()
+        _ = await refresh(force: true)
+        guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+              PlannedWorkoutCalendarSettings.enabled else { return }
+        NotificationCenter.default.post(name: Self.providerDidChange, object: nil)
     }
 
     @discardableResult

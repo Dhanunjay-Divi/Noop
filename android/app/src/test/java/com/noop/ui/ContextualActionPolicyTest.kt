@@ -10,6 +10,7 @@ class ContextualActionPolicyTest {
         id: String = kind.name,
         createdAt: Long = 1_000L,
         expiresAt: Long = 10_000L,
+        route: NoopNotificationRoute? = null,
     ) = ContextualAction(
         id = id,
         kind = kind,
@@ -18,6 +19,7 @@ class ContextualActionPolicyTest {
         evidence = emptyList(),
         createdAtMillis = createdAt,
         expiresAtMillis = expiresAt,
+        route = route,
     )
 
     @Test fun visibleActionsExpireDeduplicateByKindAndRespectPriorityLimit() {
@@ -53,6 +55,20 @@ class ContextualActionPolicyTest {
                 nowMillis = 2_000L,
                 limit = 0,
             ).isEmpty(),
+        )
+    }
+
+    @Test fun recoveryRouteDefaultsToSleepAndPreservesWorkoutDestination() {
+        assertEquals(
+            NoopNotificationRoute.SLEEP,
+            action(ContextualActionKind.RECOVERY).resolvedRecoveryRoute(),
+        )
+        assertEquals(
+            NoopNotificationRoute.WORKOUTS,
+            action(
+                ContextualActionKind.RECOVERY,
+                route = NoopNotificationRoute.WORKOUTS,
+            ).resolvedRecoveryRoute(),
         )
     }
 }

@@ -4,6 +4,7 @@ import com.noop.R
 import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ScoreConfidence
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -262,5 +263,25 @@ class AdaptiveDayNotifierTest {
                 DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_AND_RECOVERY,
             ),
         )
+    }
+
+    @Test fun routedPendingIntentIsCreatedOnlyInsideApprovedPostCallback() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed")
+        val pendingIntent = text.indexOf(
+            "NotificationPlatformIdentity.activityPendingIntent",
+            postGate,
+        )
+        val notificationPost = text.indexOf("NotificationLifecycleLedger.posted", postGate)
+
+        assertTrue(postGate >= 0)
+        assertTrue(pendingIntent > postGate)
+        assertTrue(notificationPost > pendingIntent)
     }
 }

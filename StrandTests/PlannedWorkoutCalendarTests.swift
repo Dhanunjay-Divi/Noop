@@ -17,4 +17,42 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertEqual(workout.startSec, snapshot.startSec)
         XCTAssertEqual(workout.endSec, snapshot.endSec)
     }
+
+    @MainActor
+    func testProviderChangeRequestsFreshGuidanceEvaluationWhenEnabled() async {
+        let defaults = UserDefaults.standard
+        let adaptiveKey = ContextualInterventionSettings.adaptiveDayGuidanceEnabledKey
+        let calendarKey = PlannedWorkoutCalendarSettings.enabledKey
+        let priorAdaptive = defaults.object(forKey: adaptiveKey)
+        let priorCalendar = defaults.object(forKey: calendarKey)
+        defer {
+            if let priorAdaptive {
+                defaults.set(priorAdaptive, forKey: adaptiveKey)
+            } else {
+                defaults.removeObject(forKey: adaptiveKey)
+            }
+            if let priorCalendar {
+                defaults.set(priorCalendar, forKey: calendarKey)
+            } else {
+                defaults.removeObject(forKey: calendarKey)
+            }
+            PlannedWorkoutCalendarStore.shared.clear()
+        }
+        defaults.set(true, forKey: adaptiveKey)
+        defaults.set(true, forKey: calendarKey)
+
+        let requested = expectation(description: "calendar provider change")
+        let observer = NotificationCenter.default.addObserver(
+            forName: PlannedWorkoutCalendarStore.providerDidChange,
+            object: nil,
+            queue: .main
+        ) { _ in
+            requested.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        await PlannedWorkoutCalendarStore.shared.handleProviderChange()
+
+        await fulfillment(of: [requested], timeout: 1)
+    }
 }

@@ -29,6 +29,33 @@ struct ContextualAction: Identifiable, Codable, Equatable, Sendable {
     let createdAt: Date
     let expiresAt: Date
     let amountML: Int?
+    let route: NoopNotificationRoute?
+
+    init(
+        id: String,
+        kind: ContextualActionKind,
+        title: String,
+        detail: String,
+        evidence: [String],
+        createdAt: Date,
+        expiresAt: Date,
+        amountML: Int?,
+        route: NoopNotificationRoute? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.evidence = evidence
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.amountML = amountML
+        self.route = route
+    }
+
+    var resolvedRecoveryRoute: NoopNotificationRoute {
+        route ?? .sleep
+    }
 }
 
 enum ContextualActionPolicy {
@@ -151,7 +178,8 @@ final class ContextualActionCenter: ObservableObject {
         fingerprint: String,
         evidence: [String],
         observedAt: Date,
-        maximumAge: TimeInterval
+        maximumAge: TimeInterval,
+        route: NoopNotificationRoute = .sleep
     ) {
         present(
             kind: .recovery,
@@ -160,7 +188,8 @@ final class ContextualActionCenter: ObservableObject {
             detail: detail,
             evidence: Self.readableEvidence(evidence),
             observedAt: observedAt,
-            expiresAfter: min(maximumAge, 18 * 60 * 60)
+            expiresAfter: min(maximumAge, 18 * 60 * 60),
+            route: route
         )
     }
 
@@ -213,7 +242,8 @@ final class ContextualActionCenter: ObservableObject {
                 detail: content.body,
                 evidence: [String(localized: "Recent measured sleep and recovery context")],
                 observedAt: observedAt,
-                expiresAfter: 12 * 60 * 60
+                expiresAfter: 12 * 60 * 60,
+                route: route ?? .sleep
             )
         }
     }
@@ -303,7 +333,8 @@ final class ContextualActionCenter: ObservableObject {
         evidence: [String],
         observedAt: Date,
         expiresAfter: TimeInterval,
-        amountML: Int? = nil
+        amountML: Int? = nil,
+        route: NoopNotificationRoute? = nil
     ) {
         let id = "\(kind.rawValue):\(fingerprint)"
         let expiresAt = observedAt.addingTimeInterval(max(60, expiresAfter))
@@ -335,7 +366,8 @@ final class ContextualActionCenter: ObservableObject {
                 evidence: Array(evidence.filter { !$0.isEmpty }.prefix(3)),
                 createdAt: observedAt,
                 expiresAt: expiresAt,
-                amountML: amountML
+                amountML: amountML,
+                route: route
             )
         )
         persist()

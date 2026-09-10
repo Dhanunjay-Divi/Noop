@@ -40,6 +40,28 @@ class PlannedWorkoutCalendarSnapshotTest {
         assertTrue(queryBoundary.contains("throw cancelled"))
     }
 
+    @Test
+    fun cacheAndPublishPathsFailClosedWhenCalendarPermissionChanges() {
+        val source = plannedWorkoutCalendarStoreSource()
+        val permissionCheck = source.indexOf("val granted = ContextCompat.checkSelfPermission")
+        val initialState = source.indexOf("val initialState = synchronized", permissionCheck)
+        val cachedReturn = source.indexOf(
+            "if (initialState.first) return@withLock initialState.second",
+            initialState,
+        )
+        assertTrue(permissionCheck >= 0)
+        assertTrue(initialState > permissionCheck)
+        assertTrue(cachedReturn > initialState)
+        assertTrue(source.substring(initialState, cachedReturn).contains("granted &&"))
+
+        val accessChanged = source.indexOf("rejectionOutcome = \"access_changed\"")
+        val publishBranch = source.indexOf("} else {", accessChanged)
+        assertTrue(accessChanged >= 0 && publishBranch > accessChanged)
+        val rejectedBranch = source.substring(accessChanged, publishBranch)
+        assertTrue(rejectedBranch.contains("_snapshot.value = null"))
+        assertTrue(rejectedBranch.contains("lastRefreshAtMillis = nowMillis"))
+    }
+
     private fun plannedWorkoutCalendarStoreSource(): String {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val file = listOf(

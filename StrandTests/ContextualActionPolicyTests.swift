@@ -7,7 +7,8 @@ final class ContextualActionPolicyTests: XCTestCase {
         _ kind: ContextualActionKind,
         id: String? = nil,
         createdAt: Date,
-        expiresAt: Date
+        expiresAt: Date,
+        route: NoopNotificationRoute? = nil
     ) -> ContextualAction {
         ContextualAction(
             id: id ?? kind.rawValue,
@@ -17,7 +18,8 @@ final class ContextualActionPolicyTests: XCTestCase {
             evidence: [],
             createdAt: createdAt,
             expiresAt: expiresAt,
-            amountML: nil
+            amountML: nil,
+            route: route
         )
     }
 
@@ -57,6 +59,71 @@ final class ContextualActionPolicyTests: XCTestCase {
         )
 
         XCTAssertTrue(visible.isEmpty)
+    }
+
+    func testRecoveryRouteDefaultsToSleepAndPreservesWorkoutDestination() {
+        let now = Date()
+        let future = now.addingTimeInterval(60)
+
+        XCTAssertEqual(
+            action(.recovery, createdAt: now, expiresAt: future).resolvedRecoveryRoute,
+            .sleep
+        )
+        XCTAssertEqual(
+            action(
+                .recovery,
+                createdAt: now,
+                expiresAt: future,
+                route: .workouts
+            ).resolvedRecoveryRoute,
+            .workouts
+        )
+    }
+
+    func testLegacyPersistedActionWithoutRouteStillDecodes() throws {
+        let now = Date()
+        let encoded = try JSONEncoder().encode(
+            action(
+                .recovery,
+                createdAt: now,
+                expiresAt: now.addingTimeInterval(60),
+                route: .workouts
+            )
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "route")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(ContextualAction.self, from: legacy)
+
+        XCTAssertNil(decoded.route)
+        XCTAssertEqual(decoded.resolvedRecoveryRoute, .sleep)
+    }
+
+    @MainActor
+    func testRecoveryRoutePersistsAcrossActionCenterReload() {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "state"
+        let now = Date()
+        let center = ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+        center.presentRecovery(
+            title: "Keep it lighter",
+            detail: "Your planned workout is later today.",
+            fingerprint: "planned-workout",
+            evidence: [],
+            observedAt: now,
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+
+        let restored = ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+
+        XCTAssertEqual(restored.visibleActions.first?.route, .workouts)
+        XCTAssertEqual(restored.visibleActions.first?.resolvedRecoveryRoute, .workouts)
     }
 
     @MainActor

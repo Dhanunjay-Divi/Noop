@@ -413,12 +413,15 @@ fun AppRoot(
                 expandedContextualActionId = null
                 openTopLevel(Destination.Insights.route)
             }
-            ContextualActionKind.WIND_DOWN,
-            ContextualActionKind.RECOVERY,
-            -> {
+            ContextualActionKind.WIND_DOWN -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
                 openTopLevel(Destination.Sleep.route)
+            }
+            ContextualActionKind.RECOVERY -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(action.resolvedRecoveryRoute().navRoute)
             }
         }
     }

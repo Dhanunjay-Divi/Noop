@@ -495,27 +495,27 @@ object AdaptiveDayNotifier {
                 return
             }
 
-            val openDestination = NotificationPlatformIdentity.activityPendingIntent(
-                context,
-                NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
-                NotificationRouteBridge.launchIntent(context, route),
-            )
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_heart)
-                .setContentTitle(title)
-                .setContentText(body)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                .setContentIntent(openDestination)
-                .setAutoCancel(true)
-                .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                .build()
             val manager = NotificationManagerCompat.from(context)
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 now.toInstant().toEpochMilli(),
             ) {
+                val openDestination = NotificationPlatformIdentity.activityPendingIntent(
+                    context,
+                    NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
+                    NotificationRouteBridge.launchIntent(context, route),
+                )
+                val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_stat_heart)
+                    .setContentTitle(title)
+                    .setContentText(body)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                    .setContentIntent(openDestination)
+                    .setAutoCancel(true)
+                    .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                    .build()
                 NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.ADAPTIVE_DAY,
@@ -536,6 +536,7 @@ object AdaptiveDayNotifier {
                 evidence = evidence,
                 observedAtMillis = candidate.observedAtMillis,
                 maximumAgeMillis = candidate.maximumAgeMillis,
+                route = route,
             )
             saveState(context, decision.nextState)
             onPosted()
