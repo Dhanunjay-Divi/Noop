@@ -24,7 +24,7 @@ object PlannedWorkoutTitleClassifier {
 
     private val directActivityTokens = normalizedTokenSet(
         "workout", "gym", "exercise", "hiit", "crossfit", "pilates", "yoga", "barre",
-        "cardio", "lifting", "weights", "jog", "jogging", "ride",
+        "cardio", "lifting", "weights", "jog", "jogging",
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
         "tennis", "soccer", "football", "basketball", "volleyball", "climbing",
         "bootcamp",
@@ -50,7 +50,11 @@ object PlannedWorkoutTitleClassifier {
         "瑜伽", "普拉提", "皮拉提斯", "拳击", "拳擊", "力量训练", "重量訓練",
     )
     private val ambiguousActivityTokens = normalizedTokenSet(
-        "run", "running", "spin",
+        "run", "running", "spin", "ride",
+    )
+    private val rideTransportContextTokens = normalizedTokenSet(
+        "airport", "bus", "cab", "car", "commute", "commuting", "drive", "driving",
+        "flight", "lyft", "shuttle", "station", "taxi", "train", "transit", "uber",
     )
     private val fitnessContextTokens = normalizedTokenSet(
         "strength", "fitness", "marathon", "triathlon", "race", "5k", "10k",
@@ -94,6 +98,7 @@ object PlannedWorkoutTitleClassifier {
         if (tokenSet.any(nonParticipationContextTokens::contains)) return false
         if (containsUnsegmentedHanTerm(tokens, workContextTokens)) return false
         if (containsUnsegmentedHanTerm(tokens, nonParticipationContextTokens)) return false
+        if ("ride" in tokenSet && tokenSet.any(rideTransportContextTokens::contains)) return false
         if (tokenSet.any(directActivityTokens::contains) ||
             containsUnsegmentedHanTerm(tokens, directActivityTokens)
         ) {

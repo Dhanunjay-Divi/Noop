@@ -191,6 +191,18 @@ or delivery. The focused notifier suite and the complete 4,233-test Android
 wall pass with seven expected skips plus APK assembly, full debug compile,
 lint, and instrumentation-source compilation. A replacement commit, exact-head
 review, protected checks, and normal merge remain required.
+Fresh review also found that the generic title `ride` was treated as an
+unconditional workout, so transport plans such as `Train ride` could create
+fitness guidance. Swift and Kotlin now treat `ride` as ambiguous: a bare or
+fitness-context ride remains eligible, while train, bus, airport, taxi,
+rideshare, transit, driving, and commuting contexts fail closed. The focused
+classifier suites pass on both platforms, all 1,461 analytics tests pass with
+seven expected skips, all 1,749 Apple app tests pass with one expected
+external-data skip, the complete unsigned iPhone/widget/watch graph builds, and
+the final Android wall passes 4,233 tests with seven skips plus APK assembly,
+full debug compile, lint, and instrumentation-source compilation. The
+replacement record and policy snapshot, commit, fresh exact-head review,
+protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

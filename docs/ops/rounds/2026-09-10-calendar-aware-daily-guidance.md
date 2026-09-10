@@ -333,6 +333,13 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   settings, cancelling or scheduling work, recording diagnostics, or entering
   notification delivery. A user cannot receive travel guidance behind the
   current Terms screen.
+- Fresh review found one final ambiguous-title defect: `ride` was accepted as a
+  direct activity token, so transport events such as `Train ride` could become
+  workout guidance. Swift and Kotlin now require fitness context for ambiguous
+  rides, while explicitly rejecting train, bus, airport, taxi, rideshare,
+  transit, driving, and commuting contexts. A bare `Ride` or `Morning ride`
+  remains eligible; transport examples fail closed before any event content can
+  leave the provider query.
 
 ## Data, privacy, and medical truth
 
@@ -412,6 +419,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   authorization. The entry point returns before timezone state, settings,
   scheduling, diagnostics, or delivery, matching the existing fail-closed
   managed-runtime contract without recording user or device data.
+- Final ambiguous-ride coverage: no new event is needed. Classification remains
+  local-only, and the caller immediately discards the event title. Only the
+  existing zero/one/multiple candidate bucket can be retained; transport text,
+  exact times, identifiers, and arbitrary errors remain absent.
 - Redaction, retention, and high-frequency controls: no event title, notes,
   attendees, location, calendar/event identifiers, health values, or exact
   dynamic errors; refresh only on explicit enable and bounded lifecycle/data
@@ -446,6 +457,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Final priority and synchronous opt-out closeout | 23 focused Apple Calendar tests and the focused Android adaptive-day notifier suite passed | Timezone travel delivery retracts stale workout ownership first, while Apple disable, denial, and unavailable paths remove delivered workout artifacts before queued reevaluation | Physical timezone broadcasts, permission transitions, notification presentation, or process suspension |
 | Android app-report liveness closeout | The focused recorder/notifier unit suites and Android production/instrumentation compile passed; the exact API 35 managed-device report case passed 1/1 | Slow historical exit capture cannot occupy the live breadcrumb queue, completed history only is attached, and a bounded categorical current-session fallback prevents silent attachment loss | Real user ANR availability, every OEM exit-trace implementation, or physical-device share-sheet behavior |
 | Final timezone runtime-gate closeout | The focused Android notifier suite and complete Android wall passed | A manifest-delivered timezone broadcast returns before observing state or posting guidance when the current Terms receipt is absent | Physical broadcast delivery, process startup, or OEM behavior |
+| Final ambiguous-ride classifier closeout | The focused Swift and Android classifier suites passed; all 1,461 analytics tests passed with seven expected skips | Bare and fitness-context rides remain eligible while train, bus, airport, taxi, rideshare, transit, driving, and commuting phrases fail closed on both platforms | Unreviewed vocabulary or real user calendar naming |
 | Complete macOS app suite | 1,749 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, synchronous opt-out cleanup, current check-in and sleep-target invalidation, launch-gated contextual work, latest-only Android parity contract, cross-platform action-ID migration, cancellation contract, generation supersession, travel-priority cleanup, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
 | App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
 | Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
@@ -485,8 +497,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   containing this record
 - Branch and remote state: protected pull request `#14` remains open; the final
   priority, synchronous opt-out, Android report-liveness, and timezone runtime-
-  gate corrections are locally verified, and normal merge is pending a
-  replacement commit, fresh exact-head review, and replacement required checks
+  gate corrections plus ambiguous-ride classifier correction are locally
+  verified, and normal merge is pending a replacement commit, fresh exact-head
+  review, and replacement required checks
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires
@@ -519,9 +532,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Resolve the two exact-head review conversations with evidence, obtain a
-   fresh clean exact-head review, and complete a normal protected merge without
-   bypass.
+1. Commit the final classifier correction, resolve its exact-head review
+   conversation with evidence, obtain a fresh clean exact-head review, and
+   complete a normal protected merge without bypass.
 2. Run the permission, provider-change, foreground/background notification,
    accessibility-size, and battery matrix on representative iOS and Android
    physical devices before release.

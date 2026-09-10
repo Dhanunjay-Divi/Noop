@@ -22,7 +22,7 @@ private func normalizedPlannedWorkoutTokenSet(_ values: [String]) -> Set<String>
 public enum PlannedWorkoutTitleClassifier {
     private static let directActivityTokens = normalizedPlannedWorkoutTokenSet([
         "workout", "gym", "exercise", "hiit", "crossfit", "pilates", "yoga", "barre",
-        "cardio", "lifting", "weights", "jog", "jogging", "ride",
+        "cardio", "lifting", "weights", "jog", "jogging",
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
         "tennis", "soccer", "football", "basketball", "volleyball", "climbing",
         "bootcamp",
@@ -49,7 +49,12 @@ public enum PlannedWorkoutTitleClassifier {
     ])
 
     private static let ambiguousActivityTokens = normalizedPlannedWorkoutTokenSet([
-        "run", "running", "spin",
+        "run", "running", "spin", "ride",
+    ])
+
+    private static let rideTransportContextTokens = normalizedPlannedWorkoutTokenSet([
+        "airport", "bus", "cab", "car", "commute", "commuting", "drive", "driving",
+        "flight", "lyft", "shuttle", "station", "taxi", "train", "transit", "uber",
     ])
 
     private static let fitnessContextTokens = normalizedPlannedWorkoutTokenSet([
@@ -99,6 +104,11 @@ public enum PlannedWorkoutTitleClassifier {
               !containsUnsegmentedHanTerm(in: tokens, candidates: workContextTokens),
               !containsUnsegmentedHanTerm(in: tokens, candidates: nonParticipationContextTokens)
         else { return false }
+        if tokenSet.contains("ride"),
+           !tokenSet.isDisjoint(with: rideTransportContextTokens)
+        {
+            return false
+        }
         if !tokenSet.isDisjoint(with: directActivityTokens)
             || containsUnsegmentedHanTerm(in: tokens, candidates: directActivityTokens)
         {
