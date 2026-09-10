@@ -18,13 +18,31 @@ class PrimaryNavigationContractTest {
     }
 
     @Test
-    fun largeTextUsesNamedIconOnlyBottomBarSlots() {
+    fun largeTextOrNarrowLocalizedSlotsUseNamedIconOnlyBottomBarSlots() {
         assertTrue(bottomBarShowsVisualLabels(fontScale = 1.30f))
         assertFalse(bottomBarShowsVisualLabels(fontScale = 1.31f))
+        assertTrue(
+            bottomBarShowsVisualLabels(
+                fontScale = 1.0f,
+                availableSlotWidthPx = 96,
+                widestLabelWidthPx = 84,
+                horizontalSafetyPaddingPx = 6,
+            )
+        )
+        assertFalse(
+            bottomBarShowsVisualLabels(
+                fontScale = 1.0f,
+                availableSlotWidthPx = 88,
+                widestLabelWidthPx = 84,
+                horizontalSafetyPaddingPx = 6,
+            )
+        )
 
         val source = appRootSource()
         assumeTrue("AppRoot.kt unavailable from ${System.getProperty("user.dir")}", source != null)
         val text = source!!
+        assertTrue(text.contains("rememberBottomBarShowsVisualLabels("))
+        assertTrue(text.contains("rememberTextMeasurer("))
         val barSlot = text
             .substringAfter("private fun BarSlot(")
             .substringBefore("\n}\n\nprivate enum class QuickActionKind")

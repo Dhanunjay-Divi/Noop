@@ -47,7 +47,8 @@ class ReviewSampleModeContractTest {
             source.indexOf("\n        },\n    ) { inner ->"),
         )
 
-        assertTrue(source.contains("bottomBarShowsVisualLabels(LocalDensity.current.fontScale)"))
+        assertTrue(source.contains("rememberBottomBarShowsVisualLabels("))
+        assertTrue(source.contains("availableWidth = maxWidth"))
         assertTrue(block.contains("label = if (showVisualLabels)"))
         assertTrue(block.contains("contentDescription = tabLabel"))
         assertFalse(block.contains("TextOverflow.Ellipsis"))

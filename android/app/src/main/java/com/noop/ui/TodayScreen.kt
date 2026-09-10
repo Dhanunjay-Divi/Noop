@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -3522,10 +3523,12 @@ private fun TodayWeatherChip(
 ) {
     val compactLayout = currentTodayLayoutIsCompact()
     val snapshot = state.snapshot
+    val fontScale = LocalDensity.current.fontScale
     val showVisualText = todayWeatherShowsVisualText(
         hasSnapshot = snapshot != null,
-        fontScale = LocalDensity.current.fontScale,
+        fontScale = fontScale,
     )
+    val expandForLargeText = snapshot != null && fontScale > 1.30f
     val condition = snapshot?.let { TodayWeatherCode.condition(it.weatherCode) }
     val conditionLabel = condition?.let { todayWeatherConditionLabel(it) }
     val accessibilityLabel = when {
@@ -3545,28 +3548,10 @@ private fun TodayWeatherChip(
     val tint = if (snapshot == null) Palette.textSecondary else Palette.chargeBright
     val interaction = remember { MutableInteractionSource() }
 
-    Row(
+    Box(
         modifier = Modifier
-            .width(
-                when {
-                    !showVisualText -> if (compactLayout) 32.dp else 34.dp
-                    compactLayout -> 76.dp
-                    else -> 82.dp
-                },
-            )
-            .height(if (compactLayout) 32.dp else 34.dp)
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .liquidPress(interaction)
-            .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.055f))
-            .border(
-                width = 0.8.dp,
-                color = if (snapshot == null) {
-                    Palette.hairlineStrong.copy(alpha = 0.72f)
-                } else {
-                    Palette.chargeColor.copy(alpha = 0.34f)
-                },
-                shape = CircleShape,
-            )
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -3577,73 +3562,113 @@ private fun TodayWeatherChip(
                 contentDescription = accessibilityLabel
                 role = Role.Button
             },
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        when {
-            state.status == TodayWeatherStatus.LOCATING -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    color = tint,
-                    strokeWidth = 1.5.dp,
+        Row(
+            modifier = Modifier
+                .then(
+                    if (expandForLargeText) {
+                        Modifier
+                            .widthIn(min = 82.dp)
+                            .heightIn(min = 34.dp)
+                    } else {
+                        Modifier
+                            .width(
+                                when {
+                                    !showVisualText -> if (compactLayout) 32.dp else 34.dp
+                                    compactLayout -> 76.dp
+                                    else -> 82.dp
+                                },
+                            )
+                            .height(if (compactLayout) 32.dp else 34.dp)
+                    },
                 )
-                if (showVisualText) {
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.055f))
+                .border(
+                    width = 0.8.dp,
+                    color = if (snapshot == null) {
+                        Palette.hairlineStrong.copy(alpha = 0.72f)
+                    } else {
+                        Palette.chargeColor.copy(alpha = 0.34f)
+                    },
+                    shape = CircleShape,
+                )
+                .then(
+                    if (expandForLargeText) {
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                state.status == TodayWeatherStatus.LOCATING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        color = tint,
+                        strokeWidth = 1.5.dp,
+                    )
+                    if (showVisualText) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.today_weather),
+                            style = NoopType.captionNumber,
+                            color = tint,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                snapshot != null && condition != null -> {
+                    Icon(
+                        imageVector = todayWeatherIcon(condition),
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(16.dp),
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = stringResource(R.string.today_weather),
+                        text = weatherCompactTemperature(snapshot.temperatureC, temperatureUnit),
                         style = NoopType.captionNumber,
                         color = tint,
                         maxLines = 1,
                     )
                 }
-            }
-            snapshot != null && condition != null -> {
-                Icon(
-                    imageVector = todayWeatherIcon(condition),
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = weatherCompactTemperature(snapshot.temperatureC, temperatureUnit),
-                    style = NoopType.captionNumber,
-                    color = tint,
-                    maxLines = 1,
-                )
-            }
-            state.status == TodayWeatherStatus.DENIED -> {
-                Icon(
-                    imageVector = Icons.Filled.LocationOff,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(16.dp),
-                )
-                if (showVisualText) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.today_weather),
-                        style = NoopType.captionNumber,
-                        color = tint,
-                        maxLines = 1,
+                state.status == TodayWeatherStatus.DENIED -> {
+                    Icon(
+                        imageVector = Icons.Filled.LocationOff,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(16.dp),
                     )
+                    if (showVisualText) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.today_weather),
+                            style = NoopType.captionNumber,
+                            color = tint,
+                            maxLines = 1,
+                        )
+                    }
                 }
-            }
-            else -> {
-                Icon(
-                    imageVector = Icons.Filled.Cloud,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(16.dp),
-                )
-                if (showVisualText) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.today_weather),
-                        style = NoopType.captionNumber,
-                        color = tint,
-                        maxLines = 1,
+                else -> {
+                    Icon(
+                        imageVector = Icons.Filled.Cloud,
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(16.dp),
                     )
+                    if (showVisualText) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.today_weather),
+                            style = NoopType.captionNumber,
+                            color = tint,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }

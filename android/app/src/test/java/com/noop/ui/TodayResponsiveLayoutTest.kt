@@ -19,6 +19,16 @@ class TodayResponsiveLayoutTest {
         assertTrue(todayWeatherShowsVisualText(hasSnapshot = false, fontScale = 1.30f))
         assertFalse(todayWeatherShowsVisualText(hasSnapshot = false, fontScale = 1.31f))
         assertTrue(todayWeatherShowsVisualText(hasSnapshot = true, fontScale = 2.0f))
+
+        val today = source("com/noop/ui/TodayScreen.kt")
+        val block = today.substring(
+            today.indexOf("private fun TodayWeatherChip("),
+            today.indexOf("@Composable\nprivate fun TodayWeatherDetailsDialog("),
+        )
+        assertTrue(block.contains(".sizeIn(minWidth = 48.dp, minHeight = 48.dp)"))
+        assertTrue(block.contains("val expandForLargeText = snapshot != null && fontScale > 1.30f"))
+        assertTrue(block.contains(".widthIn(min = 82.dp)"))
+        assertTrue(block.contains(".heightIn(min = 34.dp)"))
     }
 
     @Test
