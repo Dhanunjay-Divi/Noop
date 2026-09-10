@@ -40,10 +40,16 @@ collection, account, or network behavior changed. A final exact-head review
 found that the compact Apple weather capsule exposed only a 32-point hit
 region. Commit `02594534` keeps the capsule compact while wrapping it in the
 shared 48-point control target; all 12 focused Apple contracts and the complete
-unsigned iOS simulator graph pass. The final correction and evidence update
-still require push, replacement protected checks, the resolved review
-conversation, and normal merge, along with physical-device smoothness and
-hardware-dependent evidence. Details are in
+unsigned iOS simulator graph pass. Review of that exact head then found that a
+source-less localized Daily Signal row still relied on a width guess and that
+Review Sample could announce a visible tab twice. Commit `4ff38930` now measures
+the complete localized identity, state, optional source, and fixed chrome before
+retaining one row, and adds an explicit tab accessibility name only in icon-only
+mode. Both Android variants, lint, instrumentation-source compilation, the three
+focused suites, terminology, and required-CI unit contracts pass. The final
+correction and evidence update still require push, replacement protected
+checks, two resolved review conversations, and normal merge, along with
+physical-device smoothness and hardware-dependent evidence. Details are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged
