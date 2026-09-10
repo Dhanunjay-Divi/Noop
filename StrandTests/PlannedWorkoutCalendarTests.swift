@@ -65,9 +65,9 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
             "publisher(for: ContextualInterventionInputs.didChange)"
         ))
         XCTAssertTrue(behavior.contains("ContextualInterventionInputs.notifyChanged()"))
-        XCTAssertTrue(windDown.contains(
-            "if changed { ContextualInterventionInputs.notifyChanged() }"
-        ))
+        XCTAssertTrue(windDown.contains("let wasExplicit = hasExplicitSleepNeed"))
+        XCTAssertTrue(windDown.contains("if !wasExplicit || next != prior"))
+        XCTAssertTrue(windDown.contains("ContextualInterventionInputs.notifyChanged()"))
     }
 
     func testAdaptiveEvaluationStopsAfterCalendarRefreshWhenCancelled() throws {
@@ -215,6 +215,50 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(postScheduleConsent.lowerBound, action.lowerBound)
         XCTAssertTrue(source.contains("PlannedWorkoutCalendarStore.hasCurrentReadAccess()"))
         XCTAssertTrue(source.contains("PlannedWorkoutCalendarSettings.enabled"))
+        XCTAssertTrue(source.contains(
+            "currentPlannedWorkoutFingerprint == candidate.fingerprint"
+        ))
+    }
+
+    func testChangedInputsInvalidateQueuedWorkoutGuidanceBeforeReevaluation() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let notifyStart = try XCTUnwrap(
+            source.range(of: "static func notifyChanged()")
+        )
+        let notifyTail = source[notifyStart.lowerBound...]
+        let invalidate = try XCTUnwrap(
+            notifyTail.range(of: "invalidatePlannedWorkoutCandidate()")
+        )
+        let publish = try XCTUnwrap(
+            notifyTail.range(
+                of: "NotificationCenter.default.post",
+                range: invalidate.upperBound..<notifyTail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(invalidate.lowerBound, publish.lowerBound)
+        XCTAssertTrue(source.contains(
+            "currentPlannedWorkoutFingerprint = keepingFingerprint"
+        ))
+    }
+
+    func testQueuedWorkoutReplacementKeepsItsDeliveryGateUntilQueueDrains() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let drainStart = try XCTUnwrap(
+            source.range(of: "private static func drainPendingDeliveries() async")
+        )
+        let drainTail = source[drainStart.lowerBound...]
+        let sameKindPending = try XCTUnwrap(
+            drainTail.range(of: "pendingDeliveries.contains(where:")
+        )
+        let removeGate = try XCTUnwrap(
+            drainTail.range(
+                of: "deliveriesInFlight.remove(pending.candidate.kind)",
+                range: sameKindPending.upperBound..<drainTail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(sameKindPending.lowerBound, removeGate.lowerBound)
     }
 
     func testDeliveredPlannedWorkoutHasStartTimeCleanupAndRestartWake() throws {

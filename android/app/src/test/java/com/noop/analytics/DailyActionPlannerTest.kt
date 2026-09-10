@@ -185,6 +185,7 @@ class DailyActionPlannerTest {
             recentEffort = emptyList(),
             recentSleep = listOf(DailyActionPlanner.SleepDay(today, 410.0)),
             sleepTargetMinutes = 480,
+            sleepTargetIsExplicit = true,
             plannedWorkout = plannedWorkout(),
             nowSec = 1_000_000L,
         )
@@ -200,6 +201,21 @@ class DailyActionPlannerTest {
             plan.workoutAdjustment?.sleepReference,
         )
         assertEquals(ScoreConfidence.BUILDING, plan.workoutAdjustment?.confidence)
+    }
+
+    @Test fun implicitDefaultSleepTargetCannotCreatePersonalizedDeficit() {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(),
+            checkIn = DailyActionPlanner.CheckIn.UNANSWERED,
+            recentEffort = emptyList(),
+            recentSleep = listOf(DailyActionPlanner.SleepDay(today, 360.0)),
+            sleepTargetMinutes = 480,
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertNull(plan.workoutAdjustment)
     }
 
     @Test fun recoveryShiftCanSupportWorkoutAdjustmentWithoutSleepDuration() {

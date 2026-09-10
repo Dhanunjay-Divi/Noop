@@ -112,6 +112,10 @@ enum WindDownNudge {
         return min(max(v, 5 * 60), 11 * 60)
     }
 
+    static var hasExplicitSleepNeed: Bool {
+        UserDefaults.standard.object(forKey: K.sleepNeed) != nil
+    }
+
     static var goalMode: SleepGoalMode {
         guard let raw = UserDefaults.standard.string(forKey: K.goalMode),
               let mode = SleepGoalMode(rawValue: raw) else { return .balance }
@@ -288,10 +292,13 @@ enum WindDownNudge {
     /// but never silently changes this value.
     static func setSleepNeedMinutes(_ minutes: Int) {
         let next = min(max(minutes, 5 * 60), 11 * 60)
-        let changed = next != sleepNeedMinutes
+        let prior = sleepNeedMinutes
+        let wasExplicit = hasExplicitSleepNeed
         UserDefaults.standard.set(next, forKey: K.sleepNeed)
         if isEnabled { schedule() }
-        if changed { ContextualInterventionInputs.notifyChanged() }
+        if !wasExplicit || next != prior {
+            ContextualInterventionInputs.notifyChanged()
+        }
     }
 
     static func setGoalMode(_ mode: SleepGoalMode) {

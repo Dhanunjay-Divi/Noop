@@ -187,6 +187,7 @@ public enum DailyActionPlanner {
         sleepConfidence: ScoreConfidence = .calibrating,
         recentSleep: [SleepDay] = [],
         sleepTargetMinutes: Int = 8 * 60,
+        sleepTargetIsExplicit: Bool = false,
         plannedWorkout: PlannedWorkout? = nil,
         nowSec: Int = Int(Date().timeIntervalSince1970)
     ) -> Plan {
@@ -197,6 +198,7 @@ public enum DailyActionPlanner {
             readiness: readiness,
             recentSleep: recentSleep,
             sleepTargetMinutes: sleepTargetMinutes,
+            sleepTargetIsExplicit: sleepTargetIsExplicit,
             plannedWorkout: plannedWorkout
         )
 
@@ -336,6 +338,7 @@ public enum DailyActionPlanner {
         readiness: ReadinessEngine.Readiness,
         recentSleep: [SleepDay],
         sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Bool,
         plannedWorkout: PlannedWorkout?
     ) -> WorkoutAdjustment? {
         guard let workout = plannedWorkout,
@@ -351,7 +354,8 @@ public enum DailyActionPlanner {
         let sleep = sleepContext(
             days: recentSleep,
             today: today,
-            sleepTargetMinutes: sleepTargetMinutes
+            sleepTargetMinutes: sleepTargetMinutes,
+            sleepTargetIsExplicit: sleepTargetIsExplicit
         )
         let recoveryShift =
             readiness.asOfDay == today
@@ -400,7 +404,8 @@ public enum DailyActionPlanner {
     private static func sleepContext(
         days: [SleepDay],
         today: String,
-        sleepTargetMinutes: Int
+        sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Bool
     ) -> SleepContext? {
         let grouped = validSleepByDay(days, through: today)
         guard let current = grouped[today] else { return nil }
@@ -419,6 +424,7 @@ public enum DailyActionPlanner {
             source = .personalUsual
             confidence = prior.count >= solidUsualSleepNights ? .solid : .building
         } else {
+            guard sleepTargetIsExplicit else { return nil }
             reference = Double(min(max(sleepTargetMinutes, 5 * 60), 11 * 60))
             source = .explicitTarget
             confidence = .building

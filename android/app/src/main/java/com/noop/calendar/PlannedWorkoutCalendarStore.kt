@@ -62,6 +62,16 @@ object PlannedWorkoutCalendarStore {
         }
     }
 
+    fun isCurrent(snapshot: PlannedWorkoutCalendarSnapshot): Boolean =
+        synchronized(stateLock) {
+            _snapshot.value == snapshot
+        }
+
+    fun isCurrentRevision(expectedRevision: Long): Boolean =
+        synchronized(stateLock) {
+            _snapshot.value?.revision == expectedRevision
+        }
+
     suspend fun refresh(
         context: Context,
         now: ZonedDateTime = ZonedDateTime.now(),

@@ -22,6 +22,24 @@ class PlannedWorkoutTitleClassifierTest {
         }
     }
 
+    @Test fun recognizesWorkoutTitlesAcrossEveryLocalizedAppLanguage() {
+        listOf(
+            "Schwimmen",
+            "Gimnasio",
+            "Natation",
+            "Palestra",
+            "Ginásio",
+            "Тренировка",
+            "游泳",
+            "騎行",
+        ).forEach {
+            assertTrue(
+                "Expected localized workout title: $it",
+                PlannedWorkoutTitleClassifier.isWorkoutTitle(it),
+            )
+        }
+    }
+
     @Test fun rejectsAmbiguousAndWorkTitles() {
         listOf<String?>(
             null,
@@ -44,6 +62,11 @@ class PlannedWorkoutTitleClassifierTest {
             "Football watch party",
             "Tennis tickets",
             "Gym equipment shopping",
+            "Gimnasio reunión",
+            "Schwimmen Besprechung",
+            "Тренировка встреча",
+            "健身会议",
+            "健身會議",
         ).forEach {
             assertFalse(
                 "Expected non-workout title: ${it ?: "nil"}",

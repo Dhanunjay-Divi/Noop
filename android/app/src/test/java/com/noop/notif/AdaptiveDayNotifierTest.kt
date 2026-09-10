@@ -461,7 +461,7 @@ class AdaptiveDayNotifierTest {
             postGate,
         )
         val action = text.indexOf("ContextualActionCenter.presentRecovery", pendingIntent)
-        val helper = text.indexOf("private fun plannedWorkoutCalendarConsentCurrent")
+        val helper = text.indexOf("private fun plannedWorkoutDeliveryCurrent")
 
         assertTrue(postCandidate >= 0)
         assertTrue(postGate > postCandidate)
@@ -469,15 +469,15 @@ class AdaptiveDayNotifierTest {
         assertTrue(action > pendingIntent)
         assertTrue(
             text.substring(postCandidate, postGate)
-                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+                .contains("plannedWorkoutDeliveryCurrent(context, candidate)"),
         )
         assertTrue(
             text.substring(postGate, pendingIntent)
-                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+                .contains("plannedWorkoutDeliveryCurrent(context, candidate)"),
         )
         assertTrue(
             text.substring(pendingIntent, action)
-                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+                .contains("plannedWorkoutDeliveryCurrent(context, candidate)"),
         )
         assertTrue(helper > action)
         assertTrue(
@@ -487,6 +487,18 @@ class AdaptiveDayNotifierTest {
         assertTrue(
             text.substring(helper)
                 .contains("NoopPrefs.plannedWorkoutCalendar(context)"),
+        )
+        assertTrue(
+            text.substring(helper)
+                .contains("NoopPrefs.adaptiveDayGuidance(context)"),
+        )
+        assertTrue(
+            text.substring(helper)
+                .contains("AdaptiveDayEvaluationGate.isCurrent(evaluationToken)"),
+        )
+        assertTrue(
+            text.substring(helper)
+                .contains("PlannedWorkoutCalendarStore.isCurrentRevision(calendarRevision)"),
         )
     }
 
@@ -509,7 +521,7 @@ class AdaptiveDayNotifierTest {
             postGate,
         )
         val postSuccessConsent = text.indexOf(
-            "!plannedWorkoutCalendarConsentCurrent(context)",
+            "!plannedWorkoutDeliveryCurrent(context, candidate)",
             postedResult,
         )
         val reconcile = text.indexOf(
@@ -549,6 +561,37 @@ class AdaptiveDayNotifierTest {
         assertTrue(worker >= 0)
         assertTrue(registry > worker)
         assertTrue(evaluate > registry)
+    }
+
+    @Test fun plannedWorkoutWorkerRequiresCurrentTermsBeforeDiagnosticsOrDataAccess() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val worker = text.indexOf("class AdaptivePlannedWorkoutWorker")
+        val terms = text.indexOf("ManagedRuntimeGate.isAuthorized(applicationContext)", worker)
+        val diagnostic = text.indexOf("AppDiagnosticsRecorder.beginOperation", worker)
+        val repository = text.indexOf("WhoopRepository.from(applicationContext)", worker)
+
+        assertTrue(worker >= 0)
+        assertTrue(terms > worker)
+        assertTrue(diagnostic > terms)
+        assertTrue(repository > diagnostic)
+    }
+
+    @Test fun newerAdaptiveEvaluationInvalidatesEveryOlderDeliveryToken() {
+        val first = AdaptiveDayEvaluationGate.begin()
+        assertTrue(AdaptiveDayEvaluationGate.isCurrent(first))
+
+        val second = AdaptiveDayEvaluationGate.begin()
+        assertFalse(AdaptiveDayEvaluationGate.isCurrent(first))
+        assertTrue(AdaptiveDayEvaluationGate.isCurrent(second))
+
+        AdaptiveDayEvaluationGate.invalidate()
+        assertFalse(AdaptiveDayEvaluationGate.isCurrent(second))
     }
 
     @Test fun adaptiveEvaluationReconcilesRemovedWorkoutAndDeliveryStateCanDeleteKeys() {

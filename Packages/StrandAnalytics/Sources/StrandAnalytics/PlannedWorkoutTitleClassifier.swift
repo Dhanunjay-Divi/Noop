@@ -11,6 +11,26 @@ public enum PlannedWorkoutTitleClassifier {
         "cycling", "bike", "swim", "swimming", "hike", "hiking", "rowing", "boxing",
         "tennis", "soccer", "football", "basketball", "volleyball", "climbing",
         "bootcamp",
+        // German
+        "fitnessstudio", "schwimmen", "radfahren", "joggen", "wandern", "rudern",
+        "boxen", "klettern", "krafttraining",
+        // Spanish
+        "gimnasio", "ejercicio", "natacion", "ciclismo", "correr", "senderismo",
+        "remo", "boxeo", "escalada",
+        // French
+        "musculation", "natation", "cyclisme", "velo", "randonnee", "aviron",
+        "boxe", "escalade",
+        // Italian
+        "palestra", "esercizio", "nuoto", "corsa", "escursione", "canottaggio",
+        "pugilato",
+        // Portuguese
+        "ginasio", "exercicio", "natacao", "corrida", "caminhada",
+        // Russian
+        "спортзал", "тренировка", "фитнес", "плавание", "бег", "велоспорт",
+        "йога", "пилатес", "бокс", "гребля", "скалолазание",
+        // Simplified and Traditional Chinese
+        "健身", "锻炼", "鍛鍊", "运动", "運動", "游泳", "跑步", "骑行", "騎行",
+        "瑜伽", "普拉提", "皮拉提斯", "拳击", "拳擊", "力量训练", "重量訓練",
     ]
 
     private static let ambiguousActivityTokens: Set<String> = [
@@ -29,6 +49,13 @@ public enum PlannedWorkoutTitleClassifier {
         "onboarding", "presentation", "planning", "demo", "review", "sync", "project",
         "payroll", "backup", "backups", "staging", "deploy", "deployment", "server",
         "database", "script", "pipeline", "batch", "runbook",
+        "besprechung", "vorstellungsgespräch", "konferenz",
+        "reunion", "entrevista", "conferencia", "taller",
+        "entretien", "atelier",
+        "riunione", "colloquio", "conferenza",
+        "reuniao",
+        "встреча", "собеседование", "конференция",
+        "会议", "會議", "面试", "面試", "研讨会", "研討會",
     ]
 
     private static let nonParticipationContextTokens: Set<String> = [
@@ -44,6 +71,10 @@ public enum PlannedWorkoutTitleClassifier {
         guard let title else { return false }
         let tokens = title
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
+            .folding(
+                options: [.diacriticInsensitive, .widthInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return false }

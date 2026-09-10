@@ -81,6 +81,7 @@ object DailyActionPlanner {
         sleepConfidence: ScoreConfidence = ScoreConfidence.CALIBRATING,
         recentSleep: List<SleepDay> = emptyList(),
         sleepTargetMinutes: Int = 8 * 60,
+        sleepTargetIsExplicit: Boolean = false,
         plannedWorkout: PlannedWorkout? = null,
         nowSec: Long = System.currentTimeMillis() / 1_000L,
     ): Plan {
@@ -91,6 +92,7 @@ object DailyActionPlanner {
             readiness = readiness,
             recentSleep = recentSleep,
             sleepTargetMinutes = sleepTargetMinutes,
+            sleepTargetIsExplicit = sleepTargetIsExplicit,
             plannedWorkout = plannedWorkout,
         )
 
@@ -211,6 +213,7 @@ object DailyActionPlanner {
         readiness: ReadinessEngine.Readiness,
         recentSleep: List<SleepDay>,
         sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Boolean,
         plannedWorkout: PlannedWorkout?,
     ): WorkoutAdjustment? {
         val workout = plannedWorkout ?: return null
@@ -225,7 +228,12 @@ object DailyActionPlanner {
             return null
         }
 
-        val sleep = sleepContext(recentSleep, today, sleepTargetMinutes)
+        val sleep = sleepContext(
+            recentSleep,
+            today,
+            sleepTargetMinutes,
+            sleepTargetIsExplicit,
+        )
         val recoveryShift =
             readiness.asOfDay == today &&
                 readiness.confidence != ScoreConfidence.CALIBRATING &&
@@ -274,6 +282,7 @@ object DailyActionPlanner {
         days: List<SleepDay>,
         today: String,
         sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Boolean,
     ): SleepContext? {
         val grouped = validSleepByDay(days, today)
         val current = grouped[today] ?: return null
@@ -295,6 +304,7 @@ object DailyActionPlanner {
                 ScoreConfidence.BUILDING
             }
         } else {
+            if (!sleepTargetIsExplicit) return null
             reference = sleepTargetMinutes.coerceIn(5 * 60, 11 * 60).toDouble()
             source = SleepReference.EXPLICIT_TARGET
             confidence = ScoreConfidence.BUILDING

@@ -22,6 +22,24 @@ final class PlannedWorkoutTitleClassifierTests: XCTestCase {
         }
     }
 
+    func testRecognizesWorkoutTitlesAcrossEveryLocalizedAppLanguage() {
+        for title in [
+            "Schwimmen",
+            "Gimnasio",
+            "Natation",
+            "Palestra",
+            "Ginásio",
+            "Тренировка",
+            "游泳",
+            "騎行",
+        ] {
+            XCTAssertTrue(
+                PlannedWorkoutTitleClassifier.isWorkoutTitle(title),
+                "Expected localized workout title: \(title)"
+            )
+        }
+    }
+
     func testRejectsAmbiguousAndWorkTitles() {
         for title in [
             nil,
@@ -44,6 +62,11 @@ final class PlannedWorkoutTitleClassifierTests: XCTestCase {
             "Football watch party",
             "Tennis tickets",
             "Gym equipment shopping",
+            "Gimnasio reunión",
+            "Schwimmen Besprechung",
+            "Тренировка встреча",
+            "健身会议",
+            "健身會議",
         ] {
             XCTAssertFalse(
                 PlannedWorkoutTitleClassifier.isWorkoutTitle(title),

@@ -2833,6 +2833,7 @@ final class AppModel: ObservableObject {
                 DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
             },
             sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
             plannedWorkout: plannedWorkout?.plannedWorkout(forPlanningDay: today),
             nowSec: nowSec
         )

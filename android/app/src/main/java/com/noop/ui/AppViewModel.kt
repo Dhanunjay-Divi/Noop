@@ -66,6 +66,7 @@ import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.AdaptiveDayEvaluator
+import com.noop.notif.AdaptiveDayEvaluationGate
 import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.AdaptivePlannedWorkoutScheduler
 import com.noop.notif.AdaptiveDayTimeZoneStore
@@ -2941,12 +2942,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setWindDownSleepNeedMinutes(minutes: Int) {
         val prior = windDownStore.sleepNeedMinutes
+        val wasExplicit = windDownStore.hasExplicitSleepNeed
         windDownStore.sleepNeedMinutes = minutes
         _windDownSleepNeedMinutes.value = windDownStore.sleepNeedMinutes
         if (windDownStore.enabled) {
             WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
         }
-        if (windDownStore.sleepNeedMinutes != prior) {
+        if (!wasExplicit || windDownStore.sleepNeedMinutes != prior) {
             onAdaptiveDayInputsChanged()
         }
     }
@@ -3006,6 +3008,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setAdaptiveDayGuidanceEnabled(enabled: Boolean) {
+        AdaptiveDayEvaluationGate.invalidate()
         _adaptiveDayGuidanceEnabled.value = enabled
         NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
         if (!enabled) {
@@ -3026,6 +3029,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onPlannedWorkoutCalendarChanged() {
         reconcilePlannedWorkoutCalendarObserver()
+        AdaptiveDayEvaluationGate.invalidate()
+        PlannedWorkoutCalendarStore.clear()
         plannedWorkoutCalendarEvaluationJob?.cancel()
         plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
             PlannedWorkoutCalendarStore.refresh(
@@ -3037,6 +3042,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onAdaptiveDayInputsChanged() {
+        AdaptiveDayEvaluationGate.invalidate()
         adaptiveDayInputEvaluationJob?.cancel()
         adaptiveDayInputEvaluationJob = viewModelScope.launch {
             evaluateAdaptiveDayGuidance()
@@ -3096,6 +3102,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             days = days,
             now = now,
             sleepTargetMinutes = windDownStore.sleepNeedMinutes,
+            sleepTargetIsExplicit = windDownStore.hasExplicitSleepNeed,
         )
     }
 

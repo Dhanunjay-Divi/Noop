@@ -63,7 +63,7 @@ after a successful post, and Apple's immediate notification diagnostic used
 the generic vital category. Both platforms now coalesce immediate
 input-triggered reevaluation, Android reconciles that owner on post-success
 consent loss, and Apple records both immediate and durable delivery under
-`adaptive_day`. The complete replacement local wall passes: 1,459 analytics
+`adaptive_day`. The complete replacement local wall passes: 1,461 analytics
 tests with seven skips, 1,726 Apple app tests with one expected skip, the
 complete unsigned iOS app/widget/watch graph, and 4,211 Android tests with seven
 skips plus APK assembly, production compile, lint, and instrumentation-source
@@ -74,6 +74,17 @@ expecting 631 rather than the exact new total of 636; that contract is corrected
 and passes locally. Fresh protected review/checks and normal merge remain, along
 with physical iOS/Android permission, provider, background-delivery,
 accessibility, and battery evidence.
+The latest review correction also closes five final fail-closed gaps: Android
+rechecks the master toggle and current Terms at delivery boundaries, both
+platforms reject stale in-flight workout plans, the planners require a
+genuinely user-set target while personal sleep history is thin, and the local
+classifier recognizes conservative workout titles across every shipped
+language. Focused Swift analytics, Apple app integration, and Android
+planner/Calendar/notifier suites pass on the replacement source. A final
+fresh-eyes review also keeps the Apple same-kind delivery gate active while a
+newer planned-workout candidate waits behind an in-flight delivery, preventing
+a third candidate from bypassing queue coalescing. The queue-specific regression
+suite and the exact current iOS source graph pass.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

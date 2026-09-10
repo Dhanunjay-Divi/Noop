@@ -84,9 +84,12 @@ class PlannedWorkoutCalendarSnapshotTest {
         assertTrue(methodStart >= 0 && methodEnd > methodStart)
         val method = viewModel.substring(methodStart, methodEnd)
         val cancel = method.indexOf("plannedWorkoutCalendarEvaluationJob?.cancel()")
+        val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
+        val clear = method.indexOf("PlannedWorkoutCalendarStore.clear()")
         val refresh = method.indexOf("PlannedWorkoutCalendarStore.refresh(")
         val evaluate = method.indexOf("evaluateAdaptiveDayGuidance()")
-        assertTrue(cancel >= 0 && refresh > cancel)
+        assertTrue(invalidate >= 0 && clear > invalidate)
+        assertTrue(cancel > clear && refresh > cancel)
         assertTrue(refresh >= 0 && evaluate > refresh)
         assertTrue(method.contains("force = true"))
 

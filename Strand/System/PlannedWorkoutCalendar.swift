@@ -128,6 +128,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         snapshot = nil
         lastRefreshAt = nil
         lastRefreshDay = nil
+        ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
     }
 
     func handleProviderChange() async {

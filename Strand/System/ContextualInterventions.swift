@@ -187,6 +187,7 @@ enum ContextualInterventionCenter {
     private static var deliveriesInFlight = Set<ContextualInterventionKind>()
     private static var pendingDeliveries: [PendingDelivery] = []
     private static var deliveryLoopRunning = false
+    private static var currentPlannedWorkoutFingerprint: String?
 
     enum EnableOutcome: Equatable, Sendable {
         case enabled
@@ -214,10 +215,13 @@ enum ContextualInterventionCenter {
     }
 
     static func post(_ candidate: ContextualInterventionCandidate, now: Date = Date()) {
-        guard !candidate.kind.isAdaptiveDayGuidance
-                || ContextualInterventionSettings.adaptiveDayGuidanceEnabled
-        else { return }
-        guard !deliveriesInFlight.contains(candidate.kind) else { return }
+        guard deliveryConsentCurrent(for: candidate) else { return }
+        if deliveriesInFlight.contains(candidate.kind) {
+            guard candidate.kind == .adaptivePlannedWorkout else { return }
+            pendingDeliveries.removeAll { $0.candidate.kind == candidate.kind }
+            pendingDeliveries.append(.init(candidate: candidate, now: now))
+            return
+        }
         deliveriesInFlight.insert(candidate.kind)
         pendingDeliveries.append(.init(candidate: candidate, now: now))
         guard !deliveryLoopRunning else { return }
@@ -231,7 +235,11 @@ enum ContextualInterventionCenter {
         while !pendingDeliveries.isEmpty {
             let pending = pendingDeliveries.removeFirst()
             await deliver(pending.candidate, now: pending.now)
-            deliveriesInFlight.remove(pending.candidate.kind)
+            if !pendingDeliveries.contains(where: {
+                $0.candidate.kind == pending.candidate.kind
+            }) {
+                deliveriesInFlight.remove(pending.candidate.kind)
+            }
         }
         deliveryLoopRunning = false
     }
@@ -366,7 +374,12 @@ enum ContextualInterventionCenter {
         }
         guard candidate.kind == .adaptivePlannedWorkout else { return true }
         return PlannedWorkoutCalendarSettings.enabled &&
-            PlannedWorkoutCalendarStore.hasCurrentReadAccess()
+            PlannedWorkoutCalendarStore.hasCurrentReadAccess() &&
+            currentPlannedWorkoutFingerprint == candidate.fingerprint
+    }
+
+    static func invalidatePlannedWorkoutCandidate() {
+        currentPlannedWorkoutFingerprint = nil
     }
 
     private static func rejectDelivery(
@@ -421,6 +434,7 @@ enum ContextualInterventionCenter {
         center: UNUserNotificationCenter = .current(),
         defaults: UserDefaults = .standard
     ) {
+        currentPlannedWorkoutFingerprint = keepingFingerprint
         let state = loadState(defaults: defaults)
         let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
         let prior = state.deliveries[key]
@@ -495,10 +509,12 @@ enum ContextualInterventionSettings {
 
 /// Low-frequency user inputs that can invalidate an already delivered adaptive-day recommendation.
 /// Publishers persist their value first; AppModel coalesces the resulting evaluation.
+@MainActor
 enum ContextualInterventionInputs {
     static let didChange = Notification.Name("noop.contextualInterventionInputs.didChange")
 
     static func notifyChanged() {
+        ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
         NotificationCenter.default.post(name: didChange, object: nil)
     }
 }

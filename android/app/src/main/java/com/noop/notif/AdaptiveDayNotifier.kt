@@ -27,6 +27,7 @@ import com.noop.ble.WhoopBleClient
 import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
+import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NoopPrefs
@@ -51,6 +52,8 @@ internal data class AdaptiveDayDeliveryCandidate(
     val observedAtMillis: Long,
     val maximumAgeMillis: Long,
     val fingerprint: String,
+    val evaluationToken: Long? = null,
+    val calendarRevision: Long? = null,
 )
 
 internal data class AdaptiveDayDelivery(
@@ -271,6 +274,30 @@ internal object AdaptivePlannedWorkoutSchedulePolicy {
     }
 }
 
+internal object AdaptiveDayEvaluationGate {
+    private val lock = Any()
+    private var generation = 0L
+
+    fun begin(): Long = synchronized(lock) {
+        generation += 1L
+        generation
+    }
+
+    fun invalidate() {
+        synchronized(lock) {
+            generation += 1L
+        }
+    }
+
+    fun isCurrent(token: Long): Boolean = synchronized(lock) {
+        generation == token
+    }
+
+    fun commitIfCurrent(token: Long, block: () -> Boolean): Boolean = synchronized(lock) {
+        if (generation != token) false else block()
+    }
+}
+
 /** Durable two-hour boundary reevaluation. WorkManager survives process death and app dismissal. */
 internal object AdaptivePlannedWorkoutScheduler {
     private const val WORK_NAME = "noop_adaptive_planned_workout_boundary"
@@ -314,6 +341,9 @@ class AdaptivePlannedWorkoutWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
+        if (!ManagedRuntimeGate.isAuthorized(applicationContext)) {
+            return Result.success()
+        }
         val diagnostic = AppDiagnosticsRecorder.beginOperation(
             "adaptive_day.planned_workout_boundary",
         )
@@ -370,7 +400,9 @@ object AdaptiveDayEvaluator {
         days: List<DailyMetric>? = null,
         now: ZonedDateTime = ZonedDateTime.now(),
         sleepTargetMinutes: Int = WindDownStore.from(context).sleepNeedMinutes,
+        sleepTargetIsExplicit: Boolean = WindDownStore.from(context).hasExplicitSleepNeed,
     ): AdaptiveDayGuidance.Recommendation? {
+        val evaluationToken = AdaptiveDayEvaluationGate.begin()
         val appContext = context.applicationContext
         val nowSec = now.toEpochSecond()
         val offsetSec = now.offset.totalSeconds
@@ -422,6 +454,7 @@ object AdaptiveDayEvaluator {
             emptyList()
         }
         val today = maxOf(logicalDay(now).toString(), now.toLocalDate().toString())
+        if (!AdaptiveDayEvaluationGate.isCurrent(evaluationToken)) return null
         val recommendation = AdaptiveDayGuidance.recommendation(
             AdaptiveDayGuidance.Input(
                 today = today,
@@ -439,12 +472,15 @@ object AdaptiveDayEvaluator {
             ),
         )
         if (recommendation?.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
-            AdaptivePlannedWorkoutScheduler.cancel(appContext)
-            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
-                appContext,
-                currentFingerprint = null,
-            )
-            AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+            AdaptiveDayEvaluationGate.commitIfCurrent(evaluationToken) {
+                AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                    appContext,
+                    currentFingerprint = null,
+                )
+                AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+                true
+            }
             return recommendation
         }
 
@@ -452,6 +488,7 @@ object AdaptiveDayEvaluator {
             context = appContext,
             now = now,
         )
+        if (!AdaptiveDayEvaluationGate.isCurrent(evaluationToken)) return recommendation
         val plan = DailyActionPlanner.plan(
             today = today,
             readiness = ReadinessEngine.evaluate(resolvedDays, today),
@@ -463,54 +500,67 @@ object AdaptiveDayEvaluator {
                 DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
             },
             sleepTargetMinutes = sleepTargetMinutes,
+            sleepTargetIsExplicit = sleepTargetIsExplicit,
             plannedWorkout = plannedWorkout?.asPlannedWorkout(today),
             nowSec = nowSec,
         )
-        plan.workoutAdjustment?.let { adjustment ->
-            val leadSeconds = adjustment.startSec - nowSec
-            if (leadSeconds <= 0L) {
+        AdaptiveDayEvaluationGate.commitIfCurrent(evaluationToken) {
+            if (
+                plannedWorkout != null &&
+                !PlannedWorkoutCalendarStore.isCurrent(plannedWorkout)
+            ) {
+                return@commitIfCurrent false
+            }
+            plan.workoutAdjustment?.let { adjustment ->
+                val leadSeconds = adjustment.startSec - nowSec
+                if (leadSeconds <= 0L) {
+                    AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                    AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                        appContext,
+                        currentFingerprint = null,
+                    )
+                } else {
+                    val fingerprint = AdaptiveDayNotifier.plannedWorkoutFingerprint(
+                        day = today,
+                        adjustment = adjustment,
+                    )
+                    AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                        appContext,
+                        currentFingerprint = fingerprint,
+                    )
+                    if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
+                        AdaptivePlannedWorkoutScheduler.schedule(
+                            context = appContext,
+                            startSec = adjustment.startSec,
+                            nowMillis = now.toInstant().toEpochMilli(),
+                        )
+                    } else {
+                        AdaptivePlannedWorkoutScheduler.cancel(appContext)
+                    }
+                    if (leadSeconds <= AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
+                        val snapshot = plannedWorkout ?: return@commitIfCurrent false
+                        AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
+                            appContext,
+                            day = today,
+                            adjustment = adjustment,
+                            evaluationToken = evaluationToken,
+                            calendarRevision = snapshot.revision,
+                            now = now,
+                        )
+                        return@commitIfCurrent true
+                    }
+                }
+            } ?: run {
                 AdaptivePlannedWorkoutScheduler.cancel(appContext)
                 AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
                     appContext,
                     currentFingerprint = null,
                 )
-            } else {
-                val fingerprint = AdaptiveDayNotifier.plannedWorkoutFingerprint(
-                    day = today,
-                    adjustment = adjustment,
-                )
-                AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
-                    appContext,
-                    currentFingerprint = fingerprint,
-                )
-                if (leadSeconds > AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
-                    AdaptivePlannedWorkoutScheduler.schedule(
-                        context = appContext,
-                        startSec = adjustment.startSec,
-                        nowMillis = now.toInstant().toEpochMilli(),
-                    )
-                } else {
-                    AdaptivePlannedWorkoutScheduler.cancel(appContext)
-                }
-                if (leadSeconds <= AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
-                    AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
-                        appContext,
-                        day = today,
-                        adjustment = adjustment,
-                        now = now,
-                    )
-                    return recommendation
-                }
             }
-        } ?: run {
-            AdaptivePlannedWorkoutScheduler.cancel(appContext)
-            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
-                appContext,
-                currentFingerprint = null,
-            )
-        }
-        recommendation?.let {
-            AdaptiveDayNotifier.onRecommendation(appContext, it, now)
+            recommendation?.let {
+                AdaptiveDayNotifier.onRecommendation(appContext, it, now)
+            }
+            true
         }
         return recommendation
     }
@@ -559,6 +609,8 @@ object AdaptiveDayNotifier {
         context: Context,
         day: String,
         adjustment: DailyActionPlanner.WorkoutAdjustment,
+        evaluationToken: Long,
+        calendarRevision: Long,
         now: ZonedDateTime = ZonedDateTime.now(),
     ) {
         val observedAtMillis = now.toInstant().toEpochMilli()
@@ -570,6 +622,8 @@ object AdaptiveDayNotifier {
                 observedAtMillis = observedAtMillis,
             ),
             fingerprint = plannedWorkoutFingerprint(day, adjustment),
+            evaluationToken = evaluationToken,
+            calendarRevision = calendarRevision,
         )
         postCandidate(
             context = context,
@@ -635,7 +689,7 @@ object AdaptiveDayNotifier {
         if (!NoopPrefs.adaptiveDayGuidance(context)) return
         if (
             candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-            !plannedWorkoutCalendarConsentCurrent(context)
+            !plannedWorkoutDeliveryCurrent(context, candidate)
         ) {
             AdaptivePlannedWorkoutScheduler.cancel(context)
             suppress(context)
@@ -676,7 +730,7 @@ object AdaptiveDayNotifier {
             ) {
                 if (
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-                    !plannedWorkoutCalendarConsentCurrent(context)
+                    !plannedWorkoutDeliveryCurrent(context, candidate)
                 ) {
                     calendarConsentLost = true
                     return@postIfAllowed false
@@ -713,7 +767,7 @@ object AdaptiveDayNotifier {
                 if (
                     posted &&
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-                    !plannedWorkoutCalendarConsentCurrent(context)
+                    !plannedWorkoutDeliveryCurrent(context, candidate)
                 ) {
                     calendarConsentLost = true
                     NotificationLifecycleLedger.cancelled(
@@ -738,7 +792,7 @@ object AdaptiveDayNotifier {
             }
             if (
                 candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-                !plannedWorkoutCalendarConsentCurrent(context)
+                !plannedWorkoutDeliveryCurrent(context, candidate)
             ) {
                 ContextualPromptDeliveryLedger.reconcileIfOwned(
                     context,
@@ -766,6 +820,31 @@ object AdaptiveDayNotifier {
                 maximumAgeMillis = candidate.maximumAgeMillis,
                 route = route,
             )
+            if (
+                candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                !plannedWorkoutDeliveryCurrent(context, candidate)
+            ) {
+                ContextualActionCenter.reconcileRecoveryActions(
+                    context = context,
+                    route = NoopNotificationRoute.WORKOUTS,
+                    keepingFingerprint = null,
+                )
+                ContextualPromptDeliveryLedger.reconcileIfOwned(
+                    context,
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                    expectedAtMillis = deliveryAtMillis,
+                )
+                NotificationLifecycleLedger.cancelled(
+                    context,
+                    NotificationLifecycleId.ADAPTIVE_DAY,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+                }
+                AdaptivePlannedWorkoutScheduler.cancel(context)
+                suppress(context)
+                return
+            }
             saveState(context, decision.nextState)
             onPosted()
         }.onFailure {
@@ -777,12 +856,22 @@ object AdaptiveDayNotifier {
         }
     }
 
-    private fun plannedWorkoutCalendarConsentCurrent(context: Context): Boolean =
-        NoopPrefs.plannedWorkoutCalendar(context) &&
+    private fun plannedWorkoutDeliveryCurrent(
+        context: Context,
+        candidate: AdaptiveDayDeliveryCandidate,
+    ): Boolean {
+        if (candidate.kind != AdaptiveDayDeliveryKind.PLANNED_WORKOUT) return true
+        val evaluationToken = candidate.evaluationToken ?: return false
+        val calendarRevision = candidate.calendarRevision ?: return false
+        return NoopPrefs.adaptiveDayGuidance(context) &&
+            NoopPrefs.plannedWorkoutCalendar(context) &&
+            AdaptiveDayEvaluationGate.isCurrent(evaluationToken) &&
+            PlannedWorkoutCalendarStore.isCurrentRevision(calendarRevision) &&
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.READ_CALENDAR,
             ) == PackageManager.PERMISSION_GRANTED
+    }
 
     /**
      * Broadcast-receiver entry point. Travel can be evaluated without opening Room because the qualified

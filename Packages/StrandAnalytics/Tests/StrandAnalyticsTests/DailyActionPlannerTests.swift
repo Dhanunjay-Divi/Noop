@@ -188,6 +188,7 @@ final class DailyActionPlannerTests: XCTestCase {
             recentEffort: [],
             recentSleep: [.init(day: today, minutes: 410)],
             sleepTargetMinutes: 480,
+            sleepTargetIsExplicit: true,
             plannedWorkout: plannedWorkout(),
             nowSec: 1_000_000
         )
@@ -197,6 +198,21 @@ final class DailyActionPlannerTests: XCTestCase {
         XCTAssertEqual(plan.workoutAdjustment?.sleepDeficitMinutes, 70)
         XCTAssertEqual(plan.workoutAdjustment?.sleepReference, .explicitTarget)
         XCTAssertEqual(plan.workoutAdjustment?.confidence, .building)
+    }
+
+    func testImplicitDefaultSleepTargetCannotCreatePersonalizedDeficit() {
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: readiness(),
+            checkIn: .unanswered,
+            recentEffort: [],
+            recentSleep: [.init(day: today, minutes: 360)],
+            sleepTargetMinutes: 480,
+            plannedWorkout: plannedWorkout(),
+            nowSec: 1_000_000
+        )
+
+        XCTAssertNil(plan.workoutAdjustment)
     }
 
     func testRecoveryShiftCanSupportWorkoutAdjustmentWithoutSleepDuration() {

@@ -3370,6 +3370,7 @@ struct LiquidTodayView: View {
             },
             recentSleep: recentSleep,
             sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
             plannedWorkout: plannedWorkout,
             nowSec: Int(planningNow.timeIntervalSince1970)
         )

@@ -662,6 +662,8 @@ fun TodayScreen(
                 DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
             },
             sleepTargetMinutes = sleepTargetMinutes,
+            sleepTargetIsExplicit =
+                com.noop.alarm.WindDownStore.from(context).hasExplicitSleepNeed,
             plannedWorkout = plannedWorkoutDemo?.workout
                 ?: if (selectedDayOffset == 0) {
                     plannedWorkoutSnapshot?.asPlannedWorkout(selectedDayKey)
