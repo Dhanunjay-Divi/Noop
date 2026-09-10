@@ -413,12 +413,15 @@ fun AppRoot(
                 expandedContextualActionId = null
                 openTopLevel(Destination.Insights.route)
             }
-            ContextualActionKind.WIND_DOWN,
-            ContextualActionKind.RECOVERY,
-            -> {
+            ContextualActionKind.WIND_DOWN -> {
                 ContextualActionCenter.complete(context, action)
                 expandedContextualActionId = null
                 openTopLevel(Destination.Sleep.route)
+            }
+            ContextualActionKind.RECOVERY -> {
+                ContextualActionCenter.complete(context, action)
+                expandedContextualActionId = null
+                openTopLevel(action.resolvedRecoveryRoute().navRoute)
             }
         }
     }
@@ -522,6 +525,8 @@ fun AppRoot(
                         // destination the Sleep screen's morning sheet uses.
                         onOpenJournal = { openTopLevel(Destination.Insights.route) },
                         onOpenCalendar = { nav.navigate(Destination.Calendar.route) },
+                        demoPlannedWorkout =
+                            BuildConfig.DEBUG && initialRoute == DEMO_PLANNED_WORKOUT_ROUTE,
                     )
                 }
                 composable(Destination.Calendar.route) {

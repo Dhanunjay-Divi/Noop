@@ -29,7 +29,11 @@ internal data class ContextualAction(
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     val amountMl: Int? = null,
+    val route: NoopNotificationRoute? = null,
 )
+
+internal fun ContextualAction.resolvedRecoveryRoute(): NoopNotificationRoute =
+    route ?: NoopNotificationRoute.SLEEP
 
 internal object ContextualActionPolicy {
     const val VISIBLE_LIMIT = 3
@@ -50,6 +54,60 @@ internal object ContextualActionPolicy {
                     .thenByDescending { it.createdAtMillis },
             )
             .take(limit.coerceAtLeast(0))
+}
+
+internal data class ContextualActionIdentityState(
+    val actions: List<ContextualAction>,
+    val processingIds: Set<String>,
+    val dismissedIds: Set<String>,
+    val completedIds: Set<String>,
+)
+
+internal object ContextualActionIdentityMigration {
+    fun recovery(
+        state: ContextualActionIdentityState,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ): ContextualActionIdentityState {
+        val idPrefix = "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:"
+        val newId = "$idPrefix$toFingerprint"
+        fun matchesLegacyId(id: String): Boolean =
+            id != newId &&
+                id.startsWith(idPrefix) &&
+                matchingFingerprint(id.removePrefix(idPrefix))
+
+        val matchingActions = state.actions.filter {
+            it.kind == ContextualActionKind.RECOVERY &&
+                it.resolvedRecoveryRoute() == route &&
+                matchesLegacyId(it.id)
+        }
+        val actions = if (matchingActions.isEmpty()) {
+            state.actions
+        } else {
+            val prior = matchingActions.maxBy { it.createdAtMillis }
+            buildList {
+                addAll(state.actions.filterNot {
+                    it.kind == ContextualActionKind.RECOVERY &&
+                        it.resolvedRecoveryRoute() == route &&
+                        matchesLegacyId(it.id)
+                })
+                if (none { it.id == newId }) add(prior.copy(id = newId))
+            }
+        }
+
+        fun migrateIds(ids: Set<String>): Set<String> {
+            val legacyIds = ids.filterTo(hashSetOf(), ::matchesLegacyId)
+            return if (legacyIds.isEmpty()) ids else (ids - legacyIds) + newId
+        }
+
+        return ContextualActionIdentityState(
+            actions = actions,
+            processingIds = migrateIds(state.processingIds),
+            dismissedIds = migrateIds(state.dismissedIds),
+            completedIds = migrateIds(state.completedIds),
+        )
+    }
 }
 
 /**
@@ -158,6 +216,7 @@ internal object ContextualActionCenter {
         evidence: List<String>,
         observedAtMillis: Long,
         maximumAgeMillis: Long,
+        route: NoopNotificationRoute = NoopNotificationRoute.SLEEP,
     ) {
         present(
             context = context,
@@ -168,6 +227,7 @@ internal object ContextualActionCenter {
             evidence = readableEvidence(context, evidence),
             observedAtMillis = observedAtMillis,
             expiresAfterMillis = maximumAgeMillis.coerceAtMost(18L * 60L * 60L * 1_000L),
+            route = route,
         )
     }
 
@@ -250,6 +310,59 @@ internal object ContextualActionCenter {
         if (begin(context, action)) finish(context, action, succeeded = true)
     }
 
+    fun migrateRecoveryAction(
+        context: Context,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val prior = ContextualActionIdentityState(
+                actions = storedActions,
+                processingIds = _processingIds.value,
+                dismissedIds = dismissedIds,
+                completedIds = completedIds,
+            )
+            val migrated = ContextualActionIdentityMigration.recovery(
+                state = prior,
+                route = route,
+                toFingerprint = toFingerprint,
+                matchingFingerprint = matchingFingerprint,
+            )
+            if (migrated == prior) return@synchronized
+            storedActions = migrated.actions.toMutableList()
+            _processingIds.value = migrated.processingIds
+            dismissedIds = migrated.dismissedIds.toCollection(linkedSetOf())
+            completedIds = migrated.completedIds.toCollection(linkedSetOf())
+            persistLocked(app)
+        }
+    }
+
+    fun reconcileRecoveryActions(
+        context: Context,
+        route: NoopNotificationRoute,
+        keepingFingerprint: String?,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val keepId = keepingFingerprint?.let {
+                "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:$it"
+            }
+            val changed = storedActions.removeAll {
+                it.kind == ContextualActionKind.RECOVERY &&
+                    it.resolvedRecoveryRoute() == route &&
+                    it.id != keepId
+            }
+            if (!changed) return@synchronized
+            val validIds = storedActions.mapTo(hashSetOf()) { it.id }
+            _processingIds.value = _processingIds.value.intersect(validIds)
+            persistLocked(app)
+        }
+    }
+
     fun applyDemoActions(context: Context, nowMillis: Long = System.currentTimeMillis()) {
         presentHydration(
             context = context,
@@ -289,12 +402,13 @@ internal object ContextualActionCenter {
         observedAtMillis: Long,
         expiresAfterMillis: Long,
         amountMl: Int? = null,
+        route: NoopNotificationRoute? = null,
     ) {
         synchronized(lock) {
             val app = context.applicationContext
             ensureLoadedLocked(app)
             val now = System.currentTimeMillis()
-            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(60_000L)
+            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(0L)
             val id = "${kind.name.lowercase(Locale.ROOT)}:$fingerprint"
             if (expiresAt <= now || id in dismissedIds || id in completedIds) return@synchronized
             if (storedActions.any { it.id == id }) {
@@ -321,6 +435,7 @@ internal object ContextualActionCenter {
                 createdAtMillis = observedAtMillis,
                 expiresAtMillis = expiresAt,
                 amountMl = amountMl,
+                route = route,
             )
             persistLocked(app)
         }
@@ -396,6 +511,7 @@ internal object ContextualActionCenter {
         .put("evidence", JSONArray(action.evidence))
         .put("createdAt", action.createdAtMillis)
         .put("expiresAt", action.expiresAtMillis)
+        .apply { action.route?.let { put("route", it.navRoute) } }
         .apply { action.amountMl?.let { put("amountMl", it) } }
 
     private fun decodeActions(array: JSONArray?): List<ContextualAction> = buildList {
@@ -418,6 +534,7 @@ internal object ContextualActionCenter {
                     createdAtMillis = item.optLong("createdAt", 0L),
                     expiresAtMillis = expiresAt,
                     amountMl = item.optInt("amountMl").takeIf { item.has("amountMl") },
+                    route = NoopNotificationRoute.fromRaw(item.optString("route")),
                 ),
             )
         }

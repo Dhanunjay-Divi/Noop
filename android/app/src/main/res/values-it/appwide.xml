@@ -6,11 +6,16 @@
     <string name="appwide_action_open_settings">Apri impostazioni</string>
     <string name="appwide_adaptive_coaching_summary">Usa segnali recenti del dispositivo indossabile per guidare recupero, pause di concentrazione, respirazione, adattamento ai viaggi e sforzo negli allenamenti.</string>
     <string name="appwide_adaptive_coaching_title">Coaching adattivo</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">Con l’autorizzazione, NOOP controlla su questo dispositivo i titoli del calendario di oggi e conserva solo l’orario di un allenamento chiaramente indicato. Il contenuto del calendario non viene mai archiviato o caricato.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Usa gli allenamenti pianificati</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">L’accesso al calendario non è disponibile. Consenti a NOOP di accedere al calendario nelle impostazioni di sistema.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Suggerimenti privati e facoltativi per il recupero e l’adattamento ai viaggi.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Indicazioni giornaliere adattive</string>
     <string name="appwide_adaptive_day_guidance_help">Suggerimenti privati e con frequenza limitata sul telefono dopo un sonno recente troppo breve, uno spostamento della routine più tardi e più breve appreso da almeno cinque notti precedenti, o un cambio di fuso orario di almeno due ore. Il cambio d’ora di un’ora e i dati non recenti non li attivano mai.</string>
     <string name="appwide_adaptive_day_guidance_label">Indicazioni giornaliere adattive</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Le notifiche non sono disponibili. Attiva le notifiche di NOOP e il canale Indicazioni giornaliere adattive nelle impostazioni di sistema.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Si avvicina un allenamento pianificato e il sonno o il recupero di oggi suggeriscono flessibilità. Valuta come ti senti prima di iniziare.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Valuta un allenamento più leggero oggi</string>
     <string name="appwide_adaptive_day_guidance_routine_body">L’ultimo sonno è stato più tardi e più breve rispetto al tuo andamento recente. Mantieni flessibile la giornata e torna stasera verso il tuo solito orario di rilassamento.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Torna gradualmente al tuo ritmo</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Hai dormito meno del tuo obiettivo. Usa blocchi di concentrazione più brevi, scegli attività più leggere se necessario e proteggi il rilassamento di stasera.</string>

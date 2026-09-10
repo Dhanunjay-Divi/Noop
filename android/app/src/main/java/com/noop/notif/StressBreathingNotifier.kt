@@ -157,7 +157,11 @@ object StressBreathingNotifier {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
-            val postResult = ContextualPromptDeliveryLedger.postIfAllowed(context, nowMillis) {
+            val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
+                context,
+                nowMillis,
+                ContextualPromptDeliveryOwner.STRESS_BREATHING,
+            ) {
                 NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.STRESS_BREATHING,

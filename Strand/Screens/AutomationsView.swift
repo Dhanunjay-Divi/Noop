@@ -21,6 +21,7 @@ struct AutomationsView: View {
     // scoping it means a tick re-renders just the one pill.
     /// Deep-link into the experimental Rhythm visualization (it self-gates on its own consent).
     @EnvironmentObject var router: NavRouter
+    @Environment(\.scenePhase) private var scenePhase
 
     /// v5 cycle-awareness opt-in (default OFF — the most sensitive health category, manual-first).
     @AppStorage(AppModel.cycleAwarenessKey) private var cycleAwareness = false
@@ -58,6 +59,11 @@ struct AutomationsView: View {
     private var contextualVO2Reviews = false
     @AppStorage(ContextualInterventionSettings.adaptiveDayGuidanceEnabledKey)
     private var adaptiveDayGuidance = false
+    #if os(iOS)
+    @AppStorage(PlannedWorkoutCalendarSettings.enabledKey)
+    private var plannedWorkoutCalendarEnabled = false
+    @State private var plannedWorkoutCalendarPermissionUnavailable = false
+    #endif
     @State private var notificationPermissionDenied = false
     @State private var notificationsAuthorized = false
     @State private var showNotificationPermissionAlert = false
@@ -108,6 +114,16 @@ struct AutomationsView: View {
             postWorkoutSummaryEnabled = PostWorkoutSummaryNotifications.isEnabled
             hydrationReminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()
+            #if os(iOS)
+            refreshPlannedWorkoutCalendarState()
+            #endif
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            refreshNotificationPermissionState()
+            #if os(iOS)
+            refreshPlannedWorkoutCalendarState()
+            #endif
         }
         .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
             Button("Open Settings") { openNotificationSettings() }
@@ -873,6 +889,25 @@ struct AutomationsView: View {
                     help: String(localized: "appwide.adaptive_day_guidance.help"),
                     isOn: adaptiveDayGuidanceToggle
                 )
+                #if os(iOS)
+                if adaptiveDayGuidance {
+                    rowDivider
+                    ToggleRow(
+                        label: String(localized: "appwide.adaptive_day_guidance.calendar.label"),
+                        help: String(localized: "appwide.adaptive_day_guidance.calendar.help"),
+                        isOn: plannedWorkoutCalendarToggle
+                    )
+                    if plannedWorkoutCalendarPermissionUnavailable {
+                        rowDivider
+                        Text("appwide.adaptive_day_guidance.calendar.permission_unavailable")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    }
+                }
+                #endif
                 rowDivider
                 ToggleRow(label: String(localized: "appwide.workout_guidance.label"),
                           help: String(localized: "appwide.workout_guidance.help"),
@@ -948,6 +983,13 @@ struct AutomationsView: View {
             set: { on in
                 guard on else {
                     adaptiveDayGuidance = false
+                    #if os(iOS)
+                    PlannedWorkoutCalendarStore.shared.clear()
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
+                    ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                        keepingFingerprint: nil
+                    )
+                    #endif
                     model.reevaluateContextualInterventions()
                     return
                 }
@@ -960,15 +1002,86 @@ struct AutomationsView: View {
                         model.reevaluateContextualInterventions()
                     case .denied:
                         adaptiveDayGuidance = false
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
                         notificationPermissionDenied = true
                         showNotificationPermissionAlert = true
                     case .off:
                         adaptiveDayGuidance = false
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
                     }
                 }
             }
         )
     }
+
+    #if os(iOS)
+    private var plannedWorkoutCalendarToggle: Binding<Bool> {
+        Binding(
+            get: { plannedWorkoutCalendarEnabled },
+            set: { on in
+                guard on else {
+                    plannedWorkoutCalendarEnabled = false
+                    plannedWorkoutCalendarPermissionUnavailable = false
+                    PlannedWorkoutCalendarStore.shared.clear()
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
+                    ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                        keepingFingerprint: nil
+                    )
+                    model.reevaluateContextualInterventions()
+                    return
+                }
+                PlannedWorkoutCalendarStore.shared.requestAccess { outcome in
+                    switch outcome {
+                    case .enabled:
+                        plannedWorkoutCalendarEnabled = true
+                        plannedWorkoutCalendarPermissionUnavailable = false
+                        Task { @MainActor in
+                            _ = await PlannedWorkoutCalendarStore.shared.refresh(force: true)
+                            model.reevaluateContextualInterventions()
+                        }
+                    case .denied, .unavailable:
+                        plannedWorkoutCalendarEnabled = false
+                        plannedWorkoutCalendarPermissionUnavailable = true
+                        PlannedWorkoutCalendarStore.shared.clear()
+                        AdaptivePlannedWorkoutScheduler.cancelPending()
+                        ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                            keepingFingerprint: nil
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    private func refreshPlannedWorkoutCalendarState() {
+        guard plannedWorkoutCalendarEnabled else {
+            plannedWorkoutCalendarPermissionUnavailable = false
+            PlannedWorkoutCalendarStore.shared.clear()
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
+            return
+        }
+        PlannedWorkoutCalendarStore.shared.requestAccess { outcome in
+            switch outcome {
+            case .enabled:
+                plannedWorkoutCalendarPermissionUnavailable = false
+                Task { @MainActor in
+                    _ = await PlannedWorkoutCalendarStore.shared.refresh(force: true)
+                }
+            case .denied, .unavailable:
+                plannedWorkoutCalendarEnabled = false
+                plannedWorkoutCalendarPermissionUnavailable = true
+                PlannedWorkoutCalendarStore.shared.clear()
+                AdaptivePlannedWorkoutScheduler.cancelPending()
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: nil
+                )
+            }
+        }
+    }
+    #endif
 
     private var workoutGuidanceToggle: Binding<Bool> {
         Binding(

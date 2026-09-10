@@ -6,11 +6,16 @@
     <string name="appwide_action_open_settings">Einstellungen öffnen</string>
     <string name="appwide_adaptive_coaching_summary">Nutze aktuelle Wearable-Signale für Erholung, Fokuspausen, Atmung, Reiseanpassung und Trainingsbelastung.</string>
     <string name="appwide_adaptive_coaching_title">Adaptive Begleitung</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">Mit deiner Erlaubnis prüft NOOP nur auf diesem Gerät die heutigen Kalendertitel und behält ausschließlich die Zeit eines eindeutig benannten Trainings. Kalenderinhalte werden weder gespeichert noch hochgeladen.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Geplante Trainings berücksichtigen</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">Kalenderzugriff ist nicht verfügbar. Erlaube NOOP den Kalenderzugriff in den Systemeinstellungen.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Private, optionale Hinweise zu Erholung und Reiseanpassung.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Adaptive Tageshinweise</string>
     <string name="appwide_adaptive_day_guidance_help">Private, begrenzte Telefonhinweise nach aktuell kurzem Schlaf, einer späteren und kürzeren Routineabweichung auf Basis von mindestens fünf früheren Nächten oder einem Zeitzonenwechsel von mindestens zwei Stunden. Eine einstündige Sommerzeitumstellung und veraltete Daten lösen nie einen Hinweis aus.</string>
     <string name="appwide_adaptive_day_guidance_label">Adaptive Tageshinweise</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Benachrichtigungen sind nicht verfügbar. Aktiviere NOOP-Benachrichtigungen und den Kanal „Adaptive Tageshinweise“ in den Systemeinstellungen.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Ein geplantes Training steht bevor und der heutige Schlaf oder die Erholung sprechen für Flexibilität. Prüfe dein Befinden, bevor du beginnst.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Zieh heute ein leichteres Training in Betracht</string>
     <string name="appwide_adaptive_day_guidance_routine_body">Dein letzter Schlaf war später und kürzer als dein jüngstes Muster. Halte den Tag flexibel und nähere dich heute Abend wieder deiner üblichen Entspannungszeit.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Finde sanft zu deinem Rhythmus zurück</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Dein Schlaf war kürzer als dein Ziel. Nutze kürzere Fokusblöcke, wähle bei Bedarf leichtere Aktivität und schütze heute Abend deine Entspannungszeit.</string>

@@ -24,6 +24,9 @@ class WindDownStore(private val prefs: SharedPreferences) {
         get() = prefs.getInt(KEY_SLEEP_NEED, DEFAULT_SLEEP_NEED).coerceIn(SLEEP_MIN, SLEEP_MAX)
         set(v) = prefs.edit().putInt(KEY_SLEEP_NEED, v.coerceIn(SLEEP_MIN, SLEEP_MAX)).apply()
 
+    val hasExplicitSleepNeed: Boolean
+        get() = prefs.contains(KEY_SLEEP_NEED)
+
     var goalMode: SleepGoalMode
         get() = SleepGoalMode.fromPersisted(prefs.getString(KEY_GOAL_MODE, null))
         set(v) = prefs.edit().putString(KEY_GOAL_MODE, v.persistedValue).apply()

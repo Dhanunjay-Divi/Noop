@@ -59,4 +59,14 @@
     <string name="daily_plan_why_title">Pourquoi la journée se présente ainsi</string>
     <string name="daily_plan_why_trailing">Votre référence personnelle</string>
     <string name="daily_plan_why_unavailable">Aucun signal de récupération actuel ne dispose encore d’un historique personnel suffisant pour être comparé.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_hours_minutes">Vous avez dormi %1$d h %2$d min de moins que votre objectif.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_minutes">Vous avez dormi %1$d min de moins que votre objectif.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_hours_minutes">Vous avez dormi %1$d h %2$d min de moins que d’habitude.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_minutes">Vous avez dormi %1$d min de moins que d’habitude.</string>
+    <string name="daily_plan_workout_adjustment_recovery_shift">Les signaux de récupération du jour suggèrent d’alléger cette séance. Évaluez votre état.</string>
+    <string name="daily_plan_workout_adjustment_sleep_and_recovery">Le sommeil et la récupération suggèrent tous deux d’alléger cette séance. Évaluez votre état.</string>
+    <string name="daily_plan_workout_adjustment_sleep_deficit">Votre sommeil est inférieur à votre niveau habituel ou à votre objectif. Gardez cette séance flexible et évaluez votre état.</string>
+    <string name="daily_plan_workout_adjustment_sleep_label">Sommeil</string>
+    <string name="daily_plan_workout_adjustment_title">Entraînement prévu</string>
+    <string name="daily_plan_workout_adjustment_workout_label">Début</string>
 </resources>

@@ -184,6 +184,7 @@ object ContextualVitalNotifier {
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 now.toInstant().toEpochMilli(),
+                ContextualPromptDeliveryOwner.VITAL_REVIEW,
             ) {
                 NotificationLifecycleLedger.posted(
                     context,

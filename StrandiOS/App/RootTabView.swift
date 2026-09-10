@@ -487,12 +487,14 @@ struct RootTabView: View {
             contextualActions.complete(action)
             expandedContextualActionID = nil
             routeToMore(.insights)
-        case .windDown, .recovery:
+        case .windDown:
             contextualActions.complete(action)
             expandedContextualActionID = nil
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
-                selectedTab = IPhonePrimaryTab.sleep.rawValue
-            }
+            openNotificationRoute(.sleep)
+        case .recovery:
+            contextualActions.complete(action)
+            expandedContextualActionID = nil
+            openNotificationRoute(action.resolvedRecoveryRoute)
         }
     }
 
@@ -649,6 +651,10 @@ struct RootTabView: View {
     /// on a pushed detail page.
     private func consumePendingNotificationRoute() {
         guard let route = NotificationRouteBridge.consumePending() else { return }
+        openNotificationRoute(route)
+    }
+
+    private func openNotificationRoute(_ route: NoopNotificationRoute) {
         quickAction = nil
         pendingMoreDestination = nil
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
@@ -2186,14 +2192,17 @@ private struct ContextualActionRail: View {
             HydrationGlassGlyph(fill: 0.38, tint: tint(action))
                 .frame(width: size, height: size + 3)
         } else {
-            Image(systemName: symbol(action.kind))
+            Image(systemName: symbol(action))
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(tint(action))
         }
     }
 
-    private func symbol(_ kind: ContextualActionKind) -> String {
-        switch kind {
+    private func symbol(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
+        switch action.kind {
         case .hydration: return "drop.fill"
         case .breathe: return "wind"
         case .journal: return "square.and.pencil"
@@ -2217,11 +2226,18 @@ private struct ContextualActionRail: View {
         case .hydration: return String(localized: "Add \(action.amountML ?? 250) ml")
         case .breathe: return String(localized: "Start breathing")
         case .journal: return String(localized: "Open journal")
-        case .windDown, .recovery: return String(localized: "Open Sleep")
+        case .windDown: return String(localized: "Open Sleep")
+        case .recovery:
+            return action.route == .workouts
+                ? String(localized: "Workouts")
+                : String(localized: "Open Sleep")
         }
     }
 
     private func primaryIcon(_ action: ContextualAction) -> String {
+        if action.kind == .recovery, action.route == .workouts {
+            return "figure.run"
+        }
         switch action.kind {
         case .hydration: return "plus"
         case .breathe: return "play.fill"

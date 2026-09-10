@@ -63,6 +63,23 @@ enum ActiveZoneUpgradeGate {
     }
 }
 
+struct AdaptiveDayEvaluationGenerationGate {
+    private(set) var generation: UInt64 = 0
+
+    mutating func invalidate() {
+        generation &+= 1
+    }
+
+    mutating func begin() -> UInt64 {
+        invalidate()
+        return generation
+    }
+
+    func isCurrent(_ token: UInt64) -> Bool {
+        token == generation
+    }
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -281,6 +298,9 @@ final class AppModel: ObservableObject {
     /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
     /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
     private var contextualEvaluationTask: Task<Void, Never>?
+    /// Invalidates scheduler callbacks and queued evaluations before their replacement reaches EventKit.
+    /// An older superseded query therefore cannot reconcile a newer workout as if the calendar were empty.
+    private var adaptiveDayEvaluationGate = AdaptiveDayEvaluationGenerationGate()
     /// Debounced profile reconciliation. A DOB/sex/waist edit invalidates stored provenance immediately;
     /// this task writes the matching replacement values and then wakes metric-series-only views.
     private var ageMetricRecomputeTask: Task<Void, Never>?
@@ -472,6 +492,16 @@ final class AppModel: ObservableObject {
                 self.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: PlannedWorkoutCalendarStore.providerDidChange)
+            .sink { [weak self] _ in
+                self?.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+            .sink { [weak self] _ in
+                self?.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
 
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
@@ -522,12 +552,16 @@ final class AppModel: ObservableObject {
         }
         // Illness/strain early-warning recomputes when the daily history changes.
         repo.$days.sink { [weak self] days in
-            self?.evaluateIllness(days)
-            self?.evaluateStrainTarget()
-            self?.scheduleContextualInterventionEvaluation()
+            guard let self, self.operationalWorkStarted else { return }
+            self.evaluateIllness(days)
+            self.evaluateStrainTarget()
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         repo.$refreshSeq.dropFirst().sink { [weak self] _ in
-            self?.scheduleContextualInterventionEvaluation()
+            guard let self, self.operationalWorkStarted else { return }
+            ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+            self.scheduleContextualInterventionEvaluation()
         }.store(in: &hrCancellables)
         // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
         // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
@@ -668,6 +702,8 @@ final class AppModel: ObservableObject {
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
         startAnalysisLoop()
+        ContextualInterventionCenter.invalidatePlannedWorkoutCandidate()
+        scheduleContextualInterventionEvaluation()
     }
 
     /// Turn the strap's offloaded raw data into dashboard scores on launch and every 30 minutes. Kept in
@@ -1623,8 +1659,7 @@ final class AppModel: ObservableObject {
                     title: String(localized: "appwide.stress_checkin.notification_title"),
                     body: String(localized: "appwide.stress_checkin.notification_body"),
                     route: .breathe
-                ),
-                now: now
+                )
             )
         }
         live.append(log: "Stress check-in · short-window HRV moved below recent baseline")
@@ -2657,12 +2692,16 @@ final class AppModel: ObservableObject {
     /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
     /// and evaluating newly imported sleep/vital evidence.
     func reevaluateContextualInterventionsNow() async {
+        guard operationalWorkStarted else { return }
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = nil
         await evaluateContextualInterventions()
     }
 
     private func scheduleContextualInterventionEvaluation() {
+        guard operationalWorkStarted else { return }
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
             await Task.yield()
@@ -2676,7 +2715,8 @@ final class AppModel: ObservableObject {
     /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
     /// rule and is never treated as body temperature.
     private func evaluateContextualInterventions() async {
-        evaluateAdaptiveDayGuidance()
+        guard operationalWorkStarted else { return }
+        await evaluateAdaptiveDayGuidance()
 
         if ContextualInterventionSettings.vitalReviewEnabled {
             if let oxygen = ContextualVitalPolicy.oxygenCandidate(sourceRows: repo.vitalRows) {
@@ -2768,7 +2808,9 @@ final class AppModel: ObservableObject {
     /// Evaluate fresh sleep, personal sleep timing, and a persisted timezone transition through one
     /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
     /// later cannot resurrect an old trip as a new observation.
-    private func evaluateAdaptiveDayGuidance(now: Date = Date()) {
+    private func evaluateAdaptiveDayGuidance(now: Date = Date()) async {
+        guard operationalWorkStarted else { return }
+        let evaluationGeneration = adaptiveDayEvaluationGate.begin()
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
         let change = AdaptiveDayTimeZoneStore.observe(
@@ -2777,6 +2819,10 @@ final class AppModel: ObservableObject {
         )
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled else {
             AdaptiveDayTimeZoneStore.discardPending()
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
             return
         }
         let today = max(Repository.logicalDayKey(now), Repository.localDayKey(now))
@@ -2793,11 +2839,98 @@ final class AppModel: ObservableObject {
             },
             timeZoneChange: change
         ))
-        guard let recommendation else { return }
-        ContextualInterventionCenter.post(
-            AdaptiveDayInterventionFactory.candidate(from: recommendation),
-            now: now
+        if let recommendation, recommendation.kind == .travelAdjustment {
+            guard !Task.isCancelled else { return }
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
+            ContextualInterventionCenter.post(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation)
+            )
+            return
+        }
+
+        let calendarRefresh = await PlannedWorkoutCalendarStore.shared.refreshOutcome(now: now)
+        guard !Task.isCancelled else { return }
+        guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else { return }
+        guard case .completed(let plannedWorkout) = calendarRefresh else { return }
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: ReadinessEngine.evaluate(days: repo.days, today: today),
+            checkIn: behavior.dailyActionCheckIn(for: today),
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            },
+            recentSleep: repo.days.map {
+                DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
+            },
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            sleepTargetIsExplicit: WindDownNudge.hasExplicitSleepNeed,
+            plannedWorkout: plannedWorkout?.plannedWorkout(forPlanningDay: today),
+            nowSec: nowSec
         )
+        if let adjustment = plan.workoutAdjustment {
+            let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                from: adjustment,
+                day: today,
+                observedAt: now
+            )
+            let leadSeconds = adjustment.startSec - nowSec
+            if leadSeconds <= 0 {
+                AdaptivePlannedWorkoutScheduler.cancelPending()
+                ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+                    fingerprint: candidate.fingerprint
+                )
+            } else {
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: candidate.fingerprint
+                )
+                if leadSeconds > Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    let scheduled = await AdaptivePlannedWorkoutScheduler.schedule(
+                        adjustment: adjustment,
+                        day: today,
+                        now: now
+                    ) { [weak self] in
+                        await self?.evaluateAdaptiveDayGuidance(now: Date())
+                    }
+                    guard !Task.isCancelled else { return }
+                    guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else {
+                        return
+                    }
+                    if scheduled { return }
+                } else {
+                    AdaptivePlannedWorkoutScheduler.cancelPending()
+                }
+                if leadSeconds <= Int(AdaptivePlannedWorkoutScheduler.leadTime) {
+                    ContextualInterventionCenter.post(
+                        candidate
+                    ) { [weak self] retryAt in
+                        _ = AdaptivePlannedWorkoutScheduler.scheduleRetry(
+                            start: Date(
+                                timeIntervalSince1970: TimeInterval(adjustment.startSec)
+                            ),
+                            fingerprint: candidate.fingerprint,
+                            retryAt: retryAt
+                        ) { [weak self] in
+                            await self?.evaluateAdaptiveDayGuidance(now: Date())
+                        }
+                    }
+                    return
+                }
+            }
+        } else {
+            AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcileMissingPlannedWorkoutArtifacts(
+                now: now
+            )
+        }
+
+        if let recommendation {
+            ContextualInterventionCenter.post(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation)
+            )
+        }
     }
 
     // MARK: - v5 skin-temp suite engines (cycle phase + body clock)
