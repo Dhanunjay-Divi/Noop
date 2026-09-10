@@ -115,6 +115,15 @@ the 227-test Tools suite, release controls, required CI, all 51 operations
 records, i18n, health claims, calibration parity, legal provenance,
 terminology, and private-data gates pass on the exact source. Commit, fresh
 exact-head review, protected checks, and normal merge remain required.
+The newest exact-head review found one final classifier gap: Chinese calendar
+titles normally have no word separators, so natural phrases such as
+`早上跑步` did not match the reviewed workout vocabulary. Swift and Kotlin now
+apply substring matching only to Han-script terms, after applying the same
+unsegmented work-context denylist. Natural Simplified and Traditional Chinese
+phrases classify, while workout-plus-meeting or seminar phrases still fail
+closed. All 1,461 analytics tests and the complete 4,220-test Android
+unit/compile/lint wall pass on the replacement source. Commit, fresh exact-head
+review, protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

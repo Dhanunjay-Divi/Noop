@@ -69,12 +69,13 @@ public enum PlannedWorkoutTitleClassifier {
 
     public static func isWorkoutTitle(_ title: String?) -> Bool {
         guard let title else { return false }
-        let tokens = title
+        let normalizedTitle = title
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
             .folding(
                 options: [.diacriticInsensitive, .widthInsensitive],
                 locale: Locale(identifier: "en_US_POSIX")
             )
+        let tokens = normalizedTitle
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return false }
@@ -84,13 +85,41 @@ public enum PlannedWorkoutTitleClassifier {
 
         let tokenSet = Set(tokens)
         guard tokenSet.isDisjoint(with: workContextTokens),
-              tokenSet.isDisjoint(with: nonParticipationContextTokens)
+              tokenSet.isDisjoint(with: nonParticipationContextTokens),
+              !containsUnsegmentedHanTerm(in: tokens, candidates: workContextTokens),
+              !containsUnsegmentedHanTerm(in: tokens, candidates: nonParticipationContextTokens)
         else { return false }
-        if !tokenSet.isDisjoint(with: directActivityTokens) { return true }
+        if !tokenSet.isDisjoint(with: directActivityTokens)
+            || containsUnsegmentedHanTerm(in: tokens, candidates: directActivityTokens)
+        {
+            return true
+        }
         if !tokenSet.isDisjoint(with: ambiguousActivityTokens) {
             return tokens.count == 1 || !tokenSet.isDisjoint(with: fitnessContextTokens)
         }
         return tokenSet.contains("training")
             && !tokenSet.isDisjoint(with: fitnessContextTokens)
+    }
+
+    private static func containsUnsegmentedHanTerm(
+        in tokens: [String],
+        candidates: Set<String>
+    ) -> Bool {
+        candidates.contains { candidate in
+            candidate.unicodeScalars.contains(where: isHanScalar)
+                && tokens.contains(where: { $0.contains(candidate) })
+        }
+    }
+
+    private static func isHanScalar(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x3400...0x4DBF,
+             0x4E00...0x9FFF,
+             0xF900...0xFAFF,
+             0x20000...0x2FA1F:
+            return true
+        default:
+            return false
+        }
     }
 }

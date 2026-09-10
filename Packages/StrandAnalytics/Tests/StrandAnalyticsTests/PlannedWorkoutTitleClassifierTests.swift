@@ -32,6 +32,9 @@ final class PlannedWorkoutTitleClassifierTests: XCTestCase {
             "Тренировка",
             "游泳",
             "騎行",
+            "早上跑步",
+            "晚间瑜伽课",
+            "晚上騎行課",
         ] {
             XCTAssertTrue(
                 PlannedWorkoutTitleClassifier.isWorkoutTitle(title),
@@ -67,6 +70,9 @@ final class PlannedWorkoutTitleClassifierTests: XCTestCase {
             "Тренировка встреча",
             "健身会议",
             "健身會議",
+            "早上跑步会议",
+            "晚间瑜伽研讨会",
+            "晚上騎行研討會",
         ] {
             XCTAssertFalse(
                 PlannedWorkoutTitleClassifier.isWorkoutTitle(title),

@@ -243,6 +243,12 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   erase the preserved cooldown. Malformed fingerprints fail closed through full
   reconciliation, and Android refuses to let an older expiry remove artifacts
   owned by a newer exact fingerprint.
+- The newest exact-head review found that Chinese titles with no word
+  separators, such as `早上跑步` and `晚间瑜伽课`, could not match the reviewed
+  workout vocabulary. Swift and Kotlin now allow substring matching only for
+  known Han-script terms and apply the same unsegmented work-context checks
+  first. Natural Simplified and Traditional Chinese workout phrases classify,
+  while phrases that also contain meeting or seminar terms still fail closed.
 
 ## Data, privacy, and medical truth
 
@@ -282,9 +288,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   same boundary identity with enqueue and operation outcomes.
 - Latest review-correction coverage: existing fixed `adaptive_day` rejection,
   suppression, cancellation, and stale outcomes cover all three corrected
-  boundaries. No additional event is needed because candidate fingerprints,
-  calendar times, health values, and arbitrary errors must remain absent from
-  diagnostics.
+  boundaries. The final classifier correction needs no new event because title
+  text is discarded immediately; only the existing zero/one/multiple candidate
+  bucket may be retained. Candidate fingerprints, calendar times, title text,
+  health values, and arbitrary errors remain absent from diagnostics.
 - Redaction, retention, and high-frequency controls: no event title, notes,
   attendees, location, calendar/event identifiers, health values, or exact
   dynamic errors; refresh only on explicit enable and bounded lifecycle/data
@@ -310,6 +317,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Hosted Android replacement run and correction | APK assembly completed; the hosted unit task reported 4,217 tests with one stale source-contract failure and seven skips. After correcting only that assertion, the complete local unit task passed all 4,217 tests with seven expected skips. | Hosted CI exercised the production graph and identified test drift; the replacement contract now matches the reviewed explicit-target behavior without changing production code. | The corrected head is not hosted-green until replacement checks finish; no physical Android behavior is proven. |
 | Final delivery-race correction tests | 15 Apple Calendar tests and the focused Android notifier plus Today contract suites passed | Stale Apple rejection cannot clear a newer fingerprint, a superseded Apple boundary task stops after the authorization await, repository health inputs synchronously invalidate stale Apple candidates, and Android notification lifetime is computed from the actual post instant | OS scheduling, notification presentation, or process suspension on physical devices |
 | Final cooldown and natural-expiry correction tests | 42 focused Apple tests and the focused Android notifier suite passed | Quiet/global cooldown suppression retries only within the remaining workout window; duplicates remain terminal; natural expiry preserves accepted delivery state; a later no-adjustment pass distinguishes elapsed workouts from future retractions; malformed fingerprints fail closed; and stale Android expiry work cannot clear a newer workout prompt | OS scheduling precision, notification presentation, or process suspension on physical devices |
+| Final unsegmented-title correction | All 1,461 analytics tests passed with seven expected skips; the complete Android unit/compile/lint wall passed 4,220 tests with seven expected skips | Swift and Kotlin recognize reviewed Han-script workout terms inside natural Simplified and Traditional Chinese phrases, while embedded meeting and seminar terms retain fail-closed priority | Unreviewed vocabulary, real user calendars, or independent translation review |
 | Complete macOS app suite | 1,734 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, current check-in and sleep-target invalidation, cancellation contract, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
 | App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
 | Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
@@ -344,9 +352,9 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   delivery-boundary correction plus latest consent/lifecycle correction
   containing this record
 - Branch and remote state: protected pull request `#14` remains open; the latest
-  cooldown/expiry corrections and complete local gate matrix are verified, and
-  normal merge is pending commit, push, fresh exact-head review, and replacement
-  required checks
+  cooldown/expiry and unsegmented Chinese-title corrections are locally
+  verified, and normal merge is pending commit, push, fresh exact-head review,
+  and replacement required checks
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires
@@ -379,7 +387,7 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Commit and push the latest cooldown/expiry corrections, obtain a fresh
+1. Commit and push the latest unsegmented-title correction, obtain a fresh
    exact-head review, resolve any replacement-head conversations with evidence,
    and complete a normal protected merge without bypass.
 2. Run the permission, provider-change, foreground/background notification,

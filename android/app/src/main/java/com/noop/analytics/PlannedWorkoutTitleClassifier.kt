@@ -68,13 +68,14 @@ object PlannedWorkoutTitleClassifier {
     )
 
     fun isWorkoutTitle(title: String?): Boolean {
-        val tokens = title
+        val normalizedTitle = title
             ?.lowercase(Locale.ROOT)
             ?.let { Normalizer.normalize(it, Normalizer.Form.NFD) }
             ?.replace(Regex("\\p{M}+"), "")
-            ?.split(Regex("[^\\p{L}\\p{N}]+"))
-            ?.filter { it.isNotEmpty() }
-            .orEmpty()
+            ?: return false
+        val tokens = normalizedTitle
+            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return false
 
         val normalized = tokens.joinToString(" ")
@@ -83,10 +84,31 @@ object PlannedWorkoutTitleClassifier {
         val tokenSet = tokens.toSet()
         if (tokenSet.any(workContextTokens::contains)) return false
         if (tokenSet.any(nonParticipationContextTokens::contains)) return false
-        if (tokenSet.any(directActivityTokens::contains)) return true
+        if (containsUnsegmentedHanTerm(tokens, workContextTokens)) return false
+        if (containsUnsegmentedHanTerm(tokens, nonParticipationContextTokens)) return false
+        if (tokenSet.any(directActivityTokens::contains) ||
+            containsUnsegmentedHanTerm(tokens, directActivityTokens)
+        ) {
+            return true
+        }
         if (tokenSet.any(ambiguousActivityTokens::contains)) {
             return tokens.size == 1 || tokenSet.any(fitnessContextTokens::contains)
         }
         return "training" in tokenSet && tokenSet.any(fitnessContextTokens::contains)
+    }
+
+    private fun containsUnsegmentedHanTerm(
+        tokens: List<String>,
+        candidates: Set<String>,
+    ): Boolean = candidates.any { candidate ->
+        candidate.any(::isHanCharacter) && tokens.any { token -> token.contains(candidate) }
+    }
+
+    private fun isHanCharacter(character: Char): Boolean = when (character.code) {
+        in 0x3400..0x4DBF,
+        in 0x4E00..0x9FFF,
+        in 0xF900..0xFAFF,
+        -> true
+        else -> false
     }
 }
