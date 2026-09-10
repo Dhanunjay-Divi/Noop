@@ -35,9 +35,11 @@ also found and the replacement head corrects stale Android
 Calendar cache use after permission revocation, missing Apple reevaluation after
 calendar edits, contextual actions opening Sleep instead of Workouts, and
 Android adaptive-day `PendingIntent` mutation before global cooldown approval.
-The complete replacement local wall passes: 1,459 analytics tests with seven
-skips, 1,709 Apple app tests with one expected skip, the complete unsigned iOS
-app/widget/watch graph, 4,197 Android tests with seven skips plus production
+Replacement-head review then corrected Android provider-change reevaluation,
+Apple cancellation after EventKit return, and declined invitations on both
+providers. The complete replacement local wall passes: 1,459 analytics tests
+with seven skips, 1,711 Apple app tests with one expected skip, the complete
+unsigned iOS app/widget/watch graph, 4,199 Android tests with seven skips plus production
 compile and lint, 227 repository-tool tests, and all 51 operations records. The
 first hosted Apple attempt exposed only the app-wide localization ratchet still
 expecting 631 rather than the exact new total of 636; that contract is corrected
