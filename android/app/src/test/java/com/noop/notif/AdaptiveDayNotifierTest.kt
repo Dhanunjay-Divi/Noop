@@ -259,7 +259,23 @@ class AdaptiveDayNotifierTest {
         )
     }
 
-    @Test fun plannedWorkoutNotificationExpiresAtTheWorkoutStart() {
+    @Test fun plannedWorkoutNotificationExpiresAtTheWorkoutStartFromActualPostTime() {
+        assertEquals(
+            4_000L,
+            AdaptiveDayNotifier.plannedWorkoutRemainingLifetimeMillis(
+                observedAtMillis = 1_000L,
+                maximumAgeMillis = 10_000L,
+                postAtMillis = 7_000L,
+            ),
+        )
+        assertNull(
+            AdaptiveDayNotifier.plannedWorkoutRemainingLifetimeMillis(
+                observedAtMillis = 1_000L,
+                maximumAgeMillis = 10_000L,
+                postAtMillis = 11_000L,
+            ),
+        )
+
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
             File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
@@ -267,20 +283,23 @@ class AdaptiveDayNotifierTest {
             File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
         ).firstOrNull(File::isFile)?.readText()
         val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val remaining = text.indexOf("val plannedWorkoutTimeoutMillis =")
         val builder = text.indexOf("val notificationBuilder = NotificationCompat.Builder")
         val timeout = text.indexOf(
-            "notificationBuilder.setTimeoutAfter(candidate.maximumAgeMillis)",
+            "notificationBuilder.setTimeoutAfter(plannedWorkoutTimeoutMillis)",
             builder,
         )
         val build = text.indexOf("val notification = notificationBuilder.build()", timeout)
 
+        assertTrue(remaining >= 0)
+        assertTrue(
+            text.substring(remaining, builder)
+                .contains("postAtMillis = System.currentTimeMillis()"),
+        )
         assertTrue(builder >= 0)
         assertTrue(timeout > builder)
         assertTrue(build > timeout)
-        assertTrue(
-            text.substring(builder, timeout)
-                .contains("candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT"),
-        )
+        assertFalse(text.substring(builder, timeout).contains("candidate.maximumAgeMillis"))
     }
 
     @Test fun movingWorkoutWithinThirtyMinutesChangesItsFingerprint() {

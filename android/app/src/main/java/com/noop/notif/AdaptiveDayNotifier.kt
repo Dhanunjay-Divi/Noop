@@ -655,6 +655,17 @@ object AdaptiveDayNotifier {
         observedAtMillis: Long,
     ): Long = (startSec * 1_000L - observedAtMillis).coerceAtLeast(0L)
 
+    internal fun plannedWorkoutRemainingLifetimeMillis(
+        observedAtMillis: Long,
+        maximumAgeMillis: Long,
+        postAtMillis: Long,
+    ): Long? {
+        if (maximumAgeMillis <= 0L) return null
+        val expiresAtMillis = observedAtMillis + maximumAgeMillis
+        if (expiresAtMillis < observedAtMillis) return null
+        return (expiresAtMillis - postAtMillis).takeIf { it > 0L }
+    }
+
     internal fun plannedWorkoutEvidenceResources(
         reason: DailyActionPlanner.WorkoutAdjustmentReason,
     ): List<Int> = when (reason) {
@@ -718,6 +729,7 @@ object AdaptiveDayNotifier {
 
             val manager = NotificationManagerCompat.from(context)
             var calendarConsentLost = false
+            var plannedWorkoutExpired = false
             val deliveryAtMillis = now.toInstant().toEpochMilli()
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
@@ -735,6 +747,19 @@ object AdaptiveDayNotifier {
                     calendarConsentLost = true
                     return@postIfAllowed false
                 }
+                val plannedWorkoutTimeoutMillis =
+                    if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+                        plannedWorkoutRemainingLifetimeMillis(
+                            observedAtMillis = candidate.observedAtMillis,
+                            maximumAgeMillis = candidate.maximumAgeMillis,
+                            postAtMillis = System.currentTimeMillis(),
+                        ) ?: run {
+                            plannedWorkoutExpired = true
+                            return@postIfAllowed false
+                        }
+                    } else {
+                        null
+                    }
                 val openDestination = NotificationPlatformIdentity.activityPendingIntent(
                     context,
                     NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
@@ -750,11 +775,8 @@ object AdaptiveDayNotifier {
                     .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                if (
-                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-                    candidate.maximumAgeMillis > 0L
-                ) {
-                    notificationBuilder.setTimeoutAfter(candidate.maximumAgeMillis)
+                if (plannedWorkoutTimeoutMillis != null) {
+                    notificationBuilder.setTimeoutAfter(plannedWorkoutTimeoutMillis)
                 }
                 val notification = notificationBuilder.build()
                 val posted = NotificationLifecycleLedger.posted(
@@ -780,6 +802,11 @@ object AdaptiveDayNotifier {
                     return@postIfAllowed false
                 }
                 posted
+            }
+            if (plannedWorkoutExpired) {
+                onRejected(AdaptiveDayDeliveryReason.STALE)
+                suppress(context)
+                return
             }
             if (calendarConsentLost) {
                 AdaptivePlannedWorkoutScheduler.cancel(context)

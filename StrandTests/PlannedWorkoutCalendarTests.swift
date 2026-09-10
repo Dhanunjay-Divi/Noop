@@ -261,6 +261,70 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(sameKindPending.lowerBound, removeGate.lowerBound)
     }
 
+    func testRejectedStaleWorkoutDoesNotClearANewerCandidate() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let rejectStart = try XCTUnwrap(
+            source.range(of: "private static func rejectDelivery(")
+        )
+        let rejectEnd = try XCTUnwrap(
+            source.range(
+                of: "static func loadState(",
+                range: rejectStart.upperBound..<source.endIndex
+            )
+        )
+        let rejection = source[rejectStart.lowerBound..<rejectEnd.lowerBound]
+        let currentGate = try XCTUnwrap(
+            rejection.range(
+                of: "plannedWorkoutCandidateIsCurrent(candidate.fingerprint)"
+            )
+        )
+        let cleanup = try XCTUnwrap(
+            rejection.range(
+                of: "reconcilePlannedWorkoutArtifacts(",
+                range: currentGate.upperBound..<rejection.endIndex
+            )
+        )
+
+        XCTAssertLessThan(currentGate.lowerBound, cleanup.lowerBound)
+    }
+
+    func testBoundaryScheduleStopsAfterNotificationSettingsWhenSuperseded() throws {
+        let source = try source("Strand/System/ContextualInterventions.swift")
+        let schedulerStart = try XCTUnwrap(
+            source.range(of: "enum AdaptivePlannedWorkoutScheduler")
+        )
+        let schedulerTail = source[schedulerStart.lowerBound...]
+        let scheduleStart = try XCTUnwrap(
+            schedulerTail.range(of: "static func schedule(")
+        )
+        let scheduleTail = schedulerTail[scheduleStart.lowerBound...]
+        let settings = try XCTUnwrap(
+            scheduleTail.range(of: "let settings = await center.notificationSettings()")
+        )
+        let cancellation = try XCTUnwrap(
+            scheduleTail.range(
+                of: "guard !Task.isCancelled",
+                range: settings.upperBound..<scheduleTail.endIndex
+            )
+        )
+        let currentCandidate = try XCTUnwrap(
+            scheduleTail.range(
+                of: "ContextualInterventionCenter.plannedWorkoutCandidateIsCurrent(",
+                range: cancellation.upperBound..<scheduleTail.endIndex
+            )
+        )
+        let metadataWrite = try XCTUnwrap(
+            scheduleTail.range(
+                of: "defaults.set(adjustment.startSec",
+                range: currentCandidate.upperBound..<scheduleTail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(settings.lowerBound, cancellation.lowerBound)
+        XCTAssertLessThan(cancellation.lowerBound, currentCandidate.lowerBound)
+        XCTAssertLessThan(currentCandidate.lowerBound, metadataWrite.lowerBound)
+    }
+
     func testDeliveredPlannedWorkoutHasStartTimeCleanupAndRestartWake() throws {
         let schedulerSource = try source("Strand/System/ContextualInterventions.swift")
         let start = try XCTUnwrap(

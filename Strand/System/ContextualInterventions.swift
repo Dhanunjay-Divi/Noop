@@ -382,11 +382,18 @@ enum ContextualInterventionCenter {
         currentPlannedWorkoutFingerprint = nil
     }
 
+    fileprivate static func plannedWorkoutCandidateIsCurrent(
+        _ fingerprint: String
+    ) -> Bool {
+        currentPlannedWorkoutFingerprint == fingerprint
+    }
+
     private static func rejectDelivery(
         _ candidate: ContextualInterventionCandidate,
         on center: UNUserNotificationCenter
     ) {
-        if candidate.kind == .adaptivePlannedWorkout {
+        if candidate.kind == .adaptivePlannedWorkout,
+           plannedWorkoutCandidateIsCurrent(candidate.fingerprint) {
             AdaptivePlannedWorkoutScheduler.cancelPending(on: center)
             reconcilePlannedWorkoutArtifacts(
                 keepingFingerprint: nil,
@@ -687,7 +694,18 @@ enum AdaptivePlannedWorkoutScheduler {
             return false
         }
 
+        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+            from: adjustment,
+            day: day,
+            observedAt: boundary
+        )
         let settings = await center.notificationSettings()
+        guard !Task.isCancelled,
+              ContextualInterventionCenter.plannedWorkoutCandidateIsCurrent(
+                candidate.fingerprint
+              ) else {
+            return false
+        }
         guard isAuthorized(settings.authorizationStatus),
               ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
               PlannedWorkoutCalendarSettings.enabled,
@@ -696,11 +714,6 @@ enum AdaptivePlannedWorkoutScheduler {
             return false
         }
 
-        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
-            from: adjustment,
-            day: day,
-            observedAt: boundary
-        )
         let defaults = UserDefaults.standard
         let decision = ContextualInterventionPolicy.evaluate(
             candidate,
