@@ -2,13 +2,15 @@
 
 ## Status
 
-- State: `review corrections locally verified; replacement protected integration pending`
+- State: `final review correction locally verified; replacement protected integration pending`
 - Owner: project team
 - Branch: `codex/mobile-desktop-visual-parity-20260910`
 - Start commit: `beb0e88f70141766c32a0bcd270f5f8889c6f10d`
 - End implementation commit: `e51c56e5f7397e4eec511d4d1fe607768f108dac`
 - Android review-correction commit:
   `133cb5d8d064f98b70b1090c013881ecff3ebea7`
+- Apple review-correction commit:
+  `02594534df513dcaf49051ca9fa122618e946a30`
 - Record commit or PR: protected pull request `#13`
 
 ## Objective
@@ -76,6 +78,9 @@ secondary rows, matched iOS and Android screenshots, and clean platform builds.
   its compact visual surface remains unchanged. At large text, a cached
   temperature surface grows from its 82 dp minimum when content requires it
   instead of clipping a signed Fahrenheit value.
+- The compact Apple weather capsule keeps its 32/34-point visual height but is
+  wrapped in the shared 48-point control target, so the complete button remains
+  easy to activate without making the masthead visually heavier.
 - Card radius, padding, spacing, weather control dimensions, and shadow depth
   now match across the two phone implementations without changing source
   selection, formulas, navigation, gestures, accessibility labels, or stored
@@ -123,11 +128,12 @@ physical-device, and external-service evidence.
 | Android focused and app gates | Final exact-source invocation passed `:app:assembleFullDebug`, `:app:assembleDemoDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and 31 focused Today, shell, Review Sample, and performance contracts in 3 minutes | Both Android variants compile, lint is clean, instrumentation sources compile, and the responsive, navigation, retained-screen, runtime, and Today contracts hold together | Physical-device frame pacing, OEM rendering, collection, or BLE behavior |
 | Android exact review-correction gate | On commit `133cb5d8`, `:app:assembleFullDebug`, `:app:assembleDemoDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and the focused `PrimaryNavigationContractTest`, `TodayResponsiveLayoutTest`, and `ReviewSampleModeContractTest` suites passed together in 1 minute 48 seconds | Both variants compile, lint and instrumentation-source compilation remain clean, measured-label fallback is covered, and the weather target/content-size contracts hold | Hosted exact-head execution or physical-device behavior |
 | Apple focused contracts | Follow-up suite passed 77 tests across `LiquidTodayFeatureMountTests`, `TodayExplainabilityTests`, and `RetainedScreenPerformanceContractTests` with zero failures or skips | The shared Today source retains explainability, feature mounting, retained-screen behavior, and the compact-width/large-text selection policy | Physical-device smoothness or hardware-dependent behavior |
+| Apple exact review-correction gate | On commit `02594534`, all 12 `LiquidTodayFeatureMountTests` passed with zero failures or skips, and the complete unsigned `NOOPiOS` simulator graph built successfully from the regenerated XcodeGen project | The compact capsule remains visually small while modifier order preserves a 48-point tappable label, and the correction compiles through the iPhone, widget, and watch dependency graph | Physical touch accuracy, signed installation, or App Store acceptance |
 | iOS app build | `NOOPiOS` built for an arm64 iOS 26.5 simulator with signing disabled after regenerating the ignored XcodeGen project from `project.yml` | The changed shared Swift source and complete iOS dependency graph compile together | Signing, installation on a physical phone, or store acceptance |
 | Android runtime capture | Demo Today rendered at ordinary and 1.5x text on an isolated API 35 arm64 emulator; phone captures are 1080 x 2400 and the tablet capture is 2560 x 1600. The corrected large-text Today and Review Sample captures each left a zero-byte crash buffer | Current APKs render compact phone, large-text phone, and regular-width tablet branches; the weather and navigation labels no longer truncate in either Android shell | Physical OLED appearance, OEM variance, sensor data, or sustained frame pacing |
 | Android review runtime measurements | On the API 35 arm64 emulator at density 420 and 1.5x text, the no-snapshot weather control measured 126 x 126 px, exactly 48 x 48 dp. A synthetic cached `-100 C` reading displayed as signed `-148 F`; its control expanded to 225 px, about 85.7 dp, from the 82 dp visual minimum with no clipped glyphs. At ordinary text with the app locale forced to French, the production rail selected icon-only mode and retained every full localized accessibility name | The three exact review reports reproduce as fixed in rendered Compose output, including the widest supported signed Fahrenheit value | Physical touch accuracy, OEM font substitutions, or every locale/device width |
 | iOS runtime capture | Synthetic Today rendered on an iOS 26.5 phone at ordinary and accessibility-large text and on an iPad simulator; phone captures are 1170 x 2532 and the tablet capture is 1640 x 2360 | The current iOS app renders phone, accessibility-text, and regular-width tablet branches without clipped Daily Signal labels | Physical-device frame pacing, background execution, BLE, battery, or haptics |
-| Independent review | Five earlier findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. Exact-head review then reported three additional Android issues: a 34 dp icon-only weather target, localized bottom-label clipping in both shells, and fixed-width large-text weather clipping. Commit `133cb5d8` corrects all three and the focused source/runtime evidence above passes | The final source and evidence reflect multiple fresh reviews rather than only the implementation author’s assumptions | Replacement exact-head hosted review and independent physical-device review |
+| Independent review | Five earlier findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. Exact-head review then reported three additional Android issues: a 34 dp icon-only weather target, localized bottom-label clipping in both shells, and fixed-width large-text weather clipping. Commit `133cb5d8` corrects all three. Review of that replacement head then found the compact Apple weather button exposed only its 32-point capsule as the hit region; commit `02594534` wraps it in the shared 48-point target. The focused source/runtime evidence above passes | The final source and evidence reflect multiple fresh reviews rather than only the implementation author’s assumptions | Replacement exact-head hosted review and independent physical-device review |
 | Visual hierarchy review | Desktop, Android, and iOS first viewports compared directly despite different synthetic data states | Both phones share the approved hierarchy, visual weight, section order, and score geometry while preserving native chrome; tablet and large-text branches remain coherent | State-for-state screenshot parity, pixel identity across rendering engines, physical rendering, or every non-Today screen |
 | Hosted Apple first attempt | Protected pull request `#13` ran the full macOS suite: 1,701 tests executed with one expected skip and one failure in `MoreListParityTests.testAdaptiveScaffoldBackgroundUsesDynamicInk` | The hosted matrix reached the changed Apple source and exposed that an older source-contract assertion still required the pre-responsive fixed `30pt` title | A green replacement head |
 | Hosted assertion correction | The contract now verifies responsive `todayGreetingSize` followed by adaptive `StrandPalette.textPrimary`; the exact `MoreListParityTests` suite passed 14 tests locally with zero failures or skips | The corrected test still rejects hard-coded white ink while accepting the intentional `28/30pt` responsive title policy | A hosted rerun was still required at this evidence point and is recorded in the next row |
@@ -154,11 +160,13 @@ physical-device, and external-service evidence.
 - Commits: `290cefb0` (`Align mobile Today with desktop hierarchy`),
   `e51c56e5` (`Harden Today responsive accessibility`), `67ffd848`
   (`Fix responsive Today source contract`), and `133cb5d8`
-  (`Fix Android large-text navigation and weather`)
+  (`Fix Android large-text navigation and weather`), and `02594534`
+  (`Fix compact iOS weather touch target`)
 - Branch and remote state:
   `codex/mobile-desktop-visual-parity-20260910` is open as protected pull
-  request `#13`; commit `133cb5d8` and this evidence update still require push,
-  replacement hosted checks, resolved review conversations, and normal merge
+  request `#13`; commit `02594534` and this evidence update still require push,
+  replacement hosted checks, the final resolved review conversation, and
+  normal merge
 - Repository visibility verified: standalone GitHub repository relationship
   inherited from the current active handoff; exact protected integration
   remains pending
@@ -187,9 +195,9 @@ physical-device, and external-service evidence.
   tablet branches, but they do not replace physical-device accessibility,
   frame-pacing, OLED, OEM, or touch-target review.
 - The first protected Apple run failed one stale source-contract assertion.
-  Its rerun is green, but protected integration remains incomplete until the
-  newer Android correction head passes every required check and its three
-  review conversations are resolved against that evidence.
+  Its prior rerun is green, but protected integration remains incomplete until
+  the final Apple correction head passes every required check and its review
+  conversation is resolved against that evidence.
 
 ## Next round
 

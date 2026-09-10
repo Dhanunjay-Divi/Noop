@@ -36,11 +36,14 @@ target, and lets the large-text weather surface expand for signed Fahrenheit
 values. Both variants, lint, instrumentation-source compilation, and the three
 focused suites pass; API 35 runtime evidence confirms a 48 dp target and
 unclipped `-148 F` presentation. No formula, provenance, storage, sync,
-collection, account, or network behavior changed. The prior hosted Apple rerun
-is green. The new correction and evidence update still require push,
-replacement protected checks, resolved review conversations, and normal merge,
-along with physical-device smoothness and hardware-dependent evidence. Details
-are in
+collection, account, or network behavior changed. A final exact-head review
+found that the compact Apple weather capsule exposed only a 32-point hit
+region. Commit `02594534` keeps the capsule compact while wrapping it in the
+shared 48-point control target; all 12 focused Apple contracts and the complete
+unsigned iOS simulator graph pass. The final correction and evidence update
+still require push, replacement protected checks, the resolved review
+conversation, and normal merge, along with physical-device smoothness and
+hardware-dependent evidence. Details are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged
