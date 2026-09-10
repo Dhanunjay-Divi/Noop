@@ -986,6 +986,9 @@ struct AutomationsView: View {
                     #if os(iOS)
                     PlannedWorkoutCalendarStore.shared.clear()
                     AdaptivePlannedWorkoutScheduler.cancelPending()
+                    ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                        keepingFingerprint: nil
+                    )
                     #endif
                     model.reevaluateContextualInterventions()
                     return
@@ -1021,6 +1024,9 @@ struct AutomationsView: View {
                     plannedWorkoutCalendarPermissionUnavailable = false
                     PlannedWorkoutCalendarStore.shared.clear()
                     AdaptivePlannedWorkoutScheduler.cancelPending()
+                    ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                        keepingFingerprint: nil
+                    )
                     model.reevaluateContextualInterventions()
                     return
                 }
@@ -1038,6 +1044,9 @@ struct AutomationsView: View {
                         plannedWorkoutCalendarPermissionUnavailable = true
                         PlannedWorkoutCalendarStore.shared.clear()
                         AdaptivePlannedWorkoutScheduler.cancelPending()
+                        ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                            keepingFingerprint: nil
+                        )
                     }
                 }
             }
@@ -1049,6 +1058,9 @@ struct AutomationsView: View {
             plannedWorkoutCalendarPermissionUnavailable = false
             PlannedWorkoutCalendarStore.shared.clear()
             AdaptivePlannedWorkoutScheduler.cancelPending()
+            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                keepingFingerprint: nil
+            )
             return
         }
         PlannedWorkoutCalendarStore.shared.requestAccess { outcome in
@@ -1063,6 +1075,9 @@ struct AutomationsView: View {
                 plannedWorkoutCalendarPermissionUnavailable = true
                 PlannedWorkoutCalendarStore.shared.clear()
                 AdaptivePlannedWorkoutScheduler.cancelPending()
+                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+                    keepingFingerprint: nil
+                )
             }
         }
     }

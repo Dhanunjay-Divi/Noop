@@ -491,6 +491,30 @@ class AdaptiveDayNotifierTest {
         assertTrue(method.contains("keepingFingerprint = currentFingerprint"))
     }
 
+    @Test fun timeZoneBroadcastRetractsWorkoutArtifactsBeforeTravelDelivery() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull { it.exists() }?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val method = text.substring(
+            text.indexOf("fun onTimeZoneChanged("),
+            text.indexOf("fun prepareAndCanNotify("),
+        )
+        val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
+        val cancel = method.indexOf("AdaptivePlannedWorkoutScheduler.cancel(context)")
+        val reconcile = method.indexOf("reconcilePlannedWorkoutArtifacts(")
+        val post = method.indexOf("onRecommendation(context, it)")
+
+        assertTrue(invalidate >= 0)
+        assertTrue(cancel > invalidate)
+        assertTrue(reconcile > cancel)
+        assertTrue(method.contains("currentFingerprint = null"))
+        assertTrue(post > reconcile)
+    }
+
     @Test fun stalePlannedWorkoutDeliveryIsRemovedAndGlobalCooldownRecomputed() {
         val state = AdaptiveDayDeliveryState(
             lastGlobalDeliveryMillis = 2_000L,

@@ -486,6 +486,48 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(openRuntime.lowerBound, initialEvaluation.lowerBound)
     }
 
+    func testCalendarOptOutRetractsWorkoutArtifactsBeforeQueuedReevaluation() throws {
+        let source = try source("Strand/Screens/AutomationsView.swift")
+        let toggleStart = try XCTUnwrap(
+            source.range(of: "private var plannedWorkoutCalendarToggle")
+        )
+        let toggleEnd = try XCTUnwrap(
+            source.range(
+                of: "private func refreshPlannedWorkoutCalendarState()",
+                range: toggleStart.upperBound..<source.endIndex
+            )
+        )
+        let toggle = source[toggleStart.lowerBound..<toggleEnd.lowerBound]
+        let clear = try XCTUnwrap(
+            toggle.range(of: "PlannedWorkoutCalendarStore.shared.clear()")
+        )
+        let cancel = try XCTUnwrap(
+            toggle.range(
+                of: "AdaptivePlannedWorkoutScheduler.cancelPending()",
+                range: clear.upperBound..<toggle.endIndex
+            )
+        )
+        let reconcile = try XCTUnwrap(
+            toggle.range(
+                of: "ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(",
+                range: cancel.upperBound..<toggle.endIndex
+            )
+        )
+        let reevaluate = try XCTUnwrap(
+            toggle.range(
+                of: "model.reevaluateContextualInterventions()",
+                range: reconcile.upperBound..<toggle.endIndex
+            )
+        )
+
+        XCTAssertLessThan(clear.lowerBound, cancel.lowerBound)
+        XCTAssertLessThan(cancel.lowerBound, reconcile.lowerBound)
+        XCTAssertLessThan(reconcile.lowerBound, reevaluate.lowerBound)
+        XCTAssertTrue(toggle[reconcile.lowerBound..<reevaluate.lowerBound].contains(
+            "keepingFingerprint: nil"
+        ))
+    }
+
     func testQueuedWorkoutReplacementKeepsItsDeliveryGateUntilQueueDrains() throws {
         let source = try source("Strand/System/ContextualInterventions.swift")
         let drainStart = try XCTUnwrap(

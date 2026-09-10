@@ -161,6 +161,28 @@ source compilation, and the complete unsigned iPhone/widget/watch graph. The
 signed Android release probe remains correctly blocked before compilation
 without private signing credentials. Source and local evidence are complete;
 fresh exact-head review, protected checks, and normal merge remain required.
+The latest exact-head review found two remaining priority-boundary defects.
+Android timezone travel guidance now invalidates and retracts stale planned-
+workout notification, action, and cooldown ownership before it enters the
+shared delivery policy. Apple Calendar disable, denial, and unavailable paths
+now synchronously remove delivered workout artifacts before queued
+reevaluation, so suspension cannot preserve opted-out guidance. The focused
+closeout passes 23 Apple Calendar tests and the Android notifier suite; the
+complete replacement wall passes 1,749 Apple app tests with one expected skip
+and 4,231 Android tests with seven skips plus APK assembly, full debug compile,
+lint, and instrumentation-source compilation. The final Apple graph, policy
+wall, replacement commit, exact-head review, protected checks, and normal merge
+remain required.
+The stale-head hosted production-shell run also exposed an independent Android
+report-liveness defect: slow OS exit/ANR capture could occupy the live
+diagnostics queue until the bounded snapshot silently omitted the current
+session attachment. Historical capture now runs separately, only completed
+history is eligible, and an allowlisted bounded fallback explicitly reports a
+degraded snapshot without arbitrary errors or private data. The exact API 35
+app-report case passes 1/1, and the final Android unit wall passes 4,233 tests
+with seven skips plus APK assembly, full debug compile, lint, and
+instrumentation-source compilation. Replacement hosted checks must confirm the
+complete managed-device production shell.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

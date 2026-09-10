@@ -1124,7 +1124,15 @@ object AdaptiveDayNotifier {
                 sleepWindows = emptyList(),
                 timeZoneChange = change,
             ),
-        )?.let { onRecommendation(context, it) }
+        )?.let {
+            AdaptiveDayEvaluationGate.invalidate()
+            AdaptivePlannedWorkoutScheduler.cancel(context)
+            reconcilePlannedWorkoutArtifacts(
+                context = context,
+                currentFingerprint = null,
+            )
+            onRecommendation(context, it)
+        }
     }
 
     fun prepareAndCanNotify(context: Context): Boolean {

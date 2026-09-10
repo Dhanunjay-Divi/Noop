@@ -18449,7 +18449,7 @@
     {
       "category": "core",
       "lineNumbers": [
-        424
+        486
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/AppDiagnosticsRecorder.kt",
@@ -31042,7 +31042,7 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        871
+        895
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/test/java/com/noop/notif/AdaptiveDayNotifierTest.kt",
