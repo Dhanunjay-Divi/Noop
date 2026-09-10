@@ -63,6 +63,23 @@ enum ActiveZoneUpgradeGate {
     }
 }
 
+struct AdaptiveDayEvaluationGenerationGate {
+    private(set) var generation: UInt64 = 0
+
+    mutating func invalidate() {
+        generation &+= 1
+    }
+
+    mutating func begin() -> UInt64 {
+        invalidate()
+        return generation
+    }
+
+    func isCurrent(_ token: UInt64) -> Bool {
+        token == generation
+    }
+}
+
 /// Root app state: owns the live BLE connection state and the CoreBluetooth engine.
 /// More subsystems (Repository, AnalyticsEngine, ImportCoordinator) get wired in here
 /// in later milestones.
@@ -281,6 +298,9 @@ final class AppModel: ObservableObject {
     /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
     /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
     private var contextualEvaluationTask: Task<Void, Never>?
+    /// Invalidates scheduler callbacks and queued evaluations before their replacement reaches EventKit.
+    /// An older superseded query therefore cannot reconcile a newer workout as if the calendar were empty.
+    private var adaptiveDayEvaluationGate = AdaptiveDayEvaluationGenerationGate()
     /// Debounced profile reconciliation. A DOB/sex/waist edit invalidates stored provenance immediately;
     /// this task writes the matching replacement values and then wakes metric-series-only views.
     private var ageMetricRecomputeTask: Task<Void, Never>?
@@ -2669,12 +2689,14 @@ final class AppModel: ObservableObject {
     /// Background refreshes await this boundary so iOS cannot complete the BG task between enqueueing
     /// and evaluating newly imported sleep/vital evidence.
     func reevaluateContextualInterventionsNow() async {
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = nil
         await evaluateContextualInterventions()
     }
 
     private func scheduleContextualInterventionEvaluation() {
+        adaptiveDayEvaluationGate.invalidate()
         contextualEvaluationTask?.cancel()
         contextualEvaluationTask = Task { [weak self] in
             await Task.yield()
@@ -2781,6 +2803,7 @@ final class AppModel: ObservableObject {
     /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
     /// later cannot resurrect an old trip as a new observation.
     private func evaluateAdaptiveDayGuidance(now: Date = Date()) async {
+        let evaluationGeneration = adaptiveDayEvaluationGate.begin()
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
         let change = AdaptiveDayTimeZoneStore.observe(
@@ -2822,8 +2845,10 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let plannedWorkout = await PlannedWorkoutCalendarStore.shared.refresh(now: now)
+        let calendarRefresh = await PlannedWorkoutCalendarStore.shared.refreshOutcome(now: now)
         guard !Task.isCancelled else { return }
+        guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else { return }
+        guard case .completed(let plannedWorkout) = calendarRefresh else { return }
         let plan = DailyActionPlanner.plan(
             today: today,
             readiness: ReadinessEngine.evaluate(days: repo.days, today: today),
@@ -2862,6 +2887,10 @@ final class AppModel: ObservableObject {
                         now: now
                     ) { [weak self] in
                         await self?.evaluateAdaptiveDayGuidance(now: Date())
+                    }
+                    guard !Task.isCancelled else { return }
+                    guard adaptiveDayEvaluationGate.isCurrent(evaluationGeneration) else {
+                        return
                     }
                 } else {
                     AdaptivePlannedWorkoutScheduler.cancelPending()

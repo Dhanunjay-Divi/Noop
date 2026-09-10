@@ -495,6 +495,58 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun orphanedPlannedWorkoutOwnerReportsWhetherItOwnsItsNotificationSlot() {
+        val orphanedLatest = ContextualPromptDeliveryLedger.ownerReconciliation(
+            ContextualPromptDeliveryState(
+                lastGlobalDeliveryMillis = 2_000L,
+                deliveries = mapOf(
+                    ContextualPromptDeliveryOwner.VITAL_REVIEW to 1_000L,
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT to 2_000L,
+                ),
+            ),
+            ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        assertTrue(orphanedLatest.ownerRemoved)
+        assertTrue(orphanedLatest.ownedNotificationSlot)
+        assertEquals(1_000L, orphanedLatest.nextState.lastGlobalDeliveryMillis)
+
+        val supersededInSameSlot = ContextualPromptDeliveryLedger.ownerReconciliation(
+            ContextualPromptDeliveryState(
+                lastGlobalDeliveryMillis = 3_000L,
+                deliveries = mapOf(
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT to 2_000L,
+                    ContextualPromptDeliveryOwner.ADAPTIVE_DAY to 3_000L,
+                ),
+            ),
+            ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        assertTrue(supersededInSameSlot.ownerRemoved)
+        assertFalse(supersededInSameSlot.ownedNotificationSlot)
+        assertEquals(3_000L, supersededInSameSlot.nextState.lastGlobalDeliveryMillis)
+        assertEquals(
+            mapOf(ContextualPromptDeliveryOwner.ADAPTIVE_DAY to 3_000L),
+            supersededInSameSlot.nextState.deliveries,
+        )
+
+        val newerDifferentSlot = ContextualPromptDeliveryLedger.ownerReconciliation(
+            ContextualPromptDeliveryState(
+                lastGlobalDeliveryMillis = 3_000L,
+                deliveries = mapOf(
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT to 2_000L,
+                    ContextualPromptDeliveryOwner.VITAL_REVIEW to 3_000L,
+                ),
+            ),
+            ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        assertTrue(newerDifferentSlot.ownerRemoved)
+        assertTrue(newerDifferentSlot.ownedNotificationSlot)
+        assertEquals(3_000L, newerDifferentSlot.nextState.lastGlobalDeliveryMillis)
+        assertEquals(
+            mapOf(ContextualPromptDeliveryOwner.VITAL_REVIEW to 3_000L),
+            newerDifferentSlot.nextState.deliveries,
+        )
+    }
+
     @Test fun plannedWorkoutEvidenceMatchesTheSupportingSignals() {
         assertEquals(
             listOf(
@@ -751,5 +803,47 @@ class AdaptiveDayNotifierTest {
         assertTrue(missingSource.contains("plannedWorkoutStartSec(prior.fingerprint)"))
         assertTrue(missingSource.contains("expirePlannedWorkoutArtifacts"))
         assertTrue(missingSource.contains("reconcilePlannedWorkoutArtifacts"))
+    }
+
+    @Test fun missingWorkoutReconcilesAnOrphanedOwnerWithoutCancellingANewerPrompt() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val reconcile = text.indexOf("internal fun reconcilePlannedWorkoutArtifacts(")
+        val cancel = text.indexOf("private fun cancelAdaptiveDayNotification(", reconcile)
+        val reconcileSource = text.substring(reconcile, cancel)
+
+        assertTrue(reconcileSource.contains("currentFingerprint == null"))
+        assertTrue(reconcileSource.contains("reconcileOwnerWithOutcome("))
+        assertTrue(reconcileSource.contains("onNotificationSlotOwnerRemoved = {"))
+        assertTrue(reconcileSource.contains("orphanedOwner?.ownedNotificationSlot != true"))
+    }
+
+    @Test fun orphanCleanupCancelsInsideTheDeliveryLockBeforeRemovingOwnership() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/ContextualPromptDeliveryLedger.kt"),
+            File(root, "app/src/main/java/com/noop/notif/ContextualPromptDeliveryLedger.kt"),
+            File(
+                root,
+                "android/app/src/main/java/com/noop/notif/ContextualPromptDeliveryLedger.kt",
+            ),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) {
+            "Could not locate ContextualPromptDeliveryLedger.kt from $root"
+        }
+        val method = text.indexOf("fun reconcileOwnerWithOutcome(")
+        val methodEnd = text.indexOf("fun nextAllowedAtMillis(", method)
+        val methodSource = text.substring(method, methodEnd)
+        val cancel = methodSource.indexOf("onNotificationSlotOwnerRemoved()")
+        val save = methodSource.indexOf("saveState(prefs, outcome.nextState)")
+
+        assertTrue(methodSource.contains("synchronized(lock)"))
+        assertTrue(cancel >= 0)
+        assertTrue(save > cancel)
     }
 }

@@ -18,6 +18,19 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertEqual(workout.endSec, snapshot.endSec)
     }
 
+    func testAdaptiveEvaluationGenerationRejectsSupersededCalendarWork() {
+        var gate = AdaptiveDayEvaluationGenerationGate()
+        let first = gate.begin()
+        XCTAssertTrue(gate.isCurrent(first))
+
+        gate.invalidate()
+        XCTAssertFalse(gate.isCurrent(first))
+
+        let second = gate.begin()
+        XCTAssertTrue(gate.isCurrent(second))
+        XCTAssertFalse(gate.isCurrent(first))
+    }
+
     @MainActor
     func testProviderChangeRequestsFreshGuidanceEvaluationWhenEnabled() async {
         let defaults = UserDefaults.standard
@@ -77,7 +90,7 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         )
         let tail = source[method.lowerBound...]
         let refresh = try XCTUnwrap(
-            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refresh")
+            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome")
         )
         let cancellation = try XCTUnwrap(
             tail.range(
@@ -94,10 +107,81 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(cancellation.lowerBound, plan.lowerBound)
     }
 
+    func testAdaptiveEvaluationTreatsSupersededRefreshAsNeitherEmptyNorCurrent() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let refresh = try XCTUnwrap(
+            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome")
+        )
+        let completed = try XCTUnwrap(
+            tail.range(
+                of: "guard case .completed(let plannedWorkout) = calendarRefresh else",
+                range: refresh.upperBound..<tail.endIndex
+            )
+        )
+        let missingReconciliation = try XCTUnwrap(
+            tail.range(
+                of: "reconcileMissingPlannedWorkoutArtifacts",
+                range: completed.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(refresh.lowerBound, completed.lowerBound)
+        XCTAssertLessThan(completed.lowerBound, missingReconciliation.lowerBound)
+    }
+
+    func testAdaptiveEvaluationRejectsSupersededCalendarRefreshBeforePlanning() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func evaluateAdaptiveDayGuidance")
+        )
+        let tail = source[method.lowerBound...]
+        let refresh = try XCTUnwrap(
+            tail.range(of: "await PlannedWorkoutCalendarStore.shared.refreshOutcome")
+        )
+        let generationCheck = try XCTUnwrap(
+            tail.range(
+                of: "adaptiveDayEvaluationGate.isCurrent(evaluationGeneration)",
+                range: refresh.upperBound..<tail.endIndex
+            )
+        )
+        let plan = try XCTUnwrap(
+            tail.range(
+                of: "let plan = DailyActionPlanner.plan",
+                range: generationCheck.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(refresh.lowerBound, generationCheck.lowerBound)
+        XCTAssertLessThan(generationCheck.lowerBound, plan.lowerBound)
+    }
+
+    func testQueuedEvaluationInvalidatesCalendarWorkBeforeReplacementTaskStarts() throws {
+        let source = try source("Strand/App/AppModel.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "private func scheduleContextualInterventionEvaluation()")
+        )
+        let tail = source[method.lowerBound...]
+        let invalidate = try XCTUnwrap(
+            tail.range(of: "adaptiveDayEvaluationGate.invalidate()")
+        )
+        let task = try XCTUnwrap(
+            tail.range(
+                of: "contextualEvaluationTask = Task",
+                range: invalidate.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(invalidate.lowerBound, task.lowerBound)
+    }
+
     func testCalendarAuthorizationIsCheckedBeforeCachedSnapshotCanReturn() throws {
         let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
         let method = try XCTUnwrap(
-            source.range(of: "func refresh(now: Date = Date(), force: Bool = false)")
+            source.range(of: "func refreshOutcome(now: Date = Date(), force: Bool = false)")
         )
         let tail = source[method.lowerBound...]
         let authorization = try XCTUnwrap(
@@ -111,7 +195,7 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         )
         let cachedReturn = try XCTUnwrap(
             tail.range(
-                of: "return snapshot",
+                of: "return .completed(snapshot)",
                 range: accessGuard.upperBound..<tail.endIndex
             )
         )

@@ -53,6 +53,11 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         case unavailable
     }
 
+    enum RefreshOutcome: Equatable, Sendable {
+        case completed(PlannedWorkoutCalendarSnapshot?)
+        case superseded
+    }
+
     @Published private(set) var snapshot: PlannedWorkoutCalendarSnapshot?
 
     private var revision = 0
@@ -142,10 +147,21 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
     @discardableResult
     func refresh(now: Date = Date(), force: Bool = false) async
         -> PlannedWorkoutCalendarSnapshot? {
+        switch await refreshOutcome(now: now, force: force) {
+        case .completed(let snapshot):
+            return snapshot
+        case .superseded:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func refreshOutcome(now: Date = Date(), force: Bool = false) async
+        -> RefreshOutcome {
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
               PlannedWorkoutCalendarSettings.enabled else {
             clear()
-            return nil
+            return .completed(nil)
         }
 
         let day = Self.dayKey(now)
@@ -164,7 +180,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
                 outcome: "permission_unavailable",
                 fields: ["candidate_bucket": "zero"]
             )
-            return nil
+            return .completed(nil)
         }
         #endif
         if !force,
@@ -172,7 +188,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
            let lastRefreshAt,
            now.timeIntervalSince(lastRefreshAt) >= 0,
            now.timeIntervalSince(lastRefreshAt) < cacheLifetime {
-            return snapshot
+            return .completed(snapshot)
         }
 
         requestGeneration &+= 1
@@ -190,7 +206,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
                 outcome: "superseded",
                 fields: ["candidate_bucket": "zero"]
             )
-            return nil
+            return .superseded
         }
         guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
               PlannedWorkoutCalendarSettings.enabled,
@@ -201,7 +217,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
                 outcome: "access_changed",
                 fields: ["candidate_bucket": "zero"]
             )
-            return nil
+            return .completed(nil)
         }
         revision &+= 1
         snapshot = result.window.map {
@@ -220,7 +236,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
             outcome: result.window == nil ? "empty" : "matched",
             fields: ["candidate_bucket": result.candidateBucket]
         )
-        return snapshot
+        return .completed(snapshot)
         #else
         snapshot = nil
         lastRefreshAt = now
@@ -230,7 +246,7 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
             outcome: "platform_unavailable",
             fields: ["candidate_bucket": "zero"]
         )
-        return nil
+        return .completed(nil)
         #endif
     }
 

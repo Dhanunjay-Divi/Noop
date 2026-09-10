@@ -8,16 +8,31 @@ internal enum class ContextualPromptPostResult {
     FAILED,
 }
 
-internal enum class ContextualPromptDeliveryOwner(val storageKey: String) {
-    ADAPTIVE_DAY("adaptive_day"),
-    PLANNED_WORKOUT("planned_workout"),
-    STRESS_BREATHING("stress_breathing"),
-    VITAL_REVIEW("vital_review"),
+internal enum class ContextualPromptNotificationSlot {
+    ADAPTIVE_DAY,
+    STRESS_BREATHING,
+    VITAL_REVIEW,
+}
+
+internal enum class ContextualPromptDeliveryOwner(
+    val storageKey: String,
+    val notificationSlot: ContextualPromptNotificationSlot,
+) {
+    ADAPTIVE_DAY("adaptive_day", ContextualPromptNotificationSlot.ADAPTIVE_DAY),
+    PLANNED_WORKOUT("planned_workout", ContextualPromptNotificationSlot.ADAPTIVE_DAY),
+    STRESS_BREATHING("stress_breathing", ContextualPromptNotificationSlot.STRESS_BREATHING),
+    VITAL_REVIEW("vital_review", ContextualPromptNotificationSlot.VITAL_REVIEW),
 }
 
 internal data class ContextualPromptDeliveryState(
     val lastGlobalDeliveryMillis: Long? = null,
     val deliveries: Map<ContextualPromptDeliveryOwner, Long> = emptyMap(),
+)
+
+internal data class ContextualPromptOwnerReconciliation(
+    val nextState: ContextualPromptDeliveryState,
+    val ownerRemoved: Boolean,
+    val ownedNotificationSlot: Boolean,
 )
 
 /** Pure cross-topic anti-pileup rule shared by routine contextual phone prompts. */
@@ -72,9 +87,27 @@ internal object ContextualPromptDeliveryLedger {
     internal fun reconciledOwnerState(
         state: ContextualPromptDeliveryState,
         owner: ContextualPromptDeliveryOwner,
-    ): ContextualPromptDeliveryState {
-        val expectedAtMillis = state.deliveries[owner] ?: return state
-        return reconciledState(state, owner, expectedAtMillis)
+    ): ContextualPromptDeliveryState = ownerReconciliation(state, owner).nextState
+
+    internal fun ownerReconciliation(
+        state: ContextualPromptDeliveryState,
+        owner: ContextualPromptDeliveryOwner,
+    ): ContextualPromptOwnerReconciliation {
+        val expectedAtMillis = state.deliveries[owner]
+            ?: return ContextualPromptOwnerReconciliation(
+                nextState = state,
+                ownerRemoved = false,
+                ownedNotificationSlot = false,
+            )
+        val latestSlotDeliveryMillis = state.deliveries
+            .filterKeys { it.notificationSlot == owner.notificationSlot }
+            .values
+            .maxOrNull()
+        return ContextualPromptOwnerReconciliation(
+            nextState = reconciledState(state, owner, expectedAtMillis),
+            ownerRemoved = true,
+            ownedNotificationSlot = latestSlotDeliveryMillis == expectedAtMillis,
+        )
     }
 
     fun postIfAllowed(
@@ -106,16 +139,25 @@ internal object ContextualPromptDeliveryLedger {
         true
     }
 
-    fun reconcileOwner(
+    /**
+     * Reconciles one owner and performs shared-slot cleanup before another prompt can post.
+     *
+     * [onNotificationSlotOwnerRemoved] runs under the same lock as [postIfAllowed], so a newer notification
+     * cannot take over the shared slot between the ownership check and platform cancellation.
+     */
+    fun reconcileOwnerWithOutcome(
         context: Context,
         owner: ContextualPromptDeliveryOwner,
-    ): Boolean = synchronized(lock) {
+        onNotificationSlotOwnerRemoved: () -> Unit = {},
+    ): ContextualPromptOwnerReconciliation = synchronized(lock) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
         val state = loadState(prefs)
-        val next = reconciledOwnerState(state, owner)
-        if (next == state) return@synchronized false
-        saveState(prefs, next)
-        true
+        val outcome = ownerReconciliation(state, owner)
+        if (outcome.ownerRemoved) {
+            if (outcome.ownedNotificationSlot) onNotificationSlotOwnerRemoved()
+            saveState(prefs, outcome.nextState)
+        }
+        outcome
     }
 
     fun nextAllowedAtMillis(

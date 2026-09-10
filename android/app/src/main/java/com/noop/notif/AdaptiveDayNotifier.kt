@@ -1230,11 +1230,23 @@ object AdaptiveDayNotifier {
         val state = loadState(app)
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
         if (prior == null) {
-            if (forceCancelSharedNotification) {
-                ContextualPromptDeliveryLedger.reconcileOwner(
+            val orphanedOwner = if (
+                currentFingerprint == null || forceCancelSharedNotification
+            ) {
+                ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(
                     context = app,
                     owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                    onNotificationSlotOwnerRemoved = {
+                        cancelAdaptiveDayNotification(app)
+                    },
                 )
+            } else {
+                null
+            }
+            if (
+                forceCancelSharedNotification &&
+                orphanedOwner?.ownedNotificationSlot != true
+            ) {
                 cancelAdaptiveDayNotification(app)
             }
             return
