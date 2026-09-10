@@ -204,6 +204,26 @@ struct LiquidTodayView: View {
     private let liquidHeart = Color(.sRGB, red: 1, green: 107 / 255, blue: 129 / 255, opacity: 1)
     /// Hero card fill: a translucent near-black so it floats over the sky (mock rgba(13,14,20,.78)).
     private let heroFill = Color(.sRGB, red: 13 / 255, green: 14 / 255, blue: 20 / 255, opacity: 0.80)
+    /// The desktop reference has a deliberately dense first viewport. Phones keep that hierarchy by
+    /// scaling the fixed-format score instruments down together; large Dynamic Type retains the roomier
+    /// dimensions so labels never clip.
+    private var usesCompactPhoneTodayLayout: Bool {
+        #if os(iOS)
+        return dynamicTypeSize != .xxxLarge && !dynamicTypeSize.isAccessibilitySize
+        #else
+        return false
+        #endif
+    }
+    private var todayHeroArcSize: CGFloat { usesCompactPhoneTodayLayout ? 136 : 156 }
+    private var todaySatelliteSize: CGFloat { usesCompactPhoneTodayLayout ? 54 : 60 }
+    private var todayHeroRadius: CGFloat { usesCompactPhoneTodayLayout ? 24 : 26 }
+    private var todayHeroSpacing: CGFloat { usesCompactPhoneTodayLayout ? 10 : NoopMetrics.space3 }
+    private var todayHeroVerticalPadding: CGFloat { usesCompactPhoneTodayLayout ? 10 : NoopMetrics.space3 }
+    private var todayHeroHorizontalPadding: CGFloat { usesCompactPhoneTodayLayout ? 14 : NoopMetrics.space4 }
+    private var todaySceneTopPadding: CGFloat { usesCompactPhoneTodayLayout ? 18 : 30 }
+    private var todayGreetingSize: CGFloat { usesCompactPhoneTodayLayout ? 28 : 30 }
+    private var todayHeroShadowRadius: CGFloat { usesCompactPhoneTodayLayout ? 18 : 22 }
+    private var todayHeroShadowY: CGFloat { usesCompactPhoneTodayLayout ? 8 : 10 }
     /// "Card transparency" (0–100, default 100): fades every liquid card surface here - the hero, the
     /// session-start row, the metric tiles and the `card` helper — in lockstep with the frosted cards.
     /// Content sits above the surface so it stays readable. Mirrors Kotlin `NoopPrefs.cardOpacityPercent`.
@@ -439,7 +459,7 @@ struct LiquidTodayView: View {
                     dataSourcesSection
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 30) // sit the title lower into the sky, not jammed under the status bar
+                .padding(.top, todaySceneTopPadding)
                 // The shell reserves the bar's layout height. Keep the same small content breathing room
                 // as ScreenScaffold so the bar's upward-cast shadow never washes over the final card.
                 .padding(.bottom, NoopMetrics.space4)
@@ -720,8 +740,8 @@ struct LiquidTodayView: View {
                     }
                 }
             }
-            .padding(.top, NoopMetrics.space5)
-            .padding(.bottom, NoopMetrics.space4)
+            .padding(.top, usesCompactPhoneTodayLayout ? NoopMetrics.space3 : NoopMetrics.space5)
+            .padding(.bottom, usesCompactPhoneTodayLayout ? NoopMetrics.space3 : NoopMetrics.space4)
             .accessibilityLabel("\(dayTitle). Tap to pick a day, swipe to change day.")
             .popover(isPresented: $showDayPicker) {
                 DatePicker("", selection: dayPickerBinding, in: ...Repository.logicalDay(Date()),
@@ -744,7 +764,7 @@ struct LiquidTodayView: View {
                     .textCase(.uppercase)
                     .foregroundStyle(StrandPalette.textTertiary)
                 Text(selectedDayOffset == 0 ? greeting : dayTitle)
-                    .font(StrandFont.rounded(30, weight: .bold))
+                    .font(StrandFont.rounded(todayGreetingSize, weight: .bold))
                     .foregroundStyle(StrandPalette.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -764,7 +784,10 @@ struct LiquidTodayView: View {
             .foregroundStyle(weather.snapshot == nil
                              ? StrandPalette.textSecondary
                              : StrandPalette.chargeBright)
-            .frame(width: 82, height: 34)
+            .frame(
+                width: usesCompactPhoneTodayLayout ? 76 : 82,
+                height: usesCompactPhoneTodayLayout ? 32 : 34
+            )
             .background(Capsule().fill(.white.opacity(0.055)))
             .overlay(
                 Capsule().strokeBorder(
@@ -964,7 +987,7 @@ struct LiquidTodayView: View {
     }
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+        VStack(alignment: .leading, spacing: todayHeroSpacing) {
             DailySignalHeader(
                 readiness: readiness,
                 includesCurrentWellnessSignal: selectedDayOffset == 0,
@@ -978,7 +1001,7 @@ struct LiquidTodayView: View {
                     base: recoveryHeroTone,
                     tip: recoveryHeroTip,
                     caption: recoveryHeroCaption,
-                    size: 156
+                    size: todayHeroArcSize
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -987,14 +1010,14 @@ struct LiquidTodayView: View {
                 TapGesture(count: 2).onEnded { explainHeroMetric("recovery") }
             )
 
-            HStack(spacing: 28) {
+            HStack(spacing: usesCompactPhoneTodayLayout ? 24 : 28) {
                 Button { openHeroMetric("sleep_performance") } label: {
                     V2SatelliteRing(
                         label: String(localized: "Sleep"),
                         value: restScore,
                         base: sleepHeroTone,
                         tip: sleepHeroTip,
-                        size: 60
+                        size: todaySatelliteSize
                     )
                 }
                 .buttonStyle(.plain)
@@ -1012,7 +1035,7 @@ struct LiquidTodayView: View {
                         max: effortScale == .whoop ? 21 : 100,
                         base: StrandPalette.effortColor,
                         tip: StrandPalette.effortBright,
-                        size: 60,
+                        size: todaySatelliteSize,
                         decimals: effortScale == .whoop ? 1 : 0
                     )
                 }
@@ -1045,13 +1068,13 @@ struct LiquidTodayView: View {
                 )
             }
         }
-        .padding(.vertical, NoopMetrics.space3)
-        .padding(.horizontal, NoopMetrics.space4)
+        .padding(.vertical, todayHeroVerticalPadding)
+        .padding(.horizontal, todayHeroHorizontalPadding)
         .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
+            RoundedRectangle(cornerRadius: todayHeroRadius, style: .continuous)
                 .fill(Color(hex: "#070908").opacity(cardOpacity))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    RoundedRectangle(cornerRadius: todayHeroRadius, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [
@@ -1065,7 +1088,7 @@ struct LiquidTodayView: View {
                         )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    RoundedRectangle(cornerRadius: todayHeroRadius, style: .continuous)
                         .fill(
                             LinearGradient(
                                 colors: [.white.opacity(0.07), .clear, .black.opacity(0.24)],
@@ -1075,7 +1098,7 @@ struct LiquidTodayView: View {
                         )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    RoundedRectangle(cornerRadius: todayHeroRadius, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
@@ -1089,7 +1112,11 @@ struct LiquidTodayView: View {
                             lineWidth: 0.9
                         )
                 )
-                .shadow(color: .black.opacity(0.34), radius: 22, y: 10)
+                .shadow(
+                    color: .black.opacity(0.34),
+                    radius: todayHeroShadowRadius,
+                    y: todayHeroShadowY
+                )
                 .opacity(cardOpacity)
         )
     }
@@ -4074,20 +4101,23 @@ private struct DailySignalHeader: View {
     }
 
     private var compactRow: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-            signalLabel
+        VStack(alignment: .leading, spacing: NoopMetrics.space1) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: NoopMetrics.space2) {
+                    signalLabel
                     Spacer(minLength: NoopMetrics.space2)
-                    sourceChip
                     statusChip
                 }
 
-                VStack(alignment: .trailing, spacing: NoopMetrics.space2) {
-                    sourceChip
+                VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                    signalLabel
                     statusChip
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            if sourceLabel != nil {
+                sourceChip
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }

@@ -321,7 +321,7 @@ private var todayDidSnapToTodayThisLaunch = false
 // count-up numbers read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge.
 private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
 private val LIQUID_HERO_BASE: Color = Color(red = 7f / 255f, green = 9f / 255f, blue = 8f / 255f, alpha = 1f)
-private val LIQUID_HERO_RADIUS: Dp = 26.dp
+private val LIQUID_HERO_RADIUS: Dp = 24.dp
 private val DAILY_SIGNAL_ALERT_TINT = Color(0xFFFF453A)
 
 private fun Modifier.liquidTodayHeroSurface(tint: Color): Modifier = composed {
@@ -329,7 +329,7 @@ private fun Modifier.liquidTodayHeroSurface(tint: Color): Modifier = composed {
     val shape = RoundedCornerShape(LIQUID_HERO_RADIUS)
     this
         .shadow(
-            elevation = (22f * opacity).dp,
+            elevation = (18f * opacity).dp,
             shape = shape,
             clip = false,
         )
@@ -3331,7 +3331,7 @@ private fun LiquidTodayHeader(
     var showMenu by remember { mutableStateOf(false) }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Metrics.space16),
+        verticalArrangement = Arrangement.spacedBy(Metrics.space12),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -3465,7 +3465,7 @@ private fun LiquidTodayHeader(
             ) {
                 Text(
                     headline,
-                    style = NoopType.number(30f, weight = FontWeight.Bold).copy(
+                    style = NoopType.number(28f, weight = FontWeight.Bold).copy(
                         shadow = Shadow(
                             color = Color.Black.copy(alpha = 0.4f),
                             offset = Offset(0f, 1f),
@@ -4243,7 +4243,11 @@ private fun DailySignalHeader(
     ) {
         val fontScale = LocalDensity.current.fontScale
         val sourceNeedsWideRow = sourceLabel?.contains(" + ") == true
-        val singleRowMinimum = if (sourceNeedsWideRow) 440.dp else 380.dp
+        val singleRowMinimum = when {
+            sourceLabel == null -> 260.dp
+            sourceNeedsWideRow -> 440.dp
+            else -> 360.dp
+        }
         val fitsSingleRow = maxWidth >= singleRowMinimum && fontScale <= 1.15f
         val semantics = Modifier.semantics {
             contentDescription = uiString(
@@ -4272,21 +4276,23 @@ private fun DailySignalHeader(
         } else {
             Column(
                 modifier = semantics.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space4),
             ) {
-                DailySignalIdentity(status = status, tint = tint)
-                Column(
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (sourceLabel != null) {
-                        DailySignalSourceBadgeLive(
-                            text = sourceLabel,
-                            viewModel = viewModel,
-                        )
-                    }
+                    DailySignalIdentity(status = status, tint = tint)
+                    Spacer(Modifier.weight(1f))
                     DailySignalStatePill(title = label, tint = tint)
+                }
+                if (sourceLabel != null) {
+                    DailySignalSourceBadgeLive(
+                        text = sourceLabel,
+                        viewModel = viewModel,
+                        modifier = Modifier.align(Alignment.End),
+                    )
                 }
             }
         }
@@ -4562,6 +4568,9 @@ private fun ScoreHeroRow(
     onChargeTap: (() -> Unit)? = null,
     onFitnessAgeTap: (() -> Unit)? = null,
 ) {
+    val compactInstruments = LocalDensity.current.fontScale <= 1.30f
+    val heroSize = if (compactInstruments) 136.dp else 156.dp
+    val satelliteSize = if (compactInstruments) 54.dp else 60.dp
     val ownRecovery = day?.recovery
     val recovery = ownRecovery ?: lastScoredCharge?.value
     val recoveryColors = recovery?.let(Palette::recoveryGaugeColors)
@@ -4594,9 +4603,9 @@ private fun ScoreHeroRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Metrics.space16, vertical = Metrics.space12),
+            .padding(horizontal = Metrics.space14, vertical = Metrics.space10),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Metrics.space16),
+        verticalArrangement = Arrangement.spacedBy(Metrics.space12),
     ) {
         V2HeroArc(
             label = uiString(R.string.l10n_today_screen_recovery_ea924f72),
@@ -4604,7 +4613,7 @@ private fun ScoreHeroRow(
             base = recoveryColors.first,
             tip = recoveryColors.second,
             caption = recoveryCaption,
-            size = 156.dp,
+            size = heroSize,
             modifier = Modifier.clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -4614,7 +4623,7 @@ private fun ScoreHeroRow(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.Top,
         ) {
             V2SatelliteRing(
@@ -4623,7 +4632,7 @@ private fun ScoreHeroRow(
                 maximum = 100.0,
                 base = sleepBase,
                 tip = sleepTip,
-                size = 60.dp,
+                size = satelliteSize,
                 onClick = { onScoreInfo(ScoreSection.REST) },
             )
             V2SatelliteRing(
@@ -4632,7 +4641,7 @@ private fun ScoreHeroRow(
                 maximum = effortMax,
                 base = Palette.effortColor,
                 tip = Palette.effortBright,
-                size = 60.dp,
+                size = satelliteSize,
                 decimals = if (effortScale == EffortScale.WHOOP) 1 else 0,
                 onClick = { onScoreInfo(ScoreSection.EFFORT) },
             )

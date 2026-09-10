@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-09**
+Last updated: **2026-09-10**
 
 ## Repository
 
@@ -17,6 +17,20 @@ Last updated: **2026-09-09**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The mobile and desktop Today visual-parity round is implemented and locally
+verified on `codex/mobile-desktop-visual-parity-20260910`. Apple and Android
+phones now share the desktop reference's compact masthead, dominant Daily
+Signal hierarchy, score geometry, integrated Fitness Age row, and immediate
+workout-coach placement while preserving native navigation and accessibility.
+Matched synthetic captures were reviewed at 1170 x 2532 and 1080 x 2400. The
+focused Apple suite passed 80 tests; Android passed 19 focused contracts plus
+the full debug build, lint, and instrumentation-source compilation; and the
+complete iOS simulator app graph builds. No formula, provenance, storage, sync,
+collection, account, or network behavior changed. Protected push, hosted
+checks, review, and merge remain, along with physical-device smoothness and
+hardware-dependent evidence. Details are in
+[Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged
 on `main` as `035dec3c` after all 35 hosted checks passed. Apple and Android require a
