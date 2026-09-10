@@ -138,6 +138,21 @@ external-data skip, all 4,227 Android tests with seven skips plus APK assembly,
 production compile, lint, and instrumentation-source compilation, and the
 complete unsigned iPhone/widget/watch graph. Fresh exact-head review, protected
 checks, and normal merge remain required.
+The newest exact-head review then found two final state-lifetime gaps. Android
+now invalidates the active adaptive-day generation as soon as a new health-data
+emission arrives and uses latest-only collection, so an older suspended
+evaluation cannot publish after fresher sleep or readiness data exists. Apple
+now discovers and migrates any equivalent legacy Workouts action ID, processing
+state, and bounded dismissed/completed tombstones even when delivery state is
+already canonical, preserving the action and the user's prior decision under
+the three-field identity. The focused closeout passes 40 Apple tests and the
+two Android regression suites. The complete replacement wall passes 1,746
+Apple app tests with one expected external-data skip, 4,228 Android tests with
+seven skips plus APK assembly, full debug compile, lint, and instrumentation-
+source compilation, and the complete unsigned iPhone/widget/watch graph. The
+signed Android release probe remains correctly blocked before compilation
+without private signing credentials. Source and local evidence are complete;
+fresh exact-head review, protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

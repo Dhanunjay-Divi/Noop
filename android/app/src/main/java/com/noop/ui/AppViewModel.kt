@@ -100,6 +100,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -958,7 +959,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         // Recompute the illness banner + today's row whenever cached days change.
         viewModelScope.launch {
-            recentDays.collect { days ->
+            recentDays
+                .onEach { AdaptiveDayEvaluationGate.invalidate() }
+                .collectLatest { days ->
                 // Only treat a row as "today" if its date is the phone's ACTUAL local calendar day.
                 // Was days.lastOrNull() — the newest stored row regardless of date — so after importing
                 // historical data the newest import (e.g. months old) showed as today's synthesis (#23).
@@ -1031,7 +1034,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         ),
                     )
                 }
-            }
+                }
         }
 
         // Turn the strap's offloaded raw data into dashboard scores on launch and every

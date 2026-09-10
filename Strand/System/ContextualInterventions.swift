@@ -584,9 +584,20 @@ enum ContextualInterventionCenter {
         let artifactFingerprint = remainsCurrent
             ? prior?.fingerprint
             : keepingFingerprint
+        if let keepingFingerprint {
+            ContextualActionCenter.shared.migrateRecoveryAction(
+                route: .workouts,
+                toFingerprint: keepingFingerprint
+            ) { candidateFingerprint in
+                plannedWorkoutFingerprintsMatch(
+                    candidateFingerprint,
+                    keepingFingerprint
+                )
+            }
+        }
         ContextualActionCenter.shared.reconcileRecoveryActions(
             route: .workouts,
-            keepingFingerprint: artifactFingerprint
+            keepingFingerprint: keepingFingerprint
         )
         AdaptivePlannedWorkoutScheduler.reconcileDeliveryExpiry(
             keepingFingerprint: artifactFingerprint,

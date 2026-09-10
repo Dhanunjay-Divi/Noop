@@ -103,6 +103,22 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
+    fun recentHealthDataInvalidatesAndCancelsOlderAdaptiveEvaluation() {
+        val viewModel = source("com/noop/ui/AppViewModel.kt")
+        val chainStart = viewModel.indexOf(
+            "recentDays\n" +
+                "                .onEach { AdaptiveDayEvaluationGate.invalidate() }",
+        )
+        val collectLatest = viewModel.indexOf(".collectLatest { days ->", chainStart)
+        val evaluate = viewModel.indexOf("evaluateAdaptiveDayGuidance(days)", collectLatest)
+
+        assertTrue(chainStart >= 0)
+        assertTrue(collectLatest > chainStart)
+        assertTrue(evaluate > collectLatest)
+        assertTrue(!viewModel.contains("recentDays.collect { days ->"))
+    }
+
+    @Test
     fun enablingCalendarAccessImmediatelyReevaluatesAdaptiveGuidance() {
         val source = source("com/noop/ui/AutomationsScreen.kt")
         assertTrue(!source.contains("PlannedWorkoutCalendarStore.refresh(ctx, force = true)"))

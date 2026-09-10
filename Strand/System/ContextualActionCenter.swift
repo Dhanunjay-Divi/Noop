@@ -380,6 +380,64 @@ final class ContextualActionCenter: ObservableObject {
         }
     }
 
+    func migrateRecoveryAction(
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Bool
+    ) {
+        let idPrefix = "\(ContextualActionKind.recovery.rawValue):"
+        let newID = "\(idPrefix)\(toFingerprint)"
+        func matchesLegacyID(_ id: String) -> Bool {
+            guard id != newID, id.hasPrefix(idPrefix) else { return false }
+            return matchingFingerprint(String(id.dropFirst(idPrefix.count)))
+        }
+
+        var changed = false
+        let matchingActions = actions.filter {
+            $0.kind == .recovery &&
+                $0.resolvedRecoveryRoute == route &&
+                matchesLegacyID($0.id)
+        }
+        if let prior = matchingActions.max(by: { $0.createdAt < $1.createdAt }) {
+            actions.removeAll {
+                $0.kind == .recovery &&
+                    $0.resolvedRecoveryRoute == route &&
+                    matchesLegacyID($0.id)
+            }
+            if !actions.contains(where: { $0.id == newID }) {
+                actions.append(
+                    ContextualAction(
+                        id: newID,
+                        kind: prior.kind,
+                        title: prior.title,
+                        detail: prior.detail,
+                        evidence: prior.evidence,
+                        createdAt: prior.createdAt,
+                        expiresAt: prior.expiresAt,
+                        amountML: prior.amountML,
+                        route: prior.route
+                    )
+                )
+            }
+            changed = true
+        }
+
+        func migrateIDs(_ ids: inout Set<String>) {
+            let legacyIDs = ids.filter(matchesLegacyID)
+            guard !legacyIDs.isEmpty else { return }
+            ids.subtract(legacyIDs)
+            ids.insert(newID)
+            changed = true
+        }
+        migrateIDs(&processingIDs)
+        migrateIDs(&dismissedIDs)
+        migrateIDs(&completedIDs)
+
+        if changed {
+            persist()
+        }
+    }
+
     func removeExpired(now: Date = Date()) {
         let priorCount = actions.count
         actions.removeAll { $0.expiresAt <= now }

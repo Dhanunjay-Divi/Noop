@@ -166,6 +166,90 @@ final class ContextualActionPolicyTests: XCTestCase {
     }
 
     @MainActor
+    func testEquivalentLegacyActionMigratesAfterDeliveryStateIsCanonical() throws {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "state"
+        let center = ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+        let legacy = "planned-workout|2026-08-22|1700000123|SLEEP_DEFICIT"
+        let current = "planned-workout|2026-08-22|1700000123"
+        center.presentRecovery(
+            title: "Planned workout",
+            detail: "Keep it lighter.",
+            fingerprint: legacy,
+            evidence: ["Measured sleep"],
+            observedAt: Date(),
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+
+        center.migrateRecoveryAction(
+            route: .workouts,
+            toFingerprint: current
+        ) {
+            ContextualInterventionCenter.plannedWorkoutFingerprintsMatch($0, current)
+        }
+        center.reconcileRecoveryActions(
+            route: .workouts,
+            keepingFingerprint: current
+        )
+
+        let migrated = try XCTUnwrap(center.visibleActions.first)
+        XCTAssertEqual(migrated.id, "recovery:\(current)")
+        XCTAssertEqual(migrated.route, .workouts)
+        XCTAssertEqual(migrated.evidence, ["Measured sleep"])
+        XCTAssertEqual(
+            ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+                .visibleActions.first?.id,
+            migrated.id
+        )
+    }
+
+    @MainActor
+    func testPlannedWorkoutActionFingerprintMigrationPreservesDismissal() throws {
+        let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "state"
+        let center = ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+        let legacy = "planned-workout|2026-08-22|1700000123|SLEEP_DEFICIT"
+        let current = "planned-workout|2026-08-22|1700000123"
+        center.presentRecovery(
+            title: "Planned workout",
+            detail: "Keep it lighter.",
+            fingerprint: legacy,
+            evidence: ["Measured sleep"],
+            observedAt: Date(),
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+        center.dismiss(try XCTUnwrap(center.visibleActions.first))
+
+        center.migrateRecoveryAction(
+            route: .workouts,
+            toFingerprint: current
+        ) {
+            ContextualInterventionCenter.plannedWorkoutFingerprintsMatch($0, current)
+        }
+        center.presentRecovery(
+            title: "Planned workout",
+            detail: "Keep it lighter.",
+            fingerprint: current,
+            evidence: ["Measured sleep"],
+            observedAt: Date(),
+            maximumAge: 60 * 60,
+            route: .workouts
+        )
+
+        XCTAssertTrue(center.visibleActions.isEmpty)
+        XCTAssertTrue(
+            ContextualActionCenter(defaults: defaults, storageKey: storageKey)
+                .visibleActions.isEmpty
+        )
+    }
+
+    @MainActor
     func testStaleDeliveredNotificationDoesNotBecomeCurrentAction() {
         let suiteName = "ContextualActionPolicyTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
