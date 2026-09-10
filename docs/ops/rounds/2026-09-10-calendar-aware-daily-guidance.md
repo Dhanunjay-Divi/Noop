@@ -7,7 +7,7 @@
 - Branch: `codex/calendar-aware-daily-guidance-20260910`
 - Start commit: `67ffd848094bbc3e7cbab682feed592c68a10f88`
 - End implementation commit: `0222fe1a410943ce6bd849361308e889f14911f2`
-- Record commit or PR: pending protected review
+- Record commit or PR: pull request `#14`
 
 ## Objective
 
@@ -165,8 +165,8 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   (refresh cancellation), `28a75392` (fatal provider errors), `b752de56`
   (deterministic visual fixtures), and `0222fe1a` (fail-closed visual
   verification)
-- Branch and remote state: rebased child branch of merged pull request `#13`;
-  protected review and merge for this feature remain pending
+- Branch and remote state: rebased branch synchronized to `origin` at
+  `61651bbc`; protected pull request `#14` is open and merge remains pending
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires

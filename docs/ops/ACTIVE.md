@@ -18,8 +18,9 @@ Last updated: **2026-09-10**
 
 ## Active work
 
-Calendar-aware daily guidance is implemented and locally verified on
-`codex/calendar-aware-daily-guidance-20260910`. Apple and Android expose a
+Calendar-aware daily guidance is implemented and locally verified on protected
+pull request `#14` from `codex/calendar-aware-daily-guidance-20260910`. Apple
+and Android expose a
 separate default-off Calendar option under Adaptive Day Guidance, classify
 same-day future workout titles locally, discard event content inside the
 query, and keep only a generic in-memory time window. Today's Plan can combine
