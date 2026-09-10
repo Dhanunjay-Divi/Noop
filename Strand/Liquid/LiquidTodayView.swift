@@ -804,6 +804,8 @@ struct LiquidTodayView: View {
                     lineWidth: 0.8
                 )
             )
+            .frame(minHeight: NoopMetrics.controlHeight)
+            .contentShape(Rectangle())
         }
         .buttonStyle(LiquidPressStyle())
         .accessibilityLabel(weatherAccessibilityLabel)

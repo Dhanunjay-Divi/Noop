@@ -27,6 +27,29 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         )
     }
 
+    func testCompactWeatherKeepsFullTouchTargetAroundCompactCapsule() throws {
+        let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let weather = try slice(
+            source,
+            from: "private var weatherChip",
+            to: "@ViewBuilder private var weatherChipContent"
+        )
+
+        let compactVisualHeight = try XCTUnwrap(
+            weather.range(of: "height: usesCompactPhoneTodayLayout ? 32 : 34")
+        )
+        let touchTarget = try XCTUnwrap(
+            weather.range(of: ".frame(minHeight: NoopMetrics.controlHeight)")
+        )
+        let buttonStyle = try XCTUnwrap(
+            weather.range(of: ".buttonStyle(LiquidPressStyle())")
+        )
+
+        XCTAssertLessThan(compactVisualHeight.lowerBound, touchTarget.lowerBound)
+        XCTAssertLessThan(touchTarget.lowerBound, buttonStyle.lowerBound)
+        XCTAssertTrue(weather.contains(".contentShape(Rectangle())"))
+    }
+
     func testAutoDetectedWorkoutSuggestionIsMountedOnDefaultToday() throws {
         let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
         let body = try slice(source, from: "var body: some View", to: ".coordinateSpace(name: Self.pullSpace)")
