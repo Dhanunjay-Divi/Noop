@@ -112,8 +112,9 @@ fun HrvSnapshotScreen(
     // phase or leaving the sheet releases exactly the one capture lease. Activity background is gated in
     // AppViewModel, so an in-progress visible capture re-arms only if the same Activity returns.
     DisposableEffect(phase == HrvPhase.Capturing) {
-        if (phase == HrvPhase.Capturing) viewModel.requestRealtimeHr()
-        onDispose { if (phase == HrvPhase.Capturing) viewModel.releaseRealtimeHr() }
+        val ownsRealtimeHrLease = phase == HrvPhase.Capturing
+        if (ownsRealtimeHrLease) viewModel.requestRealtimeHr()
+        onDispose { if (ownsRealtimeHrLease) viewModel.releaseRealtimeHr() }
     }
 
     // Pull new R-R intervals into the capture buffer as they arrive — same path as BreatheScreen.

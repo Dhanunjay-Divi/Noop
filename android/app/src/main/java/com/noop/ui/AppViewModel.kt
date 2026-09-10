@@ -80,11 +80,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -118,6 +120,60 @@ internal object ActiveZoneUpgradeGate {
     fun needsRescore(completedRevision: String?): Boolean =
         completedRevision != CURRENT_REVISION
 }
+
+internal data class TodayRestCompositeCacheKey(
+    val dailyDataSignature: Int,
+    val activeStrapId: String,
+    val restDataVersion: Long,
+)
+
+/** Stable live fields the Today root is allowed to observe. Sensor values and sync counters stay in leaves. */
+internal data class DashboardLiveSnapshot(
+    val connected: Boolean,
+    val bonded: Boolean,
+    val batteryPct: Double?,
+    val isGeneration5: Boolean,
+    val charging: Boolean?,
+)
+
+internal fun LiveState.dashboardLiveSnapshot(): DashboardLiveSnapshot =
+    DashboardLiveSnapshot(
+        connected = connected,
+        bonded = bonded,
+        batteryPct = batteryPct,
+        isGeneration5 = isGeneration5,
+        charging = charging,
+    )
+
+internal fun Flow<LiveState>.dashboardLiveChanges(): Flow<DashboardLiveSnapshot> =
+    map(LiveState::dashboardLiveSnapshot).distinctUntilChanged()
+
+/** Exact history progress for small status leaves; ordinary sensor packets map to an equal value. */
+internal data class HistorySyncStatusSnapshot(
+    val backfilling: Boolean,
+    val batches: Int,
+    val rows: Int,
+    val newestDataUnix: Long?,
+    val startedAt: Long?,
+    val lastDurableProgressAt: Long?,
+    val lastSyncAt: Long?,
+    val experimental: Boolean,
+)
+
+internal fun LiveState.historySyncStatusSnapshot(): HistorySyncStatusSnapshot =
+    HistorySyncStatusSnapshot(
+        backfilling = backfilling,
+        batches = syncChunksThisSession,
+        rows = syncRowsThisSession,
+        newestDataUnix = syncDataNewestAt,
+        startedAt = syncStartedAt,
+        lastDurableProgressAt = syncLastDurableProgressAt,
+        lastSyncAt = lastSyncAt,
+        experimental = historySyncExperimental,
+    )
+
+internal fun Flow<LiveState>.historySyncStatusChanges(): Flow<HistorySyncStatusSnapshot> =
+    map(LiveState::historySyncStatusSnapshot).distinctUntilChanged()
 
 /**
  * The single app-wide view model. Holds the BLE client and the Room-backed
@@ -220,7 +276,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun deletePairedDeviceData(id: String) {
         noopApp.deviceRegistry.deleteDeviceData(id)
         repository.noteWorkoutsChanged()
-        noteAgeMetricsChanged()
+        noteAllMetricsChanged()
     }
 
     /**
@@ -389,6 +445,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Repository-backed revisions also advance for background imports/scoring without an Activity owner. */
     val metricDataVersion: StateFlow<Long> = repository.metricDataVersion
     val ageMetricDataVersion: StateFlow<Long> = metricDataVersion
+    val restDataVersion: StateFlow<Long> = repository.restDataVersion
     val workoutDataVersion: StateFlow<Long> = repository.workoutDataVersion
     private var lastAgeMetricReconciliationTarget: AgeMetricReconciliationTarget? =
         NoopPrefs.of(appContext).let { prefs ->
@@ -446,11 +503,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Live connection + biometric snapshot, surfaced straight from the BLE client. */
     val live: StateFlow<LiveState> = ble.state
+    /** Slow-changing Today-root state. Exact history progress is collected only by status leaves. */
+    internal val dashboardLive: StateFlow<DashboardLiveSnapshot> = live
+        .dashboardLiveChanges()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            live.value.dashboardLiveSnapshot(),
+        )
+    /** Shared exact sync projection. It emits for progress, not for HR/R-R sensor cadence. */
+    internal val historySyncStatus: StateFlow<HistorySyncStatusSnapshot> = live
+        .historySyncStatusChanges()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            live.value.historySyncStatusSnapshot(),
+        )
     /** Low-frequency projection for history consumers that need to refresh after an offload without
      *  collecting the full live state (which republishes every heart-rate packet). */
     val lastHistorySyncAt: StateFlow<Long?> = live
         .map { it.lastSyncAt }
         .stateIn(viewModelScope, SharingStarted.Eagerly, live.value.lastSyncAt)
+    /** Low-frequency write-boundary projection for retained screens. */
+    val historyBackfillActive: StateFlow<Boolean> = live
+        .map { it.backfilling }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, live.value.backfilling)
 
     /** Which strap the user is pairing — drives the scan filter in [connect]. Defaults to WHOOP 4.0. */
     private val _selectedModel = MutableStateFlow(WhoopModel.WHOOP4)
@@ -652,6 +730,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * the screen's local state. `null` = never loaded this process. Pure load-bookkeeping; never drives UI.
      */
     var todayFooterLoadedSig: Int? = null
+    var todayFooterLoadedDeviceId: String? = null
 
     /**
      * #849: the last computed Today footer state, cached so a re-mount can RESTORE it without recomputing.
@@ -669,11 +748,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * loaded this process; the cached triple is restored into the screen's local state on first composition.
      */
     var todayCardsLoadedSig: Int? = null
+    var todayCardsLoadedDeviceId: String? = null
     var todayCardsLoadedProfileSig: String? = null
     var todayCardsLoadedAgeMetricVersion: Long? = null
     var todayStressCache: Double? = null
     var todayFitnessAgeCache: Double? = null
     var todayVitalityCache: Double? = null
+
+    /**
+     * The Rest number and its sparkline consume the same resolved sleep_performance history. Keep that
+     * compact day/value map across Today re-mounts so one Room read serves both outputs and a day swipe
+     * performs only in-memory filtering.
+     */
+    internal var todayRestCompositeLoadedKey: TodayRestCompositeCacheKey? = null
+    internal var todayRestCompositeCache: Map<String, Double> = emptyMap()
 
     /**
      * Recent daily metrics (newest last), backing the Today grid + illness watch.
@@ -2193,9 +2281,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (to <= from) return null
         val readFrom = maxOf(from, to - com.noop.analytics.HeartRateRecovery.eligibilityLookbackSeconds)
         val readTo = to + 5 * 60 + com.noop.analytics.HeartRateRecovery.measurementToleranceSeconds
-        val samples = runCatching {
+        val samples = try {
             repository.hrSamplesUnion(activeStrapId, readFrom, readTo, limit = 2_000)
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
         return com.noop.analytics.HeartRateRecovery.calculate(
             samples = samples,
             workoutStart = from,
@@ -2608,7 +2700,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  blanks the stale smoothing window so a resume shows "-" until a fresh sample lands (#46).
      *  Guarded on 0→1 so a second concurrent HR screen doesn't re-clear an already-live window. */
     fun requestRealtimeHr() {
-        if (realtimeLeasePolicy.requestLease() == ForegroundRealtimeLeasePolicy.Transition.ARM) {
+        val transition = realtimeLeasePolicy.requestLease()
+        recordRealtimeLease("request", transition)
+        if (transition == ForegroundRealtimeLeasePolicy.Transition.ARM) {
             resetSmoothing()
             ble.startRealtime()
         }
@@ -2616,7 +2710,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A live-HR screen went away. Stops the realtime stream only when the last one leaves. */
     fun releaseRealtimeHr() {
-        if (realtimeLeasePolicy.releaseLease() == ForegroundRealtimeLeasePolicy.Transition.DISARM) {
+        val transition = realtimeLeasePolicy.releaseLease()
+        recordRealtimeLease("release", transition)
+        if (transition == ForegroundRealtimeLeasePolicy.Transition.DISARM) {
             ble.stopRealtime()
         }
     }
@@ -2625,7 +2721,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  history sync, or change Continuous HRV capture. A still-held explicit lease re-arms once when the
      *  Activity resumes; stale smoothing is cleared before that resumed stream is shown. */
     fun setRealtimeForeground(foreground: Boolean) {
-        when (realtimeLeasePolicy.setForeground(foreground)) {
+        val transition = realtimeLeasePolicy.setForeground(foreground)
+        recordRealtimeLease(if (foreground) "foreground" else "background", transition)
+        when (transition) {
             ForegroundRealtimeLeasePolicy.Transition.ARM -> {
                 resetSmoothing()
                 ble.startRealtime()
@@ -2633,6 +2731,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ForegroundRealtimeLeasePolicy.Transition.DISARM -> ble.stopRealtime()
             ForegroundRealtimeLeasePolicy.Transition.NONE -> Unit
         }
+    }
+
+    private fun recordRealtimeLease(
+        action: String,
+        transition: ForegroundRealtimeLeasePolicy.Transition,
+    ) {
+        com.noop.AppDiagnosticsRecorder.record(
+            "realtime_hr.lease",
+            fields = mapOf(
+                "action" to action,
+                "transition" to transition.name.lowercase(),
+                "lease_count_bucket" to when (realtimeLeasePolicy.leaseCount) {
+                    0 -> "zero"
+                    1 -> "one"
+                    else -> "multiple"
+                },
+                "foreground" to realtimeLeasePolicy.isForeground.toString(),
+                "transport_armed" to realtimeLeasePolicy.transportArmed.toString(),
+            ),
+        )
     }
 
     /** Refresh the battery reading. Reads the standard 0x2A19 characteristic (works on 5/MG, where the
@@ -2683,13 +2801,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         scheduleAgeMetricRecompute()
     }
 
-    private fun noteAgeMetricsChanged() {
+    private fun invalidateTodayAgeMetricCaches() {
         todayCardsLoadedSig = null
         todayCardsLoadedProfileSig = null
         todayCardsLoadedAgeMetricVersion = null
         todayFitnessAgeCache = null
         todayVitalityCache = null
+    }
+
+    private fun noteAgeMetricsChanged() {
+        invalidateTodayAgeMetricCaches()
         repository.noteAgeMetricsChanged()
+    }
+
+    private fun noteAllMetricsChanged() {
+        invalidateTodayAgeMetricCaches()
+        repository.noteMetricsChanged()
     }
 
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +

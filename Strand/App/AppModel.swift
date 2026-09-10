@@ -439,6 +439,12 @@ final class AppModel: ObservableObject {
         live.$rr.sink { [weak self] intervals in
             self?.ingestHR(shouldEvaluateStress: true, rrPacket: intervals)
         }.store(in: &hrCancellables)
+        // Mirror only the history-write edge onto Repository. Today/Sleep already observe Repository for
+        // data revisions, so this gives their first render a synchronous gate without making the heavy
+        // screen roots observe LiveState's sensor-rate publications.
+        live.$backfilling.removeDuplicates().sink { [weak self] active in
+            self?.repo.setHistoryWritesActive(active)
+        }.store(in: &hrCancellables)
         // A natural history sync can publish the missing half of the stress evidence after the latest
         // R-R packet. Re-evaluate the already-buffered R-R window without appending that packet again.
         live.$recentWristMotionEvidence.dropFirst().sink { [weak self] _ in

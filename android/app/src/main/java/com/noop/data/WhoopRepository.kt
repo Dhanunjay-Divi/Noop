@@ -311,6 +311,20 @@ object HistoryHeal {
  * Reads.swift, MetricsCache.swift) , the phone does NO metric computation here; daily/sleep
  * rows are an offline cache of server-computed values.
  */
+internal object RestDataVersionPolicy {
+    private val sleepSurfaceKeys = setOf(
+        ScoreConfidence.sleepPerformanceSeriesKey,
+        "sleep_consistency",
+        "sleep_need_min",
+        "sleep_debt_min",
+        ScoreConfidence.restConfidenceSeriesKey,
+        ScoreConfidence.restEvidenceSeriesKey,
+    )
+
+    fun shouldAdvance(keys: Collection<String>, dailyMetricsChanged: Boolean): Boolean =
+        dailyMetricsChanged || keys.any(sleepSurfaceKeys::contains)
+}
+
 class WhoopRepository private constructor(
     private val dao: WhoopDao,
     /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
@@ -319,15 +333,31 @@ class WhoopRepository private constructor(
     private val _metricDataVersion = MutableStateFlow(0L)
     val metricDataVersion: StateFlow<Long> = _metricDataVersion.asStateFlow()
     val ageMetricDataVersion: StateFlow<Long> = metricDataVersion
+    private val _restDataVersion = MutableStateFlow(0L)
+    val restDataVersion: StateFlow<Long> = _restDataVersion.asStateFlow()
 
     private val _workoutDataVersion = MutableStateFlow(0L)
     val workoutDataVersion: StateFlow<Long> = _workoutDataVersion.asStateFlow()
 
-    fun noteMetricsChanged() {
+    private fun noteMetricsChanged(
+        keys: Collection<String>,
+        dailyMetricsChanged: Boolean = false,
+    ) {
         _metricDataVersion.update { it + 1L }
+        if (RestDataVersionPolicy.shouldAdvance(keys, dailyMetricsChanged)) {
+            _restDataVersion.update { it + 1L }
+        }
     }
 
-    fun noteAgeMetricsChanged() = noteMetricsChanged()
+    /** Conservative fallback for a caller that cannot identify the affected metric keys. */
+    fun noteMetricsChanged() {
+        _metricDataVersion.update { it + 1L }
+        _restDataVersion.update { it + 1L }
+    }
+
+    fun noteAgeMetricsChanged() {
+        _metricDataVersion.update { it + 1L }
+    }
 
     fun noteWorkoutsChanged() {
         _workoutDataVersion.update { it + 1L }
@@ -480,7 +510,11 @@ class WhoopRepository private constructor(
 
     // MARK: - Server-derived caches (latest value wins on conflict)
 
-    suspend fun upsertDailyMetrics(days: List<DailyMetric>) = dao.upsertDailyMetrics(days)
+    suspend fun upsertDailyMetrics(days: List<DailyMetric>) {
+        if (days.isEmpty()) return
+        dao.upsertDailyMetrics(days)
+        noteMetricsChanged(emptyList(), dailyMetricsChanged = true)
+    }
     suspend fun upsertSleepSessions(sessions: List<SleepSession>) = dao.upsertSleepSessions(sessions)
     suspend fun insertHealthConnectSleepSessions(sessions: List<SleepSession>) {
         if (sessions.isNotEmpty()) dao.insertSleepSessionsIgnoringConflicts(sessions)
@@ -520,8 +554,13 @@ class WhoopRepository private constructor(
             workoutRows = workoutRows,
         )
         if (scope.exercise) noteWorkoutsChanged()
-        if (scope.vo2Max || scope.seriesKeys.isNotEmpty() || metricRows.isNotEmpty()) {
-            noteMetricsChanged()
+        if (dailyRows.isNotEmpty() || scope.vo2Max || scope.seriesKeys.isNotEmpty() ||
+            metricRows.isNotEmpty()
+        ) {
+            noteMetricsChanged(
+                keys = scope.seriesKeys + metricRows.map(MetricSeriesRow::key),
+                dailyMetricsChanged = dailyRows.isNotEmpty(),
+            )
         }
     }
 
@@ -542,8 +581,11 @@ class WhoopRepository private constructor(
             workoutRows = workoutRows,
         )
         if (workoutRows.isNotEmpty()) noteWorkoutsChanged()
-        if (metricRows.isNotEmpty() || appleRows.any { it.vo2max != null }) {
-            noteMetricsChanged()
+        if (dailyRows.isNotEmpty() || metricRows.isNotEmpty() || appleRows.any { it.vo2max != null }) {
+            noteMetricsChanged(
+                keys = metricRows.map(MetricSeriesRow::key),
+                dailyMetricsChanged = dailyRows.isNotEmpty(),
+            )
         }
     }
 
@@ -618,7 +660,7 @@ class WhoopRepository private constructor(
                 rows = normalizedRestRows,
             )
         }
-        noteMetricsChanged()
+        noteMetricsChanged(keys, dailyMetricsChanged = true)
         return retainedDays
     }
 
@@ -869,18 +911,22 @@ class WhoopRepository private constructor(
         dao.sessionMotionJson(deviceId, sessionStart)?.let { decodeDoubleArray(it) }
 
     /** Per-epoch MOTION series for each of [starts] (detected session start keys), keyed by start (#407).
-     *  Motion is written ONLY under the computed ("-noop") source by the engine, so we read there; an
-     *  imported-only night (no computed twin) has no motion (absent stays absent , an honest empty state,
-     *  never a fabricated zero array). Does NOT resolve the night: the caller has already chosen the
-     *  main-night GROUP and passes those blocks' starts. A start with no stored series is omitted. Mirrors
-     *  iOS Repository.sessionMotions. */
+     *  Motion is written ONLY under computed ("-noop") sources by the engine. Read the active-plus-canonical
+     *  computed union so a re-added strap retains motion stored under "my-whoop-noop"; active-device rows
+     *  win if both sources contain the same detected start. An imported-only night (no computed twin) has no
+     *  motion (absent stays absent, never a fabricated zero array). Mirrors iOS Repository.sessionMotions. */
     suspend fun sessionMotions(strapDeviceId: String, starts: List<Long>): Map<Long, List<Double>> {
         if (starts.isEmpty()) return emptyMap()
-        val computedId = computedDeviceId(strapDeviceId)
+        val uniqueStarts = starts.distinct()
         val out = HashMap<Long, List<Double>>()
-        for (start in starts) {
-            val m = dao.sessionMotionJson(computedId, start)?.let { decodeDoubleArray(it) }
-            if (!m.isNullOrEmpty()) out[start] = m
+        // At most one bounded query per source/chunk replaces one SELECT per historical session.
+        for (computedId in computedSourceIds(strapDeviceId)) {
+            for (chunk in uniqueStarts.chunked(500)) {
+                for (row in dao.sessionMotionRows(computedId, chunk)) {
+                    val motion = row.motionJSON?.let { decodeDoubleArray(it) }
+                    if (!motion.isNullOrEmpty()) out.putIfAbsent(row.startTs, motion)
+                }
+            }
         }
         return out
     }
@@ -898,7 +944,7 @@ class WhoopRepository private constructor(
         val normalized = rows.mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
         if (normalized.isNotEmpty()) {
             dao.upsertMetricSeries(normalized)
-            noteMetricsChanged()
+            noteMetricsChanged(normalized.map(MetricSeriesRow::key))
         }
     }
 
@@ -913,7 +959,12 @@ class WhoopRepository private constructor(
         }
         val seriesKeys = normalized.fillOnlyMetricSeries.map(MetricSeriesRow::key) +
             normalized.officialMetricSeriesReplacements.flatMap { it.managedKeys }
-        if (seriesKeys.isNotEmpty()) noteMetricsChanged()
+        if (seriesKeys.isNotEmpty() || normalized.officialDailyMetrics.isNotEmpty()) {
+            noteMetricsChanged(
+                seriesKeys,
+                dailyMetricsChanged = normalized.officialDailyMetrics.isNotEmpty(),
+            )
+        }
     }
 
     private fun normalizedWhoopCsvBatch(batch: WhoopCsvImportBatch): WhoopCsvImportBatch {
@@ -981,7 +1032,12 @@ class WhoopRepository private constructor(
         }
         val seriesKeys = normalizedCsv.fillOnlyMetricSeries.map(MetricSeriesRow::key) +
             normalizedCsv.officialMetricSeriesReplacements.flatMap { it.managedKeys }
-        if (seriesKeys.isNotEmpty()) noteMetricsChanged()
+        if (seriesKeys.isNotEmpty() || normalizedCsv.officialDailyMetrics.isNotEmpty()) {
+            noteMetricsChanged(
+                seriesKeys,
+                dailyMetricsChanged = normalizedCsv.officialDailyMetrics.isNotEmpty(),
+            )
+        }
         return portableSummary
     }
 
@@ -1006,7 +1062,7 @@ class WhoopRepository private constructor(
             .mapNotNull(SleepEfficiencyUnits::normalizedSeriesRow)
             .toList()
         dao.replaceMetricSeriesRange(deviceId, fromDay, toDay, keys, normalized)
-        if (keys.isNotEmpty()) noteMetricsChanged()
+        if (keys.isNotEmpty()) noteMetricsChanged(keys)
     }
 
     suspend fun upsertNutritionEntries(rows: List<NutritionEntryRow>) = dao.upsertNutritionEntries(rows)
@@ -1904,7 +1960,7 @@ class WhoopRepository private constructor(
     /** Remove one computed/source metric series when its required profile inputs become invalid. */
     suspend fun deleteMetricSeries(deviceId: String, key: String): Int {
         val deleted = dao.deleteMetricSeries(deviceId, key)
-        if (deleted > 0) noteMetricsChanged()
+        if (deleted > 0) noteMetricsChanged(listOf(key))
         return deleted
     }
 

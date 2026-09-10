@@ -4,6 +4,119 @@ import StrandDesign
 import UIKit
 #endif
 
+enum ScrollInteractionTiming {
+    static let defaultSettleNanoseconds: UInt64 = 180_000_000
+
+    static func remainingSeconds(
+        lastMovementUptime: TimeInterval,
+        nowUptime: TimeInterval,
+        settleNanoseconds: UInt64
+    ) -> TimeInterval {
+        max(
+            0,
+            Double(settleNanoseconds) / 1_000_000_000
+                - (nowUptime - lastMovementUptime)
+        )
+    }
+}
+
+/// Converts high-frequency scroll offsets into one low-frequency interaction edge for the shared
+/// motion budget. Reference storage avoids invalidating an entire retained screen on every frame:
+/// observers publish only when movement begins and after the final drag/deceleration update settles.
+@MainActor
+final class ScrollInteractionTracker: ObservableObject {
+    static let minimumOffsetDelta: CGFloat = 0.25
+
+    @Published private(set) var isActive = false
+
+    private let settleDelayNanoseconds: UInt64
+    private var previousOffset: CGFloat?
+    private var lastMovementUptime: TimeInterval?
+    private var settleTask: Task<Void, Never>?
+
+    init(
+        settleNanoseconds: UInt64 = ScrollInteractionTiming.defaultSettleNanoseconds
+    ) {
+        settleDelayNanoseconds = settleNanoseconds
+    }
+
+    func observe(offset: CGFloat) {
+        guard offset.isFinite else { return }
+        defer { previousOffset = offset }
+        guard let previousOffset,
+              abs(offset - previousOffset) >= Self.minimumOffsetDelta else { return }
+
+        lastMovementUptime = ProcessInfo.processInfo.systemUptime
+        if !isActive { isActive = true }
+        guard settleTask == nil else { return }
+        settleTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                guard let lastMovementUptime = self.lastMovementUptime else { return }
+                let remaining = ScrollInteractionTiming.remainingSeconds(
+                    lastMovementUptime: lastMovementUptime,
+                    nowUptime: ProcessInfo.processInfo.systemUptime,
+                    settleNanoseconds: self.settleDelayNanoseconds
+                )
+                if remaining == 0 {
+                    self.isActive = false
+                    self.settleTask = nil
+                    return
+                }
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(remaining * 1_000_000_000)
+                    )
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    func reset() {
+        settleTask?.cancel()
+        settleTask = nil
+        previousOffset = nil
+        lastMovementUptime = nil
+        isActive = false
+    }
+}
+
+/// Keeps query-heavy screens away from the store until a history-write burst has been quiet for a
+/// short interval. Some band firmware completes a deep sync in several back-to-back sessions and
+/// briefly drops `backfilling` between them; releasing on that raw edge lets multi-year reads start
+/// just as the next write slice begins. The visible sync affordance still follows the raw state.
+struct HistoryWriteQueryGateBridge: View {
+    static let quietNanoseconds: UInt64 = 2_000_000_000
+
+    let active: Bool
+    @Binding var blocked: Bool
+    @State private var releaseTask: Task<Void, Never>?
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear { reconcile(active) }
+            .onChangeCompat(of: active) { reconcile($0) }
+            .onDisappear { releaseTask?.cancel() }
+    }
+
+    private func reconcile(_ active: Bool) {
+        releaseTask?.cancel()
+        if active {
+            if !blocked { blocked = true }
+            return
+        }
+        guard blocked else { return }
+        releaseTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.quietNanoseconds)
+            guard !Task.isCancelled, !active else { return }
+            blocked = false
+        }
+    }
+}
+
 /// Standard scrollable screen container: title + dark surface + content column.
 struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// Optional — when nil (and no subtitle) the header is omitted entirely, so a screen can supply its
@@ -48,6 +161,8 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// this ScrollView (including inertial deceleration); the default no-op keeps macOS, sheets and
     /// stand-alone previews behaviorally identical.
     @Environment(\.scrollPositionReporter) private var reportScrollPosition
+    @StateObject private var scrollInteraction = ScrollInteractionTracker()
+
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
@@ -90,12 +205,17 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
         }
         #if os(iOS)
         .modifier(DemoBottomScrollAnchor())
-        .modifier(ScreenScrollPositionReporter(report: reportScrollPosition))
+        .modifier(ScreenScrollPositionReporter { offset in
+            reportScrollPosition(offset)
+            scrollInteraction.observe(offset: offset)
+        })
         // #697: stop a vertical scroll from drifting/bouncing the screen left-right. `.basedOnSize` only
         // permits horizontal bounce when content genuinely overflows the width (it does not here, the column
         // is width-capped), so the spurious horizontal rubber-band that caused the sideways drift is gone.
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         #endif
+        .environment(\.noopInteractionInProgress, scrollInteraction.isActive)
+        .onDisappear { scrollInteraction.reset() }
         // The flat canvas, plus an optional full-bleed TOP backdrop (Today's day-cycle scene) drawn behind
         // the scroll content — edge-to-edge under the status bar. The scene is CONFINED to the header+hero
         // band (see SceneScreenBackground.height) so it fades out ABOVE the dashboard cards, which then sit

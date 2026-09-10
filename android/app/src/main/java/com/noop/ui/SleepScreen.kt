@@ -48,7 +48,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,7 +90,13 @@ import com.noop.analytics.SleepStress
 import com.noop.data.DismissedSleep
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -149,12 +154,56 @@ internal fun resolvedRestAssessment(
 }
 
 /** Authoritative active-plus-canonical sleep history for every browse reload and mutation recovery. */
-private suspend fun loadSleepBrowseSessions(vm: AppViewModel): List<SleepSession> {
+private suspend fun loadSleepBrowseSessions(
+    vm: AppViewModel,
+    deviceId: String,
+): List<SleepSession> {
     val now = System.currentTimeMillis() / 1_000L
-    val imported = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
-    val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
-    return WhoopRepository.mergeSleep(imported, computed)
-        .sortedBy { it.effectiveStartTs }
+    return coroutineScope {
+        val imported = async { vm.repo.sleepSessionsUnion(deviceId, 0L, now) }
+        val computed = async { vm.repo.computedSleepSessionsUnion(deviceId, 0L, now) }
+        WhoopRepository.mergeSleep(imported.await(), computed.await())
+            .sortedBy { it.effectiveStartTs }
+    }
+}
+
+private data class SleepHistorySnapshot(
+    val sessions: List<SleepSession>,
+    val habitualMidsleep: Long?,
+    val motionByStart: Map<Long, List<Double>>,
+)
+
+private data class SleepMetricSnapshot(
+    val imported: ImportedSleepSeries,
+    val confidenceByDay: Map<String, ScoreConfidence>,
+    val evidenceByDay: Map<String, ScoreConfidence.RestEvidenceFlags>,
+)
+
+internal fun sleepHistoryResultBucket(count: Int): String = when {
+    count <= 0 -> "empty"
+    count <= 30 -> "up_to_30"
+    count <= 365 -> "31_to_365"
+    else -> "over_365"
+}
+
+internal fun shouldPublishSleepHistorySnapshot(
+    requestDeviceId: String,
+    currentDeviceId: String,
+    isCancelled: Boolean,
+): Boolean = !isCancelled && requestDeviceId == currentDeviceId
+
+@Composable
+private fun SleepSyncingHistoryStatus(vm: AppViewModel) {
+    val status by vm.historySyncStatus.collectAsStateWithLifecycle()
+    if (status.backfilling) {
+        SyncingHistoryNote(
+            chunks = status.batches,
+            rows = status.rows,
+            newestDataUnix = status.newestDataUnix,
+            startedAt = status.startedAt,
+            lastDurableProgressAt = status.lastDurableProgressAt,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -163,28 +212,13 @@ fun SleepScreen(
     vm: AppViewModel,
 ) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val activeDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
+    val restDataVersion by vm.restDataVersion.collectAsStateWithLifecycle()
 
-    // PERF (#scroll-jank): the BLE live state ticks ~1Hz. This screen reads `live` ONLY for the
-    // "syncing history" note, so reading the whole `live` object at body scope recomposed the entire
-    // Sleep screen on every HR tick. Collapse it to the visible progress fields: a 72→73 bpm tick
-    // produces an EQUAL snapshot and the body only recomposes when sync progress changes.
-    val live by vm.live.collectAsStateWithLifecycle()
-    val backfillNote by remember {
-        derivedStateOf {
-            val s = live
-            if (s.backfilling) {
-                HistorySyncUiProgress(
-                    batches = s.syncChunksThisSession,
-                    rows = s.syncRowsThisSession,
-                    newestDataUnix = s.syncDataNewestAt,
-                    startedAt = s.syncStartedAt,
-                    lastDurableProgressAt = s.syncLastDurableProgressAt,
-                )
-            } else {
-                null
-            }
-        }
-    }
+    // Exact batches/rows are rendered only by the empty-state leaf. The query-heavy root observes the
+    // boolean write edge, so neither sensor packets nor history progress can rebuild the whole screen.
+    val isBackfilling by vm.historyBackfillActive.collectAsStateWithLifecycle()
+    val deferHistoricalQueries = rememberHistoryQueryGate(isBackfilling)
 
     // Every recorded sleep BLOCK, oldest→newest — the hero's ◀/▶ chevrons walk this whole list,
     // including same-day naps / split sleep that `sleepSessionsMerged` collapses to one-per-night
@@ -192,31 +226,93 @@ fun SleepScreen(
     // "-noop" sessions on days the import doesn't cover (imported-wins / computed-fills, mirroring
     // mergeSleep but WITHOUT the per-night collapse). Keyed on `days` so a sync/import (which always
     // rewrites dailyMetric too) reloads; these reads have no Flow. (#160, #170)
-    var sleeps by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
+    var sleeps by remember(activeDeviceId) { mutableStateOf<List<SleepSession>>(emptyList()) }
     // Durable deleted-night markers. Unlike the 7-second Undo banner these remain reachable after the
     // session row is gone, giving each suppressed window a "Recompute this night" escape hatch (#515).
-    var dismissedSleeps by remember { mutableStateOf<List<DismissedSleep>>(emptyList()) }
-    var recomputingSleep by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    var dismissedSleeps by remember(activeDeviceId) {
+        mutableStateOf<List<DismissedSleep>>(emptyList())
+    }
+    var recomputingSleep by remember(activeDeviceId) {
+        mutableStateOf<Pair<String, Long>?>(null)
+    }
     // 0 = latest night, N = N sleep-sessions back. Reset to the newest night only on a REAL data
     // reload (new sync / re-import via `days` changing). The optimistic bed/wake edit rewrites
     // `sleeps` in place WITHOUT touching `days`, so it must not reset the browse — keeping the
     // user on the night they just edited. (#160)
-    var nightOffset by remember { mutableIntStateOf(0) }
-    LaunchedEffect(days) {
-        sleeps = runCatching {
-            // Read the ACTIVE-strap plus canonical union (#814/#1008), richness-merge each historical
-            // local wake-day, and preserve naps/split blocks.
-            loadSleepBrowseSessions(vm)
-        }.getOrDefault(emptyList())
-        nightOffset = 0
+    var nightOffset by remember(activeDeviceId) { mutableIntStateOf(0) }
+    var habitualMidsleep by remember(activeDeviceId) { mutableStateOf<Long?>(null) }
+    var motionByStart by remember(activeDeviceId) {
+        mutableStateOf<Map<Long, List<Double>>>(emptyMap())
+    }
+    LaunchedEffect(days, activeDeviceId, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_snapshot_load")
+        var outcome = "completed"
+        var fields = emptyMap<String, String>()
+        try {
+            val snapshot = coroutineScope {
+                val sessions = async { loadSleepBrowseSessions(vm, requestDeviceId) }
+                val habitual = async { vm.repo.habitualMidsleepSec(requestDeviceId) }
+                val loadedSessions = sessions.await()
+                val motion = async {
+                    vm.repo.sessionMotions(
+                        requestDeviceId,
+                        loadedSessions.map { it.startTs },
+                    )
+                }
+                SleepHistorySnapshot(
+                    sessions = loadedSessions,
+                    habitualMidsleep = habitual.await(),
+                    motionByStart = motion.await(),
+                )
+            }
+            currentCoroutineContext().ensureActive()
+            if (!shouldPublishSleepHistorySnapshot(
+                    requestDeviceId = requestDeviceId,
+                    currentDeviceId = vm.activeStrapId,
+                    isCancelled = false,
+                )
+            ) {
+                outcome = "superseded"
+                return@LaunchedEffect
+            }
+            // Publish the sessions, learned timing, and motion together. This prevents a canceled
+            // old-device load from leaving a mixed Sleep screen assembled from two devices.
+            sleeps = snapshot.sessions
+            habitualMidsleep = snapshot.habitualMidsleep
+            motionByStart = snapshot.motionByStart
+            nightOffset = 0
+            fields = mapOf(
+                "session_bucket" to sleepHistoryResultBucket(snapshot.sessions.size),
+                "motion_bucket" to sleepHistoryResultBucket(snapshot.motionByStart.size),
+            )
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
+        }
     }
 
     // Read the active∪canonical management union so a marker created before a strap re-add remains
     // visible. Keyed on days because deletes/recomputes both rescore and republish the affected day.
-    LaunchedEffect(days) {
-        dismissedSleeps = runCatching {
-            vm.repo.dismissedSleepsUnion(vm.activeStrapId)
-        }.getOrDefault(dismissedSleeps)
+    LaunchedEffect(days, activeDeviceId) {
+        try {
+            val loaded = vm.repo.dismissedSleepsUnion(activeDeviceId)
+            currentCoroutineContext().ensureActive()
+            if (vm.activeStrapId == activeDeviceId) dismissedSleeps = loaded
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Preserve the last coherent list on a transient read failure.
+        }
     }
 
     // #65: the transient UNDO banner shown after a suppressing delete. Holds the deleted SleepSession
@@ -231,77 +327,118 @@ fun SleepScreen(
         }
     }
 
-    // The user's LEARNED habitual midsleep (local time-of-day seconds), or null under the cold-start
-    // threshold. Loaded from `vm.repo.habitualMidsleepSec` — the SAME value AnalyticsEngine.analyzeDay
-    // threads into the daily total — and fed into the main-night selector so the hero, the naps split,
-    // and the edit target pick the SAME block the analytics rollup did, for a shift/late sleeper too.
-    // null keeps the existing cold-start overnight-band fallback. Keyed on `days` so it refreshes
-    // alongside `sleeps`. Mirrors iOS SleepView.habitualMidsleepSec. (#547)
-    var habitualMidsleep by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(days) {
-        // Thread the ACTIVE strap id so the learner unions active + canonical nights (#814/#1008);
-        // habitualMidsleepSec resolves the canonical "my-whoop" sibling internally either way.
-        habitualMidsleep = runCatching { vm.repo.habitualMidsleepSec(vm.activeStrapId) }.getOrNull()
-    }
-
-    // Persisted per-epoch MOTION keyed by each session's detected startTs (#407). Loaded alongside
-    // `sleeps`; `selectNight` reads only the ALREADY-resolved main-night GROUP's entries (no re-resolution)
-    // and lays them along the hypnogram's timeline. A block with no stored series stays absent (honest empty
-    // state for older rows whose motionJSON is NULL). Mirrors iOS SleepView.motionByStart.
-    var motionByStart by remember { mutableStateOf<Map<Long, List<Double>>>(emptyMap()) }
-    LaunchedEffect(sleeps) {
-        motionByStart = runCatching {
-            vm.repo.sessionMotions("my-whoop", sleeps.map { it.startTs })
-        }.getOrDefault(emptyMap())
-    }
-
     // Export-verbatim sleep figures (sleep_performance / consistency / need / debt) — the
     // headline tiles prefer them over the on-device approximations. Keyed on `days` so a
     // fresh import (which always rewrites dailyMetric too) reloads; metricSeries has no Flow.
-    var imported by remember { mutableStateOf(ImportedSleepSeries()) }
-    var restConfidenceByDay by remember {
+    var imported by remember(activeDeviceId) { mutableStateOf(ImportedSleepSeries()) }
+    var restConfidenceByDay by remember(activeDeviceId) {
         mutableStateOf<Map<String, ScoreConfidence>>(emptyMap())
     }
-    var restEvidenceByDay by remember {
+    var restEvidenceByDay by remember(activeDeviceId) {
         mutableStateOf<Map<String, ScoreConfidence.RestEvidenceFlags>>(emptyMap())
     }
-    LaunchedEffect(days) {
-        suspend fun load(key: String) = runCatching {
-            vm.repo.metricSeries("my-whoop", key, "0000-00-00", "9999-99-99")
-        }.getOrDefault(emptyList()).associate { it.day to it.value }
-        imported = ImportedSleepSeries(
-            performance = load("sleep_performance"),
-            consistency = load("sleep_consistency"),
-            needMin = load("sleep_need_min"),
-            debtMin = load("sleep_debt_min"),
-        )
-        restConfidenceByDay = runCatching {
-            vm.repo.metricSeriesComputedUnion(
-                vm.activeStrapId,
-                ScoreConfidence.restConfidenceSeriesKey,
-                "0000-00-00",
-                "9999-99-99",
-            )
-        }.getOrDefault(emptyList()).mapNotNull { row ->
-            ScoreConfidence.fromPersistedValue(row.value)?.let { row.day to it }
-        }.toMap()
-        val evidenceRows = vm.repo.computedSourceIds(vm.activeStrapId).flatMap { source ->
-            runCatching {
-                vm.repo.metricSeries(
-                    source,
-                    ScoreConfidence.restEvidenceSeriesKey,
-                    "0000-00-00",
-                    "9999-99-99",
+    LaunchedEffect(days, activeDeviceId, restDataVersion, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
+        val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("sleep.history_metrics_load")
+        var outcome = "completed"
+        var fields = emptyMap<String, String>()
+        try {
+            val snapshot = coroutineScope {
+                suspend fun load(key: String) = try {
+                    vm.repo.metricSeries("my-whoop", key, "0000-00-00", "9999-99-99")
+                        .associate { it.day to it.value }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyMap()
+                }
+
+                val performance = async { load("sleep_performance") }
+                val consistency = async { load("sleep_consistency") }
+                val need = async { load("sleep_need_min") }
+                val debt = async { load("sleep_debt_min") }
+                val confidence = async {
+                    try {
+                        vm.repo.metricSeriesComputedUnion(
+                            requestDeviceId,
+                            ScoreConfidence.restConfidenceSeriesKey,
+                            "0000-00-00",
+                            "9999-99-99",
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+                val evidenceJobs = vm.repo.computedSourceIds(requestDeviceId).map { source ->
+                    async {
+                        try {
+                            vm.repo.metricSeries(
+                                source,
+                                ScoreConfidence.restEvidenceSeriesKey,
+                                "0000-00-00",
+                                "9999-99-99",
+                            )
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                }
+
+                val loadedImported = ImportedSleepSeries(
+                    performance = performance.await(),
+                    consistency = consistency.await(),
+                    needMin = need.await(),
+                    debtMin = debt.await(),
                 )
-            }.getOrDefault(emptyList())
-        }
-        val mergedEvidence = linkedMapOf<String, ScoreConfidence.RestEvidenceFlags>()
-        for (row in evidenceRows.asReversed()) {
-            ScoreConfidence.RestEvidenceFlags.fromPersistedValue(row.value)?.let {
-                mergedEvidence[row.day] = it
+                val loadedConfidence = confidence.await().mapNotNull { row ->
+                    ScoreConfidence.fromPersistedValue(row.value)?.let { row.day to it }
+                }.toMap()
+                val mergedEvidence = linkedMapOf<String, ScoreConfidence.RestEvidenceFlags>()
+                for (row in evidenceJobs.awaitAll().flatten().asReversed()) {
+                    ScoreConfidence.RestEvidenceFlags.fromPersistedValue(row.value)?.let {
+                        mergedEvidence[row.day] = it
+                    }
+                }
+                SleepMetricSnapshot(
+                    imported = loadedImported,
+                    confidenceByDay = loadedConfidence,
+                    evidenceByDay = mergedEvidence,
+                )
             }
+            currentCoroutineContext().ensureActive()
+            if (!shouldPublishSleepHistorySnapshot(
+                    requestDeviceId = requestDeviceId,
+                    currentDeviceId = vm.activeStrapId,
+                    isCancelled = false,
+                )
+            ) {
+                outcome = "superseded"
+                return@LaunchedEffect
+            }
+            imported = snapshot.imported
+            restConfidenceByDay = snapshot.confidenceByDay
+            restEvidenceByDay = snapshot.evidenceByDay
+            fields = mapOf(
+                "session_bucket" to sleepHistoryResultBucket(sleeps.size),
+                "metric_day_bucket" to sleepHistoryResultBucket(snapshot.imported.performance.size),
+            )
+        } catch (cancelled: CancellationException) {
+            outcome = "canceled"
+            throw cancelled
+        } catch (_: Exception) {
+            outcome = "failed"
+        } finally {
+            com.noop.AppDiagnosticsRecorder.endOperation(
+                diagnostic,
+                outcome = outcome,
+                fields = fields,
+            )
         }
-        restEvidenceByDay = mergedEvidence
     }
 
     val context = LocalContext.current
@@ -392,30 +529,43 @@ fun SleepScreen(
             )
         }
     }
-    var loadedSleepStress by remember { mutableStateOf<LoadedSleepStress?>(null) }
-    LaunchedEffect(sleepStressWindow, days, vm.activeStrapId) {
+    var loadedSleepStress by remember(activeDeviceId) {
+        mutableStateOf<LoadedSleepStress?>(null)
+    }
+    LaunchedEffect(sleepStressWindow, days, activeDeviceId, deferHistoricalQueries) {
+        if (deferHistoricalQueries) return@LaunchedEffect
+        val requestDeviceId = activeDeviceId
         loadedSleepStress = null
         val window = sleepStressWindow ?: return@LaunchedEffect
         if (window.endTs <= window.startTs) {
-            loadedSleepStress = LoadedSleepStress(window, null)
+            loadedSleepStress = LoadedSleepStress(window, requestDeviceId, null)
             return@LaunchedEffect
         }
-        val heartRate = runCatching {
-            vm.repo.hrSamplesUnion(
-                vm.activeStrapId,
-                window.startTs,
-                window.endTs,
-                limit = 200_000,
-            )
-        }.getOrDefault(emptyList())
-        val intervals = runCatching {
-            vm.repo.rrIntervalsUnion(
-                vm.activeStrapId,
-                window.startTs,
-                window.endTs,
-                limit = 200_000,
-            )
-        }.getOrDefault(emptyList())
+        val (heartRate, intervals) = try {
+            coroutineScope {
+                val heartRateJob = async {
+                    vm.repo.hrSamplesUnion(
+                        requestDeviceId,
+                        window.startTs,
+                        window.endTs,
+                        limit = 200_000,
+                    )
+                }
+                val intervalsJob = async {
+                    vm.repo.rrIntervalsUnion(
+                        requestDeviceId,
+                        window.startTs,
+                        window.endTs,
+                        limit = 200_000,
+                    )
+                }
+                heartRateJob.await() to intervalsJob.await()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList<com.noop.data.HrSample>() to emptyList<com.noop.data.RrInterval>()
+        }
         val stress = withContext(Dispatchers.Default) {
             SleepStress.analyze(
                 heartRate,
@@ -424,7 +574,16 @@ fun SleepScreen(
                 window.endTs,
             )
         }
-        loadedSleepStress = LoadedSleepStress(window, stress)
+        currentCoroutineContext().ensureActive()
+        if (!shouldPublishSleepHistorySnapshot(
+                requestDeviceId = requestDeviceId,
+                currentDeviceId = vm.activeStrapId,
+                isCancelled = false,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        loadedSleepStress = LoadedSleepStress(window, requestDeviceId, stress)
     }
 
     // #940: ONE stage-less SELECTED day (typically the newest, after an impossible hand-edit staged
@@ -474,7 +633,9 @@ fun SleepScreen(
                         sleepUndo = null
                         scope.launch {
                             vm.undoDeleteSleepSession(deleted)
-                            sleeps = runCatching { loadSleepBrowseSessions(vm) }.getOrDefault(sleeps)
+                            sleeps = runCatching {
+                                loadSleepBrowseSessions(vm, activeDeviceId)
+                            }.getOrDefault(sleeps)
                         }
                     },
                 )
@@ -510,7 +671,7 @@ fun SleepScreen(
                         scope.launch {
                             val cleared = vm.recomputeDeletedSleep(marker)
                             dismissedSleeps = runCatching {
-                                vm.repo.dismissedSleepsUnion(vm.activeStrapId)
+                                vm.repo.dismissedSleepsUnion(activeDeviceId)
                             }.getOrDefault(dismissedSleeps)
                             recomputingSleep = null
                             Toast.makeText(
@@ -533,15 +694,7 @@ fun SleepScreen(
         if (tilesModel == null && night == null) {
             // While the strap is mid-offload, say so - "No nights" reads as final otherwise (#77).
             item {
-                backfillNote?.let { progress ->
-                    SyncingHistoryNote(
-                        chunks = progress.batches,
-                        rows = progress.rows,
-                        newestDataUnix = progress.newestDataUnix,
-                        startedAt = progress.startedAt,
-                        lastDurableProgressAt = progress.lastDurableProgressAt,
-                    )
-                }
+                SleepSyncingHistoryStatus(vm)
                 SleepEmptyState()
             }
         } else {
@@ -653,7 +806,7 @@ fun SleepScreen(
                                 // The row can disappear between opening the editor and tapping Save. Do not
                                 // fabricate a replacement from stale UI state; restore the authoritative union.
                                 sleeps = runCatching {
-                                    loadSleepBrowseSessions(vm)
+                                    loadSleepBrowseSessions(vm, activeDeviceId)
                                 }.getOrElse {
                                     sleeps.filterNot {
                                         it.deviceId == s.deviceId && it.startTs == s.startTs
@@ -688,7 +841,7 @@ fun SleepScreen(
                     scope.launch {
                         vm.deleteSleepSession(s)
                         dismissedSleeps = runCatching {
-                            vm.repo.dismissedSleepsUnion(vm.activeStrapId)
+                                vm.repo.dismissedSleepsUnion(activeDeviceId)
                         }.getOrDefault(dismissedSleeps)
                     }
                 },
@@ -698,7 +851,9 @@ fun SleepScreen(
                     // insert here because the stages are staged from raw off the UI thread.
                     scope.launch {
                         vm.addManualNap(startTs, endTs)
-                        sleeps = runCatching { loadSleepBrowseSessions(vm) }.getOrDefault(sleeps)
+                        sleeps = runCatching {
+                            loadSleepBrowseSessions(vm, activeDeviceId)
+                        }.getOrDefault(sleeps)
                     }
                 },
                 onPickNightDate = onPickNightDate,
@@ -732,7 +887,9 @@ fun SleepScreen(
                 item {
                     SleepStressCard(
                         window = selectedStressWindow,
-                        loaded = loadedSleepStress?.takeIf { it.window == selectedStressWindow },
+                        loaded = loadedSleepStress?.takeIf {
+                            it.window == selectedStressWindow && it.deviceId == activeDeviceId
+                        },
                     )
                 }
             }
@@ -2506,6 +2663,7 @@ private data class SleepStressWindow(val startTs: Long, val endTs: Long)
 
 private data class LoadedSleepStress(
     val window: SleepStressWindow,
+    val deviceId: String,
     val result: SleepStress.Result?,
 )
 

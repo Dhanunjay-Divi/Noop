@@ -123,6 +123,12 @@ struct SleepView: View {
     /// The pending auto-dismiss task for `sleepUndo`, cancelled when a new delete replaces the banner or
     /// the user hits Undo, so a stale timer can't clear a fresh banner.
     @State private var sleepUndoTask: Task<Void, Never>?
+    /// Mirrors only the history-offload edge from LiveState. Heavy sleep-history reads wait until the
+    /// write burst finishes, while the small syncing leaf continues to show progress independently.
+    @State private var historyWriteQueryGate = false
+    private var historyReadsBlocked: Bool {
+        repo.historyWritesActive || historyWriteQueryGate
+    }
 
     var body: some View {
         // Resolve the memoized model for THIS render. `dataKey` is O(1)-ish (counts + last-row
@@ -196,43 +202,93 @@ struct SleepView: View {
                     navNight = nil
                 }
             }
+            .background(HistoryWriteQueryGateBridge(
+                active: repo.historyWritesActive,
+                blocked: $historyWriteQueryGate
+            ))
             // Load EVERY sleep block across BOTH sources (un-deduplicated) so the hero's ◀/▶ can
             // browse split-sleep days the dashboard collapses — including Bluetooth-only nights,
             // whose blocks live under the computed source. Re-runs whenever a sync/import bumps
             // refreshSeq; snaps back to the newest day and rebuilds the model so offset 0 reflects
             // the freshly-loaded blocks. (#170)
-            .task(id: repo.refreshSeq) {
-                let loadedSessions = await repo.allSleepSessions()
-                allSessions = loadedSessions
-                // Load the learned habitual midsleep the engine used, so the main-night pick aligns to it
-                // (a shift/late sleeper) instead of only the cold-start band. nil under threshold. (#547)
-                let loadedHabitualMidsleep = await repo.habitualMidsleepSec()
-                habitualMidsleepSec = loadedHabitualMidsleep
+            .task(id: "\(repo.refreshSeq)|\(repo.deviceId)|\(historyReadsBlocked)") {
+                guard !historyReadsBlocked else { return }
+                let requestRefreshSeq = repo.refreshSeq
+                let requestDeviceId = repo.deviceId
+                let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("sleep.history_load")
+                var diagnosticOutcome = "completed"
+                var diagnosticFields: [String: String] = [:]
+                defer {
+                    AppDiagnosticsRecorder.shared.endOperation(
+                        diagnostic,
+                        outcome: diagnosticOutcome,
+                        fields: diagnosticFields
+                    )
+                }
+
+                // Session history, learned timing, and compact metric histories are independent reads.
+                // Start them together so opening Sleep does not serialize several years-wide scans.
+                async let sessionsTask = repo.allSleepSessions()
+                async let habitualTask = repo.habitualMidsleepSec()
+                async let confidenceTask = repo.exploreSeries(
+                    key: ScoreConfidence.restConfidenceSeriesKey,
+                    source: "my-whoop"
+                )
+                async let evidenceSeriesTask = repo.exploreSeries(
+                    key: ScoreConfidence.restEvidenceSeriesKey,
+                    source: "my-whoop"
+                )
+
+                let (loadedSessions, loadedHabitualMidsleep) =
+                    await (sessionsTask, habitualTask)
+                guard !Task.isCancelled else {
+                    diagnosticOutcome = "canceled"
+                    return
+                }
                 // Per-epoch motion for every block (#407), keyed by detected start. mergeDay reads only the
                 // already-resolved group's entries — this just pre-fetches them all so the model build is sync.
-                motionByStart = await repo.sessionMotions(starts: loadedSessions.map { $0.startTs })
-                let loadedStageEvidence = await repo.detailedSleepStageEvidence(
-                    habitualMidsleepSec: loadedHabitualMidsleep)
+                async let motionsTask = repo.sessionMotions(
+                    starts: loadedSessions.map(\.startTs)
+                )
+                async let stageEvidenceTask = repo.detailedSleepStageEvidence(
+                    habitualMidsleepSec: loadedHabitualMidsleep
+                )
+                let (loadedMotions, loadedStageEvidence, confidenceRows, evidenceRows) =
+                    await (motionsTask, stageEvidenceTask, confidenceTask, evidenceSeriesTask)
+                guard Self.shouldPublishHistoryLoad(
+                    requestRefreshSeq: requestRefreshSeq,
+                    currentRefreshSeq: repo.refreshSeq,
+                    requestDeviceId: requestDeviceId,
+                    currentDeviceId: repo.deviceId,
+                    isCancelled: Task.isCancelled
+                ) else {
+                    diagnosticOutcome = Task.isCancelled ? "canceled" : "superseded"
+                    return
+                }
+                // Publish one coherent snapshot only after every independent read still belongs to
+                // the current refresh and device. A canceled old-device task must not replace only
+                // sessions while leaving motion, evidence, and the model from another device.
+                allSessions = loadedSessions
+                habitualMidsleepSec = loadedHabitualMidsleep
+                motionByStart = loadedMotions
                 detailedStageEvidence = loadedStageEvidence
                 publishableDetailedStageDays = Self.detailedStagePublicationDays(
                     sessions: loadedSessions,
                     evidence: loadedStageEvidence,
                     habitualMidsleepSec: loadedHabitualMidsleep)
                 restConfidenceByDay = Dictionary(
-                    uniqueKeysWithValues: await repo
-                        .exploreSeries(key: ScoreConfidence.restConfidenceSeriesKey,
-                                       source: "my-whoop")
-                        .compactMap { point in
-                            ScoreConfidence(persistedValue: point.value).map { (point.day, $0) }
-                        })
+                    uniqueKeysWithValues: confidenceRows.compactMap { point in
+                        ScoreConfidence(persistedValue: point.value).map { (point.day, $0) }
+                    })
                 restEvidenceByDay = Dictionary(
-                    uniqueKeysWithValues: await repo
-                        .exploreSeries(key: ScoreConfidence.restEvidenceSeriesKey,
-                                       source: "my-whoop")
-                        .compactMap { point in
-                            ScoreConfidence.RestEvidenceFlags(persistedValue: point.value)
-                                .map { (point.day, $0) }
-                        })
+                    uniqueKeysWithValues: evidenceRows.compactMap { point in
+                        ScoreConfidence.RestEvidenceFlags(persistedValue: point.value)
+                            .map { (point.day, $0) }
+                    })
+                diagnosticFields = [
+                    "session_bucket": Self.sleepHistoryResultBucket(loadedSessions.count),
+                    "motion_bucket": Self.sleepHistoryResultBucket(loadedMotions.count),
+                ]
                 nightOffset = 0
                 navNight = nil
                 modelKey = dataKey
@@ -508,7 +564,7 @@ struct SleepView: View {
             }
             .padding(NoopMetrics.cardInnerPadding + NoopMetrics.space1)
             .frame(maxWidth: .infinity)
-            .timeOfDayBackground(.night)
+            .timeOfDayBackground(.night, animated: false)
             // The Rest hero is intentionally a fixed-dark focus surface in every app appearance.
             // Forcing only this subtree dark keeps its liquid score legible on Pearl without turning
             // the page-level section title into white-on-white text.
@@ -622,6 +678,27 @@ struct SleepView: View {
         if sessions.contains(where: { $0.gravitySparse == true }) { return true }
         guard sessions.allSatisfy({ $0.gravitySparse == false }) else { return nil }
         return false
+    }
+
+    static func sleepHistoryResultBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...30: return "up_to_30"
+        case 31...365: return "31_to_365"
+        default: return "over_365"
+        }
+    }
+
+    static func shouldPublishHistoryLoad(
+        requestRefreshSeq: Int,
+        currentRefreshSeq: Int,
+        requestDeviceId: String,
+        currentDeviceId: String,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled
+            && requestRefreshSeq == currentRefreshSeq
+            && requestDeviceId == currentDeviceId
     }
 
     private func isImportedPerformance(for night: Night) -> Bool {
@@ -830,7 +907,12 @@ struct SleepView: View {
             startTs: night.session.effectiveStartTs,
             endTs: night.session.endTs,
             refreshSeq: repo.refreshSeq)
+        let loadKey = SleepStressLoadKey(
+            window: window,
+            deviceId: repo.deviceId,
+            historyReadsBlocked: historyReadsBlocked)
         let finished = loadedSleepStress?.window == window
+            && loadedSleepStress?.deviceId == repo.deviceId
         let result = finished ? loadedSleepStress?.result : nil
 
         NoopCard(padding: NoopMetrics.cardInnerPadding, tint: StrandPalette.restColor) {
@@ -892,10 +974,14 @@ struct SleepView: View {
                 }
             }
         }
-        .task(id: window) {
+        .task(id: loadKey) {
+            guard !loadKey.historyReadsBlocked else { return }
             loadedSleepStress = nil
             guard window.endTs > window.startTs else {
-                loadedSleepStress = LoadedSleepStress(window: window, result: nil)
+                loadedSleepStress = LoadedSleepStress(
+                    window: window,
+                    deviceId: loadKey.deviceId,
+                    result: nil)
                 return
             }
             async let hr = repo.hrSamples(
@@ -914,8 +1000,14 @@ struct SleepView: View {
                     startTs: window.startTs,
                     endTs: window.endTs)
             }.value
-            guard !Task.isCancelled else { return }
-            loadedSleepStress = LoadedSleepStress(window: window, result: stress)
+            guard !Task.isCancelled,
+                  repo.deviceId == loadKey.deviceId,
+                  repo.refreshSeq == window.refreshSeq,
+                  !historyReadsBlocked else { return }
+            loadedSleepStress = LoadedSleepStress(
+                window: window,
+                deviceId: loadKey.deviceId,
+                result: stress)
         }
     }
 
@@ -2495,8 +2587,8 @@ struct SleepView: View {
     /// same main-vs-nap classification the hero uses and decodes persisted stages. A stage-less nap
     /// contributes nothing rather than substituting its in-bed window. Mirrors Android
     /// `napSleepMinutesByDay`.
-    static func napSleepMinutes(_ sessions: [CachedSleepSession],
-                                habitualMidsleepSec: Int? = nil) -> Double {
+    nonisolated static func napSleepMinutes(_ sessions: [CachedSleepSession],
+                                            habitualMidsleepSec: Int? = nil) -> Double {
         let mainStarts = Set(mainNightGroup(sessions, habitualMidsleepSec: habitualMidsleepSec)
             .map { $0.startTs })
         return sessions
@@ -3155,14 +3247,17 @@ struct SleepView: View {
     /// pre-onset trim. Internal (not private) so the golden test pins the DECODE PATH itself, not a
     /// pre-computed minute count. Android twin: SleepScreen's onset stub-test caller needs the same
     /// both-format decode.
-    static func decodedAsleepMinutes(_ json: String?, effectiveStartTs: Int) -> Double {
+    nonisolated static func decodedAsleepMinutes(
+        _ json: String?,
+        effectiveStartTs: Int
+    ) -> Double {
         decodeStages(json)?.asleep
             ?? decodeSegments(json, sessionStart: effectiveStartTs)?.stages.asleep
             ?? 0
     }
 
     /// Decode the imported stagesJSON dict of MINUTES {"light","deep","rem","awake"}.
-    private static func decodeStages(_ json: String?) -> Stages? {
+    nonisolated private static func decodeStages(_ json: String?) -> Stages? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         guard let obj = try? JSONSerialization.jsonObject(with: data),
               let dict = obj as? [String: Any] else { return nil }
@@ -3180,7 +3275,7 @@ struct SleepView: View {
     /// Decode the COMPUTED stagesJSON segment array [{"start":epoch,"end":epoch,"stage":"wake"|
     /// "light"|"deep"|"rem"}] into stage totals plus the real timeline (seconds relative to the
     /// session start, the Hypnogram's domain). The on-device SleepStager calls awake "wake". (#77)
-    private static func decodeSegments(
+    nonisolated private static func decodeSegments(
         _ json: String?, sessionStart: Int
     ) -> (stages: Stages, intervals: [SleepInterval])? {
         guard let json, let data = json.data(using: .utf8),
@@ -3406,8 +3501,15 @@ private struct SleepStressWindow: Hashable, Sendable {
     let refreshSeq: Int
 }
 
+private struct SleepStressLoadKey: Hashable, Sendable {
+    let window: SleepStressWindow
+    let deviceId: String
+    let historyReadsBlocked: Bool
+}
+
 private struct LoadedSleepStress: Sendable {
     let window: SleepStressWindow
+    let deviceId: String
     let result: SleepStress.Result?
 }
 

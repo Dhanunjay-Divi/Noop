@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -57,6 +58,18 @@ import androidx.compose.ui.unit.dp
 // A fixed brand literal (NOT a theme token) on iOS, so it ports as-is: the HR thread reads the same coral
 // pink on every platform and both schemes, matching LiquidThread's iOS default exactly.
 val liquidHeartPink: Color = Color(red = 1f, green = 107f / 255f, blue = 129f / 255f, alpha = 1f)
+
+/**
+ * Screen scaffolds publish their active drag/fling state here. Decorative liquid clocks pose while
+ * content is moving so the list owns the frame budget, matching Apple's interaction budget.
+ */
+internal val LocalLiquidInteractionInProgress = staticCompositionLocalOf { false }
+
+internal fun shouldAnimateLiquid(
+    animated: Boolean,
+    renderStill: Boolean,
+    interactionInProgress: Boolean,
+): Boolean = animated && !renderStill && !interactionInProgress
 
 /**
  * Reduces a display-vsync stream to a requested render budget while preserving elapsed time. A 120 Hz
@@ -131,12 +144,13 @@ fun LiquidVessel(
     modifier: Modifier = Modifier,
 ) {
     val renderStill = rememberPoseStill()
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
+    // Keep the physics object alive while a drag/fling temporarily renders the posed form. Recreating it
+    // when scrolling stops would visibly restart the fill animation instead of continuing smoothly.
+    val sim = remember { LiquidSim(target = value ?: 0.0) }
 
-    if (animated && !renderStill) {
+    if (shouldAnimateLiquid(animated, renderStill, interactionInProgress)) {
         val view = LocalView.current
-        // The mutable physics, remembered across recompositions so the slosh is continuous. Seeded at the
-        // fill line (iOS `LiquidSim(target: value ?? 0)`); the target is re-supplied every frame in step().
-        val sim = remember { LiquidSim(target = value ?: 0.0) }
 
         // One shared tilt source per visible liquid screen — acquire on enter, release on leave (iOS
         // .onAppear/.onDisappear). Keyed on the context so it re-runs if the composition's context changes.
@@ -197,12 +211,12 @@ fun LiquidTube(
     modifier: Modifier = Modifier,
 ) {
     val renderStill = rememberPoseStill()
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
     val clamped = frac.coerceIn(0.0, 1.0)
+    // Preserve the simulated surface while scrolling poses the tube, so resuming does not chase from zero.
+    val sim = remember { LiquidSim(target = 0.0) }
 
-    if (animated && !renderStill) {
-        // iOS seeds the tube sim at target 0 (`LiquidSim(target: 0)`) and lets step() chase `frac`.
-        val sim = remember { LiquidSim(target = 0.0) }
-
+    if (shouldAnimateLiquid(animated, renderStill, interactionInProgress)) {
         val context = LocalContext.current
         DisposableEffect(context) {
             LiquidMotion.shared.acquire(context)
@@ -267,8 +281,9 @@ fun LiquidThread(
     modifier: Modifier = Modifier,
 ) {
     val renderStill = rememberPoseStill()
+    val interactionInProgress = LocalLiquidInteractionInProgress.current
 
-    if (animated && !renderStill) {
+    if (shouldAnimateLiquid(animated, renderStill, interactionInProgress)) {
         val seconds = rememberLiquidClock(maxFramesPerSecond = 60)
         Canvas(modifier = modifier.height(height)) {
             with(LiquidRender) { thread(size = size, values = bpm, now = seconds, tint = tint) }

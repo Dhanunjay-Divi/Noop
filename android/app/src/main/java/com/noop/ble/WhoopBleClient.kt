@@ -288,6 +288,9 @@ data class LiveState(
     /** Connected link whose recent completed history handovers remain empty. */
     val sustainedEmptyOffload: Boolean = false,
 ) {
+    val isGeneration5: Boolean
+        get() = whoop5Detected
+
     /** Set the fresh-packet [rr] AND append the valid intervals onto the bounded [rrRecent] rolling
      *  buffer (oldest fall off first). Non-positive sentinels are dropped from the rolling buffer.
      *  Twin of macOS LiveState.setRRIntervals (PR#191). */

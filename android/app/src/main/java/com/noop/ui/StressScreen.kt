@@ -61,6 +61,12 @@ import com.noop.analytics.HrvFreqDomain
 import com.noop.analytics.StressIndex
 import com.noop.data.DailyMetric
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -90,6 +96,9 @@ import kotlin.math.sqrt
 @Composable
 fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
+    val metricDataVersion by vm.metricDataVersion.collectAsStateWithLifecycle()
+    val lastHistorySyncAt by vm.lastHistorySyncAt.collectAsStateWithLifecycle()
+    val analysisDeviceId by vm.selectedDeviceId.collectAsStateWithLifecycle()
 
     // #698: the liquid day-of-sky backdrop is gated on the same "Day-cycle background" setting as Today,
     // so turning it off falls back to the flat theme canvas on every liquid screen alike.
@@ -102,10 +111,14 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     // We pull a wide range so the whole history is covered.
     var stored by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
     var storedLoaded by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        val rows = runCatching {
+    androidx.compose.runtime.LaunchedEffect(analysisDeviceId, metricDataVersion) {
+        val rows = try {
             vm.repo.metricSeries("my-whoop", "stress", "0000-01-01", "9999-12-31")
-        }.getOrDefault(emptyList())
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
         stored = rows.associate { it.day to it.value.coerceIn(0.0, 3.0) }
         storedLoaded = true
     }
@@ -120,12 +133,23 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     // span/beat gate is not met. Faithful twin of the iOS StressView readouts.
     var stressIndex by remember { mutableStateOf<StressIndex.Components?>(null) }
     var freqHrv by remember { mutableStateOf<HrvFreqDomain.Bands?>(null) }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        val read = runCatching { loadDaytimeStress(vm) }
-            .getOrDefault(DaytimeReadout(DaytimeStress.Result.EMPTY, null, null))
-        daytime = read.daytime
-        stressIndex = read.stressIndex
-        freqHrv = read.freqHrv
+    androidx.compose.runtime.LaunchedEffect(analysisDeviceId, lastHistorySyncAt) {
+        publishStressAnalysisIfCurrent(
+            load = {
+                try {
+                    loadDaytimeStress(vm, analysisDeviceId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    DaytimeReadout(DaytimeStress.Result.EMPTY, null, null)
+                }
+            },
+            isCurrent = { vm.activeStrapId == analysisDeviceId },
+        ) { read ->
+            daytime = read.daytime
+            stressIndex = read.stressIndex
+            freqHrv = read.freqHrv
+        }
     }
 
     // Rebuild the model only when the inputs (days, stored) actually change — the
@@ -159,11 +183,64 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
  * clean beats; freq-HRV needs >= 60 s span) or when the day had no usable intraday HR. None of this
  * touches the 0..3 score.
  */
-private data class DaytimeReadout(
+internal data class DaytimeReadout(
     val daytime: DaytimeStress.Result,
     val stressIndex: StressIndex.Components?,
     val freqHrv: HrvFreqDomain.Bands?,
 )
+
+/**
+ * Publishes only after the structured request is still active and still targets
+ * the same screen input. Tests exercise cancellation and supersession directly.
+ */
+internal suspend fun <Value> publishStressAnalysisIfCurrent(
+    load: suspend () -> Value,
+    isCurrent: () -> Boolean,
+    publish: (Value) -> Unit,
+) {
+    val result = load()
+    currentCoroutineContext().ensureActive()
+    if (!isCurrent()) return
+    publish(result)
+}
+
+/** Runs the three deterministic post-query analyses on the CPU dispatcher. */
+internal suspend fun analyzeDaytimeStressOffMain(
+    hr: List<com.noop.data.HrSample>,
+    rr: List<com.noop.data.RrInterval>,
+    tzOffsetSeconds: Long,
+    dispatcher: CoroutineDispatcher = Dispatchers.Default,
+): DaytimeReadout = withContext(dispatcher) {
+    currentCoroutineContext().ensureActive()
+    val daytime = DaytimeStress.analyze(hr, rr, tzOffsetSeconds)
+    currentCoroutineContext().ensureActive()
+    val stressIndex = StressIndex.components(rr)
+    currentCoroutineContext().ensureActive()
+    val freqHrv = HrvFreqDomain.freqDomain(rr)
+    currentCoroutineContext().ensureActive()
+    DaytimeReadout(daytime, stressIndex, freqHrv)
+}
+
+private suspend fun analyzeDaytimeStressTimed(
+    hr: List<com.noop.data.HrSample>,
+    rr: List<com.noop.data.RrInterval>,
+    tzOffsetSeconds: Long,
+): DaytimeReadout {
+    // Evidence is bounded to a fixed operation name, duration, and categorical
+    // outcome. It contains no health values, timestamps, counts, or identifiers.
+    val diagnostic = com.noop.AppDiagnosticsRecorder.beginOperation("stress.daytime_analysis")
+    return try {
+        analyzeDaytimeStressOffMain(hr, rr, tzOffsetSeconds).also {
+            com.noop.AppDiagnosticsRecorder.endOperation(diagnostic)
+        }
+    } catch (cancelled: CancellationException) {
+        com.noop.AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "canceled")
+        throw cancelled
+    } catch (error: Exception) {
+        com.noop.AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "failed")
+        throw error
+    }
+}
 
 /**
  * Read TODAY's banked HR + R-R and build the intraday stress timeline. Local-day window
@@ -171,24 +248,22 @@ private data class DaytimeReadout(
  * score's math, so this is the same proxy at a finer grain (never a new score). The SAME `rr` is
  * then fed to the two additive HRV engines (no extra fetch, no DB / schema change).
  */
-private suspend fun loadDaytimeStress(vm: AppViewModel): DaytimeReadout {
+private suspend fun loadDaytimeStress(
+    vm: AppViewModel,
+    deviceId: String,
+): DaytimeReadout {
     val nowSeconds = System.currentTimeMillis() / 1000L
     val tzOffsetSeconds = java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
     // Local midnight (wall-clock seconds): floor the LOCAL time to the day, then undo the
     // offset so the bound is back on the wall clock the samples are stored in.
     val localNow = nowSeconds + tzOffsetSeconds
     val from = (localNow - Math.floorMod(localNow, 86_400L)) - tzOffsetSeconds
-    val hr = vm.repo.hrSamples("my-whoop", from, nowSeconds, limit = 200_000)
+    val hr = vm.repo.hrSamplesUnion(deviceId, from, nowSeconds, limit = 200_000)
     if (hr.size < DaytimeStress.minHourHrSamples) {
         return DaytimeReadout(DaytimeStress.Result.EMPTY, null, null)
     }
-    val rr = vm.repo.rrIntervals("my-whoop", from, nowSeconds, limit = 200_000)
-    val daytime = DaytimeStress.analyze(hr, rr, tzOffsetSeconds)
-    // ADDITIVE advanced readouts from the SAME `rr`. Each engine self-gates and returns null when
-    // its requirement is not met, in which case its row is simply hidden in the UI.
-    val si = StressIndex.components(rr)
-    val freq = HrvFreqDomain.freqDomain(rr)
-    return DaytimeReadout(daytime, si, freq)
+    val rr = vm.repo.rrIntervalsUnion(deviceId, from, nowSeconds, limit = 200_000)
+    return analyzeDaytimeStressTimed(hr, rr, tzOffsetSeconds)
 }
 
 // MARK: - Loaded content

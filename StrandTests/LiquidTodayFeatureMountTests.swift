@@ -53,6 +53,156 @@ final class LiquidTodayFeatureMountTests: XCTestCase {
         XCTAssertEqual(AppModel.analysisBackstopNanoseconds, 30 * 60 * 1_000_000_000)
     }
 
+    func testLiquidTodayCacheIsExactAndCurrentDayIsAgeGated() {
+        let key = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        XCTAssertTrue(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-30),
+            now: now,
+            isToday: true
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-121),
+            now: now,
+            isToday: true
+        ))
+        XCTAssertTrue(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-240),
+            now: now,
+            isToday: false
+        ))
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: key,
+            bankedAt: now.addingTimeInterval(-301),
+            now: now,
+            isToday: false
+        ))
+
+        let newer = LiquidTodayQueryKey(
+            refreshSeq: 5,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: newer,
+            bankedAt: now,
+            now: now,
+            isToday: false
+        ))
+
+        let otherDevice = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-b",
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        XCTAssertFalse(LiquidTodayView.shouldRestoreQueryCache(
+            cachedKey: key,
+            requestKey: otherDevice,
+            bankedAt: now,
+            now: now,
+            isToday: false
+        ))
+    }
+
+    func testLiquidTodayDefersEveryQueryLoadDuringHistoryWrites() {
+        XCTAssertTrue(LiquidTodayView.shouldDeferQueryLoad(isBackfilling: true))
+        XCTAssertFalse(LiquidTodayView.shouldDeferQueryLoad(isBackfilling: false))
+    }
+
+    func testLiquidTodayCanRestoreOnlyTheSameDeviceDayAndProfileDuringHistoryWrites() {
+        let cached = LiquidTodayQueryKey(
+            refreshSeq: 4,
+            ageMetricsSeq: 2,
+            workoutsSeq: 3,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        let newer = LiquidTodayQueryKey(
+            refreshSeq: 9,
+            ageMetricsSeq: 5,
+            workoutsSeq: 6,
+            deviceId: "device-a",
+            dayKey: "2026-09-09",
+            isToday: true,
+            profileState: "profile-a"
+        )
+        XCTAssertTrue(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: newer
+        ))
+        XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: LiquidTodayQueryKey(
+                refreshSeq: 9,
+                ageMetricsSeq: 5,
+                workoutsSeq: 6,
+                deviceId: "device-b",
+                dayKey: "2026-09-09",
+                isToday: true,
+                profileState: "profile-a"
+            )
+        ))
+        XCTAssertFalse(LiquidTodayView.canRestoreDuringHistoryWrite(
+            cachedKey: cached,
+            requestKey: LiquidTodayQueryKey(
+                refreshSeq: 9,
+                ageMetricsSeq: 5,
+                workoutsSeq: 6,
+                deviceId: "device-a",
+                dayKey: "2026-09-09",
+                isToday: false,
+                profileState: "profile-a"
+            )
+        ))
+    }
+
+    func testLiquidTodayUsesDurableRefreshInsteadOfRawBackfillEdgeInvalidation() throws {
+        let source = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let task = try slice(
+            source,
+            from: ".task(id:",
+            to: "#if DEBUG"
+        )
+
+        XCTAssertTrue(task.contains("\\(repo.refreshSeq)"))
+        XCTAssertTrue(task.contains("\\(historyReadsBlocked)"))
+        XCTAssertTrue(task.contains("\\(repo.deviceId)"))
+        XCTAssertFalse(task.contains("repo.liquidTodayLoadCache = nil"))
+        XCTAssertTrue(task.contains("await load()"))
+
+        let appModel = try sourceText("Strand/App/AppModel.swift")
+        XCTAssertTrue(appModel.contains("persistedHistoryRefreshWorker"))
+        XCTAssertTrue(appModel.contains("refreshAfterPersistedHistory()"))
+        XCTAssertTrue(appModel.contains("await repo.refresh(days: 120)"))
+    }
+
     func testChargeV2UpgradeForcesFullHistoryUntilPassCompletes() {
         XCTAssertEqual(ChargeFormulaUpgradeGate.currentRevision, "noop-charge-v2")
         XCTAssertEqual(ChargeFormulaUpgradeGate.historyDays, 4_000)

@@ -18,8 +18,8 @@ Last updated: **2026-09-09**
 
 ## Active work
 
-The latest managed Safety late-review closeout is implemented and completely
-locally verified on protected pull request `#10`. Apple and Android require a
+The managed Safety implementation from protected pull request `#10` is merged
+on `main` as `035dec3c` after all 35 hosted checks passed. Apple and Android require a
 working app-alert path before accepting a Safety contact; incident creation
 counts only accepted contacts represented by deterministically locked active
 push installations. Apple suppresses foreground managed Safety presentation
@@ -31,9 +31,8 @@ complete local server suite passed 424 tests with only the explicit real-provide
 case skipped; Android passed 4,143 tests plus lint, build, and instrumentation
 compilation; Apple passed 1,669 tests with one expected skip and the complete
 unsigned iOS simulator graph builds; 227 Tools tests and every local policy gate
-pass. Replacement push and exact-head review, protected checks, normal merge,
-physical providers/devices, and external launch gates remain. No public
-traffic, real paging, or real health data was used. Evidence is recorded in
+pass. Physical providers/devices and external launch gates remain. No public
+traffic, real paging, or real health data was used during verification. Evidence is recorded in
 [Managed Safety late-review closeout](rounds/2026-09-09-managed-safety-late-review-closeout.md).
 
 The latest managed Safety lock and retention closeout is implemented and
@@ -90,14 +89,55 @@ exact-head review, protected checks, and normal merge. No public traffic or
 real participant paging was enabled. Evidence is recorded in
 [Managed Safety final gate closeout](rounds/2026-09-09-managed-safety-final-gate-closeout.md).
 
-The reported physical-phone lag is not evidence against the pending
-large-data fix yet: yesterday's protected `main` did not contain pull request
-`#12`. That branch has measured a 4.2-million-row, approximately 441 MB local
-database and removes active backfill/write contention, repeated retained-screen
-queries, unnecessary per-chunk reads, and scroll-time animation work across
-Apple and Android. It still requires integration after Safety, complete local
-and hosted verification, protected merge, and a reviewed shake-to-report ZIP
-from the affected phone on the merged-main build.
+The reported physical-phone lag is not evidence against the large-data fix yet:
+yesterday's protected `main` did not contain pull request `#12`. Its
+deterministic 4,207,350-row fixture produced a 440.6 MB database and showed
+ordinary indexed reads remain bounded while one-million-row active writes
+measurably increased concurrent read latency. Apple Liquid Today restores an
+exact revision-bound query snapshot across tab remounts, scopes it to the active
+device, defers repeated same-day reads during bulk backfill, and discards
+pre-backfill state before the completion reload. Historical snapshots expire
+after five minutes so an incomplete failed read cannot be retained forever.
+Android shares one
+Rest-history read, keys it to the active device and metric revision, retries
+failed reads instead of banking an empty result, and pauses decorative liquid
+clocks during drag/fling. Across both platforms, Health avoids sensor-rate root
+updates, Sleep parallelizes independent history reads and batches motion
+lookups, with Android preserving canonical computed motion after a re-pair.
+Stress moves deterministic analysis off the UI executor, and Workouts defers
+historical recovery scans until their lazy section mounts; both platforms then
+own the long load at screen lifetime so scrolling the placeholder away cannot
+cancel it. Device switches now invalidate or supersede every affected cache and
+task. No local history was deleted and no retention or formula contract
+changed. Protected integration and exact-head check history are tracked by pull
+request `#12`. The complete replacement local gates pass: 4,176 Android tests
+plus build/lint/instrumentation compilation, 53 API 35 production-shell tests,
+1,700 macOS tests, the unsigned iOS graph, and 35 iOS production-shell tests. A
+fresh lifecycle review also
+fixed three Android realtime-HR surfaces that could skip their lease release
+after Stop, and strength video/GIF cleanup that could target a replacement
+resource. The final Apple lifetime review also preserves an off-screen
+Workouts recovery request across retained-tab suspension and moves Health's
+explicit Live HR lease outside the lazy row, so row recycling cannot stop a
+stream the user requested. The latest exact-head review additionally prevents
+hidden Apple Workouts restarts, protects Android recovery cleanup through an
+A-B-A request cycle, keeps failed Android pinned-card reads retryable, expires
+Classic Today's fallback-empty cache after two minutes, and links Apple
+auto-workout CPU workers to cancellation before the step query and classifier.
+Focused Android tests and 19 Apple retained-screen contracts pass after those
+corrections. The final iOS shell scroll pass averaged 5.185 seconds of
+automation time and 0.172 seconds of app CPU across five repetitions. All 227
+repository tooling tests and local policy gates pass after regenerating the
+fail-closed terminology snapshot and its reviewed digest. The app report now
+records only bounded realtime-lease categories and a zero/one/multiple
+ownership bucket. The first hosted release-control run
+exposed only a stale fail-closed terminology inventory; its reviewed
+regeneration has no forbidden mapping or active allowlist expansion. A
+reviewed shake-to-report ZIP from the affected phone on the integrated build
+plus representative large-database, active-collection,
+low-storage, thermal, memory-pressure, and in-place-upgrade physical-device
+runs remain required. Evidence is recorded in
+[Large-data scroll lag](rounds/2026-09-09-large-data-scroll-lag.md).
 
 The latest managed Safety race closeout is implemented and locally verified on
 protected pull request `#10`. Invitation and contact deletes are idempotent,
@@ -288,8 +328,8 @@ protected-main commit `d8cee4f6` has green exact-SHA Apple, Android, server,
 Swift-package/study, localization, health-claims, runtime-license, operations,
 release-control, and trusted-release-control evidence. Strict branch
 protection, active tag rulesets, and immutable releases are enabled; external
-release gates remain open. The frozen terminology inventory classifies 17,370
-legacy-name occurrences across 1,508 path/category groups; active customer/core
+release gates remain open. The frozen terminology inventory classifies 17,369
+legacy-name occurrences across 1,509 path/category groups; active customer/core
 removal must use a reviewed allowlist and additive migration rather than
 destructive replacement. Evidence is recorded
 in

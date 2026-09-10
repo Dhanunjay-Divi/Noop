@@ -10,6 +10,24 @@ enum RepositoryReadError: Error {
     case incompleteSleepSnapshot
 }
 
+/// Runs dense auto-workout CPU work off the main actor while linking parent cancellation to the worker.
+/// Callers add checks between expensive phases so a dismissed/superseded scan cannot continue into the
+/// step query or classifier after its screen task has been canceled.
+enum AutoWorkoutBackgroundAnalysis {
+    static func run<Value: Sendable>(
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        let worker = Task.detached(priority: .utility) {
+            try operation()
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+}
+
 /// Stable identity for one suggestion. The endpoint is deliberately excluded: a later sync can extend
 /// the same bout or merge a nearby finalized span, but it must not create a second prompt/notification.
 /// Legacy `start:end` values remain readable so existing dismissals survive the migration.
@@ -515,7 +533,7 @@ final class Repository: ObservableObject {
     /// raw under THAT id while the dashboard kept reading "my-whoop" and snapped to a stale day. Now the
     /// read side follows the same active id the write side does. NOT a `let` for that reason; `private(set)`
     /// so only `adoptActiveDeviceId` can move it.
-    private(set) var deviceId: String
+    @Published private(set) var deviceId: String
     /// Source id for on-device computed scores (recovery/strain/sleep derived from the raw strap
     /// streams by IntelligenceEngine). Merged UNDER the imported `deviceId` rows at read time, so a
     /// real WHOOP import always wins and the strap-only user still gets a populated dashboard.
@@ -565,6 +583,15 @@ final class Repository: ObservableObject {
     /// date string within a day and would freeze e.g. the Today HR trend until the date rolls over.
     @Published private(set) var refreshSeq = 0
 
+    /// Low-frequency write boundary mirrored from LiveState. Query-heavy screens read this directly so a
+    /// cold mount during an already-running history offload cannot race a leaf view's first onAppear.
+    /// Only the true/false transfer edges publish; sensor packets and exact progress remain leaf-owned.
+    @Published private(set) var historyWritesActive = false
+    func setHistoryWritesActive(_ active: Bool) {
+        guard historyWritesActive != active else { return }
+        historyWritesActive = active
+    }
+
     /// #989: bumped by every hydration mutation (log / edit / delete). Today's hydration card re-reads on
     /// this instead of waiting for a full `refreshSeq` data refresh, which a hydration write never causes,
     /// so the card sat stale until an unrelated sync landed. Race-free: Repository is @MainActor.
@@ -583,6 +610,7 @@ final class Repository: ObservableObject {
         ageMetricsSeq += 1
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
+        liquidTodayLoadCache = nil
     }
 
     /// Bumped whenever workout persistence changes independently of the daily-metric cache. Activity
@@ -592,6 +620,7 @@ final class Repository: ObservableObject {
         workoutsSeq += 1
         todayHistoryWideLoadedSeq = -1
         todayHistoryWideCache = nil
+        liquidTodayLoadCache = nil
     }
 
     /// Workouts & GPS test mode (Test Centre): the tagged sink for the `.workouts` diagnostic lines
@@ -637,6 +666,17 @@ final class Repository: ObservableObject {
     func adoptActiveDeviceId(_ id: String) -> Bool {
         let trimmed = id.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != deviceId else { return false }
+        todayHistoryWideLoadedSeq = -1
+        todayHistoryWideCache = nil
+        todayDayScopedLoadedSeq = -1
+        todayDayScopedLoadedDayKey = ""
+        todayDayScopedCache = nil
+        liquidTodayLoadCache = nil
+        autoDetectCandidateCache = nil
+        autoDetectScanGeneration &+= 1
+        autoDetectScanTask?.cancel()
+        autoDetectScanTask = nil
+        autoDetectScanTaskKey = nil
         deviceId = trimmed
         return true
     }
@@ -1294,6 +1334,11 @@ final class Repository: ObservableObject {
     /// #932: the snapshot `loadDayScoped()` last built, so a same-(seq, day) re-mount RESTORES it in-memory
     /// (no store queries, no hrBuckets/hrSamples reads) instead of re-running the heavy load. Not @Published.
     var todayDayScopedCache: TodayDayScopedCache?
+
+    /// The default Liquid Today screen's complete query-backed snapshot. The cache key carries every
+    /// independent revision plus the selected day and age-profile state; current-day restores are also
+    /// age-gated in LiquidTodayView because live HR banking does not advance refreshSeq.
+    var liquidTodayLoadCache: LiquidTodayLoadCache?
 
     #if DEBUG
     /// v7.7.2 regression guard: DEBUG-only tally of how many times each cached heavy load actually ran its
@@ -4009,6 +4054,7 @@ final class Repository: ObservableObject {
     private struct AutoDetectCandidateCacheKey: Equatable {
         let refreshSeq: Int
         let decisionSeq: Int
+        let deviceId: String
         let daysBack: Int
         let minuteBucket: Int
     }
@@ -4080,6 +4126,7 @@ final class Repository: ObservableObject {
         let key = AutoDetectCandidateCacheKey(
             refreshSeq: refreshSeq,
             decisionSeq: autoDetectDecisionSeq,
+            deviceId: deviceId,
             daysBack: daysBack,
             minuteBucket: now / 60
         )
@@ -4094,6 +4141,7 @@ final class Repository: ObservableObject {
 
         autoDetectScanGeneration &+= 1
         let generation = autoDetectScanGeneration
+        let requestDeviceId = deviceId
         let task = Task<DetectedWorkout?, Never> { @MainActor [weak self] in
             guard let self else { return nil }
             return await self.computeAutoDetectCandidate(daysBack: daysBack, now: now)
@@ -4101,48 +4149,93 @@ final class Repository: ObservableObject {
         autoDetectScanTask = task
         autoDetectScanTaskKey = key
         let candidate = await task.value
-        if autoDetectScanGeneration == generation {
+        if autoDetectScanGeneration == generation, deviceId == requestDeviceId {
             autoDetectCandidateCache = AutoDetectCandidateCache(key: key, candidate: candidate)
             autoDetectScanTask = nil
             autoDetectScanTaskKey = nil
+            return candidate
         }
-        return candidate
+        return nil
     }
 
     private func computeAutoDetectCandidate(daysBack: Int, now: Int) async -> DetectedWorkout? {
+        let diagnostic = AppDiagnosticsRecorder.shared.beginOperation("workouts.auto_detect_scan")
+        var diagnosticOutcome = "no_candidate"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: diagnosticOutcome,
+                fields: diagnosticFields
+            )
+        }
+
         let from = now - daysBack * 86_400
-        let samples = await hrSamples(from: from, to: now, limit: 200_000)
-        guard samples.count >= 2 else { return nil }
-        let hr = samples.map { (ts: $0.ts, bpm: $0.bpm) }
-        let gravity = await gravitySamples(from: from, to: now, limit: 200_000)
-        let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
+        async let samplesTask = hrSamples(from: from, to: now, limit: 200_000)
+        async let gravityTask = gravitySamples(from: from, to: now, limit: 200_000)
+        async let savedSpansTask = autoDetectSavedSpans(from: from, to: now)
+        let (samples, gravity, savedSpans) =
+            await (samplesTask, gravityTask, savedSpansTask)
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
+        diagnosticFields = [
+            "hr_bucket": Self.autoDetectCountBucket(samples.count),
+            "motion_bucket": Self.autoDetectCountBucket(gravity.count),
+            "saved_span_bucket": Self.autoDetectCountBucket(savedSpans.count),
+        ]
+        guard samples.count >= 2 else {
+            diagnosticOutcome = "insufficient_hr"
+            return nil
+        }
 
         // Resting HR: most recent nightly RHR in range, else the detector's own default (60).
         let restingBpm = days.last(where: { $0.restingHr != nil })?.restingHr
-
-        // Exclude every already-saved workout window (any source , strap, manual, imported, detected).
-        let savedSpans = await autoDetectSavedSpans(from: from, to: now)
 
         // Workouts & GPS test mode: when on, run the diagnostic twin which returns the SAME candidates
         // detect(...) does (it reuses detect verbatim) plus the inputs / thresholds / per-window why trace,
         // tagged `.workouts`. Zero-cost when off: the gate is one UserDefaults bool read inside emitWorkouts,
         // and detectTrace is only called on that branch, so the default path runs the untraced detect.
         let shouldTrace = TestCentre.active(.workouts) && workoutsLog != nil
-        let detection = await Task.detached(priority: .utility) {
-            if shouldTrace {
-                let (results, trace) = AutoWorkoutDetector.detectTrace(
-                    hr: hr, restingBpm: restingBpm, motion: motion,
-                    savedSpans: savedSpans, path: "autoDetect")
-                return (candidates: results, trace: trace)
-            }
-            return (
-                candidates: AutoWorkoutDetector.detect(
+        let detection: (candidates: [DetectedWorkout], trace: [String])
+        do {
+            detection = try await AutoWorkoutBackgroundAnalysis.run {
+                try Task.checkCancellation()
+                var hr: [(ts: Int, bpm: Int)] = []
+                hr.reserveCapacity(samples.count)
+                for (index, sample) in samples.enumerated() {
+                    if index.isMultiple(of: 2_048) { try Task.checkCancellation() }
+                    hr.append((ts: sample.ts, bpm: sample.bpm))
+                }
+                try Task.checkCancellation()
+                let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
+                try Task.checkCancellation()
+                if shouldTrace {
+                    let (results, trace) = AutoWorkoutDetector.detectTrace(
+                        hr: hr, restingBpm: restingBpm, motion: motion,
+                        savedSpans: savedSpans, path: "autoDetect")
+                    try Task.checkCancellation()
+                    return (candidates: results, trace: trace)
+                }
+                let candidates = AutoWorkoutDetector.detect(
                     hr: hr, restingBpm: restingBpm,
                     motion: motion, savedSpans: savedSpans
-                ),
-                trace: []
-            )
-        }.value
+                )
+                try Task.checkCancellation()
+                return (candidates: candidates, trace: [])
+            }
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            return nil
+        } catch {
+            diagnosticOutcome = "failed"
+            return nil
+        }
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
         for line in detection.trace { emitWorkouts(line) }
         // Drop anything the user already dismissed, then take the most recent.
         let dismissed = autoDetectDismissedSpans
@@ -4158,21 +4251,42 @@ final class Repository: ObservableObject {
         // its confidence floor; otherwise the candidate remains the honest generic "Workout". It is still
         // advisory: the card names it experimental and saving is an explicit acceptance.
         let steps = await stepSamplesUnion(from: candidate.startSec, to: candidate.endSec)
-        let prediction: WorkoutClassPrediction? = await Task.detached(priority: .utility) {
-            guard let features = WorkoutTypeFeatureExtractor.extract(
-                hr: samples, gravity: gravity, steps: steps,
-                start: candidate.startSec, end: candidate.endSec,
-                restingHR: restingBpm.map(Double.init)
-            ), features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else {
-                return nil
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
+        let prediction: WorkoutClassPrediction?
+        do {
+            prediction = try await AutoWorkoutBackgroundAnalysis.run {
+                try Task.checkCancellation()
+                guard let features = WorkoutTypeFeatureExtractor.extract(
+                    hr: samples, gravity: gravity, steps: steps,
+                    start: candidate.startSec, end: candidate.endSec,
+                    restingHR: restingBpm.map(Double.init)
+                ), features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else {
+                    return nil
+                }
+                try Task.checkCancellation()
+                let prediction = WorkoutTypeClassifier.classify(features)
+                try Task.checkCancellation()
+                guard prediction.predictedClass != .other,
+                      prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else {
+                    return nil
+                }
+                return prediction
             }
-            let prediction = WorkoutTypeClassifier.classify(features)
-            guard prediction.predictedClass != .other,
-                  prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else {
-                return nil
-            }
-            return prediction
-        }.value
+        } catch is CancellationError {
+            diagnosticOutcome = "canceled"
+            return nil
+        } catch {
+            diagnosticOutcome = "failed"
+            return nil
+        }
+        guard !Task.isCancelled else {
+            diagnosticOutcome = "canceled"
+            return nil
+        }
+        diagnosticOutcome = "candidate"
         guard let prediction else { return candidate }
         return DetectedWorkout(
             startSec: candidate.startSec, endSec: candidate.endSec,
@@ -4184,6 +4298,15 @@ final class Repository: ObservableObject {
             eventConfidence: candidate.eventConfidence,
             confidenceStatus: candidate.confidenceStatus,
             evidenceProvenance: candidate.evidenceProvenance)
+    }
+
+    private nonisolated static func autoDetectCountBucket(_ count: Int) -> String {
+        switch count {
+        case ...0: return "empty"
+        case 1...100: return "up_to_100"
+        case 101...10_000: return "101_to_10000"
+        default: return "over_10000"
+        }
     }
 
     /// Persist a detector-qualified window under the computed `<strap>-noop` source so it is honestly

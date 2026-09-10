@@ -173,6 +173,16 @@ struct LiquidTodayView: View {
     /// Flips true once the first load() completes. Until then the hero gauges + sky render STATIC so the
     /// launch data-churn (refresh publish + BLE/HR notifies) isn't fighting 4 live canvases + CoreMotion.
     @State private var dataLoaded = false
+    /// Blocks query work until a multi-session history-write burst has been stably quiet.
+    @State private var historyWriteQueryGate = false
+    /// Forces one real post-sync load even if raw rows changed without advancing a query-cache revision.
+    @State private var deferredQueryLoadForHistoryWrite = false
+    /// The selected day currently represented by the query-backed state below. It lets a same-day refresh
+    /// preserve visible values while an offload writes, while a day change still loads immediately.
+    @State private var loadedQueryDayKey: String?
+    private var historyReadsBlocked: Bool {
+        repo.historyWritesActive || historyWriteQueryGate
+    }
 
     // Custom liquid pull-to-refresh: a vessel that FILLS as you drag, releases into a refresh (replaces
     // the system spinner). Driven by the scroll's top overscroll offset.
@@ -180,6 +190,7 @@ struct LiquidTodayView: View {
     /// Raw offsets arrive every display-linked scroll update. Reference storage keeps that bookkeeping
     /// from invalidating this entire dashboard; only visible pull-state transitions remain `@State`.
     @State private var scrollTracker = LiquidTodayScrollTracker()
+    @StateObject private var scrollInteraction = ScrollInteractionTracker()
     @State private var pullGestureStartedAtTop: Bool?
     @State private var refreshArmed = false
     @State private var refreshing = false
@@ -444,12 +455,19 @@ struct LiquidTodayView: View {
             .frame(maxWidth: .infinity)
             #endif
         }
+        .background(HistoryWriteQueryGateBridge(
+            active: repo.historyWritesActive,
+            blocked: $historyWriteQueryGate
+        ))
         .coordinateSpace(name: Self.pullSpace)
         .onPreferenceChange(PullOffsetKey.self) { offset in
             scrollTracker.offset = offset
+            scrollInteraction.observe(offset: offset)
             handlePull(offset)
             reportScrollPosition(offset)
         }
+        .environment(\.noopInteractionInProgress, scrollInteraction.isActive)
+        .onDisappear { scrollInteraction.reset() }
         // The original satin-obsidian field is a FIXED full-bleed backdrop behind the scroll content,
         // edge-to-edge under the status bar. It does not scroll, so the UI reads as glass moving over
         // physical hardware rather than wallpaper moving with the cards.
@@ -475,7 +493,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyReadsBlocked)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -2655,10 +2673,86 @@ struct LiquidTodayView: View {
 
     // MARK: - Data
 
+    private static let queryCacheMaxAge: TimeInterval = 120
+    private static let historicalQueryCacheMaxAge: TimeInterval = 5 * 60
+
+    static func shouldRestoreQueryCache(
+        cachedKey: LiquidTodayQueryKey,
+        requestKey: LiquidTodayQueryKey,
+        bankedAt: Date,
+        now: Date,
+        isToday: Bool
+    ) -> Bool {
+        guard cachedKey == requestKey else { return false }
+        let maxAge = isToday ? queryCacheMaxAge : historicalQueryCacheMaxAge
+        return max(0, now.timeIntervalSince(bankedAt)) < maxAge
+    }
+
+    static func shouldDeferQueryLoad(isBackfilling: Bool) -> Bool { isBackfilling }
+
+    static func canRestoreDuringHistoryWrite(
+        cachedKey: LiquidTodayQueryKey,
+        requestKey: LiquidTodayQueryKey
+    ) -> Bool {
+        cachedKey.deviceId == requestKey.deviceId
+            && cachedKey.dayKey == requestKey.dayKey
+            && cachedKey.isToday == requestKey.isToday
+            && cachedKey.profileState == requestKey.profileState
+    }
+
+    private func applyQueryCache(_ cache: LiquidTodayLoadCache) {
+        restScore = cache.restScore
+        heroProvenanceByMetric = cache.heroProvenanceByMetric
+        stress = cache.stress
+        fitnessAge = cache.fitnessAge
+        vitality = cache.vitality
+        ageMetricsLoadedProfileState = cache.key.profileState
+        stepsEst = cache.stepsEst
+        importedStepsDay = cache.importedStepsDay
+        importedActiveKcalDay = cache.importedActiveKcalDay
+        importedRestingKcalDay = cache.importedRestingKcalDay
+        importedWeightKg = cache.importedWeightKg
+        hrValues = cache.hrValues
+        workouts = cache.workouts
+        keyMetricTrends = cache.keyMetricTrends
+        resolvedSpo2ByDay = cache.resolvedSpo2ByDay
+    }
+
+    private func markQueryDataLoaded() {
+        guard !dataLoaded else { return }
+        withAnimation(.easeIn(duration: 0.4)) { dataLoaded = true }
+    }
+
     private func load() async {
-        // Capture the profile identity before any suspension. A sex/DOB edit starts a replacement task;
-        // the older task must never stamp its result with the newer profile token after its reads finish.
+        let requestedOffset = selectedDayOffset
+        let requestedDayKey = selectedDayKey
+        let requestedLogicalDay = selectedLogicalDay
         let requestedAgeMetricState = profile.ageMetricStateToken
+        let isToday = requestedOffset == 0
+        let requestKey = LiquidTodayQueryKey(
+            refreshSeq: repo.refreshSeq,
+            ageMetricsSeq: repo.ageMetricsSeq,
+            workoutsSeq: repo.workoutsSeq,
+            deviceId: repo.deviceId,
+            dayKey: requestedDayKey,
+            isToday: isToday,
+            profileState: requestedAgeMetricState
+        )
+        let trace = AppDiagnosticsRecorder.shared.beginOperation(
+            "today.liquid.load",
+            fields: ["scope": isToday ? "today" : "historical"]
+        )
+        var diagnosticOutcome = "cancelled"
+        var diagnosticFields: [String: String] = [:]
+        defer {
+            AppDiagnosticsRecorder.shared.endOperation(
+                trace,
+                outcome: diagnosticOutcome,
+                fields: diagnosticFields,
+                includeResourceSnapshot: diagnosticOutcome == "full"
+            )
+        }
+
         if hydrationEnabled {
             hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
             hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
@@ -2666,6 +2760,17 @@ struct LiquidTodayView: View {
             hydrationTotalML = nil
             hydrationGoalML = nil
         }
+        guard !Task.isCancelled,
+              requestKey == LiquidTodayQueryKey(
+                refreshSeq: repo.refreshSeq,
+                ageMetricsSeq: repo.ageMetricsSeq,
+                workoutsSeq: repo.workoutsSeq,
+                deviceId: repo.deviceId,
+                dayKey: selectedDayKey,
+                isToday: selectedDayOffset == 0,
+                profileState: profile.ageMetricStateToken
+              ) else { return }
+
         // Resolve the O(days) lookups ONCE here (not on every body re-render): the selected day and the
         // readiness verdict. Both scan repo.days (up to 599 rows); doing it per-render was the stutter.
         let day = resolveDisplayDay()
@@ -2675,7 +2780,7 @@ struct LiquidTodayView: View {
         // current row into nil, which asks ReadinessEngine to fall back to the newest stored row — so a
         // stale import could masquerade as today's pattern. An explicit absent key correctly yields
         // `.insufficient`.
-        let readinessResult = ReadinessEngine.evaluate(days: repo.days, today: selectedDayKey)
+        let readinessResult = ReadinessEngine.evaluate(days: repo.days, today: requestedDayKey)
         cachedReadiness = readinessResult
         readinessAsOfDay = readinessResult.asOfDay
         let dailyPlan = makeDailyActionPlan(readiness: readinessResult)
@@ -2691,16 +2796,16 @@ struct LiquidTodayView: View {
         #endif
         // Prior-day vitals carry, resolved ONCE here (never in body). Bound to today's own key so it can't
         // echo today's still-forming row; only on today (a past day's own row is the whole story).
-        let tkey = cachedDisplayDay?.day ?? selectedDayKey
-        cachedVitalsDay = (selectedDayOffset == 0) ? Repository.lastVitalsDay(days: repo.days, todayKey: tkey) : nil
-        cachedSpo2Day = (selectedDayOffset == 0) ? Repository.lastSpo2Day(days: repo.days, todayKey: tkey) : nil
-        cachedSkinTempDay = (selectedDayOffset == 0)
+        let tkey = cachedDisplayDay?.day ?? requestedDayKey
+        cachedVitalsDay = isToday ? Repository.lastVitalsDay(days: repo.days, todayKey: tkey) : nil
+        cachedSpo2Day = isToday ? Repository.lastSpo2Day(days: repo.days, todayKey: tkey) : nil
+        cachedSkinTempDay = isToday
             ? Repository.lastSkinTempDay(days: repo.days, todayKey: tkey) : nil
         // Charge carry (#543) + the honest label, resolved here for the same reason as the two above: the
         // selector below scans repo.days. Calibration nights come from the SAME `RecoveryScorer` helper the
         // classic Today reads, so the two screens agree on when a wearer is genuinely mid-calibration
         // rather than simply lacking a scored night.
-        let calNights = (selectedDayOffset == 0)
+        let calNights = isToday
             ? RecoveryScorer.calibrationNights(nightlyHrv: repo.days.map(\.avgHrv),
                                                dayKeys: repo.days.map(\.day),
                                                before: tkey,
@@ -2709,25 +2814,68 @@ struct LiquidTodayView: View {
         let resolvedChargeDisplay = ChargeDisplay.resolve(
             todayRecovery: day?.recovery,
             priorScored: TodayView.lastScoredRecoveryDay(days: repo.days, selectedDayKey: tkey,
-                                                         isToday: selectedDayOffset == 0,
+                                                         isToday: isToday,
                                                          todayScored: day?.recovery != nil,
                                                          isCalibrating: calNights != nil),
             calibrationNights: calNights,
             todayKey: tkey)
         cachedChargeDisplay = resolvedChargeDisplay
-        if selectedDayOffset == 0,
+        if isToday,
            case .scored = resolvedChargeDisplay,
            chargeLandingHapticDay != tkey {
             chargeLandingHapticDay = tkey
             chargeLandingHapticTrigger += 1
         }
 
+        if Self.shouldDeferQueryLoad(isBackfilling: historyReadsBlocked) {
+            deferredQueryLoadForHistoryWrite = true
+            if let cached = repo.liquidTodayLoadCache,
+               Self.canRestoreDuringHistoryWrite(cachedKey: cached.key, requestKey: requestKey) {
+                applyQueryCache(cached)
+                loadedQueryDayKey = requestedDayKey
+                markQueryDataLoaded()
+                diagnosticOutcome = "backfill_cache_restore"
+                diagnosticFields = [
+                    "hr_bucket_count": String(cached.hrValues.count),
+                    "workout_count": String(cached.workouts.count),
+                    "trend_metric_count": String(cached.keyMetricTrends.count),
+                ]
+            } else {
+                diagnosticOutcome = "backfill_deferred"
+            }
+            return
+        }
+
+        let forceAfterHistoryWrite = deferredQueryLoadForHistoryWrite
+        deferredQueryLoadForHistoryWrite = false
+
+        if !forceAfterHistoryWrite,
+           let cached = repo.liquidTodayLoadCache,
+           Self.shouldRestoreQueryCache(
+                cachedKey: cached.key,
+                requestKey: requestKey,
+                bankedAt: cached.bankedAt,
+                now: Date(),
+                isToday: isToday
+           ) {
+            applyQueryCache(cached)
+            loadedQueryDayKey = requestedDayKey
+            markQueryDataLoaded()
+            diagnosticOutcome = "cache_restore"
+            diagnosticFields = [
+                "hr_bucket_count": String(cached.hrValues.count),
+                "workout_count": String(cached.workouts.count),
+                "trend_metric_count": String(cached.keyMetricTrends.count),
+            ]
+            return
+        }
+
         let cal = Calendar.current
-        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: selectedDayKey, calendar: cal)
-            ?? WorkoutDateWindow.localDay(containing: selectedLogicalDay, calendar: cal)
+        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: requestedDayKey, calendar: cal)
+            ?? WorkoutDateWindow.localDay(containing: requestedLogicalDay, calendar: cal)
         let from = selectedCalendarWindow.lowerBound
         // today → midnight..now; a past day → its full 24h (a missing morning reads as empty space).
-        let to: Int = selectedDayOffset == 0
+        let to: Int = isToday
             ? Int(Date().timeIntervalSince1970)
             : selectedCalendarWindow.upperBound
 
@@ -2742,15 +2890,14 @@ struct LiquidTodayView: View {
         async let spo2A = repo.resolvedSeries(
             key: "spo2",
             source: Repository.whoopSource,
-            days: max(30, selectedDayOffset + 15))
+            days: max(30, requestedOffset + 15))
         async let appleA = repo.appleDailyRows()
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
         async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
                                          to: selectedCalendarWindow.upperBound)
         // Ask the same cross-source resolver the Classic Today view uses which source actually won each
         // displayed score. Limit the read to the selected-day window instead of scanning full history.
-        let sourceDayKey = selectedDayKey
-        let sourceLookback = max(2, selectedDayOffset + 2)
+        let sourceLookback = max(2, requestedOffset + 2)
         async let chargeSourceA = repo.resolvedSeries(key: "recovery", source: Repository.whoopSource,
                                                       days: sourceLookback)
         async let effortSourceA = repo.resolvedSeries(key: "strain", source: Repository.whoopSource,
@@ -2764,7 +2911,7 @@ struct LiquidTodayView: View {
         let validSpo2Points = spo2Resolution.values.filter {
             $0.value.isFinite && $0.value > 0 && $0.value <= 100
         }
-        resolvedSpo2ByDay = Dictionary(
+        let resolvedSpo2Local = Dictionary(
             validSpo2Points,
             uniquingKeysWith: { _, last in last })
         let restByDay = Dictionary(restSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
@@ -2773,10 +2920,10 @@ struct LiquidTodayView: View {
         // gravity ⇒ no sleep_performance point ever written) used to pin Rest to the weeks-old series tail
         // forever while Charge advanced; freshness-gate the tail-fallback so a stale tail falls through to
         // the Rest hero's No-Data/calibrating state (same empty treatment Effort uses) instead of freezing.
-        restScore = TodayView.freshRestScore(
-            todayValue: restByDay[selectedDayKey], lastDay: restSeries.last?.day,
-            lastValue: restSeries.last?.value, isTodaySelected: selectedDayOffset == 0,
-            todayKey: selectedDayKey)
+        let restScoreLocal = TodayView.freshRestScore(
+            todayValue: restByDay[requestedDayKey], lastDay: restSeries.last?.day,
+            lastValue: restSeries.last?.value, isTodaySelected: isToday,
+            todayKey: requestedDayKey)
         // Mirror StressView's source-isolated read: select one complete source before building a personal
         // baseline. Never blend strap, WHOOP export, and Apple rows into a synthetic physiology history.
         // The Today card is stricter than the detail screen's honest historical carry: if the selected day
@@ -2789,54 +2936,51 @@ struct LiquidTodayView: View {
         // already-loaded rows also feed one compact 14-day trend cache below; no extra store query is made.
         let appleRows = await appleA
         let stressModel = StressModel(sourceRows: stressRows)
-        stress = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
+        let stressLocal = stressModel?.asOfDay == requestedDayKey ? stressModel?.score : nil
         let fitProfile = (await fitProfileA).last?.value
         let vitProfile = (await vitProfileA).last?.value
         let readFitnessAge = (await fitA).last?.value
         let readVitality = (await vitA).last?.value
-        if !Task.isCancelled, requestedAgeMetricState == profile.ageMetricStateToken {
-            fitnessAge = profile.acceptsFitnessAge(provenance: fitProfile)
-                ? readFitnessAge : nil   // history-wide latest banked (not day-scoped)
-            vitality = profile.acceptsVitality(provenance: vitProfile) ? readVitality : nil
-            ageMetricsLoadedProfileState = requestedAgeMetricState
-        }
+        let fitnessAgeLocal = profile.acceptsFitnessAge(provenance: fitProfile)
+            ? readFitnessAge : nil
+        let vitalityLocal = profile.acceptsVitality(provenance: vitProfile) ? readVitality : nil
         // Steps is a DAILY metric, so key it to the SELECTED day (like restScore above), not the history-wide
         // latest. Without this, swiping to a past day with no strap motion estimate showed today's estimate (the
         // `.last` value) instead of that day's. Mirrors the classic Today's stepsEstByDay[selectedDayKey].
         let stepsByDay = Dictionary(stepsSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
         // Never let the history tail pose as today's count. An exact-day row may be absent while an
         // older estimate exists; Today must stay empty until this selected day actually has a point.
-        stepsEst = stepsByDay[selectedDayKey]
+        let stepsEstLocal = stepsByDay[requestedDayKey]
         // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
         // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
         // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
-        importedStepsDay = appleRows.filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
+        let importedStepsLocal = appleRows.filter { $0.day == requestedDayKey }.compactMap { $0.steps }.max()
         // Weight is not expected every day. Use the freshest measured Apple Health value no later than
         // the day being viewed; never borrow from a future day when navigating backwards.
-        importedWeightKg = appleRows.filter { $0.day <= selectedDayKey && $0.weightKg != nil }
+        let importedWeightLocal = appleRows.filter { $0.day <= requestedDayKey && $0.weightKg != nil }
             .max(by: { $0.day < $1.day })?.weightKg
         // Keep the Apple Health components together. The derived Total is resolved later only when both
         // exist; a partial row never borrows the strap's combined estimate to complete itself.
-        let selectedAppleEnergy = appleRows.last(where: { $0.day == selectedDayKey })
-        importedActiveKcalDay = selectedAppleEnergy?.activeKcal
-        importedRestingKcalDay = selectedAppleEnergy?.basalKcal
+        let selectedAppleEnergy = appleRows.last(where: { $0.day == requestedDayKey })
+        let importedActiveKcalLocal = selectedAppleEnergy?.activeKcal
+        let importedRestingKcalLocal = selectedAppleEnergy?.basalKcal
         var trendDays = repo.days
         if let day, !trendDays.contains(where: { $0.day == day.day }) {
             trendDays.append(day)
         }
-        keyMetricTrends = Self.keyMetricTrendSeries(
+        let keyMetricTrendsLocal = Self.keyMetricTrendSeries(
             days: trendDays,
             restSeries: restSeries,
             stepEstimates: stepsSeries,
             appleRows: appleRows,
-            endingAt: selectedDayKey,
+            endingAt: requestedDayKey,
             resolvedSpo2: validSpo2Points
         )
-        hrValues = (await hrA).map { $0.bpm }
+        let hrValuesLocal = (await hrA).map { $0.bpm }
         // A row that only OVERLAPS the selected day (for example a workout begun before midnight) must
         // be visibly attributed, not look like it started today. Keep the useful overlap but stamp its
         // start day in the row; the empty state remains strictly selected-day scoped.
-        workouts = (await wkA).sorted { $0.startTs > $1.startTs }
+        let workoutsLocal = (await wkA).sorted { $0.startTs > $1.startTs }
 
         let (chargeSource, effortSource, restSource) = await (chargeSourceA, effortSourceA, restSourceA)
         let sourceResolutions = [
@@ -2846,14 +2990,50 @@ struct LiquidTodayView: View {
         ]
         var provenance: [String: String] = [:]
         for (metric, resolution) in sourceResolutions {
-            if let winner = resolution.points.last(where: { $0.day == sourceDayKey })?.source {
+            if let winner = resolution.points.last(where: { $0.day == requestedDayKey })?.source {
                 provenance[metric] = winner
             }
         }
-        heroProvenanceByMetric = provenance
 
-        // First load done — bring the hero gauges + sky to life now the launch churn has settled.
-        if !dataLoaded { withAnimation(.easeIn(duration: 0.4)) { dataLoaded = true } }
+        guard !Task.isCancelled,
+              requestKey == LiquidTodayQueryKey(
+                refreshSeq: repo.refreshSeq,
+                ageMetricsSeq: repo.ageMetricsSeq,
+                workoutsSeq: repo.workoutsSeq,
+                deviceId: repo.deviceId,
+                dayKey: selectedDayKey,
+                isToday: selectedDayOffset == 0,
+                profileState: profile.ageMetricStateToken
+              ) else { return }
+
+        let cache = LiquidTodayLoadCache(
+            key: requestKey,
+            bankedAt: Date(),
+            restScore: restScoreLocal,
+            heroProvenanceByMetric: provenance,
+            stress: stressLocal,
+            fitnessAge: fitnessAgeLocal,
+            vitality: vitalityLocal,
+            stepsEst: stepsEstLocal,
+            importedStepsDay: importedStepsLocal,
+            importedActiveKcalDay: importedActiveKcalLocal,
+            importedRestingKcalDay: importedRestingKcalLocal,
+            importedWeightKg: importedWeightLocal,
+            hrValues: hrValuesLocal,
+            workouts: workoutsLocal,
+            keyMetricTrends: keyMetricTrendsLocal,
+            resolvedSpo2ByDay: resolvedSpo2Local
+        )
+        repo.liquidTodayLoadCache = cache
+        applyQueryCache(cache)
+        loadedQueryDayKey = requestedDayKey
+        markQueryDataLoaded()
+        diagnosticOutcome = "full"
+        diagnosticFields = [
+            "hr_bucket_count": String(hrValuesLocal.count),
+            "workout_count": String(workoutsLocal.count),
+            "trend_metric_count": String(keyMetricTrendsLocal.count),
+        ]
     }
 
     private func updateAdaptiveHydrationContext() {
@@ -3210,6 +3390,37 @@ struct LiquidTodayView: View {
         return TodayView.carriedCaption(priorDayKey: carried.day,
                                         todayKey: displayDay?.day ?? selectedDayKey)
     }
+}
+
+struct LiquidTodayQueryKey: Equatable {
+    let refreshSeq: Int
+    let ageMetricsSeq: Int
+    let workoutsSeq: Int
+    let deviceId: String
+    let dayKey: String
+    let isToday: Bool
+    let profileState: String
+}
+
+/// Query-backed Liquid Today outputs banked on the long-lived Repository. A view re-mount can repaint
+/// from memory instead of reopening the same multi-year metric series and selected-day HR window.
+struct LiquidTodayLoadCache {
+    let key: LiquidTodayQueryKey
+    let bankedAt: Date
+    let restScore: Double?
+    let heroProvenanceByMetric: [String: String]
+    let stress: Double?
+    let fitnessAge: Double?
+    let vitality: Double?
+    let stepsEst: Double?
+    let importedStepsDay: Int?
+    let importedActiveKcalDay: Double?
+    let importedRestingKcalDay: Double?
+    let importedWeightKg: Double?
+    let hrValues: [Double]
+    let workouts: [WorkoutRow]
+    let keyMetricTrends: [KeyMetric: [Double]]
+    let resolvedSpo2ByDay: [String: Double]
 }
 
 // MARK: - Cross-metric pattern brief
@@ -3923,6 +4134,7 @@ private struct DailySignalHeader: View {
 private struct DailySignalSourceChip: View {
     @EnvironmentObject private var live: LiveState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
 
     let text: String
 
@@ -3973,7 +4185,7 @@ private struct DailySignalSourceChip: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
                         .fill(StrandPalette.onDarkSecondary.opacity(0.13))
-                    if syncing && !reduceMotion {
+                    if syncing && !reduceMotion && !interactionInProgress {
                         GeometryReader { proxy in
                             let width = max(CGFloat(22), proxy.size.width * 0.48)
                             LinearGradient(
@@ -4005,6 +4217,9 @@ private struct DailySignalSourceChip: View {
                 updateSyncPresentation()
             }
             .onChangeCompat(of: reduceMotion) { _ in
+                updateSweep()
+            }
+            .onChangeCompat(of: interactionInProgress) { _ in
                 updateSweep()
             }
             .onDisappear {
@@ -4049,7 +4264,7 @@ private struct DailySignalSourceChip: View {
 
     private func updateSweep() {
         withAnimation(.none) { sweep = 0 }
-        guard syncing, !reduceMotion else { return }
+        guard syncing, !reduceMotion, !interactionInProgress else { return }
         DispatchQueue.main.async {
             withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
                 sweep = 1
@@ -4066,6 +4281,7 @@ private struct DailySignalWaveform: View {
     let tint: Color
     let posed: Bool
 
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @State private var progress: CGFloat = 1
 
     private var sweepSeconds: Double {
@@ -4094,9 +4310,9 @@ private struct DailySignalWaveform: View {
         }
         .frame(width: 30, height: 17)
         .accessibilityHidden(true)
-        .task(id: "\(status.rawValue)-\(posed)") {
+        .task(id: "\(status.rawValue)-\(posed)-\(interactionInProgress)") {
             progress = 1
-            guard !posed else { return }
+            guard !posed, !interactionInProgress else { return }
             while !Task.isCancelled {
                 progress = 0
                 withAnimation(.linear(duration: sweepSeconds)) { progress = 1 }
