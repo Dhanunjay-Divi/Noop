@@ -3,8 +3,12 @@ package com.noop.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,6 +60,7 @@ import androidx.compose.material.icons.automirrored.filled.TrendingFlat
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Accessibility
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
@@ -187,6 +192,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import android.view.HapticFeedbackConstants
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.noop.R
@@ -205,6 +213,7 @@ import com.noop.analytics.ScoreConfidence
 import com.noop.analytics.StepsEstimateEngine
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.VitalBands
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.data.DailyMetric
 import com.noop.data.HrBucket
 import com.noop.data.SleepSession
@@ -461,6 +470,7 @@ fun TodayScreen(
     val healthSignals by viewModel.v5Signals.collectAsStateWithLifecycle()
     val illnessWatchEnabled by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
     val days by viewModel.recentDays.collectAsStateWithLifecycle()
+    val sleepTargetMinutes by viewModel.windDownSleepNeedMinutes.collectAsStateWithLifecycle()
     val activeStrapId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
     val liveSnap by viewModel.dashboardLive.collectAsStateWithLifecycle()
     val historyBackfilling by viewModel.historyBackfillActive.collectAsStateWithLifecycle()
@@ -547,6 +557,57 @@ fun TodayScreen(
     // Display-only units + the SI profile weight, read once like every other Settings-backed
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val plannedWorkoutSnapshot by PlannedWorkoutCalendarStore.snapshot.collectAsStateWithLifecycle()
+    val plannedWorkoutCalendarScope = rememberCoroutineScope()
+    DisposableEffect(context, lifecycleOwner) {
+        var providerObserverRegistered = false
+        val providerObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                plannedWorkoutCalendarScope.launch {
+                    PlannedWorkoutCalendarStore.refresh(context, force = true)
+                }
+            }
+        }
+        fun ensureProviderObserver() {
+            if (
+                !providerObserverRegistered &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_CALENDAR,
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                runCatching {
+                    context.contentResolver.registerContentObserver(
+                        CalendarContract.Events.CONTENT_URI,
+                        true,
+                        providerObserver,
+                    )
+                }.onSuccess {
+                    providerObserverRegistered = true
+                }
+            }
+        }
+        fun refreshPlannedWorkout() {
+            ensureProviderObserver()
+            plannedWorkoutCalendarScope.launch {
+                PlannedWorkoutCalendarStore.refresh(context, force = true)
+            }
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshPlannedWorkout()
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        refreshPlannedWorkout()
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+            if (providerObserverRegistered) {
+                runCatching {
+                    context.contentResolver.unregisterContentObserver(providerObserver)
+                }
+            }
+        }
+    }
     val weatherStore = remember(context.applicationContext) {
         TodayWeatherStore(context.applicationContext)
     }
@@ -586,6 +647,34 @@ fun TodayScreen(
     val dailyActionReadiness = remember(days, selectedDayKey) {
         ReadinessEngine.evaluate(days, today = selectedDayKey)
     }
+    var planningClockRevision by remember { mutableLongStateOf(0L) }
+    val planningNowSec = remember(
+        plannedWorkoutSnapshot?.revision,
+        selectedDayKey,
+        planningClockRevision,
+    ) {
+        System.currentTimeMillis() / 1_000L
+    }
+
+    fun buildDailyActionPlan(checkIn: DailyActionPlanner.CheckIn): DailyActionPlanner.Plan =
+        DailyActionPlanner.plan(
+            today = selectedDayKey,
+            readiness = dailyActionReadiness,
+            checkIn = checkIn,
+            recentEffort = days.map {
+                DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+            },
+            recentSleep = days.map {
+                DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
+            },
+            sleepTargetMinutes = sleepTargetMinutes,
+            plannedWorkout = if (selectedDayOffset == 0) {
+                plannedWorkoutSnapshot?.asPlannedWorkout(selectedDayKey)
+            } else {
+                null
+            },
+            nowSec = planningNowSec,
+        )
 
     fun applyStrainTargetPreference(enabled: Boolean, permissionDenied: Boolean = false) {
         strainTargetEnabled = enabled
@@ -598,13 +687,8 @@ fun TodayScreen(
                 context = context,
                 day = selectedDayKey,
                 dayEffort = displayMetric?.strain,
-                targetRange = DailyActionPlanner.plan(
-                    today = selectedDayKey,
-                    readiness = dailyActionReadiness,
-                    checkIn = NoopPrefs.dailyActionCheckIn(context, selectedDayKey),
-                    recentEffort = days.map {
-                        DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
-                    },
+                targetRange = buildDailyActionPlan(
+                    NoopPrefs.dailyActionCheckIn(context, selectedDayKey),
                 ).target,
             )
         }
@@ -631,15 +715,23 @@ fun TodayScreen(
     val dailySignalStatus = remember(dailyActionReadiness, currentIllnessResult) {
         DailySignalStatus.resolve(dailyActionReadiness, currentIllnessResult)
     }
-    val dailyActionPlan = remember(days, selectedDayKey, dailyActionCheckIn) {
-        DailyActionPlanner.plan(
-            today = selectedDayKey,
-            readiness = dailyActionReadiness,
-            checkIn = dailyActionCheckIn,
-            recentEffort = days.map {
-                DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
-            },
-        )
+    val dailyActionPlan = remember(
+        days,
+        selectedDayKey,
+        selectedDayOffset,
+        dailyActionCheckIn,
+        dailyActionReadiness,
+        plannedWorkoutSnapshot?.revision,
+        sleepTargetMinutes,
+        planningNowSec,
+    ) {
+        buildDailyActionPlan(dailyActionCheckIn)
+    }
+    LaunchedEffect(dailyActionPlan.workoutAdjustment?.startSec) {
+        val startSec = dailyActionPlan.workoutAdjustment?.startSec ?: return@LaunchedEffect
+        val delayMillis = (startSec * 1_000L - System.currentTimeMillis()).coerceAtLeast(0L)
+        if (delayMillis > 0L) delay(delayMillis)
+        planningClockRevision += 1L
     }
     val updateDailyActionCheckIn: (DailyActionPlanner.CheckIn) -> Unit = { value ->
         if (selectedDayOffset == 0) {
@@ -2584,6 +2676,11 @@ private fun DailyPlanTargetSection(
                     }
                 }
 
+                plan.workoutAdjustment?.let { adjustment ->
+                    HorizontalDivider(color = Palette.hairline)
+                    DailyPlanWorkoutAdjustment(adjustment)
+                }
+
                 TextButton(
                     onClick = { detailsExpanded = !detailsExpanded },
                     modifier = Modifier
@@ -2615,6 +2712,148 @@ private fun DailyPlanTargetSection(
             }
         }
     }
+}
+
+@Composable
+private fun DailyPlanWorkoutAdjustment(
+    adjustment: DailyActionPlanner.WorkoutAdjustment,
+) {
+    val startTime = remember(adjustment.startSec) {
+        DateTimeFormatter
+            .ofLocalizedTime(FormatStyle.SHORT)
+            .withLocale(Locale.getDefault())
+            .format(
+                Instant.ofEpochSecond(adjustment.startSec)
+                    .atZone(ZoneId.systemDefault()),
+            )
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.CalendarMonth,
+                contentDescription = null,
+                tint = Palette.accent,
+                modifier = Modifier.size(Metrics.iconSmall),
+            )
+            Text(
+                stringResource(R.string.daily_plan_workout_adjustment_title),
+                style = NoopType.headline,
+                color = Palette.textPrimary,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+        ) {
+            adjustment.measuredSleepMinutes?.let { minutes ->
+                DailyPlanWorkoutMetric(
+                    icon = Icons.Filled.Bedtime,
+                    label = stringResource(R.string.daily_plan_workout_adjustment_sleep_label),
+                    value = dailyPlanDuration(minutes),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            DailyPlanWorkoutMetric(
+                icon = Icons.Filled.AccessTime,
+                label = stringResource(R.string.daily_plan_workout_adjustment_workout_label),
+                value = startTime,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        dailyPlanSleepDeficit(adjustment)?.let { deficit ->
+            Text(
+                deficit,
+                style = NoopType.subhead.copy(fontWeight = FontWeight.SemiBold),
+                color = Palette.textPrimary,
+            )
+        }
+        Text(
+            stringResource(dailyPlanWorkoutAdjustmentBodyResource(adjustment.reason)),
+            style = NoopType.subhead,
+            color = Palette.textSecondary,
+        )
+    }
+}
+
+@Composable
+private fun dailyPlanSleepDeficit(
+    adjustment: DailyActionPlanner.WorkoutAdjustment,
+): String? {
+    val deficit = adjustment.sleepDeficitMinutes?.takeIf { it > 0 } ?: return null
+    val reference = adjustment.sleepReference ?: return null
+    val hours = deficit / 60
+    val minutes = deficit % 60
+    val resource = when {
+        reference == DailyActionPlanner.SleepReference.PERSONAL_USUAL && hours > 0 ->
+            R.string.daily_plan_workout_adjustment_deficit_usual_hours_minutes
+        reference == DailyActionPlanner.SleepReference.PERSONAL_USUAL ->
+            R.string.daily_plan_workout_adjustment_deficit_usual_minutes
+        hours > 0 ->
+            R.string.daily_plan_workout_adjustment_deficit_target_hours_minutes
+        else ->
+            R.string.daily_plan_workout_adjustment_deficit_target_minutes
+    }
+    return if (hours > 0) {
+        stringResource(resource, hours, minutes)
+    } else {
+        stringResource(resource, minutes)
+    }
+}
+
+@Composable
+private fun DailyPlanWorkoutMetric(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(Metrics.iconSmall),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space2)) {
+            Text(label, style = NoopType.overline, color = Palette.textTertiary)
+            Text(value, style = NoopType.subhead, color = Palette.textPrimary)
+        }
+    }
+}
+
+@Composable
+private fun dailyPlanDuration(minutes: Int): String {
+    val bounded = minutes.coerceAtLeast(0)
+    val hours = bounded / 60
+    val remainder = bounded % 60
+    return if (hours > 0) {
+        stringResource(
+            R.string.appwide_day_overview_duration_hours_minutes_format,
+            hours,
+            remainder,
+        )
+    } else {
+        stringResource(R.string.appwide_day_overview_duration_minutes_format, remainder)
+    }
+}
+
+@StringRes
+private fun dailyPlanWorkoutAdjustmentBodyResource(
+    reason: DailyActionPlanner.WorkoutAdjustmentReason,
+): Int = when (reason) {
+    DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT ->
+        R.string.daily_plan_workout_adjustment_sleep_deficit
+    DailyActionPlanner.WorkoutAdjustmentReason.RECOVERY_SHIFT ->
+        R.string.daily_plan_workout_adjustment_recovery_shift
+    DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_AND_RECOVERY ->
+        R.string.daily_plan_workout_adjustment_sleep_and_recovery
 }
 
 @Composable

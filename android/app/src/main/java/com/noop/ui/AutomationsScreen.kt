@@ -56,7 +56,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -64,7 +63,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.analytics.NapCandidate
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.HydrationReminderPrefs
@@ -115,9 +116,20 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     val batteryAlerts by viewModel.batteryAlertsEnabled.collectAsStateWithLifecycle()
     val predictiveBatteryAlerts by viewModel.predictiveBatteryAlertsEnabled.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
+    val plannedWorkoutCalendarScope = rememberCoroutineScope()
     var adaptiveNotificationsUnavailable by remember {
         mutableStateOf(
             adaptiveDayGuidance && !AdaptiveDayNotifier.canNotify(ctx),
+        )
+    }
+    var plannedWorkoutCalendarEnabled by remember {
+        mutableStateOf(NoopPrefs.plannedWorkoutCalendar(ctx))
+    }
+    var plannedWorkoutCalendarPermissionUnavailable by remember {
+        mutableStateOf(
+            plannedWorkoutCalendarEnabled &&
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+                PackageManager.PERMISSION_GRANTED,
         )
     }
     var workoutNotificationsUnavailable by remember { mutableStateOf(false) }
@@ -259,12 +271,43 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             reportNotificationsUnavailable = !allowed
         }
     }
+    val plannedWorkoutCalendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        plannedWorkoutCalendarEnabled = granted
+        plannedWorkoutCalendarPermissionUnavailable = !granted
+        NoopPrefs.setPlannedWorkoutCalendar(ctx, granted)
+        if (granted) {
+            plannedWorkoutCalendarScope.launch {
+                PlannedWorkoutCalendarStore.refresh(ctx, force = true)
+            }
+        } else {
+            PlannedWorkoutCalendarStore.clear()
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)
+                if (plannedWorkoutCalendarEnabled) {
+                    val calendarGranted = ContextCompat.checkSelfPermission(
+                        ctx,
+                        Manifest.permission.READ_CALENDAR,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (calendarGranted) {
+                        plannedWorkoutCalendarPermissionUnavailable = false
+                        plannedWorkoutCalendarScope.launch {
+                            PlannedWorkoutCalendarStore.refresh(ctx, force = true)
+                        }
+                    } else {
+                        plannedWorkoutCalendarEnabled = false
+                        plannedWorkoutCalendarPermissionUnavailable = true
+                        NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
+                        PlannedWorkoutCalendarStore.clear()
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -315,6 +358,29 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
             adaptiveNotificationsUnavailable = !available
             viewModel.setAdaptiveDayGuidanceEnabled(available)
+        }
+    }
+
+    fun setPlannedWorkoutCalendarEnabled(enabled: Boolean) {
+        if (!enabled) {
+            plannedWorkoutCalendarEnabled = false
+            plannedWorkoutCalendarPermissionUnavailable = false
+            NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
+            PlannedWorkoutCalendarStore.clear()
+            return
+        }
+        if (
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            plannedWorkoutCalendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+            return
+        }
+        plannedWorkoutCalendarEnabled = true
+        plannedWorkoutCalendarPermissionUnavailable = false
+        NoopPrefs.setPlannedWorkoutCalendar(ctx, true)
+        plannedWorkoutCalendarScope.launch {
+            PlannedWorkoutCalendarStore.refresh(ctx, force = true)
         }
     }
 
@@ -513,6 +579,30 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 checked = adaptiveDayGuidance,
                 onChange = { setContextualReview("adaptive", it) },
             )
+            if (adaptiveDayGuidance) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_label,
+                    ),
+                    help = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_help,
+                    ),
+                    checked = plannedWorkoutCalendarEnabled,
+                    onChange = ::setPlannedWorkoutCalendarEnabled,
+                )
+                if (plannedWorkoutCalendarPermissionUnavailable) {
+                    RowDivider()
+                    Text(
+                        stringResource(
+                            R.string
+                                .appwide_adaptive_day_guidance_calendar_permission_unavailable,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                }
+            }
             if (adaptiveNotificationsUnavailable) {
                 RowDivider()
                 Text(

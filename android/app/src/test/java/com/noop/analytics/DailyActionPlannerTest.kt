@@ -34,6 +34,17 @@ class DailyActionPlannerTest {
         DailyActionPlanner.EffortDay("2026-08-%02d".format(it), value(it))
     }
 
+    private fun plannedWorkout(
+        day: String = "2026-08-22",
+        startSec: Long = 1_003_600L,
+        endSec: Long = 1_007_200L,
+    ) = DailyActionPlanner.PlannedWorkout(day, startSec, endSec)
+
+    private fun usualSleep(todayMinutes: Double = 360.0) =
+        (14..20).map {
+            DailyActionPlanner.SleepDay("2026-08-%02d".format(it), 450.0)
+        } + DailyActionPlanner.SleepDay(today, todayMinutes)
+
     @Test fun readyRangeUsesPersonalHistoryAndNeverRisesForPrimed() {
         val balanced = DailyActionPlanner.plan(today, readiness(), DailyActionPlanner.CheckIn.AS_USUAL, history())
         val primed = DailyActionPlanner.plan(
@@ -138,5 +149,124 @@ class DailyActionPlannerTest {
         assertEquals(DailyActionPlanner.Action.KEEP_SLEEP_WINDOW, normal.action)
         assertEquals(DailyActionPlanner.Action.PROTECT_EXTRA_SLEEP, recovery.action)
         assertEquals(DailyActionPlanner.EvidenceSource.SLEEP_PLAN, recovery.evidence.last().source)
+    }
+
+    @Test fun plannedWorkoutUsesPersonalUsualSleepWhenHistoryIsSupported() {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            recentSleep = usualSleep(),
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertEquals(
+            DailyActionPlanner.WorkoutAdjustment(
+                startSec = 1_003_600L,
+                durationMinutes = 60,
+                reason = DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT,
+                measuredSleepMinutes = 360,
+                referenceSleepMinutes = 450,
+                sleepDeficitMinutes = 90,
+                sleepReference = DailyActionPlanner.SleepReference.PERSONAL_USUAL,
+                confidence = ScoreConfidence.SOLID,
+            ),
+            plan.workoutAdjustment,
+        )
+    }
+
+    @Test fun plannedWorkoutFallsBackToExplicitSleepTargetWhileBaselineBuilds() {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(),
+            checkIn = DailyActionPlanner.CheckIn.UNANSWERED,
+            recentEffort = emptyList(),
+            recentSleep = listOf(DailyActionPlanner.SleepDay(today, 410.0)),
+            sleepTargetMinutes = 480,
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertEquals(DailyActionPlanner.Availability.CHECK_IN_NEEDED, plan.availability)
+        assertEquals(
+            DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT,
+            plan.workoutAdjustment?.reason,
+        )
+        assertEquals(70, plan.workoutAdjustment?.sleepDeficitMinutes)
+        assertEquals(
+            DailyActionPlanner.SleepReference.EXPLICIT_TARGET,
+            plan.workoutAdjustment?.sleepReference,
+        )
+        assertEquals(ScoreConfidence.BUILDING, plan.workoutAdjustment?.confidence)
+    }
+
+    @Test fun recoveryShiftCanSupportWorkoutAdjustmentWithoutSleepDuration() {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(
+                level = ReadinessEngine.Level.STRAINED,
+                confidence = ScoreConfidence.BUILDING,
+            ),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertEquals(
+            DailyActionPlanner.WorkoutAdjustmentReason.RECOVERY_SHIFT,
+            plan.workoutAdjustment?.reason,
+        )
+        assertNull(plan.workoutAdjustment?.measuredSleepMinutes)
+        assertEquals(ScoreConfidence.BUILDING, plan.workoutAdjustment?.confidence)
+    }
+
+    @Test fun thinSleepDifferenceAndInvalidWorkoutTimingFailClosed() {
+        val thinDifference = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            recentSleep = usualSleep(todayMinutes = 406.0),
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+        val alreadyStarted = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(level = ReadinessEngine.Level.STRAINED),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            plannedWorkout = plannedWorkout(startSec = 999_000L, endSec = 1_002_600L),
+            nowSec = 1_000_000L,
+        )
+        val wrongDay = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(level = ReadinessEngine.Level.STRAINED),
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = history(),
+            plannedWorkout = plannedWorkout(day = "2026-08-23"),
+            nowSec = 1_000_000L,
+        )
+
+        assertNull(thinDifference.workoutAdjustment)
+        assertNull(alreadyStarted.workoutAdjustment)
+        assertNull(wrongDay.workoutAdjustment)
+    }
+
+    @Test fun painOrUnwellSuppressesPlannedWorkoutAdjustment() {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = readiness(level = ReadinessEngine.Level.STRAINED),
+            checkIn = DailyActionPlanner.CheckIn.PAIN_OR_UNWELL,
+            recentEffort = history(),
+            recentSleep = usualSleep(),
+            plannedWorkout = plannedWorkout(),
+            nowSec = 1_000_000L,
+        )
+
+        assertEquals(DailyActionPlanner.Availability.STOP, plan.availability)
+        assertNull(plan.workoutAdjustment)
     }
 }

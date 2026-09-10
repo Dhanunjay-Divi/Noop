@@ -1,6 +1,9 @@
 package com.noop.notif
 
+import com.noop.R
 import com.noop.analytics.AdaptiveDayGuidance
+import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.ScoreConfidence
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -158,6 +161,58 @@ class AdaptiveDayNotifierTest {
             7 * 60,
         )
         assertEquals(AdaptiveDayDeliveryReason.TOPIC_COOLDOWN, sleep.reason)
+
+        val planned = AdaptiveDayDeliveryPolicy.evaluate(
+            candidate(
+                kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                observedAtMillis = later,
+                fingerprint = "planned-a",
+            ),
+            travel.nextState,
+            later,
+            12 * 60,
+            false,
+            22 * 60,
+            7 * 60,
+        )
+        assertEquals(AdaptiveDayDeliveryReason.TOPIC_COOLDOWN, planned.reason)
+    }
+
+    @Test fun plannedWorkoutSuppressesWeakerRoutineAndSleepPrompts() {
+        val planned = AdaptiveDayDeliveryPolicy.evaluate(
+            candidate(
+                kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                fingerprint = "planned-a",
+            ),
+            AdaptiveDayDeliveryState(),
+            nowMillis,
+            12 * 60,
+            false,
+            22 * 60,
+            7 * 60,
+        )
+        assertTrue(planned.shouldDeliver)
+
+        val later = nowMillis + 31L * 60L * 1_000L
+        listOf(
+            AdaptiveDayDeliveryKind.ROUTINE_RECOVERY,
+            AdaptiveDayDeliveryKind.SLEEP_RECOVERY,
+        ).forEach { kind ->
+            val result = AdaptiveDayDeliveryPolicy.evaluate(
+                candidate(
+                    kind = kind,
+                    observedAtMillis = later,
+                    fingerprint = "${kind.name}-a",
+                ),
+                planned.nextState,
+                later,
+                12 * 60,
+                false,
+                22 * 60,
+                7 * 60,
+            )
+            assertEquals(AdaptiveDayDeliveryReason.TOPIC_COOLDOWN, result.reason)
+        }
     }
 
     @Test fun recommendationMappingKeepsTheEvidenceIdentityAndTopic() {
@@ -176,5 +231,36 @@ class AdaptiveDayNotifierTest {
         assertEquals("routine-window", mapped.fingerprint)
         assertEquals(1_700_000_000_000L, mapped.observedAtMillis)
         assertFalse(mapped.maximumAgeMillis <= 0)
+    }
+
+    @Test fun plannedWorkoutEvidenceMatchesTheSupportingSignals() {
+        assertEquals(
+            listOf(
+                R.string.daily_plan_workout_adjustment_title,
+                R.string.daily_plan_workout_adjustment_sleep_label,
+            ),
+            AdaptiveDayNotifier.plannedWorkoutEvidenceResources(
+                DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT,
+            ),
+        )
+        assertEquals(
+            listOf(
+                R.string.daily_plan_workout_adjustment_title,
+                R.string.daily_plan_evidence_readiness,
+            ),
+            AdaptiveDayNotifier.plannedWorkoutEvidenceResources(
+                DailyActionPlanner.WorkoutAdjustmentReason.RECOVERY_SHIFT,
+            ),
+        )
+        assertEquals(
+            listOf(
+                R.string.daily_plan_workout_adjustment_title,
+                R.string.daily_plan_workout_adjustment_sleep_label,
+                R.string.daily_plan_evidence_readiness,
+            ),
+            AdaptiveDayNotifier.plannedWorkoutEvidenceResources(
+                DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_AND_RECOVERY,
+            ),
+        )
     }
 }

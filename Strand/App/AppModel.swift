@@ -2676,7 +2676,7 @@ final class AppModel: ObservableObject {
     /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
     /// rule and is never treated as body temperature.
     private func evaluateContextualInterventions() async {
-        evaluateAdaptiveDayGuidance()
+        await evaluateAdaptiveDayGuidance()
 
         if ContextualInterventionSettings.vitalReviewEnabled {
             if let oxygen = ContextualVitalPolicy.oxygenCandidate(sourceRows: repo.vitalRows) {
@@ -2768,7 +2768,7 @@ final class AppModel: ObservableObject {
     /// Evaluate fresh sleep, personal sleep timing, and a persisted timezone transition through one
     /// ranked policy. The offset baseline is maintained even while the feature is off so enabling it
     /// later cannot resurrect an old trip as a new observation.
-    private func evaluateAdaptiveDayGuidance(now: Date = Date()) {
+    private func evaluateAdaptiveDayGuidance(now: Date = Date()) async {
         let nowSec = Int(now.timeIntervalSince1970)
         let offset = TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
         let change = AdaptiveDayTimeZoneStore.observe(
@@ -2793,11 +2793,50 @@ final class AppModel: ObservableObject {
             },
             timeZoneChange: change
         ))
-        guard let recommendation else { return }
-        ContextualInterventionCenter.post(
-            AdaptiveDayInterventionFactory.candidate(from: recommendation),
-            now: now
+        if let recommendation, recommendation.kind == .travelAdjustment {
+            ContextualInterventionCenter.post(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                now: now
+            )
+            return
+        }
+
+        let plannedWorkout = await PlannedWorkoutCalendarStore.shared.refresh(now: now)
+        let plan = DailyActionPlanner.plan(
+            today: today,
+            readiness: ReadinessEngine.evaluate(days: repo.days, today: today),
+            checkIn: behavior.dailyActionCheckIn(for: today),
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            },
+            recentSleep: repo.days.map {
+                DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
+            },
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            plannedWorkout: plannedWorkout?.plannedWorkout(forPlanningDay: today),
+            nowSec: nowSec
         )
+        if let adjustment = plan.workoutAdjustment {
+            let leadSeconds = adjustment.startSec - nowSec
+            if leadSeconds >= 0, leadSeconds <= 2 * 60 * 60 {
+                ContextualInterventionCenter.post(
+                    AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                        from: adjustment,
+                        day: today,
+                        observedAt: now
+                    ),
+                    now: now
+                )
+                return
+            }
+        }
+
+        if let recommendation {
+            ContextualInterventionCenter.post(
+                AdaptiveDayInterventionFactory.candidate(from: recommendation),
+                now: now
+            )
+        }
     }
 
     // MARK: - v5 skin-temp suite engines (cycle phase + body clock)

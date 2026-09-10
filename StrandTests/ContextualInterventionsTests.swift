@@ -1,4 +1,5 @@
 import XCTest
+import StrandAnalytics
 import WhoopProtocol
 import WhoopStore
 @testable import Strand
@@ -202,6 +203,25 @@ final class ContextualInterventionsTests: XCTestCase {
             .topicCooldown
         )
 
+        let planned = candidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: later,
+            maximumAge: 2 * 60 * 60,
+            fingerprint: "planned-a"
+        )
+        XCTAssertEqual(
+            ContextualInterventionPolicy.evaluate(
+                planned,
+                state: deliveredTravel.nextState,
+                now: later,
+                quietHoursEnabled: false,
+                quietStartMinutes: 22 * 60,
+                quietEndMinutes: 7 * 60,
+                calendar: calendar
+            ).reason,
+            .topicCooldown
+        )
+
         let sleep = candidate(
             kind: .adaptiveSleepRecovery,
             observedAt: later,
@@ -220,6 +240,50 @@ final class ContextualInterventionsTests: XCTestCase {
             ).reason,
             .topicCooldown
         )
+    }
+
+    func testPlannedWorkoutSuppressesWeakerRoutineAndSleepPrompts() {
+        let now = date()
+        let planned = candidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: now,
+            maximumAge: 2 * 60 * 60,
+            fingerprint: "planned-a"
+        )
+        let delivered = ContextualInterventionPolicy.evaluate(
+            planned,
+            state: .empty,
+            now: now,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        )
+        XCTAssertTrue(delivered.shouldDeliver)
+
+        let later = now.addingTimeInterval(31 * 60)
+        for kind in [
+            ContextualInterventionKind.adaptiveRoutineRecovery,
+            .adaptiveSleepRecovery
+        ] {
+            XCTAssertEqual(
+                ContextualInterventionPolicy.evaluate(
+                    candidate(
+                        kind: kind,
+                        observedAt: later,
+                        maximumAge: 18 * 60 * 60,
+                        fingerprint: "\(kind.rawValue)-a"
+                    ),
+                    state: delivered.nextState,
+                    now: later,
+                    quietHoursEnabled: false,
+                    quietStartMinutes: 22 * 60,
+                    quietEndMinutes: 7 * 60,
+                    calendar: calendar
+                ).reason,
+                .topicCooldown
+            )
+        }
     }
 
     func testTimeZoneObservationIgnoresDSTAndSurvivesRestartForTravelRetry() {
@@ -264,6 +328,54 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertEqual(candidate.route, .sleep)
         XCTAssertEqual(candidate.fingerprint, "routine-window")
         XCTAssertFalse(candidate.body.contains("party"))
+    }
+
+    func testPlannedWorkoutCandidateUsesPrivateWorkoutRouteAndBoundedIdentity() {
+        let observedAt = date()
+        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+            from: .init(
+                startSec: Int(observedAt.timeIntervalSince1970) + 60 * 60,
+                durationMinutes: 60,
+                reason: .sleepAndRecovery,
+                measuredSleepMinutes: 372,
+                referenceSleepMinutes: 450,
+                sleepDeficitMinutes: 78,
+                sleepReference: .personalUsual,
+                confidence: .solid
+            ),
+            day: "2026-08-22",
+            observedAt: observedAt
+        )
+
+        XCTAssertEqual(candidate.kind, .adaptivePlannedWorkout)
+        XCTAssertEqual(candidate.route, .workouts)
+        XCTAssertEqual(candidate.maximumAge, 2 * 60 * 60)
+        XCTAssertEqual(candidate.evidence.count, 3)
+        XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.workout_adjustment.sleep_label")))
+        XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.evidence.readiness")))
+        XCTAssertFalse(candidate.fingerprint.contains("372"))
+        XCTAssertFalse(candidate.body.contains("17:"))
+    }
+
+    func testSleepOnlyPlannedWorkoutCandidateDoesNotClaimReadinessEvidence() {
+        let observedAt = date()
+        let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+            from: .init(
+                startSec: Int(observedAt.timeIntervalSince1970) + 60 * 60,
+                durationMinutes: 60,
+                reason: .sleepDeficit,
+                measuredSleepMinutes: 372,
+                referenceSleepMinutes: 450,
+                sleepDeficitMinutes: 78,
+                sleepReference: .personalUsual,
+                confidence: .solid
+            ),
+            day: "2026-08-22",
+            observedAt: observedAt
+        )
+
+        XCTAssertTrue(candidate.evidence.contains(String(localized: "daily_plan.workout_adjustment.sleep_label")))
+        XCTAssertFalse(candidate.evidence.contains(String(localized: "daily_plan.evidence.readiness")))
     }
 
     func testWorkoutCautionNotificationHasRestartSafeCooldown() {

@@ -15,6 +15,7 @@ enum ContextualInterventionKind: String, Codable, CaseIterable, Sendable {
     case stressBreathing
     case adaptiveSleepRecovery
     case adaptiveRoutineRecovery
+    case adaptivePlannedWorkout
     case adaptiveTravel
     case caffeineCutoff
     case oxygenTrend
@@ -24,7 +25,8 @@ enum ContextualInterventionKind: String, Codable, CaseIterable, Sendable {
     var cooldown: TimeInterval {
         switch self {
         case .stressBreathing: return 4 * 60 * 60
-        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery: return 20 * 60 * 60
+        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery, .adaptivePlannedWorkout:
+            return 20 * 60 * 60
         case .adaptiveTravel: return 24 * 60 * 60
         case .caffeineCutoff: return 6 * 60 * 60
         case .oxygenTrend, .bodyTemperatureReview: return 24 * 60 * 60
@@ -34,7 +36,8 @@ enum ContextualInterventionKind: String, Codable, CaseIterable, Sendable {
 
     var isAdaptiveDayGuidance: Bool {
         switch self {
-        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery, .adaptiveTravel:
+        case .adaptiveSleepRecovery, .adaptiveRoutineRecovery,
+             .adaptivePlannedWorkout, .adaptiveTravel:
             return true
         default:
             return false
@@ -155,8 +158,10 @@ enum ContextualInterventionPolicy {
     ) -> [ContextualInterventionKind] {
         switch kind {
         case .adaptiveSleepRecovery:
-            return [.adaptiveTravel, .adaptiveRoutineRecovery]
+            return [.adaptiveTravel, .adaptivePlannedWorkout, .adaptiveRoutineRecovery]
         case .adaptiveRoutineRecovery:
+            return [.adaptiveTravel, .adaptivePlannedWorkout]
+        case .adaptivePlannedWorkout:
             return [.adaptiveTravel]
         default:
             return []
@@ -442,6 +447,46 @@ enum AdaptiveDayInterventionFactory {
             body: copy.2,
             route: .sleep,
             evidence: recommendation.evidence
+        )
+    }
+
+    static func plannedWorkoutCandidate(
+        from adjustment: DailyActionPlanner.WorkoutAdjustment,
+        day: String,
+        observedAt: Date
+    ) -> ContextualInterventionCandidate {
+        let evidence = switch adjustment.reason {
+        case .sleepDeficit:
+            [
+                String(localized: "daily_plan.workout_adjustment.title"),
+                String(localized: "daily_plan.workout_adjustment.sleep_label")
+            ]
+        case .recoveryShift:
+            [
+                String(localized: "daily_plan.workout_adjustment.title"),
+                String(localized: "daily_plan.evidence.readiness")
+            ]
+        case .sleepAndRecovery:
+            [
+                String(localized: "daily_plan.workout_adjustment.title"),
+                String(localized: "daily_plan.workout_adjustment.sleep_label"),
+                String(localized: "daily_plan.evidence.readiness")
+            ]
+        }
+        return ContextualInterventionCandidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: observedAt,
+            maximumAge: 2 * 60 * 60,
+            fingerprint: [
+                "planned-workout",
+                day,
+                String(adjustment.startSec / (30 * 60)),
+                adjustment.reason.rawValue
+            ].joined(separator: "|"),
+            title: String(localized: "appwide.adaptive_day_guidance.planned_workout.title"),
+            body: String(localized: "appwide.adaptive_day_guidance.planned_workout.body"),
+            route: .workouts,
+            evidence: evidence
         )
     }
 }

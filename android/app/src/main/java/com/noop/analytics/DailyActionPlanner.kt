@@ -22,6 +22,20 @@ object DailyActionPlanner {
             fun fromStoredValue(raw: String?): CheckIn? = entries.firstOrNull { it.storedValue == raw }
         }
     }
+    data class SleepDay(val day: String, val minutes: Double?)
+    data class PlannedWorkout(val day: String, val startSec: Long, val endSec: Long)
+    enum class WorkoutAdjustmentReason { SLEEP_DEFICIT, RECOVERY_SHIFT, SLEEP_AND_RECOVERY }
+    enum class SleepReference { PERSONAL_USUAL, EXPLICIT_TARGET }
+    data class WorkoutAdjustment(
+        val startSec: Long,
+        val durationMinutes: Int,
+        val reason: WorkoutAdjustmentReason,
+        val measuredSleepMinutes: Int?,
+        val referenceSleepMinutes: Int?,
+        val sleepDeficitMinutes: Int?,
+        val sleepReference: SleepReference?,
+        val confidence: ScoreConfidence,
+    )
     enum class Availability { READY, CHECK_IN_NEEDED, CALIBRATING, RECOVERY_SHIFT, STOP }
     enum class Action {
         COMPLETE_CHECK_IN, KEEP_SLEEP_WINDOW, PROTECT_EXTRA_SLEEP, CHOOSE_EASY_DAY, STOP_AND_ASSESS,
@@ -40,12 +54,20 @@ object DailyActionPlanner {
         val action: Action,
         val evidence: List<Evidence>,
         val limitations: List<String>,
+        val workoutAdjustment: WorkoutAdjustment? = null,
     )
 
     const val HISTORY_WINDOW_DAYS = 28
     const val MINIMUM_EFFORT_DAYS = 7
     const val SOLID_EFFORT_DAYS = 14
     const val EXTRA_SLEEP_ACTION_THRESHOLD_MINUTES = 30
+    const val SLEEP_HISTORY_WINDOW_DAYS = 21
+    const val MINIMUM_USUAL_SLEEP_NIGHTS = 5
+    const val SOLID_USUAL_SLEEP_NIGHTS = 7
+    const val WORKOUT_SLEEP_DEFICIT_THRESHOLD_MINUTES = 45
+    const val MINIMUM_PLANNED_WORKOUT_MINUTES = 10
+    const val MAXIMUM_PLANNED_WORKOUT_MINUTES = 6 * 60
+    const val MAXIMUM_PLANNED_WORKOUT_LEAD_SECONDS = 24 * 60 * 60L
 
     private const val planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."
@@ -57,8 +79,20 @@ object DailyActionPlanner {
         recentEffort: List<EffortDay>,
         sleepRecoveryMinutes: Int = 0,
         sleepConfidence: ScoreConfidence = ScoreConfidence.CALIBRATING,
+        recentSleep: List<SleepDay> = emptyList(),
+        sleepTargetMinutes: Int = 8 * 60,
+        plannedWorkout: PlannedWorkout? = null,
+        nowSec: Long = System.currentTimeMillis() / 1_000L,
     ): Plan {
         val selfEvidence = Evidence(EvidenceSource.SELF_CHECK, checkIn.storedValue)
+        val plannedAdjustment = workoutAdjustment(
+            today = today,
+            nowSec = nowSec,
+            readiness = readiness,
+            recentSleep = recentSleep,
+            sleepTargetMinutes = sleepTargetMinutes,
+            plannedWorkout = plannedWorkout,
+        )
 
         if (checkIn == CheckIn.PAIN_OR_UNWELL) {
             return Plan(
@@ -72,6 +106,7 @@ object DailyActionPlanner {
                 today, Availability.CHECK_IN_NEEDED, null, ScoreConfidence.CALIBRATING,
                 Action.COMPLETE_CHECK_IN, emptyList(),
                 listOf(planningLimitation, "A same-day self-check is required before showing a range."),
+                plannedAdjustment,
             )
         }
         if (checkIn == CheckIn.BELOW_USUAL) {
@@ -79,6 +114,7 @@ object DailyActionPlanner {
                 today, Availability.RECOVERY_SHIFT, null, ScoreConfidence.CALIBRATING,
                 Action.CHOOSE_EASY_DAY, listOf(selfEvidence),
                 listOf(planningLimitation, "How you feel takes priority over an aligned wearable read."),
+                plannedAdjustment,
             )
         }
         if (readiness.asOfDay != today) {
@@ -86,6 +122,7 @@ object DailyActionPlanner {
                 today, Availability.CALIBRATING, null, ScoreConfidence.CALIBRATING,
                 Action.KEEP_SLEEP_WINDOW, listOf(selfEvidence),
                 listOf(planningLimitation, "No current readiness read is available for this date."),
+                plannedAdjustment,
             )
         }
 
@@ -106,6 +143,7 @@ object DailyActionPlanner {
                     planningLimitation,
                     "A measured recovery shift withholds the range; it does not diagnose a cause.",
                 ),
+                plannedAdjustment,
             )
         }
         if (readiness.confidence != ScoreConfidence.SOLID ||
@@ -119,6 +157,7 @@ object DailyActionPlanner {
                     planningLimitation,
                     "At least two current signals and a trusted personal baseline are required.",
                 ),
+                plannedAdjustment,
             )
         }
 
@@ -136,6 +175,7 @@ object DailyActionPlanner {
                     planningLimitation,
                     "At least $MINIMUM_EFFORT_DAYS prior scored Effort days are required.",
                 ),
+                plannedAdjustment,
             )
         }
 
@@ -161,7 +201,133 @@ object DailyActionPlanner {
                 planningLimitation,
                 "Aligned readiness never raises the range above the user's recent normal Effort.",
             ),
+            plannedAdjustment,
         )
+    }
+
+    internal fun workoutAdjustment(
+        today: String,
+        nowSec: Long,
+        readiness: ReadinessEngine.Readiness,
+        recentSleep: List<SleepDay>,
+        sleepTargetMinutes: Int,
+        plannedWorkout: PlannedWorkout?,
+    ): WorkoutAdjustment? {
+        val workout = plannedWorkout ?: return null
+        if (
+            workout.day != today ||
+            workout.startSec <= nowSec ||
+            workout.startSec - nowSec > MAXIMUM_PLANNED_WORKOUT_LEAD_SECONDS ||
+            workout.endSec <= workout.startSec
+        ) return null
+        val durationMinutes = ((workout.endSec - workout.startSec) / 60L).toInt()
+        if (durationMinutes !in MINIMUM_PLANNED_WORKOUT_MINUTES..MAXIMUM_PLANNED_WORKOUT_MINUTES) {
+            return null
+        }
+
+        val sleep = sleepContext(recentSleep, today, sleepTargetMinutes)
+        val recoveryShift =
+            readiness.asOfDay == today &&
+                readiness.confidence != ScoreConfidence.CALIBRATING &&
+                (
+                    readiness.level == ReadinessEngine.Level.STRAINED ||
+                        readiness.level == ReadinessEngine.Level.RUNDOWN
+                    )
+        if (sleep == null && !recoveryShift) return null
+        val reason = when {
+            sleep != null && recoveryShift -> WorkoutAdjustmentReason.SLEEP_AND_RECOVERY
+            sleep != null -> WorkoutAdjustmentReason.SLEEP_DEFICIT
+            else -> WorkoutAdjustmentReason.RECOVERY_SHIFT
+        }
+        val confidence = when {
+            sleep == null -> if (readiness.confidence == ScoreConfidence.SOLID) {
+                ScoreConfidence.SOLID
+            } else {
+                ScoreConfidence.BUILDING
+            }
+            !recoveryShift -> sleep.confidence
+            sleep.confidence == ScoreConfidence.SOLID &&
+                readiness.confidence == ScoreConfidence.SOLID -> ScoreConfidence.SOLID
+            else -> ScoreConfidence.BUILDING
+        }
+        return WorkoutAdjustment(
+            startSec = workout.startSec,
+            durationMinutes = durationMinutes,
+            reason = reason,
+            measuredSleepMinutes = sleep?.measuredMinutes,
+            referenceSleepMinutes = sleep?.referenceMinutes,
+            sleepDeficitMinutes = sleep?.deficitMinutes,
+            sleepReference = sleep?.reference,
+            confidence = confidence,
+        )
+    }
+
+    private data class SleepContext(
+        val measuredMinutes: Int,
+        val referenceMinutes: Int,
+        val deficitMinutes: Int,
+        val reference: SleepReference,
+        val confidence: ScoreConfidence,
+    )
+
+    private fun sleepContext(
+        days: List<SleepDay>,
+        today: String,
+        sleepTargetMinutes: Int,
+    ): SleepContext? {
+        val grouped = validSleepByDay(days, today)
+        val current = grouped[today] ?: return null
+        val prior = grouped
+            .filterKeys { it < today }
+            .toSortedMap()
+            .values
+            .toList()
+            .takeLast(SLEEP_HISTORY_WINDOW_DAYS)
+        val reference: Double
+        val source: SleepReference
+        val confidence: ScoreConfidence
+        if (prior.size >= MINIMUM_USUAL_SLEEP_NIGHTS) {
+            reference = quantile(prior.sorted(), 0.5)
+            source = SleepReference.PERSONAL_USUAL
+            confidence = if (prior.size >= SOLID_USUAL_SLEEP_NIGHTS) {
+                ScoreConfidence.SOLID
+            } else {
+                ScoreConfidence.BUILDING
+            }
+        } else {
+            reference = sleepTargetMinutes.coerceIn(5 * 60, 11 * 60).toDouble()
+            source = SleepReference.EXPLICIT_TARGET
+            confidence = ScoreConfidence.BUILDING
+        }
+        val deficit = kotlin.math.round(reference - current).toInt()
+        if (deficit < WORKOUT_SLEEP_DEFICIT_THRESHOLD_MINUTES) return null
+        return SleepContext(
+            measuredMinutes = kotlin.math.round(current).toInt(),
+            referenceMinutes = kotlin.math.round(reference).toInt(),
+            deficitMinutes = deficit,
+            reference = source,
+            confidence = confidence,
+        )
+    }
+
+    private fun validSleepByDay(days: List<SleepDay>, through: String): Map<String, Double> {
+        val end = runCatching { LocalDate.parse(through).takeIf { it.toString() == through } }
+            .getOrNull() ?: return emptyMap()
+        val start = end.minusDays(SLEEP_HISTORY_WINDOW_DAYS.toLong()).toString()
+        val grouped = mutableMapOf<String, MutableList<Double>>()
+        for (row in days) {
+            if (row.day < start || row.day > through) continue
+            val parsed = runCatching {
+                LocalDate.parse(row.day).takeIf { it.toString() == row.day }
+            }.getOrNull() ?: continue
+            if (parsed.isBefore(end.minusDays(SLEEP_HISTORY_WINDOW_DAYS.toLong())) || parsed.isAfter(end)) {
+                continue
+            }
+            val minutes = row.minutes
+            if (minutes == null || !minutes.isFinite() || minutes !in 120.0..900.0) continue
+            grouped.getOrPut(row.day) { mutableListOf() }.add(minutes)
+        }
+        return grouped.mapValues { (_, values) -> values.average() }
     }
 
     /** One deterministic value per prior calendar day in [today-28, today-1]. */

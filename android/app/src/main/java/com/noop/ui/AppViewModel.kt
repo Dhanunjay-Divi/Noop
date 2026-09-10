@@ -33,6 +33,7 @@ import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
 import com.noop.analytics.WorkoutCautionPolicy
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.location.GpsSession
 import kotlinx.coroutines.Job
 import com.noop.ble.HrBroadcaster
@@ -2986,6 +2987,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
         if (!enabled) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
+            PlannedWorkoutCalendarStore.clear()
             return
         }
         viewModelScope.launch { evaluateAdaptiveDayGuidance() }

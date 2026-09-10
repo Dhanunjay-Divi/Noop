@@ -810,12 +810,21 @@ object NoopPrefs {
 
     /** Optional evidence-gated guidance after short sleep, a learned routine shift, or travel. */
     const val KEY_ADAPTIVE_DAY_GUIDANCE = "noop.adaptiveDayGuidance"
+    const val KEY_PLANNED_WORKOUT_CALENDAR = "noop.plannedWorkoutCalendar"
 
     fun adaptiveDayGuidance(context: Context): Boolean =
         of(context).getBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, false)
 
     fun setAdaptiveDayGuidance(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, enabled).apply()
+    }
+
+    /** Optional local calendar classification used only to find a generic same-day workout time. */
+    fun plannedWorkoutCalendar(context: Context): Boolean =
+        of(context).getBoolean(KEY_PLANNED_WORKOUT_CALENDAR, false)
+
+    fun setPlannedWorkoutCalendar(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_PLANNED_WORKOUT_CALENDAR, enabled).apply()
     }
 
     /** Cycle awareness (v5): read a coarse menstrual-cycle PHASE from the nightly skin-temperature

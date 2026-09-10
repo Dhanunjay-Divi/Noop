@@ -13,6 +13,9 @@ import androidx.core.content.ContextCompat
 import com.noop.R
 import com.noop.alarm.WindDownStore
 import com.noop.analytics.AdaptiveDayGuidance
+import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.ReadinessEngine
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
 import com.noop.ui.ContextualActionCenter
@@ -29,6 +32,7 @@ import kotlin.math.abs
 internal enum class AdaptiveDayDeliveryKind {
     SLEEP_RECOVERY,
     ROUTINE_RECOVERY,
+    PLANNED_WORKOUT,
     TRAVEL,
 }
 
@@ -127,6 +131,7 @@ internal object AdaptiveDayDeliveryPolicy {
     private fun topicCooldownMillis(kind: AdaptiveDayDeliveryKind): Long = when (kind) {
         AdaptiveDayDeliveryKind.SLEEP_RECOVERY,
         AdaptiveDayDeliveryKind.ROUTINE_RECOVERY,
+        AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
         -> Duration.ofHours(20).toMillis()
         AdaptiveDayDeliveryKind.TRAVEL -> Duration.ofHours(24).toMillis()
     }
@@ -135,8 +140,14 @@ internal object AdaptiveDayDeliveryPolicy {
         kind: AdaptiveDayDeliveryKind,
     ): List<AdaptiveDayDeliveryKind> = when (kind) {
         AdaptiveDayDeliveryKind.SLEEP_RECOVERY ->
-            listOf(AdaptiveDayDeliveryKind.TRAVEL, AdaptiveDayDeliveryKind.ROUTINE_RECOVERY)
+            listOf(
+                AdaptiveDayDeliveryKind.TRAVEL,
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                AdaptiveDayDeliveryKind.ROUTINE_RECOVERY,
+            )
         AdaptiveDayDeliveryKind.ROUTINE_RECOVERY ->
+            listOf(AdaptiveDayDeliveryKind.TRAVEL, AdaptiveDayDeliveryKind.PLANNED_WORKOUT)
+        AdaptiveDayDeliveryKind.PLANNED_WORKOUT ->
             listOf(AdaptiveDayDeliveryKind.TRAVEL)
         AdaptiveDayDeliveryKind.TRAVEL -> emptyList()
     }
@@ -300,9 +311,10 @@ object AdaptiveDayEvaluator {
         } catch (_: Throwable) {
             emptyList()
         }
+        val today = maxOf(logicalDay(now).toString(), now.toLocalDate().toString())
         val recommendation = AdaptiveDayGuidance.recommendation(
             AdaptiveDayGuidance.Input(
-                today = maxOf(logicalDay(now).toString(), now.toLocalDate().toString()),
+                today = today,
                 nowSec = nowSec,
                 currentTimeZoneOffsetSec = offsetSec,
                 sleepTargetMinutes = sleepTargetMinutes,
@@ -315,8 +327,45 @@ object AdaptiveDayEvaluator {
                 sleepWindows = sleepWindows,
                 timeZoneChange = timeZoneChange,
             ),
-        ) ?: return null
-        AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+        )
+        if (recommendation?.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
+            AdaptiveDayNotifier.onRecommendation(appContext, recommendation, now)
+            return recommendation
+        }
+
+        val plannedWorkout = PlannedWorkoutCalendarStore.refresh(
+            context = appContext,
+            now = now,
+        )
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = ReadinessEngine.evaluate(resolvedDays, today),
+            checkIn = NoopPrefs.dailyActionCheckIn(appContext, today),
+            recentEffort = resolvedDays.map {
+                DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+            },
+            recentSleep = resolvedDays.map {
+                DailyActionPlanner.SleepDay(day = it.day, minutes = it.totalSleepMin)
+            },
+            sleepTargetMinutes = sleepTargetMinutes,
+            plannedWorkout = plannedWorkout?.asPlannedWorkout(today),
+            nowSec = nowSec,
+        )
+        plan.workoutAdjustment?.let { adjustment ->
+            val leadSeconds = adjustment.startSec - nowSec
+            if (leadSeconds in 0L..(2L * 60L * 60L)) {
+                AdaptiveDayNotifier.onPlannedWorkoutAdjustment(
+                    appContext,
+                    day = today,
+                    adjustment = adjustment,
+                    now = now,
+                )
+                return recommendation
+            }
+        }
+        recommendation?.let {
+            AdaptiveDayNotifier.onRecommendation(appContext, it, now)
+        }
         return recommendation
     }
 }
@@ -330,12 +379,99 @@ object AdaptiveDayNotifier {
     private const val PREFS_FILE = "noop_adaptive_day_delivery"
     private const val KEY_GLOBAL_AT = "global.at"
 
-    @SuppressLint("MissingPermission")
-    @Synchronized
     fun onRecommendation(
         context: Context,
         recommendation: AdaptiveDayGuidance.Recommendation,
         now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
+        val (title, body) = copy(context, recommendation.kind)
+        postCandidate(
+            context = context,
+            candidate = candidate(recommendation),
+            title = title,
+            body = body,
+            route = NoopNotificationRoute.SLEEP,
+            evidence = recommendation.evidence,
+            now = now,
+            onRejected = { reason ->
+                if (
+                    recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT &&
+                    reason == AdaptiveDayDeliveryReason.DUPLICATE
+                ) {
+                    AdaptiveDayTimeZoneStore.discardPending(context)
+                }
+            },
+            onPosted = {
+                if (recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
+                    AdaptiveDayTimeZoneStore.discardPending(context)
+                }
+            },
+        )
+    }
+
+    fun onPlannedWorkoutAdjustment(
+        context: Context,
+        day: String,
+        adjustment: DailyActionPlanner.WorkoutAdjustment,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
+        val observedAtMillis = now.toInstant().toEpochMilli()
+        val candidate = AdaptiveDayDeliveryCandidate(
+            kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+            observedAtMillis = observedAtMillis,
+            maximumAgeMillis = Duration.ofHours(2).toMillis(),
+            fingerprint = listOf(
+                "planned-workout",
+                day,
+                adjustment.startSec / (30L * 60L),
+                adjustment.reason.name,
+            ).joinToString("|"),
+        )
+        postCandidate(
+            context = context,
+            candidate = candidate,
+            title = context.getString(
+                R.string.appwide_adaptive_day_guidance_planned_workout_title,
+            ),
+            body = context.getString(
+                R.string.appwide_adaptive_day_guidance_planned_workout_body,
+            ),
+            route = NoopNotificationRoute.WORKOUTS,
+            evidence = plannedWorkoutEvidenceResources(adjustment.reason).map(context::getString),
+            now = now,
+        )
+    }
+
+    internal fun plannedWorkoutEvidenceResources(
+        reason: DailyActionPlanner.WorkoutAdjustmentReason,
+    ): List<Int> = when (reason) {
+        DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_DEFICIT -> listOf(
+            R.string.daily_plan_workout_adjustment_title,
+            R.string.daily_plan_workout_adjustment_sleep_label,
+        )
+        DailyActionPlanner.WorkoutAdjustmentReason.RECOVERY_SHIFT -> listOf(
+            R.string.daily_plan_workout_adjustment_title,
+            R.string.daily_plan_evidence_readiness,
+        )
+        DailyActionPlanner.WorkoutAdjustmentReason.SLEEP_AND_RECOVERY -> listOf(
+            R.string.daily_plan_workout_adjustment_title,
+            R.string.daily_plan_workout_adjustment_sleep_label,
+            R.string.daily_plan_evidence_readiness,
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    @Synchronized
+    private fun postCandidate(
+        context: Context,
+        candidate: AdaptiveDayDeliveryCandidate,
+        title: String,
+        body: String,
+        route: NoopNotificationRoute,
+        evidence: List<String>,
+        now: ZonedDateTime,
+        onRejected: (AdaptiveDayDeliveryReason) -> Unit = {},
+        onPosted: () -> Unit = {},
     ) {
         if (!NoopPrefs.adaptiveDayGuidance(context)) return
         runCatching {
@@ -344,7 +480,6 @@ object AdaptiveDayNotifier {
                 suppress(context)
                 return
             }
-            val candidate = candidate(recommendation)
             val decision = AdaptiveDayDeliveryPolicy.evaluate(
                 candidate = candidate,
                 state = loadState(context),
@@ -355,28 +490,22 @@ object AdaptiveDayNotifier {
                 quietEndMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
             )
             if (!decision.shouldDeliver) {
-                if (
-                    recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT &&
-                    decision.reason == AdaptiveDayDeliveryReason.DUPLICATE
-                ) {
-                    AdaptiveDayTimeZoneStore.discardPending(context)
-                }
+                onRejected(decision.reason)
                 if (decision.reason == AdaptiveDayDeliveryReason.QUIET_HOURS) suppress(context)
                 return
             }
 
-            val (title, body) = copy(context, recommendation.kind)
-            val openSleep = NotificationPlatformIdentity.activityPendingIntent(
+            val openDestination = NotificationPlatformIdentity.activityPendingIntent(
                 context,
                 NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
-                NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.SLEEP),
+                NotificationRouteBridge.launchIntent(context, route),
             )
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                .setContentIntent(openSleep)
+                .setContentIntent(openDestination)
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -403,15 +532,13 @@ object AdaptiveDayNotifier {
                 context = context,
                 title = title,
                 detail = body,
-                fingerprint = recommendation.fingerprint,
-                evidence = recommendation.evidence,
-                observedAtMillis = recommendation.observedAtSec * 1_000L,
-                maximumAgeMillis = recommendation.maximumAgeSeconds * 1_000L,
+                fingerprint = candidate.fingerprint,
+                evidence = evidence,
+                observedAtMillis = candidate.observedAtMillis,
+                maximumAgeMillis = candidate.maximumAgeMillis,
             )
             saveState(context, decision.nextState)
-            if (recommendation.kind == AdaptiveDayGuidance.Kind.TRAVEL_ADJUSTMENT) {
-                AdaptiveDayTimeZoneStore.discardPending(context)
-            }
+            onPosted()
         }.onFailure {
             NotificationLifecycleLedger.unknown(
                 context,

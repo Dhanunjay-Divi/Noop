@@ -6,11 +6,16 @@
     <string name="appwide_action_open_settings">Ouvrir les réglages</string>
     <string name="appwide_adaptive_coaching_summary">Utilisez des signaux récents du bracelet pour guider la récupération, les pauses de concentration, la respiration, l’adaptation aux voyages et l’effort d’entraînement.</string>
     <string name="appwide_adaptive_coaching_title">Accompagnement adaptatif</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">Avec votre autorisation, NOOP vérifie sur cet appareil les titres du calendrier du jour et ne conserve que l’heure d’un entraînement clairement nommé. Le contenu du calendrier n’est jamais stocké ni envoyé.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Utiliser les entraînements prévus</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">L’accès au calendrier n’est pas disponible. Autorisez NOOP à accéder au calendrier dans les réglages système.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Suggestions privées et facultatives de récupération et d’adaptation aux voyages.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Conseils adaptatifs au quotidien</string>
     <string name="appwide_adaptive_day_guidance_help">Suggestions privées et limitées sur le téléphone après un sommeil récent trop court, un décalage plus tardif et plus court appris sur au moins cinq nuits précédentes, ou un changement de fuseau horaire d’au moins deux heures. Un changement d’heure d’une heure et les données anciennes ne les déclenchent jamais.</string>
     <string name="appwide_adaptive_day_guidance_label">Conseils adaptatifs au quotidien</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Les notifications ne sont pas disponibles. Activez les notifications NOOP et le canal Conseils adaptatifs au quotidien dans les réglages système.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Un entraînement prévu approche, et le sommeil ou la récupération du jour suggèrent de rester flexible. Évaluez votre état avant de commencer.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Envisagez un entraînement plus léger aujourd’hui</string>
     <string name="appwide_adaptive_day_guidance_routine_body">Votre dernier sommeil a été plus tardif et plus court que votre rythme récent. Gardez une journée flexible et rapprochez-vous ce soir de votre heure habituelle de détente.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Revenez doucement à votre rythme</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Votre sommeil a été plus court que votre objectif. Travaillez par périodes de concentration plus courtes, choisissez une activité plus légère si nécessaire et préservez votre détente ce soir.</string>

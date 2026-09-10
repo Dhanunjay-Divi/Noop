@@ -6,11 +6,16 @@
     <string name="appwide_action_open_settings">Открыть настройки</string>
     <string name="appwide_adaptive_coaching_summary">Используйте свежие сигналы браслета для восстановления, перерывов в работе, дыхания, адаптации в поездках и контроля нагрузки.</string>
     <string name="appwide_adaptive_coaching_title">Адаптивные рекомендации</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">С разрешения NOOP проверяет на этом устройстве названия событий календаря за сегодня и сохраняет только время явно указанной тренировки. Содержимое календаря не хранится и не отправляется.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Учитывать запланированные тренировки</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">Доступ к календарю недоступен. Разрешите NOOP доступ к календарю в настройках системы.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Приватные необязательные советы по восстановлению и адаптации в поездках.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Адаптивные советы на день</string>
     <string name="appwide_adaptive_day_guidance_help">Приватные подсказки на телефоне с ограниченной частотой после недавнего короткого сна, более позднего и короткого отклонения от режима, изученного минимум по пяти предыдущим ночам, или смены часового пояса на два часа и более. Переход на летнее время на один час и устаревшие данные никогда не вызывают подсказку.</string>
     <string name="appwide_adaptive_day_guidance_label">Адаптивные советы на день</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Уведомления недоступны. Включите уведомления NOOP и канал «Адаптивные советы на день» в системных настройках.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Скоро запланированная тренировка, а сегодняшний сон или восстановление указывают на необходимость гибкости. Оцените самочувствие перед началом.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Сегодня стоит подумать о более лёгкой тренировке</string>
     <string name="appwide_adaptive_day_guidance_routine_body">Последний сон начался позже и был короче недавнего режима. Сделайте день гибким и вечером вернитесь ближе к обычному времени подготовки ко сну.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Мягко вернитесь к своему ритму</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Сон был короче вашей цели. Используйте более короткие периоды концентрации, при необходимости снизьте нагрузку и берегите вечернее время подготовки ко сну.</string>

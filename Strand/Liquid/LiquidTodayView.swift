@@ -150,6 +150,7 @@ struct LiquidTodayView: View {
     @State private var cachedDisplayDay: DailyMetric?
     @State private var cachedReadiness: ReadinessEngine.Readiness?
     @State private var cachedDailyActionPlan: DailyActionPlanner.Plan?
+    @StateObject private var plannedWorkoutCalendar = PlannedWorkoutCalendarStore.shared
     /// The exact day currently supporting the readiness read. Kept beside the cached result so Today can
     /// stamp freshness/confidence without recomputing or implying a carried night belongs to today.
     @State private var readinessAsOfDay: String?
@@ -522,6 +523,26 @@ struct LiquidTodayView: View {
         .liquidMediumHaptic(trigger: pullHaptic)
         .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(repo.workoutsSeq)-\(repo.deviceId)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(historyReadsBlocked)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
+        }
+        .onChangeCompat(of: plannedWorkoutCalendar.snapshot) { _ in
+            refreshCachedDailyActionPlanForCalendar()
+        }
+        .task(id: cachedDailyActionPlan?.workoutAdjustment?.startSec) {
+            guard let startSec = cachedDailyActionPlan?.workoutAdjustment?.startSec else {
+                return
+            }
+            let nowSec = Int(Date().timeIntervalSince1970)
+            if startSec > nowSec {
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(startSec - nowSec) * 1_000_000_000
+                    )
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            refreshCachedDailyActionPlanForCalendar()
         }
         #if DEBUG
         // Deterministic screenshot framing only; absent in Release. Key this to the real load state rather
@@ -1645,6 +1666,10 @@ struct LiquidTodayView: View {
 
                     dailyPlanDivider
                     dailyPlanResult(plan)
+                    if let adjustment = plan.workoutAdjustment {
+                        dailyPlanDivider
+                        dailyPlanWorkoutAdjustment(adjustment)
+                    }
 
                     Button {
                         withAnimation(StrandMotion.interactive) {
@@ -1969,6 +1994,129 @@ struct LiquidTodayView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanWorkoutAdjustment(
+        _ adjustment: DailyActionPlanner.WorkoutAdjustment
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label {
+                Text("daily_plan.workout_adjustment.title")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            } icon: {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(StrandPalette.accent)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                if let measuredSleepMinutes = adjustment.measuredSleepMinutes {
+                    dailyPlanWorkoutMetric(
+                        symbol: "bed.double.fill",
+                        label: "daily_plan.workout_adjustment.sleep_label",
+                        value: dailyPlanDuration(minutes: measuredSleepMinutes)
+                    )
+                }
+                dailyPlanWorkoutMetric(
+                    symbol: "clock.fill",
+                    label: "daily_plan.workout_adjustment.workout_label",
+                    value: Date(timeIntervalSince1970: TimeInterval(adjustment.startSec))
+                        .formatted(date: .omitted, time: .shortened)
+                )
+            }
+
+            if let sleepDeficit = dailyPlanSleepDeficit(adjustment) {
+                Text(sleepDeficit)
+                    .font(StrandFont.subhead.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(dailyPlanWorkoutAdjustmentCopy(adjustment.reason))
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanWorkoutMetric(
+        symbol: String,
+        label: LocalizedStringKey,
+        value: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(StrandFont.overline)
+                    .tracking(0)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Text(value)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func dailyPlanWorkoutAdjustmentCopy(
+        _ reason: DailyActionPlanner.WorkoutAdjustmentReason
+    ) -> LocalizedStringKey {
+        switch reason {
+        case .sleepDeficit:
+            return "daily_plan.workout_adjustment.sleep_deficit"
+        case .recoveryShift:
+            return "daily_plan.workout_adjustment.recovery_shift"
+        case .sleepAndRecovery:
+            return "daily_plan.workout_adjustment.sleep_and_recovery"
+        }
+    }
+
+    private func dailyPlanSleepDeficit(
+        _ adjustment: DailyActionPlanner.WorkoutAdjustment
+    ) -> String? {
+        guard let deficit = adjustment.sleepDeficitMinutes,
+              deficit > 0,
+              let reference = adjustment.sleepReference else { return nil }
+        let hours = deficit / 60
+        let minutes = deficit % 60
+        let key: String
+        switch (reference, hours > 0) {
+        case (.personalUsual, false):
+            key = "daily_plan.workout_adjustment.deficit_usual_minutes"
+        case (.personalUsual, true):
+            key = "daily_plan.workout_adjustment.deficit_usual_hours_minutes"
+        case (.explicitTarget, false):
+            key = "daily_plan.workout_adjustment.deficit_target_minutes"
+        case (.explicitTarget, true):
+            key = "daily_plan.workout_adjustment.deficit_target_hours_minutes"
+        }
+        if hours > 0 {
+            return String(format: String(localized: String.LocalizationValue(key)), hours, minutes)
+        }
+        return String(format: String(localized: String.LocalizationValue(key)), minutes)
+    }
+
+    private func dailyPlanDuration(minutes: Int) -> String {
+        let bounded = max(0, minutes)
+        let hours = bounded / 60
+        let remainder = bounded % 60
+        if hours > 0 {
+            return String(
+                format: String(localized: "appwide.day_overview.duration_hours_minutes_format"),
+                hours,
+                remainder
+            )
+        }
+        return String(
+            format: String(localized: "appwide.day_overview.duration_minutes_format"),
+            remainder
+        )
     }
 
     private func dailyPlanEvidence(_ plan: DailyActionPlanner.Plan) -> some View {
@@ -2819,7 +2967,18 @@ struct LiquidTodayView: View {
         let readinessResult = ReadinessEngine.evaluate(days: repo.days, today: requestedDayKey)
         cachedReadiness = readinessResult
         readinessAsOfDay = readinessResult.asOfDay
-        let dailyPlan = makeDailyActionPlan(readiness: readinessResult)
+        let planningNow = Date()
+        let plannedWorkoutSnapshot = isToday
+            ? await plannedWorkoutCalendar.refresh(now: planningNow)
+            : nil
+        guard !Task.isCancelled,
+              requestedOffset == selectedDayOffset,
+              requestedDayKey == selectedDayKey else { return }
+        let dailyPlan = makeDailyActionPlan(
+            readiness: readinessResult,
+            plannedWorkoutSnapshot: plannedWorkoutSnapshot,
+            now: planningNow
+        )
         cachedDailyActionPlan = dailyPlan
         #if DEBUG
         if CommandLine.arguments.contains("--demo-daily-plan") {
@@ -3118,6 +3277,54 @@ struct LiquidTodayView: View {
         }
         return DailyActionPlanner.CheckIn(rawValue: arguments[index + 1])
     }
+
+    private static func demoPlannedWorkoutContext(
+        dayKey: String
+    ) -> (
+        now: Date,
+        recentSleep: [DailyActionPlanner.SleepDay],
+        workout: DailyActionPlanner.PlannedWorkout
+    )? {
+        guard CommandLine.arguments.contains("--demo-planned-workout") else { return nil }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let day = formatter.date(from: dayKey),
+              formatter.string(from: day) == dayKey,
+              let now = calendar.date(bySettingHour: 9, minute: 41, second: 0, of: day),
+              let start = calendar.date(bySettingHour: 17, minute: 30, second: 0, of: day),
+              let end = calendar.date(byAdding: .hour, value: 1, to: start)
+        else { return nil }
+
+        var recentSleep = [
+            DailyActionPlanner.SleepDay(day: dayKey, minutes: 6 * 60 + 12)
+        ]
+        for offset in 1...7 {
+            guard let prior = calendar.date(byAdding: .day, value: -offset, to: day) else {
+                continue
+            }
+            recentSleep.append(
+                DailyActionPlanner.SleepDay(
+                    day: formatter.string(from: prior),
+                    minutes: 7 * 60 + 30
+                )
+            )
+        }
+        return (
+            now: now,
+            recentSleep: recentSleep,
+            workout: DailyActionPlanner.PlannedWorkout(
+                day: dayKey,
+                startSec: Int(start.timeIntervalSince1970),
+                endSec: Int(end.timeIntervalSince1970)
+            )
+        )
+    }
     #endif
 
     private var dailyActionPlan: DailyActionPlanner.Plan {
@@ -3125,15 +3332,38 @@ struct LiquidTodayView: View {
     }
 
     private func makeDailyActionPlan(
-        readiness: ReadinessEngine.Readiness
+        readiness: ReadinessEngine.Readiness,
+        checkIn: DailyActionPlanner.CheckIn? = nil,
+        plannedWorkoutSnapshot: PlannedWorkoutCalendarSnapshot? = nil,
+        now: Date = Date()
     ) -> DailyActionPlanner.Plan {
-        DailyActionPlanner.plan(
+        var planningNow = now
+        var recentSleep = repo.days.map {
+            DailyActionPlanner.SleepDay(day: $0.day, minutes: $0.totalSleepMin)
+        }
+        var plannedWorkout = selectedDayOffset == 0
+            ? (plannedWorkoutSnapshot ?? plannedWorkoutCalendar.snapshot)?
+                .plannedWorkout(forPlanningDay: selectedDayKey)
+            : nil
+        #if DEBUG
+        if selectedDayOffset == 0,
+           let demo = Self.demoPlannedWorkoutContext(dayKey: selectedDayKey) {
+            planningNow = demo.now
+            recentSleep = demo.recentSleep
+            plannedWorkout = demo.workout
+        }
+        #endif
+        return DailyActionPlanner.plan(
             today: selectedDayKey,
             readiness: readiness,
-            checkIn: currentDailyActionCheckIn,
+            checkIn: checkIn ?? currentDailyActionCheckIn,
             recentEffort: repo.days.map {
                 DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
-            }
+            },
+            recentSleep: recentSleep,
+            sleepTargetMinutes: WindDownNudge.sleepNeedMinutes,
+            plannedWorkout: plannedWorkout,
+            nowSec: Int(planningNow.timeIntervalSince1970)
         )
     }
 
@@ -3141,13 +3371,19 @@ struct LiquidTodayView: View {
         guard selectedDayOffset == 0 else { return }
         dailyActionCheckInDay = selectedDayKey
         dailyActionCheckInValue = value.rawValue
-        cachedDailyActionPlan = DailyActionPlanner.plan(
-            today: selectedDayKey,
+        cachedDailyActionPlan = makeDailyActionPlan(
             readiness: readiness,
             checkIn: value,
-            recentEffort: repo.days.map {
-                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
-            }
+            plannedWorkoutSnapshot: plannedWorkoutCalendar.snapshot
+        )
+    }
+
+    private func refreshCachedDailyActionPlanForCalendar(now: Date = Date()) {
+        guard let cachedReadiness else { return }
+        cachedDailyActionPlan = makeDailyActionPlan(
+            readiness: cachedReadiness,
+            plannedWorkoutSnapshot: plannedWorkoutCalendar.snapshot,
+            now: now
         )
     }
 

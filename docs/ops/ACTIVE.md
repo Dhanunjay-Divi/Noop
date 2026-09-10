@@ -18,6 +18,25 @@ Last updated: **2026-09-10**
 
 ## Active work
 
+Calendar-aware daily guidance is implemented and locally verified on
+`codex/calendar-aware-daily-guidance-20260910`. Apple and Android expose a
+separate default-off Calendar option under Adaptive Day Guidance, classify
+same-day future workout titles locally, discard event content inside the
+query, and keep only a generic in-memory time window. Today's Plan can combine
+that window with supported personal sleep and readiness evidence, while one
+private cooldown-ranked prompt opens Workouts without placing event details,
+exact times, or health values on the lock screen. Opt-out and permission
+changes invalidate reads already in flight, and action-center evidence names
+only signals that actually supported the prompt. Calendar edits update the
+visible plan, the adjustment expires at its start time, and spectator,
+shopping, ticket, or equipment-service titles fail closed. Shared analytics
+passed 1,459 tests with seven skips; 19 focused Apple app tests passed; the
+complete unsigned iOS simulator graph builds; and Android passed 4,191 tests
+with seven skips plus production compile and lint. Protected review/merge and
+physical iOS/Android permission, provider, background-delivery, accessibility,
+and battery evidence remain. Details are in
+[Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
+
 The mobile and desktop Today visual-parity round is implemented and locally
 verified on protected pull request `#13` from
 `codex/mobile-desktop-visual-parity-20260910`. Apple and Android

@@ -6,11 +6,16 @@
     <string name="appwide_action_open_settings">Open settings</string>
     <string name="appwide_adaptive_coaching_summary">Use fresh wearable signals to shape recovery, focus breaks, breathing, travel adjustment, and workout effort.</string>
     <string name="appwide_adaptive_coaching_title">Adaptive coaching</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">With permission, NOOP checks today\'s calendar titles on this device and keeps only the time of a clearly named workout. Calendar content is never stored or uploaded.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Use planned workouts</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">Calendar access is unavailable. Allow NOOP calendar access in system settings.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Private, optional recovery and travel-adjustment suggestions.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Adaptive day guidance</string>
     <string name="appwide_adaptive_day_guidance_help">Private, rate-limited phone suggestions after current short sleep, a late-and-short routine shift learned from at least five prior nights, or a timezone move of two hours or more. One-hour DST changes and stale data never trigger it.</string>
     <string name="appwide_adaptive_day_guidance_label">Adaptive day guidance</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Notifications are unavailable. Enable NOOP notifications and the Adaptive day guidance channel in system settings.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">A planned workout is coming up, and today\'s sleep or recovery supports keeping it flexible. Check how you feel before you start.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Consider a lighter workout today</string>
     <string name="appwide_adaptive_day_guidance_routine_body">Your latest sleep shifted later and shorter than your recent pattern. Keep today flexible and return toward your usual wind-down tonight.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Ease back toward your rhythm</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Sleep was shorter than your target. Use shorter focus blocks, choose lighter activity if needed, and protect tonight\'s wind-down.</string>

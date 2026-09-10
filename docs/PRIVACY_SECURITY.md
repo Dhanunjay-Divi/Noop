@@ -555,6 +555,42 @@ operating system may delay or suppress delivery.
   frontier advances only after Notification Center accepts the request, so a
   failed attempt does not silently discard the newly synced workout.
 
+### 1.6 Local calendar-aware daily guidance
+
+Planned-workout guidance is an optional extension of Adaptive Day Guidance. It
+is off by default and requires a separate Calendar permission on iOS and
+Android. Turning Adaptive Day Guidance or its calendar option off immediately
+clears the in-memory result, invalidates any read already in flight, and stops
+future reads; revoking the operating-system permission does the same.
+
+- **Classification stays inside the calendar query.** NOOP reads only same-day,
+  future, non-all-day event instances and conservatively checks the title for
+  an unambiguous workout term. Ambiguous work, meeting, spectator, shopping,
+  ticket, and equipment-service titles fail closed. The initial classifier
+  recognizes a bounded set of explicit workout keywords; unsupported or
+  ambiguous titles are ignored. The title is discarded inside the query loop.
+- **Only a generic time window survives.** The published in-memory value
+  contains the civil day, start time, end time, observation time, and an
+  in-process revision. NOOP does not retain event title, notes, location,
+  attendees, organizer, calendar name, recurrence data, event ID, or calendar
+  ID in SQLite, Room, preferences, diagnostics, exports, backups, or network
+  requests.
+- **The recommendation is local and advisory.** Today may combine that generic
+  future window with NOOP's already-local sleep and readiness evidence to
+  suggest considering a lighter session. The user's same-day symptom check
+  overrides wearable guidance. Calendar edits and deletions refresh the card,
+  and the adjustment expires when the planned start passes. This is not
+  medical, injury, or training clearance.
+- **Lock-screen copy stays private.** A bounded local notification can say that
+  a planned session may need adjustment and open Workouts. It does not expose
+  the event name, exact event time, sleep duration, sleep deficit, score,
+  calendar provider, or inferred cause.
+- **Diagnostics are categorical only.** The app report can show the permission
+  category, whether zero/one/multiple candidates matched, operation duration,
+  and fixed success/rejection/failure outcomes. It never includes calendar
+  content, exact times, health values, identifiers, or arbitrary provider
+  errors.
+
 ---
 
 ## 2. Data at rest
