@@ -80,6 +80,32 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertLessThan(cancellation.lowerBound, plan.lowerBound)
     }
 
+    func testCalendarAuthorizationIsCheckedBeforeCachedSnapshotCanReturn() throws {
+        let source = try source("Strand/System/PlannedWorkoutCalendar.swift")
+        let method = try XCTUnwrap(
+            source.range(of: "func refresh(now: Date = Date(), force: Bool = false)")
+        )
+        let tail = source[method.lowerBound...]
+        let authorization = try XCTUnwrap(
+            tail.range(of: "let authorization = Self.authorizationCategory()")
+        )
+        let accessGuard = try XCTUnwrap(
+            tail.range(
+                of: "guard authorization == \"full_access\" else",
+                range: authorization.upperBound..<tail.endIndex
+            )
+        )
+        let cachedReturn = try XCTUnwrap(
+            tail.range(
+                of: "return snapshot",
+                range: accessGuard.upperBound..<tail.endIndex
+            )
+        )
+
+        XCTAssertLessThan(authorization.lowerBound, accessGuard.lowerBound)
+        XCTAssertLessThan(accessGuard.lowerBound, cachedReturn.lowerBound)
+    }
+
     func testAdaptiveEvaluationSchedulesTheTwoHourBoundaryAndCancelsBeforeLiveDelivery() throws {
         let source = try source("Strand/App/AppModel.swift")
         let method = try XCTUnwrap(

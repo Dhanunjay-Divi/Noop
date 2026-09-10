@@ -3,12 +3,8 @@ package com.noop.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.database.ContentObserver
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -192,9 +188,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import android.view.HapticFeedbackConstants
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.noop.R
@@ -596,55 +589,7 @@ fun TodayScreen(
     // Display-only units + the SI profile weight, read once like every other Settings-backed
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val plannedWorkoutSnapshot by PlannedWorkoutCalendarStore.snapshot.collectAsStateWithLifecycle()
-    val plannedWorkoutCalendarScope = rememberCoroutineScope()
-    DisposableEffect(context, lifecycleOwner) {
-        var providerObserverRegistered = false
-        val providerObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                viewModel.onPlannedWorkoutCalendarChanged()
-            }
-        }
-        fun ensureProviderObserver() {
-            if (
-                !providerObserverRegistered &&
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.READ_CALENDAR,
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                runCatching {
-                    context.contentResolver.registerContentObserver(
-                        CalendarContract.Events.CONTENT_URI,
-                        true,
-                        providerObserver,
-                    )
-                }.onSuccess {
-                    providerObserverRegistered = true
-                }
-            }
-        }
-        fun refreshPlannedWorkout() {
-            ensureProviderObserver()
-            plannedWorkoutCalendarScope.launch {
-                PlannedWorkoutCalendarStore.refresh(context, force = true)
-            }
-        }
-        val lifecycleObserver = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) refreshPlannedWorkout()
-        }
-        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
-        refreshPlannedWorkout()
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
-            if (providerObserverRegistered) {
-                runCatching {
-                    context.contentResolver.unregisterContentObserver(providerObserver)
-                }
-            }
-        }
-    }
     val weatherStore = remember(context.applicationContext) {
         TodayWeatherStore(context.applicationContext)
     }

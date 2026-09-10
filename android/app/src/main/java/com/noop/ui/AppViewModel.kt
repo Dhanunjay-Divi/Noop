@@ -1,7 +1,14 @@
 package com.noop.ui
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.CalendarContract
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.noop.NoopApplication
@@ -192,6 +199,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Process-wide context for prefs + the background-connection service. */
     private val appContext = app.applicationContext
+    private var plannedWorkoutCalendarObserverRegistered = false
+    private var plannedWorkoutCalendarEvaluationJob: Job? = null
+    private val plannedWorkoutCalendarObserver =
+        object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                onPlannedWorkoutCalendarChanged()
+            }
+        }
 
     /** The process owns the store + BLE client (see [NoopApplication]) so the connection can outlive
      *  this Activity-scoped ViewModel and keep streaming under [WhoopConnectionService]. */
@@ -812,7 +827,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             analyzeKick.trySend(Unit)
             viewModelScope.launch { refreshAdaptiveHydrationContext() }
             viewModelScope.launch { refreshCycleTracking() }
-            viewModelScope.launch { evaluateAdaptiveDayGuidance() }
+            onPlannedWorkoutCalendarChanged()
             refreshAgeMetricsIfProfileChanged()
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
@@ -842,6 +857,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         noopApp.sourceCoordinator.start()
         // #78 hole-4: wire the app-foreground salvage probe (see salvageProbeLifecycleCallbacks above).
         noopApp.registerActivityLifecycleCallbacks(salvageProbeLifecycleCallbacks)
+        reconcilePlannedWorkoutCalendarObserver()
         // Resolve the active band's name for the Live screen header (MW-6). Falls back to "WHOOP" in the
         // UI until this first read lands.
         refreshActiveDeviceName()
@@ -2987,21 +3003,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _adaptiveDayGuidanceEnabled.value = enabled
         NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
         if (!enabled) {
+            plannedWorkoutCalendarEvaluationJob?.cancel()
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             PlannedWorkoutCalendarStore.clear()
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
+            reconcilePlannedWorkoutCalendarObserver()
             return
         }
-        viewModelScope.launch { evaluateAdaptiveDayGuidance() }
+        onPlannedWorkoutCalendarChanged()
     }
 
     fun onPlannedWorkoutCalendarChanged() {
-        viewModelScope.launch {
+        reconcilePlannedWorkoutCalendarObserver()
+        plannedWorkoutCalendarEvaluationJob?.cancel()
+        plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
             PlannedWorkoutCalendarStore.refresh(
                 context = appContext,
                 force = true,
             )
             evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    private fun reconcilePlannedWorkoutCalendarObserver() {
+        val shouldObserve =
+            NoopPrefs.adaptiveDayGuidance(appContext) &&
+                NoopPrefs.plannedWorkoutCalendar(appContext) &&
+                ContextCompat.checkSelfPermission(
+                    appContext,
+                    Manifest.permission.READ_CALENDAR,
+                ) == PackageManager.PERMISSION_GRANTED
+        when {
+            shouldObserve && !plannedWorkoutCalendarObserverRegistered -> {
+                runCatching {
+                    appContext.contentResolver.registerContentObserver(
+                        CalendarContract.Events.CONTENT_URI,
+                        true,
+                        plannedWorkoutCalendarObserver,
+                    )
+                }.onSuccess {
+                    plannedWorkoutCalendarObserverRegistered = true
+                }
+            }
+            !shouldObserve && plannedWorkoutCalendarObserverRegistered -> {
+                unregisterPlannedWorkoutCalendarObserver()
+            }
+        }
+    }
+
+    private fun unregisterPlannedWorkoutCalendarObserver() {
+        if (!plannedWorkoutCalendarObserverRegistered) return
+        runCatching {
+            appContext.contentResolver.unregisterContentObserver(
+                plannedWorkoutCalendarObserver,
+            )
+        }.onSuccess {
+            plannedWorkoutCalendarObserverRegistered = false
         }
     }
 
@@ -3511,6 +3568,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // workout lease before a replacement VM rehydrates the same session, preventing a stale screen
         // want or double acquisition across Activity teardown.
         releaseActiveWorkoutRealtimeLease()
+        plannedWorkoutCalendarEvaluationJob?.cancel()
+        unregisterPlannedWorkoutCalendarObserver()
         super.onCleared()
         // #78 hole-4: drop the app-foreground salvage-probe hook with this ViewModel (the next Activity's
         // ViewModel re-registers its own), so a cleared VM can never leak resume callbacks.

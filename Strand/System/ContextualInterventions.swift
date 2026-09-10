@@ -241,8 +241,15 @@ enum ContextualInterventionCenter {
     ) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
+        let plannedWorkoutConsentCurrent =
+            candidate.kind != .adaptivePlannedWorkout ||
+            (
+                PlannedWorkoutCalendarSettings.enabled &&
+                PlannedWorkoutCalendarStore.hasCurrentReadAccess()
+            )
         guard (!candidate.kind.isAdaptiveDayGuidance
                 || ContextualInterventionSettings.adaptiveDayGuidanceEnabled),
+              plannedWorkoutConsentCurrent,
               isAuthorized(settings.authorizationStatus) else {
             LocalNotificationLifecycle.suppressed(
                 identifier: "contextual-\(candidate.kind.rawValue)",
@@ -310,6 +317,11 @@ enum ContextualInterventionCenter {
                 )
             }
             saveState(decision.nextState, defaults: defaults)
+            await AdaptivePlannedWorkoutScheduler.reconcilePending(
+                after: decision.nextState,
+                acceptedAt: now,
+                center: center
+            )
             if candidate.kind == .adaptiveTravel {
                 AdaptiveDayTimeZoneStore.discardPending()
             }
@@ -541,7 +553,8 @@ enum AdaptivePlannedWorkoutScheduler {
         let settings = await center.notificationSettings()
         guard isAuthorized(settings.authorizationStatus),
               ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
-              PlannedWorkoutCalendarSettings.enabled else {
+              PlannedWorkoutCalendarSettings.enabled,
+              PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
             cancelPending(on: center)
             return false
         }
@@ -599,6 +612,81 @@ enum AdaptivePlannedWorkoutScheduler {
         }
     }
 
+    static func reconcilePending(
+        after state: ContextualInterventionState,
+        acceptedAt: Date,
+        center: UNUserNotificationCenter = .current()
+    ) async {
+        let requests = await center.pendingNotificationRequests()
+        guard let request = requests.first(where: { $0.identifier == requestID }) else {
+            return
+        }
+        guard PlannedWorkoutCalendarSettings.enabled,
+              PlannedWorkoutCalendarStore.hasCurrentReadAccess(),
+              let startSec = integerUserInfoValue(
+                request.content.userInfo[startSecUserInfoKey]
+              ),
+              let fingerprint = request.content.userInfo[fingerprintUserInfoKey] as? String
+        else {
+            cancelPending(on: center)
+            return
+        }
+
+        let boundary = Date(
+            timeIntervalSince1970: TimeInterval(startSec)
+        ).addingTimeInterval(-leadTime)
+        guard boundary > acceptedAt else {
+            cancelPending(on: center)
+            return
+        }
+
+        let defaults = UserDefaults.standard
+        let shouldKeep = shouldKeepPending(
+            startSec: startSec,
+            fingerprint: fingerprint,
+            state: state,
+            quietHoursEnabled: defaults.bool(forKey: "notif.quietHoursEnabled"),
+            quietStartMinutes: defaults.object(forKey: "notif.quietStartMinutes") as? Int
+                ?? 22 * 60,
+            quietEndMinutes: defaults.object(forKey: "notif.quietEndMinutes") as? Int
+                ?? 7 * 60
+        )
+        if !shouldKeep {
+            cancelPending(on: center)
+        }
+    }
+
+    static func shouldKeepPending(
+        startSec: Int,
+        fingerprint: String,
+        state: ContextualInterventionState,
+        quietHoursEnabled: Bool,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> Bool {
+        let start = Date(timeIntervalSince1970: TimeInterval(startSec))
+        let boundary = start.addingTimeInterval(-leadTime)
+        let candidate = ContextualInterventionCandidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: boundary,
+            maximumAge: leadTime,
+            fingerprint: fingerprint,
+            title: "",
+            body: "",
+            route: .workouts
+        )
+        return ContextualInterventionPolicy.evaluate(
+            candidate,
+            state: state,
+            now: boundary,
+            quietHoursEnabled: quietHoursEnabled,
+            quietStartMinutes: quietStartMinutes,
+            quietEndMinutes: quietEndMinutes,
+            calendar: calendar
+        ).shouldDeliver
+    }
+
     static func cancelPending(
         on center: UNUserNotificationCenter = .current()
     ) {
@@ -613,6 +701,13 @@ enum AdaptivePlannedWorkoutScheduler {
         case .authorized, .provisional, .ephemeral: return true
         default: return false
         }
+    }
+
+    private static func integerUserInfoValue(_ value: Any?) -> Int? {
+        if let value = value as? Int {
+            return value
+        }
+        return (value as? NSNumber)?.intValue
     }
 }
 

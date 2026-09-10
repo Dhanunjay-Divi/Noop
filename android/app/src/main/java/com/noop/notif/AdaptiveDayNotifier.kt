@@ -597,6 +597,14 @@ object AdaptiveDayNotifier {
         onPosted: () -> Unit = {},
     ) {
         if (!NoopPrefs.adaptiveDayGuidance(context)) return
+        if (
+            candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+            !plannedWorkoutCalendarConsentCurrent(context)
+        ) {
+            AdaptivePlannedWorkoutScheduler.cancel(context)
+            suppress(context)
+            return
+        }
         runCatching {
             ensureChannel(context)
             if (!canNotify(context)) {
@@ -619,10 +627,18 @@ object AdaptiveDayNotifier {
             }
 
             val manager = NotificationManagerCompat.from(context)
+            var calendarConsentLost = false
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 now.toInstant().toEpochMilli(),
             ) {
+                if (
+                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                    !plannedWorkoutCalendarConsentCurrent(context)
+                ) {
+                    calendarConsentLost = true
+                    return@postIfAllowed false
+                }
                 val openDestination = NotificationPlatformIdentity.activityPendingIntent(
                     context,
                     NotificationPlatformIdentity.ActivityIntent.ADAPTIVE_DAY,
@@ -639,16 +655,52 @@ object AdaptiveDayNotifier {
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .build()
-                NotificationLifecycleLedger.posted(
+                val posted = NotificationLifecycleLedger.posted(
                     context,
                     NotificationLifecycleId.ADAPTIVE_DAY,
                     NotificationLifecycleCategory.RECOMMENDATION,
                 ) {
                     manager.notify(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY, notification)
                 }
+                if (
+                    posted &&
+                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                    !plannedWorkoutCalendarConsentCurrent(context)
+                ) {
+                    calendarConsentLost = true
+                    NotificationLifecycleLedger.cancelled(
+                        context,
+                        NotificationLifecycleId.ADAPTIVE_DAY,
+                        NotificationLifecycleCategory.RECOMMENDATION,
+                    ) {
+                        manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+                    }
+                    return@postIfAllowed false
+                }
+                posted
+            }
+            if (calendarConsentLost) {
+                AdaptivePlannedWorkoutScheduler.cancel(context)
+                suppress(context)
+                return
             }
             if (postResult != ContextualPromptPostResult.POSTED) {
                 if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
+                return
+            }
+            if (
+                candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
+                !plannedWorkoutCalendarConsentCurrent(context)
+            ) {
+                NotificationLifecycleLedger.cancelled(
+                    context,
+                    NotificationLifecycleId.ADAPTIVE_DAY,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+                }
+                AdaptivePlannedWorkoutScheduler.cancel(context)
+                suppress(context)
                 return
             }
             ContextualActionCenter.presentRecovery(
@@ -671,6 +723,13 @@ object AdaptiveDayNotifier {
             )
         }
     }
+
+    private fun plannedWorkoutCalendarConsentCurrent(context: Context): Boolean =
+        NoopPrefs.plannedWorkoutCalendar(context) &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR,
+            ) == PackageManager.PERMISSION_GRANTED
 
     /**
      * Broadcast-receiver entry point. Travel can be evaluated without opening Room because the qualified

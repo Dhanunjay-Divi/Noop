@@ -318,6 +318,64 @@ final class ContextualInterventionsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testScheduledPlannedWorkoutIsReconciledAgainstLaterAcceptedPrompts() {
+        let start = date(2026, 8, 22, 17, 30)
+        let startSec = Int(start.timeIntervalSince1970)
+        let boundary = start.addingTimeInterval(-AdaptivePlannedWorkoutScheduler.leadTime)
+        let globalConflict = ContextualInterventionState(
+            lastGlobalDelivery: boundary.addingTimeInterval(-10 * 60),
+            deliveries: [:]
+        )
+        XCTAssertFalse(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
+            startSec: startSec,
+            fingerprint: "planned-a",
+            state: globalConflict,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        ))
+
+        let travelConflict = ContextualInterventionState(
+            lastGlobalDelivery: boundary.addingTimeInterval(-60 * 60),
+            deliveries: [
+                ContextualInterventionKind.adaptiveTravel.rawValue: .init(
+                    at: boundary.addingTimeInterval(-60 * 60),
+                    fingerprint: "travel-a"
+                )
+            ]
+        )
+        XCTAssertFalse(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
+            startSec: startSec,
+            fingerprint: "planned-a",
+            state: travelConflict,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        ))
+
+        let weakerRoutine = ContextualInterventionState(
+            lastGlobalDelivery: boundary.addingTimeInterval(-60 * 60),
+            deliveries: [
+                ContextualInterventionKind.adaptiveRoutineRecovery.rawValue: .init(
+                    at: boundary.addingTimeInterval(-60 * 60),
+                    fingerprint: "routine-a"
+                )
+            ]
+        )
+        XCTAssertTrue(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
+            startSec: startSec,
+            fingerprint: "planned-a",
+            state: weakerRoutine,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        ))
+    }
+
     func testTimeZoneObservationIgnoresDSTAndSurvivesRestartForTravelRetry() {
         let suiteName = "adaptive-time-zone.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

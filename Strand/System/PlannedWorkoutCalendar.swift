@@ -148,6 +148,24 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         }
 
         let day = Self.dayKey(now)
+        let authorization = Self.authorizationCategory()
+        #if os(iOS)
+        guard authorization == "full_access" else {
+            clear()
+            lastRefreshAt = now
+            lastRefreshDay = day
+            let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
+                "calendar.workout_plan_refresh",
+                fields: ["permission_state": authorization]
+            )
+            AppDiagnosticsRecorder.shared.endOperation(
+                diagnostic,
+                outcome: "permission_unavailable",
+                fields: ["candidate_bucket": "zero"]
+            )
+            return nil
+        }
+        #endif
         if !force,
            lastRefreshDay == day,
            let lastRefreshAt,
@@ -158,25 +176,12 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
 
         requestGeneration &+= 1
         let request = requestGeneration
-        let authorization = Self.authorizationCategory()
         let diagnostic = AppDiagnosticsRecorder.shared.beginOperation(
             "calendar.workout_plan_refresh",
             fields: ["permission_state": authorization]
         )
 
         #if os(iOS)
-        guard authorization == "full_access" else {
-            snapshot = nil
-            lastRefreshAt = now
-            lastRefreshDay = day
-            AppDiagnosticsRecorder.shared.endOperation(
-                diagnostic,
-                outcome: "permission_unavailable",
-                fields: ["candidate_bucket": "zero"]
-            )
-            return nil
-        }
-
         let result = await Self.query(now: now)
         guard request == requestGeneration else {
             AppDiagnosticsRecorder.shared.endOperation(
@@ -226,6 +231,10 @@ final class PlannedWorkoutCalendarStore: ObservableObject {
         )
         return nil
         #endif
+    }
+
+    static func hasCurrentReadAccess() -> Bool {
+        authorizationCategory() == "full_access"
     }
 
     private static func dayKey(_ date: Date) -> String {

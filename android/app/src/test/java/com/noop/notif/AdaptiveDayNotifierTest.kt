@@ -310,6 +310,50 @@ class AdaptiveDayNotifierTest {
         assertTrue(notificationPost > pendingIntent)
     }
 
+    @Test fun plannedWorkoutDeliveryRechecksCalendarConsentAtThePostBoundary() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val postCandidate = text.indexOf("private fun postCandidate(")
+        val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed", postCandidate)
+        val pendingIntent = text.indexOf(
+            "NotificationPlatformIdentity.activityPendingIntent",
+            postGate,
+        )
+        val action = text.indexOf("ContextualActionCenter.presentRecovery", pendingIntent)
+        val helper = text.indexOf("private fun plannedWorkoutCalendarConsentCurrent")
+
+        assertTrue(postCandidate >= 0)
+        assertTrue(postGate > postCandidate)
+        assertTrue(pendingIntent > postGate)
+        assertTrue(action > pendingIntent)
+        assertTrue(
+            text.substring(postCandidate, postGate)
+                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+        )
+        assertTrue(
+            text.substring(postGate, pendingIntent)
+                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+        )
+        assertTrue(
+            text.substring(pendingIntent, action)
+                .contains("plannedWorkoutCalendarConsentCurrent(context)"),
+        )
+        assertTrue(helper > action)
+        assertTrue(
+            text.substring(helper)
+                .contains("Manifest.permission.READ_CALENDAR"),
+        )
+        assertTrue(
+            text.substring(helper)
+                .contains("NoopPrefs.plannedWorkoutCalendar(context)"),
+        )
+    }
+
     @Test fun plannedWorkoutWorkerResolvesThePersistedActiveDeviceBeforeEvaluation() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(

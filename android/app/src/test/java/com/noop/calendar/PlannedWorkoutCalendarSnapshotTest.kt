@@ -66,20 +66,37 @@ class PlannedWorkoutCalendarSnapshotTest {
     fun providerChangesForceRefreshBeforeAdaptiveGuidanceReevaluation() {
         val today = source("com/noop/ui/TodayScreen.kt")
         val viewModel = source("com/noop/ui/AppViewModel.kt")
-        val observer = today.substring(
-            today.indexOf("val providerObserver = object"),
-            today.indexOf("fun ensureProviderObserver()"),
+        val observer = viewModel.substring(
+            viewModel.indexOf("private val plannedWorkoutCalendarObserver"),
+            viewModel.indexOf("private val noopApp"),
         )
-        assertTrue(observer.contains("viewModel.onPlannedWorkoutCalendarChanged()"))
+        assertTrue(observer.contains("onPlannedWorkoutCalendarChanged()"))
+        assertTrue(viewModel.contains("CalendarContract.Events.CONTENT_URI"))
+        assertTrue(viewModel.contains("registerContentObserver("))
+        assertTrue(viewModel.contains("unregisterContentObserver("))
+        assertTrue(!today.contains("CalendarContract.Events.CONTENT_URI"))
 
         val methodStart = viewModel.indexOf("fun onPlannedWorkoutCalendarChanged()")
-        val methodEnd = viewModel.indexOf("private suspend fun evaluateAdaptiveDayGuidance", methodStart)
+        val methodEnd = viewModel.indexOf(
+            "private fun reconcilePlannedWorkoutCalendarObserver",
+            methodStart,
+        )
         assertTrue(methodStart >= 0 && methodEnd > methodStart)
         val method = viewModel.substring(methodStart, methodEnd)
+        val cancel = method.indexOf("plannedWorkoutCalendarEvaluationJob?.cancel()")
         val refresh = method.indexOf("PlannedWorkoutCalendarStore.refresh(")
         val evaluate = method.indexOf("evaluateAdaptiveDayGuidance()")
+        assertTrue(cancel >= 0 && refresh > cancel)
         assertTrue(refresh >= 0 && evaluate > refresh)
         assertTrue(method.contains("force = true"))
+
+        val resumeStart = viewModel.indexOf("override fun onActivityResumed")
+        val resumeEnd = viewModel.indexOf("override fun onActivityCreated", resumeStart)
+        assertTrue(resumeStart >= 0 && resumeEnd > resumeStart)
+        assertTrue(
+            viewModel.substring(resumeStart, resumeEnd)
+                .contains("onPlannedWorkoutCalendarChanged()"),
+        )
     }
 
     @Test
