@@ -32,9 +32,10 @@ class PlannedWorkoutCalendarSnapshotTest {
 
         val queryBoundary = source.substring(queryStart, publishStart)
         val cancellationCatch = queryBoundary.indexOf("catch (cancelled: CancellationException)")
-        val genericCatch = queryBoundary.indexOf("catch (_: Throwable)")
+        val genericCatch = queryBoundary.indexOf("catch (_: Exception)")
         assertTrue(cancellationCatch >= 0)
         assertTrue(genericCatch > cancellationCatch)
+        assertTrue(!queryBoundary.contains("catch (_: Throwable)"))
         assertTrue(queryBoundary.contains("outcome = \"cancelled\""))
         assertTrue(queryBoundary.contains("throw cancelled"))
     }

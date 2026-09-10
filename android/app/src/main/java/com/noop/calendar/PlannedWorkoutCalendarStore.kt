@@ -140,7 +140,7 @@ object PlannedWorkoutCalendarStore {
                 }
             }
             return@withLock null
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             AppDiagnosticsRecorder.endOperation(
                 diagnostic,
                 outcome = "failed",
