@@ -98,13 +98,23 @@ exact-head review found that new daily sleep/readiness state could still queue
 reevaluation without first invalidating a suspended candidate. Both Apple
 repository health-input publishers now invalidate that candidate synchronously
 before scheduling replacement evaluation. The focused regressions pass, the
-complete Apple rerun executes 1,730 tests with one intentional external-data
-skip and no failures, and the final Android wall passes 4,217 tests with seven
-skips plus production compile, lint, instrumentation-source compile, and APK
-assembly. The complete unsigned iPhone/widget/watch graph also builds. The
-final policy rerun also passes after regenerating and pinning the reviewed
-terminology inventory. Commit, fresh exact-head review, protected checks, and
-normal merge remain required.
+next exact-head review found that natural workout expiry removed accepted
+cooldown history and that quiet hours or a global cooldown at the two-hour
+boundary discarded the only notification opportunity. Both platforms now
+preserve accepted history only for a persisted workout whose exact start has
+passed, fully retract future/invalidated workouts, and schedule one bounded
+retry at the next eligible instant before workout start. A final no-adjustment
+pass cannot erase the preserved history; malformed fingerprints fail closed,
+and stale Android expiry work cannot remove a newer exact prompt. The focused
+correction suites pass 42 Apple tests plus the Android notifier suite. The
+complete Apple rerun passes 1,734 tests with one intentional external-data skip,
+and the final Android wall passes 4,220 tests with seven skips plus production
+compile, lint, instrumentation-source compile, and APK assembly. The complete
+unsigned iPhone/widget/watch graph also builds. Final terminology regeneration,
+the 227-test Tools suite, release controls, required CI, all 51 operations
+records, i18n, health claims, calibration parity, legal provenance,
+terminology, and private-data gates pass on the exact source. Commit, fresh
+exact-head review, protected checks, and normal merge remain required.
 Details are in
 [Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
 

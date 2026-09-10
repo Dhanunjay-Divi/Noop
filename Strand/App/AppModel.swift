@@ -2840,18 +2840,18 @@ final class AppModel: ObservableObject {
             nowSec: nowSec
         )
         if let adjustment = plan.workoutAdjustment {
+            let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
+                from: adjustment,
+                day: today,
+                observedAt: now
+            )
             let leadSeconds = adjustment.startSec - nowSec
             if leadSeconds <= 0 {
                 AdaptivePlannedWorkoutScheduler.cancelPending()
-                ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                    keepingFingerprint: nil
+                ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+                    fingerprint: candidate.fingerprint
                 )
             } else {
-                let candidate = AdaptiveDayInterventionFactory.plannedWorkoutCandidate(
-                    from: adjustment,
-                    day: today,
-                    observedAt: now
-                )
                 ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
                     keepingFingerprint: candidate.fingerprint
                 )
@@ -2870,14 +2870,24 @@ final class AppModel: ObservableObject {
                     ContextualInterventionCenter.post(
                         candidate,
                         now: now
-                    )
+                    ) { [weak self] retryAt in
+                        _ = AdaptivePlannedWorkoutScheduler.scheduleRetry(
+                            start: Date(
+                                timeIntervalSince1970: TimeInterval(adjustment.startSec)
+                            ),
+                            fingerprint: candidate.fingerprint,
+                            retryAt: retryAt
+                        ) { [weak self] in
+                            await self?.evaluateAdaptiveDayGuidance(now: Date())
+                        }
+                    }
                     return
                 }
             }
         } else {
             AdaptivePlannedWorkoutScheduler.cancelPending()
-            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                keepingFingerprint: nil
+            ContextualInterventionCenter.reconcileMissingPlannedWorkoutArtifacts(
+                now: now
             )
         }
 

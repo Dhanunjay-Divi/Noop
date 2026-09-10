@@ -144,6 +144,55 @@ enum ContextualInterventionPolicy {
         return .init(shouldDeliver: true, reason: .deliver, nextState: next)
     }
 
+    static func nextEligibleDate(
+        for candidate: ContextualInterventionCandidate,
+        state: ContextualInterventionState,
+        notBefore: Date,
+        quietHoursEnabled: Bool,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+        calendar: Calendar = .current
+    ) -> Date? {
+        let expiresAt = candidate.observedAt.addingTimeInterval(candidate.maximumAge)
+        var probe = notBefore
+
+        for _ in 0..<8 {
+            guard probe < expiresAt else { return nil }
+            let decision = evaluate(
+                candidate,
+                state: state,
+                now: probe,
+                quietHoursEnabled: quietHoursEnabled,
+                quietStartMinutes: quietStartMinutes,
+                quietEndMinutes: quietEndMinutes,
+                calendar: calendar
+            )
+            if decision.shouldDeliver { return probe }
+
+            let next: Date?
+            switch decision.reason {
+            case .globalCooldown:
+                next = state.lastGlobalDelivery?.addingTimeInterval(globalCooldown)
+            case .topicCooldown:
+                next = topicCooldownEnd(for: candidate.kind, state: state)
+            case .quietHours:
+                next = nextQuietHoursEnd(
+                    after: probe,
+                    endMinutes: quietEndMinutes,
+                    calendar: calendar
+                )
+            case .stale, .duplicate:
+                return nil
+            case .deliver:
+                return probe
+            }
+
+            guard let next else { return nil }
+            probe = next > probe ? next : probe.addingTimeInterval(1)
+        }
+        return nil
+    }
+
     static func windowContains(_ minute: Int, start: Int, end: Int) -> Bool {
         let day = 24 * 60
         let value = ((minute % day) + day) % day
@@ -167,6 +216,41 @@ enum ContextualInterventionPolicy {
             return []
         }
     }
+
+    private static func topicCooldownEnd(
+        for kind: ContextualInterventionKind,
+        state: ContextualInterventionState
+    ) -> Date? {
+        var dates: [Date] = []
+        if let prior = state.deliveries[kind.rawValue] {
+            dates.append(prior.at.addingTimeInterval(kind.cooldown))
+        }
+        for blocker in adaptivePriorityBlockers(for: kind) {
+            if let prior = state.deliveries[blocker.rawValue] {
+                dates.append(prior.at.addingTimeInterval(20 * 60 * 60))
+            }
+        }
+        return dates.max()
+    }
+
+    private static func nextQuietHoursEnd(
+        after date: Date,
+        endMinutes: Int,
+        calendar: Calendar
+    ) -> Date? {
+        let normalized = ((endMinutes % (24 * 60)) + (24 * 60)) % (24 * 60)
+        return calendar.nextDate(
+            after: date,
+            matching: DateComponents(
+                hour: normalized / 60,
+                minute: normalized % 60,
+                second: 0
+            ),
+            matchingPolicy: .nextTime,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        )
+    }
 }
 
 /// Notification side effect for immediate contextual prompts. Authorization is requested only from an
@@ -182,6 +266,7 @@ enum ContextualInterventionCenter {
     private struct PendingDelivery {
         let candidate: ContextualInterventionCandidate
         let now: Date
+        let onRetry: (@MainActor @Sendable (Date) -> Void)?
     }
 
     private static var deliveriesInFlight = Set<ContextualInterventionKind>()
@@ -214,16 +299,28 @@ enum ContextualInterventionCenter {
         }
     }
 
-    static func post(_ candidate: ContextualInterventionCandidate, now: Date = Date()) {
+    static func post(
+        _ candidate: ContextualInterventionCandidate,
+        now: Date = Date(),
+        onRetry: (@MainActor @Sendable (Date) -> Void)? = nil
+    ) {
         guard deliveryConsentCurrent(for: candidate) else { return }
         if deliveriesInFlight.contains(candidate.kind) {
             guard candidate.kind == .adaptivePlannedWorkout else { return }
             pendingDeliveries.removeAll { $0.candidate.kind == candidate.kind }
-            pendingDeliveries.append(.init(candidate: candidate, now: now))
+            pendingDeliveries.append(.init(
+                candidate: candidate,
+                now: now,
+                onRetry: onRetry
+            ))
             return
         }
         deliveriesInFlight.insert(candidate.kind)
-        pendingDeliveries.append(.init(candidate: candidate, now: now))
+        pendingDeliveries.append(.init(
+            candidate: candidate,
+            now: now,
+            onRetry: onRetry
+        ))
         guard !deliveryLoopRunning else { return }
         deliveryLoopRunning = true
         Task { @MainActor in
@@ -234,7 +331,11 @@ enum ContextualInterventionCenter {
     private static func drainPendingDeliveries() async {
         while !pendingDeliveries.isEmpty {
             let pending = pendingDeliveries.removeFirst()
-            await deliver(pending.candidate, now: pending.now)
+            await deliver(
+                pending.candidate,
+                now: pending.now,
+                onRetry: pending.onRetry
+            )
             if !pendingDeliveries.contains(where: {
                 $0.candidate.kind == pending.candidate.kind
             }) {
@@ -246,7 +347,8 @@ enum ContextualInterventionCenter {
 
     private static func deliver(
         _ candidate: ContextualInterventionCandidate,
-        now: Date
+        now: Date,
+        onRetry: (@MainActor @Sendable (Date) -> Void)?
     ) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
@@ -258,17 +360,33 @@ enum ContextualInterventionCenter {
 
         let defaults = UserDefaults.standard
         let current = loadState(defaults: defaults)
+        let quietHoursEnabled = defaults.bool(forKey: quietHoursEnabledKey)
+        let quietStartMinutes =
+            defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60
+        let quietEndMinutes =
+            defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
         let decision = ContextualInterventionPolicy.evaluate(
             candidate,
             state: current,
             now: now,
-            quietHoursEnabled: defaults.bool(forKey: quietHoursEnabledKey),
-            quietStartMinutes: defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60,
-            quietEndMinutes: defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
+            quietHoursEnabled: quietHoursEnabled,
+            quietStartMinutes: quietStartMinutes,
+            quietEndMinutes: quietEndMinutes
         )
         guard decision.shouldDeliver else {
             if candidate.kind == .adaptiveTravel, decision.reason == .duplicate {
                 AdaptiveDayTimeZoneStore.discardPending()
+            }
+            if candidate.kind == .adaptivePlannedWorkout,
+               let retryAt = ContextualInterventionPolicy.nextEligibleDate(
+                   for: candidate,
+                   state: current,
+                   notBefore: now,
+                   quietHoursEnabled: quietHoursEnabled,
+                   quietStartMinutes: quietStartMinutes,
+                   quietEndMinutes: quietEndMinutes
+               ) {
+                onRetry?(retryAt)
             }
             LocalNotificationLifecycle.suppressed(
                 identifier: "contextual-\(candidate.kind.rawValue)",
@@ -472,6 +590,65 @@ enum ContextualInterventionCenter {
         )
     }
 
+    static func expirePlannedWorkoutArtifacts(
+        fingerprint: String,
+        center: UNUserNotificationCenter = .current(),
+        defaults: UserDefaults = .standard
+    ) {
+        guard currentPlannedWorkoutFingerprint == nil ||
+                currentPlannedWorkoutFingerprint == fingerprint else {
+            return
+        }
+        currentPlannedWorkoutFingerprint = nil
+        ContextualActionCenter.shared.reconcileRecoveryActions(
+            route: .workouts,
+            keepingFingerprint: nil
+        )
+        AdaptivePlannedWorkoutScheduler.reconcileDeliveryExpiry(
+            keepingFingerprint: nil,
+            center: center,
+            defaults: defaults
+        )
+        LocalNotificationLifecycle.cancel(
+            identifiers: [plannedWorkoutRequestID, AdaptivePlannedWorkoutScheduler.requestID],
+            presented: true,
+            on: center
+        )
+    }
+
+    static func reconcileMissingPlannedWorkoutArtifacts(
+        now: Date,
+        center: UNUserNotificationCenter = .current(),
+        defaults: UserDefaults = .standard
+    ) {
+        let key = ContextualInterventionKind.adaptivePlannedWorkout.rawValue
+        if let prior = loadState(defaults: defaults).deliveries[key],
+           let start = plannedWorkoutStartDate(from: prior.fingerprint),
+           start <= now {
+            expirePlannedWorkoutArtifacts(
+                fingerprint: prior.fingerprint,
+                center: center,
+                defaults: defaults
+            )
+            return
+        }
+        reconcilePlannedWorkoutArtifacts(
+            keepingFingerprint: nil,
+            center: center,
+            defaults: defaults
+        )
+    }
+
+    static func plannedWorkoutStartDate(from fingerprint: String) -> Date? {
+        let fields = fingerprint.split(separator: "|", omittingEmptySubsequences: false)
+        guard fields.count == 4,
+              fields[0] == "planned-workout",
+              let startSec = Int(fields[2]) else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: TimeInterval(startSec))
+    }
+
     static func recordScheduledPlannedWorkoutDelivery(
         fingerprint: String,
         deliveredAt: Date,
@@ -671,6 +848,7 @@ enum AdaptiveDayInterventionFactory {
 enum AdaptivePlannedWorkoutScheduler {
     static let requestID = "contextual-adaptivePlannedWorkout-boundary"
     static let startSecUserInfoKey = "noop.plannedWorkout.startSec"
+    static let evaluationSecUserInfoKey = "noop.plannedWorkout.evaluationSec"
     static let fingerprintUserInfoKey = "noop.plannedWorkout.fingerprint"
     static let evidenceUserInfoKey = "noop.plannedWorkout.evidence"
     static let deliveredStartSecKey = "noop.plannedWorkout.deliveredStartSec"
@@ -714,65 +892,44 @@ enum AdaptivePlannedWorkoutScheduler {
             return false
         }
 
-        let defaults = UserDefaults.standard
-        let decision = ContextualInterventionPolicy.evaluate(
-            candidate,
-            state: ContextualInterventionCenter.loadState(defaults: defaults),
-            now: boundary,
-            quietHoursEnabled: defaults.bool(forKey: "notif.quietHoursEnabled"),
-            quietStartMinutes: defaults.object(forKey: "notif.quietStartMinutes") as? Int
-                ?? 22 * 60,
-            quietEndMinutes: defaults.object(forKey: "notif.quietEndMinutes") as? Int
-                ?? 7 * 60,
-            calendar: .autoupdatingCurrent
+        return armEvaluation(
+            startSec: adjustment.startSec,
+            evaluationAt: boundary,
+            fingerprint: candidate.fingerprint,
+            now: now,
+            center: center,
+            defaults: .standard,
+            outcome: "armed",
+            onBoundary: onBoundary
         )
-        guard decision.shouldDeliver else {
-            cancelPending(on: center)
+    }
+
+    @discardableResult
+    static func scheduleRetry(
+        start: Date,
+        fingerprint: String,
+        retryAt: Date,
+        now: Date = Date(),
+        center: UNUserNotificationCenter = .current(),
+        defaults: UserDefaults = .standard,
+        onBoundary: @escaping @MainActor @Sendable () async -> Void
+    ) -> Bool {
+        guard ContextualInterventionCenter.plannedWorkoutCandidateIsCurrent(fingerprint),
+              ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+              PlannedWorkoutCalendarSettings.enabled,
+              PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
             return false
         }
-
-        removeLegacyNotification(on: center)
-        defaults.set(adjustment.startSec, forKey: startSecUserInfoKey)
-        defaults.set(candidate.fingerprint, forKey: fingerprintUserInfoKey)
-        defaults.removeObject(forKey: evidenceUserInfoKey)
-        boundaryTask?.cancel()
-        let delay = max(1, boundary.timeIntervalSince(now))
-        boundaryTask = Task { @MainActor in
-            do {
-                try await Task.sleep(
-                    nanoseconds: UInt64(delay * 1_000_000_000)
-                )
-            } catch {
-                return
-            }
-            guard !Task.isCancelled,
-                  pendingStartSec(defaults: defaults) == adjustment.startSec,
-                  defaults.string(forKey: fingerprintUserInfoKey) == candidate.fingerprint,
-                  ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
-                  PlannedWorkoutCalendarSettings.enabled,
-                  PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
-                cancelPending(on: center, defaults: defaults)
-                return
-            }
-            boundaryTask = nil
-            clearPendingMetadata(defaults: defaults)
-#if os(iOS)
-            rescheduleRequestedWake(now: Date(), defaults: defaults)
-#endif
-            AppDiagnosticsRecorder.shared.record(
-                "adaptive_day.planned_workout_boundary",
-                fields: ["outcome": "reevaluation_requested"]
-            )
-            await onBoundary()
-        }
-#if os(iOS)
-        rescheduleRequestedWake(now: now, defaults: defaults)
-#endif
-        AppDiagnosticsRecorder.shared.record(
-            "adaptive_day.planned_workout_boundary",
-            fields: ["outcome": "armed"]
+        return armEvaluation(
+            startSec: Int(start.timeIntervalSince1970),
+            evaluationAt: retryAt,
+            fingerprint: fingerprint,
+            now: now,
+            center: center,
+            defaults: defaults,
+            outcome: "retry_armed",
+            onBoundary: onBoundary
         )
-        return true
     }
 
     static func reconcilePending(
@@ -793,18 +950,21 @@ enum AdaptivePlannedWorkoutScheduler {
             return
         }
 
-        let boundary = Date(
-            timeIntervalSince1970: TimeInterval(startSec)
-        ).addingTimeInterval(-leadTime)
-        guard boundary > acceptedAt else {
+        let start = Date(timeIntervalSince1970: TimeInterval(startSec))
+        guard start > acceptedAt else {
             cancelPending(on: center, defaults: defaults)
             return
         }
+        let boundary = start.addingTimeInterval(-leadTime)
+        let scheduledEvaluation = pendingEvaluationSec(defaults: defaults).map {
+            Date(timeIntervalSince1970: TimeInterval($0))
+        } ?? boundary
 
         let shouldKeep = shouldKeepPending(
             startSec: startSec,
             fingerprint: fingerprint,
             state: state,
+            notBefore: max(scheduledEvaluation, acceptedAt),
             quietHoursEnabled: defaults.bool(forKey: "notif.quietHoursEnabled"),
             quietStartMinutes: defaults.object(forKey: "notif.quietStartMinutes") as? Int
                 ?? 22 * 60,
@@ -820,6 +980,7 @@ enum AdaptivePlannedWorkoutScheduler {
         startSec: Int,
         fingerprint: String,
         state: ContextualInterventionState,
+        notBefore: Date? = nil,
         quietHoursEnabled: Bool,
         quietStartMinutes: Int,
         quietEndMinutes: Int,
@@ -836,15 +997,15 @@ enum AdaptivePlannedWorkoutScheduler {
             body: "",
             route: .workouts
         )
-        return ContextualInterventionPolicy.evaluate(
-            candidate,
+        return ContextualInterventionPolicy.nextEligibleDate(
+            for: candidate,
             state: state,
-            now: boundary,
+            notBefore: max(boundary, notBefore ?? boundary),
             quietHoursEnabled: quietHoursEnabled,
             quietStartMinutes: quietStartMinutes,
             quietEndMinutes: quietEndMinutes,
             calendar: calendar
-        ).shouldDeliver
+        ) != nil
     }
 
     @discardableResult
@@ -856,8 +1017,8 @@ enum AdaptivePlannedWorkoutScheduler {
         defaults: UserDefaults = .standard
     ) -> Bool {
         guard start > now else {
-            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                keepingFingerprint: nil,
+            ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+                fingerprint: fingerprint,
                 center: center,
                 defaults: defaults
             )
@@ -891,8 +1052,8 @@ enum AdaptivePlannedWorkoutScheduler {
                 "adaptive_day.planned_workout_boundary",
                 fields: ["outcome": "expired"]
             )
-            ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
-                keepingFingerprint: nil,
+            ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+                fingerprint: fingerprint,
                 center: center,
                 defaults: defaults
             )
@@ -985,8 +1146,14 @@ enum AdaptivePlannedWorkoutScheduler {
         return defaults.integer(forKey: deliveredStartSecKey)
     }
 
+    private static func pendingEvaluationSec(defaults: UserDefaults) -> Int? {
+        guard defaults.object(forKey: evaluationSecUserInfoKey) != nil else { return nil }
+        return defaults.integer(forKey: evaluationSecUserInfoKey)
+    }
+
     private static func clearPendingMetadata(defaults: UserDefaults) {
         defaults.removeObject(forKey: startSecUserInfoKey)
+        defaults.removeObject(forKey: evaluationSecUserInfoKey)
         defaults.removeObject(forKey: fingerprintUserInfoKey)
         defaults.removeObject(forKey: evidenceUserInfoKey)
     }
@@ -1002,13 +1169,16 @@ enum AdaptivePlannedWorkoutScheduler {
         defaults: UserDefaults
     ) {
         BackgroundSyncScheduler.clearRequestedWake()
-        let boundary = pendingStartSec(defaults: defaults).map {
-            Date(timeIntervalSince1970: TimeInterval($0)).addingTimeInterval(-leadTime)
+        let evaluation = pendingEvaluationSec(defaults: defaults).map {
+            Date(timeIntervalSince1970: TimeInterval($0))
+        } ?? pendingStartSec(defaults: defaults).map {
+            Date(timeIntervalSince1970: TimeInterval($0))
+                .addingTimeInterval(-leadTime)
         }
         let expiry = deliveredStartSec(defaults: defaults).map {
             Date(timeIntervalSince1970: TimeInterval($0))
         }
-        let next = [boundary, expiry]
+        let next = [evaluation, expiry]
             .compactMap { $0 }
             .filter { $0 > now }
             .min()
@@ -1017,6 +1187,67 @@ enum AdaptivePlannedWorkoutScheduler {
         }
     }
 #endif
+
+    private static func armEvaluation(
+        startSec: Int,
+        evaluationAt: Date,
+        fingerprint: String,
+        now: Date,
+        center: UNUserNotificationCenter,
+        defaults: UserDefaults,
+        outcome: String,
+        onBoundary: @escaping @MainActor @Sendable () async -> Void
+    ) -> Bool {
+        let start = Date(timeIntervalSince1970: TimeInterval(startSec))
+        guard evaluationAt > now, evaluationAt < start else { return false }
+
+        removeLegacyNotification(on: center)
+        let evaluationSec = Int(evaluationAt.timeIntervalSince1970)
+        defaults.set(startSec, forKey: startSecUserInfoKey)
+        defaults.set(evaluationSec, forKey: evaluationSecUserInfoKey)
+        defaults.set(fingerprint, forKey: fingerprintUserInfoKey)
+        defaults.removeObject(forKey: evidenceUserInfoKey)
+        boundaryTask?.cancel()
+        let delay = max(1, evaluationAt.timeIntervalSince(now))
+        boundaryTask = Task { @MainActor in
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(delay * 1_000_000_000)
+                )
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  pendingStartSec(defaults: defaults) == startSec,
+                  pendingEvaluationSec(defaults: defaults) == evaluationSec,
+                  defaults.string(forKey: fingerprintUserInfoKey) == fingerprint,
+                  ContextualInterventionCenter.plannedWorkoutCandidateIsCurrent(fingerprint),
+                  ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+                  PlannedWorkoutCalendarSettings.enabled,
+                  PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
+                cancelPending(on: center, defaults: defaults)
+                return
+            }
+            boundaryTask = nil
+            clearPendingMetadata(defaults: defaults)
+#if os(iOS)
+            rescheduleRequestedWake(now: Date(), defaults: defaults)
+#endif
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.planned_workout_boundary",
+                fields: ["outcome": "reevaluation_requested"]
+            )
+            await onBoundary()
+        }
+#if os(iOS)
+        rescheduleRequestedWake(now: now, defaults: defaults)
+#endif
+        AppDiagnosticsRecorder.shared.record(
+            "adaptive_day.planned_workout_boundary",
+            fields: ["outcome": outcome]
+        )
+        return true
+    }
 
     private static func removeLegacyNotification(
         on center: UNUserNotificationCenter

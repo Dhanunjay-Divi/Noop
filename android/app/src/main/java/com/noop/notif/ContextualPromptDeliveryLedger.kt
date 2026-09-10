@@ -118,6 +118,16 @@ internal object ContextualPromptDeliveryLedger {
         true
     }
 
+    fun nextAllowedAtMillis(
+        context: Context,
+        nowMillis: Long,
+    ): Long? = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        val last = loadState(prefs).lastGlobalDeliveryMillis ?: return@synchronized null
+        (last + ContextualPromptGlobalPolicy.COOLDOWN_MILLIS)
+            .takeIf { it > nowMillis }
+    }
+
     private fun ownerKey(owner: ContextualPromptDeliveryOwner): String =
         "owner.${owner.storageKey}.at"
 

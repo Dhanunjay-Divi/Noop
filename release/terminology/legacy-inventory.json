@@ -9593,22 +9593,22 @@
         1959,
         1961,
         1964,
-        2924,
-        3008,
-        3025,
-        3081,
-        3171,
-        3177,
-        3182,
-        3183,
+        2934,
+        3018,
+        3035,
+        3091,
+        3181,
+        3187,
+        3192,
         3193,
-        3195,
-        3495,
-        3496,
-        3497,
-        3510,
-        3511,
-        3512
+        3203,
+        3205,
+        3505,
+        3506,
+        3507,
+        3520,
+        3521,
+        3522
       ],
       "occurrenceCount": 74,
       "path": "Strand/App/AppModel.swift",
@@ -14840,10 +14840,10 @@
       "lineNumbers": [
         3,
         4,
-        572,
-        602,
-        613,
-        614
+        715,
+        745,
+        756,
+        757
       ],
       "occurrenceCount": 6,
       "path": "StrandTests/ContextualInterventionsTests.swift",
@@ -22226,9 +22226,9 @@
       "lineNumbers": [
         26,
         29,
-        372,
-        375,
-        398
+        489,
+        492,
+        515
       ],
       "occurrenceCount": 5,
       "path": "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt",
@@ -31042,7 +31042,7 @@
     {
       "category": "fixture",
       "lineNumbers": [
-        596
+        677
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/test/java/com/noop/notif/AdaptiveDayNotifierTest.kt",

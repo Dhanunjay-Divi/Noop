@@ -5,6 +5,8 @@ import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ScoreConfidence
 import java.io.File
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -251,12 +253,72 @@ class AdaptiveDayNotifierTest {
             ),
         )
         assertEquals(
+            20L * 60L * 1_000L,
+            AdaptivePlannedWorkoutSchedulePolicy.retryDelayMillis(
+                startSec = nowMillis / 1_000L + 60L * 60L,
+                retryAtMillis = nowMillis + 20L * 60L * 1_000L,
+                nowMillis = nowMillis,
+            ),
+        )
+        assertNull(
+            AdaptivePlannedWorkoutSchedulePolicy.retryDelayMillis(
+                startSec = nowMillis / 1_000L + 20L * 60L,
+                retryAtMillis = nowMillis + 20L * 60L * 1_000L,
+                nowMillis = nowMillis,
+            ),
+        )
+        assertEquals(
             15L * 60L * 1_000L,
             AdaptiveDayNotifier.plannedWorkoutMaximumAgeMillis(
                 startSec = nowMillis / 1_000L + 15L * 60L,
                 observedAtMillis = nowMillis,
             ),
         )
+    }
+
+    @Test fun plannedWorkoutRetriesAfterTransientCooldownAndQuietHours() {
+        val boundary = ZonedDateTime.of(2026, 8, 23, 6, 0, 0, 0, ZoneOffset.UTC)
+        val start = boundary.plusHours(2)
+        val planned = AdaptiveDayDeliveryCandidate(
+            kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+            observedAtMillis = boundary.toInstant().toEpochMilli(),
+            maximumAgeMillis = 2L * 60L * 60L * 1_000L,
+            fingerprint = "planned-a",
+        )
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = boundary.minusMinutes(10).toInstant().toEpochMilli(),
+        )
+
+        assertEquals(
+            boundary.plusHours(1).toInstant().toEpochMilli(),
+            AdaptiveDayDeliveryPolicy.nextEligibleAtMillis(
+                candidate = planned,
+                state = state,
+                notBefore = boundary,
+                quietHoursEnabled = true,
+                quietStartMinutes = 22 * 60,
+                quietEndMinutes = 7 * 60,
+            ),
+        )
+        assertNull(
+            AdaptiveDayDeliveryPolicy.nextEligibleAtMillis(
+                candidate = planned,
+                state = AdaptiveDayDeliveryState(
+                    lastGlobalDeliveryMillis = boundary.toInstant().toEpochMilli(),
+                    deliveries = mapOf(
+                        AdaptiveDayDeliveryKind.PLANNED_WORKOUT to AdaptiveDayDelivery(
+                            boundary.toInstant().toEpochMilli(),
+                            "planned-a",
+                        ),
+                    ),
+                ),
+                notBefore = boundary,
+                quietHoursEnabled = false,
+                quietStartMinutes = 22 * 60,
+                quietEndMinutes = 7 * 60,
+            ),
+        )
+        assertEquals(start.toInstant().toEpochMilli(), planned.observedAtMillis + planned.maximumAgeMillis)
     }
 
     @Test fun plannedWorkoutNotificationExpiresAtTheWorkoutStartFromActualPostTime() {
@@ -320,6 +382,25 @@ class AdaptiveDayNotifierTest {
                     "2026-08-22",
                     first.copy(startSec = first.startSec + 5L * 60L),
                 ),
+        )
+    }
+
+    @Test fun plannedWorkoutFingerprintExposesOnlyItsBoundedStartTimestamp() {
+        assertEquals(
+            1_700_000_123L,
+            AdaptiveDayNotifier.plannedWorkoutStartSec(
+                "planned-workout|2026-08-22|1700000123|SLEEP_DEFICIT",
+            ),
+        )
+        assertNull(
+            AdaptiveDayNotifier.plannedWorkoutStartSec(
+                "planned-workout|2026-08-22|not-a-date|SLEEP_DEFICIT",
+            ),
+        )
+        assertNull(
+            AdaptiveDayNotifier.plannedWorkoutStartSec(
+                "other|2026-08-22|1700000123|SLEEP_DEFICIT",
+            ),
         )
     }
 
@@ -626,10 +707,49 @@ class AdaptiveDayNotifierTest {
         val evaluatorSource = text.substring(evaluator, notifier)
         val saveState = text.indexOf("private fun saveState")
 
-        assertTrue(evaluatorSource.contains("reconcilePlannedWorkoutArtifacts"))
-        assertTrue(evaluatorSource.contains("currentFingerprint = null"))
+        assertTrue(evaluatorSource.contains("reconcileMissingPlannedWorkoutArtifacts"))
+        assertTrue(evaluatorSource.contains("nowSec = nowSec"))
         assertTrue(evaluatorSource.contains("if (leadSeconds <= 0L)"))
         assertTrue(saveState >= 0)
         assertTrue(text.substring(saveState).contains(".clear()"))
+    }
+
+    @Test fun naturalWorkoutExpiryPreservesCooldownLedgersAndTransientSuppressionRetries() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val evaluator = text.indexOf("object AdaptiveDayEvaluator")
+        val notifier = text.indexOf("object AdaptiveDayNotifier", evaluator)
+        val evaluatorSource = text.substring(evaluator, notifier)
+        val postCandidate = text.indexOf("private fun postCandidate(")
+        val deliveryCurrent = text.indexOf("private fun plannedWorkoutDeliveryCurrent", postCandidate)
+        val postSource = text.substring(postCandidate, deliveryCurrent)
+        val expire = text.indexOf("internal fun expirePlannedWorkoutArtifacts(")
+        val reconcileMissing = text.indexOf(
+            "internal fun reconcileMissingPlannedWorkoutArtifacts(",
+            expire,
+        )
+        val reconcile = text.indexOf(
+            "internal fun reconcilePlannedWorkoutArtifacts(",
+            reconcileMissing,
+        )
+        val expireSource = text.substring(expire, reconcileMissing)
+        val missingSource = text.substring(reconcileMissing, reconcile)
+
+        assertTrue(evaluatorSource.contains("expirePlannedWorkoutArtifacts("))
+        assertTrue(postSource.contains("AdaptiveDayDeliveryPolicy.nextEligibleAtMillis("))
+        assertTrue(postSource.contains("ContextualPromptDeliveryLedger.nextAllowedAtMillis("))
+        assertTrue(postSource.contains("schedulePlannedWorkoutRetry("))
+        assertTrue(expire >= 0)
+        assertFalse(expireSource.contains("ContextualPromptDeliveryLedger.reconcile"))
+        assertFalse(expireSource.contains("saveState("))
+        assertTrue(expireSource.contains("prior.fingerprint != fingerprint"))
+        assertTrue(missingSource.contains("plannedWorkoutStartSec(prior.fingerprint)"))
+        assertTrue(missingSource.contains("expirePlannedWorkoutArtifacts"))
+        assertTrue(missingSource.contains("reconcilePlannedWorkoutArtifacts"))
     }
 }

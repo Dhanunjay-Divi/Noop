@@ -345,16 +345,16 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
                 range: cancellation.upperBound..<scheduleTail.endIndex
             )
         )
-        let metadataWrite = try XCTUnwrap(
+        let arm = try XCTUnwrap(
             scheduleTail.range(
-                of: "defaults.set(adjustment.startSec",
+                of: "return armEvaluation(",
                 range: currentCandidate.upperBound..<scheduleTail.endIndex
             )
         )
 
         XCTAssertLessThan(settings.lowerBound, cancellation.lowerBound)
         XCTAssertLessThan(cancellation.lowerBound, currentCandidate.lowerBound)
-        XCTAssertLessThan(currentCandidate.lowerBound, metadataWrite.lowerBound)
+        XCTAssertLessThan(currentCandidate.lowerBound, arm.lowerBound)
     }
 
     func testDeliveredPlannedWorkoutHasStartTimeCleanupAndRestartWake() throws {
@@ -371,13 +371,16 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         let scheduler = schedulerSource[start.lowerBound..<end.lowerBound]
 
         XCTAssertTrue(scheduler.contains("scheduleDeliveryExpiry"))
+        XCTAssertTrue(scheduler.contains("scheduleRetry"))
         XCTAssertTrue(scheduler.contains("deliveredStartSecKey"))
         XCTAssertTrue(scheduler.contains("deliveredFingerprintKey"))
-        XCTAssertTrue(scheduler.contains("ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts"))
+        XCTAssertTrue(scheduler.contains("evaluationSecUserInfoKey"))
+        XCTAssertTrue(scheduler.contains("ContextualInterventionCenter.expirePlannedWorkoutArtifacts"))
         XCTAssertTrue(scheduler.contains("BackgroundSyncScheduler.requestWake"))
 
         let appModel = try source("Strand/App/AppModel.swift")
         XCTAssertTrue(appModel.contains("if leadSeconds <= 0"))
+        XCTAssertTrue(appModel.contains("AdaptivePlannedWorkoutScheduler.scheduleRetry"))
     }
 
     func testEventKitQueryRejectsCurrentUserDeclinedInvitations() throws {

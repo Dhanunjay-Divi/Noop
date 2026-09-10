@@ -164,6 +164,51 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertEqual(ContextualInterventionCenter.loadState(defaults: defaults), state)
     }
 
+    func testPlannedWorkoutRetriesAfterTransientCooldownAndQuietHours() {
+        let start = date(2026, 8, 23, 8)
+        let boundary = start.addingTimeInterval(-2 * 60 * 60)
+        let planned = candidate(
+            kind: .adaptivePlannedWorkout,
+            observedAt: boundary,
+            maximumAge: 2 * 60 * 60,
+            fingerprint: "planned-a"
+        )
+        let state = ContextualInterventionState(
+            lastGlobalDelivery: boundary.addingTimeInterval(-10 * 60),
+            deliveries: [:]
+        )
+
+        XCTAssertEqual(
+            ContextualInterventionPolicy.nextEligibleDate(
+                for: planned,
+                state: state,
+                notBefore: boundary,
+                quietHoursEnabled: true,
+                quietStartMinutes: 22 * 60,
+                quietEndMinutes: 7 * 60,
+                calendar: calendar
+            ),
+            date(2026, 8, 23, 7)
+        )
+        XCTAssertNil(ContextualInterventionPolicy.nextEligibleDate(
+            for: planned,
+            state: ContextualInterventionState(
+                lastGlobalDelivery: boundary,
+                deliveries: [
+                    ContextualInterventionKind.adaptivePlannedWorkout.rawValue: .init(
+                        at: boundary,
+                        fingerprint: "planned-a"
+                    )
+                ]
+            ),
+            notBefore: boundary,
+            quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        ))
+    }
+
     func testTravelAndRoutineSuppressWeakerAdaptiveFollowUpsForTheDay() {
         let now = date()
         let travel = candidate(
@@ -324,6 +369,94 @@ final class ContextualInterventionsTests: XCTestCase {
         )
     }
 
+    func testNaturalPlannedWorkoutExpiryPreservesAcceptedDeliveryHistory() {
+        let suiteName = "planned-workout-expiry.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let state = ContextualInterventionState(
+            lastGlobalDelivery: date(),
+            deliveries: [
+                ContextualInterventionKind.adaptivePlannedWorkout.rawValue: .init(
+                    at: date(),
+                    fingerprint: "planned-a"
+                )
+            ]
+        )
+        ContextualInterventionCenter.saveState(state, defaults: defaults)
+        ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+            keepingFingerprint: "planned-a",
+            defaults: defaults
+        )
+
+        ContextualInterventionCenter.expirePlannedWorkoutArtifacts(
+            fingerprint: "planned-a",
+            defaults: defaults
+        )
+
+        XCTAssertEqual(ContextualInterventionCenter.loadState(defaults: defaults), state)
+    }
+
+    func testMissingWorkoutReconciliationDistinguishesExpiryFromRetraction() {
+        let suiteName = "planned-workout-missing.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let start = date(2026, 8, 22, 17, 30)
+        let fingerprint = [
+            "planned-workout",
+            "2026-08-22",
+            String(Int(start.timeIntervalSince1970)),
+            "SLEEP_DEFICIT",
+        ].joined(separator: "|")
+        let state = ContextualInterventionState(
+            lastGlobalDelivery: start.addingTimeInterval(-60 * 60),
+            deliveries: [
+                ContextualInterventionKind.adaptivePlannedWorkout.rawValue: .init(
+                    at: start.addingTimeInterval(-60 * 60),
+                    fingerprint: fingerprint
+                )
+            ]
+        )
+
+        ContextualInterventionCenter.saveState(state, defaults: defaults)
+        ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+            keepingFingerprint: fingerprint,
+            defaults: defaults
+        )
+        ContextualInterventionCenter.reconcileMissingPlannedWorkoutArtifacts(
+            now: start.addingTimeInterval(1),
+            defaults: defaults
+        )
+        XCTAssertEqual(ContextualInterventionCenter.loadState(defaults: defaults), state)
+
+        ContextualInterventionCenter.reconcilePlannedWorkoutArtifacts(
+            keepingFingerprint: fingerprint,
+            defaults: defaults
+        )
+        ContextualInterventionCenter.reconcileMissingPlannedWorkoutArtifacts(
+            now: start.addingTimeInterval(-1),
+            defaults: defaults
+        )
+        XCTAssertEqual(ContextualInterventionCenter.loadState(defaults: defaults), .empty)
+    }
+
+    func testPlannedWorkoutStartDateRejectsMalformedFingerprint() {
+        let start = date(2026, 8, 22, 17, 30)
+        let startSec = Int(start.timeIntervalSince1970)
+
+        XCTAssertEqual(
+            ContextualInterventionCenter.plannedWorkoutStartDate(
+                from: "planned-workout|2026-08-22|\(startSec)|SLEEP_DEFICIT"
+            ),
+            start
+        )
+        XCTAssertNil(ContextualInterventionCenter.plannedWorkoutStartDate(
+            from: "planned-workout|2026-08-22|not-a-date|SLEEP_DEFICIT"
+        ))
+        XCTAssertNil(ContextualInterventionCenter.plannedWorkoutStartDate(
+            from: "other|2026-08-22|\(startSec)|SLEEP_DEFICIT"
+        ))
+    }
+
     @MainActor
     func testScheduledPlannedWorkoutIsReconciledAgainstLaterAcceptedPrompts() {
         let start = date(2026, 8, 22, 17, 30)
@@ -333,11 +466,21 @@ final class ContextualInterventionsTests: XCTestCase {
             lastGlobalDelivery: boundary.addingTimeInterval(-10 * 60),
             deliveries: [:]
         )
-        XCTAssertFalse(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
+        XCTAssertTrue(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
             startSec: startSec,
             fingerprint: "planned-a",
             state: globalConflict,
             quietHoursEnabled: false,
+            quietStartMinutes: 22 * 60,
+            quietEndMinutes: 7 * 60,
+            calendar: calendar
+        ))
+
+        XCTAssertTrue(AdaptivePlannedWorkoutScheduler.shouldKeepPending(
+            startSec: Int(date(2026, 8, 23, 8).timeIntervalSince1970),
+            fingerprint: "planned-quiet",
+            state: .empty,
+            quietHoursEnabled: true,
             quietStartMinutes: 22 * 60,
             quietEndMinutes: 7 * 60,
             calendar: calendar

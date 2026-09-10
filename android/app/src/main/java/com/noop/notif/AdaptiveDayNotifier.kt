@@ -36,6 +36,7 @@ import com.noop.ui.NotificationRouteBridge
 import com.noop.ui.logicalDay
 import kotlinx.coroutines.CancellationException
 import java.time.Duration
+import java.time.Instant
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -141,6 +142,55 @@ internal object AdaptiveDayDeliveryPolicy {
         )
     }
 
+    fun nextEligibleAtMillis(
+        candidate: AdaptiveDayDeliveryCandidate,
+        state: AdaptiveDayDeliveryState,
+        notBefore: ZonedDateTime,
+        quietHoursEnabled: Boolean,
+        quietStartMinutes: Int,
+        quietEndMinutes: Int,
+    ): Long? {
+        if (candidate.maximumAgeMillis <= 0L) return null
+        val expiresAtMillis = candidate.observedAtMillis + candidate.maximumAgeMillis
+        if (expiresAtMillis < candidate.observedAtMillis) return null
+        var probe = notBefore
+
+        repeat(8) {
+            val probeMillis = probe.toInstant().toEpochMilli()
+            if (probeMillis >= expiresAtMillis) return null
+            val decision = evaluate(
+                candidate = candidate,
+                state = state,
+                nowMillis = probeMillis,
+                localMinuteOfDay = probe.hour * 60 + probe.minute,
+                quietHoursEnabled = quietHoursEnabled,
+                quietStartMinutes = quietStartMinutes,
+                quietEndMinutes = quietEndMinutes,
+            )
+            if (decision.shouldDeliver) return probeMillis
+
+            val nextMillis = when (decision.reason) {
+                AdaptiveDayDeliveryReason.GLOBAL_COOLDOWN ->
+                    state.lastGlobalDeliveryMillis?.plus(GLOBAL_COOLDOWN_MILLIS)
+                AdaptiveDayDeliveryReason.TOPIC_COOLDOWN ->
+                    topicCooldownEndMillis(candidate.kind, state)
+                AdaptiveDayDeliveryReason.QUIET_HOURS ->
+                    nextQuietHoursEnd(probe, quietEndMinutes).toInstant().toEpochMilli()
+                AdaptiveDayDeliveryReason.STALE,
+                AdaptiveDayDeliveryReason.DUPLICATE,
+                -> return null
+                AdaptiveDayDeliveryReason.DELIVER -> return probeMillis
+            } ?: return null
+
+            val advancedMillis = maxOf(nextMillis, probeMillis + 1_000L)
+            probe = ZonedDateTime.ofInstant(
+                Instant.ofEpochMilli(advancedMillis),
+                notBefore.zone,
+            )
+        }
+        return null
+    }
+
     private fun topicCooldownMillis(kind: AdaptiveDayDeliveryKind): Long = when (kind) {
         AdaptiveDayDeliveryKind.SLEEP_RECOVERY,
         AdaptiveDayDeliveryKind.ROUTINE_RECOVERY,
@@ -163,6 +213,36 @@ internal object AdaptiveDayDeliveryPolicy {
         AdaptiveDayDeliveryKind.PLANNED_WORKOUT ->
             listOf(AdaptiveDayDeliveryKind.TRAVEL)
         AdaptiveDayDeliveryKind.TRAVEL -> emptyList()
+    }
+
+    private fun topicCooldownEndMillis(
+        kind: AdaptiveDayDeliveryKind,
+        state: AdaptiveDayDeliveryState,
+    ): Long? {
+        val dates = buildList {
+            state.deliveries[kind]?.let {
+                add(it.atMillis + topicCooldownMillis(kind))
+            }
+            adaptivePriorityBlockers(kind).forEach { blocker ->
+                state.deliveries[blocker]?.let {
+                    add(it.atMillis + Duration.ofHours(20).toMillis())
+                }
+            }
+        }
+        return dates.maxOrNull()
+    }
+
+    private fun nextQuietHoursEnd(
+        now: ZonedDateTime,
+        endMinutes: Int,
+    ): ZonedDateTime {
+        val dayMinutes = 24 * 60
+        val normalized = ((endMinutes % dayMinutes) + dayMinutes) % dayMinutes
+        var end = now.toLocalDate()
+            .atTime(normalized / 60, normalized % 60)
+            .atZone(now.zone)
+        if (!end.isAfter(now)) end = end.plusDays(1)
+        return end
     }
 
     private fun reject(
@@ -272,6 +352,16 @@ internal object AdaptivePlannedWorkoutSchedulePolicy {
         val boundaryMillis = (startSec - LEAD_SECONDS) * 1_000L
         return (boundaryMillis - nowMillis).takeIf { it > 0L }
     }
+
+    fun retryDelayMillis(
+        startSec: Long,
+        retryAtMillis: Long,
+        nowMillis: Long,
+    ): Long? {
+        val startMillis = startSec * 1_000L
+        if (retryAtMillis >= startMillis) return null
+        return (retryAtMillis - nowMillis).takeIf { it > 0L }
+    }
 }
 
 internal object AdaptiveDayEvaluationGate {
@@ -327,6 +417,33 @@ internal object AdaptivePlannedWorkoutScheduler {
         AppDiagnosticsRecorder.record(
             "adaptive_day.planned_workout_boundary",
             fields = mapOf("outcome" to "enqueue_requested"),
+        )
+        return true
+    }
+
+    fun scheduleRetry(
+        context: Context,
+        startSec: Long,
+        retryAtMillis: Long,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Boolean {
+        val delayMillis = AdaptivePlannedWorkoutSchedulePolicy.retryDelayMillis(
+            startSec = startSec,
+            retryAtMillis = retryAtMillis,
+            nowMillis = nowMillis,
+        ) ?: return false
+        val request = OneTimeWorkRequestBuilder<AdaptivePlannedWorkoutWorker>()
+            .setInputData(workDataOf(EXPECTED_START_SEC_KEY to startSec))
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            WORK_NAME,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            request,
+        )
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.planned_workout_boundary",
+            fields = mapOf("outcome" to "retry_enqueue_requested"),
         )
         return true
     }
@@ -512,18 +629,18 @@ object AdaptiveDayEvaluator {
                 return@commitIfCurrent false
             }
             plan.workoutAdjustment?.let { adjustment ->
+                val fingerprint = AdaptiveDayNotifier.plannedWorkoutFingerprint(
+                    day = today,
+                    adjustment = adjustment,
+                )
                 val leadSeconds = adjustment.startSec - nowSec
                 if (leadSeconds <= 0L) {
                     AdaptivePlannedWorkoutScheduler.cancel(appContext)
-                    AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                    AdaptiveDayNotifier.expirePlannedWorkoutArtifacts(
                         appContext,
-                        currentFingerprint = null,
+                        fingerprint = fingerprint,
                     )
                 } else {
-                    val fingerprint = AdaptiveDayNotifier.plannedWorkoutFingerprint(
-                        day = today,
-                        adjustment = adjustment,
-                    )
                     AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
                         appContext,
                         currentFingerprint = fingerprint,
@@ -534,8 +651,6 @@ object AdaptiveDayEvaluator {
                             startSec = adjustment.startSec,
                             nowMillis = now.toInstant().toEpochMilli(),
                         )
-                    } else {
-                        AdaptivePlannedWorkoutScheduler.cancel(appContext)
                     }
                     if (leadSeconds <= AdaptivePlannedWorkoutSchedulePolicy.LEAD_SECONDS) {
                         val snapshot = plannedWorkout ?: return@commitIfCurrent false
@@ -552,9 +667,9 @@ object AdaptiveDayEvaluator {
                 }
             } ?: run {
                 AdaptivePlannedWorkoutScheduler.cancel(appContext)
-                AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
-                    appContext,
-                    currentFingerprint = null,
+                AdaptiveDayNotifier.reconcileMissingPlannedWorkoutArtifacts(
+                    context = appContext,
+                    nowSec = nowSec,
                 )
             }
             recommendation?.let {
@@ -650,6 +765,12 @@ object AdaptiveDayNotifier {
         adjustment.reason.name,
     ).joinToString("|")
 
+    internal fun plannedWorkoutStartSec(fingerprint: String): Long? {
+        val fields = fingerprint.split('|')
+        if (fields.size != 4 || fields[0] != "planned-workout") return null
+        return fields[2].toLongOrNull()
+    }
+
     internal fun plannedWorkoutMaximumAgeMillis(
         startSec: Long,
         observedAtMillis: Long,
@@ -712,17 +833,42 @@ object AdaptiveDayNotifier {
                 suppress(context)
                 return
             }
+            val deliveryState = loadState(context)
+            val deliveryAtMillis = now.toInstant().toEpochMilli()
+            val quietHoursEnabled =
+                NotifPrefs.getBool(context, NotifPrefs.QUIET, false)
+            val quietStartMinutes =
+                NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60)
+            val quietEndMinutes =
+                NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60)
             val decision = AdaptiveDayDeliveryPolicy.evaluate(
                 candidate = candidate,
-                state = loadState(context),
-                nowMillis = now.toInstant().toEpochMilli(),
+                state = deliveryState,
+                nowMillis = deliveryAtMillis,
                 localMinuteOfDay = now.hour * 60 + now.minute,
-                quietHoursEnabled = NotifPrefs.getBool(context, NotifPrefs.QUIET, false),
-                quietStartMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60),
-                quietEndMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
+                quietHoursEnabled = quietHoursEnabled,
+                quietStartMinutes = quietStartMinutes,
+                quietEndMinutes = quietEndMinutes,
             )
             if (!decision.shouldDeliver) {
                 onRejected(decision.reason)
+                if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+                    AdaptiveDayDeliveryPolicy.nextEligibleAtMillis(
+                        candidate = candidate,
+                        state = deliveryState,
+                        notBefore = now,
+                        quietHoursEnabled = quietHoursEnabled,
+                        quietStartMinutes = quietStartMinutes,
+                        quietEndMinutes = quietEndMinutes,
+                    )?.let { retryAtMillis ->
+                        schedulePlannedWorkoutRetry(
+                            context = context,
+                            candidate = candidate,
+                            retryAtMillis = retryAtMillis,
+                            nowMillis = deliveryAtMillis,
+                        )
+                    }
+                }
                 if (decision.reason == AdaptiveDayDeliveryReason.QUIET_HOURS) suppress(context)
                 return
             }
@@ -730,7 +876,6 @@ object AdaptiveDayNotifier {
             val manager = NotificationManagerCompat.from(context)
             var calendarConsentLost = false
             var plannedWorkoutExpired = false
-            val deliveryAtMillis = now.toInstant().toEpochMilli()
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
                 deliveryAtMillis,
@@ -814,7 +959,22 @@ object AdaptiveDayNotifier {
                 return
             }
             if (postResult != ContextualPromptPostResult.POSTED) {
-                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
+                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) {
+                    if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+                        ContextualPromptDeliveryLedger.nextAllowedAtMillis(
+                            context,
+                            deliveryAtMillis,
+                        )?.let { retryAtMillis ->
+                            schedulePlannedWorkoutRetry(
+                                context = context,
+                                candidate = candidate,
+                                retryAtMillis = retryAtMillis,
+                                nowMillis = deliveryAtMillis,
+                            )
+                        }
+                    }
+                    suppress(context)
+                }
                 return
             }
             if (
@@ -881,6 +1041,28 @@ object AdaptiveDayNotifier {
                 NotificationLifecycleCategory.RECOMMENDATION,
             )
         }
+    }
+
+    private fun schedulePlannedWorkoutRetry(
+        context: Context,
+        candidate: AdaptiveDayDeliveryCandidate,
+        retryAtMillis: Long,
+        nowMillis: Long,
+    ) {
+        val expiresAtMillis = candidate.observedAtMillis + candidate.maximumAgeMillis
+        if (
+            candidate.kind != AdaptiveDayDeliveryKind.PLANNED_WORKOUT ||
+            candidate.maximumAgeMillis <= 0L ||
+            expiresAtMillis < candidate.observedAtMillis
+        ) {
+            return
+        }
+        AdaptivePlannedWorkoutScheduler.scheduleRetry(
+            context = context,
+            startSec = expiresAtMillis / 1_000L,
+            retryAtMillis = retryAtMillis,
+            nowMillis = nowMillis,
+        )
     }
 
     private fun plannedWorkoutDeliveryCurrent(
@@ -992,6 +1174,45 @@ object AdaptiveDayNotifier {
                 .takeIf { prefs.contains(KEY_GLOBAL_AT) },
             deliveries = deliveries,
         )
+    }
+
+    @Synchronized
+    internal fun expirePlannedWorkoutArtifacts(
+        context: Context,
+        fingerprint: String,
+    ) {
+        val app = context.applicationContext
+        val state = loadState(app)
+        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        if (prior != null && prior.fingerprint != fingerprint) return
+        ContextualActionCenter.reconcileRecoveryActions(
+            context = app,
+            route = NoopNotificationRoute.WORKOUTS,
+            keepingFingerprint = null,
+        )
+        if (
+            prior?.fingerprint == fingerprint &&
+            state.lastGlobalDeliveryMillis == prior.atMillis
+        ) {
+            cancelAdaptiveDayNotification(app)
+        }
+    }
+
+    @Synchronized
+    internal fun reconcileMissingPlannedWorkoutArtifacts(
+        context: Context,
+        nowSec: Long,
+    ) {
+        val app = context.applicationContext
+        val prior = loadState(app).deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        if (
+            prior != null &&
+            plannedWorkoutStartSec(prior.fingerprint)?.let { it <= nowSec } == true
+        ) {
+            expirePlannedWorkoutArtifacts(app, prior.fingerprint)
+            return
+        }
+        reconcilePlannedWorkoutArtifacts(app, currentFingerprint = null)
     }
 
     @Synchronized
