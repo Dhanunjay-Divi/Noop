@@ -29,13 +29,18 @@ follow-up Apple suite passed 77 tests; Android passed 31 focused contracts plus
 both debug builds, lint, and instrumentation-source compilation; and the
 complete iOS simulator app graph builds. Android large-text weather and normal
 plus Review Sample navigation retain full accessibility names without
-ellipsized visual fragments. No formula, provenance, storage, sync, collection,
-account, or network behavior changed. The first hosted Apple run executed
-1,701 tests and exposed one stale source assertion that still required the
-pre-responsive fixed title size. The corrected assertion preserves the
-adaptive-ink check and its exact 14-test suite passes locally. The replacement
-push, hosted checks, review, and merge remain, along with physical-device
-smoothness and hardware-dependent evidence. Details are in
+ellipsized visual fragments. Exact-head review later found three additional
+Android accessibility defects. Commit `133cb5d8` now measures localized
+bottom-bar labels before showing them, preserves a 48 x 48 dp weather hit
+target, and lets the large-text weather surface expand for signed Fahrenheit
+values. Both variants, lint, instrumentation-source compilation, and the three
+focused suites pass; API 35 runtime evidence confirms a 48 dp target and
+unclipped `-148 F` presentation. No formula, provenance, storage, sync,
+collection, account, or network behavior changed. The prior hosted Apple rerun
+is green. The new correction and evidence update still require push,
+replacement protected checks, resolved review conversations, and normal merge,
+along with physical-device smoothness and hardware-dependent evidence. Details
+are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged

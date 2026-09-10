@@ -2,11 +2,13 @@
 
 ## Status
 
-- State: `implementation complete and locally verified; protected integration pending`
+- State: `review corrections locally verified; replacement protected integration pending`
 - Owner: project team
 - Branch: `codex/mobile-desktop-visual-parity-20260910`
 - Start commit: `beb0e88f70141766c32a0bcd270f5f8889c6f10d`
 - End implementation commit: `e51c56e5f7397e4eec511d4d1fe607768f108dac`
+- Android review-correction commit:
+  `133cb5d8d064f98b70b1090c013881ecff3ebea7`
 - Record commit or PR: protected pull request `#13`
 
 ## Objective
@@ -66,10 +68,14 @@ secondary rows, matched iOS and Android screenshots, and clean platform builds.
 - The narrow Daily Signal header stacks status and provenance below the title
   when the actual width or text scale cannot fit them. Wider layouts retain
   the established single-row presentation.
-- At Android text scales above 1.30, the weather placeholder and both normal
-  and Review Sample bottom bars use familiar icon-only controls with complete
-  accessibility names. Temperature remains visible when a weather reading is
-  available; no label is ellipsized to an ambiguous fragment.
+- Android bottom bars now measure the actual localized labels against their
+  available slot width before choosing labels or icon-only controls. Both the
+  normal and Review Sample shells retain complete accessibility names without
+  clipping long translations.
+- The Android weather control retains at least a 48 x 48 dp hit target while
+  its compact visual surface remains unchanged. At large text, a cached
+  temperature surface grows from its 82 dp minimum when content requires it
+  instead of clipping a signed Fahrenheit value.
 - Card radius, padding, spacing, weather control dimensions, and shadow depth
   now match across the two phone implementations without changing source
   selection, formulas, navigation, gestures, accessibility labels, or stored
@@ -115,14 +121,17 @@ physical-device, and external-service evidence.
 |---|---|---|---|
 | Source preflight | Desktop reference and both Today implementations inspected | Existing hierarchy and parity points are understood before edits | Final appearance or device performance |
 | Android focused and app gates | Final exact-source invocation passed `:app:assembleFullDebug`, `:app:assembleDemoDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and 31 focused Today, shell, Review Sample, and performance contracts in 3 minutes | Both Android variants compile, lint is clean, instrumentation sources compile, and the responsive, navigation, retained-screen, runtime, and Today contracts hold together | Physical-device frame pacing, OEM rendering, collection, or BLE behavior |
+| Android exact review-correction gate | On commit `133cb5d8`, `:app:assembleFullDebug`, `:app:assembleDemoDebug`, `:app:lintFullDebug`, `:app:compileFullDebugAndroidTestKotlin`, and the focused `PrimaryNavigationContractTest`, `TodayResponsiveLayoutTest`, and `ReviewSampleModeContractTest` suites passed together in 1 minute 48 seconds | Both variants compile, lint and instrumentation-source compilation remain clean, measured-label fallback is covered, and the weather target/content-size contracts hold | Hosted exact-head execution or physical-device behavior |
 | Apple focused contracts | Follow-up suite passed 77 tests across `LiquidTodayFeatureMountTests`, `TodayExplainabilityTests`, and `RetainedScreenPerformanceContractTests` with zero failures or skips | The shared Today source retains explainability, feature mounting, retained-screen behavior, and the compact-width/large-text selection policy | Physical-device smoothness or hardware-dependent behavior |
 | iOS app build | `NOOPiOS` built for an arm64 iOS 26.5 simulator with signing disabled after regenerating the ignored XcodeGen project from `project.yml` | The changed shared Swift source and complete iOS dependency graph compile together | Signing, installation on a physical phone, or store acceptance |
 | Android runtime capture | Demo Today rendered at ordinary and 1.5x text on an isolated API 35 arm64 emulator; phone captures are 1080 x 2400 and the tablet capture is 2560 x 1600. The corrected large-text Today and Review Sample captures each left a zero-byte crash buffer | Current APKs render compact phone, large-text phone, and regular-width tablet branches; the weather and navigation labels no longer truncate in either Android shell | Physical OLED appearance, OEM variance, sensor data, or sustained frame pacing |
+| Android review runtime measurements | On the API 35 arm64 emulator at density 420 and 1.5x text, the no-snapshot weather control measured 126 x 126 px, exactly 48 x 48 dp. A synthetic cached `-100 C` reading displayed as signed `-148 F`; its control expanded to 225 px, about 85.7 dp, from the 82 dp visual minimum with no clipped glyphs. At ordinary text with the app locale forced to French, the production rail selected icon-only mode and retained every full localized accessibility name | The three exact review reports reproduce as fixed in rendered Compose output, including the widest supported signed Fahrenheit value | Physical touch accuracy, OEM font substitutions, or every locale/device width |
 | iOS runtime capture | Synthetic Today rendered on an iOS 26.5 phone at ordinary and accessibility-large text and on an iPad simulator; phone captures are 1170 x 2532 and the tablet capture is 1640 x 2360 | The current iOS app renders phone, accessibility-text, and regular-width tablet branches without clipped Daily Signal labels | Physical-device frame pacing, background execution, BLE, battery, or haptics |
-| Independent review | Five findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. A later rendered pass also found and corrected Android weather and navigation ellipses in both shells | The final source and evidence reflect a fresh review rather than only the implementation author’s assumptions | Independent physical-device review |
+| Independent review | Five earlier findings were reproduced and corrected: Android header clipping, tablet geometry, incomplete large-text scaling, overclaimed evidence, and a stale radius comment. Exact-head review then reported three additional Android issues: a 34 dp icon-only weather target, localized bottom-label clipping in both shells, and fixed-width large-text weather clipping. Commit `133cb5d8` corrects all three and the focused source/runtime evidence above passes | The final source and evidence reflect multiple fresh reviews rather than only the implementation author’s assumptions | Replacement exact-head hosted review and independent physical-device review |
 | Visual hierarchy review | Desktop, Android, and iOS first viewports compared directly despite different synthetic data states | Both phones share the approved hierarchy, visual weight, section order, and score geometry while preserving native chrome; tablet and large-text branches remain coherent | State-for-state screenshot parity, pixel identity across rendering engines, physical rendering, or every non-Today screen |
 | Hosted Apple first attempt | Protected pull request `#13` ran the full macOS suite: 1,701 tests executed with one expected skip and one failure in `MoreListParityTests.testAdaptiveScaffoldBackgroundUsesDynamicInk` | The hosted matrix reached the changed Apple source and exposed that an older source-contract assertion still required the pre-responsive fixed `30pt` title | A green replacement head |
-| Hosted assertion correction | The contract now verifies responsive `todayGreetingSize` followed by adaptive `StrandPalette.textPrimary`; the exact `MoreListParityTests` suite passed 14 tests locally with zero failures or skips | The corrected test still rejects hard-coded white ink while accepting the intentional `28/30pt` responsive title policy | The replacement hosted universal macOS build and full suite, which remain required |
+| Hosted assertion correction | The contract now verifies responsive `todayGreetingSize` followed by adaptive `StrandPalette.textPrimary`; the exact `MoreListParityTests` suite passed 14 tests locally with zero failures or skips | The corrected test still rejects hard-coded white ink while accepting the intentional `28/30pt` responsive title policy | A hosted rerun was still required at this evidence point and is recorded in the next row |
+| Hosted Apple rerun on prior head | GitHub Actions run `34446056639` reran successfully on `67ffd848`; iOS/macOS job `102802245051` and the stable `apple-ci-required` result both passed | The prior reviewed head satisfies the complete protected Apple matrix after the launch-timeout rerun | The newer Android-only correction head still requires its own protected matrix |
 | Terminology snapshot review | Regenerated inventory retains 17,367 classified occurrences across 1,511 groups with identical category totals, a byte-identical active allowlist, and zero forbidden mappings; only source line locations changed | The UI edit introduces no new or modified active customer/core legacy terminology and the fail-closed inventory matches the source tree | Independent provenance review of pre-existing compatibility terminology |
 | Repository policy matrix | All 227 Tools tests passed; required CI verified 5 conditional workflows, 5 universal workflows, and 10 contexts; 9 release controls, 12-metric calibration parity, no-new-copy localization, 1,203-file health-claims scan, 230-component legal inventory, distribution provenance, private-data, 50 operations records, terminology, and diff checks passed | The exact local tree preserves release, metric, localization, claims, provenance, privacy, and durable-evidence contracts | Hosted exact-SHA checks, external legal approval, or physical behavior |
 | Resource cleanup | API 35 emulator stopped, Gradle and Kotlin daemons stopped, both temporary DerivedData roots and the temporary terminology candidate removed, and no Android or Apple simulator remains booted | Temporary runtime and build resources created by this round are no longer consuming device or daemon resources | The pre-existing Gradle-managed AVD cache, repository build products, or unrelated user resources |
@@ -142,13 +151,14 @@ physical-device, and external-service evidence.
   the Apple adaptive-ink source contract;
   `release/terminology/legacy-inventory.json`; `Tools/required-ci-gate.py`;
   this record; `docs/ops/rounds/INDEX.md`; and `docs/ops/ACTIVE.md`
-- Commits: `290cefb0` (`Align mobile Today with desktop hierarchy`) and
-  `e51c56e5` (`Harden Today responsive accessibility`); hosted assertion
-  correction pending commit
+- Commits: `290cefb0` (`Align mobile Today with desktop hierarchy`),
+  `e51c56e5` (`Harden Today responsive accessibility`), `67ffd848`
+  (`Fix responsive Today source contract`), and `133cb5d8`
+  (`Fix Android large-text navigation and weather`)
 - Branch and remote state:
-  `codex/mobile-desktop-visual-parity-20260910` is pushed to `origin` and open
-  as protected pull request `#13`; replacement hosted checks and normal merge
-  remain
+  `codex/mobile-desktop-visual-parity-20260910` is open as protected pull
+  request `#13`; commit `133cb5d8` and this evidence update still require push,
+  replacement hosted checks, resolved review conversations, and normal merge
 - Repository visibility verified: standalone GitHub repository relationship
   inherited from the current active handoff; exact protected integration
   remains pending
@@ -177,8 +187,9 @@ physical-device, and external-service evidence.
   tablet branches, but they do not replace physical-device accessibility,
   frame-pacing, OLED, OEM, or touch-target review.
 - The first protected Apple run failed one stale source-contract assertion.
-  The exact suite passes after correction, but protected integration remains
-  incomplete until the replacement head passes every required check.
+  Its rerun is green, but protected integration remains incomplete until the
+  newer Android correction head passes every required check and its three
+  review conversations are resolved against that evidence.
 
 ## Next round
 
