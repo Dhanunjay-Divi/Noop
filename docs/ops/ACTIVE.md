@@ -55,12 +55,20 @@ master-opt-out cleanup, owner-aware cross-topic cooldown restoration,
 workout-start notification expiry, and ambiguous work uses of `run` and `spin`.
 A final local review covered the Android process-death window between posting
 and private-state persistence, so master opt-out still retracts the shared
-notification and planned-workout cooldown owner. The complete replacement local
-wall passes: 1,459 analytics tests with seven skips, 1,725 Apple app tests with
-one expected skip, the complete unsigned iOS app/widget/watch graph, and 4,211
-Android tests with seven skips plus APK assembly, production compile, lint, and
-instrumentation-source compilation. Repository policy totals are refreshed in
-the round record. The first hosted Apple attempt exposed
+notification and planned-workout cooldown owner. The latest exact-head review
+also found that same-day pain/unwell check-ins and sleep-target edits could
+leave the prior plan visible until another lifecycle event, Android could keep
+global planned-workout prompt ownership after consent disappeared immediately
+after a successful post, and Apple's immediate notification diagnostic used
+the generic vital category. Both platforms now coalesce immediate
+input-triggered reevaluation, Android reconciles that owner on post-success
+consent loss, and Apple records both immediate and durable delivery under
+`adaptive_day`. The complete replacement local wall passes: 1,459 analytics
+tests with seven skips, 1,726 Apple app tests with one expected skip, the
+complete unsigned iOS app/widget/watch graph, and 4,211 Android tests with seven
+skips plus APK assembly, production compile, lint, and instrumentation-source
+compilation. Repository policy totals are refreshed in the round record. The
+first hosted Apple attempt exposed
 only the app-wide localization ratchet still
 expecting 631 rather than the exact new total of 636; that contract is corrected
 and passes locally. Fresh protected review/checks and normal merge remain, along

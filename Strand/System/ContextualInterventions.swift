@@ -493,6 +493,16 @@ enum ContextualInterventionSettings {
     }
 }
 
+/// Low-frequency user inputs that can invalidate an already delivered adaptive-day recommendation.
+/// Publishers persist their value first; AppModel coalesces the resulting evaluation.
+enum ContextualInterventionInputs {
+    static let didChange = Notification.Name("noop.contextualInterventionInputs.didChange")
+
+    static func notifyChanged() {
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+}
+
 // MARK: - Adaptive day guidance
 
 /// Restart-safe timezone observation. A qualified transition remains available for 36 hours so a prompt

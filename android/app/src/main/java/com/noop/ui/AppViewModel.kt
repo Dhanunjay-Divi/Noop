@@ -202,6 +202,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val appContext = app.applicationContext
     private var plannedWorkoutCalendarObserverRegistered = false
     private var plannedWorkoutCalendarEvaluationJob: Job? = null
+    private var adaptiveDayInputEvaluationJob: Job? = null
     private val plannedWorkoutCalendarObserver =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
@@ -2939,10 +2940,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setWindDownSleepNeedMinutes(minutes: Int) {
+        val prior = windDownStore.sleepNeedMinutes
         windDownStore.sleepNeedMinutes = minutes
         _windDownSleepNeedMinutes.value = windDownStore.sleepNeedMinutes
         if (windDownStore.enabled) {
             WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
+        }
+        if (windDownStore.sleepNeedMinutes != prior) {
+            onAdaptiveDayInputsChanged()
         }
     }
 
@@ -3027,6 +3032,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 context = appContext,
                 force = true,
             )
+            evaluateAdaptiveDayGuidance()
+        }
+    }
+
+    fun onAdaptiveDayInputsChanged() {
+        adaptiveDayInputEvaluationJob?.cancel()
+        adaptiveDayInputEvaluationJob = viewModelScope.launch {
             evaluateAdaptiveDayGuidance()
         }
     }
@@ -3575,6 +3587,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // want or double acquisition across Activity teardown.
         releaseActiveWorkoutRealtimeLease()
         plannedWorkoutCalendarEvaluationJob?.cancel()
+        adaptiveDayInputEvaluationJob?.cancel()
         unregisterPlannedWorkoutCalendarObserver()
         super.onCleared()
         // #78 hole-4: drop the app-foreground salvage-probe hook with this ViewModel (the next Activity's

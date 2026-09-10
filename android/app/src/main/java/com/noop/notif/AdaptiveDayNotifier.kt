@@ -664,9 +664,10 @@ object AdaptiveDayNotifier {
 
             val manager = NotificationManagerCompat.from(context)
             var calendarConsentLost = false
+            val deliveryAtMillis = now.toInstant().toEpochMilli()
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
                 context,
-                now.toInstant().toEpochMilli(),
+                deliveryAtMillis,
                 if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
                     ContextualPromptDeliveryOwner.PLANNED_WORKOUT
                 } else {
@@ -739,6 +740,11 @@ object AdaptiveDayNotifier {
                 candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
                 !plannedWorkoutCalendarConsentCurrent(context)
             ) {
+                ContextualPromptDeliveryLedger.reconcileIfOwned(
+                    context,
+                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                    expectedAtMillis = deliveryAtMillis,
+                )
                 NotificationLifecycleLedger.cancelled(
                     context,
                     NotificationLifecycleId.ADAPTIVE_DAY,

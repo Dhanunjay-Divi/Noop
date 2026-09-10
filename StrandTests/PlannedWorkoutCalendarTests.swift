@@ -56,6 +56,20 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         await fulfillment(of: [requested], timeout: 1)
     }
 
+    func testUserPlannerInputsRequestFreshGuidanceEvaluation() throws {
+        let appModel = try source("Strand/App/AppModel.swift")
+        let behavior = try source("Strand/Data/BehaviorStore.swift")
+        let windDown = try source("Strand/System/WindDownNudge.swift")
+
+        XCTAssertTrue(appModel.contains(
+            "publisher(for: ContextualInterventionInputs.didChange)"
+        ))
+        XCTAssertTrue(behavior.contains("ContextualInterventionInputs.notifyChanged()"))
+        XCTAssertTrue(windDown.contains(
+            "if changed { ContextualInterventionInputs.notifyChanged() }"
+        ))
+    }
+
     func testAdaptiveEvaluationStopsAfterCalendarRefreshWhenCancelled() throws {
         let source = try source("Strand/App/AppModel.swift")
         let method = try XCTUnwrap(

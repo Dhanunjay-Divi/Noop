@@ -477,6 +477,11 @@ final class AppModel: ObservableObject {
                 self?.scheduleContextualInterventionEvaluation()
             }
             .store(in: &hrCancellables)
+        NotificationCenter.default.publisher(for: ContextualInterventionInputs.didChange)
+            .sink { [weak self] _ in
+                self?.scheduleContextualInterventionEvaluation()
+            }
+            .store(in: &hrCancellables)
 
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }

@@ -737,6 +737,7 @@ fun TodayScreen(
                 value = value,
             )
             dailyActionCheckIn = value
+            viewModel.onAdaptiveDayInputsChanged()
         }
     }
     // Effort display scale (#268), drives the Effort tile's value + caption. Display-only.

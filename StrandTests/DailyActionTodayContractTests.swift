@@ -35,6 +35,9 @@ final class DailyActionTodayContractTests: XCTestCase {
         XCTAssertTrue(today.contains("DailyActionPlanner.plan("))
         XCTAssertTrue(today.contains("BehaviorStore.decodeDailyActionCheckIn("))
         XCTAssertTrue(today.contains("setDailyActionCheckIn("))
+        XCTAssertTrue(today.contains(
+            "behavior.setDailyActionCheckIn(value, for: selectedDayKey)"
+        ))
         XCTAssertTrue(today.contains("selectedDayOffset == 0"))
         XCTAssertTrue(today.contains("dailyPlanTargetStatusKey(plan)"))
         XCTAssertTrue(today.contains(#""daily_plan.target.withheld""#))

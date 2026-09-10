@@ -490,6 +490,50 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun consentLossAfterPostingReleasesThePlannedWorkoutPromptOwner() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val postCandidate = text.indexOf("private fun postCandidate(")
+        val deliveryAt = text.indexOf(
+            "val deliveryAtMillis = now.toInstant().toEpochMilli()",
+            postCandidate,
+        )
+        val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed", deliveryAt)
+        val postedResult = text.indexOf(
+            "if (postResult != ContextualPromptPostResult.POSTED)",
+            postGate,
+        )
+        val postSuccessConsent = text.indexOf(
+            "!plannedWorkoutCalendarConsentCurrent(context)",
+            postedResult,
+        )
+        val reconcile = text.indexOf(
+            "ContextualPromptDeliveryLedger.reconcileIfOwned(",
+            postSuccessConsent,
+        )
+        val expectedTimestamp = text.indexOf(
+            "expectedAtMillis = deliveryAtMillis",
+            reconcile,
+        )
+        val cancellation = text.indexOf(
+            "NotificationLifecycleLedger.cancelled(",
+            expectedTimestamp,
+        )
+
+        assertTrue(deliveryAt > postCandidate)
+        assertTrue(postGate > deliveryAt)
+        assertTrue(postedResult > postGate)
+        assertTrue(postSuccessConsent > postedResult)
+        assertTrue(reconcile > postSuccessConsent)
+        assertTrue(expectedTimestamp > reconcile)
+        assertTrue(cancellation > expectedTimestamp)
+    }
+
     @Test fun plannedWorkoutWorkerResolvesThePersistedActiveDeviceBeforeEvaluation() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(

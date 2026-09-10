@@ -312,6 +312,12 @@ final class ContextualInterventionsTests: XCTestCase {
     func testPlannedWorkoutBoundaryUsesAdaptiveDayDiagnosticIdentity() {
         XCTAssertEqual(
             LocalNotificationLifecycleLedger.stableIdentifier(
+                ContextualInterventionCenter.plannedWorkoutRequestID
+            ),
+            "adaptive_day"
+        )
+        XCTAssertEqual(
+            LocalNotificationLifecycleLedger.stableIdentifier(
                 AdaptivePlannedWorkoutScheduler.requestID
             ),
             "adaptive_day"

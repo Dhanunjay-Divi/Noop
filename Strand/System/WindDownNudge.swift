@@ -287,8 +287,11 @@ enum WindDownNudge {
     /// Update the user's explicit baseline target. The planner may add a bounded recovery buffer,
     /// but never silently changes this value.
     static func setSleepNeedMinutes(_ minutes: Int) {
-        UserDefaults.standard.set(min(max(minutes, 5 * 60), 11 * 60), forKey: K.sleepNeed)
+        let next = min(max(minutes, 5 * 60), 11 * 60)
+        let changed = next != sleepNeedMinutes
+        UserDefaults.standard.set(next, forKey: K.sleepNeed)
         if isEnabled { schedule() }
+        if changed { ContextualInterventionInputs.notifyChanged() }
     }
 
     static func setGoalMode(_ mode: SleepGoalMode) {

@@ -3377,6 +3377,7 @@ struct LiquidTodayView: View {
 
     private func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn) {
         guard selectedDayOffset == 0 else { return }
+        behavior.setDailyActionCheckIn(value, for: selectedDayKey)
         dailyActionCheckInDay = selectedDayKey
         dailyActionCheckInValue = value.rawValue
         cachedDailyActionPlan = makeDailyActionPlan(

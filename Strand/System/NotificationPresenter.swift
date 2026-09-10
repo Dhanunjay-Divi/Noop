@@ -176,6 +176,7 @@ final class LocalNotificationLifecycleLedger: @unchecked Sendable {
             "wellness-check-in": "illness_check_in",
             "noop.band-sync.stale": "stale_sync",
             "managed-poke": "managed_poke",
+            "contextual-adaptivePlannedWorkout": "adaptive_day",
             "contextual-adaptivePlannedWorkout-boundary": "adaptive_day",
         ]
         if let mapped = exact[raw] {
