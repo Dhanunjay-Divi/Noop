@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s。%2$s</string>
     <string name="appwide_action_done">完成</string>
     <string name="appwide_action_open_settings">開啟設定</string>
+    <string name="appwide_activity_suggestion_notifications">活動建議通知</string>
+    <string name="appwide_activity_suggestion_notifications_detail">預設關閉。同步後，近期經動作訊號佐證的活動可顯示在鎖定畫面上供你審核。未經你確認，NOOP 絕不會儲存。</string>
     <string name="appwide_adaptive_coaching_summary">利用最新的穿戴式裝置訊號來引導恢復、專注休息、呼吸、旅行適應和運動強度。</string>
     <string name="appwide_adaptive_coaching_title">適應式指導</string>
     <string name="appwide_adaptive_day_guidance_channel_description">私密且可選的恢復和旅行適應建議。</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">生物標誌物趨勢</string>
     <string name="appwide_health_body_composition_add_target">在個人資料中新增選填目標。</string>
     <string name="appwide_health_body_composition_bmi">BMI</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">確認身高和體重後可顯示成人 BMI。</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">成人 BMI 僅在 20 歲及以上且身高、體重已確認時計算。它只是有限的篩查值，不是診斷或身體組成測量。</string>
+    <string name="appwide_health_body_composition_bmi_under_20">20 歲前不顯示成人 BMI。</string>
     <string name="appwide_health_body_composition_body_fat">體脂</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">全身體脂百分之 %1$s</string>
-    <string name="appwide_health_body_composition_disclaimer">全身數值會保留其記錄來源。NOOP 不推斷手臂、腿部或軀幹的脂肪和肌肉分佈；這需要相容的分段測量硬體。</string>
+    <string name="appwide_health_body_composition_calculated">計算值</string>
+    <string name="appwide_health_body_composition_disclaimer">全身數值會保留來源和日期。體脂和瘦體重是來源裝置的估算值，可能受水分狀態等條件影響；請比較長期趨勢，而非單次讀數。NOOP 不推斷分段分佈。</string>
     <string name="appwide_health_body_composition_lean_mass">瘦體重</string>
     <string name="appwide_health_body_composition_loading">正在載入測量值…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">無全身體脂測量值</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">比所選目標低 %1$s</string>
     <string name="appwide_health_body_composition_target_detail">目標 %1$s · 由你選擇</string>
     <string name="appwide_health_body_composition_target_reached">已達到所選目標</string>
+    <string name="appwide_health_body_composition_target_safety_note">選填體重目標僅適用於 20 歲及以上且測量已確認的成人，不適用於孕期、產後恢復、飲食失調照護或由臨床專業人員指導的計劃。NOOP 不會指定速度或額外運動。</string>
+    <string name="appwide_health_body_composition_target_summary">目前 %1$s · 所選目標 %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">目前個人資料不支援目標進度。</string>
     <string name="appwide_health_body_composition_target_weight">目標體重</string>
     <string name="appwide_health_body_composition_title">身體組成</string>
     <string name="appwide_health_body_composition_weight">體重</string>

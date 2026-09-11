@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-10**
+Last updated: **2026-09-11**
 
 ## Repository
 
@@ -17,6 +17,21 @@ Last updated: **2026-09-10**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The product, safety, and quality audit is active on
+`codex/product-safety-quality-audit-20260911`. Its first verified slice makes
+BMI adult-only and dependent on confirmed age, height, and weight; prevents
+seeded profile values from becoming personal Health Connect BMI history;
+preserves source/date context for imported whole-body composition; and keeps
+target weight neutral and non-prescriptive. Android now matches Apple's
+separate default-off activity-suggestion interruption consent while retaining
+quiet in-app workout review. Supplied exercise media remains excluded until
+rights and instructional-safety evidence exists. Focused Apple/Android tests,
+both Android variants, localization/claims gates, and the complete unsigned
+iOS simulator graph pass for the recorded slice. Broader accessibility,
+notification, calendar-guidance integration, exact-current build, and physical
+device work remains. Details are in
+[Product, safety, and quality audit](rounds/2026-09-11-product-safety-quality-audit.md).
 
 The mobile and desktop Today visual-parity round is implemented and locally
 verified on protected pull request `#13` from

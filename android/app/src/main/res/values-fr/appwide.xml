@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s. %2$s</string>
     <string name="appwide_action_done">Terminé</string>
     <string name="appwide_action_open_settings">Ouvrir les réglages</string>
+    <string name="appwide_activity_suggestion_notifications">Notifications de suggestion d’activité</string>
+    <string name="appwide_activity_suggestion_notifications_detail">Désactivées par défaut. Après une synchronisation, une activité récente corroborée par le mouvement peut apparaître sur l’écran verrouillé pour vérification. NOOP ne l’enregistre jamais sans votre accord.</string>
     <string name="appwide_adaptive_coaching_summary">Utilisez des signaux récents du bracelet pour guider la récupération, les pauses de concentration, la respiration, l’adaptation aux voyages et l’effort d’entraînement.</string>
     <string name="appwide_adaptive_coaching_title">Accompagnement adaptatif</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Suggestions privées et facultatives de récupération et d’adaptation aux voyages.</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">Tendances des biomarqueurs</string>
     <string name="appwide_health_body_composition_add_target">Ajoutez un objectif facultatif dans Profil.</string>
     <string name="appwide_health_body_composition_bmi">IMC</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">Confirmez la taille et le poids pour afficher l’IMC adulte.</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">L’IMC est calculé à partir de la taille et du poids confirmés chez les adultes de 20 ans et plus. C’est une valeur de dépistage limitée, pas un diagnostic ni une mesure de la composition corporelle.</string>
+    <string name="appwide_health_body_composition_bmi_under_20">L’IMC adulte n’est pas affiché avant 20 ans.</string>
     <string name="appwide_health_body_composition_body_fat">MASSE GRASSE</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">Masse grasse du corps entier %1$s pour cent</string>
-    <string name="appwide_health_body_composition_disclaimer">Les valeurs du corps entier conservent leur source enregistrée. NOOP ne déduit pas la répartition de la graisse ou des muscles dans les bras, les jambes ou le tronc ; cela nécessite un matériel de mesure segmentaire compatible.</string>
+    <string name="appwide_health_body_composition_calculated">Calculé</string>
+    <string name="appwide_health_body_composition_disclaimer">Les valeurs du corps entier conservent leur source et leur date. La masse grasse et la masse maigre sont des estimations de l’appareil source et peuvent varier avec l’hydratation et d’autres conditions ; comparez les tendances plutôt qu’une mesure isolée. NOOP ne déduit pas la répartition segmentaire.</string>
     <string name="appwide_health_body_composition_lean_mass">MASSE MAIGRE</string>
     <string name="appwide_health_body_composition_loading">Chargement des mesures…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">Aucune mesure de la masse grasse du corps entier</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">%1$s en dessous de votre objectif</string>
     <string name="appwide_health_body_composition_target_detail">Objectif %1$s · choisi par vous</string>
     <string name="appwide_health_body_composition_target_reached">Objectif sélectionné atteint</string>
+    <string name="appwide_health_body_composition_target_safety_note">Les objectifs de poids facultatifs sont destinés aux adultes de 20 ans et plus disposant de mesures confirmées. Ils ne conviennent pas à la grossesse, au rétablissement post-partum, aux soins des troubles alimentaires ni à un programme encadré par un professionnel. NOOP n’impose jamais de rythme ni d’exercice supplémentaire.</string>
+    <string name="appwide_health_body_composition_target_summary">Actuel %1$s · objectif sélectionné %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">La progression vers l’objectif n’est pas disponible avec le profil actuel.</string>
     <string name="appwide_health_body_composition_target_weight">POIDS CIBLE</string>
     <string name="appwide_health_body_composition_title">Composition corporelle</string>
     <string name="appwide_health_body_composition_weight">POIDS</string>

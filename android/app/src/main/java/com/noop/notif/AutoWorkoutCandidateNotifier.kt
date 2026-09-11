@@ -47,12 +47,16 @@ internal object AutoWorkoutCandidateNotificationPolicy {
 
     fun shouldPost(
         autoDetectEnabled: Boolean,
+        suggestionNotificationsEnabled: Boolean,
         notificationsAlreadyAuthorized: Boolean,
         kind: Kind,
         candidateToken: String,
         lastNotifiedToken: String?,
     ): Boolean {
-        if (!autoDetectEnabled || !notificationsAlreadyAuthorized) return false
+        if (!autoDetectEnabled ||
+            !suggestionNotificationsEnabled ||
+            !notificationsAlreadyAuthorized
+        ) return false
         if (deliveryToken(kind, candidateToken) == lastNotifiedToken) return false
         // Before modes existed, Ask notifications stored only `start:<ts>`. Honor that old token so an
         // upgrade does not re-alert an already reviewed suggestion.
@@ -176,7 +180,9 @@ object AutoWorkoutCandidateNotifier {
             val deliveryToken = AutoWorkoutCandidateNotificationPolicy.deliveryToken(kind, candidateToken)
             val authorized = runCatching { notificationsAlreadyAuthorized(context) }.getOrDefault(false)
             val autoDetectEnabled = NoopPrefs.autoDetectWorkouts(context)
-            if (!authorized && autoDetectEnabled) {
+            val suggestionNotificationsEnabled =
+                NoopPrefs.autoWorkoutSuggestionNotifications(context)
+            if (!authorized && autoDetectEnabled && suggestionNotificationsEnabled) {
                 NotificationLifecycleLedger.suppressed(
                     context,
                     NotificationLifecycleId.AUTO_WORKOUT,
@@ -185,6 +191,7 @@ object AutoWorkoutCandidateNotifier {
             }
             if (!AutoWorkoutCandidateNotificationPolicy.shouldPost(
                     autoDetectEnabled = autoDetectEnabled,
+                    suggestionNotificationsEnabled = suggestionNotificationsEnabled,
                     notificationsAlreadyAuthorized = authorized,
                     kind = kind,
                     candidateToken = candidateToken,

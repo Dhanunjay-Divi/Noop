@@ -307,6 +307,50 @@
     "zh-Hans": "BMI",
     "zh-Hant": "BMI"
   },
+  "appwide.health.body_composition.bmi_confirm_inputs": {
+    "de": "Bestätige Größe und Gewicht, um den BMI für Erwachsene anzuzeigen.",
+    "en": "Confirm height and weight to show adult BMI.",
+    "es": "Confirma la altura y el peso para mostrar el IMC de adultos.",
+    "fr": "Confirmez la taille et le poids pour afficher l’IMC adulte.",
+    "it": "Conferma altezza e peso per mostrare il BMI per adulti.",
+    "pt-PT": "Confirme a altura e o peso para mostrar o IMC de adulto.",
+    "ru": "Подтвердите рост и вес, чтобы показать ИМТ для взрослых.",
+    "zh-Hans": "确认身高和体重后可显示成人 BMI。",
+    "zh-Hant": "確認身高和體重後可顯示成人 BMI。"
+  },
+  "appwide.health.body_composition.bmi_under_20": {
+    "de": "Der BMI für Erwachsene wird vor dem 20. Lebensjahr nicht angezeigt.",
+    "en": "Adult BMI is not shown before age 20.",
+    "es": "El IMC de adultos no se muestra antes de los 20 años.",
+    "fr": "L’IMC adulte n’est pas affiché avant 20 ans.",
+    "it": "Il BMI per adulti non viene mostrato prima dei 20 anni.",
+    "pt-PT": "O IMC de adulto não é mostrado antes dos 20 anos.",
+    "ru": "ИМТ для взрослых не показывается до 20 лет.",
+    "zh-Hans": "20 岁前不显示成人 BMI。",
+    "zh-Hant": "20 歲前不顯示成人 BMI。"
+  },
+  "appwide.health.body_composition.bmi_screening_note": {
+    "de": "Der BMI wird für Erwachsene ab 20 Jahren aus bestätigter Größe und bestätigtem Gewicht berechnet. Er ist ein begrenzter Screeningwert, keine Diagnose und keine Messung der Körperzusammensetzung.",
+    "en": "BMI is calculated from confirmed height and weight for adults 20+. It is a limited screening value, not a diagnosis or a body-composition measurement.",
+    "es": "El IMC se calcula con la altura y el peso confirmados para adultos de 20 años o más. Es un valor de cribado limitado, no un diagnóstico ni una medición de la composición corporal.",
+    "fr": "L’IMC est calculé à partir de la taille et du poids confirmés chez les adultes de 20 ans et plus. C’est une valeur de dépistage limitée, pas un diagnostic ni une mesure de la composition corporelle.",
+    "it": "Il BMI è calcolato da altezza e peso confermati per gli adulti dai 20 anni in su. È un valore di screening limitato, non una diagnosi né una misura della composizione corporea.",
+    "pt-PT": "O IMC é calculado a partir da altura e do peso confirmados para adultos com 20 anos ou mais. É um valor de rastreio limitado, não um diagnóstico nem uma medição da composição corporal.",
+    "ru": "ИМТ рассчитывается по подтверждённым росту и весу для взрослых от 20 лет. Это ограниченный скрининговый показатель, а не диагноз или измерение состава тела.",
+    "zh-Hans": "成人 BMI 仅在 20 岁及以上且身高、体重已确认时计算。它只是有限的筛查值，不是诊断或身体成分测量。",
+    "zh-Hant": "成人 BMI 僅在 20 歲及以上且身高、體重已確認時計算。它只是有限的篩查值，不是診斷或身體組成測量。"
+  },
+  "appwide.health.body_composition.calculated": {
+    "de": "Berechnet",
+    "en": "Calculated",
+    "es": "Calculado",
+    "fr": "Calculé",
+    "it": "Calcolato",
+    "pt-PT": "Calculado",
+    "ru": "Рассчитано",
+    "zh-Hans": "计算值",
+    "zh-Hant": "計算值"
+  },
   "appwide.health.body_composition.body_fat": {
     "de": "KÖRPERFETT",
     "en": "BODY FAT",
@@ -352,15 +396,15 @@
     "zh-Hant": "無測量值"
   },
   "appwide.health.body_composition.disclaimer": {
-    "de": "Ganzkörperwerte behalten ihre aufgezeichnete Quelle. NOOP leitet keine Fett- oder Muskelverteilung für Arme, Beine oder Rumpf ab; dafür ist kompatible segmentale Messhardware erforderlich.",
-    "en": "Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk fat and muscle distribution; that requires compatible segmental measurement hardware.",
-    "es": "Los valores de cuerpo completo conservan su fuente registrada. NOOP no infiere la distribución de grasa o músculo en brazos, piernas o tronco; para ello se necesita hardware compatible de medición segmentaria.",
-    "fr": "Les valeurs du corps entier conservent leur source enregistrée. NOOP ne déduit pas la répartition de la graisse ou des muscles dans les bras, les jambes ou le tronc ; cela nécessite un matériel de mesure segmentaire compatible.",
-    "it": "I valori del corpo intero mantengono la fonte registrata. NOOP non deduce la distribuzione di grasso o muscoli in braccia, gambe o tronco; è necessario un hardware compatibile per la misurazione segmentale.",
-    "pt-PT": "Os valores de corpo inteiro mantêm a respetiva fonte registada. O NOOP não infere a distribuição de gordura ou músculo nos braços, pernas ou tronco; isso requer hardware compatível de medição segmentar.",
-    "ru": "Значения для всего тела сохраняют исходный источник. NOOP не определяет распределение жира и мышц по рукам, ногам или туловищу: для этого требуется совместимое оборудование сегментарного анализа.",
-    "zh-Hans": "全身数值会保留其记录来源。NOOP 不推断手臂、腿部或躯干的脂肪和肌肉分布；这需要兼容的分段测量硬件。",
-    "zh-Hant": "全身數值會保留其記錄來源。NOOP 不推斷手臂、腿部或軀幹的脂肪和肌肉分佈；這需要相容的分段測量硬體。"
+    "de": "Ganzkörperwerte behalten Quelle und Datum. Körperfett und Magermasse sind Schätzungen des jeweiligen Messgeräts und können unter anderem mit der Hydration schwanken; vergleiche Trends statt einzelner Messungen. NOOP leitet keine segmentale Verteilung ab.",
+    "en": "Whole-body values retain their source and date. Body fat and lean mass are source-device estimates that can vary with hydration and other conditions; compare trends rather than single readings. NOOP does not infer segmental distribution.",
+    "es": "Los valores de cuerpo completo conservan su fuente y fecha. La grasa corporal y la masa magra son estimaciones del dispositivo de origen y pueden variar con la hidratación y otras condiciones; compara tendencias, no lecturas aisladas. NOOP no infiere la distribución segmentaria.",
+    "fr": "Les valeurs du corps entier conservent leur source et leur date. La masse grasse et la masse maigre sont des estimations de l’appareil source et peuvent varier avec l’hydratation et d’autres conditions ; comparez les tendances plutôt qu’une mesure isolée. NOOP ne déduit pas la répartition segmentaire.",
+    "it": "I valori del corpo intero mantengono fonte e data. Massa grassa e massa magra sono stime del dispositivo di origine e possono variare con l’idratazione e altre condizioni; confronta le tendenze, non le singole letture. NOOP non deduce la distribuzione segmentale.",
+    "pt-PT": "Os valores de corpo inteiro mantêm a fonte e a data. A gordura corporal e a massa magra são estimativas do dispositivo de origem e podem variar com a hidratação e outras condições; compare tendências, não leituras isoladas. O NOOP não infere a distribuição segmentar.",
+    "ru": "Значения для всего тела сохраняют источник и дату. Жировая и безжировая масса являются оценками исходного устройства и могут меняться из-за гидратации и других условий; сравнивайте тренды, а не отдельные измерения. NOOP не определяет сегментарное распределение.",
+    "zh-Hans": "全身数值会保留来源和日期。体脂和瘦体重是来源设备的估算值，可能受水分状态等条件影响；请比较长期趋势，而非单次读数。NOOP 不推断分段分布。",
+    "zh-Hant": "全身數值會保留來源和日期。體脂和瘦體重是來源裝置的估算值，可能受水分狀態等條件影響；請比較長期趨勢，而非單次讀數。NOOP 不推斷分段分佈。"
   },
   "appwide.health.body_composition.loading": {
     "de": "Messungen werden geladen…",
@@ -460,6 +504,39 @@
     "ru": "Цель %1$s · выбрана вами",
     "zh-Hans": "目标 %1$s · 由你选择",
     "zh-Hant": "目標 %1$s · 由你選擇"
+  },
+  "appwide.health.body_composition.target_summary": {
+    "de": "Aktuell %1$s · ausgewähltes Ziel %2$s",
+    "en": "Current %1$s · selected target %2$s",
+    "es": "Actual %1$s · objetivo seleccionado %2$s",
+    "fr": "Actuel %1$s · objectif sélectionné %2$s",
+    "it": "Attuale %1$s · obiettivo selezionato %2$s",
+    "pt-PT": "Atual %1$s · objetivo selecionado %2$s",
+    "ru": "Сейчас %1$s · выбранная цель %2$s",
+    "zh-Hans": "当前 %1$s · 所选目标 %2$s",
+    "zh-Hant": "目前 %1$s · 所選目標 %2$s"
+  },
+  "appwide.health.body_composition.target_unavailable": {
+    "de": "Der Zielfortschritt ist mit dem aktuellen Profil nicht verfügbar.",
+    "en": "Target progress is unavailable with the current profile.",
+    "es": "El progreso del objetivo no está disponible con el perfil actual.",
+    "fr": "La progression vers l’objectif n’est pas disponible avec le profil actuel.",
+    "it": "L’avanzamento verso l’obiettivo non è disponibile con il profilo attuale.",
+    "pt-PT": "O progresso do objetivo não está disponível com o perfil atual.",
+    "ru": "Прогресс цели недоступен для текущего профиля.",
+    "zh-Hans": "当前个人资料不支持目标进度。",
+    "zh-Hant": "目前個人資料不支援目標進度。"
+  },
+  "appwide.health.body_composition.target_safety_note": {
+    "de": "Optionale Gewichtsziele sind für Erwachsene ab 20 Jahren mit bestätigten Messwerten gedacht. Sie sind nicht für Schwangerschaft, die Zeit nach der Geburt, Essstörungsbehandlung oder ärztlich geleitete Pläne bestimmt. NOOP legt weder Tempo noch zusätzliche Bewegung fest.",
+    "en": "Optional weight goals are for adults 20+ with confirmed measurements. They are not intended for pregnancy, postpartum recovery, eating-disorder care, or a clinician-directed plan. NOOP never assigns a pace or extra exercise.",
+    "es": "Los objetivos de peso opcionales son para adultos de 20 años o más con mediciones confirmadas. No están pensados para el embarazo, la recuperación posparto, la atención de trastornos alimentarios ni planes dirigidos por un profesional sanitario. NOOP nunca asigna un ritmo ni ejercicio adicional.",
+    "fr": "Les objectifs de poids facultatifs sont destinés aux adultes de 20 ans et plus disposant de mesures confirmées. Ils ne conviennent pas à la grossesse, au rétablissement post-partum, aux soins des troubles alimentaires ni à un programme encadré par un professionnel. NOOP n’impose jamais de rythme ni d’exercice supplémentaire.",
+    "it": "Gli obiettivi di peso facoltativi sono per adulti dai 20 anni in su con misure confermate. Non sono destinati a gravidanza, recupero post-partum, cura dei disturbi alimentari o piani guidati da un professionista. NOOP non assegna mai un ritmo o esercizio aggiuntivo.",
+    "pt-PT": "Os objetivos de peso opcionais destinam-se a adultos com 20 anos ou mais e medições confirmadas. Não se destinam à gravidez, recuperação pós-parto, cuidados de perturbações alimentares ou planos orientados por um profissional. O NOOP nunca define um ritmo nem exercício adicional.",
+    "ru": "Необязательные цели по весу предназначены для взрослых от 20 лет с подтверждёнными измерениями. Они не предназначены для беременности, послеродового восстановления, лечения расстройств пищевого поведения или плана под наблюдением врача. NOOP не назначает темп или дополнительную нагрузку.",
+    "zh-Hans": "可选体重目标仅适用于 20 岁及以上且测量已确认的成人，不适用于孕期、产后恢复、进食障碍照护或由临床专业人员指导的计划。NOOP 不会指定速度或额外运动。",
+    "zh-Hant": "選填體重目標僅適用於 20 歲及以上且測量已確認的成人，不適用於孕期、產後恢復、飲食失調照護或由臨床專業人員指導的計劃。NOOP 不會指定速度或額外運動。"
   },
   "appwide.health.body_composition.no_target": {
     "de": "Kein Ziel ausgewählt",
@@ -735,6 +812,28 @@
     "ru": "Уведомления отключены в системных настройках.",
     "zh-Hans": "系统设置中已关闭通知。",
     "zh-Hant": "系統設定中已關閉通知。"
+  },
+  "appwide.activity_suggestion_notifications": {
+    "de": "Mitteilungen zu Aktivitätsvorschlägen",
+    "en": "Activity suggestion notifications",
+    "es": "Notificaciones de sugerencias de actividad",
+    "fr": "Notifications de suggestion d’activité",
+    "it": "Notifiche dei suggerimenti di attività",
+    "pt-PT": "Notificações de sugestões de atividade",
+    "ru": "Уведомления о предложениях активности",
+    "zh-Hans": "活动建议通知",
+    "zh-Hant": "活動建議通知"
+  },
+  "appwide.activity_suggestion_notifications_detail": {
+    "de": "Standardmäßig aus. Nach einer Synchronisierung kann eine kürzlich durch Bewegung bestätigte Aktivität zur Prüfung auf dem Sperrbildschirm erscheinen. NOOP speichert sie nie ohne deine Zustimmung.",
+    "en": "Off by default. After a sync, a recent motion-corroborated activity can appear on the Lock Screen for review. NOOP never saves it without your approval.",
+    "es": "Desactivadas de forma predeterminada. Tras una sincronización, una actividad reciente confirmada por movimiento puede aparecer en la pantalla de bloqueo para que la revises. NOOP nunca la guarda sin tu aprobación.",
+    "fr": "Désactivées par défaut. Après une synchronisation, une activité récente corroborée par le mouvement peut apparaître sur l’écran verrouillé pour vérification. NOOP ne l’enregistre jamais sans votre accord.",
+    "it": "Disattivate per impostazione predefinita. Dopo una sincronizzazione, un’attività recente confermata dal movimento può apparire nella schermata di blocco per la revisione. NOOP non la salva mai senza la tua approvazione.",
+    "pt-PT": "Desativadas por predefinição. Após uma sincronização, uma atividade recente confirmada por movimento pode aparecer no ecrã bloqueado para revisão. O NOOP nunca a guarda sem a sua aprovação.",
+    "ru": "По умолчанию отключено. После синхронизации недавняя активность, подтверждённая движением, может появиться на экране блокировки для проверки. NOOP никогда не сохраняет её без вашего подтверждения.",
+    "zh-Hans": "默认关闭。同步后，近期经运动信号佐证的活动可显示在锁定屏幕上供你审核。未经你确认，NOOP 绝不会保存。",
+    "zh-Hant": "預設關閉。同步後，近期經動作訊號佐證的活動可顯示在鎖定畫面上供你審核。未經你確認，NOOP 絕不會儲存。"
   },
   "appwide.notifications.effort_permission_message": {
     "de": "Aktiviere Mitteilungen in den Einstellungen, um die optionale Belastungsmarke zu erhalten. NOOP funktioniert auch ohne sie normal.",

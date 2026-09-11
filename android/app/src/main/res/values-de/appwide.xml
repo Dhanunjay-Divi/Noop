@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s. %2$s</string>
     <string name="appwide_action_done">Fertig</string>
     <string name="appwide_action_open_settings">Einstellungen öffnen</string>
+    <string name="appwide_activity_suggestion_notifications">Mitteilungen zu Aktivitätsvorschlägen</string>
+    <string name="appwide_activity_suggestion_notifications_detail">Standardmäßig aus. Nach einer Synchronisierung kann eine kürzlich durch Bewegung bestätigte Aktivität zur Prüfung auf dem Sperrbildschirm erscheinen. NOOP speichert sie nie ohne deine Zustimmung.</string>
     <string name="appwide_adaptive_coaching_summary">Nutze aktuelle Wearable-Signale für Erholung, Fokuspausen, Atmung, Reiseanpassung und Trainingsbelastung.</string>
     <string name="appwide_adaptive_coaching_title">Adaptive Begleitung</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Private, optionale Hinweise zu Erholung und Reiseanpassung.</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">Biomarker-Trends</string>
     <string name="appwide_health_body_composition_add_target">Füge im Profil ein optionales Ziel hinzu.</string>
     <string name="appwide_health_body_composition_bmi">BMI</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">Bestätige Größe und Gewicht, um den BMI für Erwachsene anzuzeigen.</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">Der BMI wird für Erwachsene ab 20 Jahren aus bestätigter Größe und bestätigtem Gewicht berechnet. Er ist ein begrenzter Screeningwert, keine Diagnose und keine Messung der Körperzusammensetzung.</string>
+    <string name="appwide_health_body_composition_bmi_under_20">Der BMI für Erwachsene wird vor dem 20. Lebensjahr nicht angezeigt.</string>
     <string name="appwide_health_body_composition_body_fat">KÖRPERFETT</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">Ganzkörperfett %1$s Prozent</string>
-    <string name="appwide_health_body_composition_disclaimer">Ganzkörperwerte behalten ihre aufgezeichnete Quelle. NOOP leitet keine Fett- oder Muskelverteilung für Arme, Beine oder Rumpf ab; dafür ist kompatible segmentale Messhardware erforderlich.</string>
+    <string name="appwide_health_body_composition_calculated">Berechnet</string>
+    <string name="appwide_health_body_composition_disclaimer">Ganzkörperwerte behalten Quelle und Datum. Körperfett und Magermasse sind Schätzungen des jeweiligen Messgeräts und können unter anderem mit der Hydration schwanken; vergleiche Trends statt einzelner Messungen. NOOP leitet keine segmentale Verteilung ab.</string>
     <string name="appwide_health_body_composition_lean_mass">MAGERMASSE</string>
     <string name="appwide_health_body_composition_loading">Messungen werden geladen…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">Keine Ganzkörperfettmessung</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">%1$s unter deinem ausgewählten Ziel</string>
     <string name="appwide_health_body_composition_target_detail">Ziel %1$s · von dir ausgewählt</string>
     <string name="appwide_health_body_composition_target_reached">Am ausgewählten Ziel</string>
+    <string name="appwide_health_body_composition_target_safety_note">Optionale Gewichtsziele sind für Erwachsene ab 20 Jahren mit bestätigten Messwerten gedacht. Sie sind nicht für Schwangerschaft, die Zeit nach der Geburt, Essstörungsbehandlung oder ärztlich geleitete Pläne bestimmt. NOOP legt weder Tempo noch zusätzliche Bewegung fest.</string>
+    <string name="appwide_health_body_composition_target_summary">Aktuell %1$s · ausgewähltes Ziel %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">Der Zielfortschritt ist mit dem aktuellen Profil nicht verfügbar.</string>
     <string name="appwide_health_body_composition_target_weight">ZIELGEWICHT</string>
     <string name="appwide_health_body_composition_title">Körperzusammensetzung</string>
     <string name="appwide_health_body_composition_weight">GEWICHT</string>

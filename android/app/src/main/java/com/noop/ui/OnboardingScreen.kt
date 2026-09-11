@@ -280,7 +280,10 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
         if (page == OnboardingPage.Profile) {
             // Save & Continue explicitly accepts both visible inputs, including intentionally keeping
             // the seeded editor values. Until this tap, age-shaped estimates remain unavailable.
-            ProfileStore.from(context).confirmFitnessInputs()
+            ProfileStore.from(context).apply {
+                confirmFitnessInputs()
+                confirmBodyInputs()
+            }
         }
         when (page) {
             OnboardingPage.Plan -> {
@@ -1458,10 +1461,11 @@ private fun ImportStep(viewModel: AppViewModel) {
             }.getOrDefault(emptySet())
             if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
                 runImport {
+                    val profile = ProfileStore.from(context)
                     HealthConnectImporter.import(
                         context,
                         viewModel.repo,
-                        ProfileStore.from(context).heightCm,
+                        profile.bodyCompositionImportHeightCm,
                     )
                 }
             } else {
@@ -1483,7 +1487,14 @@ private fun ImportStep(viewModel: AppViewModel) {
             }.getOrDefault(emptySet())
             val missing = HealthConnectImporter.missingReadPermissions(granted)
             if (missing.isEmpty()) {
-                runImport { HealthConnectImporter.import(context, viewModel.repo, ProfileStore.from(context).heightCm) }
+                runImport {
+                    val profile = ProfileStore.from(context)
+                    HealthConnectImporter.import(
+                        context,
+                        viewModel.repo,
+                        profile.bodyCompositionImportHeightCm,
+                    )
+                }
             } else {
                 hcPermissionLauncher.launch(missing)
             }

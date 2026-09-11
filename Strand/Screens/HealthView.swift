@@ -2179,17 +2179,23 @@ private struct BodyCompositionSection: View {
         UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw)
     }
 
-    private var weight: Reading {
-        snapshot.weight ?? Reading(value: profile.weightKg, day: nil, source: "profile")
+    private var weight: Reading? {
+        if let measured = snapshot.weight { return measured }
+        guard profile.weightInputConfirmed else { return nil }
+        return Reading(value: profile.weightKg, day: nil, source: "profile")
     }
 
     private var bmi: Reading? {
+        guard profile.ageInputConfirmed, profile.age >= BodyProfilePolicy.adultMinimumAge else {
+            return nil
+        }
         if let measured = snapshot.bmi { return measured }
+        guard profile.heightInputConfirmed, let weight else { return nil }
         let metres = profile.heightCm / 100
         guard weight.value.isFinite, metres.isFinite, metres > 0 else { return nil }
         let value = weight.value / (metres * metres)
         guard value >= 5, value <= 100 else { return nil }
-        return Reading(value: value, day: weight.day, source: "profile")
+        return Reading(value: value, day: weight.day, source: "calculated")
     }
 
     private var latestMeasuredDay: String? {
@@ -2212,15 +2218,18 @@ private struct BodyCompositionSection: View {
                         bodyVisual
                         VStack(alignment: .leading, spacing: 5) {
                             Text("appwide.health.body_composition.weight").strandOverline()
-                            Text(UnitFormatter.massFromKilograms(weight.value, unit: massUnit))
+                            Text(weight.map {
+                                UnitFormatter.massFromKilograms($0.value, unit: massUnit)
+                            } ?? "-")
                                 .font(StrandFont.number(30))
                                 .foregroundStyle(StrandPalette.textPrimary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.65)
-                            Text(readingCaption(weight))
+                            Text(weight.map(readingCaption)
+                                 ?? String(localized: "appwide.health.body_composition.no_measurement"))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
-                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -2228,18 +2237,18 @@ private struct BodyCompositionSection: View {
                     Divider().overlay(StrandPalette.hairline)
 
                     LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                        columns: [GridItem(.adaptive(minimum: 124), spacing: 8)],
                         spacing: 8
                     ) {
                         compositionMetric(
                             label: String(localized: "appwide.health.body_composition.bmi"),
                             value: bmi.map { String(format: "%.1f", $0.value) } ?? "-",
                             detail: bmi.map(readingCaption)
-                                ?? String(localized: "appwide.health.body_composition.no_value")
+                                ?? bmiUnavailableText
                         )
                         compositionMetric(
                             label: String(localized: "appwide.health.body_composition.body_fat"),
-                            value: snapshot.bodyFat.map { String(format: "%.1f%%", $0.value) } ?? "-",
+                            value: snapshot.bodyFat.map { String(format: "%.0f%%", $0.value) } ?? "-",
                             detail: snapshot.bodyFat.map(readingCaption)
                                 ?? String(localized: "appwide.health.body_composition.no_measurement")
                         )
@@ -2287,7 +2296,7 @@ private struct BodyCompositionSection: View {
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(StrandPalette.metricCyan)
                     .accessibilityHidden(true)
-                Text(bodyFat.map { String(format: "%.1f%%", $0) } ?? "-")
+                Text(bodyFat.map { String(format: "%.0f%%", $0) } ?? "-")
                     .font(StrandFont.captionNumber)
                     .foregroundStyle(StrandPalette.textPrimary)
                 Text("appwide.health.body_composition.whole_body")
@@ -2301,9 +2310,9 @@ private struct BodyCompositionSection: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             bodyFat.map {
-                String.localizedStringWithFormat(
-                    String(localized: "appwide.health.body_composition.body_fat_accessibility"),
-                    $0.formatted(.number.precision(.fractionLength(1)))
+                    String.localizedStringWithFormat(
+                        String(localized: "appwide.health.body_composition.body_fat_accessibility"),
+                    $0.formatted(.number.precision(.fractionLength(0)))
                 )
             } ?? String(localized: "appwide.health.body_composition.no_body_fat_measurement")
         )
@@ -2314,8 +2323,7 @@ private struct BodyCompositionSection: View {
             Text(label)
                 .font(StrandFont.overline)
                 .foregroundStyle(StrandPalette.textTertiary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .fixedSize(horizontal: false, vertical: true)
             Text(value)
                 .font(StrandFont.number(18))
                 .foregroundStyle(StrandPalette.textPrimary)
@@ -2324,14 +2332,20 @@ private struct BodyCompositionSection: View {
             Text(detail)
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.75)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
         .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var targetRow: some View {
+        let availability = weight.map {
+            profile.targetWeightAvailability(
+                currentWeightKg: $0.value,
+                targetWeightKg: profile.targetWeightKg,
+                currentWeightConfirmed: true
+            )
+        } ?? .measurementsUnconfirmed
         HStack(spacing: 12) {
             Image(systemName: "target")
                 .font(.system(size: 18, weight: .semibold))
@@ -2342,19 +2356,32 @@ private struct BodyCompositionSection: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("appwide.health.body_composition.target_weight").strandOverline()
-                if let target = profile.targetWeightKg {
-                    Text(targetDistanceText(currentKg: weight.value, targetKg: target))
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if let target = profile.targetWeightKg,
+                   let weight,
+                   availability == .available {
                     Text(
                         String.localizedStringWithFormat(
-                            String(localized: "appwide.health.body_composition.target_detail"),
+                            String(localized: "appwide.health.body_composition.target_summary"),
+                            UnitFormatter.massFromKilograms(weight.value, unit: massUnit),
                             UnitFormatter.massFromKilograms(target, unit: massUnit)
                         )
                     )
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("appwide.health.body_composition.target_safety_note")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if profile.targetWeightKg != nil || availability != .available {
+                    Text("appwide.health.body_composition.target_unavailable")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("appwide.health.body_composition.target_safety_note")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("appwide.health.body_composition.no_target")
                         .font(StrandFont.subhead)
@@ -2369,21 +2396,10 @@ private struct BodyCompositionSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func targetDistanceText(currentKg: Double, targetKg: Double) -> String {
-        let delta = currentKg - targetKg
-        if abs(delta) < 0.05 {
-            return String(localized: "appwide.health.body_composition.target_reached")
-        }
-        let distance = UnitFormatter.massFromKilograms(abs(delta), unit: massUnit)
-        return delta > 0
-            ? String.localizedStringWithFormat(
-                String(localized: "appwide.health.body_composition.target_above"),
-                distance
-            )
-            : String.localizedStringWithFormat(
-                String(localized: "appwide.health.body_composition.target_below"),
-                distance
-            )
+    private var bmiUnavailableText: String {
+        profile.ageInputConfirmed && profile.age < BodyProfilePolicy.adultMinimumAge
+            ? String(localized: "appwide.health.body_composition.bmi_under_20")
+            : String(localized: "appwide.health.body_composition.bmi_confirm_inputs")
     }
 
     private func readingCaption(_ reading: Reading) -> String {
@@ -2398,6 +2414,8 @@ private struct BodyCompositionSection: View {
         case Repository.appleHealthSource: return String(localized: "Apple Health")
         case Repository.healthConnectSource: return String(localized: "Health Connect")
         case "profile": return String(localized: "Profile")
+        case "calculated":
+            return String(localized: "appwide.health.body_composition.calculated")
         default: return source
         }
     }

@@ -142,7 +142,7 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
                 context = applicationContext,
                 repository = repository,
                 grantedPermissions = granted,
-                heightCm = ProfileStore.from(applicationContext).heightCm,
+                heightCm = ProfileStore.from(applicationContext).bodyCompositionImportHeightCm,
             )
             if (outcome is HealthConnectReconcileResult.Success) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())

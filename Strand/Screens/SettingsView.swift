@@ -505,25 +505,33 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "BMI") {
-                    Text(FitnessAgeEngine.bmi(
-                        weightKg: profile.weightKg,
-                        heightCm: profile.heightCm
-                    ).formatted(.number.precision(.fractionLength(1))))
-                        .font(StrandFont.bodyNumber)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .accessibilityLabel("Body mass index")
-                        .accessibilityValue(FitnessAgeEngine.bmi(
-                            weightKg: profile.weightKg,
-                            heightCm: profile.heightCm
-                        ).formatted(.number.precision(.fractionLength(1))))
+                    if let bmi = profile.adultBMI {
+                        Text(bmi.formatted(.number.precision(.fractionLength(1))))
+                            .font(StrandFont.bodyNumber)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .accessibilityLabel("Body mass index")
+                            .accessibilityValue(
+                                bmi.formatted(.number.precision(.fractionLength(1)))
+                            )
+                    } else {
+                        Text(profile.ageInputConfirmed
+                             && profile.age < BodyProfilePolicy.adultMinimumAge
+                             ? "appwide.health.body_composition.bmi_under_20"
+                             : "appwide.health.body_composition.bmi_confirm_inputs")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Text("BMI is a limited height-and-weight screening calculation. It is not a diagnosis or a measure of body composition.")
+                Text("appwide.health.body_composition.bmi_screening_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 rowDivider
                 FormRow(label: "Target weight (optional)") {
-                    if profile.targetWeightKg != nil {
+                    let availability = profile.targetWeightAvailability()
+                    if profile.targetWeightKg != nil, availability == .available {
                         HStack(spacing: 8) {
                             if massUnit == .pounds {
                                 poundsField(
@@ -550,7 +558,24 @@ struct SettingsView: View {
                             .help("Clear target weight")
                             .accessibilityLabel("Clear target weight")
                         }
-                    } else {
+                    } else if profile.targetWeightKg != nil {
+                        HStack(spacing: 8) {
+                            Text("appwide.health.body_composition.target_unavailable")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                profile.setTargetWeightKg(nil)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear target weight")
+                            .accessibilityLabel("Clear target weight")
+                        }
+                    } else if availability == .available {
                         Button {
                             profile.setTargetWeightKg(profile.weightKg)
                         } label: {
@@ -561,9 +586,15 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .help("Add a target weight")
                         .accessibilityLabel("Add target weight")
+                    } else {
+                        Text("appwide.health.body_composition.target_unavailable")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Text("Optional and entirely your choice. NOOP does not recommend a target or a rate of change.")
+                Text("appwide.health.body_composition.target_safety_note")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

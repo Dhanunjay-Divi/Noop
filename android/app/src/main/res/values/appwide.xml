@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s. %2$s</string>
     <string name="appwide_action_done">Done</string>
     <string name="appwide_action_open_settings">Open settings</string>
+    <string name="appwide_activity_suggestion_notifications">Activity suggestion notifications</string>
+    <string name="appwide_activity_suggestion_notifications_detail">Off by default. After a sync, a recent motion-corroborated activity can appear on the Lock Screen for review. NOOP never saves it without your approval.</string>
     <string name="appwide_adaptive_coaching_summary">Use fresh wearable signals to shape recovery, focus breaks, breathing, travel adjustment, and workout effort.</string>
     <string name="appwide_adaptive_coaching_title">Adaptive coaching</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Private, optional recovery and travel-adjustment suggestions.</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">Biomarker trends</string>
     <string name="appwide_health_body_composition_add_target">Add an optional target in Profile.</string>
     <string name="appwide_health_body_composition_bmi">BMI</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">Confirm height and weight to show adult BMI.</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">BMI is calculated from confirmed height and weight for adults 20+. It is a limited screening value, not a diagnosis or a body-composition measurement.</string>
+    <string name="appwide_health_body_composition_bmi_under_20">Adult BMI is not shown before age 20.</string>
     <string name="appwide_health_body_composition_body_fat">BODY FAT</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">Whole-body fat %1$s percent</string>
-    <string name="appwide_health_body_composition_disclaimer">Whole-body values retain their recorded source. NOOP does not infer arm, leg, or trunk fat and muscle distribution; that requires compatible segmental measurement hardware.</string>
+    <string name="appwide_health_body_composition_calculated">Calculated</string>
+    <string name="appwide_health_body_composition_disclaimer">Whole-body values retain their source and date. Body fat and lean mass are source-device estimates that can vary with hydration and other conditions; compare trends rather than single readings. NOOP does not infer segmental distribution.</string>
     <string name="appwide_health_body_composition_lean_mass">LEAN MASS</string>
     <string name="appwide_health_body_composition_loading">Loading measurements…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">No whole-body fat measurement</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">%1$s below your selected target</string>
     <string name="appwide_health_body_composition_target_detail">Target %1$s · selected by you</string>
     <string name="appwide_health_body_composition_target_reached">At your selected target</string>
+    <string name="appwide_health_body_composition_target_safety_note">Optional weight goals are for adults 20+ with confirmed measurements. They are not intended for pregnancy, postpartum recovery, eating-disorder care, or a clinician-directed plan. NOOP never assigns a pace or extra exercise.</string>
+    <string name="appwide_health_body_composition_target_summary">Current %1$s · selected target %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">Target progress is unavailable with the current profile.</string>
     <string name="appwide_health_body_composition_target_weight">TARGET WEIGHT</string>
     <string name="appwide_health_body_composition_title">Body composition</string>
     <string name="appwide_health_body_composition_weight">WEIGHT</string>

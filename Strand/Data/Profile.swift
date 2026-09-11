@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import StrandAnalytics
 
 /// Profile provenance carried beside age-shaped computed metrics. These compact numeric tokens fit
 /// exactly in a SQLite `REAL` and let every read reject a value produced from a different profile
@@ -134,6 +135,7 @@ final class ProfileStore: ObservableObject {
     @Published var weightKg: Double {
         didSet {
             d.set(weightKg, forKey: K.weight)
+            d.set(true, forKey: K.weightConfirmed)
             // Direct setters are user/profile edits. Only create a manual-precedence marker after an
             // external value has existed; otherwise the harmless onboarding seed/first manual entry
             // would prevent a user's older-but-latest HealthKit history from bootstrapping the profile.
@@ -145,7 +147,12 @@ final class ProfileStore: ObservableObject {
     /// Optional target selected by the user. This is a remembered preference, not a recommendation:
     /// NOOP never derives a target or a rate of change. Stored canonically in kilograms.
     @Published private(set) var targetWeightKg: Double?
-    @Published var heightCm: Double { didSet { d.set(heightCm, forKey: K.height) } }
+    @Published var heightCm: Double {
+        didSet {
+            d.set(heightCm, forKey: K.height)
+            d.set(true, forKey: K.heightConfirmed)
+        }
+    }
     /// Optional waist circumference (cm); 0 = not set. Only used to ALSO show an estimated VO₂max
     /// alongside Fitness Age — the Fitness Age itself does not need it (the body term cancels).
     @Published var waistCm: Double {
@@ -214,6 +221,8 @@ final class ProfileStore: ObservableObject {
         /// for ordinary UI previews but must never masquerade as user-supplied Fitness Age inputs.
         static let ageConfirmed = "profile.ageInputConfirmed"
         static let sexConfirmed = "profile.sexInputConfirmed"
+        static let weightConfirmed = "profile.weightInputConfirmed"
+        static let heightConfirmed = "profile.heightInputConfirmed"
         static let onboarded = "noop.onboarded"
         static let fitnessAgeProvenanceRequired = "profile.fitnessAgeProvenanceRequired"
         static let vo2maxProvenanceRequired = "profile.vo2maxProvenanceRequired"
@@ -465,6 +474,39 @@ final class ProfileStore: ObservableObject {
     var ageInputConfirmed: Bool { d.bool(forKey: K.ageConfirmed) || d.bool(forKey: K.onboarded) }
     var sexInputConfirmed: Bool { d.bool(forKey: K.sexConfirmed) || d.bool(forKey: K.onboarded) }
     var fitnessInputsConfirmed: Bool { ageInputConfirmed && sexInputConfirmed }
+    /// Display seeds do not become health inputs until the user accepts the profile page, edits the
+    /// field, restores it, or a trusted external measurement updates weight.
+    var weightInputConfirmed: Bool {
+        d.bool(forKey: K.weightConfirmed) || d.object(forKey: K.weight) != nil
+    }
+    var heightInputConfirmed: Bool {
+        d.bool(forKey: K.heightConfirmed) || d.object(forKey: K.height) != nil
+    }
+    var bodyInputsConfirmed: Bool { weightInputConfirmed && heightInputConfirmed }
+
+    var adultBMI: Double? {
+        BodyProfilePolicy.adultBMI(
+            age: age,
+            weightKg: weightKg,
+            heightCm: heightCm,
+            measurementsConfirmed: ageInputConfirmed && bodyInputsConfirmed
+        )
+    }
+
+    func targetWeightAvailability(
+        currentWeightKg: Double? = nil,
+        targetWeightKg: Double? = nil,
+        currentWeightConfirmed: Bool? = nil
+    ) -> BodyWeightTargetAvailability {
+        BodyProfilePolicy.targetAvailability(
+            age: age,
+            currentWeightKg: currentWeightKg ?? weightKg,
+            heightCm: heightCm,
+            targetWeightKg: targetWeightKg ?? self.targetWeightKg,
+            measurementsConfirmed: ageInputConfirmed && heightInputConfirmed
+                && (currentWeightConfirmed ?? weightInputConfirmed)
+        )
+    }
 
     var fitnessAgeProvenanceRequired: Bool { d.bool(forKey: K.fitnessAgeProvenanceRequired) }
     var vo2maxProvenanceRequired: Bool { d.bool(forKey: K.vo2maxProvenanceRequired) }
@@ -518,6 +560,11 @@ final class ProfileStore: ObservableObject {
         confirmSexInput()
     }
 
+    func confirmBodyInputs() {
+        d.set(true, forKey: K.weightConfirmed)
+        d.set(true, forKey: K.heightConfirmed)
+    }
+
     /// The onboarding shell intentionally does not observe `ProfileStore` (live profile updates used
     /// to restart its animations). This narrow static boundary lets the Profile CTA record acceptance
     /// without subscribing that shell to the store; the computed confirmation properties read through
@@ -528,6 +575,11 @@ final class ProfileStore: ObservableObject {
         defaults.set(true, forKey: K.fitnessAgeProvenanceRequired)
         defaults.set(true, forKey: K.vo2maxProvenanceRequired)
         defaults.set(true, forKey: K.vitalityProvenanceRequired)
+    }
+
+    static func confirmBodyInputsInDefaults(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: K.weightConfirmed)
+        defaults.set(true, forKey: K.heightConfirmed)
     }
 
     /// Pure decision used by platform tests and migrations.

@@ -2684,7 +2684,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         context = appContext,
                         repository = repository,
                         grantedPermissions = granted,
-                        heightCm = profileStore.heightCm,
+                        heightCm = profileStore.bodyCompositionImportHeightCm,
                     )
                 }.getOrNull() is HealthConnectReconcileResult.Success
             }

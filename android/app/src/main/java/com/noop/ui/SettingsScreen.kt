@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
@@ -7,7 +8,9 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
+import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.animateFloatAsState
@@ -56,6 +59,7 @@ import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Vibration
@@ -65,6 +69,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -94,6 +99,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -101,9 +107,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.noop.BuildConfig
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.Baselines
+import com.noop.analytics.BodyProfilePolicy
+import com.noop.analytics.BodyWeightTargetAvailability
 import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.Zones
 import com.noop.R
@@ -115,6 +125,7 @@ import com.noop.data.DataBackup
 import com.noop.data.MedicationStore
 import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
+import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -281,9 +292,19 @@ class ProfileStore(private val prefs: SharedPreferences) {
         signalAgeMetricProfileChange()
     }
 
+    fun confirmBodyInputs() {
+        prefs.edit()
+            .putBoolean(KEY_WEIGHT_CONFIRMED, true)
+            .putBoolean(KEY_HEIGHT_CONFIRMED, true)
+            .apply()
+    }
+
     var weightKg: Double
         get() = prefs.getFloat(KEY_WEIGHT, 75f).toDouble().coerceIn(WEIGHT_MIN, WEIGHT_MAX)
-        set(v) = prefs.edit().putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat()).apply()
+        set(v) = prefs.edit()
+            .putFloat(KEY_WEIGHT, v.coerceIn(WEIGHT_MIN, WEIGHT_MAX).toFloat())
+            .putBoolean(KEY_WEIGHT_CONFIRMED, true)
+            .apply()
 
     /**
      * Optional target selected by the user. It is stored canonically in kilograms and is never
@@ -305,7 +326,42 @@ class ProfileStore(private val prefs: SharedPreferences) {
 
     var heightCm: Double
         get() = prefs.getFloat(KEY_HEIGHT, 178f).toDouble().coerceIn(HEIGHT_MIN, HEIGHT_MAX)
-        set(v) = prefs.edit().putFloat(KEY_HEIGHT, v.coerceIn(HEIGHT_MIN, HEIGHT_MAX).toFloat()).apply()
+        set(v) = prefs.edit()
+            .putFloat(KEY_HEIGHT, v.coerceIn(HEIGHT_MIN, HEIGHT_MAX).toFloat())
+            .putBoolean(KEY_HEIGHT_CONFIRMED, true)
+            .apply()
+
+    val weightInputConfirmed: Boolean
+        get() = prefs.getBoolean(KEY_WEIGHT_CONFIRMED, false) || prefs.contains(KEY_WEIGHT)
+    val heightInputConfirmed: Boolean
+        get() = prefs.getBoolean(KEY_HEIGHT_CONFIRMED, false) || prefs.contains(KEY_HEIGHT)
+    val bodyInputsConfirmed: Boolean get() = weightInputConfirmed && heightInputConfirmed
+    val adultBmi: Double?
+        get() = BodyProfilePolicy.adultBmi(
+            age,
+            weightKg,
+            heightCm,
+            ageInputConfirmed && bodyInputsConfirmed,
+        )
+
+    /**
+     * Health Connect has no BMI record. A non-positive value tells the importer to skip derivation,
+     * preventing the untouched 178 cm editor seed from becoming apparently personal history.
+     */
+    val bodyCompositionImportHeightCm: Double
+        get() = heightCm.takeIf { heightInputConfirmed } ?: 0.0
+
+    fun targetWeightAvailability(
+        currentWeightKg: Double = weightKg,
+        targetWeightKg: Double? = this.targetWeightKg,
+        currentWeightConfirmed: Boolean = weightInputConfirmed,
+    ): BodyWeightTargetAvailability = BodyProfilePolicy.targetAvailability(
+        age = age,
+        currentWeightKg = currentWeightKg,
+        heightCm = heightCm,
+        targetWeightKg = targetWeightKg,
+        measurementsConfirmed = ageInputConfirmed && heightInputConfirmed && currentWeightConfirmed,
+    )
 
     /**
      * Waist circumference in cm; 0 = unset (the Fitness Age VO₂max estimate is hidden until a waist
@@ -452,8 +508,10 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_VO2MAX_PROVENANCE_REQUIRED = "vo2max_provenance_required"
         private const val KEY_VITALITY_PROVENANCE_REQUIRED = "vitality_provenance_required"
         private const val KEY_WEIGHT = "weight_kg"
+        private const val KEY_WEIGHT_CONFIRMED = "weight_input_confirmed"
         private const val KEY_TARGET_WEIGHT = "target_weight_kg"
         private const val KEY_HEIGHT = "height_cm"
+        private const val KEY_HEIGHT_CONFIRMED = "height_input_confirmed"
         private const val KEY_WAIST = "waist_cm"
         private const val KEY_HRMAX = "hr_max_override"
         private const val KEY_STEP_SCALE = "step_ticks_per_step"
@@ -577,6 +635,7 @@ fun SettingsScreen(
     profileEntry: Boolean = false,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val live by vm.live.collectAsStateWithLifecycle()
     val cycleTracking by vm.cycleTrackingEnabled.collectAsStateWithLifecycle()
@@ -710,6 +769,14 @@ fun SettingsScreen(
     var rhythmEnabled by remember { mutableStateOf(RhythmConsent.isEnabled(context)) }
     var coachSignals by remember { mutableStateOf(NoopPrefs.coachSignals(context)) }
     var autoWorkoutMode by remember { mutableStateOf(NoopPrefs.autoWorkoutMode(context)) }
+    val activitySuggestionStored =
+        remember { NoopPrefs.autoWorkoutSuggestionNotifications(context) }
+    var autoWorkoutSuggestionNotifications by remember {
+        mutableStateOf(activitySuggestionStored && reportNotificationsAvailable(context))
+    }
+    var activitySuggestionPermissionDenied by remember {
+        mutableStateOf(activitySuggestionStored && !reportNotificationsAvailable(context))
+    }
     var journalReminder by remember { mutableStateOf(NoopPrefs.journalReminderEnabled(context)) }
     // Keep the screen on during a manual workout recording (#703), default OFF. The live-workout
     // screen reads this same "workoutKeepScreenOn" key. String shared verbatim with the iOS/Mac twin
@@ -757,6 +824,64 @@ fun SettingsScreen(
     // Card-surface opacity (0f = clear, 1f = solid), for the "Card transparency" slider. Live-previews via
     // CardAppearance; saved on release.
     var cardOpacity by remember { mutableStateOf(NoopPrefs.cardOpacityPercent(context) / 100f) }
+
+    fun persistActivitySuggestionNotifications(enabled: Boolean) {
+        autoWorkoutSuggestionNotifications = enabled
+        NoopPrefs.setAutoWorkoutSuggestionNotifications(context, enabled)
+        if (!enabled) AutoWorkoutCandidateNotifier.cancelHandled(context)
+    }
+
+    val activitySuggestionPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val allowed = granted && reportNotificationsAvailable(context)
+        persistActivitySuggestionNotifications(allowed)
+        activitySuggestionPermissionDenied = !allowed
+    }
+
+    fun setActivitySuggestionNotifications(enabled: Boolean) {
+        if (!enabled) {
+            activitySuggestionPermissionDenied = false
+            persistActivitySuggestionNotifications(false)
+            return
+        }
+        if (reportNotificationsAvailable(context)) {
+            activitySuggestionPermissionDenied = false
+            persistActivitySuggestionNotifications(true)
+            return
+        }
+        val canRequestRuntimePermission =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+        if (canRequestRuntimePermission) {
+            activitySuggestionPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            activitySuggestionPermissionDenied = true
+            persistActivitySuggestionNotifications(false)
+        }
+    }
+
+    // A revoked OS permission must not leave an interruption preference showing ON. Detection and the
+    // quiet Today review card remain available; only Lock Screen delivery fails closed.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            if (reportNotificationsAvailable(context)) {
+                activitySuggestionPermissionDenied = false
+            } else if (
+                autoWorkoutSuggestionNotifications ||
+                NoopPrefs.autoWorkoutSuggestionNotifications(context)
+            ) {
+                persistActivitySuggestionNotifications(false)
+                activitySuggestionPermissionDenied = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // SAF launchers — CreateDocument for export, OpenDocument for import.
     val exportLauncher = rememberLauncherForActivityResult(
@@ -1160,30 +1285,49 @@ fun SettingsScreen(
                 }
                 RowDivider()
                 FormRow(label = stringResource(R.string.profile_bmi_label)) {
-                    val bmi = FitnessAgeEngine.bmi(profile.weightKg, profile.heightCm)
-                    val bmiText = "%.1f".format(bmi)
-                    val bmiAccessibility = stringResource(
-                        R.string.profile_bmi_accessibility,
-                        bmiText,
-                    )
-                    Text(
-                        text = bmiText,
-                        style = NoopType.bodyNumber,
-                        color = Palette.textPrimary,
-                        modifier = Modifier.semantics {
-                            contentDescription = bmiAccessibility
-                        },
-                    )
+                    val bmi = profile.adultBmi
+                    if (bmi != null) {
+                        val bmiText = "%.1f".format(bmi)
+                        val bmiAccessibility = stringResource(
+                            R.string.profile_bmi_accessibility,
+                            bmiText,
+                        )
+                        Text(
+                            text = bmiText,
+                            style = NoopType.bodyNumber,
+                            color = Palette.textPrimary,
+                            modifier = Modifier.semantics {
+                                contentDescription = bmiAccessibility
+                            },
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(
+                                if (profile.ageInputConfirmed && profile.age < 20) {
+                                    R.string.appwide_health_body_composition_bmi_under_20
+                                } else {
+                                    R.string.appwide_health_body_composition_bmi_confirm_inputs
+                                },
+                            ),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 Text(
-                    text = stringResource(R.string.profile_bmi_explanation),
+                    text = stringResource(R.string.appwide_health_body_composition_bmi_screening_note),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
                 RowDivider()
                 FormRow(label = stringResource(R.string.profile_target_weight_optional)) {
                     val target = profile.targetWeightKg
-                    if (target == null) {
+                    val availability = profile.targetWeightAvailability()
+                    val clearTargetAccessibility = stringResource(
+                        R.string.profile_target_weight_clear_accessibility,
+                    )
+                    if (target == null && availability == BodyWeightTargetAvailability.AVAILABLE) {
                         val addTargetAccessibility = stringResource(
                             R.string.profile_target_weight_add_accessibility,
                         )
@@ -1202,7 +1346,7 @@ fun SettingsScreen(
                             )
                             Text(stringResource(R.string.profile_target_weight_add))
                         }
-                    } else {
+                    } else if (target != null && availability == BodyWeightTargetAvailability.AVAILABLE) {
                         Column(horizontalAlignment = Alignment.End) {
                             if (massUnit == MassUnit.POUNDS) {
                                 val pounds = UnitFormatter.kgToPounds(target)
@@ -1235,9 +1379,6 @@ fun SettingsScreen(
                                     onPlus = { mutate { profile.targetWeightKg = target + 0.5 } },
                                 )
                             }
-                            val clearTargetAccessibility = stringResource(
-                                R.string.profile_target_weight_clear_accessibility,
-                            )
                             TextButton(
                                 onClick = { mutate { profile.targetWeightKg = null } },
                                 modifier = Modifier
@@ -1254,10 +1395,43 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.profile_target_weight_clear))
                             }
                         }
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.appwide_health_body_composition_target_unavailable,
+                                ),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (target != null) {
+                                IconButton(
+                                    onClick = { mutate { profile.targetWeightKg = null } },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .semantics {
+                                            contentDescription = clearTargetAccessibility
+                                        },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = null,
+                                        tint = Palette.textTertiary,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Text(
-                    text = stringResource(R.string.profile_target_weight_explanation),
+                    text = stringResource(
+                        R.string.appwide_health_body_composition_target_safety_note,
+                    ),
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -2585,6 +2759,9 @@ fun SettingsScreen(
                         onSelect = {
                             autoWorkoutMode = it
                             NoopPrefs.setAutoWorkoutMode(context, it)
+                            if (it == AutoWorkoutMode.OFF) {
+                                AutoWorkoutCandidateNotifier.cancelHandled(context)
+                            }
                         },
                         adaptsToAvailableWidth = true,
                     )
@@ -2595,6 +2772,41 @@ fun SettingsScreen(
                     color = Palette.textTertiary,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
                 )
+                RowDivider()
+                ToggleRow(
+                    title = uiString(R.string.appwide_activity_suggestion_notifications),
+                    detail = uiString(R.string.appwide_activity_suggestion_notifications_detail),
+                    checked = autoWorkoutSuggestionNotifications,
+                    enabled = autoWorkoutMode != AutoWorkoutMode.OFF,
+                    onCheckedChange = ::setActivitySuggestionNotifications,
+                )
+                if (activitySuggestionPermissionDenied) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.appwide_notifications_system_disabled),
+                            style = NoopType.footnote,
+                            color = Palette.statusCritical,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(
+                            onClick = {
+                                context.startActivity(
+                                    Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(
+                                            AndroidSettings.EXTRA_APP_PACKAGE,
+                                            context.packageName,
+                                        ),
+                                )
+                            },
+                        ) {
+                            Text(stringResource(R.string.appwide_action_open_settings))
+                        }
+                    }
+                }
                 RowDivider()
                 ToggleRow(
                     title = uiString(R.string.l10n_journal_reminder_journal_reminder_0fdc0d9c),
@@ -3657,6 +3869,7 @@ private fun ToggleRow(
     title: String,
     detail: String,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
@@ -3671,6 +3884,7 @@ private fun ToggleRow(
         NoopToggleSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
         )
     }
 }

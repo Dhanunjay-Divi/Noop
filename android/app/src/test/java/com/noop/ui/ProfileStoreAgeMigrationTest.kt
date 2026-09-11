@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import android.content.SharedPreferences
+import com.noop.analytics.BodyWeightTargetAvailability
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -77,6 +78,48 @@ class ProfileStoreAgeMigrationTest {
 
         profile.applyBackup(mapOf("profile.targetWeightKg" to 71.25))
         assertEquals(71.25, profile.targetWeightKg!!, 0.001)
+    }
+
+    @Test
+    fun bodySeedsRemainUnconfirmed_untilAcceptedOrEdited() {
+        val prefs = FakeSharedPreferences()
+        val profile = ProfileStore(prefs)
+        assertFalse(profile.weightInputConfirmed)
+        assertFalse(profile.heightInputConfirmed)
+        assertFalse(profile.bodyInputsConfirmed)
+        assertNull(profile.adultBmi)
+        assertEquals(0.0, profile.bodyCompositionImportHeightCm, 0.0)
+
+        profile.confirmAgeInput()
+        profile.weightKg = 75.0
+        assertTrue(profile.weightInputConfirmed)
+        assertFalse(profile.bodyInputsConfirmed)
+        profile.heightCm = 178.0
+        assertTrue(profile.bodyInputsConfirmed)
+        assertEquals(23.671, profile.adultBmi!!, 0.001)
+        assertEquals(178.0, profile.bodyCompositionImportHeightCm, 0.001)
+    }
+
+    @Test
+    fun bodyConfirmationAcceptsVisibleOnboardingValues() {
+        val profile = ProfileStore(FakeSharedPreferences())
+        profile.confirmAgeInput()
+        profile.confirmBodyInputs()
+        assertTrue(profile.bodyInputsConfirmed)
+        assertEquals(23.671, profile.adultBmi!!, 0.001)
+    }
+
+    @Test
+    fun adultBmiAndTargetProgressRemainUnavailableBelowAgeTwenty() {
+        val profile = ProfileStore(FakeSharedPreferences())
+        profile.weightKg = 75.0
+        profile.heightCm = 178.0
+        profile.setAge(19)
+        assertNull(profile.adultBmi)
+        assertEquals(
+            BodyWeightTargetAvailability.ADULT_SCREENING_UNAVAILABLE,
+            profile.targetWeightAvailability(targetWeightKg = 70.0),
+        )
     }
 
     @Test

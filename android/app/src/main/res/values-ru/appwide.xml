@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s. %2$s</string>
     <string name="appwide_action_done">Готово</string>
     <string name="appwide_action_open_settings">Открыть настройки</string>
+    <string name="appwide_activity_suggestion_notifications">Уведомления о предложениях активности</string>
+    <string name="appwide_activity_suggestion_notifications_detail">По умолчанию отключено. После синхронизации недавняя активность, подтверждённая движением, может появиться на экране блокировки для проверки. NOOP никогда не сохраняет её без вашего подтверждения.</string>
     <string name="appwide_adaptive_coaching_summary">Используйте свежие сигналы браслета для восстановления, перерывов в работе, дыхания, адаптации в поездках и контроля нагрузки.</string>
     <string name="appwide_adaptive_coaching_title">Адаптивные рекомендации</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Приватные необязательные советы по восстановлению и адаптации в поездках.</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">Тренды биомаркеров</string>
     <string name="appwide_health_body_composition_add_target">Добавьте необязательную цель в профиле.</string>
     <string name="appwide_health_body_composition_bmi">ИМТ</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">Подтвердите рост и вес, чтобы показать ИМТ для взрослых.</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">ИМТ рассчитывается по подтверждённым росту и весу для взрослых от 20 лет. Это ограниченный скрининговый показатель, а не диагноз или измерение состава тела.</string>
+    <string name="appwide_health_body_composition_bmi_under_20">ИМТ для взрослых не показывается до 20 лет.</string>
     <string name="appwide_health_body_composition_body_fat">ЖИРОВАЯ МАССА</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">Жировая масса всего тела: %1$s процента</string>
-    <string name="appwide_health_body_composition_disclaimer">Значения для всего тела сохраняют исходный источник. NOOP не определяет распределение жира и мышц по рукам, ногам или туловищу: для этого требуется совместимое оборудование сегментарного анализа.</string>
+    <string name="appwide_health_body_composition_calculated">Рассчитано</string>
+    <string name="appwide_health_body_composition_disclaimer">Значения для всего тела сохраняют источник и дату. Жировая и безжировая масса являются оценками исходного устройства и могут меняться из-за гидратации и других условий; сравнивайте тренды, а не отдельные измерения. NOOP не определяет сегментарное распределение.</string>
     <string name="appwide_health_body_composition_lean_mass">БЕЗЖИРОВАЯ МАССА</string>
     <string name="appwide_health_body_composition_loading">Загрузка измерений…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">Нет измерения жировой массы всего тела</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">На %1$s ниже выбранной цели</string>
     <string name="appwide_health_body_composition_target_detail">Цель %1$s · выбрана вами</string>
     <string name="appwide_health_body_composition_target_reached">Вы достигли выбранной цели</string>
+    <string name="appwide_health_body_composition_target_safety_note">Необязательные цели по весу предназначены для взрослых от 20 лет с подтверждёнными измерениями. Они не предназначены для беременности, послеродового восстановления, лечения расстройств пищевого поведения или плана под наблюдением врача. NOOP не назначает темп или дополнительную нагрузку.</string>
+    <string name="appwide_health_body_composition_target_summary">Сейчас %1$s · выбранная цель %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">Прогресс цели недоступен для текущего профиля.</string>
     <string name="appwide_health_body_composition_target_weight">ЦЕЛЕВОЙ ВЕС</string>
     <string name="appwide_health_body_composition_title">Состав тела</string>
     <string name="appwide_health_body_composition_weight">ВЕС</string>

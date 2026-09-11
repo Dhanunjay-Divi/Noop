@@ -22,13 +22,36 @@ class AutoWorkoutCandidateNotificationPolicyTest {
 
     @Test
     fun post_requiresOptInExistingAuthorizationAndANewSpan() {
-        assertTrue(AutoWorkoutCandidateNotificationPolicy.shouldPost(true, true, kind, token, null))
-        assertFalse(AutoWorkoutCandidateNotificationPolicy.shouldPost(false, true, kind, token, null))
-        assertFalse(AutoWorkoutCandidateNotificationPolicy.shouldPost(true, false, kind, token, null))
-        assertFalse(AutoWorkoutCandidateNotificationPolicy.shouldPost(true, true, kind, token, deliveryToken))
+        assertTrue(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, true, kind, token, null,
+            ),
+        )
+        assertFalse(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                false, true, true, kind, token, null,
+            ),
+        )
+        assertFalse(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, false, true, kind, token, null,
+            ),
+        )
+        assertFalse(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, false, kind, token, null,
+            ),
+        )
+        assertFalse(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, true, kind, token, deliveryToken,
+            ),
+        )
         assertFalse(
             "legacy candidate tokens remain deduped after migration",
-            AutoWorkoutCandidateNotificationPolicy.shouldPost(true, true, kind, token, token),
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, true, kind, token, token,
+            ),
         )
     }
 
@@ -40,7 +63,11 @@ class AutoWorkoutCandidateNotificationPolicyTest {
             postedSuccessfully = false,
         )
         assertNull(afterFailure)
-        assertTrue(AutoWorkoutCandidateNotificationPolicy.shouldPost(true, true, kind, token, afterFailure))
+        assertTrue(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, true, kind, token, afterFailure,
+            ),
+        )
 
         val afterSuccess = AutoWorkoutCandidateNotificationPolicy.tokenAfterAttempt(
             previous = afterFailure,
@@ -48,7 +75,11 @@ class AutoWorkoutCandidateNotificationPolicyTest {
             postedSuccessfully = true,
         )
         assertEquals(deliveryToken, afterSuccess)
-        assertFalse(AutoWorkoutCandidateNotificationPolicy.shouldPost(true, true, kind, token, afterSuccess))
+        assertFalse(
+            AutoWorkoutCandidateNotificationPolicy.shouldPost(
+                true, true, true, kind, token, afterSuccess,
+            ),
+        )
     }
 
     @Test

@@ -4,6 +4,8 @@
     <string name="appwide_a11y_state_format">%1$s. %2$s</string>
     <string name="appwide_action_done">Listo</string>
     <string name="appwide_action_open_settings">Abrir ajustes</string>
+    <string name="appwide_activity_suggestion_notifications">Notificaciones de sugerencias de actividad</string>
+    <string name="appwide_activity_suggestion_notifications_detail">Desactivadas de forma predeterminada. Tras una sincronización, una actividad reciente confirmada por movimiento puede aparecer en la pantalla de bloqueo para que la revises. NOOP nunca la guarda sin tu aprobación.</string>
     <string name="appwide_adaptive_coaching_summary">Usa señales recientes del wearable para orientar la recuperación, las pausas de concentración, la respiración, la adaptación a viajes y el esfuerzo de entrenamiento.</string>
     <string name="appwide_adaptive_coaching_title">Orientación adaptativa</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Sugerencias privadas y opcionales de recuperación y adaptación a viajes.</string>
@@ -334,9 +336,13 @@
     <string name="appwide_health_biomarker_trends_title">Tendencias de biomarcadores</string>
     <string name="appwide_health_body_composition_add_target">Añade un objetivo opcional en Perfil.</string>
     <string name="appwide_health_body_composition_bmi">IMC</string>
+    <string name="appwide_health_body_composition_bmi_confirm_inputs">Confirma la altura y el peso para mostrar el IMC de adultos.</string>
+    <string name="appwide_health_body_composition_bmi_screening_note">El IMC se calcula con la altura y el peso confirmados para adultos de 20 años o más. Es un valor de cribado limitado, no un diagnóstico ni una medición de la composición corporal.</string>
+    <string name="appwide_health_body_composition_bmi_under_20">El IMC de adultos no se muestra antes de los 20 años.</string>
     <string name="appwide_health_body_composition_body_fat">GRASA CORPORAL</string>
     <string name="appwide_health_body_composition_body_fat_accessibility">Grasa corporal total %1$s por ciento</string>
-    <string name="appwide_health_body_composition_disclaimer">Los valores de cuerpo completo conservan su fuente registrada. NOOP no infiere la distribución de grasa o músculo en brazos, piernas o tronco; para ello se necesita hardware compatible de medición segmentaria.</string>
+    <string name="appwide_health_body_composition_calculated">Calculado</string>
+    <string name="appwide_health_body_composition_disclaimer">Los valores de cuerpo completo conservan su fuente y fecha. La grasa corporal y la masa magra son estimaciones del dispositivo de origen y pueden variar con la hidratación y otras condiciones; compara tendencias, no lecturas aisladas. NOOP no infiere la distribución segmentaria.</string>
     <string name="appwide_health_body_composition_lean_mass">MASA MAGRA</string>
     <string name="appwide_health_body_composition_loading">Cargando mediciones…</string>
     <string name="appwide_health_body_composition_no_body_fat_measurement">Sin medición de grasa corporal total</string>
@@ -348,6 +354,9 @@
     <string name="appwide_health_body_composition_target_below">%1$s por debajo del objetivo seleccionado</string>
     <string name="appwide_health_body_composition_target_detail">Objetivo %1$s · seleccionado por ti</string>
     <string name="appwide_health_body_composition_target_reached">En el objetivo seleccionado</string>
+    <string name="appwide_health_body_composition_target_safety_note">Los objetivos de peso opcionales son para adultos de 20 años o más con mediciones confirmadas. No están pensados para el embarazo, la recuperación posparto, la atención de trastornos alimentarios ni planes dirigidos por un profesional sanitario. NOOP nunca asigna un ritmo ni ejercicio adicional.</string>
+    <string name="appwide_health_body_composition_target_summary">Actual %1$s · objetivo seleccionado %2$s</string>
+    <string name="appwide_health_body_composition_target_unavailable">El progreso del objetivo no está disponible con el perfil actual.</string>
     <string name="appwide_health_body_composition_target_weight">PESO OBJETIVO</string>
     <string name="appwide_health_body_composition_title">Composición corporal</string>
     <string name="appwide_health_body_composition_weight">PESO</string>

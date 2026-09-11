@@ -918,6 +918,11 @@ object NoopPrefs {
     /** Three-way mode. Fresh → Ask; legacy true → Ask; legacy false → Off. */
     const val KEY_AUTO_WORKOUT_MODE = "noop.autoWorkoutMode"
 
+    /** Lock-screen activity suggestions are a separate interruption consent. Detection remains usable
+     *  quietly in Today when this is OFF. Fresh installs and upgrades default OFF. */
+    const val KEY_AUTO_WORKOUT_SUGGESTION_NOTIFICATIONS =
+        "noop.autoWorkoutSuggestionNotifications"
+
     internal fun resolveAutoWorkoutMode(storedRaw: String?, legacyEnabled: Boolean?): AutoWorkoutMode =
         AutoWorkoutMode.fromStored(storedRaw)?.let {
             if (it == AutoWorkoutMode.AUTO_SAVE) AutoWorkoutMode.ASK else it
@@ -987,6 +992,15 @@ object NoopPrefs {
 
     fun setAutoDetectWorkouts(context: Context, enabled: Boolean) {
         setAutoWorkoutMode(context, if (enabled) AutoWorkoutMode.ASK else AutoWorkoutMode.OFF)
+    }
+
+    fun autoWorkoutSuggestionNotifications(context: Context): Boolean =
+        of(context).getBoolean(KEY_AUTO_WORKOUT_SUGGESTION_NOTIFICATIONS, false)
+
+    fun setAutoWorkoutSuggestionNotifications(context: Context, enabled: Boolean) {
+        of(context).edit()
+            .putBoolean(KEY_AUTO_WORKOUT_SUGGESTION_NOTIFICATIONS, enabled)
+            .apply()
     }
 
     fun journalReminderEnabled(context: Context): Boolean =

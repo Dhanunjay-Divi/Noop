@@ -298,7 +298,14 @@ fun DataSourcesScreen(vm: AppViewModel) {
             hcHasAnyReadAccess = allGranted.any { it in HealthConnectImporter.PERMISSIONS }
             hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - allGranted
             if (allGranted.any { it in HealthConnectImporter.PERMISSIONS }) {
-                runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
+                runImport {
+                    val profile = ProfileStore.from(context)
+                    HealthConnectImporter.import(
+                        context,
+                        vm.repo,
+                        profile.bodyCompositionImportHeightCm,
+                    )
+                }
             } else {
                 Toast.makeText(context, "Health Connect access not granted.", Toast.LENGTH_LONG).show()
             }
@@ -340,7 +347,14 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 HealthConnectImporter.missingReadPermissions(granted)
             }
             if (missing.isEmpty()) {
-                runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
+                runImport {
+                    val profile = ProfileStore.from(context)
+                    HealthConnectImporter.import(
+                        context,
+                        vm.repo,
+                        profile.bodyCompositionImportHeightCm,
+                    )
+                }
             } else {
                 hcPermissionLauncher.launch(missing)
             }
