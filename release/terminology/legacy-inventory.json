@@ -3,9 +3,9 @@
     "compatibility": 1701,
     "core": 4972,
     "customer": 813,
-    "fixture": 5339,
-    "generated": 13,
-    "historical": 3032,
+    "fixture": 5342,
+    "generated": 14,
+    "historical": 3034,
     "import": 870,
     "persisted": 667
   },
@@ -16881,7 +16881,7 @@
       "category": "core",
       "lineNumbers": [
         291,
-        1312
+        1315
       ],
       "occurrenceCount": 2,
       "path": "StrandiOS/App/StrandiOSApp.swift",
@@ -18155,6 +18155,18 @@
       }
     },
     {
+      "category": "generated",
+      "lineNumbers": [
+        0
+      ],
+      "occurrenceCount": 1,
+      "path": "android/app/schemas/com.noop.data.WhoopDatabase/46.json",
+      "sha256": "ad7d549237a49fe2d95ec223fb7336fed0359973575a014fad8788c1bd8b19fa",
+      "tokenCounts": {
+        "whoopdatabase": 1
+      }
+    },
+    {
       "category": "historical",
       "lineNumbers": [
         0,
@@ -18341,6 +18353,19 @@
       "category": "historical",
       "lineNumbers": [
         19,
+        64
+      ],
+      "occurrenceCount": 2,
+      "path": "android/app/src/androidTest/java/com/noop/data/SleepGravityBmiCleanupMigrationInstrumentedTest.kt",
+      "sha256": "15063944245823342c9006dbff52c9830b57152ec4c613d5e679995c9a856c80",
+      "tokenCounts": {
+        "whoopdatabase": 2
+      }
+    },
+    {
+      "category": "historical",
+      "lineNumbers": [
+        19,
         52
       ],
       "occurrenceCount": 2,
@@ -18465,7 +18490,7 @@
         10,
         23,
         29,
-        119
+        167
       ],
       "occurrenceCount": 4,
       "path": "android/app/src/androidTest/java/com/noop/managed/RoomManagedRestoreInstrumentedTest.kt",
@@ -18660,10 +18685,10 @@
       "lineNumbers": [
         8,
         9,
-        148,
-        150,
-        150,
-        151
+        149,
+        151,
+        151,
+        152
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/java/com/noop/alarm/WindDownStore.kt",
@@ -19036,35 +19061,35 @@
         1029,
         1032,
         1036,
-        1243,
-        1260,
-        1267,
+        1244,
+        1261,
         1268,
-        1279,
-        1447,
-        1459,
+        1269,
+        1280,
+        1448,
         1460,
-        1476,
-        1482,
-        1517,
-        1654,
-        1685,
-        1755,
-        1855,
-        1878,
-        1935,
-        2112,
-        2127,
-        2145,
-        2274,
-        2286,
-        2341,
-        2343,
-        2353,
-        2384,
-        2413,
-        2427,
-        2448
+        1461,
+        1477,
+        1483,
+        1518,
+        1655,
+        1686,
+        1756,
+        1856,
+        1879,
+        1936,
+        2113,
+        2128,
+        2146,
+        2275,
+        2287,
+        2342,
+        2344,
+        2354,
+        2385,
+        2414,
+        2428,
+        2449
       ],
       "occurrenceCount": 78,
       "path": "android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt",
@@ -19094,12 +19119,12 @@
         475,
         497,
         559,
-        1242,
-        1262,
-        1551,
+        1243,
+        1263,
         1552,
-        1682,
-        2267
+        1553,
+        1683,
+        2268
       ],
       "occurrenceCount": 14,
       "path": "android/app/src/main/java/com/noop/analytics/IntelligenceEngine.kt",
@@ -21171,15 +21196,15 @@
         293,
         295,
         333,
-        458,
-        466,
-        562,
-        563,
-        571,
-        601,
-        603,
-        606,
-        633
+        462,
+        470,
+        566,
+        567,
+        575,
+        605,
+        607,
+        610,
+        637
       ],
       "occurrenceCount": 26,
       "path": "android/app/src/main/java/com/noop/data/Entities.kt",
@@ -21196,7 +21221,7 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        468
+        472
       ],
       "occurrenceCount": 1,
       "path": "android/app/src/main/java/com/noop/data/Entities.kt",
@@ -21408,25 +21433,25 @@
         0,
         12,
         25,
-        615,
-        641,
-        724,
-        789,
-        953,
-        1047,
-        1146,
-        1175,
-        1175,
-        1186,
-        1266,
-        1710,
-        1726,
-        1750,
-        1805,
-        1928,
-        1951,
-        2070,
-        2112
+        619,
+        645,
+        728,
+        793,
+        957,
+        1051,
+        1150,
+        1179,
+        1179,
+        1190,
+        1270,
+        1714,
+        1730,
+        1754,
+        1809,
+        1932,
+        1955,
+        2074,
+        2116
       ],
       "occurrenceCount": 22,
       "path": "android/app/src/main/java/com/noop/data/WhoopDao.kt",
@@ -21444,15 +21469,15 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        1145,
-        1176,
-        1176,
-        1182,
-        1191,
-        1200,
-        1207,
-        2073,
-        2112
+        1149,
+        1180,
+        1180,
+        1186,
+        1195,
+        1204,
+        1211,
+        2077,
+        2116
       ],
       "occurrenceCount": 9,
       "path": "android/app/src/main/java/com/noop/data/WhoopDao.kt",
@@ -21503,14 +21528,14 @@
         695,
         695,
         703,
-        1445,
-        1448,
-        1472,
-        1475,
+        1464,
+        1467,
         1491,
-        1491,
-        1492,
-        1492
+        1494,
+        1510,
+        1510,
+        1511,
+        1511
       ],
       "occurrenceCount": 46,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -21534,8 +21559,8 @@
         879,
         882,
         885,
-        1472,
-        1491
+        1491,
+        1510
       ],
       "occurrenceCount": 9,
       "path": "android/app/src/main/java/com/noop/data/WhoopDatabase.kt",
@@ -23901,22 +23926,22 @@
         2786,
         2911,
         2916,
-        3126,
-        3127,
         3131,
         3132,
-        3146,
-        3147,
-        3173,
-        3174,
-        3396,
-        3397,
-        3415,
-        3434,
-        3477,
-        3607,
-        3729,
-        3750
+        3136,
+        3137,
+        3151,
+        3152,
+        3178,
+        3179,
+        3401,
+        3402,
+        3420,
+        3439,
+        3482,
+        3612,
+        3734,
+        3755
       ],
       "occurrenceCount": 90,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -23941,10 +23966,10 @@
         1042,
         2161,
         2162,
-        3396,
-        3397,
-        3566,
-        3568
+        3401,
+        3402,
+        3571,
+        3573
       ],
       "occurrenceCount": 10,
       "path": "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
@@ -24519,18 +24544,18 @@
       "category": "core",
       "lineNumbers": [
         102,
-        713,
-        964,
-        977,
-        1281,
-        1438,
-        1443,
-        1449,
-        1537,
-        3184,
-        3441,
+        714,
+        965,
+        978,
+        1282,
+        1439,
+        1444,
+        1450,
+        1538,
+        3185,
         3442,
-        3483
+        3443,
+        3484
       ],
       "occurrenceCount": 13,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -24544,12 +24569,12 @@
     {
       "category": "persisted",
       "lineNumbers": [
-        778,
-        3376,
-        3400,
-        3449,
-        3465,
-        3487
+        779,
+        3377,
+        3401,
+        3450,
+        3466,
+        3488
       ],
       "occurrenceCount": 6,
       "path": "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -30494,6 +30519,20 @@
     {
       "category": "fixture",
       "lineNumbers": [
+        15,
+        17,
+        18
+      ],
+      "occurrenceCount": 3,
+      "path": "android/app/src/test/java/com/noop/data/SleepGravityBmiCleanupMigrationTest.kt",
+      "sha256": "d3a826fb8ecd50b492d1bc7667a12d6318570346c7d79cd604ea6e5ebfdafb44",
+      "tokenCounts": {
+        "whoopdatabase": 3
+      }
+    },
+    {
+      "category": "fixture",
+      "lineNumbers": [
         9,
         11,
         20,
@@ -35009,11 +35048,11 @@
     {
       "category": "historical",
       "lineNumbers": [
-        31
+        36
       ],
       "occurrenceCount": 1,
       "path": "docs/ops/ACTIVE.md",
-      "sha256": "9ae4ba0ed4ad752e1c48012e2f8e6340f9e81a7aad3a0d8cbe115e2218299474",
+      "sha256": "c05b420ef8421d034615fc724784b9786fbceb7d6dd4d81596cbcbd0347cf739",
       "tokenCounts": {
         "whoopstore": 1
       }
@@ -35221,12 +35260,12 @@
     {
       "category": "historical",
       "lineNumbers": [
-        202,
-        230
+        230,
+        261
       ],
       "occurrenceCount": 2,
       "path": "docs/ops/rounds/2026-09-11-product-safety-quality-audit.md",
-      "sha256": "77fb59305b9d5215e20a8b5b0acd274fd0edd46ccb318891a3aa57ae02b4eba2",
+      "sha256": "6f7fd97b7ecc34914cfb269f57e892d548b7a23204fa02bd6f08aca1d0307408",
       "tokenCounts": {
         "whoopstore": 2
       }
@@ -35240,7 +35279,7 @@
       ],
       "occurrenceCount": 3,
       "path": "docs/ops/rounds/INDEX.md",
-      "sha256": "641973e3dafde7f1f4e2b6c86fe1908dd31cc0c23da7857bf1f24354d1d1e31b",
+      "sha256": "4bb1353df4b2df243f335bd29fc32f37f577bf366b60b9666e3717d0e9b33b98",
       "tokenCounts": {
         "whoop": 2,
         "whoopstore": 1
@@ -37459,7 +37498,7 @@
       }
     }
   ],
-  "occurrenceCount": 17407,
+  "occurrenceCount": 17413,
   "scanner": "Tools/terminology-audit.py",
   "schemaVersion": 1
 }

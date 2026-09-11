@@ -235,7 +235,7 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         )
     }
 
-    func testDatedScheduleUsesPerDayOverridesAndKeepsFourteenFutureNights() throws {
+    func testDatedScheduleUsesPerDayOverridesAndKeepsTwentyEightFutureNights() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
         let now = try XCTUnwrap(calendar.date(from: DateComponents(
@@ -248,18 +248,46 @@ final class WindDownPerDayOverrideTests: XCTestCase {
 
         let reminders = WindDownNudge.reminderSchedule(
             now: now,
-            horizonDays: 14,
+            horizonDays: 28,
             calendar: calendar
         )
 
-        XCTAssertEqual(reminders.count, 14)
-        XCTAssertEqual(Set(reminders.map(\.identifier)).count, 14)
+        XCTAssertEqual(reminders.count, 28)
+        XCTAssertEqual(Set(reminders.map(\.identifier)).count, 28)
         XCTAssertTrue(reminders.allSatisfy { $0.fireDate > now })
         let saturday = try XCTUnwrap(reminders.first {
             calendar.component(.weekday, from: $0.fireDate) == 7
         })
         XCTAssertEqual(calendar.component(.hour, from: saturday.fireDate), 0)
         XCTAssertEqual(calendar.component(.minute, from: saturday.fireDate), 30)
+    }
+
+    func testRenewalWakeIsRequestedWhileThreeWeeksOfRemindersRemain() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 9, day: 11, hour: 12
+        )))
+        let reminders = WindDownNudge.reminderSchedule(
+            now: now,
+            horizonDays: 28,
+            calendar: calendar
+        )
+        let final = try XCTUnwrap(reminders.last?.fireDate)
+        let renewal = try XCTUnwrap(WindDownNudge.renewalWakeDate(
+            scheduledReminders: reminders,
+            now: now,
+            calendar: calendar
+        ))
+        let expected = try XCTUnwrap(calendar.date(
+            byAdding: .day,
+            value: -21,
+            to: final
+        ))
+
+        XCTAssertEqual(renewal, expected)
+        XCTAssertGreaterThan(renewal, now)
+        XCTAssertLessThan(renewal, final)
     }
 
     func testDatedSchedulePreservesLocalWallClockAcrossSpringDst() throws {
@@ -348,18 +376,18 @@ final class WindDownPerDayOverrideTests: XCTestCase {
 
         let baseline = WindDownNudge.reminderSchedule(
             now: now,
-            horizonDays: 14,
+            horizonDays: 28,
             calendar: calendar
         )
         let excluded = try XCTUnwrap(baseline.first?.dayKey)
         let filtered = WindDownNudge.reminderSchedule(
             now: now,
-            horizonDays: 14,
+            horizonDays: 28,
             calendar: calendar,
             excludedDayKeys: [excluded]
         )
 
-        XCTAssertEqual(filtered.count, 14)
+        XCTAssertEqual(filtered.count, 28)
         XCTAssertFalse(filtered.contains { $0.dayKey == excluded })
     }
 

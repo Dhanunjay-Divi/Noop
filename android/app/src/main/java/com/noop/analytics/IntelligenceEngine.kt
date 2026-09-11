@@ -1219,6 +1219,7 @@ object IntelligenceEngine {
                         restingHr = s.restingHR,
                         avgHrv = s.avgHRV,
                         stagesJSON = AnalyticsEngine.encodeStages(s.stages),
+                        gravitySparse = night.gravitySparse,
                         rrEligibleWindowCount = rrEvidence?.eligibleWindows,
                         rrValidWindowCount = rrEvidence?.validRRWindows,
                     ),

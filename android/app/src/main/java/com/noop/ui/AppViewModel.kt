@@ -3034,6 +3034,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         reconcilePlannedWorkoutCalendarObserver()
         AdaptiveDayEvaluationGate.invalidate()
         PlannedWorkoutCalendarStore.invalidate()
+        AdaptivePlannedWorkoutScheduler.cancel(appContext)
+        AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+            appContext,
+            currentFingerprint = null,
+        )
         plannedWorkoutCalendarEvaluationJob?.cancel()
         plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
             PlannedWorkoutCalendarStore.refresh(

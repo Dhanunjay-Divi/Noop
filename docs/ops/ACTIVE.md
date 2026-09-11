@@ -23,21 +23,27 @@ Last updated: **2026-09-11**
 ### Current audited state
 
 The supplier-independent product, safety, and quality audit is complete locally
-on `codex/product-safety-quality-audit-20260911`. Commits `99a51b80` and
-`e35d1d37` add schema-v55 atomic hydration entries, matched missing/error and
-accessibility semantics, one routine-notification budget per completed sync,
-private and sleep-aware wind-down behavior, uncapped Today Dynamic Type, and
-terminal-state Safety location deletion in memory and PostgreSQL. The exact
-current tree passes 450 WhoopStore tests, 1,777 Apple app tests with one
-external-fixture skip, 4,313 tests in each Android variant with seven
-evidence-dependent skips plus lint and both APK assemblies, 340 server tests
-with 94 environment/provider skips plus Ruff, the complete unsigned
-app/widget/Watch graph, and a directly inspected 42-capture iPhone visual
-matrix. The exact-tree terminology, claims, privacy, CI, calibration, legal,
-operations, i18n, secret-pattern, schema, diff, and tool policy wall passes;
-the project/user `noop-ops` skill copies are validated and byte-identical. The
-single protected push, exact-SHA hosted checks, normal merge, and round-owned
-cleanup remain in this round. Physical phones, band/firmware,
+on `codex/product-safety-quality-audit-20260911` and tracked by protected pull
+request `#15`. Commits `99a51b80` and `e35d1d37` plus the corrective head add
+schema-v55 atomic hydration entries, matched missing/error and accessibility
+semantics, one routine-notification budget per completed sync, private
+sleep-aware wind-down behavior, uncapped Today Dynamic Type, and terminal-state
+Safety location deletion in memory and PostgreSQL. Hosted review identified
+six concrete defects after its first green head; the replacement source purges
+legacy terminal Safety locations, renews Apple's dated wind-down schedule,
+adds Android Room v46 nullable motion-quality evidence and legacy BMI cleanup,
+retracts stale calendar artifacts, and releases queued Apple notification
+budgets before discard. The exact current tree passes 450 WhoopStore tests,
+1,779 Apple app tests with one external-fixture skip, 4,315 tests in each
+Android variant with seven evidence-dependent skips plus lint and both APK
+assemblies, 340 server tests with 94 environment/provider skips plus Ruff, the
+complete unsigned app/widget/Watch graph, an eight-test managed API 35 device
+run, and a directly inspected 42-capture iPhone visual matrix. The exact-tree
+terminology, claims, privacy, CI, calibration, legal, operations, i18n,
+secret-pattern, schema, diff, 227-tool-test, and 49-i18n-test policy wall
+passes; the project/user `noop-ops` skill copies are validated and
+byte-identical. Replacement-head exact-SHA checks, normal integration, and
+round-owned cleanup remain in this round. Physical phones, band/firmware,
 BLE/background/notification/haptic/
 battery/sensor behavior, configured PostgreSQL, real providers/carriers,
 public traffic, production health transfer, legal/terms, 24/7 operations,

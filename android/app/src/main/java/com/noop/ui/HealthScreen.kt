@@ -397,11 +397,12 @@ private fun BodyCompositionSection(
         ?.let { BodyCompositionReading(value = it, day = null, source = "profile") }
     val currentBmi = if (
         profile.ageInputConfirmed &&
-        profile.age >= BodyProfilePolicy.ADULT_MINIMUM_AGE
+        profile.age >= BodyProfilePolicy.ADULT_MINIMUM_AGE &&
+        profile.heightInputConfirmed &&
+        currentWeight != null
     ) {
         snapshot.bmi ?: run {
-            val weight = currentWeight ?: return@run null
-            if (!profile.heightInputConfirmed) return@run null
+            val weight = currentWeight
             val metres = profile.heightCm / 100.0
             val value = if (metres > 0.0) weight.value / (metres * metres) else Double.NaN
             value.takeIf { it.isFinite() && it in 5.0..100.0 }?.let {
@@ -420,7 +421,7 @@ private fun BodyCompositionSection(
     } ?: BodyWeightTargetAvailability.MEASUREMENTS_UNCONFIRMED
     val latestDay = listOfNotNull(
         snapshot.weight?.day,
-        snapshot.bmi?.day,
+        currentBmi?.day,
         snapshot.bodyFat?.day,
         snapshot.leanMass?.day,
     ).maxOrNull();

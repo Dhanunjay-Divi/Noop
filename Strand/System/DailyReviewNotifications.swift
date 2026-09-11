@@ -1456,6 +1456,9 @@ enum AutoWorkoutNotifications {
 
     static func clear(client: NotificationClient) {
         deliveryGeneration &+= 1
+        for delivery in deliveryQueue {
+            delivery.budget?.release(.autoWorkout)
+        }
         deliveryQueue.removeAll()
         // The suspended delivery still owns the drain, but it belongs to the retired generation. Do
         // not let its token suppress a same-candidate retry that arrives after this clear.

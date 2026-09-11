@@ -434,6 +434,41 @@ final class DailyReviewNotificationsTests: XCTestCase {
                        expectedToken)
     }
 
+    func testClearReleasesQueuedDeliveryBudgetBeforeSuspendedAddCompletes() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.suspendAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+        let activeBudget = PostSyncRoutineNotificationBudget()
+        let queuedBudget = PostSyncRoutineNotificationBudget()
+
+        let activePosting = Task {
+            await AutoWorkoutNotifications.postIfAuthorized(
+                startSec: 1_700_150_000,
+                endSec: 1_700_151_200,
+                client: notifications.client,
+                budget: activeBudget
+            )
+        }
+        await notifications.waitUntilAddStarts()
+
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: 1_700_160_000,
+            endSec: 1_700_161_200,
+            client: notifications.client,
+            budget: queuedBudget
+        )
+        AutoWorkoutNotifications.clear(client: notifications.client)
+
+        XCTAssertTrue(queuedBudget.reserve(.morningRecap))
+        XCTAssertTrue(queuedBudget.commit(.morningRecap))
+        XCTAssertEqual(queuedBudget.claimedLane, .morningRecap)
+
+        notifications.resumeAdd()
+        await activePosting.value
+        XCTAssertFalse(activeBudget.isClaimed)
+    }
+
     func testActivitySuggestionDedupHonorsBoundedHistoryAndLegacyToken() {
         let suite = "DailyReviewNotificationsTests.autoWorkout.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

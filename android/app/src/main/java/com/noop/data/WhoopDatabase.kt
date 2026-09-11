@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
-const val NOOP_DATABASE_SCHEMA_VERSION = 45
+const val NOOP_DATABASE_SCHEMA_VERSION = 46
 
 /**
  * Local Room database, the Android port of the GRDB store in
@@ -1113,6 +1113,25 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v45 -> v46: persist nullable sleep-stage motion quality and remove BMI rows that older builds
+         * derived from the untouched 178 cm editor seed. Nullable gravity evidence makes legacy/imported
+         * sessions fail open; fresh local analysis writes an explicit dense/sparse verdict. Health Connect
+         * has no measured BMI record, so deleting its old derived series loses no source measurement.
+         */
+        internal val SLEEP_GRAVITY_BMI_CLEANUP_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `sleepSession` ADD COLUMN `gravitySparse` INTEGER",
+            "DELETE FROM `metricSeries` WHERE `deviceId` = 'health-connect' AND `key` = 'bmi'",
+        )
+
+        internal val MIGRATION_45_46 = object : Migration(45, 46) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in SLEEP_GRAVITY_BMI_CLEANUP_MIGRATION_SQL) {
+                    db.execSQL(statement)
+                }
+            }
+        }
+
         private data class ManagedDocumentTriggerSpec(
             val table: String,
             val documentKind: String,
@@ -1466,7 +1485,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37,
                     MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40,
                     MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44,
-                    MIGRATION_44_45,
+                    MIGRATION_44_45, MIGRATION_45_46,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

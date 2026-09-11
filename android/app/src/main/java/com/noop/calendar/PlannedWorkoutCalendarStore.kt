@@ -75,6 +75,7 @@ object PlannedWorkoutCalendarStore {
     fun invalidate() {
         synchronized(stateLock) {
             invalidationGeneration += 1L
+            _snapshot.value = null
             lastRefreshAtMillis = 0L
             lastRefreshDay = null
         }

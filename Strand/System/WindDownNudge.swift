@@ -462,20 +462,25 @@ enum WindDownNudge {
     /// an older target-device reminder behind and a restored ON value becomes live only when the user
     /// has already authorized notifications.
     static func restoreScheduleIfAuthorized() {
+        Task { @MainActor in
+            await renewScheduleIfAuthorized()
+        }
+    }
+
+    /// Direct async repair used by the iOS background-maintenance lane. Unlike the foreground wrapper,
+    /// this does not launch detached work that could outlive the finite BGAppRefreshTask.
+    static func renewScheduleIfAuthorized() async {
         let center = UNUserNotificationCenter.current()
         guard isEnabled else {
             cancelAllScheduledReminders(on: center)
             return
         }
-        Task { @MainActor in
-            let settings = await center.notificationSettings()
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                schedule()
-            default:
-                LocalNotificationLifecycle.suppressed(identifier: requestId)
-                break
-            }
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            schedule()
+        default:
+            LocalNotificationLifecycle.suppressed(identifier: requestId)
         }
     }
 
@@ -492,6 +497,7 @@ enum WindDownNudge {
     /// a stale trigger behind.
     private static var perDayRequestIds: [String] { (1...7).map { "\(requestId)-wd\($0)" } }
     private static let suppressionLookAhead: TimeInterval = 12 * 60 * 60
+    private static let renewalBufferDays = 21
 
     private static var storedScheduledReminders: [ScheduledWindDownReminder] {
         guard let data = UserDefaults.standard.data(forKey: K.scheduledReminders),
@@ -557,7 +563,7 @@ enum WindDownNudge {
     /// evidence remove only the current sleep-window reminder instead of destroying every later night.
     static func reminderSchedule(
         now: Date = Date(),
-        horizonDays: Int = 14,
+        horizonDays: Int = 28,
         calendar: Calendar = .current,
         excludedDayKeys: Set<String> = []
     ) -> [ScheduledWindDownReminder] {
@@ -585,6 +591,23 @@ enum WindDownNudge {
             )
         }
         return reminders
+    }
+
+    /// Requests maintenance while a large dated-reminder buffer still remains. iOS may defer app
+    /// refresh, so the 28-day schedule leaves three weeks after this first renewal opportunity.
+    static func renewalWakeDate(
+        scheduledReminders: [ScheduledWindDownReminder],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard let finalReminder = scheduledReminders.max(by: {
+            $0.fireTimestamp < $1.fireTimestamp
+        }), let preferred = calendar.date(
+            byAdding: .day,
+            value: -renewalBufferDays,
+            to: finalReminder.fireDate
+        ) else { return nil }
+        return max(preferred, now.addingTimeInterval(60))
     }
 
     /// Selects only reminders in the active sleep window. The upper bound prevents evidence observed
@@ -708,5 +731,14 @@ enum WindDownNudge {
                 on: center
             )
         }
+        #if os(iOS)
+        if let renewal = renewalWakeDate(
+            scheduledReminders: reminders,
+            now: now,
+            calendar: calendar
+        ) {
+            BackgroundSyncScheduler.requestWake(noLaterThan: renewal, now: now)
+        }
+        #endif
     }
 }

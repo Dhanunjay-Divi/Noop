@@ -474,6 +474,7 @@ interface WhoopDao : DeviceRegistryDao {
                 startTsAdjusted = row.startTsAdjusted,
                 incomingMotionJSON = row.motionJSON,
                 incomingSleepStateJSON = row.sleepStateJSON,
+                incomingGravitySparse = row.gravitySparse,
                 rrEligibleWindowCount = row.rrEligibleWindowCount,
                 rrValidWindowCount = row.rrValidWindowCount,
             )
@@ -489,6 +490,8 @@ interface WhoopDao : DeviceRegistryDao {
             "startTsAdjusted = CASE WHEN userEdited = 1 THEN startTsAdjusted ELSE :startTsAdjusted END, " +
             "motionJSON = COALESCE(motionJSON, :incomingMotionJSON), " +
             "sleepStateJSON = COALESCE(sleepStateJSON, :incomingSleepStateJSON), " +
+            "gravitySparse = CASE WHEN userEdited = 1 " +
+                "THEN gravitySparse ELSE :incomingGravitySparse END, " +
             "rrEligibleWindowCount = CASE WHEN userEdited = 1 " +
                 "THEN rrEligibleWindowCount ELSE :rrEligibleWindowCount END, " +
             "rrValidWindowCount = CASE WHEN userEdited = 1 " +
@@ -507,6 +510,7 @@ interface WhoopDao : DeviceRegistryDao {
         startTsAdjusted: Long?,
         incomingMotionJSON: String?,
         incomingSleepStateJSON: String?,
+        incomingGravitySparse: Boolean?,
         rrEligibleWindowCount: Int?,
         rrValidWindowCount: Int?,
     ): Int

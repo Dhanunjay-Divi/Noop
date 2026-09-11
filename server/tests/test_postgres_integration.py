@@ -237,6 +237,20 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     assert "share_duration_hours" in escalation
 
 
+def test_terminal_location_cleanup_migration_removes_legacy_precise_rows() -> None:
+    cleanup = (
+        MIGRATIONS / "033_safety_terminal_location_cleanup.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "DELETE FROM safety_incident_locations AS location" in cleanup
+    assert "USING safety_dispatches AS dispatch" in cleanup
+    assert "location.dispatch_id = dispatch.dispatch_id" in cleanup
+    for status in ("resolved", "cancelled", "expired", "failed"):
+        assert f"'{status}'" in cleanup
+    assert "'open'" not in cleanup
+    assert "'acknowledged'" not in cleanup
+
+
 def test_managed_app_safety_migration_is_private_bounded_and_rerunnable() -> None:
     sql = (MIGRATIONS / "027_managed_app_safety.sql").read_text(encoding="utf-8")
     lifecycle = (MIGRATIONS / "028_managed_safety_contact_lifecycle.sql").read_text(

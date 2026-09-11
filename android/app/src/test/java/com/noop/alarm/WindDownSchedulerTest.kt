@@ -97,18 +97,22 @@ class WindDownSchedulerTest {
     }
 
     @Test
-    fun awakeStaleEditedAndSummaryOnlySessionsFailOpen() {
+    fun awakeStaleEditedSparseUnknownAndSummaryOnlySessionsFailOpen() {
         val now = 1_800_000_000L
         val awake = session(now - 90 * 60, now - 2 * 60, "wake")
         val stale = session(now - 3 * 60 * 60, now - 31 * 60, "rem")
         val edited = session(now - 90 * 60, now - 2 * 60, "light").copy(userEdited = true)
+        val sparse = session(now - 90 * 60, now - 2 * 60, "light")
+            .copy(gravitySparse = true)
+        val unknown = session(now - 90 * 60, now - 2 * 60, "light")
+            .copy(gravitySparse = null)
         val summaryOnly = session(now - 90 * 60, now - 2 * 60, "light").copy(
             stagesJSON = """{"light":80,"deep":10}""",
         )
 
         assertFalse(
             WindDownSleepStatePolicy.shouldSuppress(
-                listOf(awake, stale, edited, summaryOnly),
+                listOf(awake, stale, edited, sparse, unknown, summaryOnly),
                 now,
             ),
         )
@@ -134,6 +138,7 @@ class WindDownSchedulerTest {
             stagesJSON =
                 """[{"start":$start,"end":$middle,"stage":"light"},""" +
                     """{"start":$middle,"end":$end,"stage":"$lastStage"}]""",
+            gravitySparse = false,
         )
     }
 }

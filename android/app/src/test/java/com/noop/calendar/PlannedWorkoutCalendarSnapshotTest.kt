@@ -68,7 +68,7 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
-    fun refreshInvalidationPreservesTheLastKnownSnapshot() {
+    fun refreshInvalidationWithdrawsThePublishedSnapshot() {
         val source = plannedWorkoutCalendarStoreSource()
         val clearStart = source.indexOf("fun clear()")
         val invalidateStart = source.indexOf("fun invalidate()", clearStart)
@@ -78,7 +78,7 @@ class PlannedWorkoutCalendarSnapshotTest {
         val clear = source.substring(clearStart, invalidateStart)
         val invalidate = source.substring(invalidateStart, currentStart)
         assertTrue(clear.contains("_snapshot.value = null"))
-        assertTrue(!invalidate.contains("_snapshot.value = null"))
+        assertTrue(invalidate.contains("_snapshot.value = null"))
         assertTrue(invalidate.contains("invalidationGeneration += 1L"))
         assertTrue(invalidate.contains("lastRefreshAtMillis = 0L"))
         assertTrue(invalidate.contains("lastRefreshDay = null"))
@@ -130,10 +130,16 @@ class PlannedWorkoutCalendarSnapshotTest {
         val cancel = method.indexOf("plannedWorkoutCalendarEvaluationJob?.cancel()")
         val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
         val invalidateStore = method.indexOf("PlannedWorkoutCalendarStore.invalidate()")
+        val cancelArtifacts = method.indexOf("AdaptivePlannedWorkoutScheduler.cancel(appContext)")
+        val reconcileArtifacts = method.indexOf(
+            "AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(",
+        )
         val refresh = method.indexOf("PlannedWorkoutCalendarStore.refresh(")
         val evaluate = method.indexOf("evaluateAdaptiveDayGuidance()")
         assertTrue(invalidate >= 0 && invalidateStore > invalidate)
-        assertTrue(cancel > invalidateStore && refresh > cancel)
+        assertTrue(cancelArtifacts > invalidateStore)
+        assertTrue(reconcileArtifacts > cancelArtifacts)
+        assertTrue(cancel > reconcileArtifacts && refresh > cancel)
         assertTrue(refresh >= 0 && evaluate > refresh)
         assertTrue(method.contains("force = true"))
 

@@ -341,6 +341,10 @@ data class SleepSession(
     // through the targeted DAO methods (not the @Upsert path, which never names them and so preserves them).
     val motionJSON: String? = null,
     val sleepStateJSON: String? = null,
+    // v46. Explicit stage-evidence quality from the analysis that produced this session. `null` means
+    // unknown/imported/legacy and must fail open for behavior such as suppressing a wind-down reminder.
+    // Fresh on-device analysis writes true or false; a missing value is never interpreted as dense motion.
+    val gravitySparse: Boolean? = null,
     // v35. Exact-session sustained R-R evidence from the analysis that produced [stagesJSON].
     // Both values are nullable and must travel as a pair: null means the session has no attributable
     // analysis evidence (imports, legacy rows, manual edits, or failed/incomplete restore). Publication

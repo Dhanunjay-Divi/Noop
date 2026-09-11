@@ -35,6 +35,7 @@ internal object WindDownSleepStatePolicy {
 
     internal fun evidence(session: SleepSession): Evidence? {
         if (session.userEdited) return null
+        if (session.gravitySparse != false) return null
         val raw = session.stagesJSON ?: return null
         val stages = runCatching { JSONArray(raw) }.getOrNull() ?: return null
         if (stages.length() == 0) return null

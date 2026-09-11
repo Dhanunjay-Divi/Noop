@@ -414,6 +414,9 @@ struct StrandiOSApp: App {
                   let bridge,
                   await model.repo.storeHandle() != nil else { return false }
 
+            await WindDownNudge.renewScheduleIfAuthorized()
+            guard !Task.isCancelled else { return false }
+
             // If CoreBluetooth already restored/retained a bonded link, ask for the same rate-limited
             // historical offload as the 15-minute connected timer. This never starts dense Live HR and
             // is a no-op while disconnected, busy, recently synced, or backed off after empty history.

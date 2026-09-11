@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `supplier-independent implementation and local verification complete; protected integration pending`
+- State: `supplier-independent implementation and complete local verification; protected PR #15 replacement-head integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
-- End implementation commits: `99a51b80`, `e35d1d37`
-- Record commit or PR: pending
+- End implementation commits: `99a51b80`, `e35d1d37`, plus the corrective
+  head recorded by pull request `#15`
+- Record commit or PR: pull request `#15`
 
 ## Objective
 
@@ -110,10 +111,20 @@ records. Concurrent development must remain isolated by worktree and branch.
   external-health sync. Workout review, post-workout summary, adaptive-day
   guidance, and morning recap cannot burst from one late sync, and skipped
   lanes retain their durable frontier for later reconsideration.
+- Closed the final queued-delivery ownership race found in hosted review.
+  Clearing Apple workout suggestions now releases every queued reservation
+  before discarding it, while the suspended active delivery retains its own
+  defer-based cleanup. Android remains synchronous and already releases every
+  reservation on failure.
 - Hardened wind-down delivery with generic private-preview copy, suppression
   when fresh computed sleep evidence shows the user is already asleep, and
   conservative fail-open handling for stale, edited, sparse, malformed, or
   future sleep evidence.
+- Extended Apple's one-shot wind-down schedule to 28 nights and uses the
+  existing finite background-refresh lane to request renewal while three weeks
+  of reminders remain. Android now persists nullable `gravitySparse` evidence
+  through local analysis, Room, managed export, and restore; sparse or unknown
+  motion can no longer suppress a reminder.
 - Removed Today text-size caps, made the workout-coach row adapt vertically at
   accessibility sizes, and added explicit expanded/collapsed state semantics
   on Apple and Android. App-wide localization now contains 653 generated keys
@@ -122,6 +133,18 @@ records. Concurrent development must remain isolated by worktree and branch.
   expiry, cancellation, acknowledgement, exhaustion, closure, and deletion
   cancel pending delivery and delete latest precise location in both memory and
   PostgreSQL implementations; direct lifecycle tests cover the durable state.
+- Added PostgreSQL migration `033` to purge precise location rows already
+  retained by terminal incidents from older deployments while preserving open
+  and acknowledged incidents.
+- Added Android Room v46. It removes legacy Health Connect BMI rows derived by
+  older builds from the untouched 178 cm editor seed, retains real weight and
+  non-Health-Connect BMI rows, and stores nullable sleep motion-quality
+  evidence. The Body screen also requires confirmed adult age, confirmed
+  height, and current weight before displaying BMI.
+- Provider invalidation now withdraws the published Android calendar snapshot,
+  cancels scheduled reevaluation, and retracts old planned-workout artifacts
+  before a replacement query. A failed provider refresh therefore cannot leave
+  guidance for a moved or deleted workout.
 - Classified Apple `hydrationEntry` as a client-encrypted managed hydration
   target without enabling upload or changing core NOOP's local-first behavior.
 - Made the deterministic visual harness reliable from temporary worktrees by
@@ -144,12 +167,17 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: local database schema `54` to `55` adds
+- Schema or migration impact: Apple local database schema `54` to `55` adds
   `hydrationEntry`. Existing scalar hydration history migrates once into an
   editable row and the scalar projection remains transactionally aligned.
-- Existing-data retention impact: no biometric history was removed or
-  uploaded. Safety location now has stricter deletion at preview expiry and
-  every incident terminal state.
+  Android Room schema `45` to `46` adds nullable `sleepSession.gravitySparse`
+  and removes only legacy Health Connect-derived BMI rows. PostgreSQL migration
+  `033` removes precise locations joined to terminal Safety incidents.
+- Existing-data retention impact: no source biometric measurement was
+  uploaded or removed. The Android migration deletes unsupported derived BMI,
+  not Health Connect weight or another source's BMI. Safety location now has
+  stricter deletion at preview expiry, every incident terminal state, and
+  upgrade cleanup for legacy terminal rows.
 - Source/provenance or formula impact: BMI remains the conventional
   weight/height screening calculation, but now requires confirmed adult inputs.
   Body-composition values remain imported measurements with source/date
@@ -200,18 +228,20 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Private reference inventory preflight | Private session export and reference-image/PDF sets were reviewed in place and excluded from Git | Inputs can inform the audit without redistributing private material | Accuracy, rights, clinical review, or physical behavior |
 | Local source and round preflight | `CLAUDE.md`, operations contract, active handoff, and current release ledger reviewed | Audit is bounded by current repository rules | Any feature or external gate is complete |
 | Hydration store and schema | Full `WhoopStore` suite passed 450 tests; seven schema-oracle checks passed; Apple/Android oracles are byte-identical | Schema-v55 migration, atomic row/scalar projection, deletion, and parity contracts hold | Physical import-provider accuracy |
-| Focused current-delta suites | 42 focused Apple tests, 31 focused Android tests, and 13 focused Safety lifecycle tests passed | Changed hydration, notification, wind-down, accessibility, and Safety boundaries have direct regressions | Whole-app interaction or physical delivery |
-| Complete Apple app suite | 1,777 tests passed with one external-fixture skip and zero failures | Apple app, persistence, notification, calendar, privacy, accessibility, and lifecycle contracts pass together | iOS background delivery or physical BLE behavior |
-| Android full matrix | Full and Demo each passed 4,313 tests with seven evidence-dependent skips and zero failures; lint passed and both debug APKs assembled | Both Android variants compile and pass the current cross-platform contracts | Signed install, OEM delivery timing, or physical-device behavior |
+| Focused current-delta suites | 43 focused Apple tests, 31 focused Android tests, and 13 focused Safety lifecycle tests passed; a separate 16-test Apple notification run covers the queued-budget correction | Changed hydration, notification, wind-down, accessibility, and Safety boundaries have direct regressions | Whole-app interaction or physical delivery |
+| Complete Apple app suite | 1,779 tests passed with one external-fixture skip and zero failures | Apple app, persistence, notification, calendar, privacy, accessibility, and lifecycle contracts pass together | iOS background delivery or physical BLE behavior |
+| Android full matrix | Full and Demo each passed 4,315 tests with seven evidence-dependent skips and zero failures; lint passed and both debug APKs assembled | Both Android variants compile and pass the current cross-platform contracts | Signed install, OEM delivery timing, or physical-device behavior |
 | Complete Apple simulator graph | Unsigned generic iOS Simulator build succeeded for app, widget, and Watch dependencies | Current Apple source compiles and links | Signing, store acceptance, or physical-device behavior |
 | Deterministic visual matrix | 42 unique captures passed on iPhone 17 Pro Max and iPhone 17e; Today accessibility, Nutrition, keyboard, Safety, light/dark, and contrast states were inspected | Required screens are nonblank and show no incoherent clipping or overlap in these simulator states | VoiceOver focus, haptics, notification presentation, or hardware behavior |
 | Complete server suite | 340 tests passed, 94 environment/provider cases skipped, and Ruff passed | Current in-memory and configured server contracts remain coherent, including Safety lifecycle | PostgreSQL integration where `NOOP_TEST_DATABASE_URL` is absent, provider delivery, or public runtime |
-| Localization and repository policy | 653 app-wide keys generated for nine locales; terminology, required CI, calibration, release controls, trusted-main controls, legal provenance, private-data, health-claims, i18n, operations, schema, diff, 227 tool tests, and 49 i18n tests passed | Exact local source and release-control wiring pass the repository policy wall | Professional translation, hosted exact-SHA checks, or clinical review |
+| Localization and repository policy | 653 app-wide keys generated for nine locales; terminology, required CI, calibration, release controls, trusted-main controls, legal provenance, private-data, health-claims, i18n, operations, schema, diff, 227 tool tests, and 49 i18n tests passed | Exact local source and release-control wiring pass the repository policy wall | Professional translation, hosted replacement-head checks, or clinical review |
+| Hosted review | Pull request `#15` first passed 34 executable checks with four expected skips, then review identified six actionable lifecycle defects: legacy Safety location retention, finite wind-down exhaustion, legacy derived BMI, stale provider artifacts, sparse sleep suppression, and queued notification-budget leakage. All six have direct source and regression corrections on the replacement head. | The corrective scope is tied to concrete hosted findings rather than an unbounded rewrite | Replacement-head hosted verdict, physical behavior, or external launch gates |
 | Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
 
 The app, package, server, simulator-build, visual, and policy totals above cover
-commits `99a51b80` and `e35d1d37` plus the current record/policy delta.
-Protected exact-SHA checks remain required before integration.
+commits `99a51b80` and `e35d1d37` plus all six pull-request review corrections
+and the current record/policy delta. Protected replacement-head exact-SHA
+checks remain required before integration.
 
 ## Physical device and deployment
 
@@ -227,13 +257,17 @@ Protected exact-SHA checks remain required before integration.
 ## Git and release state
 
 - Changed paths: shared Apple/Android hydration, notification, wind-down,
-  Today/accessibility, generated localization and tests; WhoopStore schema and
-  migration; Safety repository lifecycle and tests; visual QA harness; durable
-  skill and operations records.
+  Today/accessibility, generated localization and tests; Apple queue ownership;
+  Android Room v46 and managed sleep evidence; WhoopStore schema and migration;
+  PostgreSQL Safety migration `033`; Safety repository lifecycle and tests;
+  visual QA harness; durable skill and operations records.
 - Commits: body/notification `9547c394`; calendar integration `4f8682a6`;
   wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
   reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`
-- Branch and remote state: isolated local branch; no push or hosted CI
+- Branch and remote state: protected pull request `#15`; the first head passed
+  every executable hosted check before six review findings were returned. The
+  corrective replacement head requires its own exact-SHA checks and normal
+  integration; earlier green checks are not reused as proof.
 - Repository visibility verified: inherited from current repository record
 - Version/build impact: local database schema `54` to `55`; no marketing
   version change
@@ -292,14 +326,10 @@ Protected exact-SHA checks remain required before integration.
 
 ## Next round
 
-1. Commit the validated record, terminology inventory, and byte-identical
-   project/user `noop-ops` skill state.
-2. Push once, allow all protected exact-SHA checks to complete, and merge
-   normally without bypassing branch protection.
-3. Run the checked-in physical-device handoff on representative iOS and Android
+1. Run the checked-in physical-device handoff on representative iOS and Android
    phones plus supported band firmware; record failures and logs rather than
    treating simulator evidence as hardware evidence.
-4. Complete legal, carrier, provider, signing, store, participant, licensing,
+2. Complete legal, carrier, provider, signing, store, participant, licensing,
    and operational-readiness gates before any production launch claim.
 
 ## Privacy check
