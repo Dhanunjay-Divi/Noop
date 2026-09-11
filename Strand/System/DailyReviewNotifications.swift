@@ -3,7 +3,7 @@ import UserNotifications
 
 /// A destination carried by a NOOP notification. The route is deliberately small: notifications
 /// open a trusted top-level screen, never a URL or arbitrary stored navigation value.
-enum NoopNotificationRoute: String, Equatable, Sendable {
+enum NoopNotificationRoute: String, Codable, Equatable, Sendable {
     case today
     case trends
     case workouts

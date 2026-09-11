@@ -64,6 +64,11 @@
          must be granted at runtime. Requested in MainActivity alongside the BLE permissions. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Optional planned-workout guidance. Requested only from the nested Automations toggle.
+         Titles are classified in memory; NOOP retains only a same-day start/end time and never writes
+         calendar content or identifiers. WRITE_CALENDAR is deliberately not requested. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
     <!-- Optional call alerts. Requested only when the user enables "Phone calls"; NOOP does not
          request READ_CALL_LOG and never reads incoming numbers, contacts, or call history. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />

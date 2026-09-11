@@ -8,11 +8,16 @@
     <string name="appwide_activity_suggestion_notifications_detail">Desativadas por predefinição. Após uma sincronização, uma atividade recente confirmada por movimento pode aparecer no ecrã bloqueado para revisão. O NOOP nunca a guarda sem a sua aprovação.</string>
     <string name="appwide_adaptive_coaching_summary">Use sinais recentes do dispositivo para orientar a recuperação, as pausas de concentração, a respiração, a adaptação a viagens e o esforço no treino.</string>
     <string name="appwide_adaptive_coaching_title">Orientação adaptativa</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">Com autorização, o NOOP verifica neste dispositivo os títulos do calendário de hoje e guarda apenas a hora de um treino claramente identificado. O conteúdo do calendário nunca é armazenado nem enviado.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Usar treinos planeados</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">O acesso ao calendário não está disponível. Permita o acesso do NOOP ao calendário nas definições do sistema.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Sugestões privadas e opcionais de recuperação e adaptação a viagens.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Orientação diária adaptativa</string>
     <string name="appwide_adaptive_day_guidance_help">Sugestões privadas e limitadas no telemóvel após sono recente insuficiente, uma alteração da rotina para mais tarde e com menor duração aprendida com pelo menos cinco noites anteriores, ou uma mudança de fuso horário de duas horas ou mais. Mudanças de uma hora devido ao horário de verão e dados antigos nunca as acionam.</string>
     <string name="appwide_adaptive_day_guidance_label">Orientação diária adaptativa</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">As notificações não estão disponíveis. Ative as notificações do NOOP e o canal Orientação diária adaptativa nas definições do sistema.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Aproxima-se um treino planeado e o sono ou a recuperação de hoje sugerem flexibilidade. Avalie como se sente antes de começar.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Considere um treino mais leve hoje</string>
     <string name="appwide_adaptive_day_guidance_routine_body">O seu sono mais recente foi mais tardio e mais curto do que o padrão recente. Mantenha o dia flexível e regresse esta noite ao seu horário habitual de relaxamento.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Regresse gradualmente ao seu ritmo</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Dormiu menos do que o seu objetivo. Use blocos de concentração mais curtos, escolha uma atividade mais leve se necessário e proteja o relaxamento desta noite.</string>

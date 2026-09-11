@@ -47,6 +47,70 @@ public enum DailyActionPlanner {
         }
     }
 
+    public struct SleepDay: Equatable, Sendable {
+        public let day: String
+        public let minutes: Double?
+
+        public init(day: String, minutes: Double?) {
+            self.day = day
+            self.minutes = minutes
+        }
+    }
+
+    public struct PlannedWorkout: Equatable, Sendable {
+        public let day: String
+        public let startSec: Int
+        public let endSec: Int
+
+        public init(day: String, startSec: Int, endSec: Int) {
+            self.day = day
+            self.startSec = startSec
+            self.endSec = endSec
+        }
+    }
+
+    public enum WorkoutAdjustmentReason: String, Equatable, Sendable, Codable {
+        case sleepDeficit
+        case recoveryShift
+        case sleepAndRecovery
+    }
+
+    public enum SleepReference: String, Equatable, Sendable, Codable {
+        case personalUsual
+        case explicitTarget
+    }
+
+    public struct WorkoutAdjustment: Equatable, Sendable {
+        public let startSec: Int
+        public let durationMinutes: Int
+        public let reason: WorkoutAdjustmentReason
+        public let measuredSleepMinutes: Int?
+        public let referenceSleepMinutes: Int?
+        public let sleepDeficitMinutes: Int?
+        public let sleepReference: SleepReference?
+        public let confidence: ScoreConfidence
+
+        public init(
+            startSec: Int,
+            durationMinutes: Int,
+            reason: WorkoutAdjustmentReason,
+            measuredSleepMinutes: Int?,
+            referenceSleepMinutes: Int?,
+            sleepDeficitMinutes: Int?,
+            sleepReference: SleepReference?,
+            confidence: ScoreConfidence
+        ) {
+            self.startSec = startSec
+            self.durationMinutes = durationMinutes
+            self.reason = reason
+            self.measuredSleepMinutes = measuredSleepMinutes
+            self.referenceSleepMinutes = referenceSleepMinutes
+            self.sleepDeficitMinutes = sleepDeficitMinutes
+            self.sleepReference = sleepReference
+            self.confidence = confidence
+        }
+    }
+
     public struct EffortRange: Equatable, Sendable {
         public let lower: Int
         public let upper: Int
@@ -76,6 +140,7 @@ public enum DailyActionPlanner {
         public let action: Action
         public let evidence: [Evidence]
         public let limitations: [String]
+        public let workoutAdjustment: WorkoutAdjustment?
 
         public init(
             day: String,
@@ -84,7 +149,8 @@ public enum DailyActionPlanner {
             confidence: ScoreConfidence,
             action: Action,
             evidence: [Evidence],
-            limitations: [String]
+            limitations: [String],
+            workoutAdjustment: WorkoutAdjustment? = nil
         ) {
             self.day = day
             self.availability = availability
@@ -93,6 +159,7 @@ public enum DailyActionPlanner {
             self.action = action
             self.evidence = evidence
             self.limitations = limitations
+            self.workoutAdjustment = workoutAdjustment
         }
     }
 
@@ -100,6 +167,13 @@ public enum DailyActionPlanner {
     public static let minimumEffortDays = 7
     public static let solidEffortDays = 14
     public static let extraSleepActionThresholdMinutes = 30
+    public static let sleepHistoryWindowDays = 21
+    public static let minimumUsualSleepNights = 5
+    public static let solidUsualSleepNights = 7
+    public static let workoutSleepDeficitThresholdMinutes = 45
+    public static let minimumPlannedWorkoutMinutes = 10
+    public static let maximumPlannedWorkoutMinutes = 6 * 60
+    public static let maximumPlannedWorkoutLeadSeconds = 24 * 60 * 60
 
     private static let planningLimitation =
         "This is a personal planning range, not a safety limit, diagnosis, or medical clearance."
@@ -110,9 +184,23 @@ public enum DailyActionPlanner {
         checkIn: CheckIn,
         recentEffort: [EffortDay],
         sleepRecoveryMinutes: Int = 0,
-        sleepConfidence: ScoreConfidence = .calibrating
+        sleepConfidence: ScoreConfidence = .calibrating,
+        recentSleep: [SleepDay] = [],
+        sleepTargetMinutes: Int = 8 * 60,
+        sleepTargetIsExplicit: Bool = false,
+        plannedWorkout: PlannedWorkout? = nil,
+        nowSec: Int = Int(Date().timeIntervalSince1970)
     ) -> Plan {
         let selfEvidence = Evidence(source: .selfCheck, detail: checkIn.rawValue)
+        let plannedAdjustment = workoutAdjustment(
+            today: today,
+            nowSec: nowSec,
+            readiness: readiness,
+            recentSleep: recentSleep,
+            sleepTargetMinutes: sleepTargetMinutes,
+            sleepTargetIsExplicit: sleepTargetIsExplicit,
+            plannedWorkout: plannedWorkout
+        )
 
         if checkIn == .painOrUnwell {
             return Plan(
@@ -134,7 +222,8 @@ public enum DailyActionPlanner {
                 confidence: .calibrating,
                 action: .completeCheckIn,
                 evidence: [],
-                limitations: [planningLimitation, "A same-day self-check is required before showing a range."]
+                limitations: [planningLimitation, "A same-day self-check is required before showing a range."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -146,7 +235,8 @@ public enum DailyActionPlanner {
                 confidence: .calibrating,
                 action: .chooseEasyDay,
                 evidence: [selfEvidence],
-                limitations: [planningLimitation, "How you feel takes priority over an aligned wearable read."]
+                limitations: [planningLimitation, "How you feel takes priority over an aligned wearable read."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -158,7 +248,8 @@ public enum DailyActionPlanner {
                 confidence: .calibrating,
                 action: .keepSleepWindow,
                 evidence: [selfEvidence],
-                limitations: [planningLimitation, "No current readiness read is available for this date."]
+                limitations: [planningLimitation, "No current readiness read is available for this date."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -178,7 +269,8 @@ public enum DailyActionPlanner {
                 confidence: readiness.confidence,
                 action: .chooseEasyDay,
                 evidence: [selfEvidence, readinessEvidence],
-                limitations: [planningLimitation, "A measured recovery shift withholds the range; it does not diagnose a cause."]
+                limitations: [planningLimitation, "A measured recovery shift withholds the range; it does not diagnose a cause."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -191,7 +283,8 @@ public enum DailyActionPlanner {
                 confidence: readiness.confidence,
                 action: .keepSleepWindow,
                 evidence: [selfEvidence, readinessEvidence],
-                limitations: [planningLimitation, "At least two current signals and a trusted personal baseline are required."]
+                limitations: [planningLimitation, "At least two current signals and a trusted personal baseline are required."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -208,7 +301,8 @@ public enum DailyActionPlanner {
                 confidence: .calibrating,
                 action: .keepSleepWindow,
                 evidence: [selfEvidence, readinessEvidence, effortEvidence],
-                limitations: [planningLimitation, "At least \(minimumEffortDays) prior scored Effort days are required."]
+                limitations: [planningLimitation, "At least \(minimumEffortDays) prior scored Effort days are required."],
+                workoutAdjustment: plannedAdjustment
             )
         }
 
@@ -233,8 +327,144 @@ public enum DailyActionPlanner {
             limitations: [
                 planningLimitation,
                 "Aligned readiness never raises the range above the user's recent normal Effort."
-            ]
+            ],
+            workoutAdjustment: plannedAdjustment
         )
+    }
+
+    static func workoutAdjustment(
+        today: String,
+        nowSec: Int,
+        readiness: ReadinessEngine.Readiness,
+        recentSleep: [SleepDay],
+        sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Bool,
+        plannedWorkout: PlannedWorkout?
+    ) -> WorkoutAdjustment? {
+        guard let workout = plannedWorkout,
+              workout.day == today,
+              workout.startSec > nowSec,
+              workout.startSec - nowSec <= maximumPlannedWorkoutLeadSeconds,
+              workout.endSec > workout.startSec else { return nil }
+
+        let durationMinutes = (workout.endSec - workout.startSec) / 60
+        guard (minimumPlannedWorkoutMinutes...maximumPlannedWorkoutMinutes)
+            .contains(durationMinutes) else { return nil }
+
+        let sleep = sleepContext(
+            days: recentSleep,
+            today: today,
+            sleepTargetMinutes: sleepTargetMinutes,
+            sleepTargetIsExplicit: sleepTargetIsExplicit
+        )
+        let recoveryShift =
+            readiness.asOfDay == today
+            && readiness.confidence != .calibrating
+            && (readiness.level == .strained || readiness.level == .rundown)
+        guard sleep != nil || recoveryShift else { return nil }
+
+        let reason: WorkoutAdjustmentReason
+        switch (sleep != nil, recoveryShift) {
+        case (true, true): reason = .sleepAndRecovery
+        case (true, false): reason = .sleepDeficit
+        case (false, true): reason = .recoveryShift
+        case (false, false): return nil
+        }
+
+        let confidence: ScoreConfidence = {
+            guard let sleep else {
+                return readiness.confidence == .solid ? .solid : .building
+            }
+            guard recoveryShift else { return sleep.confidence }
+            return sleep.confidence == .solid && readiness.confidence == .solid
+                ? .solid
+                : .building
+        }()
+
+        return WorkoutAdjustment(
+            startSec: workout.startSec,
+            durationMinutes: durationMinutes,
+            reason: reason,
+            measuredSleepMinutes: sleep?.measuredMinutes,
+            referenceSleepMinutes: sleep?.referenceMinutes,
+            sleepDeficitMinutes: sleep?.deficitMinutes,
+            sleepReference: sleep?.reference,
+            confidence: confidence
+        )
+    }
+
+    private struct SleepContext {
+        let measuredMinutes: Int
+        let referenceMinutes: Int
+        let deficitMinutes: Int
+        let reference: SleepReference
+        let confidence: ScoreConfidence
+    }
+
+    private static func sleepContext(
+        days: [SleepDay],
+        today: String,
+        sleepTargetMinutes: Int,
+        sleepTargetIsExplicit: Bool
+    ) -> SleepContext? {
+        let grouped = validSleepByDay(days, through: today)
+        guard let current = grouped[today] else { return nil }
+
+        let prior = grouped
+            .filter { $0.key < today }
+            .keys
+            .sorted()
+            .suffix(sleepHistoryWindowDays)
+            .compactMap { grouped[$0] }
+        let reference: Double
+        let source: SleepReference
+        let confidence: ScoreConfidence
+        if prior.count >= minimumUsualSleepNights {
+            reference = quantile(prior.sorted(), 0.5)
+            source = .personalUsual
+            confidence = prior.count >= solidUsualSleepNights ? .solid : .building
+        } else {
+            guard sleepTargetIsExplicit else { return nil }
+            reference = Double(min(max(sleepTargetMinutes, 5 * 60), 11 * 60))
+            source = .explicitTarget
+            confidence = .building
+        }
+        let deficit = Int((reference - current).rounded())
+        guard deficit >= workoutSleepDeficitThresholdMinutes else { return nil }
+        return SleepContext(
+            measuredMinutes: Int(current.rounded()),
+            referenceMinutes: Int(reference.rounded()),
+            deficitMinutes: deficit,
+            reference: source,
+            confidence: confidence
+        )
+    }
+
+    private static func validSleepByDay(
+        _ days: [SleepDay],
+        through today: String
+    ) -> [String: Double] {
+        let formatter = isoFormatter()
+        guard let end = formatter.date(from: today),
+              formatter.string(from: end) == today,
+              let start = formatter.calendar.date(
+                byAdding: .day,
+                value: -sleepHistoryWindowDays,
+                to: end
+              ) else { return [:] }
+        let startDay = formatter.string(from: start)
+        var grouped: [String: [Double]] = [:]
+        for row in days where row.day >= startDay && row.day <= today {
+            guard let parsed = formatter.date(from: row.day),
+                  formatter.string(from: parsed) == row.day,
+                  let minutes = row.minutes,
+                  minutes.isFinite,
+                  (120...900).contains(minutes) else { continue }
+            grouped[row.day, default: []].append(minutes)
+        }
+        return grouped.mapValues { values in
+            values.reduce(0, +) / Double(values.count)
+        }
     }
 
     /// One deterministic value per prior calendar day in [today-28, today-1]. Duplicate rows are

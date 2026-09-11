@@ -39,6 +39,7 @@ import com.noop.data.WhoopRepository
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedSafetyMessagingService
 import com.noop.managed.ManagedSafetyPushPayload
+import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.StaleSyncReminderScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -315,6 +316,7 @@ internal const val EXTRA_DEMO_ROUTE = "com.noop.extra.DEMO_ROUTE"
 internal const val DEMO_RELEASE_WELCOME_ROUTE = "release_welcome"
 internal const val DEMO_APP_REPORT_ROUTE = "app-report"
 internal const val DEMO_REVIEW_SAMPLE_ROUTE = "review-sample"
+internal const val DEMO_PLANNED_WORKOUT_ROUTE = "today-planned-workout"
 
 internal fun appLaunchIntent(context: Context): Intent =
     context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -810,13 +812,80 @@ object NoopPrefs {
 
     /** Optional evidence-gated guidance after short sleep, a learned routine shift, or travel. */
     const val KEY_ADAPTIVE_DAY_GUIDANCE = "noop.adaptiveDayGuidance"
+    const val KEY_PLANNED_WORKOUT_CALENDAR = "noop.plannedWorkoutCalendar"
+    private const val KEY_ADAPTIVE_DAY_CLEANUP_PENDING =
+        "noop.adaptiveDayGuidance.cleanupPending"
+    private const val KEY_PLANNED_WORKOUT_CLEANUP_PENDING =
+        "noop.plannedWorkoutCalendar.cleanupPending"
 
     fun adaptiveDayGuidance(context: Context): Boolean =
         of(context).getBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, false)
 
-    fun setAdaptiveDayGuidance(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, enabled).apply()
-    }
+    fun commitAdaptiveDayGuidance(
+        context: Context,
+        enabled: Boolean,
+        cleanupPending: Boolean,
+    ): Boolean = commitAdaptiveDayGuidance(
+        prefs = of(context),
+        enabled = enabled,
+        cleanupPending = cleanupPending,
+    )
+
+    internal fun commitAdaptiveDayGuidance(
+        prefs: SharedPreferences,
+        enabled: Boolean,
+        cleanupPending: Boolean,
+    ): Boolean = prefs.edit()
+        .putBoolean(KEY_ADAPTIVE_DAY_GUIDANCE, enabled)
+        .putBoolean(KEY_ADAPTIVE_DAY_CLEANUP_PENDING, cleanupPending)
+        .commit()
+
+    fun adaptiveDayCleanupPending(context: Context): Boolean =
+        adaptiveDayCleanupPending(of(context))
+
+    internal fun adaptiveDayCleanupPending(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_ADAPTIVE_DAY_CLEANUP_PENDING, false)
+
+    fun clearAdaptiveDayCleanupPending(context: Context): Boolean =
+        clearAdaptiveDayCleanupPending(of(context))
+
+    internal fun clearAdaptiveDayCleanupPending(prefs: SharedPreferences): Boolean =
+        prefs.edit().putBoolean(KEY_ADAPTIVE_DAY_CLEANUP_PENDING, false).commit()
+
+    /** Optional local calendar classification used only to find a generic same-day workout time. */
+    fun plannedWorkoutCalendar(context: Context): Boolean =
+        of(context).getBoolean(KEY_PLANNED_WORKOUT_CALENDAR, false)
+
+    fun commitPlannedWorkoutCalendar(
+        context: Context,
+        enabled: Boolean,
+        cleanupPending: Boolean,
+    ): Boolean = commitPlannedWorkoutCalendar(
+        prefs = of(context),
+        enabled = enabled,
+        cleanupPending = cleanupPending,
+    )
+
+    internal fun commitPlannedWorkoutCalendar(
+        prefs: SharedPreferences,
+        enabled: Boolean,
+        cleanupPending: Boolean,
+    ): Boolean = prefs.edit()
+        .putBoolean(KEY_PLANNED_WORKOUT_CALENDAR, enabled)
+        .putBoolean(KEY_PLANNED_WORKOUT_CLEANUP_PENDING, cleanupPending)
+        .commit()
+
+    fun plannedWorkoutCleanupPending(context: Context): Boolean =
+        plannedWorkoutCleanupPending(of(context))
+
+    internal fun plannedWorkoutCleanupPending(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_PLANNED_WORKOUT_CLEANUP_PENDING, false)
+
+    fun clearPlannedWorkoutCleanupPending(context: Context): Boolean =
+        clearPlannedWorkoutCleanupPending(of(context))
+
+    internal fun clearPlannedWorkoutCleanupPending(prefs: SharedPreferences): Boolean =
+        prefs.edit().putBoolean(KEY_PLANNED_WORKOUT_CLEANUP_PENDING, false).commit()
 
     /** Cycle awareness (v5): read a coarse menstrual-cycle PHASE from the nightly skin-temperature
      *  shift. OPT-IN, default OFF (manual-first ethos), the Health hub's Cycle card only renders once
@@ -1355,14 +1424,24 @@ fun NoopRoot(demoRoute: String? = null) {
     // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
     if (acceptedTerms != Terms.CURRENT_VERSION && !demoBypass) {
         TermsGateScreen(onAccept = {
-            val stored = prefs.edit()
-                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
-                .putString(NoopPrefs.KEY_ACCEPTED_TERMS_AT, java.time.Instant.now().toString())
-                .commit()
-            if (stored) {
-                application.startOperationalRuntime()
-                context.mainActivityOrNull()?.resumeAfterOperationalRuntimeStarted()
-                acceptedTerms = Terms.CURRENT_VERSION
+            val blockMarkerStored = AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(application)
+            if (!blockMarkerStored) {
+                com.noop.AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "terms_block_marker_failed"),
+                )
+            } else {
+                val stored = prefs.edit()
+                    .putString(NoopPrefs.KEY_ACCEPTED_TERMS_VERSION, Terms.CURRENT_VERSION)
+                    .putString(NoopPrefs.KEY_ACCEPTED_TERMS_AT, java.time.Instant.now().toString())
+                    .commit()
+                if (stored) {
+                    application.startOperationalRuntime()
+                    if (application.operationalRuntimeStarted) {
+                        context.mainActivityOrNull()?.resumeAfterOperationalRuntimeStarted()
+                        acceptedTerms = Terms.CURRENT_VERSION
+                    }
+                }
             }
         })
         return

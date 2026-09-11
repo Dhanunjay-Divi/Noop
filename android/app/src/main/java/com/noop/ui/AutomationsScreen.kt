@@ -56,7 +56,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -64,7 +63,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.analytics.NapCandidate
+import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.AdaptiveDayNotifier
 import com.noop.notif.HydrationReminderPrefs
@@ -118,6 +119,16 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var adaptiveNotificationsUnavailable by remember {
         mutableStateOf(
             adaptiveDayGuidance && !AdaptiveDayNotifier.canNotify(ctx),
+        )
+    }
+    var plannedWorkoutCalendarEnabled by remember {
+        mutableStateOf(AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx))
+    }
+    var plannedWorkoutCalendarPermissionUnavailable by remember {
+        mutableStateOf(
+            plannedWorkoutCalendarEnabled &&
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+                PackageManager.PERMISSION_GRANTED,
         )
     }
     var workoutNotificationsUnavailable by remember { mutableStateOf(false) }
@@ -259,12 +270,50 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             reportNotificationsUnavailable = !allowed
         }
     }
+    fun commitPlannedWorkoutCalendarConsent(enabled: Boolean): Boolean {
+        val committed = AdaptiveDayNotifier.setPlannedWorkoutCalendarConsent(ctx, enabled)
+        plannedWorkoutCalendarEnabled = if (committed) {
+            enabled
+        } else {
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx)
+        }
+        return committed
+    }
+    val plannedWorkoutCalendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        plannedWorkoutCalendarPermissionUnavailable = !granted
+        if (commitPlannedWorkoutCalendarConsent(granted)) {
+            if (granted) {
+                viewModel.onPlannedWorkoutCalendarChanged()
+            } else {
+                PlannedWorkoutCalendarStore.clear()
+                viewModel.onPlannedWorkoutCalendarChanged()
+            }
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 reportNotificationsUnavailable =
                     !automationReportsCanNotify(ctx) &&
                         (morningRecapEnabled || postWorkoutSummaryEnabled)
+                if (plannedWorkoutCalendarEnabled) {
+                    val calendarGranted = ContextCompat.checkSelfPermission(
+                        ctx,
+                        Manifest.permission.READ_CALENDAR,
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (calendarGranted) {
+                        plannedWorkoutCalendarPermissionUnavailable = false
+                        viewModel.onPlannedWorkoutCalendarChanged()
+                    } else {
+                        plannedWorkoutCalendarPermissionUnavailable = true
+                        if (commitPlannedWorkoutCalendarConsent(false)) {
+                            PlannedWorkoutCalendarStore.clear()
+                            viewModel.onPlannedWorkoutCalendarChanged()
+                        }
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -280,13 +329,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 "vo2" -> viewModel.setContextualVo2ReviewEnabled(true)
                 "adaptive" -> {
                     val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-                    adaptiveNotificationsUnavailable = !available
-                    viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    adaptiveNotificationsUnavailable = !available || !committed
                 }
             }
         } else if (pendingContextualPermission == "adaptive") {
-            adaptiveNotificationsUnavailable = true
-            viewModel.setAdaptiveDayGuidanceEnabled(false)
+            adaptiveNotificationsUnavailable =
+                !viewModel.setAdaptiveDayGuidanceEnabled(false)
         }
         pendingContextualPermission = null
     }
@@ -296,8 +345,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             if (target == "vitals") viewModel.setContextualVitalReviewEnabled(false)
             else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(false)
             else {
-                adaptiveNotificationsUnavailable = false
-                viewModel.setAdaptiveDayGuidanceEnabled(false)
+                adaptiveNotificationsUnavailable =
+                    !viewModel.setAdaptiveDayGuidanceEnabled(false)
             }
             return
         }
@@ -313,9 +362,29 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(true)
         else {
             val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-            adaptiveNotificationsUnavailable = !available
-            viewModel.setAdaptiveDayGuidanceEnabled(available)
+            val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+            adaptiveNotificationsUnavailable = !available || !committed
         }
+    }
+
+    fun setPlannedWorkoutCalendarEnabled(enabled: Boolean) {
+        if (!enabled) {
+            if (!commitPlannedWorkoutCalendarConsent(false)) return
+            plannedWorkoutCalendarPermissionUnavailable = false
+            PlannedWorkoutCalendarStore.clear()
+            viewModel.onPlannedWorkoutCalendarChanged()
+            return
+        }
+        if (
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_CALENDAR) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            plannedWorkoutCalendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+            return
+        }
+        if (!commitPlannedWorkoutCalendarConsent(true)) return
+        plannedWorkoutCalendarPermissionUnavailable = false
+        viewModel.onPlannedWorkoutCalendarChanged()
     }
 
     fun setWorkoutGuidanceEnabled(enabled: Boolean) {
@@ -513,6 +582,30 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 checked = adaptiveDayGuidance,
                 onChange = { setContextualReview("adaptive", it) },
             )
+            if (adaptiveDayGuidance) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_label,
+                    ),
+                    help = stringResource(
+                        R.string.appwide_adaptive_day_guidance_calendar_help,
+                    ),
+                    checked = plannedWorkoutCalendarEnabled,
+                    onChange = ::setPlannedWorkoutCalendarEnabled,
+                )
+                if (plannedWorkoutCalendarPermissionUnavailable) {
+                    RowDivider()
+                    Text(
+                        stringResource(
+                            R.string
+                                .appwide_adaptive_day_guidance_calendar_permission_unavailable,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                }
+            }
             if (adaptiveNotificationsUnavailable) {
                 RowDivider()
                 Text(

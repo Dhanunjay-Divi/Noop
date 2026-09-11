@@ -59,4 +59,14 @@
     <string name="daily_plan_why_title">为何今天呈现这种状态</string>
     <string name="daily_plan_why_trailing">你的个人基线</string>
     <string name="daily_plan_why_unavailable">当前恢复信号尚无足够的个人历史数据可供比较。</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_hours_minutes">你的睡眠比目标少 %1$d 小时 %2$d 分钟。</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_minutes">你的睡眠比目标少 %1$d 分钟。</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_hours_minutes">你的睡眠比平常少 %1$d 小时 %2$d 分钟。</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_minutes">你的睡眠比平常少 %1$d 分钟。</string>
+    <string name="daily_plan_workout_adjustment_recovery_shift">今天的恢复信号支持降低这次锻炼的强度。请确认自己的感受。</string>
+    <string name="daily_plan_workout_adjustment_sleep_and_recovery">睡眠和恢复信号都支持降低这次锻炼的强度。请确认自己的感受。</string>
+    <string name="daily_plan_workout_adjustment_sleep_deficit">睡眠低于平常水平或目标。请灵活调整这次锻炼，并确认自己的感受。</string>
+    <string name="daily_plan_workout_adjustment_sleep_label">睡眠</string>
+    <string name="daily_plan_workout_adjustment_title">计划锻炼</string>
+    <string name="daily_plan_workout_adjustment_workout_label">开始</string>
 </resources>

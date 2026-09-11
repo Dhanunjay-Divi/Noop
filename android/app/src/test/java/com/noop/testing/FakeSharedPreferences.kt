@@ -4,8 +4,11 @@ import android.content.SharedPreferences
 
 class FakeSharedPreferences(
     private val commitResult: Boolean = true,
+    commitResults: List<Boolean> = emptyList(),
+    private val applyFailedCommitsToMemory: Boolean = false,
 ) : SharedPreferences {
     private val values = LinkedHashMap<String, Any?>()
+    private val scriptedCommitResults = java.util.ArrayDeque(commitResults)
 
     override fun getAll(): MutableMap<String, *> = values.toMutableMap()
     override fun getString(key: String?, defValue: String?): String? =
@@ -49,8 +52,13 @@ class FakeSharedPreferences(
         override fun remove(key: String): SharedPreferences.Editor = apply { removals += key }
         override fun clear(): SharedPreferences.Editor = apply { clear = true }
         override fun commit(): Boolean {
-            if (commitResult) applyChanges()
-            return commitResult
+            val result = if (scriptedCommitResults.isEmpty()) {
+                commitResult
+            } else {
+                scriptedCommitResults.removeFirst()
+            }
+            if (result || applyFailedCommitsToMemory) applyChanges()
+            return result
         }
         override fun apply() = applyChanges()
 

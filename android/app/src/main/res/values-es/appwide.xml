@@ -8,11 +8,16 @@
     <string name="appwide_activity_suggestion_notifications_detail">Desactivadas de forma predeterminada. Tras una sincronización, una actividad reciente confirmada por movimiento puede aparecer en la pantalla de bloqueo para que la revises. NOOP nunca la guarda sin tu aprobación.</string>
     <string name="appwide_adaptive_coaching_summary">Usa señales recientes del wearable para orientar la recuperación, las pausas de concentración, la respiración, la adaptación a viajes y el esfuerzo de entrenamiento.</string>
     <string name="appwide_adaptive_coaching_title">Orientación adaptativa</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">Con permiso, NOOP revisa en este dispositivo los títulos del calendario de hoy y conserva solo la hora de un entrenamiento claramente identificado. El contenido del calendario nunca se guarda ni se sube.</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">Usar entrenamientos previstos</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">El acceso al calendario no está disponible. Permite que NOOP acceda al calendario en los ajustes del sistema.</string>
     <string name="appwide_adaptive_day_guidance_channel_description">Sugerencias privadas y opcionales de recuperación y adaptación a viajes.</string>
     <string name="appwide_adaptive_day_guidance_channel_name">Orientación diaria adaptativa</string>
     <string name="appwide_adaptive_day_guidance_help">Sugerencias privadas y limitadas en el teléfono tras una noche reciente de sueño corto, un cambio de rutina más tardío y breve aprendido de al menos cinco noches anteriores, o un cambio de zona horaria de dos horas o más. Los cambios de una hora por horario de verano y los datos antiguos nunca las activan.</string>
     <string name="appwide_adaptive_day_guidance_label">Orientación diaria adaptativa</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">Las notificaciones no están disponibles. Activa las notificaciones de NOOP y el canal Orientación diaria adaptativa en los ajustes del sistema.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">Se acerca un entrenamiento previsto y el sueño o la recuperación de hoy aconsejan mantenerlo flexible. Comprueba cómo te sientes antes de empezar.</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">Valora un entrenamiento más ligero hoy</string>
     <string name="appwide_adaptive_day_guidance_routine_body">Tu último sueño fue más tarde y más corto que tu patrón reciente. Mantén el día flexible y vuelve esta noche hacia tu hora habitual de relajación.</string>
     <string name="appwide_adaptive_day_guidance_routine_title">Retoma poco a poco tu ritmo</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">Dormiste menos que tu objetivo. Usa bloques de concentración más cortos, elige actividad más ligera si lo necesitas y protege la relajación de esta noche.</string>

@@ -4883,6 +4883,61 @@
     "zh-Hans": "睡眠时长低于目标。缩短专注时段，必要时选择较轻的活动，并守住今晚的睡前放松时间。",
     "zh-Hant": "睡眠時間低於目標。縮短專注時段，必要時選擇較輕的活動，並守住今晚的睡前放鬆時間。"
   },
+  "appwide.adaptive_day_guidance.calendar.label": {
+    "de": "Geplante Trainings berücksichtigen",
+    "en": "Use planned workouts",
+    "es": "Usar entrenamientos previstos",
+    "fr": "Utiliser les entraînements prévus",
+    "it": "Usa gli allenamenti pianificati",
+    "pt-PT": "Usar treinos planeados",
+    "ru": "Учитывать запланированные тренировки",
+    "zh-Hans": "使用计划锻炼",
+    "zh-Hant": "使用計畫運動"
+  },
+  "appwide.adaptive_day_guidance.calendar.help": {
+    "de": "Mit deiner Erlaubnis prüft NOOP nur auf diesem Gerät die heutigen Kalendertitel und behält ausschließlich die Zeit eines eindeutig benannten Trainings. Kalenderinhalte werden weder gespeichert noch hochgeladen.",
+    "en": "With permission, NOOP checks today's calendar titles on this device and keeps only the time of a clearly named workout. Calendar content is never stored or uploaded.",
+    "es": "Con permiso, NOOP revisa en este dispositivo los títulos del calendario de hoy y conserva solo la hora de un entrenamiento claramente identificado. El contenido del calendario nunca se guarda ni se sube.",
+    "fr": "Avec votre autorisation, NOOP vérifie sur cet appareil les titres du calendrier du jour et ne conserve que l’heure d’un entraînement clairement nommé. Le contenu du calendrier n’est jamais stocké ni envoyé.",
+    "it": "Con l’autorizzazione, NOOP controlla su questo dispositivo i titoli del calendario di oggi e conserva solo l’orario di un allenamento chiaramente indicato. Il contenuto del calendario non viene mai archiviato o caricato.",
+    "pt-PT": "Com autorização, o NOOP verifica neste dispositivo os títulos do calendário de hoje e guarda apenas a hora de um treino claramente identificado. O conteúdo do calendário nunca é armazenado nem enviado.",
+    "ru": "С разрешения NOOP проверяет на этом устройстве названия событий календаря за сегодня и сохраняет только время явно указанной тренировки. Содержимое календаря не хранится и не отправляется.",
+    "zh-Hans": "经你许可后，NOOP 仅在此设备上检查今天的日历标题，并只保留明确标注为锻炼的时间。日历内容绝不会被存储或上传。",
+    "zh-Hant": "經你許可後，NOOP 僅在此裝置上檢查今天的行事曆標題，並只保留明確標示為運動的時間。行事曆內容絕不會被儲存或上傳。"
+  },
+  "appwide.adaptive_day_guidance.calendar.permission_unavailable": {
+    "de": "Kalenderzugriff ist nicht verfügbar. Erlaube NOOP den Kalenderzugriff in den Systemeinstellungen.",
+    "en": "Calendar access is unavailable. Allow NOOP calendar access in system settings.",
+    "es": "El acceso al calendario no está disponible. Permite que NOOP acceda al calendario en los ajustes del sistema.",
+    "fr": "L’accès au calendrier n’est pas disponible. Autorisez NOOP à accéder au calendrier dans les réglages système.",
+    "it": "L’accesso al calendario non è disponibile. Consenti a NOOP di accedere al calendario nelle impostazioni di sistema.",
+    "pt-PT": "O acesso ao calendário não está disponível. Permita o acesso do NOOP ao calendário nas definições do sistema.",
+    "ru": "Доступ к календарю недоступен. Разрешите NOOP доступ к календарю в настройках системы.",
+    "zh-Hans": "日历访问不可用。请在系统设置中允许 NOOP 访问日历。",
+    "zh-Hant": "行事曆存取無法使用。請在系統設定中允許 NOOP 存取行事曆。"
+  },
+  "appwide.adaptive_day_guidance.planned_workout.title": {
+    "de": "Zieh heute ein leichteres Training in Betracht",
+    "en": "Consider a lighter workout today",
+    "es": "Valora un entrenamiento más ligero hoy",
+    "fr": "Envisagez un entraînement plus léger aujourd’hui",
+    "it": "Valuta un allenamento più leggero oggi",
+    "pt-PT": "Considere um treino mais leve hoje",
+    "ru": "Сегодня стоит подумать о более лёгкой тренировке",
+    "zh-Hans": "今天可考虑降低锻炼强度",
+    "zh-Hant": "今天可考慮降低運動強度"
+  },
+  "appwide.adaptive_day_guidance.planned_workout.body": {
+    "de": "Ein geplantes Training steht bevor und der heutige Schlaf oder die Erholung sprechen für Flexibilität. Prüfe dein Befinden, bevor du beginnst.",
+    "en": "A planned workout is coming up, and today's sleep or recovery supports keeping it flexible. Check how you feel before you start.",
+    "es": "Se acerca un entrenamiento previsto y el sueño o la recuperación de hoy aconsejan mantenerlo flexible. Comprueba cómo te sientes antes de empezar.",
+    "fr": "Un entraînement prévu approche, et le sommeil ou la récupération du jour suggèrent de rester flexible. Évaluez votre état avant de commencer.",
+    "it": "Si avvicina un allenamento pianificato e il sonno o il recupero di oggi suggeriscono flessibilità. Valuta come ti senti prima di iniziare.",
+    "pt-PT": "Aproxima-se um treino planeado e o sono ou a recuperação de hoje sugerem flexibilidade. Avalie como se sente antes de começar.",
+    "ru": "Скоро запланированная тренировка, а сегодняшний сон или восстановление указывают на необходимость гибкости. Оцените самочувствие перед началом.",
+    "zh-Hans": "计划锻炼即将开始，而今天的睡眠或恢复信号建议灵活调整。开始前请确认自己的感受。",
+    "zh-Hant": "計畫運動即將開始，而今天的睡眠或恢復訊號建議彈性調整。開始前請確認自己的感受。"
+  },
   "appwide.workout_guidance.label": {
     "de": "Hinweise zur Trainingsbelastung",
     "en": "Workout exertion guidance",

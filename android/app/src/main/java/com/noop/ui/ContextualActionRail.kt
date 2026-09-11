@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bed
@@ -115,7 +116,7 @@ private fun CollapsedContextualAction(
             },
         contentAlignment = Alignment.Center,
     ) {
-        ContextualActionGlyph(action.kind, tint, 19.dp)
+        ContextualActionGlyph(action, tint, 19.dp)
     }
 }
 
@@ -147,7 +148,7 @@ private fun ExpandedContextualAction(
                     .background(tint.copy(alpha = 0.13f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                ContextualActionGlyph(action.kind, tint, 17.dp)
+                ContextualActionGlyph(action, tint, 17.dp)
             }
             Text(
                 text = action.title,
@@ -222,7 +223,7 @@ private fun ExpandedContextualAction(
                 .alpha(if (processing) 0.72f else 1f),
         ) {
             Icon(
-                imageVector = primaryIcon(action.kind),
+                imageVector = primaryIcon(action),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
@@ -260,11 +261,11 @@ private fun ContextualIconControl(
 
 @Composable
 private fun ContextualActionGlyph(
-    kind: ContextualActionKind,
+    action: ContextualAction,
     tint: Color,
     size: androidx.compose.ui.unit.Dp,
 ) {
-    if (kind == ContextualActionKind.HYDRATION) {
+    if (action.kind == ContextualActionKind.HYDRATION) {
         HydrationGlassGlyph(
             fill = 0.38f,
             tint = tint,
@@ -274,7 +275,7 @@ private fun ContextualActionGlyph(
         )
     } else {
         Icon(
-            imageVector = actionIcon(kind),
+            imageVector = actionIcon(action),
             contentDescription = null,
             tint = tint,
             modifier = Modifier.size(size),
@@ -356,22 +357,36 @@ private fun contextualActionTint(kind: ContextualActionKind): Color = when (kind
     ContextualActionKind.RECOVERY -> Palette.chargeColor
 }
 
-private fun actionIcon(kind: ContextualActionKind): ImageVector = when (kind) {
-    ContextualActionKind.HYDRATION -> Icons.Filled.WaterDrop
-    ContextualActionKind.BREATHE -> Icons.Filled.Air
-    ContextualActionKind.JOURNAL -> Icons.Filled.Edit
-    ContextualActionKind.WIND_DOWN -> Icons.Filled.Bedtime
-    ContextualActionKind.RECOVERY -> Icons.Filled.Bed
-}
+private fun actionIcon(action: ContextualAction): ImageVector =
+    if (action.kind == ContextualActionKind.RECOVERY &&
+        action.route == NoopNotificationRoute.WORKOUTS
+    ) {
+        Icons.AutoMirrored.Filled.DirectionsRun
+    } else {
+        when (action.kind) {
+            ContextualActionKind.HYDRATION -> Icons.Filled.WaterDrop
+            ContextualActionKind.BREATHE -> Icons.Filled.Air
+            ContextualActionKind.JOURNAL -> Icons.Filled.Edit
+            ContextualActionKind.WIND_DOWN -> Icons.Filled.Bedtime
+            ContextualActionKind.RECOVERY -> Icons.Filled.Bed
+        }
+    }
 
-private fun primaryIcon(kind: ContextualActionKind): ImageVector = when (kind) {
-    ContextualActionKind.HYDRATION -> Icons.Filled.Add
-    ContextualActionKind.BREATHE -> Icons.Filled.PlayArrow
-    ContextualActionKind.JOURNAL -> Icons.Filled.Edit
-    ContextualActionKind.WIND_DOWN,
-    ContextualActionKind.RECOVERY,
-    -> Icons.Filled.Bed
-}
+private fun primaryIcon(action: ContextualAction): ImageVector =
+    if (action.kind == ContextualActionKind.RECOVERY &&
+        action.route == NoopNotificationRoute.WORKOUTS
+    ) {
+        Icons.AutoMirrored.Filled.DirectionsRun
+    } else {
+        when (action.kind) {
+            ContextualActionKind.HYDRATION -> Icons.Filled.Add
+            ContextualActionKind.BREATHE -> Icons.Filled.PlayArrow
+            ContextualActionKind.JOURNAL -> Icons.Filled.Edit
+            ContextualActionKind.WIND_DOWN,
+            ContextualActionKind.RECOVERY,
+            -> Icons.Filled.Bed
+        }
+    }
 
 @Composable
 private fun primaryTitle(action: ContextualAction): String = when (action.kind) {
@@ -379,7 +394,11 @@ private fun primaryTitle(action: ContextualAction): String = when (action.kind) 
         stringResource(R.string.context_action_add_water, action.amountMl ?: 250)
     ContextualActionKind.BREATHE -> stringResource(R.string.context_action_start_breathing)
     ContextualActionKind.JOURNAL -> stringResource(R.string.context_action_open_journal)
-    ContextualActionKind.WIND_DOWN,
-    ContextualActionKind.RECOVERY,
-    -> stringResource(R.string.context_action_open_sleep)
+    ContextualActionKind.WIND_DOWN -> stringResource(R.string.context_action_open_sleep)
+    ContextualActionKind.RECOVERY ->
+        if (action.route == NoopNotificationRoute.WORKOUTS) {
+            stringResource(R.string.nav_workouts)
+        } else {
+            stringResource(R.string.context_action_open_sleep)
+        }
 }

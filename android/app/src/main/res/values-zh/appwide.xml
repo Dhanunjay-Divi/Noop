@@ -8,11 +8,16 @@
     <string name="appwide_activity_suggestion_notifications_detail">默认关闭。同步后，近期经运动信号佐证的活动可显示在锁定屏幕上供你审核。未经你确认，NOOP 绝不会保存。</string>
     <string name="appwide_adaptive_coaching_summary">利用最新的可穿戴设备信号来指导恢复、专注休息、呼吸、旅行适应和锻炼强度。</string>
     <string name="appwide_adaptive_coaching_title">自适应指导</string>
+    <string name="appwide_adaptive_day_guidance_calendar_help">经你许可后，NOOP 仅在此设备上检查今天的日历标题，并只保留明确标注为锻炼的时间。日历内容绝不会被存储或上传。</string>
+    <string name="appwide_adaptive_day_guidance_calendar_label">使用计划锻炼</string>
+    <string name="appwide_adaptive_day_guidance_calendar_permission_unavailable">日历访问不可用。请在系统设置中允许 NOOP 访问日历。</string>
     <string name="appwide_adaptive_day_guidance_channel_description">私密且可选的恢复和旅行适应建议。</string>
     <string name="appwide_adaptive_day_guidance_channel_name">自适应每日指导</string>
     <string name="appwide_adaptive_day_guidance_help">在近期睡眠不足、根据至少前五晚识别到更晚且更短的作息变化，或时区变化达到两小时后，发送私密且限频的手机建议。一小时的夏令时变化和过期数据绝不会触发建议。</string>
     <string name="appwide_adaptive_day_guidance_label">自适应每日指导</string>
     <string name="appwide_adaptive_day_guidance_notifications_unavailable">通知不可用。请在系统设置中启用 NOOP 通知和“自适应每日指导”渠道。</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_body">计划锻炼即将开始，而今天的睡眠或恢复信号建议灵活调整。开始前请确认自己的感受。</string>
+    <string name="appwide_adaptive_day_guidance_planned_workout_title">今天可考虑降低锻炼强度</string>
     <string name="appwide_adaptive_day_guidance_routine_body">最近一次睡眠比近期规律更晚且更短。今天保持灵活，今晚逐步回到平常的睡前放松时间。</string>
     <string name="appwide_adaptive_day_guidance_routine_title">逐步回到你的作息节奏</string>
     <string name="appwide_adaptive_day_guidance_sleep_body">睡眠时长低于目标。缩短专注时段，必要时选择较轻的活动，并守住今晚的睡前放松时间。</string>

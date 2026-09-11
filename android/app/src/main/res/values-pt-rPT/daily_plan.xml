@@ -59,4 +59,14 @@
     <string name="daily_plan_why_title">Porque é que hoje se apresenta assim</string>
     <string name="daily_plan_why_trailing">A sua referência pessoal</string>
     <string name="daily_plan_why_unavailable">Ainda não existe um sinal de recuperação atual com histórico pessoal suficiente para comparação.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_hours_minutes">Dormiu %1$d h %2$d min menos do que o seu objetivo.</string>
+    <string name="daily_plan_workout_adjustment_deficit_target_minutes">Dormiu %1$d min menos do que o seu objetivo.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_hours_minutes">Dormiu %1$d h %2$d min menos do que o habitual.</string>
+    <string name="daily_plan_workout_adjustment_deficit_usual_minutes">Dormiu %1$d min menos do que o habitual.</string>
+    <string name="daily_plan_workout_adjustment_recovery_shift">Os sinais de recuperação de hoje sugerem uma sessão mais leve. Avalie como se sente.</string>
+    <string name="daily_plan_workout_adjustment_sleep_and_recovery">O sono e a recuperação sugerem uma sessão mais leve. Avalie como se sente.</string>
+    <string name="daily_plan_workout_adjustment_sleep_deficit">O sono ficou abaixo do habitual ou do objetivo. Mantenha esta sessão flexível e avalie como se sente.</string>
+    <string name="daily_plan_workout_adjustment_sleep_label">Sono</string>
+    <string name="daily_plan_workout_adjustment_title">Treino planeado</string>
+    <string name="daily_plan_workout_adjustment_workout_label">Início</string>
 </resources>

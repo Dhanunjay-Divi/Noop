@@ -19,23 +19,242 @@ Last updated: **2026-09-11**
 ## Active work
 
 The product, safety, and quality audit is active on
-`codex/product-safety-quality-audit-20260911`. Its first verified slice makes
+`codex/product-safety-quality-audit-20260911`. Its verified body slice makes
 BMI adult-only and dependent on confirmed age, height, and weight; prevents
 seeded profile values from becoming personal Health Connect BMI history;
 preserves source/date context for imported whole-body composition; and keeps
 target weight neutral and non-prescriptive. Android now matches Apple's
 separate default-off activity-suggestion interruption consent while retaining
 quiet in-app workout review. Supplied exercise media remains excluded until
-rights and instructional-safety evidence exists. Focused Apple/Android tests,
-both Android variants, localization/claims gates, and the complete unsigned
-iOS simulator graph pass for the recorded slice. Broader accessibility,
-notification, calendar-guidance integration, exact-current build, and physical
-device work remains. Details are in
+rights and instructional-safety evidence exists. The reviewed calendar-aware
+daily-guidance source is now integrated locally with separate consent, local
+event classification, content-discarding queries, sleep/readiness evidence
+gates, private prompt copy, stale-plan cleanup, and cooldown ownership.
+Exact-current verification passes 1,464 shared analytics tests, 1,755 Apple app
+tests, 4,296 tests in each Android variant, both APK assemblies, the complete
+unsigned iOS simulator graph, 645-key app-wide localization, terminology,
+claims, required-CI configuration, and diff checks. Broader accessibility,
+notification, simulator UI, physical-device, cleanup, and protected
+integration work remains. Details are in
 [Product, safety, and quality audit](rounds/2026-09-11-product-safety-quality-audit.md).
 
-The mobile and desktop Today visual-parity round is implemented and locally
-verified on protected pull request `#13` from
-`codex/mobile-desktop-visual-parity-20260910`. Apple and Android
+The final local calendar-aware source has completed its clean verification
+wall. Shared analytics passed 1,461 tests with seven expected skips; the
+complete macOS suite passed 1,750 tests with one expected external-data skip;
+both Android Full and Demo variants passed 4,234 tests with seven expected
+skips apiece alongside both APK assemblies, lint variants, and instrumentation
+source compilation; and the complete unsigned iPhone, widget, and Watch graph
+built. Seven deterministic iPhone visual states passed and the planned-workout
+fixture was inspected without clipping or overlap. Two iOS UI-test attempts
+compiled but failed before worker creation because this Mac's Xcode debugger
+version store is unavailable; that is recorded as test-infrastructure evidence,
+not an app result. Exact physical scenarios are now documented in
+`docs/handoff/CALENDAR-AWARE-PHYSICAL-DEVICE-RUNBOOK.md`. The source remains
+local and unpushed to avoid spending GitHub Actions without explicit owner
+approval; protected review, hosted checks, merge, and physical-device evidence
+remain open.
+
+Calendar-aware daily guidance is implemented and review-corrected locally on
+protected pull request `#14` from
+`codex/calendar-aware-daily-guidance-20260910`. Apple and Android expose a
+separate default-off Calendar option under Adaptive Day Guidance, classify
+same-day future workout titles locally, discard event content inside the
+query, and keep only a generic in-memory time window. Today's Plan can combine
+that window with supported personal sleep and readiness evidence, while one
+private cooldown-ranked prompt opens Workouts without placing event details,
+exact times, or health values on the lock screen. Opt-out and permission
+changes invalidate reads already in flight, and action-center evidence names
+only signals that actually supported the prompt. Calendar edits update the
+visible plan, the adjustment expires at its start time, and spectator,
+shopping, ticket, or equipment-service titles fail closed. Exact-head review
+also found and the replacement head corrects stale Android
+Calendar cache use after permission revocation, missing Apple reevaluation after
+calendar edits, contextual actions opening Sleep instead of Workouts, and
+Android adaptive-day `PendingIntent` mutation before global cooldown approval.
+Replacement-head review then corrected Android provider-change reevaluation,
+Apple cancellation after EventKit return, and declined invitations on both
+providers. Final review then added the two-hour boundary reevaluation,
+workout-start action expiry, exact supporting-evidence preservation, persisted
+active-device resolution, and immediate Android reevaluation after every
+Calendar enablement or permission transition. The latest protected review found
+that Apple could still preload calendar-derived copy before consent changed and
+that either platform could retain a stale delivered prompt or Workouts action
+after a workout moved or disappeared. Apple now stores only generic boundary
+metadata, uses a process-local task while alive, and gives its existing
+background-refresh lane a one-shot earliest-wake hint; every path reruns current
+consent and evidence before creating a prompt. Android retains WorkManager
+reevaluation. Both platforms use the exact start in the fingerprint and
+reconcile stale delivery state, cooldowns, actions, and notifications on every
+disabled, superseded, moved, removed, or expired plan. The newest exact-head
+review also closed consent changes across Apple notification awaits, Android
+master-opt-out cleanup, owner-aware cross-topic cooldown restoration,
+workout-start notification expiry, and ambiguous work uses of `run` and `spin`.
+A final local review covered the Android process-death window between posting
+and private-state persistence, so master opt-out still retracts the shared
+notification and planned-workout cooldown owner. The latest exact-head review
+also found that same-day pain/unwell check-ins and sleep-target edits could
+leave the prior plan visible until another lifecycle event, Android could keep
+global planned-workout prompt ownership after consent disappeared immediately
+after a successful post, and Apple's immediate notification diagnostic used
+the generic vital category. Both platforms now coalesce immediate
+input-triggered reevaluation, Android reconciles that owner on post-success
+consent loss, and Apple records both immediate and durable delivery under
+`adaptive_day`. The complete replacement local wall passes: 1,461 analytics
+tests with seven skips, 1,726 Apple app tests with one expected skip, the
+complete unsigned iOS app/widget/watch graph, and 4,211 Android tests with seven
+skips plus APK assembly, production compile, lint, and instrumentation-source
+compilation. Repository policy totals are refreshed in the round record. The
+first hosted Apple attempt exposed
+only the app-wide localization ratchet still
+expecting 631 rather than the exact new total of 636; that contract is corrected
+and passes locally. Fresh protected review/checks and normal merge remain, along
+with physical iOS/Android permission, provider, background-delivery,
+accessibility, and battery evidence.
+The latest review correction also closes five final fail-closed gaps: Android
+rechecks the master toggle and current Terms at delivery boundaries, both
+platforms reject stale in-flight workout plans, the planners require a
+genuinely user-set target while personal sleep history is thin, and the local
+classifier recognizes conservative workout titles across every shipped
+language. Focused Swift analytics, Apple app integration, and Android
+planner/Calendar/notifier suites pass on the replacement source. A final
+fresh-eyes review also keeps the Apple same-kind delivery gate active while a
+newer planned-workout candidate waits behind an in-flight delivery, preventing
+a third candidate from bypassing queue coalescing. The queue-specific regression
+suite and the exact current iOS source graph pass. The first hosted Android
+replacement run then exposed one stale source-contract assertion that still
+required the pre-explicit-target condition. The contract now pins both the
+explicit-target read and the intended first-write-or-value-change condition;
+the complete Android unit suite passes 4,217 tests with seven expected skips.
+Exact-head review then found three final delivery-lifetime races. Apple now
+prevents a rejected stale candidate from clearing a newer exact fingerprint and
+stops a superseded boundary task immediately after notification authorization
+returns. Android computes notification expiry from the remaining lifetime at
+the actual post instant instead of restarting the original window. A subsequent
+exact-head review found that new daily sleep/readiness state could still queue
+reevaluation without first invalidating a suspended candidate. Both Apple
+repository health-input publishers now invalidate that candidate synchronously
+before scheduling replacement evaluation. The focused regressions pass, the
+next exact-head review found that natural workout expiry removed accepted
+cooldown history and that quiet hours or a global cooldown at the two-hour
+boundary discarded the only notification opportunity. Both platforms now
+preserve accepted history only for a persisted workout whose exact start has
+passed, fully retract future/invalidated workouts, and schedule one bounded
+retry at the next eligible instant before workout start. A final no-adjustment
+pass cannot erase the preserved history; malformed fingerprints fail closed,
+and stale Android expiry work cannot remove a newer exact prompt. The focused
+correction suites pass 42 Apple tests plus the Android notifier suite. The
+complete Apple rerun passes 1,734 tests with one intentional external-data skip,
+and the final Android wall passes 4,220 tests with seven skips plus production
+compile, lint, instrumentation-source compile, and APK assembly. The complete
+unsigned iPhone/widget/watch graph also builds. Final terminology regeneration,
+the 227-test Tools suite, release controls, required CI, all 51 operations
+records, i18n, health claims, calibration parity, legal provenance,
+terminology, and private-data gates pass on the exact source. Commit, fresh
+exact-head review, protected checks, and normal merge remain required.
+The newest exact-head review found one final classifier gap: Chinese calendar
+titles normally have no word separators, so natural phrases such as
+`早上跑步` did not match the reviewed workout vocabulary. Swift and Kotlin now
+apply substring matching only to Han-script terms, after applying the same
+unsegmented work-context denylist. Natural Simplified and Traditional Chinese
+phrases classify, while workout-plus-meeting or seminar phrases still fail
+closed. All 1,461 analytics tests and the complete 4,220-test Android
+unit/compile/lint wall pass on the replacement source. Commit, fresh exact-head
+review, protected checks, and normal merge remain required.
+The final replacement review then found three prompt-lifetime defects. Planned
+workout identity now consists only of the planning day and exact start, so a
+change from sleep-only to sleep-plus-readiness evidence updates explanation
+without consuming a second notification or erasing cooldown history; legacy
+four-field identities migrate in place. Apple and Android evaluate quiet hours,
+staleness, retry timing, and cooldowns from the actual delivery boundary rather
+than the earlier analytics timestamp. A successfully armed future workout also
+suppresses weaker routine or sleep guidance until that higher-priority
+reevaluation runs. The exact replacement source passes all 1,461 shared
+analytics tests with seven skips, all 1,745 Apple app tests with one expected
+external-data skip, all 4,227 Android tests with seven skips plus APK assembly,
+production compile, lint, and instrumentation-source compilation, and the
+complete unsigned iPhone/widget/watch graph. Fresh exact-head review, protected
+checks, and normal merge remain required.
+The newest exact-head review then found two final state-lifetime gaps. Android
+now invalidates the active adaptive-day generation as soon as a new health-data
+emission arrives and uses latest-only collection, so an older suspended
+evaluation cannot publish after fresher sleep or readiness data exists. Apple
+now discovers and migrates any equivalent legacy Workouts action ID, processing
+state, and bounded dismissed/completed tombstones even when delivery state is
+already canonical, preserving the action and the user's prior decision under
+the three-field identity. The focused closeout passes 40 Apple tests and the
+two Android regression suites. The latest exact-head review then found that
+Apple repository publishers could queue calendar-backed contextual work before
+the accepted launch/runtime gate and that Android could canonicalize delivery
+state without migrating the active Workouts action or its bounded history.
+Apple now fails closed at every scheduling and evaluation entry point until
+operational work starts; Android migrates the action, processing state, and
+dismissed/completed identities together before stale reconciliation. The
+focused closeout passes 22 Apple tests and both Android regression suites. The
+complete replacement wall passes 1,748
+Apple app tests with one expected external-data skip, 4,228 Android tests with
+seven skips plus APK assembly, full debug compile, lint, and instrumentation-
+source compilation, and the complete unsigned iPhone/widget/watch graph. The
+signed Android release probe remains correctly blocked before compilation
+without private signing credentials. Source and local evidence are complete;
+fresh exact-head review, protected checks, and normal merge remain required.
+The latest exact-head review found two remaining priority-boundary defects.
+Android timezone travel guidance now invalidates and retracts stale planned-
+workout notification, action, and cooldown ownership before it enters the
+shared delivery policy. Apple Calendar disable, denial, and unavailable paths
+now synchronously remove delivered workout artifacts before queued
+reevaluation, so suspension cannot preserve opted-out guidance. The focused
+closeout passes 23 Apple Calendar tests and the Android notifier suite; the
+complete replacement wall passes 1,749 Apple app tests with one expected skip
+and 4,231 Android tests with seven skips plus APK assembly, full debug compile,
+lint, and instrumentation-source compilation. The final Apple graph, policy
+wall, replacement commit, exact-head review, protected checks, and normal merge
+remain required.
+The stale-head hosted production-shell run also exposed an independent Android
+report-liveness defect: slow OS exit/ANR capture could occupy the live
+diagnostics queue until the bounded snapshot silently omitted the current
+session attachment. Historical capture now runs separately, only completed
+history is eligible, and an allowlisted bounded fallback explicitly reports a
+degraded snapshot without arbitrary errors or private data. The exact API 35
+app-report case passes 1/1, and the final Android unit wall passes 4,233 tests
+with seven skips plus APK assembly, full debug compile, lint, and
+instrumentation-source compilation. Replacement hosted checks must confirm the
+complete managed-device production shell.
+Fresh replacement-head review found one additional launch-boundary defect:
+Android's manifest-delivered timezone entry point could observe and post travel
+guidance while the current Terms receipt was absent. It now checks
+`ManagedRuntimeGate` before timezone state, settings, scheduling, diagnostics,
+or delivery. The focused notifier suite and the complete 4,233-test Android
+wall pass with seven expected skips plus APK assembly, full debug compile,
+lint, and instrumentation-source compilation. A replacement commit, exact-head
+review, protected checks, and normal merge remain required.
+Fresh review also found that the generic title `ride` was treated as an
+unconditional workout, so transport plans such as `Train ride` could create
+fitness guidance. Swift and Kotlin now treat `ride` as ambiguous: a bare or
+fitness-context ride remains eligible, while train, bus, airport, taxi,
+rideshare, transit, driving, and commuting contexts fail closed. The focused
+classifier suites pass on both platforms, all 1,461 analytics tests pass with
+seven expected skips, all 1,749 Apple app tests pass with one expected
+external-data skip, the complete unsigned iPhone/widget/watch graph builds, and
+the final Android wall passes 4,233 tests with seven skips plus APK assembly,
+full debug compile, lint, and instrumentation-source compilation. The
+replacement record and policy snapshot, commit, fresh exact-head review,
+protected checks, and normal merge remain required.
+The next exact-head review found one remaining background-entry gap:
+`HealthConnectSyncWorker` and other non-UI callers could reach the shared
+Android evaluator after a newly required Terms version made the runtime
+unauthorized. `AdaptiveDayEvaluator` now checks `ManagedRuntimeGate` before it
+creates a generation, observes timezone state, reads Room or Calendar, records
+guidance diagnostics, or posts a prompt, so every current and future caller
+shares the same fail-closed boundary. The focused contract passes in both
+variants, and the complete Android wall passes 4,234 tests with seven expected
+skips plus both APK assemblies, full debug compile, lint, and instrumentation-
+source compilation. The replacement record and policy snapshot, commit, fresh
+exact-head review, protected checks, and normal merge remain required.
+Details are in
+[Calendar-aware daily guidance](rounds/2026-09-10-calendar-aware-daily-guidance.md).
+
+The mobile and desktop Today visual-parity round is merged on protected
+`main` as `2efd5e89` through pull request `#13`. Apple and Android
 phones now share the desktop reference's compact masthead, dominant Daily
 Signal hierarchy, score geometry, integrated Fitness Age row, and immediate
 workout-coach placement while preserving native navigation and accessibility.
@@ -61,10 +280,10 @@ Review Sample could announce a visible tab twice. Commit `4ff38930` now measures
 the complete localized identity, state, optional source, and fixed chrome before
 retaining one row, and adds an explicit tab accessibility name only in icon-only
 mode. Both Android variants, lint, instrumentation-source compilation, the three
-focused suites, terminology, and required-CI unit contracts pass. The final
-correction and evidence update still require push, replacement protected
-checks, two resolved review conversations, and normal merge, along with
-physical-device smoothness and hardware-dependent evidence. Details are in
+focused suites, terminology, and required-CI unit contracts pass. All six
+review conversations were resolved and every required hosted context passed
+before the normal protected merge. Physical-device smoothness and
+hardware-dependent evidence remain. Details are in
 [Mobile and desktop Today visual parity](rounds/2026-09-10-mobile-desktop-visual-parity.md).
 
 The managed Safety implementation from protected pull request `#10` is merged

@@ -100,14 +100,25 @@ records. Concurrent development must remain isolated by worktree and branch.
   consent. Detection can remain in Ask mode for quiet Today review while Lock
   Screen suggestions are separately default-off, permission-aware, and cleared
   when disabled or when OS authorization is revoked.
+- Integrated the reviewed calendar-aware daily-guidance source. Calendar access
+  remains a separate default-off local permission; event content is discarded
+  during the query and only a generic future workout window can contribute to
+  Today's Plan or one private, cooldown-ranked Workouts prompt. Sleep and
+  readiness evidence must independently support any lighter-day suggestion.
+- Closed the merged Xcode target-membership defect, refreshed both localization
+  ratchets to 645 app-wide entries across nine locales, and reviewed the
+  terminology inventory after merge-only line movement. The active
+  customer/core terminology allowlist did not change.
 - Classified supplied exercise media as deferred: the reviewed downloads do
   not currently establish redistribution rights or clinical/instructional
   review, so none was copied into source or a shipping bundle.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: none. Body-input confirmation and activity-alert
-  consent are local preferences with fail-closed defaults.
+- Schema or migration impact: no health-history migration. Body-input
+  confirmation, activity-alert consent, adaptive-day consent, and calendar
+  access are local preferences with fail-closed defaults; the calendar branch's
+  bounded local action-state migration is covered by cross-platform tests.
 - Existing-data retention impact: none. No local biometric history was removed,
   rewritten, or uploaded.
 - Source/provenance or formula impact: BMI remains the conventional
@@ -115,8 +126,10 @@ records. Concurrent development must remain isolated by worktree and branch.
   Body-composition values remain imported measurements with source/date
   context. No band-derived body-composition formula was added.
 - Permissions/network disclosure impact: Android requests notification
-  permission only after the user explicitly enables activity suggestions. No
-  endpoint, cloud traffic, or background entitlement was added.
+  permission only after the user explicitly enables activity suggestions.
+  Calendar data is read only after separate user opt-in and platform
+  authorization, event content is not persisted in guidance state, and no
+  endpoint, cloud traffic, or new background entitlement was added.
 - Health/medical claim impact and limitations: BMI is optional adult screening
   context, not diagnosis or body composition. Target weight is not a NOOP
   recommendation. NOOP does not prescribe weight-loss pace, calories, or
@@ -159,9 +172,12 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Shared body-profile policy tests | Swift `BodyProfilePolicyTests` passed 3 cases; Android full and demo policy/profile/import suites passed | Adult/confirmed-input gating and target suppression agree across platforms | Imported-device accuracy or clinical suitability |
 | Apple profile regression tests | `ProfileExternalWeightTests` passed 11 cases | Existing external-weight behavior and new confirmation rules coexist | Physical HealthKit delivery |
 | Android activity-alert tests | Full-variant `AutoWorkoutCandidateNotificationPolicyTest` and `AutoWorkoutSuggestionPolicyTest` passed | Posting now requires detection, separate interruption opt-in, OS authorization, and a new candidate token | OEM delivery timing or terminated-process execution |
-| Android app builds | Full and demo debug APK assembly passed before the notification slice; current focused compilation and tests pass after it | Both product variants compile with body-profile policy; full variant compiles with the consent change | Signed release, install, or physical-device behavior |
-| Complete Apple simulator graph | Unsigned `NOOPiOS` generic iOS Simulator build succeeded with iOS, widget, and watch targets | Current Apple body-profile source compiles across the app graph | Signing, App Store acceptance, or physical-device behavior |
-| Localization and claims gates | 640 app-wide keys generated for nine locales; localization JSON, diff check, and health-claims gate pass | New health and consent copy is generated consistently and contains no detected prohibited claim | Professional translation review |
+| Shared analytics suite | 1,464 tests passed with seven evidence-dependent skips and zero failures | Body policy, daily planning, workout-title classification, scoring, and related shared analytics remain coherent after integration | Sensor accuracy or physical collection |
+| Complete Apple app suite | 1,755 tests passed with one external-fixture skip and zero failures | Apple body, notification, calendar, privacy, lifecycle, and app contracts pass together | iOS background delivery or physical BLE behavior |
+| Android full matrix | Full and Demo each passed 4,296 tests with seven skips and zero failures; both debug APKs assembled | Both Android variants compile and pass the merged body, notification, calendar, lifecycle, localization, and storage contracts | Signed install, OEM delivery timing, or physical-device behavior |
+| Complete Apple simulator graph | Unsigned `NOOPiOS` generic iOS Simulator build succeeded after regenerating target membership, including app, widget, and watch dependencies | The merged Apple source graph compiles and links | Signing, App Store acceptance, or physical-device behavior |
+| Calendar-aware guidance contracts | Focused Apple/Android suites plus the complete matrices passed; stale consent, moved/removed plans, cooldown ownership, privacy, and evidence attribution are covered | Guidance is local, opt-in, bounded, and fails closed when supporting evidence or permission disappears | Calendar-provider behavior on a real phone or OS notification timing |
+| Localization, terminology, claims, and CI gates | 645 app-wide keys and 68 daily-plan keys generated for nine locales; localization audit, terminology ratchet, health-claims scan of 1,202 files, required-CI configuration, and diff checks pass | Merged copy is generated consistently, active legacy terminology did not expand, prohibited claims were not detected, and local release-gate wiring is valid | Professional translation, hosted exact-SHA checks, or clinical review |
 
 ## Physical device and deployment
 
@@ -176,9 +192,11 @@ records. Concurrent development must remain isolated by worktree and branch.
 ## Git and release state
 
 - Changed paths: shared body-profile policy/tests; Apple and Android profile,
-  onboarding, Health/body-composition, Android notification preference/policy,
-  generated localization, focused tests, and this operations record.
-- Commits: pending
+  onboarding, Health/body-composition, notification consent/policy,
+  calendar-aware daily guidance, generated localization, broad regression
+  tests, privacy documentation, physical-device runbook, and this operations
+  record.
+- Commits: body/notification slice `9547c394`; calendar merge commit pending
 - Branch and remote state: isolated local branch; no push or hosted CI
 - Repository visibility verified: inherited from current repository record
 - Version/build impact: none yet
@@ -219,15 +237,15 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 ## Next round
 
-1. Run exact-current Android full/demo builds and the incremental Apple graph
-   after generated localization settles.
+1. Commit the verified calendar integration locally without triggering hosted
+   Actions.
 2. Address the remaining highest-severity accessibility and notification
    findings in bounded cross-platform slices.
-3. Integrate the separately verified calendar-aware daily-guidance branch and
-   resolve conflicts against this audit branch.
-4. Run the complete local policy matrix, prepare physical-device handoff and
-   shareable `noop-ops` bundle, clean temporary resources, then consolidate and
-   push once to avoid unnecessary hosted Actions spend.
+3. Run the remaining simulator UI and local policy checks that add independent
+   evidence, then prepare the physical-device handoff and shareable
+   `noop-ops` bundle.
+4. Clean temporary resources and consolidate the final push so hosted Actions
+   run once for the finished source rather than once per audit slice.
 
 ## Privacy check
 

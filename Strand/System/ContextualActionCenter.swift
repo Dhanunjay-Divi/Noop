@@ -29,6 +29,33 @@ struct ContextualAction: Identifiable, Codable, Equatable, Sendable {
     let createdAt: Date
     let expiresAt: Date
     let amountML: Int?
+    let route: NoopNotificationRoute?
+
+    init(
+        id: String,
+        kind: ContextualActionKind,
+        title: String,
+        detail: String,
+        evidence: [String],
+        createdAt: Date,
+        expiresAt: Date,
+        amountML: Int?,
+        route: NoopNotificationRoute? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.evidence = evidence
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.amountML = amountML
+        self.route = route
+    }
+
+    var resolvedRecoveryRoute: NoopNotificationRoute {
+        route ?? .sleep
+    }
 }
 
 enum ContextualActionPolicy {
@@ -151,7 +178,8 @@ final class ContextualActionCenter: ObservableObject {
         fingerprint: String,
         evidence: [String],
         observedAt: Date,
-        maximumAge: TimeInterval
+        maximumAge: TimeInterval,
+        route: NoopNotificationRoute = .sleep
     ) {
         present(
             kind: .recovery,
@@ -160,7 +188,8 @@ final class ContextualActionCenter: ObservableObject {
             detail: detail,
             evidence: Self.readableEvidence(evidence),
             observedAt: observedAt,
-            expiresAfter: min(maximumAge, 18 * 60 * 60)
+            expiresAfter: min(maximumAge, 18 * 60 * 60),
+            route: route
         )
     }
 
@@ -197,6 +226,50 @@ final class ContextualActionCenter: ObservableObject {
                 observedAt: observedAt,
                 expiresAfter: 6 * 60 * 60
             )
+        } else if identifier == AdaptivePlannedWorkoutScheduler.requestID ||
+                    identifier == ContextualInterventionCenter.plannedWorkoutRequestID {
+            #if os(iOS)
+            guard ContextualInterventionSettings.adaptiveDayGuidanceEnabled,
+                  PlannedWorkoutCalendarSettings.enabled,
+                  PlannedWorkoutCalendarStore.hasCurrentReadAccess() else {
+                LocalNotificationLifecycle.cancel(
+                    identifiers: [identifier],
+                    presented: true
+                )
+                return
+            }
+            #endif
+            let startSec = (content.userInfo[
+                AdaptivePlannedWorkoutScheduler.startSecUserInfoKey
+            ] as? NSNumber)?.doubleValue
+            let scheduledFingerprint = content.userInfo[
+                AdaptivePlannedWorkoutScheduler.fingerprintUserInfoKey
+            ] as? String ?? fingerprint
+            let scheduledEvidence = content.userInfo[
+                AdaptivePlannedWorkoutScheduler.evidenceUserInfoKey
+            ] as? [String] ?? [
+                String(localized: "Today’s planned workout time")
+            ]
+            let expiresAfter = startSec.map {
+                max(0, $0 - observedAt.timeIntervalSince1970)
+            } ?? AdaptivePlannedWorkoutScheduler.leadTime
+            present(
+                kind: .recovery,
+                fingerprint: scheduledFingerprint,
+                title: content.title.isEmpty
+                    ? String(localized: "Adjust today’s workout")
+                    : content.title,
+                detail: content.body,
+                evidence: scheduledEvidence,
+                observedAt: observedAt,
+                expiresAfter: expiresAfter,
+                route: .workouts
+            )
+            ContextualInterventionCenter.recordScheduledPlannedWorkoutDelivery(
+                fingerprint: scheduledFingerprint,
+                deliveredAt: observedAt,
+                defaults: defaults
+            )
         } else if identifier.hasPrefix("contextual-stressBreathing") || route == .breathe {
             presentStress(
                 fastRMSSD: nil,
@@ -213,7 +286,8 @@ final class ContextualActionCenter: ObservableObject {
                 detail: content.body,
                 evidence: [String(localized: "Recent measured sleep and recovery context")],
                 observedAt: observedAt,
-                expiresAfter: 12 * 60 * 60
+                expiresAfter: 12 * 60 * 60,
+                route: route ?? .sleep
             )
         }
     }
@@ -288,6 +362,82 @@ final class ContextualActionCenter: ObservableObject {
         finish(action, succeeded: begin(action))
     }
 
+    func reconcileRecoveryActions(
+        route: NoopNotificationRoute,
+        keepingFingerprint: String?
+    ) {
+        let keepID = keepingFingerprint.map { "\(ContextualActionKind.recovery.rawValue):\($0)" }
+        let priorCount = actions.count
+        actions.removeAll { action in
+            action.kind == .recovery &&
+                action.resolvedRecoveryRoute == route &&
+                action.id != keepID
+        }
+        let validIDs = Set(actions.map(\.id))
+        processingIDs = processingIDs.intersection(validIDs)
+        if actions.count != priorCount {
+            persist()
+        }
+    }
+
+    func migrateRecoveryAction(
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Bool
+    ) {
+        let idPrefix = "\(ContextualActionKind.recovery.rawValue):"
+        let newID = "\(idPrefix)\(toFingerprint)"
+        func matchesLegacyID(_ id: String) -> Bool {
+            guard id != newID, id.hasPrefix(idPrefix) else { return false }
+            return matchingFingerprint(String(id.dropFirst(idPrefix.count)))
+        }
+
+        var changed = false
+        let matchingActions = actions.filter {
+            $0.kind == .recovery &&
+                $0.resolvedRecoveryRoute == route &&
+                matchesLegacyID($0.id)
+        }
+        if let prior = matchingActions.max(by: { $0.createdAt < $1.createdAt }) {
+            actions.removeAll {
+                $0.kind == .recovery &&
+                    $0.resolvedRecoveryRoute == route &&
+                    matchesLegacyID($0.id)
+            }
+            if !actions.contains(where: { $0.id == newID }) {
+                actions.append(
+                    ContextualAction(
+                        id: newID,
+                        kind: prior.kind,
+                        title: prior.title,
+                        detail: prior.detail,
+                        evidence: prior.evidence,
+                        createdAt: prior.createdAt,
+                        expiresAt: prior.expiresAt,
+                        amountML: prior.amountML,
+                        route: prior.route
+                    )
+                )
+            }
+            changed = true
+        }
+
+        func migrateIDs(_ ids: inout Set<String>) {
+            let legacyIDs = ids.filter(matchesLegacyID)
+            guard !legacyIDs.isEmpty else { return }
+            ids.subtract(legacyIDs)
+            ids.insert(newID)
+            changed = true
+        }
+        migrateIDs(&processingIDs)
+        migrateIDs(&dismissedIDs)
+        migrateIDs(&completedIDs)
+
+        if changed {
+            persist()
+        }
+    }
+
     func removeExpired(now: Date = Date()) {
         let priorCount = actions.count
         actions.removeAll { $0.expiresAt <= now }
@@ -303,10 +453,11 @@ final class ContextualActionCenter: ObservableObject {
         evidence: [String],
         observedAt: Date,
         expiresAfter: TimeInterval,
-        amountML: Int? = nil
+        amountML: Int? = nil,
+        route: NoopNotificationRoute? = nil
     ) {
         let id = "\(kind.rawValue):\(fingerprint)"
-        let expiresAt = observedAt.addingTimeInterval(max(60, expiresAfter))
+        let expiresAt = observedAt.addingTimeInterval(max(0, expiresAfter))
         let now = Date()
         guard expiresAt > now,
               !dismissedIDs.contains(id),
@@ -335,7 +486,8 @@ final class ContextualActionCenter: ObservableObject {
                 evidence: Array(evidence.filter { !$0.isEmpty }.prefix(3)),
                 createdAt: observedAt,
                 expiresAt: expiresAt,
-                amountML: amountML
+                amountML: amountML,
+                route: route
             )
         )
         persist()

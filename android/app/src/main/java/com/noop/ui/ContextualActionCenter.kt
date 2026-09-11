@@ -1,8 +1,10 @@
 package com.noop.ui
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import com.noop.AppDiagnosticsRecorder
 import com.noop.R
 import com.noop.notif.HydrationReminderPrefs
 import java.util.Locale
@@ -20,6 +22,10 @@ internal enum class ContextualActionKind(val priority: Int) {
     RECOVERY(85),
 }
 
+internal enum class ContextualActionSource {
+    ADAPTIVE_DAY,
+}
+
 internal data class ContextualAction(
     val id: String,
     val kind: ContextualActionKind,
@@ -29,7 +35,12 @@ internal data class ContextualAction(
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     val amountMl: Int? = null,
+    val route: NoopNotificationRoute? = null,
+    val source: ContextualActionSource? = null,
 )
+
+internal fun ContextualAction.resolvedRecoveryRoute(): NoopNotificationRoute =
+    route ?: NoopNotificationRoute.SLEEP
 
 internal object ContextualActionPolicy {
     const val VISIBLE_LIMIT = 3
@@ -50,6 +61,140 @@ internal object ContextualActionPolicy {
                     .thenByDescending { it.createdAtMillis },
             )
             .take(limit.coerceAtLeast(0))
+}
+
+internal object ContextualActionCleanupPolicy {
+    private val legacyAdaptivePrefixes = listOf(
+        "recovery:sleep:",
+        "recovery:sleep-window:",
+        "recovery:routine:",
+        "recovery:travel:",
+        "recovery:planned-workout|",
+    )
+
+    fun isLegacyAdaptiveAction(action: ContextualAction): Boolean =
+        action.kind == ContextualActionKind.RECOVERY &&
+            action.source == null &&
+            legacyAdaptivePrefixes.any(action.id::startsWith)
+
+    fun removeRecoveryActions(
+        actions: List<ContextualAction>,
+        source: ContextualActionSource,
+        legacyFingerprints: Set<String>,
+        route: NoopNotificationRoute? = null,
+    ): List<ContextualAction> {
+        val legacyIds = legacyFingerprints.mapTo(hashSetOf()) {
+            "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:$it"
+        }
+        return actions.filterNot {
+            it.kind == ContextualActionKind.RECOVERY &&
+                (route == null || it.resolvedRecoveryRoute() == route) &&
+                (
+                    it.source == source ||
+                        isLegacyAdaptiveAction(it) ||
+                        (it.source == null && it.id in legacyIds)
+                )
+        }
+    }
+}
+
+internal object ContextualActionConsentPolicy {
+    fun visibleCandidates(
+        actions: List<ContextualAction>,
+        hiddenActionIds: Set<String>,
+        adaptiveDayEnabled: Boolean,
+        plannedWorkoutCalendarEnabled: Boolean,
+    ): List<ContextualAction> = actions.filterNot {
+        it.id in hiddenActionIds ||
+            (
+                !adaptiveDayEnabled &&
+                    (
+                        it.source == ContextualActionSource.ADAPTIVE_DAY ||
+                            ContextualActionCleanupPolicy.isLegacyAdaptiveAction(it)
+                    )
+                ) ||
+            (
+                !plannedWorkoutCalendarEnabled &&
+                    (
+                        (
+                            it.source == ContextualActionSource.ADAPTIVE_DAY &&
+                                it.resolvedRecoveryRoute() == NoopNotificationRoute.WORKOUTS
+                            ) ||
+                            it.id.startsWith("recovery:planned-workout|")
+                    )
+                )
+    }
+}
+
+internal object ContextualActionStateStore {
+    fun write(
+        prefs: SharedPreferences,
+        key: String,
+        encodedState: String,
+        synchronous: Boolean,
+    ): Boolean {
+        val editor = prefs.edit().putString(key, encodedState)
+        return if (synchronous) {
+            editor.commit()
+        } else {
+            editor.apply()
+            true
+        }
+    }
+}
+
+internal data class ContextualActionIdentityState(
+    val actions: List<ContextualAction>,
+    val processingIds: Set<String>,
+    val dismissedIds: Set<String>,
+    val completedIds: Set<String>,
+)
+
+internal object ContextualActionIdentityMigration {
+    fun recovery(
+        state: ContextualActionIdentityState,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ): ContextualActionIdentityState {
+        val idPrefix = "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:"
+        val newId = "$idPrefix$toFingerprint"
+        fun matchesLegacyId(id: String): Boolean =
+            id != newId &&
+                id.startsWith(idPrefix) &&
+                matchingFingerprint(id.removePrefix(idPrefix))
+
+        val matchingActions = state.actions.filter {
+            it.kind == ContextualActionKind.RECOVERY &&
+                it.resolvedRecoveryRoute() == route &&
+                matchesLegacyId(it.id)
+        }
+        val actions = if (matchingActions.isEmpty()) {
+            state.actions
+        } else {
+            val prior = matchingActions.maxBy { it.createdAtMillis }
+            buildList {
+                addAll(state.actions.filterNot {
+                    it.kind == ContextualActionKind.RECOVERY &&
+                        it.resolvedRecoveryRoute() == route &&
+                        matchesLegacyId(it.id)
+                })
+                if (none { it.id == newId }) add(prior.copy(id = newId))
+            }
+        }
+
+        fun migrateIds(ids: Set<String>): Set<String> {
+            val legacyIds = ids.filterTo(hashSetOf(), ::matchesLegacyId)
+            return if (legacyIds.isEmpty()) ids else (ids - legacyIds) + newId
+        }
+
+        return ContextualActionIdentityState(
+            actions = actions,
+            processingIds = migrateIds(state.processingIds),
+            dismissedIds = migrateIds(state.dismissedIds),
+            completedIds = migrateIds(state.completedIds),
+        )
+    }
 }
 
 /**
@@ -74,6 +219,7 @@ internal object ContextualActionCenter {
     private var appContext: Context? = null
     private var loaded = false
     private var storedActions = mutableListOf<ContextualAction>()
+    private val hiddenActionIds = linkedSetOf<String>()
     private var dismissedIds = linkedSetOf<String>()
     private var completedIds = linkedSetOf<String>()
     private val expiryRunnable = Runnable {
@@ -158,6 +304,8 @@ internal object ContextualActionCenter {
         evidence: List<String>,
         observedAtMillis: Long,
         maximumAgeMillis: Long,
+        route: NoopNotificationRoute = NoopNotificationRoute.SLEEP,
+        source: ContextualActionSource? = null,
     ) {
         present(
             context = context,
@@ -168,6 +316,8 @@ internal object ContextualActionCenter {
             evidence = readableEvidence(context, evidence),
             observedAtMillis = observedAtMillis,
             expiresAfterMillis = maximumAgeMillis.coerceAtMost(18L * 60L * 60L * 1_000L),
+            route = route,
+            source = source,
         )
     }
 
@@ -215,6 +365,7 @@ internal object ContextualActionCenter {
             ensureLoadedLocked(app)
             dismissedIds.add(action.id)
             storedActions.removeAll { it.id == action.id }
+            hiddenActionIds.remove(action.id)
             _processingIds.value = _processingIds.value - action.id
             persistLocked(app)
         }
@@ -242,12 +393,107 @@ internal object ContextualActionCenter {
             if (!succeeded) return@synchronized
             completedIds.add(action.id)
             storedActions.removeAll { it.id == action.id }
+            hiddenActionIds.remove(action.id)
             persistLocked(app)
         }
     }
 
     fun complete(context: Context, action: ContextualAction) {
         if (begin(context, action)) finish(context, action, succeeded = true)
+    }
+
+    fun migrateRecoveryAction(
+        context: Context,
+        route: NoopNotificationRoute,
+        toFingerprint: String,
+        matchingFingerprint: (String) -> Boolean,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val prior = ContextualActionIdentityState(
+                actions = storedActions,
+                processingIds = _processingIds.value,
+                dismissedIds = dismissedIds,
+                completedIds = completedIds,
+            )
+            val migrated = ContextualActionIdentityMigration.recovery(
+                state = prior,
+                route = route,
+                toFingerprint = toFingerprint,
+                matchingFingerprint = matchingFingerprint,
+            )
+            if (migrated == prior) return@synchronized
+            storedActions = migrated.actions.toMutableList()
+            _processingIds.value = migrated.processingIds
+            dismissedIds = migrated.dismissedIds.toCollection(linkedSetOf())
+            completedIds = migrated.completedIds.toCollection(linkedSetOf())
+            persistLocked(app)
+        }
+    }
+
+    fun reconcileRecoveryActions(
+        context: Context,
+        route: NoopNotificationRoute,
+        keepingFingerprint: String?,
+    ) {
+        synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val keepId = keepingFingerprint?.let {
+                "${ContextualActionKind.RECOVERY.name.lowercase(Locale.ROOT)}:$it"
+            }
+            val changed = storedActions.removeAll {
+                it.kind == ContextualActionKind.RECOVERY &&
+                    it.resolvedRecoveryRoute() == route &&
+                    it.id != keepId
+            }
+            if (!changed) return@synchronized
+            val validIds = storedActions.mapTo(hashSetOf()) { it.id }
+            _processingIds.value = _processingIds.value.intersect(validIds)
+            persistLocked(app)
+        }
+    }
+
+    fun removeRecoveryActions(
+        context: Context,
+        source: ContextualActionSource,
+        legacyFingerprints: Set<String> = emptySet(),
+        route: NoopNotificationRoute? = null,
+    ): Boolean = synchronized(lock) {
+            val app = context.applicationContext
+            ensureLoadedLocked(app)
+            val retained = ContextualActionCleanupPolicy.removeRecoveryActions(
+                actions = storedActions,
+                source = source,
+                legacyFingerprints = legacyFingerprints,
+                route = route,
+            )
+            if (retained.size == storedActions.size) return@synchronized true
+            val removedIds = storedActions.mapTo(hashSetOf()) { it.id } -
+                retained.mapTo(hashSetOf()) { it.id }
+            val boundedRetained = retained
+                .sortedByDescending { it.createdAtMillis }
+                .take(MAX_STORED_ACTIONS)
+            val committed = writeStateLocked(
+                context = app,
+                actions = boundedRetained,
+                synchronous = true,
+            )
+            if (!committed) {
+                hiddenActionIds.addAll(removedIds)
+                _processingIds.value = _processingIds.value - removedIds
+                publishLocked()
+                scheduleExpiryLocked()
+                return@synchronized false
+            }
+            storedActions = boundedRetained.toMutableList()
+            hiddenActionIds.removeAll(removedIds)
+            val validIds = storedActions.mapTo(hashSetOf()) { it.id }
+            _processingIds.value = _processingIds.value.intersect(validIds)
+            publishLocked()
+            scheduleExpiryLocked()
+            true
     }
 
     fun applyDemoActions(context: Context, nowMillis: Long = System.currentTimeMillis()) {
@@ -289,16 +535,49 @@ internal object ContextualActionCenter {
         observedAtMillis: Long,
         expiresAfterMillis: Long,
         amountMl: Int? = null,
+        route: NoopNotificationRoute? = null,
+        source: ContextualActionSource? = null,
     ) {
         synchronized(lock) {
             val app = context.applicationContext
             ensureLoadedLocked(app)
             val now = System.currentTimeMillis()
-            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(60_000L)
+            val expiresAt = observedAtMillis + expiresAfterMillis.coerceAtLeast(0L)
             val id = "${kind.name.lowercase(Locale.ROOT)}:$fingerprint"
+            hiddenActionIds.remove(id)
             if (expiresAt <= now || id in dismissedIds || id in completedIds) return@synchronized
-            if (storedActions.any { it.id == id }) {
-                removeExpiredLocked(app, now)
+            val existingIndex = storedActions.indexOfFirst { it.id == id }
+            if (existingIndex >= 0) {
+                val existing = storedActions[existingIndex]
+                if (
+                    existing.expiresAtMillis > now &&
+                    existing.source == null &&
+                    source != null
+                ) {
+                    val upgraded = storedActions.toMutableList()
+                    upgraded[existingIndex] = existing.copy(
+                        route = existing.route ?: route,
+                        source = source,
+                    )
+                    if (
+                        writeStateLocked(
+                            context = app,
+                            actions = upgraded,
+                            synchronous = true,
+                        )
+                    ) {
+                        storedActions = upgraded
+                        publishLocked()
+                        scheduleExpiryLocked()
+                    } else {
+                        AppDiagnosticsRecorder.record(
+                            "contextual_action.source_migration",
+                            fields = mapOf("outcome" to "commit_failed"),
+                        )
+                    }
+                } else {
+                    removeExpiredLocked(app, now)
+                }
                 return@synchronized
             }
 
@@ -321,6 +600,8 @@ internal object ContextualActionCenter {
                 createdAtMillis = observedAtMillis,
                 expiresAtMillis = expiresAt,
                 amountMl = amountMl,
+                route = route,
+                source = source,
             )
             persistLocked(app)
         }
@@ -343,6 +624,7 @@ internal object ContextualActionCenter {
             completedIds = decodeStrings(root.optJSONArray("completed")).toCollection(linkedSetOf())
         }.onFailure {
             storedActions.clear()
+            hiddenActionIds.clear()
             dismissedIds.clear()
             completedIds.clear()
         }
@@ -352,6 +634,7 @@ internal object ContextualActionCenter {
     private fun removeExpiredLocked(context: Context, nowMillis: Long) {
         val changed = storedActions.removeAll { it.expiresAtMillis <= nowMillis }
         val validIds = storedActions.mapTo(hashSetOf()) { it.id }
+        hiddenActionIds.retainAll(validIds)
         _processingIds.value = _processingIds.value.intersect(validIds)
         if (changed) persistLocked(context) else {
             publishLocked(nowMillis)
@@ -366,20 +649,45 @@ internal object ContextualActionCenter {
             .toMutableList()
         dismissedIds = dismissedIds.toList().takeLast(MAX_HISTORY_IDS).toCollection(linkedSetOf())
         completedIds = completedIds.toList().takeLast(MAX_HISTORY_IDS).toCollection(linkedSetOf())
-        val root = JSONObject()
-            .put("actions", JSONArray().apply { storedActions.forEach { put(encode(it)) } })
-            .put("dismissed", JSONArray(dismissedIds.toList()))
-            .put("completed", JSONArray(completedIds.toList()))
-        context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-            .edit()
-            .putString(STATE_KEY, root.toString())
-            .apply()
+        writeStateLocked(
+            context = context,
+            actions = storedActions,
+            synchronous = false,
+        )
         publishLocked()
         scheduleExpiryLocked()
     }
 
+    private fun writeStateLocked(
+        context: Context,
+        actions: List<ContextualAction>,
+        synchronous: Boolean,
+    ): Boolean {
+        val root = JSONObject()
+            .put("actions", JSONArray().apply { actions.forEach { put(encode(it)) } })
+            .put("dismissed", JSONArray(dismissedIds.toList()))
+            .put("completed", JSONArray(completedIds.toList()))
+        return ContextualActionStateStore.write(
+            prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE),
+            key = STATE_KEY,
+            encodedState = root.toString(),
+            synchronous = synchronous,
+        )
+    }
+
     private fun publishLocked(nowMillis: Long = System.currentTimeMillis()) {
-        _actions.value = ContextualActionPolicy.visible(storedActions, nowMillis)
+        val adaptiveDayEnabled = appContext?.let(AdaptiveDayConsentGate::guidance) ?: true
+        val plannedWorkoutCalendarEnabled =
+            appContext?.let(AdaptiveDayConsentGate::plannedWorkoutCalendar) ?: true
+        _actions.value = ContextualActionPolicy.visible(
+            ContextualActionConsentPolicy.visibleCandidates(
+                actions = storedActions,
+                hiddenActionIds = hiddenActionIds,
+                adaptiveDayEnabled = adaptiveDayEnabled,
+                plannedWorkoutCalendarEnabled = plannedWorkoutCalendarEnabled,
+            ),
+            nowMillis,
+        )
     }
 
     private fun scheduleExpiryLocked() {
@@ -396,6 +704,8 @@ internal object ContextualActionCenter {
         .put("evidence", JSONArray(action.evidence))
         .put("createdAt", action.createdAtMillis)
         .put("expiresAt", action.expiresAtMillis)
+        .apply { action.route?.let { put("route", it.navRoute) } }
+        .apply { action.source?.let { put("source", it.name) } }
         .apply { action.amountMl?.let { put("amountMl", it) } }
 
     private fun decodeActions(array: JSONArray?): List<ContextualAction> = buildList {
@@ -418,6 +728,10 @@ internal object ContextualActionCenter {
                     createdAtMillis = item.optLong("createdAt", 0L),
                     expiresAtMillis = expiresAt,
                     amountMl = item.optInt("amountMl").takeIf { item.has("amountMl") },
+                    route = NoopNotificationRoute.fromRaw(item.optString("route")),
+                    source = runCatching {
+                        ContextualActionSource.valueOf(item.optString("source"))
+                    }.getOrNull(),
                 ),
             )
         }
