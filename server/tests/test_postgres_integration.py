@@ -238,9 +238,9 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
 
 
 def test_terminal_location_cleanup_migration_removes_legacy_precise_rows() -> None:
-    cleanup = (
-        MIGRATIONS / "033_safety_terminal_location_cleanup.sql"
-    ).read_text(encoding="utf-8")
+    cleanup = (MIGRATIONS / "033_safety_terminal_location_cleanup.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "DELETE FROM safety_incident_locations AS location" in cleanup
     assert "USING safety_dispatches AS dispatch" in cleanup
