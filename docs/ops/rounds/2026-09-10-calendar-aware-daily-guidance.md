@@ -347,6 +347,27 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   observing timezone state, reading Room or Calendar, recording guidance
   diagnostics, or posting. The boundary therefore covers Health Connect, BLE,
   UI, and any future caller without relying on every caller to repeat the gate.
+- The September 11 protected-review closeout found three remaining restart and
+  provider-state gaps. Apple and Android now mark timezone state stale whenever
+  the operational runtime is blocked, then consume that marker exactly once
+  after current access and Terms reopen by replacing the baseline with the
+  current offset and discarding any travel change observed while guidance was
+  forbidden. Apple covers both its launch-access receipt and Terms gate.
+- Android Calendar Provider refresh now distinguishes a confirmed empty result,
+  provider failure, and a superseded evaluation. A null provider cursor is a
+  failure rather than evidence that the user has no workout. Lifecycle and
+  provider-edit invalidation makes the prior snapshot stale without deleting
+  it, so a transient provider failure preserves the last confirmed plan and
+  its delivery artifacts; explicit opt-out and permission loss still clear
+  them immediately.
+- Android planned-workout delivery now persists the exact generic workout
+  fingerprint atomically with the shared prompt owner. If the process stops
+  after notification delivery but before private adaptive-day state is saved,
+  restart restores that state only when the owner's persisted fingerprint
+  still identifies the current workout. A moved workout or legacy
+  identity-less owner is reconciled as stale, and shared-slot cancellation
+  remains inside the delivery-ledger lock so a newer adaptive-day prompt is
+  preserved.
 
 ## Data, privacy, and medical truth
 
@@ -435,6 +456,15 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   timezone, repository, Calendar, diagnostics, or delivery work, so the
   unauthorized attempt itself retains no health, calendar, device, or error
   payload.
+- Final operational-resume and orphan-recovery coverage adds two bounded fixed
+  outcomes: `adaptive_day.time_zone_baseline` with
+  `rebased_after_operational_block`, and
+  `adaptive_day.planned_workout_state` with
+  `restored_from_delivery_owner`. Neither event includes an offset, timestamp,
+  fingerprint, calendar value, health value, user text, device identity, or
+  arbitrary error. Calendar refresh continues to use only the existing fixed
+  `matched`, `empty`, `failed`, `superseded`, permission, and access-change
+  outcomes plus a zero/one/multiple candidate bucket.
 - Redaction, retention, and high-frequency controls: no event title, notes,
   attendees, location, calendar/event identifiers, health values, or exact
   dynamic errors; refresh only on explicit enable and bounded lifecycle/data
@@ -471,15 +501,17 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 | Final timezone runtime-gate closeout | The focused Android notifier suite and complete Android wall passed | A manifest-delivered timezone broadcast returns before observing state or posting guidance when the current Terms receipt is absent | Physical broadcast delivery, process startup, or OEM behavior |
 | Final ambiguous-ride classifier closeout | The focused Swift and Android classifier suites passed; all 1,461 analytics tests passed with seven expected skips | Bare and fitness-context rides remain eligible while train, bus, airport, taxi, rideshare, transit, driving, and commuting phrases fail closed on both platforms | Unreviewed vocabulary or real user calendar naming |
 | Final evaluator runtime-gate closeout | The focused source-order contract passed in both Android variants; the complete Android wall passed 4,234 tests with seven expected skips plus both APK assemblies, full debug compile, lint, and instrumentation-source compilation | Every Android adaptive-day caller requires the current Terms receipt before generation, timezone, repository, or Calendar work | Physical worker startup, process termination at every instruction, or OEM scheduling |
-| Complete macOS app suite | 1,749 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, synchronous opt-out cleanup, current check-in and sleep-target invalidation, launch-gated contextual work, latest-only Android parity contract, cross-platform action-ID migration, cancellation contract, generation supersession, travel-priority cleanup, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
+| September 11 restart/provider closeout | 55 focused Apple tests passed; the focused Android Calendar and adaptive-day notifier suites passed; the complete Android wall passed 8,488 variant test executions with 14 expected skips, both APK assemblies, both instrumentation-source compilations, and both lint variants | Operational blocking rebases timezone state before guidance resumes, null/provider failures preserve confirmed Calendar state, superseded refreshes cannot publish, and process-death restoration requires the exact persisted generic workout identity | Physical permission/provider behavior, terminated-process notification presentation, OEM scheduling, signing, or store delivery |
+| Complete macOS app suite | 1,750 passed, 1 expected external-data skip, 0 failures | The complete shared app integration, generated localization, exact-start identity, stale-artifact reconciliation, bounded retry policy, preserved natural-expiry cooldown, background-wake policy, consent reconciliation, synchronous opt-out cleanup, current check-in and sleep-target invalidation, launch-gated contextual work, latest-only Android parity contract, cross-platform action-ID migration, cancellation contract, generation supersession, travel-priority cleanup, and affected routing graph pass together | iOS runtime or physical Calendar behavior |
 | App-wide localization contract | 2 passed with exactly 636 keys | All five new strings exist in all nine locales and Apple/Android generated resources match the source exactly | Independent translation quality review |
 | Unsigned iOS simulator build | Passed after review corrections | Complete iPhone/widget/watch dependency graph compiles with the permission declaration and UI | Physical calendar data, background timing, haptics, or battery |
 | Fail-closed iOS daily-plan visual matrix | Seven states passed on a disposable iPhone simulator, including large text, increased contrast, dark mode, and the 6h12/17:30 planned-workout fixture | Every accepted image had the expected planner availability and planned-workout category, nonblank rendered pixels, and a live app process; the simulator was removed afterward | Physical-device layout, real calendar permission/provider behavior, or background delivery |
 | Planned-workout visual inspection | `planned-workout.png`, 1170x2532 and 535,203 bytes, reviewed | Sleep, start time, exact 1h18 deficit, guidance, range, and bottom navigation are visible without overlap in the deterministic fixture | Every device size, locale, accessibility setting, or real user history |
+| iOS UI-test runner attempts | Two clean attempts compiled the UI-test graph, but Xcode repeatedly failed before worker materialization with `DebuggerLLDB.DebuggerVersionStore.StoreError` and `no debugger version`; both stalled runs were stopped and their processes removed | The failure is reproducible in the current Mac's Xcode test infrastructure and did not leave a live test process | No UI test executed, so this is neither an app pass nor an app failure |
 | Android full gate | 4,234 passed, 7 skipped, 0 failures or errors in each variant; both APK assemblies, full debug compile, lint, and instrumentation-source compilation passed on the final local source | Kotlin parity, app integration, localization contracts, exact-start identity, stale delivery/action reconciliation, latest-only health-data evaluation, preserved natural-expiry history, bounded transient-suppression retry, owner-aware shared cooldown and notification-slot restoration, crash-recoverable orphan cleanup, forced master-opt-out cleanup, app-wide calendar observation, consent-at-post enforcement, durable worker boundary, persisted active-device resolution, evaluator-wide current-Terms gating, timezone-priority cleanup, bounded report diagnostics, reviewed permission/routing/provider corrections, and static Android policy pass | OEM Calendar Provider, WorkManager timing, process termination at every instruction, or physical notification behavior |
 | Focused Android calendar and demo-fixture tests | 3 passed | Logical-day bridging, cancellation-before-generic-failure ordering, fatal-error propagation, and the exact 6h12/17:30 scenario remain deterministic | A real Calendar Provider query, OEM cancellation latency, or rendered emulator screenshot |
 | Final Apple graph | Unsigned `NOOPiOS` Debug build completed with exit 0 and `BUILD SUCCEEDED`, including the iPhone app, widgets, and watch app after the consent-safe boundary and stale-artifact correction | The complete Apple dependency graph compiles on the final local source | Signing, installation, physical calendar access, background delivery, or hardware behavior |
-| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `701816585008c8b408110aeaaf036ed48c9ca1b7c58a93bb2bdfed60c24a3e93`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source and test locations moved with the correction | Independent legal review or physical-device behavior |
+| Repository policy and terminology | 227 Tools tests passed after reviewed snapshot regeneration; release controls retained 9 checks, required CI retained 10 contexts, all 51 operations records validated, and terminology retained 17,371 occurrences across 1,512 classified path/category groups with reviewed active-allowlist SHA `77fd12aef2246bf73486eed92d4e8f8e9e9981caf3c2ac158b3d671448731bc7`, inventory SHA `2a86a3d84bb61d235da82a3424cd188c339f26537fa2c9ceb01d283c242bd13d`, and zero forbidden mappings. i18n, health-claims, calibration parity, legal provenance, and private-data gates also passed. | The final source and evidence preserve required CI, durable-record, privacy, and terminology controls; the active allowlist and category totals are unchanged, while reviewed source, test, and handoff locations moved with the correction | Independent legal review or physical-device behavior |
 
 ## Physical device and deployment
 
@@ -494,6 +526,11 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 - Unrun hardware gates: iOS and Android physical calendar authorization,
   provider query, notification timing, background behavior, accessibility, and
   battery impact
+- Physical-device handoff:
+  `docs/handoff/CALENDAR-AWARE-PHYSICAL-DEVICE-RUNBOOK.md` records 22 exact
+  synthetic-data scenarios, notification ownership checks, accessibility and
+  performance conditions, bounded evidence rules, and the local UI-test runner
+  limitation for the next agent.
 
 ## Git and release state
 
@@ -509,10 +546,10 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
   delivery-boundary correction plus latest consent/lifecycle correction
   containing this record
 - Branch and remote state: protected pull request `#14` remains open; the final
-  priority, synchronous opt-out, Android report-liveness, and timezone runtime-
-  gate corrections plus ambiguous-ride classifier and evaluator-wide runtime-
-  gate corrections are locally verified, and normal merge is pending a
-  replacement commit, fresh exact-head review, and replacement required checks
+  source and evidence are locally verified and remain unpushed at the owner's
+  request to avoid triggering hosted GitHub Actions. Normal merge is pending an
+  explicitly authorized push, fresh exact-head review, replacement required
+  checks, and protected merge without bypass.
 - Parent integration state: visual-parity pull request `#13` merged normally to
   protected `main` as `2efd5e89`; this branch is now rebased onto that exact
   commit, has completed replacement local verification, and still requires
@@ -545,12 +582,13 @@ eligible for one bounded pre-workout prompt without exposing calendar content.
 
 ## Next round
 
-1. Commit the final evaluator runtime-gate correction, resolve its exact-head
-   review conversation with evidence, obtain a fresh clean exact-head review,
-   and complete a normal protected merge without bypass.
+1. Retain the complete local commit without pushing until the owner explicitly
+   authorizes hosted checks, then obtain a fresh clean exact-head review and
+   complete a normal protected merge without bypass.
 2. Run the permission, provider-change, foreground/background notification,
    accessibility-size, and battery matrix on representative iOS and Android
-   physical devices before release.
+   physical devices before release by following
+   `docs/handoff/CALENDAR-AWARE-PHYSICAL-DEVICE-RUNBOOK.md`.
 
 ## Privacy check
 

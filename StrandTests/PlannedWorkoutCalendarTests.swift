@@ -83,6 +83,51 @@ final class PlannedWorkoutCalendarTests: XCTestCase {
         XCTAssertTrue(windDown.contains("ContextualInterventionInputs.notifyChanged()"))
     }
 
+    func testOperationallyLockedAppleLaunchRebasesTimezoneBeforeGuidanceRestarts() throws {
+        let app = try source("StrandiOS/App/StrandiOSApp.swift")
+        let model = try source("Strand/App/AppModel.swift")
+
+        let acceptedTerms = try XCTUnwrap(
+            app.range(of: "let hasAcceptedCurrentTerms")
+        )
+        let blockedCondition = try XCTUnwrap(
+            app.range(
+                of: "if !access.isUnlocked || !hasAcceptedCurrentTerms",
+                range: acceptedTerms.upperBound..<app.endIndex
+            )
+        )
+        let markBlocked = try XCTUnwrap(
+            app.range(
+                of: "AdaptiveDayTimeZoneStore.markOperationalAccessBlocked()",
+                range: blockedCondition.upperBound..<app.endIndex
+            )
+        )
+        let operational = try XCTUnwrap(
+            app.range(
+                of: "let operationallyAllowed",
+                range: markBlocked.upperBound..<app.endIndex
+            )
+        )
+        XCTAssertLessThan(blockedCondition.lowerBound, markBlocked.lowerBound)
+        XCTAssertLessThan(markBlocked.lowerBound, operational.lowerBound)
+
+        let startup = try XCTUnwrap(
+            model.range(of: "func startOperationalWorkAfterLaunchAccess()")
+        )
+        let tail = model[startup.lowerBound...]
+        let rebase = try XCTUnwrap(
+            tail.range(of: "AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(")
+        )
+        let opened = try XCTUnwrap(
+            tail.range(
+                of: "operationalWorkStarted = true",
+                range: rebase.upperBound..<tail.endIndex
+            )
+        )
+        XCTAssertLessThan(rebase.lowerBound, opened.lowerBound)
+        XCTAssertTrue(tail.contains("rebased_after_operational_block"))
+    }
+
     func testAdaptiveEvaluationStopsAfterCalendarRefreshWhenCancelled() throws {
         let source = try source("Strand/App/AppModel.swift")
         let method = try XCTUnwrap(

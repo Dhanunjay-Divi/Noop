@@ -605,7 +605,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val contextualVo2ReviewEnabled: StateFlow<Boolean> =
         _contextualVo2ReviewEnabled.asStateFlow()
     private val _adaptiveDayGuidanceEnabled =
-        MutableStateFlow(NoopPrefs.adaptiveDayGuidance(appContext))
+        MutableStateFlow(AdaptiveDayConsentGate.guidance(appContext))
     val adaptiveDayGuidanceEnabled: StateFlow<Boolean> =
         _adaptiveDayGuidanceEnabled.asStateFlow()
 
@@ -3010,30 +3010,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setAdaptiveDayGuidanceEnabled(enabled: Boolean) {
+    fun setAdaptiveDayGuidanceEnabled(enabled: Boolean): Boolean {
+        if (!AdaptiveDayNotifier.setGuidanceConsent(appContext, enabled)) {
+            _adaptiveDayGuidanceEnabled.value =
+                AdaptiveDayConsentGate.guidance(appContext)
+            return false
+        }
         AdaptiveDayEvaluationGate.invalidate()
         _adaptiveDayGuidanceEnabled.value = enabled
-        NoopPrefs.setAdaptiveDayGuidance(appContext, enabled)
         if (!enabled) {
             plannedWorkoutCalendarEvaluationJob?.cancel()
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             PlannedWorkoutCalendarStore.clear()
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
-            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
-                appContext,
-                currentFingerprint = null,
-                forceCancelSharedNotification = true,
-            )
             reconcilePlannedWorkoutCalendarObserver()
-            return
+            return true
         }
         onPlannedWorkoutCalendarChanged()
+        return true
     }
 
     fun onPlannedWorkoutCalendarChanged() {
         reconcilePlannedWorkoutCalendarObserver()
         AdaptiveDayEvaluationGate.invalidate()
-        PlannedWorkoutCalendarStore.clear()
+        PlannedWorkoutCalendarStore.invalidate()
         plannedWorkoutCalendarEvaluationJob?.cancel()
         plannedWorkoutCalendarEvaluationJob = viewModelScope.launch {
             PlannedWorkoutCalendarStore.refresh(
@@ -3054,8 +3054,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun reconcilePlannedWorkoutCalendarObserver() {
         val shouldObserve =
-            NoopPrefs.adaptiveDayGuidance(appContext) &&
-                NoopPrefs.plannedWorkoutCalendar(appContext) &&
+            AdaptiveDayConsentGate.guidance(appContext) &&
+                AdaptiveDayConsentGate.plannedWorkoutCalendar(appContext) &&
                 ContextCompat.checkSelfPermission(
                     appContext,
                     Manifest.permission.READ_CALENDAR,

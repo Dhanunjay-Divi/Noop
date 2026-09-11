@@ -9,7 +9,7 @@ import androidx.core.content.ContextCompat
 import com.noop.AppDiagnosticsRecorder
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.PlannedWorkoutTitleClassifier
-import com.noop.ui.NoopPrefs
+import com.noop.ui.AdaptiveDayConsentGate
 import java.time.ZonedDateTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +33,16 @@ data class PlannedWorkoutCalendarSnapshot(
      */
     fun asPlannedWorkout(planningDay: String = day) =
         DailyActionPlanner.PlannedWorkout(planningDay, startSec, endSec)
+}
+
+sealed interface PlannedWorkoutCalendarRefreshOutcome {
+    data class Completed(
+        val snapshot: PlannedWorkoutCalendarSnapshot?,
+    ) : PlannedWorkoutCalendarRefreshOutcome
+
+    data object Failed : PlannedWorkoutCalendarRefreshOutcome
+
+    data object Superseded : PlannedWorkoutCalendarRefreshOutcome
 }
 
 /**
@@ -62,6 +72,14 @@ object PlannedWorkoutCalendarStore {
         }
     }
 
+    fun invalidate() {
+        synchronized(stateLock) {
+            invalidationGeneration += 1L
+            lastRefreshAtMillis = 0L
+            lastRefreshDay = null
+        }
+    }
+
     fun isCurrent(snapshot: PlannedWorkoutCalendarSnapshot): Boolean =
         synchronized(stateLock) {
             _snapshot.value == snapshot
@@ -76,14 +94,14 @@ object PlannedWorkoutCalendarStore {
         context: Context,
         now: ZonedDateTime = ZonedDateTime.now(),
         force: Boolean = false,
-    ): PlannedWorkoutCalendarSnapshot? = mutex.withLock {
+    ): PlannedWorkoutCalendarRefreshOutcome = mutex.withLock {
         val appContext = context.applicationContext
         if (
-            !NoopPrefs.adaptiveDayGuidance(appContext) ||
-            !NoopPrefs.plannedWorkoutCalendar(appContext)
+            !AdaptiveDayConsentGate.guidance(appContext) ||
+            !AdaptiveDayConsentGate.plannedWorkoutCalendar(appContext)
         ) {
             clear()
-            return@withLock null
+            return@withLock PlannedWorkoutCalendarRefreshOutcome.Completed(null)
         }
 
         val day = now.toLocalDate().toString()
@@ -103,7 +121,9 @@ object PlannedWorkoutCalendarStore {
                 invalidationGeneration,
             )
         }
-        if (initialState.first) return@withLock initialState.second
+        if (initialState.first) {
+            return@withLock PlannedWorkoutCalendarRefreshOutcome.Completed(initialState.second)
+        }
         val refreshGeneration = initialState.third
 
         val diagnostic = AppDiagnosticsRecorder.beginOperation(
@@ -123,7 +143,7 @@ object PlannedWorkoutCalendarStore {
                 outcome = "permission_unavailable",
                 fields = mapOf("candidate_bucket" to "zero"),
             )
-            return@withLock null
+            return@withLock PlannedWorkoutCalendarRefreshOutcome.Completed(null)
         }
 
         val result = try {
@@ -150,21 +170,14 @@ object PlannedWorkoutCalendarStore {
                     lastRefreshDay = day
                 }
             }
-            return@withLock null
+            return@withLock PlannedWorkoutCalendarRefreshOutcome.Completed(null)
         } catch (_: Exception) {
             AppDiagnosticsRecorder.endOperation(
                 diagnostic,
                 outcome = "failed",
                 fields = mapOf("candidate_bucket" to "zero"),
             )
-            synchronized(stateLock) {
-                if (refreshGeneration == invalidationGeneration) {
-                    _snapshot.value = null
-                    lastRefreshAtMillis = nowMillis
-                    lastRefreshDay = day
-                }
-            }
-            return@withLock null
+            return@withLock PlannedWorkoutCalendarRefreshOutcome.Failed
         }
 
         var rejectionOutcome: String? = null
@@ -177,8 +190,8 @@ object PlannedWorkoutCalendarStore {
                 rejectionOutcome = "superseded"
                 false
             } else if (
-                !NoopPrefs.adaptiveDayGuidance(appContext) ||
-                !NoopPrefs.plannedWorkoutCalendar(appContext) ||
+                !AdaptiveDayConsentGate.guidance(appContext) ||
+                !AdaptiveDayConsentGate.plannedWorkoutCalendar(appContext) ||
                 !stillGranted
             ) {
                 rejectionOutcome = "access_changed"
@@ -208,20 +221,26 @@ object PlannedWorkoutCalendarStore {
                 outcome = rejectionOutcome ?: "access_changed",
                 fields = mapOf("candidate_bucket" to "zero"),
             )
-            return@withLock null
+            return@withLock if (rejectionOutcome == "superseded") {
+                PlannedWorkoutCalendarRefreshOutcome.Superseded
+            } else {
+                PlannedWorkoutCalendarRefreshOutcome.Completed(null)
+            }
         }
         AppDiagnosticsRecorder.endOperation(
             diagnostic,
             outcome = if (result.window == null) "empty" else "matched",
             fields = mapOf("candidate_bucket" to result.candidateBucket),
         )
-        _snapshot.value
+        PlannedWorkoutCalendarRefreshOutcome.Completed(_snapshot.value)
     }
 
     private data class QueryResult(
         val window: Pair<Long, Long>?,
         val candidateBucket: String,
     )
+
+    private class CalendarProviderUnavailableException : Exception()
 
     private fun query(context: Context, now: ZonedDateTime): QueryResult {
         val startMillis = now.toLocalDate()
@@ -250,7 +269,7 @@ object PlannedWorkoutCalendarStore {
             null,
             null,
             "${CalendarContract.Instances.BEGIN} ASC",
-        ) ?: return QueryResult(null, "zero")
+        ) ?: throw CalendarProviderUnavailableException()
 
         val candidates = mutableListOf<Pair<Long, Long>>()
         cursor.use {

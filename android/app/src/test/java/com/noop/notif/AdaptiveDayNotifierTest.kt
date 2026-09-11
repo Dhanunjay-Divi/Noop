@@ -4,6 +4,7 @@ import com.noop.R
 import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ScoreConfidence
+import com.noop.testing.FakeSharedPreferences
 import java.io.File
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -117,6 +118,79 @@ class AdaptiveDayNotifierTest {
             nowSec = 4_000,
         )
         assertEquals(travel.pending, afterRestart.pending)
+    }
+
+    @Test fun operationalAccessResumeRebasesTimezoneWithoutReplayingBlockedTravel() {
+        val pending = AdaptiveDayGuidance.TimeZoneChange(
+            previousOffsetSec = 0,
+            currentOffsetSec = 3 * 60 * 60,
+            observedAtSec = 2_000,
+        )
+        val resumed = AdaptiveDayTimeZonePolicy.resumeAfterOperationalBlock(
+            state = AdaptiveDayTimeZoneState(
+                currentOffsetSec = 0,
+                pending = pending,
+            ),
+            offsetSec = 5 * 60 * 60 + 30 * 60,
+        )
+
+        assertEquals(5 * 60 * 60 + 30 * 60, resumed.currentOffsetSec)
+        assertNull(resumed.pending)
+    }
+
+    @Test fun operationalAccessResumePersistsRebaseAndConsumesItsMarkerOnce() {
+        val prefs = FakeSharedPreferences()
+        assertNull(AdaptiveDayTimeZoneStore.observe(prefs, offsetSec = 0, nowSec = 1_000))
+        val blockedTravel = AdaptiveDayTimeZoneStore.observe(
+            prefs,
+            offsetSec = 3 * 60 * 60,
+            nowSec = 2_000,
+        )
+        assertEquals(0, blockedTravel?.previousOffsetSec)
+        assertTrue(AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(prefs))
+
+        val resumedOffset = 5 * 60 * 60 + 30 * 60
+        assertEquals(
+            AdaptiveDayOperationalResumeResult.REBASED,
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, resumedOffset),
+        )
+        assertNull(
+            AdaptiveDayTimeZoneStore.observe(
+                prefs,
+                offsetSec = resumedOffset,
+                nowSec = 3_000,
+            ),
+        )
+        assertEquals(
+            AdaptiveDayOperationalResumeResult.NOT_REQUIRED,
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, resumedOffset),
+        )
+
+        val laterTravel = AdaptiveDayTimeZoneStore.observe(
+            prefs,
+            offsetSec = 8 * 60 * 60 + 30 * 60,
+            nowSec = 4_000,
+        )
+        assertEquals(resumedOffset, laterTravel?.previousOffsetSec)
+    }
+
+    @Test fun operationalAccessResumeKeepsItsMarkerWhenRebasePersistenceFails() {
+        val prefs = FakeSharedPreferences(
+            commitResults = listOf(true, false, true),
+        )
+        assertTrue(AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(prefs))
+        assertEquals(
+            AdaptiveDayOperationalResumeResult.FAILED,
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+        )
+        assertEquals(
+            AdaptiveDayOperationalResumeResult.REBASED,
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+        )
+        assertEquals(
+            AdaptiveDayOperationalResumeResult.NOT_REQUIRED,
+            AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(prefs, offsetSec = 3_600),
+        )
     }
 
     @Test fun travelSuppressesWeakerAdaptiveFollowUpsForTheDay() {
@@ -482,7 +556,10 @@ class AdaptiveDayNotifierTest {
             text.indexOf("private fun cancelAdaptiveDayNotification"),
         )
         val migration = method.indexOf("ContextualActionCenter.migrateRecoveryAction")
-        val reconciliation = method.indexOf("ContextualActionCenter.reconcileRecoveryActions")
+        val reconciliation = method.indexOf(
+            "ContextualActionCenter.reconcileRecoveryActions",
+            migration,
+        )
 
         assertTrue(migration >= 0)
         assertTrue(reconciliation > migration)
@@ -508,8 +585,11 @@ class AdaptiveDayNotifierTest {
         )
         val observe = method.indexOf("AdaptiveDayTimeZoneStore.observe(")
         val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
-        val cancel = method.indexOf("AdaptivePlannedWorkoutScheduler.cancel(context)")
-        val reconcile = method.indexOf("reconcilePlannedWorkoutArtifacts(")
+        val cancel = method.indexOf(
+            "AdaptivePlannedWorkoutScheduler.cancel(context)",
+            invalidate,
+        )
+        val reconcile = method.indexOf("reconcilePlannedWorkoutArtifacts(", cancel)
         val post = method.indexOf("onRecommendation(context, it)")
 
         assertTrue(terms >= 0)
@@ -550,6 +630,32 @@ class AdaptiveDayNotifierTest {
         )
     }
 
+    @Test fun acceptedDeliveryUsesTheDurableReceiptTimestamp() {
+        val accepted = AdaptiveDayNotifier.acceptedDeliveryState(
+            state = AdaptiveDayDeliveryState(
+                lastGlobalDeliveryMillis = 3_000L,
+                deliveries = mapOf(
+                    AdaptiveDayDeliveryKind.TRAVEL to
+                        AdaptiveDayDelivery(3_000L, "travel-a"),
+                ),
+            ),
+            candidate = candidate(
+                kind = AdaptiveDayDeliveryKind.PLANNED_WORKOUT,
+                fingerprint = "planned-workout|2026-09-10|1789074000",
+            ),
+            acceptedAtMillis = 2_000L,
+        )
+
+        assertEquals(3_000L, accepted.lastGlobalDeliveryMillis)
+        assertEquals(
+            AdaptiveDayDelivery(
+                2_000L,
+                "planned-workout|2026-09-10|1789074000",
+            ),
+            accepted.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT],
+        )
+    }
+
     @Test fun sharedPromptLedgerRestoresThePreviousOwnerWhenPlannedWorkoutIsRetracted() {
         val state = ContextualPromptDeliveryState(
             lastGlobalDeliveryMillis = 2_000L,
@@ -578,6 +684,35 @@ class AdaptiveDayNotifierTest {
                 expectedAtMillis = 1_500L,
             ),
         )
+    }
+
+    @Test fun sharedPromptLedgerPersistsAndRemovesTheExactWorkoutIdentityAtomically() {
+        val fingerprint = "planned-workout|2026-09-10|1789074000"
+        val recorded = ContextualPromptDeliveryLedger.recordedState(
+            state = ContextualPromptDeliveryState(),
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            nowMillis = 2_000L,
+            identity = fingerprint,
+        )
+        assertEquals(
+            ContextualPromptDeliveryReceipt(2_000L, fingerprint),
+            ContextualPromptDeliveryLedger.deliveryReceipt(
+                recorded,
+                ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            ),
+        )
+
+        val prefs = FakeSharedPreferences()
+        ContextualPromptDeliveryLedger.saveState(prefs, recorded)
+        assertEquals(recorded, ContextualPromptDeliveryLedger.loadState(prefs))
+
+        val reconciled = ContextualPromptDeliveryLedger.reconciledState(
+            recorded,
+            ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+            expectedAtMillis = 2_000L,
+        )
+        assertFalse(reconciled.deliveries.containsKey(ContextualPromptDeliveryOwner.PLANNED_WORKOUT))
+        assertFalse(reconciled.identities.containsKey(ContextualPromptDeliveryOwner.PLANNED_WORKOUT))
     }
 
     @Test fun sharedPromptLedgerCanReconcileALegacyUnownedPlannedWorkoutTimestamp() {
@@ -755,11 +890,11 @@ class AdaptiveDayNotifierTest {
         )
         assertTrue(
             text.substring(helper)
-                .contains("NoopPrefs.plannedWorkoutCalendar(context)"),
+                .contains("AdaptiveDayConsentGate.plannedWorkoutCalendar(context)"),
         )
         assertTrue(
             text.substring(helper)
-                .contains("NoopPrefs.adaptiveDayGuidance(context)"),
+                .contains("AdaptiveDayConsentGate.guidance(context)"),
         )
         assertTrue(
             text.substring(helper)
@@ -790,19 +925,20 @@ class AdaptiveDayNotifierTest {
         )
         val postGate = text.indexOf("ContextualPromptDeliveryLedger.postIfAllowed", deliveryAt)
         val postedResult = text.indexOf(
-            "if (postResult != ContextualPromptPostResult.POSTED)",
+            "if (postResult.status != ContextualPromptPostStatus.ACCEPTED)",
             postGate,
         )
+        val acceptedReceipt = text.indexOf("val acceptedReceipt = postResult.receipt", postedResult)
         val postSuccessConsent = text.indexOf(
             "!plannedWorkoutDeliveryCurrent(context, candidate)",
-            postedResult,
+            acceptedReceipt,
         )
         val reconcile = text.indexOf(
             "ContextualPromptDeliveryLedger.reconcileIfOwned(",
             postSuccessConsent,
         )
         val expectedTimestamp = text.indexOf(
-            "expectedAtMillis = deliveryAtMillis",
+            "expectedAtMillis = acceptedReceipt.atMillis",
             reconcile,
         )
         val cancellation = text.indexOf(
@@ -814,7 +950,8 @@ class AdaptiveDayNotifierTest {
         assertTrue(deliveryAt > deliveryNow)
         assertTrue(postGate > deliveryAt)
         assertTrue(postedResult > postGate)
-        assertTrue(postSuccessConsent > postedResult)
+        assertTrue(acceptedReceipt > postedResult)
+        assertTrue(postSuccessConsent > acceptedReceipt)
         assertTrue(reconcile > postSuccessConsent)
         assertTrue(expectedTimestamp > reconcile)
         assertTrue(cancellation > expectedTimestamp)
@@ -930,6 +1067,90 @@ class AdaptiveDayNotifierTest {
         assertTrue(calendar > repository)
     }
 
+    @Test fun failedCalendarRefreshCannotReconcileAValidWorkoutAsMissing() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val evaluator = text.indexOf("object AdaptiveDayEvaluator")
+        val notifier = text.indexOf("object AdaptiveDayNotifier", evaluator)
+        val evaluatorSource = text.substring(evaluator, notifier)
+        val refresh = evaluatorSource.indexOf("val calendarRefresh")
+        val failure = evaluatorSource.indexOf(
+            "PlannedWorkoutCalendarRefreshOutcome.Failed",
+            refresh,
+        )
+        val abort = evaluatorSource.indexOf("-> return recommendation", failure)
+        val plan = evaluatorSource.indexOf("val plan = DailyActionPlanner.plan", abort)
+        val reconcileMissing = evaluatorSource.indexOf(
+            "reconcileMissingPlannedWorkoutArtifacts",
+            plan,
+        )
+
+        assertTrue(refresh >= 0)
+        assertTrue(failure > refresh)
+        assertTrue(abort > failure)
+        assertTrue(plan > abort)
+        assertTrue(reconcileMissing > plan)
+    }
+
+    @Test fun termsLockedStartupRebasesTimezoneBeforeOperationalWorkResumes() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/NoopApplication.kt"),
+            File(root, "app/src/main/java/com/noop/NoopApplication.kt"),
+            File(root, "android/app/src/main/java/com/noop/NoopApplication.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate NoopApplication.kt from $root" }
+        val onCreate = text.substring(
+            text.indexOf("override fun onCreate()"),
+            text.indexOf("fun startOperationalRuntime()"),
+        )
+        val start = text.substring(
+            text.indexOf("fun startOperationalRuntime()"),
+            text.indexOf("private fun hasAcceptedCurrentTerms()"),
+        )
+
+        assertTrue(onCreate.contains("AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(this)"))
+        val rebase = start.indexOf("AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(")
+        val failedClosed = start.indexOf("AdaptiveDayOperationalResumeResult.FAILED", rebase)
+        val runtimeClaim = start.indexOf("operationalRuntime.compareAndSet(false, true)", failedClosed)
+        val runtimeEvent = start.indexOf("AppDiagnosticsRecorder.record(\"runtime.operational_started\")")
+        assertTrue(rebase >= 0)
+        assertTrue(failedClosed > rebase)
+        assertTrue(runtimeClaim > failedClosed)
+        assertTrue(runtimeEvent > rebase)
+        assertTrue(start.contains("\"rebased_after_operational_block\""))
+        assertTrue(start.contains("\"operational_resume_failed_closed\""))
+    }
+
+    @Test fun termsAcceptancePersistsTheBlockedMarkerBeforeClickwrapAndRuntimeStartup() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/ui/MainActivity.kt"),
+            File(root, "app/src/main/java/com/noop/ui/MainActivity.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/MainActivity.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate MainActivity.kt from $root" }
+        val terms = text.substring(
+            text.indexOf("TermsGateScreen(onAccept = {"),
+            text.indexOf("var onboarded by remember"),
+        )
+        val marker = terms.indexOf("AdaptiveDayTimeZoneStore.markOperationalAccessBlocked")
+        val clickwrap = terms.indexOf("NoopPrefs.KEY_ACCEPTED_TERMS_VERSION")
+        val startup = terms.indexOf("application.startOperationalRuntime()")
+        val exposeAccepted = terms.indexOf("acceptedTerms = Terms.CURRENT_VERSION")
+
+        assertTrue(marker >= 0)
+        assertTrue(clickwrap > marker)
+        assertTrue(startup > clickwrap)
+        assertTrue(exposeAccepted > startup)
+        assertTrue(terms.contains("if (application.operationalRuntimeStarted)"))
+    }
+
     @Test fun newerAdaptiveEvaluationInvalidatesEveryOlderDeliveryToken() {
         val first = AdaptiveDayEvaluationGate.begin()
         assertTrue(AdaptiveDayEvaluationGate.isCurrent(first))
@@ -996,12 +1217,13 @@ class AdaptiveDayNotifierTest {
         assertFalse(expireSource.contains("ContextualPromptDeliveryLedger.reconcile"))
         assertFalse(expireSource.contains("saveState("))
         assertTrue(expireSource.contains("plannedWorkoutFingerprintsMatch("))
+        assertTrue(expireSource.contains("cancelNotificationSlotIfOwned("))
         assertTrue(missingSource.contains("plannedWorkoutStartSec(prior.fingerprint)"))
         assertTrue(missingSource.contains("expirePlannedWorkoutArtifacts"))
         assertTrue(missingSource.contains("reconcilePlannedWorkoutArtifacts"))
     }
 
-    @Test fun missingWorkoutReconcilesAnOrphanedOwnerWithoutCancellingANewerPrompt() {
+    @Test fun missingWorkoutReconcilesOnlyTheOwnedNotificationSlot() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
             File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
@@ -1013,13 +1235,416 @@ class AdaptiveDayNotifierTest {
         val cancel = text.indexOf("private fun cancelAdaptiveDayNotification(", reconcile)
         val reconcileSource = text.substring(reconcile, cancel)
 
-        assertTrue(reconcileSource.contains("currentFingerprint == null"))
         assertTrue(reconcileSource.contains("reconcileOwnerWithOutcome("))
         assertTrue(reconcileSource.contains("onNotificationSlotOwnerRemoved = {"))
-        assertTrue(reconcileSource.contains("orphanedOwner?.ownedNotificationSlot != true"))
+        assertTrue(reconcileSource.contains("currentFingerprint = null"))
+        assertTrue(reconcileSource.contains("cancelNotificationSlotIfUnowned("))
+        assertTrue(reconcileSource.contains("hasPendingCancellation("))
+        val unownedCancellation = reconcileSource.indexOf("cancelNotificationSlotIfUnowned(")
+        val privateCleanup = reconcileSource.indexOf(
+            "val cleared = plannedWorkoutStateAfterReconciliation(",
+            startIndex = unownedCancellation,
+        )
+        assertTrue(privateCleanup > unownedCancellation)
     }
 
-    @Test fun orphanCleanupCancelsInsideTheDeliveryLockBeforeRemovingOwnership() {
+    @Test fun failedSharedOrNotificationCleanupRetainsPrivateWorkoutRetryEvidence() {
+        val state = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(
+                        atMillis = 2_000L,
+                        fingerprint = "planned-workout|2026-09-11|1789160400",
+                    ),
+            ),
+        )
+
+        assertNull(
+            AdaptiveDayNotifier.plannedWorkoutStateAfterReconciliation(
+                state = state,
+                currentFingerprint = null,
+                sharedStateCommitted = false,
+                notificationHandled = true,
+            ),
+        )
+        assertNull(
+            AdaptiveDayNotifier.plannedWorkoutStateAfterReconciliation(
+                state = state,
+                currentFingerprint = null,
+                sharedStateCommitted = true,
+                notificationHandled = false,
+            ),
+        )
+        assertEquals(
+            AdaptiveDayDeliveryState(),
+            AdaptiveDayNotifier.plannedWorkoutStateAfterReconciliation(
+                state = state,
+                currentFingerprint = null,
+                sharedStateCommitted = true,
+                notificationHandled = true,
+            ),
+        )
+
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val reconcile = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+            text.indexOf("internal fun restoredPlannedWorkoutState("),
+        )
+        val notificationHandled = reconcile.indexOf("val notificationHandled = when")
+        val gatedState = reconcile.indexOf(
+            "plannedWorkoutStateAfterReconciliation(",
+            notificationHandled,
+        )
+        val privateSave = reconcile.indexOf("saveState(app, cleared)", gatedState)
+
+        assertTrue(notificationHandled >= 0)
+        assertTrue(gatedState > notificationHandled)
+        assertTrue(privateSave > gatedState)
+    }
+
+    @Test fun forceCleanupUsesPrivacyFirstSlotCancellationAndReturnsBeforeNormalReconciliation() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val reconcile = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+            text.indexOf("internal fun restoredPlannedWorkoutState("),
+        )
+        val forceBranch = reconcile.indexOf("if (forceCancelSharedNotification)")
+        val forceCancellation = reconcile.indexOf("completeGuidanceCleanup(app)", forceBranch)
+        val normalOwnerReconciliation = reconcile.indexOf(
+            "ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(",
+            forceBranch,
+        )
+        val forceReturn = reconcile.indexOf("return", forceCancellation)
+
+        assertTrue(forceBranch >= 0)
+        assertTrue(forceCancellation > forceBranch)
+        assertTrue(forceReturn > forceCancellation)
+        assertTrue(normalOwnerReconciliation > forceReturn)
+        assertTrue(reconcile.contains("completePlannedWorkoutCleanup(app)"))
+    }
+
+    @Test fun disabledEntryPointsRetryTheCorrectCleanupScope() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+
+        assertTrue(
+            Regex(
+                """if \(!AdaptiveDayConsentGate\.guidance\(appContext\)\)[\s\S]*?""" +
+                    """forceCancelSharedNotification = true""",
+            ).containsMatchIn(text),
+        )
+        assertTrue(
+            Regex(
+                """forceCancelSharedNotification = !adaptiveDayEnabled[\s\S]*?""" +
+                    """requirePlannedWorkoutCalendarDisabled =[\s\S]*?""" +
+                    """adaptiveDayEnabled && !calendarEnabled""",
+            ).containsMatchIn(text),
+        )
+        assertTrue(
+            Regex(
+                """if \(!AdaptiveDayConsentGate\.guidance\(context\)\)[\s\S]*?""" +
+                    """forceCancelSharedNotification = true""",
+            ).containsMatchIn(text),
+        )
+    }
+
+    @Test fun synchronizedCleanupRechecksConsentBeforeCancelling() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val annotation = text.lastIndexOf(
+            "@Synchronized",
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+        )
+        val reconcile = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+            text.indexOf("internal fun restoredPlannedWorkoutState("),
+        )
+        val adaptiveGuard = reconcile.indexOf("AdaptiveDayConsentGate.guidance(app)")
+        val calendarGuard = reconcile.indexOf(
+            "AdaptiveDayConsentGate.plannedWorkoutCalendar(app)",
+        )
+        val forceCancellation = reconcile.indexOf("completeGuidanceCleanup(app)")
+
+        assertTrue(annotation >= 0)
+        assertTrue(adaptiveGuard >= 0)
+        assertTrue(calendarGuard > adaptiveGuard)
+        assertTrue(forceCancellation > calendarGuard)
+        assertTrue(reconcile.contains("\"outcome\" to \"force_superseded\""))
+        assertTrue(reconcile.contains("\"outcome\" to \"calendar_cleanup_superseded\""))
+    }
+
+    @Test fun processStartupRetriesDurableConsentCleanupBeforeTermsAndRuntimeGates() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/NoopApplication.kt"),
+            File(root, "app/src/main/java/com/noop/NoopApplication.kt"),
+            File(root, "android/app/src/main/java/com/noop/NoopApplication.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate NoopApplication.kt from $root" }
+        val onCreate = text.substring(
+            text.indexOf("override fun onCreate()"),
+            text.indexOf("fun startOperationalRuntime()"),
+        )
+        val recovery = onCreate.indexOf(
+            "AdaptiveDayNotifier.recoverPendingConsentCleanup(this)",
+        )
+        val termsGate = onCreate.indexOf("if (hasAcceptedCurrentTerms())")
+        val retry = onCreate.indexOf("if (!consentCleanupComplete)")
+
+        assertTrue(recovery >= 0)
+        assertTrue(retry > recovery)
+        assertTrue(termsGate > retry)
+    }
+
+    @Test fun cleanupNeverTreatsAnInMemoryEmptyPrivateStateAsDurable() {
+        val prefs = FakeSharedPreferences(
+            commitResults = listOf(true, false, true),
+            applyFailedCommitsToMemory = true,
+        )
+        val initial = AdaptiveDayDeliveryState(
+            lastGlobalDeliveryMillis = 2_000L,
+            deliveries = mapOf(
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(
+                        atMillis = 2_000L,
+                        fingerprint = "planned-workout|2026-09-11|1789160400",
+                    ),
+            ),
+        )
+        assertTrue(AdaptiveDayNotifier.saveState(prefs, initial))
+
+        assertFalse(AdaptiveDayNotifier.saveState(prefs, AdaptiveDayDeliveryState()))
+        assertEquals(
+            AdaptiveDayDeliveryState(),
+            AdaptiveDayNotifier.loadState(prefs),
+        )
+        assertTrue(AdaptiveDayNotifier.saveState(prefs, AdaptiveDayDeliveryState()))
+
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val guidanceCleanup = text.substring(
+            text.indexOf("private fun completeGuidanceCleanup("),
+            text.indexOf("private fun completePlannedWorkoutCleanup("),
+        )
+        val calendarCleanup = text.substring(
+            text.indexOf("private fun completePlannedWorkoutCleanup("),
+            text.indexOf("fun onRecommendation("),
+        )
+        assertTrue(
+            guidanceCleanup.contains(
+                "canClearPrivateState && saveState(app, AdaptiveDayDeliveryState())",
+            ),
+        )
+        assertFalse(guidanceCleanup.contains("state == AdaptiveDayDeliveryState()"))
+        assertTrue(calendarCleanup.contains("cancelNotificationSlotThroughCutoff("))
+        assertTrue(calendarCleanup.contains("canClearPrivateState && saveState(app, cleared)"))
+        assertFalse(calendarCleanup.contains("cleared == state"))
+    }
+
+    @Test fun consentWritesShareTheNotifierMonitorWithPostingAndCleanup() {
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val notifier = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val appViewModel = listOf(
+            File(root, "src/main/java/com/noop/ui/AppViewModel.kt"),
+            File(root, "app/src/main/java/com/noop/ui/AppViewModel.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/AppViewModel.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val automations = listOf(
+            File(root, "src/main/java/com/noop/ui/AutomationsScreen.kt"),
+            File(root, "app/src/main/java/com/noop/ui/AutomationsScreen.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val preferences = listOf(
+            File(root, "src/main/java/com/noop/ui/MainActivity.kt"),
+            File(root, "app/src/main/java/com/noop/ui/MainActivity.kt"),
+            File(root, "android/app/src/main/java/com/noop/ui/MainActivity.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+
+        val notifierText = checkNotNull(notifier)
+        val guidanceSetter = notifierText.indexOf("fun setGuidanceConsent(")
+        val calendarSetter = notifierText.indexOf("fun setPlannedWorkoutCalendarConsent(")
+        assertTrue(notifierText.lastIndexOf("@Synchronized", guidanceSetter) >= 0)
+        assertTrue(notifierText.lastIndexOf("@Synchronized", calendarSetter) >= 0)
+        assertTrue(checkNotNull(appViewModel).contains("AdaptiveDayNotifier.setGuidanceConsent("))
+        assertFalse(appViewModel.contains("NoopPrefs.setAdaptiveDayGuidance("))
+        assertTrue(
+            checkNotNull(automations).contains(
+                "fun commitPlannedWorkoutCalendarConsent(enabled: Boolean): Boolean",
+            ),
+        )
+        assertFalse(automations.contains("NoopPrefs.setPlannedWorkoutCalendar("))
+        assertTrue(automations.contains("if (!commitPlannedWorkoutCalendarConsent(false)) return"))
+        assertTrue(
+            appViewModel.contains(
+                "if (!AdaptiveDayNotifier.setGuidanceConsent(appContext, enabled))",
+            ),
+        )
+        val preferenceText = checkNotNull(preferences)
+        assertFalse(preferenceText.contains("fun setAdaptiveDayGuidance("))
+        assertFalse(preferenceText.contains("fun setPlannedWorkoutCalendar("))
+        val guidancePreference = preferenceText.substring(
+            preferenceText.indexOf("fun commitAdaptiveDayGuidance("),
+            preferenceText.indexOf("fun adaptiveDayCleanupPending("),
+        )
+        val calendarPreference = preferenceText.substring(
+            preferenceText.indexOf("fun commitPlannedWorkoutCalendar("),
+            preferenceText.indexOf("fun plannedWorkoutCleanupPending("),
+        )
+        assertTrue(guidancePreference.contains(".commit()"))
+        assertFalse(guidancePreference.contains(".apply()"))
+        assertTrue(guidancePreference.contains("cleanupPending"))
+        assertTrue(calendarPreference.contains(".commit()"))
+        assertFalse(calendarPreference.contains(".apply()"))
+        assertTrue(calendarPreference.contains("cleanupPending"))
+    }
+
+    @Test fun currentWorkoutRestoresPrivateCooldownFromOrphanedSharedOwner() {
+        val fingerprint = "planned-workout|2026-09-10|1789074000"
+        val restored = checkNotNull(AdaptiveDayNotifier.restoredPlannedWorkoutState(
+            state = AdaptiveDayDeliveryState(
+                lastGlobalDeliveryMillis = 1_000L,
+                deliveries = mapOf(
+                    AdaptiveDayDeliveryKind.SLEEP_RECOVERY to
+                    AdaptiveDayDelivery(1_000L, "sleep-a"),
+                ),
+            ),
+            currentFingerprint = fingerprint,
+            receipt = ContextualPromptDeliveryReceipt(2_000L, fingerprint),
+        ))
+
+        assertEquals(2_000L, restored.lastGlobalDeliveryMillis)
+        assertEquals(
+            AdaptiveDayDelivery(
+                2_000L,
+                fingerprint,
+            ),
+            restored.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT],
+        )
+        assertEquals(
+            AdaptiveDayDelivery(1_000L, "sleep-a"),
+            restored.deliveries[AdaptiveDayDeliveryKind.SLEEP_RECOVERY],
+        )
+
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val reconcile = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+            text.indexOf("internal fun restoredPlannedWorkoutState("),
+        )
+        val ownerRead = reconcile.indexOf("ContextualPromptDeliveryLedger.deliveryReceipt(")
+        val restore = reconcile.indexOf("restoredPlannedWorkoutState(", ownerRead)
+        val returnIndex = reconcile.indexOf("return", restore)
+        assertTrue(ownerRead >= 0)
+        assertTrue(restore > ownerRead)
+        assertTrue(returnIndex > restore)
+    }
+
+    @Test fun newerSharedWorkoutReplacesStalePrivateWorkoutWithoutKeepingItsTimestamp() {
+        val current = "planned-workout|2026-09-11|1789160400"
+        val restored = checkNotNull(
+            AdaptiveDayNotifier.restoredPlannedWorkoutState(
+                state = AdaptiveDayDeliveryState(
+                    lastGlobalDeliveryMillis = 5_000L,
+                    deliveries = mapOf(
+                        AdaptiveDayDeliveryKind.SLEEP_RECOVERY to
+                            AdaptiveDayDelivery(1_000L, "sleep-a"),
+                        AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                            AdaptiveDayDelivery(
+                                5_000L,
+                                "planned-workout|2026-09-10|1789074000",
+                            ),
+                    ),
+                ),
+                currentFingerprint = current,
+                receipt = ContextualPromptDeliveryReceipt(2_000L, current),
+            ),
+        )
+
+        assertEquals(2_000L, restored.lastGlobalDeliveryMillis)
+        assertEquals(
+            AdaptiveDayDelivery(2_000L, current),
+            restored.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT],
+        )
+    }
+
+    @Test fun movedOrIdentitylessWorkoutOwnerIsNotRestoredAsTheCurrentPlan() {
+        val current = "planned-workout|2026-09-10|1789074000"
+        val moved = "planned-workout|2026-09-10|1789077600"
+
+        assertNull(
+            AdaptiveDayNotifier.restoredPlannedWorkoutState(
+                state = AdaptiveDayDeliveryState(),
+                currentFingerprint = current,
+                receipt = ContextualPromptDeliveryReceipt(2_000L, moved),
+            ),
+        )
+        assertNull(
+            AdaptiveDayNotifier.restoredPlannedWorkoutState(
+                state = AdaptiveDayDeliveryState(),
+                currentFingerprint = current,
+                receipt = ContextualPromptDeliveryReceipt(2_000L, identity = null),
+            ),
+        )
+
+        val root = File(checkNotNull(System.getProperty("user.dir")))
+        val source = listOf(
+            File(root, "src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+            File(root, "android/app/src/main/java/com/noop/notif/AdaptiveDayNotifier.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+        val text = checkNotNull(source) { "Could not locate AdaptiveDayNotifier.kt from $root" }
+        val reconcile = text.substring(
+            text.indexOf("internal fun reconcilePlannedWorkoutArtifacts("),
+            text.indexOf("internal fun restoredPlannedWorkoutState("),
+        )
+        val receiptRead = reconcile.indexOf("ContextualPromptDeliveryLedger.deliveryReceipt(")
+        val staleOwnerRemoval = reconcile.indexOf(
+            "ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(",
+            receiptRead,
+        )
+        assertTrue(receiptRead >= 0)
+        assertTrue(staleOwnerRemoval > receiptRead)
+        assertTrue(reconcile.contains("onNotificationSlotOwnerRemoved = {"))
+    }
+
+    @Test fun orphanCleanupPersistsOwnershipRemovalBeforeCancellingInsideTheLock() {
         val root = File(checkNotNull(System.getProperty("user.dir")))
         val source = listOf(
             File(root, "src/main/java/com/noop/notif/ContextualPromptDeliveryLedger.kt"),
@@ -1036,10 +1661,12 @@ class AdaptiveDayNotifierTest {
         val methodEnd = text.indexOf("fun nextAllowedAtMillis(", method)
         val methodSource = text.substring(method, methodEnd)
         val cancel = methodSource.indexOf("onNotificationSlotOwnerRemoved()")
-        val save = methodSource.indexOf("saveState(prefs, outcome.nextState)")
+        val save = methodSource.indexOf("saveState(prefs, prepared)")
 
         assertTrue(methodSource.contains("synchronized(lock)"))
+        assertTrue(save >= 0)
         assertTrue(cancel >= 0)
-        assertTrue(save > cancel)
+        assertTrue(cancel > save)
+        assertTrue(methodSource.contains("pendingCancellationSlots"))
     }
 }

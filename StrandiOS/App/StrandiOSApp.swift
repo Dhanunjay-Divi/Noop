@@ -318,13 +318,18 @@ struct StrandiOSApp: App {
         let demoFixtureRequested = false
         let reviewSampleFixtureRequested = false
         #endif
+        let hasAcceptedCurrentTerms =
+            UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+                == Terms.currentVersion
+        if !access.isUnlocked || !hasAcceptedCurrentTerms {
+            AdaptiveDayTimeZoneStore.markOperationalAccessBlocked()
+        }
         // Screenshot/UI-test fixtures own synthetic transport state. Never let a simulator's stale
         // launch-access receipt start CoreBluetooth or background services that can overwrite it.
         let operationallyAllowed = !demoFixtureRequested
             && !reviewSampleFixtureRequested
             && access.isUnlocked
-            && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
-                == Terms.currentVersion
+            && hasAcceptedCurrentTerms
         Self.reconcileLaunchSurfaceAuthorization(allowed: access.isUnlocked)
         // WatchConnectivity is the one intentionally permitted subsystem on a locked launch. It sends
         // only a legacy-decodable empty context, ensuring a build-229 Watch/complication cannot retain

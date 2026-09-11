@@ -633,6 +633,37 @@ final class ContextualInterventionsTests: XCTestCase {
         XCTAssertNil(AdaptiveDayTimeZoneStore.pending(defaults: defaults))
     }
 
+    func testOperationalAccessResumeRebasesWithoutReplayingBlockedTravel() {
+        let suiteName = "adaptive-time-zone-rebase.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(AdaptiveDayTimeZoneStore.observe(
+            offsetSec: 0,
+            nowSec: 1_000,
+            defaults: defaults
+        ))
+        AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(defaults: defaults)
+
+        XCTAssertTrue(AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            offsetSec: 5 * 60 * 60 + 30 * 60,
+            defaults: defaults
+        ))
+        XCTAssertNil(AdaptiveDayTimeZoneStore.pending(defaults: defaults))
+        XCTAssertFalse(AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            offsetSec: 5 * 60 * 60 + 30 * 60,
+            defaults: defaults
+        ))
+
+        let laterTravel = AdaptiveDayTimeZoneStore.observe(
+            offsetSec: 8 * 60 * 60 + 30 * 60,
+            nowSec: 3_000,
+            defaults: defaults
+        )
+        XCTAssertEqual(laterTravel?.previousOffsetSec, 5 * 60 * 60 + 30 * 60)
+        XCTAssertEqual(laterTravel?.currentOffsetSec, 8 * 60 * 60 + 30 * 60)
+    }
+
     func testAdaptiveRecommendationMapsToPrivateSleepRoute() {
         let candidate = AdaptiveDayInterventionFactory.candidate(from: .init(
             kind: .routineRecovery,

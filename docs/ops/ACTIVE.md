@@ -1,6 +1,6 @@
 # Active NOOP handoff
 
-Last updated: **2026-09-10**
+Last updated: **2026-09-11**
 
 ## Repository
 
@@ -17,6 +17,22 @@ Last updated: **2026-09-10**
   [`../handoff/RELEASE-BLOCKERS.md`](../handoff/RELEASE-BLOCKERS.md)
 
 ## Active work
+
+The final local calendar-aware source has completed its clean verification
+wall. Shared analytics passed 1,461 tests with seven expected skips; the
+complete macOS suite passed 1,750 tests with one expected external-data skip;
+both Android Full and Demo variants passed 4,234 tests with seven expected
+skips apiece alongside both APK assemblies, lint variants, and instrumentation
+source compilation; and the complete unsigned iPhone, widget, and Watch graph
+built. Seven deterministic iPhone visual states passed and the planned-workout
+fixture was inspected without clipping or overlap. Two iOS UI-test attempts
+compiled but failed before worker creation because this Mac's Xcode debugger
+version store is unavailable; that is recorded as test-infrastructure evidence,
+not an app result. Exact physical scenarios are now documented in
+`docs/handoff/CALENDAR-AWARE-PHYSICAL-DEVICE-RUNBOOK.md`. The source remains
+local and unpushed to avoid spending GitHub Actions without explicit owner
+approval; protected review, hosted checks, merge, and physical-device evidence
+remain open.
 
 Calendar-aware daily guidance is implemented and review-corrected locally on
 protected pull request `#14` from

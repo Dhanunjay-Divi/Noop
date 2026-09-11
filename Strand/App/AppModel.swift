@@ -681,6 +681,16 @@ final class AppModel: ObservableObject {
                 includeResourceSnapshot: true
             )
         }
+        let now = Date()
+        let resumedAfterBlock = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            offsetSec: TimeZone.autoupdatingCurrent.secondsFromGMT(for: now)
+        )
+        if resumedAfterBlock {
+            AppDiagnosticsRecorder.shared.record(
+                "adaptive_day.time_zone_baseline",
+                fields: ["outcome": "rebased_after_operational_block"]
+            )
+        }
         operationalWorkStarted = true
 
         AppModel.shared = self   // publish for App Intents only after the launch gate is open

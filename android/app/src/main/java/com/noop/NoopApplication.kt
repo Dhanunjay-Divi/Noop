@@ -5,29 +5,22 @@ import android.content.Context
 import android.content.res.Configuration
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
+import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
-import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.WhoopModel
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
-import com.noop.sync.RemoteSyncService
-import com.noop.sync.RemoteSyncScheduler
-import com.noop.ui.BackupSync
-import com.noop.ui.BiofeedbackPrefs
-import com.noop.ui.DebugExportScheduler
-import com.noop.ui.NoopPrefs
-import com.noop.ui.AppearanceMode
-import com.noop.ui.AppearancePrefs
-import com.noop.widget.WidgetSnapshotStore
-import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
-import com.noop.location.GpsSession
 import com.noop.ingest.HealthConnectSyncScheduler
+import com.noop.location.GpsSession
 import com.noop.managed.ManagedCloudScheduler
 import com.noop.managed.ManagedCloudService
 import com.noop.managed.ManagedRuntimeGate
 import com.noop.managed.ManagedSafetyLiveLocationSession
+import com.noop.notif.AdaptiveDayOperationalResumeResult
+import com.noop.notif.AdaptiveDayNotifier
+import com.noop.notif.AdaptiveDayTimeZoneStore
 import com.noop.notif.DailyReviewReminders
 import com.noop.notif.HydrationReminderScheduler
 import com.noop.ownership.OwnershipService
@@ -35,6 +28,17 @@ import com.noop.safety.SafetyContactSetupReminderScheduler
 import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.social.FriendsSyncScheduler
+import com.noop.sync.RemoteSyncScheduler
+import com.noop.sync.RemoteSyncService
+import com.noop.ui.AppearanceMode
+import com.noop.ui.AppearancePrefs
+import com.noop.ui.BackupSync
+import com.noop.ui.BiofeedbackPrefs
+import com.noop.ui.DebugExportScheduler
+import com.noop.ui.NoopPrefs
+import com.noop.widget.WidgetSnapshotStore
+import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
+import java.time.ZonedDateTime
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,9 +109,32 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
         // Install immediately after the bounded recorder so a failure in the initialization below keeps
         // its stack trace as well as the unmatched launch breadcrumb.
         CrashCapture.install(this)
+        val consentCleanupComplete = runCatching {
+            AdaptiveDayNotifier.recoverPendingConsentCleanup(this)
+        }.getOrElse {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_cleanup",
+                fields = mapOf("outcome" to "startup_exception"),
+            )
+            false
+        }
+        if (!consentCleanupComplete) {
+            startupScope.launch {
+                runCatching {
+                    AdaptiveDayNotifier.recoverPendingConsentCleanup(this@NoopApplication)
+                }
+            }
+        }
         lastWidgetNightMode = resources.configuration.isNightMode()
         if (hasAcceptedCurrentTerms()) {
             startOperationalRuntime()
+        } else {
+            if (!AdaptiveDayTimeZoneStore.markOperationalAccessBlocked(this)) {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "operational_block_marker_failed"),
+                )
+            }
         }
     }
 
@@ -120,6 +147,27 @@ class NoopApplication : Application(), androidx.work.Configuration.Provider {
      * operational ViewModel is constructed.
      */
     fun startOperationalRuntime() {
+        if (operationalRuntime.get()) return
+        val resumeResult = AdaptiveDayTimeZoneStore.resumeAfterOperationalAccess(
+            context = this,
+            offsetSec = ZonedDateTime.now().offset.totalSeconds,
+        )
+        when (resumeResult) {
+            AdaptiveDayOperationalResumeResult.FAILED -> {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "operational_resume_failed_closed"),
+                )
+                return
+            }
+            AdaptiveDayOperationalResumeResult.REBASED -> {
+                AppDiagnosticsRecorder.record(
+                    "adaptive_day.time_zone_baseline",
+                    fields = mapOf("outcome" to "rebased_after_operational_block"),
+                )
+            }
+            AdaptiveDayOperationalResumeResult.NOT_REQUIRED -> Unit
+        }
         if (!operationalRuntime.compareAndSet(false, true)) return
         AppDiagnosticsRecorder.record("runtime.operational_started")
         resolveActiveDeviceId()

@@ -122,7 +122,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         )
     }
     var plannedWorkoutCalendarEnabled by remember {
-        mutableStateOf(NoopPrefs.plannedWorkoutCalendar(ctx))
+        mutableStateOf(AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx))
     }
     var plannedWorkoutCalendarPermissionUnavailable by remember {
         mutableStateOf(
@@ -270,17 +270,26 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             reportNotificationsUnavailable = !allowed
         }
     }
+    fun commitPlannedWorkoutCalendarConsent(enabled: Boolean): Boolean {
+        val committed = AdaptiveDayNotifier.setPlannedWorkoutCalendarConsent(ctx, enabled)
+        plannedWorkoutCalendarEnabled = if (committed) {
+            enabled
+        } else {
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(ctx)
+        }
+        return committed
+    }
     val plannedWorkoutCalendarPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        plannedWorkoutCalendarEnabled = granted
         plannedWorkoutCalendarPermissionUnavailable = !granted
-        NoopPrefs.setPlannedWorkoutCalendar(ctx, granted)
-        if (granted) {
-            viewModel.onPlannedWorkoutCalendarChanged()
-        } else {
-            PlannedWorkoutCalendarStore.clear()
-            viewModel.onPlannedWorkoutCalendarChanged()
+        if (commitPlannedWorkoutCalendarConsent(granted)) {
+            if (granted) {
+                viewModel.onPlannedWorkoutCalendarChanged()
+            } else {
+                PlannedWorkoutCalendarStore.clear()
+                viewModel.onPlannedWorkoutCalendarChanged()
+            }
         }
     }
     DisposableEffect(lifecycleOwner) {
@@ -298,11 +307,11 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         plannedWorkoutCalendarPermissionUnavailable = false
                         viewModel.onPlannedWorkoutCalendarChanged()
                     } else {
-                        plannedWorkoutCalendarEnabled = false
                         plannedWorkoutCalendarPermissionUnavailable = true
-                        NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
-                        PlannedWorkoutCalendarStore.clear()
-                        viewModel.onPlannedWorkoutCalendarChanged()
+                        if (commitPlannedWorkoutCalendarConsent(false)) {
+                            PlannedWorkoutCalendarStore.clear()
+                            viewModel.onPlannedWorkoutCalendarChanged()
+                        }
                     }
                 }
             }
@@ -320,13 +329,13 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 "vo2" -> viewModel.setContextualVo2ReviewEnabled(true)
                 "adaptive" -> {
                     val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-                    adaptiveNotificationsUnavailable = !available
-                    viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+                    adaptiveNotificationsUnavailable = !available || !committed
                 }
             }
         } else if (pendingContextualPermission == "adaptive") {
-            adaptiveNotificationsUnavailable = true
-            viewModel.setAdaptiveDayGuidanceEnabled(false)
+            adaptiveNotificationsUnavailable =
+                !viewModel.setAdaptiveDayGuidanceEnabled(false)
         }
         pendingContextualPermission = null
     }
@@ -336,8 +345,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             if (target == "vitals") viewModel.setContextualVitalReviewEnabled(false)
             else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(false)
             else {
-                adaptiveNotificationsUnavailable = false
-                viewModel.setAdaptiveDayGuidanceEnabled(false)
+                adaptiveNotificationsUnavailable =
+                    !viewModel.setAdaptiveDayGuidanceEnabled(false)
             }
             return
         }
@@ -353,16 +362,15 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         else if (target == "vo2") viewModel.setContextualVo2ReviewEnabled(true)
         else {
             val available = AdaptiveDayNotifier.prepareAndCanNotify(ctx)
-            adaptiveNotificationsUnavailable = !available
-            viewModel.setAdaptiveDayGuidanceEnabled(available)
+            val committed = viewModel.setAdaptiveDayGuidanceEnabled(available)
+            adaptiveNotificationsUnavailable = !available || !committed
         }
     }
 
     fun setPlannedWorkoutCalendarEnabled(enabled: Boolean) {
         if (!enabled) {
-            plannedWorkoutCalendarEnabled = false
+            if (!commitPlannedWorkoutCalendarConsent(false)) return
             plannedWorkoutCalendarPermissionUnavailable = false
-            NoopPrefs.setPlannedWorkoutCalendar(ctx, false)
             PlannedWorkoutCalendarStore.clear()
             viewModel.onPlannedWorkoutCalendarChanged()
             return
@@ -374,9 +382,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             plannedWorkoutCalendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
             return
         }
-        plannedWorkoutCalendarEnabled = true
+        if (!commitPlannedWorkoutCalendarConsent(true)) return
         plannedWorkoutCalendarPermissionUnavailable = false
-        NoopPrefs.setPlannedWorkoutCalendar(ctx, true)
         viewModel.onPlannedWorkoutCalendarChanged()
     }
 

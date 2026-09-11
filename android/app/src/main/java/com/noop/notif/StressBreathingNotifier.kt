@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.noop.AppDiagnosticsRecorder
 import com.noop.R
 import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.ContextualActionCenter
@@ -122,10 +123,11 @@ object StressBreathingNotifier {
 
             val local = java.time.Instant.ofEpochMilli(nowMillis)
                 .atZone(java.time.ZoneId.systemDefault())
+            val state = loadState(context)
             val decision = StressBreathingNotificationPolicy.evaluate(
                 observedAtMillis = observedAtMillis,
                 fingerprint = fingerprint,
-                state = loadState(context),
+                state = state,
                 nowMillis = nowMillis,
                 localMinuteOfDay = local.hour * 60 + local.minute,
                 quietHoursEnabled = BiofeedbackPrefs.quietHoursEnabled(context),
@@ -133,6 +135,31 @@ object StressBreathingNotifier {
                 quietEndMinutes = BiofeedbackPrefs.quietEndMinutes(context),
             )
             if (!decision.shouldDeliver) {
+                if (decision.reason == StressBreathingNotificationReason.DUPLICATE) {
+                    val receipt = ContextualPromptDeliveryLedger.pendingReceipt(
+                        context,
+                        ContextualPromptDeliveryOwner.STRESS_BREATHING,
+                    )
+                    if (
+                        receipt?.pending == true &&
+                        receipt.identity == fingerprint &&
+                        state.lastDeliveryMillis == receipt.atMillis
+                    ) {
+                        ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                            context = context,
+                            owner = ContextualPromptDeliveryOwner.STRESS_BREATHING,
+                            expectedAtMillis = receipt.atMillis,
+                            expectedIdentity = receipt.identity,
+                        )
+                    }
+                    ContextualActionCenter.presentStress(
+                        context = context,
+                        fastRmssd = null,
+                        baselineRmssd = null,
+                        fingerprint = fingerprint,
+                        observedAtMillis = observedAtMillis,
+                    )
+                }
                 if (decision.reason == StressBreathingNotificationReason.QUIET_HOURS) {
                     suppress(context)
                 }
@@ -161,6 +188,7 @@ object StressBreathingNotifier {
                 context,
                 nowMillis,
                 ContextualPromptDeliveryOwner.STRESS_BREATHING,
+                identity = fingerprint,
             ) {
                 NotificationLifecycleLedger.posted(
                     context,
@@ -173,10 +201,13 @@ object StressBreathingNotifier {
                     )
                 }
             }
-            if (postResult != ContextualPromptPostResult.POSTED) {
-                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) suppress(context)
+            if (postResult.status != ContextualPromptPostStatus.ACCEPTED) {
+                if (postResult.status == ContextualPromptPostStatus.GLOBAL_COOLDOWN) {
+                    suppress(context)
+                }
                 return
             }
+            val acceptedReceipt = postResult.receipt ?: return
             ContextualActionCenter.presentStress(
                 context = context,
                 fastRmssd = null,
@@ -184,7 +215,38 @@ object StressBreathingNotifier {
                 fingerprint = fingerprint,
                 observedAtMillis = observedAtMillis,
             )
-            saveState(context, decision.nextState)
+            val privateStateStored = saveState(
+                context,
+                StressBreathingNotificationState(
+                    lastDeliveryMillis = acceptedReceipt.atMillis,
+                    fingerprint = fingerprint,
+                ),
+            )
+            if (!privateStateStored) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.private_state",
+                    fields = mapOf(
+                        "owner" to ContextualPromptDeliveryOwner.STRESS_BREATHING.storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            } else if (
+                acceptedReceipt.pending &&
+                !ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                    context = context,
+                    owner = ContextualPromptDeliveryOwner.STRESS_BREATHING,
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    expectedIdentity = acceptedReceipt.identity,
+                )
+            ) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.shared_state",
+                    fields = mapOf(
+                        "owner" to ContextualPromptDeliveryOwner.STRESS_BREATHING.storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            }
         }.onFailure {
             NotificationLifecycleLedger.unknown(
                 context,
@@ -233,11 +295,14 @@ object StressBreathingNotifier {
         )
     }
 
-    private fun saveState(context: Context, state: StressBreathingNotificationState) {
+    private fun saveState(
+        context: Context,
+        state: StressBreathingNotificationState,
+    ): Boolean {
         val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit()
         state.lastDeliveryMillis?.let { editor.putLong(KEY_LAST_AT, it) }
         state.fingerprint?.let { editor.putString(KEY_FINGERPRINT, it) }
-        editor.apply()
+        return editor.commit()
     }
 
     private fun ensureChannel(context: Context) {

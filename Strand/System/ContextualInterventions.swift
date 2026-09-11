@@ -798,6 +798,30 @@ enum AdaptiveDayTimeZoneStore {
     private static let changeFromKey = "adaptiveDay.timeZone.changeFromSec"
     private static let changeToKey = "adaptiveDay.timeZone.changeToSec"
     private static let changeAtKey = "adaptiveDay.timeZone.changeAtSec"
+    private static let rebaseAfterOperationalBlockKey =
+        "adaptiveDay.timeZone.rebaseAfterOperationalBlock"
+
+    static func markOperationalAccessBlocked(
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(true, forKey: rebaseAfterOperationalBlockKey)
+    }
+
+    @discardableResult
+    static func resumeAfterOperationalAccess(
+        offsetSec: Int,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard defaults.bool(forKey: rebaseAfterOperationalBlockKey) else {
+            return false
+        }
+        defaults.set(offsetSec, forKey: currentOffsetKey)
+        defaults.removeObject(forKey: changeFromKey)
+        defaults.removeObject(forKey: changeToKey)
+        defaults.removeObject(forKey: changeAtKey)
+        defaults.removeObject(forKey: rebaseAfterOperationalBlockKey)
+        return true
+    }
 
     static func observe(
         offsetSec: Int,

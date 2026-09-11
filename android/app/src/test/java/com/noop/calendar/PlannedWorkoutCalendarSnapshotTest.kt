@@ -41,12 +41,56 @@ class PlannedWorkoutCalendarSnapshotTest {
     }
 
     @Test
+    fun recoverableProviderFailurePreservesKnownStateAndReturnsUnknownOutcome() {
+        val source = plannedWorkoutCalendarStoreSource()
+        val genericCatch = source.indexOf("catch (_: Exception)")
+        val publishStart = source.indexOf("var rejectionOutcome", genericCatch)
+        assertTrue(genericCatch >= 0 && publishStart > genericCatch)
+
+        val failureBranch = source.substring(genericCatch, publishStart)
+        assertTrue(
+            failureBranch.contains("PlannedWorkoutCalendarRefreshOutcome.Failed"),
+        )
+        assertTrue(!failureBranch.contains("_snapshot.value = null"))
+        assertTrue(!failureBranch.contains("lastRefreshAtMillis = nowMillis"))
+    }
+
+    @Test
+    fun nullProviderCursorIsFailureRatherThanAConfirmedEmptyCalendar() {
+        val source = plannedWorkoutCalendarStoreSource()
+        val query = source.indexOf("val cursor = context.contentResolver.query(")
+        val candidates = source.indexOf("val candidates =", query)
+        assertTrue(query >= 0 && candidates > query)
+
+        val cursorBoundary = source.substring(query, candidates)
+        assertTrue(cursorBoundary.contains("?: throw CalendarProviderUnavailableException()"))
+        assertTrue(!cursorBoundary.contains("QueryResult(null, \"zero\")"))
+    }
+
+    @Test
+    fun refreshInvalidationPreservesTheLastKnownSnapshot() {
+        val source = plannedWorkoutCalendarStoreSource()
+        val clearStart = source.indexOf("fun clear()")
+        val invalidateStart = source.indexOf("fun invalidate()", clearStart)
+        val currentStart = source.indexOf("fun isCurrent(", invalidateStart)
+        assertTrue(clearStart >= 0 && invalidateStart > clearStart && currentStart > invalidateStart)
+
+        val clear = source.substring(clearStart, invalidateStart)
+        val invalidate = source.substring(invalidateStart, currentStart)
+        assertTrue(clear.contains("_snapshot.value = null"))
+        assertTrue(!invalidate.contains("_snapshot.value = null"))
+        assertTrue(invalidate.contains("invalidationGeneration += 1L"))
+        assertTrue(invalidate.contains("lastRefreshAtMillis = 0L"))
+        assertTrue(invalidate.contains("lastRefreshDay = null"))
+    }
+
+    @Test
     fun cacheAndPublishPathsFailClosedWhenCalendarPermissionChanges() {
         val source = plannedWorkoutCalendarStoreSource()
         val permissionCheck = source.indexOf("val granted = ContextCompat.checkSelfPermission")
         val initialState = source.indexOf("val initialState = synchronized", permissionCheck)
         val cachedReturn = source.indexOf(
-            "if (initialState.first) return@withLock initialState.second",
+            "return@withLock PlannedWorkoutCalendarRefreshOutcome.Completed(initialState.second)",
             initialState,
         )
         assertTrue(permissionCheck >= 0)
@@ -85,11 +129,11 @@ class PlannedWorkoutCalendarSnapshotTest {
         val method = viewModel.substring(methodStart, methodEnd)
         val cancel = method.indexOf("plannedWorkoutCalendarEvaluationJob?.cancel()")
         val invalidate = method.indexOf("AdaptiveDayEvaluationGate.invalidate()")
-        val clear = method.indexOf("PlannedWorkoutCalendarStore.clear()")
+        val invalidateStore = method.indexOf("PlannedWorkoutCalendarStore.invalidate()")
         val refresh = method.indexOf("PlannedWorkoutCalendarStore.refresh(")
         val evaluate = method.indexOf("evaluateAdaptiveDayGuidance()")
-        assertTrue(invalidate >= 0 && clear > invalidate)
-        assertTrue(cancel > clear && refresh > cancel)
+        assertTrue(invalidate >= 0 && invalidateStore > invalidate)
+        assertTrue(cancel > invalidateStore && refresh > cancel)
         assertTrue(refresh >= 0 && evaluate > refresh)
         assertTrue(method.contains("force = true"))
 
@@ -128,21 +172,36 @@ class PlannedWorkoutCalendarSnapshotTest {
     @Test
     fun disablingAdaptiveGuidanceImmediatelyRetractsPlannedWorkoutArtifacts() {
         val viewModel = source("com/noop/ui/AppViewModel.kt")
+        val notifier = source("com/noop/notif/AdaptiveDayNotifier.kt")
         val start = viewModel.indexOf("fun setAdaptiveDayGuidanceEnabled(enabled: Boolean)")
         val end = viewModel.indexOf("fun onPlannedWorkoutCalendarChanged()", start)
         assertTrue(start >= 0 && end > start)
         val method = viewModel.substring(start, end)
 
+        val consent = method.indexOf("AdaptiveDayNotifier.setGuidanceConsent")
+        val failedCommit = method.indexOf("return false", consent)
         val disabled = method.indexOf("if (!enabled)")
-        val reconcile = method.indexOf("AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts")
-        val returnIndex = method.indexOf("return", disabled)
+        val returnIndex = method.indexOf("return true", disabled)
+        assertTrue(consent >= 0)
+        assertTrue(failedCommit > consent)
         assertTrue(disabled >= 0)
-        assertTrue(reconcile > disabled)
-        assertTrue(returnIndex > reconcile)
-        assertTrue(method.substring(reconcile, returnIndex).contains("currentFingerprint = null"))
+        assertTrue(returnIndex > disabled)
+
+        val setterStart = notifier.indexOf("fun setGuidanceConsent(")
+        val setterEnd = notifier.indexOf(
+            "fun setPlannedWorkoutCalendarConsent(",
+            setterStart,
+        )
+        assertTrue(setterStart >= 0 && setterEnd > setterStart)
+        val setter = notifier.substring(setterStart, setterEnd)
+        val committed = setter.indexOf("AdaptiveDayConsentGate.commitGuidance")
+        val cleanup = setter.indexOf("completeGuidanceCleanup(app)", committed)
+        assertTrue(committed >= 0)
+        assertTrue(cleanup > committed)
+        assertTrue(setter.substring(committed, cleanup).contains("return false"))
         assertTrue(
-            method.substring(reconcile, returnIndex)
-                .contains("forceCancelSharedNotification = true"),
+            setter.substring(cleanup)
+                .contains("AdaptiveDayConsentGate.clearGuidanceCleanupPending(app)"),
         )
     }
 

@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -24,11 +25,14 @@ import com.noop.analytics.AdaptiveDayGuidance
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ReadinessEngine
 import com.noop.ble.WhoopBleClient
+import com.noop.calendar.PlannedWorkoutCalendarRefreshOutcome
 import com.noop.calendar.PlannedWorkoutCalendarStore
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
 import com.noop.managed.ManagedRuntimeGate
 import com.noop.ui.ContextualActionCenter
+import com.noop.ui.ContextualActionSource
+import com.noop.ui.AdaptiveDayConsentGate
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NoopPrefs
 import com.noop.ui.NotifPrefs
@@ -256,6 +260,12 @@ internal data class AdaptiveDayTimeZoneState(
     val pending: AdaptiveDayGuidance.TimeZoneChange? = null,
 )
 
+internal enum class AdaptiveDayOperationalResumeResult {
+    NOT_REQUIRED,
+    REBASED,
+    FAILED,
+}
+
 /** Pure transition rule behind the persisted timezone observation. */
 internal object AdaptiveDayTimeZonePolicy {
     fun observe(
@@ -282,6 +292,14 @@ internal object AdaptiveDayTimeZonePolicy {
         }
         return AdaptiveDayTimeZoneState(currentOffsetSec = offsetSec, pending = pending)
     }
+
+    fun resumeAfterOperationalBlock(
+        state: AdaptiveDayTimeZoneState,
+        offsetSec: Int,
+    ): AdaptiveDayTimeZoneState = state.copy(
+        currentOffsetSec = offsetSec,
+        pending = null,
+    )
 }
 
 /** SharedPreferences boundary for timezone state; qualified changes survive process death for retry. */
@@ -291,7 +309,53 @@ object AdaptiveDayTimeZoneStore {
     private const val KEY_CHANGE_FROM = "change.from.sec"
     private const val KEY_CHANGE_TO = "change.to.sec"
     private const val KEY_CHANGE_AT = "change.at.sec"
+    private const val KEY_REBASE_AFTER_OPERATIONAL_BLOCK = "rebase.after.operational.block"
     private val lock = Any()
+
+    fun markOperationalAccessBlocked(context: Context): Boolean = synchronized(lock) {
+        markOperationalAccessBlocked(
+            context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE),
+        )
+    }
+
+    internal fun markOperationalAccessBlocked(
+        prefs: android.content.SharedPreferences,
+    ): Boolean = prefs.edit()
+        .putBoolean(KEY_REBASE_AFTER_OPERATIONAL_BLOCK, true)
+        .commit()
+
+    internal fun resumeAfterOperationalAccess(
+        context: Context,
+        offsetSec: Int,
+    ): AdaptiveDayOperationalResumeResult = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        resumeAfterOperationalAccess(prefs, offsetSec)
+    }
+
+    internal fun resumeAfterOperationalAccess(
+        prefs: android.content.SharedPreferences,
+        offsetSec: Int,
+    ): AdaptiveDayOperationalResumeResult {
+        if (!prefs.getBoolean(KEY_REBASE_AFTER_OPERATIONAL_BLOCK, false)) {
+            return AdaptiveDayOperationalResumeResult.NOT_REQUIRED
+        }
+        val next = AdaptiveDayTimeZonePolicy.resumeAfterOperationalBlock(
+            state = load(prefs),
+            offsetSec = offsetSec,
+        )
+        val persisted = prefs.edit()
+            .putInt(KEY_CURRENT_OFFSET, checkNotNull(next.currentOffsetSec))
+            .remove(KEY_CHANGE_FROM)
+            .remove(KEY_CHANGE_TO)
+            .remove(KEY_CHANGE_AT)
+            .remove(KEY_REBASE_AFTER_OPERATIONAL_BLOCK)
+            .commit()
+        return if (persisted) {
+            AdaptiveDayOperationalResumeResult.REBASED
+        } else {
+            AdaptiveDayOperationalResumeResult.FAILED
+        }
+    }
 
     fun observe(
         context: Context,
@@ -299,6 +363,14 @@ object AdaptiveDayTimeZoneStore {
         nowSec: Long,
     ): AdaptiveDayGuidance.TimeZoneChange? = synchronized(lock) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        observe(prefs, offsetSec, nowSec)
+    }
+
+    internal fun observe(
+        prefs: android.content.SharedPreferences,
+        offsetSec: Int,
+        nowSec: Long,
+    ): AdaptiveDayGuidance.TimeZoneChange? {
         val next = AdaptiveDayTimeZonePolicy.observe(load(prefs), offsetSec, nowSec)
         val editor = prefs.edit().putInt(KEY_CURRENT_OFFSET, offsetSec)
         next.pending?.let {
@@ -308,7 +380,7 @@ object AdaptiveDayTimeZoneStore {
                 .putLong(KEY_CHANGE_AT, it.observedAtSec)
         }
         editor.apply()
-        next.pending
+        return next.pending
     }
 
     fun pending(context: Context): AdaptiveDayGuidance.TimeZoneChange? = synchronized(lock) {
@@ -325,7 +397,7 @@ object AdaptiveDayTimeZoneStore {
             .apply()
     }
 
-    private fun load(prefs: android.content.SharedPreferences): AdaptiveDayTimeZoneState {
+    internal fun load(prefs: android.content.SharedPreferences): AdaptiveDayTimeZoneState {
         val current = prefs.getInt(KEY_CURRENT_OFFSET, 0)
             .takeIf { prefs.contains(KEY_CURRENT_OFFSET) }
         val pending = if (
@@ -464,10 +536,22 @@ class AdaptivePlannedWorkoutWorker(
         val diagnostic = AppDiagnosticsRecorder.beginOperation(
             "adaptive_day.planned_workout_boundary",
         )
+        val adaptiveDayEnabled =
+            AdaptiveDayConsentGate.guidance(applicationContext)
+        val calendarEnabled =
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(applicationContext)
         if (
-            !NoopPrefs.adaptiveDayGuidance(applicationContext) ||
-            !NoopPrefs.plannedWorkoutCalendar(applicationContext)
+            !adaptiveDayEnabled ||
+            !calendarEnabled
         ) {
+            AdaptivePlannedWorkoutScheduler.cancel(applicationContext)
+            AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
+                context = applicationContext,
+                currentFingerprint = null,
+                forceCancelSharedNotification = !adaptiveDayEnabled,
+                requirePlannedWorkoutCalendarDisabled =
+                    adaptiveDayEnabled && !calendarEnabled,
+            )
             AppDiagnosticsRecorder.endOperation(diagnostic, outcome = "disabled")
             return Result.success()
         }
@@ -529,12 +613,13 @@ object AdaptiveDayEvaluator {
             offsetSec = offsetSec,
             nowSec = nowSec,
         )
-        if (!NoopPrefs.adaptiveDayGuidance(appContext)) {
+        if (!AdaptiveDayConsentGate.guidance(appContext)) {
             AdaptiveDayTimeZoneStore.discardPending(appContext)
             AdaptivePlannedWorkoutScheduler.cancel(appContext)
             AdaptiveDayNotifier.reconcilePlannedWorkoutArtifacts(
                 appContext,
                 currentFingerprint = null,
+                forceCancelSharedNotification = true,
             )
             return null
         }
@@ -602,11 +687,17 @@ object AdaptiveDayEvaluator {
             return recommendation
         }
 
-        val plannedWorkout = PlannedWorkoutCalendarStore.refresh(
+        val calendarRefresh = PlannedWorkoutCalendarStore.refresh(
             context = appContext,
             now = now,
         )
         if (!AdaptiveDayEvaluationGate.isCurrent(evaluationToken)) return recommendation
+        val plannedWorkout = when (calendarRefresh) {
+            is PlannedWorkoutCalendarRefreshOutcome.Completed -> calendarRefresh.snapshot
+            PlannedWorkoutCalendarRefreshOutcome.Failed,
+            PlannedWorkoutCalendarRefreshOutcome.Superseded,
+            -> return recommendation
+        }
         val plan = DailyActionPlanner.plan(
             today = today,
             readiness = ReadinessEngine.evaluate(resolvedDays, today),
@@ -691,6 +782,270 @@ object AdaptiveDayNotifier {
     private const val CHANNEL_ID = "noop_adaptive_day"
     private const val PREFS_FILE = "noop_adaptive_day_delivery"
     private const val KEY_GLOBAL_AT = "global.at"
+
+    @Synchronized
+    fun setGuidanceConsent(context: Context, enabled: Boolean): Boolean {
+        val app = context.applicationContext
+        if (
+            enabled &&
+            AdaptiveDayConsentGate.guidanceCleanupPending(app) &&
+            !completeGuidanceCleanup(app)
+        ) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_state",
+                fields = mapOf(
+                    "scope" to "guidance",
+                    "outcome" to "cleanup_pending",
+                ),
+            )
+            return false
+        }
+        val committed = AdaptiveDayConsentGate.commitGuidance(app, enabled)
+        ContextualActionCenter.refresh(app)
+        if (!committed) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_state",
+                fields = mapOf(
+                    "scope" to "guidance",
+                    "outcome" to "commit_failed",
+                ),
+            )
+            return false
+        }
+        if (!enabled) {
+            if (
+                completeGuidanceCleanup(app) &&
+                !AdaptiveDayConsentGate.clearGuidanceCleanupPending(app)
+            ) {
+                recordConsentCleanupMarkerFailure("guidance")
+            }
+        }
+        return true
+    }
+
+    @Synchronized
+    fun setPlannedWorkoutCalendarConsent(context: Context, enabled: Boolean): Boolean {
+        val app = context.applicationContext
+        if (
+            enabled &&
+            AdaptiveDayConsentGate.plannedWorkoutCleanupPending(app) &&
+            !completePlannedWorkoutCleanup(app)
+        ) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_state",
+                fields = mapOf(
+                    "scope" to "calendar",
+                    "outcome" to "cleanup_pending",
+                ),
+            )
+            return false
+        }
+        val committed = AdaptiveDayConsentGate.commitPlannedWorkoutCalendar(app, enabled)
+        ContextualActionCenter.refresh(app)
+        if (!committed) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.consent_state",
+                fields = mapOf(
+                    "scope" to "calendar",
+                    "outcome" to "commit_failed",
+                ),
+            )
+            return false
+        }
+        if (!enabled) {
+            AdaptiveDayEvaluationGate.invalidate()
+            AdaptivePlannedWorkoutScheduler.cancel(app)
+            if (
+                completePlannedWorkoutCleanup(app) &&
+                !AdaptiveDayConsentGate.clearPlannedWorkoutCleanupPending(app)
+            ) {
+                recordConsentCleanupMarkerFailure("calendar")
+            }
+        }
+        return true
+    }
+
+    @Synchronized
+    fun recoverPendingConsentCleanup(context: Context): Boolean {
+        val app = context.applicationContext
+        var complete = true
+        if (
+            AdaptiveDayConsentGate.guidanceCleanupPending(app) &&
+            !AdaptiveDayConsentGate.guidance(app)
+        ) {
+            val cleaned = completeGuidanceCleanup(app) &&
+                AdaptiveDayConsentGate.clearGuidanceCleanupPending(app)
+            complete = complete && cleaned
+        }
+        if (
+            AdaptiveDayConsentGate.plannedWorkoutCleanupPending(app) &&
+            !AdaptiveDayConsentGate.plannedWorkoutCalendar(app)
+        ) {
+            val cleaned = completePlannedWorkoutCleanup(app) &&
+                AdaptiveDayConsentGate.clearPlannedWorkoutCleanupPending(app)
+            complete = complete && cleaned
+        }
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.consent_cleanup",
+            fields = mapOf("outcome" to if (complete) "complete" else "retry_pending"),
+        )
+        return complete
+    }
+
+    private fun recordConsentCleanupMarkerFailure(scope: String) {
+        AppDiagnosticsRecorder.record(
+            "adaptive_day.consent_cleanup",
+            fields = mapOf(
+                "scope" to scope,
+                "outcome" to "marker_commit_failed",
+            ),
+        )
+    }
+
+    private fun completeGuidanceCleanup(context: Context): Boolean {
+        val app = context.applicationContext
+        val state = loadState(app)
+        val actionsCommitted = ContextualActionCenter.removeRecoveryActions(
+            context = app,
+            source = ContextualActionSource.ADAPTIVE_DAY,
+            legacyFingerprints = state.deliveries.values
+                .mapTo(linkedSetOf()) { it.fingerprint },
+        )
+        val forced = ContextualPromptDeliveryLedger.forceCancelNotificationSlot(
+            context = app,
+            slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+            cancel = {
+                cancelAdaptiveDayNotification(app)
+            },
+        )
+        val canClearPrivateState =
+            actionsCommitted &&
+                forced.stateCommitted &&
+                forced.notificationCancelled
+        val privateStateCommitted =
+            canClearPrivateState && saveState(app, AdaptiveDayDeliveryState())
+        if (!actionsCommitted) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.contextual_action_state",
+                fields = mapOf("outcome" to "force_commit_failed"),
+            )
+        }
+        if (!forced.stateCommitted) {
+            AppDiagnosticsRecorder.record(
+                "contextual_prompt.shared_state",
+                fields = mapOf(
+                    "owner" to ContextualPromptDeliveryOwner.ADAPTIVE_DAY.storageKey,
+                    "outcome" to "force_commit_failed",
+                ),
+            )
+        }
+        if (!forced.notificationCancelled) {
+            AppDiagnosticsRecorder.record(
+                "contextual_prompt.shared_state",
+                fields = mapOf(
+                    "owner" to ContextualPromptDeliveryOwner.ADAPTIVE_DAY.storageKey,
+                    "outcome" to "force_cancel_failed",
+                ),
+            )
+        }
+        if (canClearPrivateState && !privateStateCommitted) {
+            recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.ADAPTIVE_DAY)
+        }
+        return canClearPrivateState && privateStateCommitted
+    }
+
+    private fun completePlannedWorkoutCleanup(context: Context): Boolean {
+        val app = context.applicationContext
+        val state = loadState(app)
+        val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        val actionsCommitted = ContextualActionCenter.removeRecoveryActions(
+            context = app,
+            source = ContextualActionSource.ADAPTIVE_DAY,
+            legacyFingerprints = listOfNotNull(prior?.fingerprint).toSet(),
+            route = NoopNotificationRoute.WORKOUTS,
+        )
+        val deliveredReceipt = ContextualPromptDeliveryLedger.deliveryReceipt(
+            context = app,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        val pendingReceipt = ContextualPromptDeliveryLedger.pendingReceipt(
+            context = app,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        val hadSharedWorkoutEvidence = deliveredReceipt != null || pendingReceipt != null
+        var sharedStateCommitted = true
+        var notificationHandled = true
+        if (hadSharedWorkoutEvidence) {
+            val outcome = ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(
+                context = app,
+                owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                onNotificationSlotOwnerRemoved = {
+                    cancelAdaptiveDayNotification(app)
+                },
+            )
+            sharedStateCommitted = outcome.ownerRemoved
+            if (!outcome.ownerRemoved) {
+                listOfNotNull(deliveredReceipt, pendingReceipt)
+                    .maxByOrNull { it.atMillis }
+                    ?.let { receipt ->
+                        ContextualPromptDeliveryLedger.cancelNotificationSlotIfOwned(
+                            context = app,
+                            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                            expectedAtMillis = receipt.atMillis,
+                        ) {
+                            cancelAdaptiveDayNotification(app)
+                        }
+                    }
+            }
+        }
+        val privateWorkoutMayOwnSlot =
+            prior != null &&
+                state.lastGlobalDeliveryMillis == prior.atMillis
+        if (!hadSharedWorkoutEvidence && privateWorkoutMayOwnSlot) {
+            notificationHandled =
+                ContextualPromptDeliveryLedger.cancelNotificationSlotThroughCutoff(
+                    context = app,
+                    slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+                    cutoffMillis = checkNotNull(prior).atMillis,
+                ) {
+                    cancelAdaptiveDayNotification(app)
+                }
+        } else if (
+            ContextualPromptDeliveryLedger.hasPendingCancellation(
+                context = app,
+                slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+            )
+        ) {
+            ContextualPromptDeliveryLedger.cancelNotificationSlotIfUnowned(
+                context = app,
+                slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+            ) {
+                cancelAdaptiveDayNotification(app)
+            }
+            notificationHandled = !ContextualPromptDeliveryLedger.hasPendingCancellation(
+                context = app,
+                slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+            )
+        }
+        sharedStateCommitted =
+            sharedStateCommitted &&
+                ContextualPromptDeliveryLedger.deliveryReceipt(
+                    context = app,
+                    owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                ) == null &&
+                ContextualPromptDeliveryLedger.pendingReceipt(
+                    context = app,
+                    owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                ) == null
+        val canClearPrivateState =
+            actionsCommitted && sharedStateCommitted && notificationHandled
+        val cleared = reconciledPlannedWorkoutState(state, currentFingerprint = null)
+        val privateStateCommitted = canClearPrivateState && saveState(app, cleared)
+        if (canClearPrivateState && !privateStateCommitted) {
+            recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.PLANNED_WORKOUT)
+        }
+        return canClearPrivateState && privateStateCommitted
+    }
 
     fun onRecommendation(
         context: Context,
@@ -836,7 +1191,7 @@ object AdaptiveDayNotifier {
         onRejected: (AdaptiveDayDeliveryReason) -> Unit = {},
         onPosted: () -> Unit = {},
     ) {
-        if (!NoopPrefs.adaptiveDayGuidance(context)) return
+        if (!AdaptiveDayConsentGate.guidance(context)) return
         if (
             candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
             !plannedWorkoutDeliveryCurrent(context, candidate)
@@ -870,7 +1225,46 @@ object AdaptiveDayNotifier {
                 quietEndMinutes = quietEndMinutes,
             )
             if (!decision.shouldDeliver) {
-                onRejected(decision.reason)
+                var rejectionCanFinalize = true
+                if (decision.reason == AdaptiveDayDeliveryReason.DUPLICATE) {
+                    val owner = deliveryOwner(candidate.kind)
+                    val prior = deliveryState.deliveries[candidate.kind]
+                    val receipt = ContextualPromptDeliveryLedger.pendingReceipt(context, owner)
+                    if (
+                        receipt?.pending == true &&
+                        prior?.atMillis == receipt.atMillis &&
+                        deliveryIdentitiesMatch(
+                            candidate.kind,
+                            receipt.identity,
+                            candidate.fingerprint,
+                        )
+                    ) {
+                        rejectionCanFinalize =
+                            ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                            context = context,
+                            owner = owner,
+                            expectedAtMillis = receipt.atMillis,
+                            expectedIdentity = receipt.identity,
+                        )
+                    }
+                    ContextualActionCenter.presentRecovery(
+                        context = context,
+                        title = title,
+                        detail = body,
+                        fingerprint = candidate.fingerprint,
+                        evidence = evidence,
+                        observedAtMillis = candidate.observedAtMillis,
+                        maximumAgeMillis = candidate.maximumAgeMillis,
+                        route = route,
+                        source = ContextualActionSource.ADAPTIVE_DAY,
+                    )
+                }
+                if (
+                    decision.reason != AdaptiveDayDeliveryReason.DUPLICATE ||
+                    rejectionCanFinalize
+                ) {
+                    onRejected(decision.reason)
+                }
                 if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
                     AdaptiveDayDeliveryPolicy.nextEligibleAtMillis(
                         candidate = candidate,
@@ -896,13 +1290,10 @@ object AdaptiveDayNotifier {
             var calendarConsentLost = false
             var plannedWorkoutExpired = false
             val postResult = ContextualPromptDeliveryLedger.postIfAllowed(
-                context,
-                deliveryAtMillis,
-                if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
-                    ContextualPromptDeliveryOwner.PLANNED_WORKOUT
-                } else {
-                    ContextualPromptDeliveryOwner.ADAPTIVE_DAY
-                },
+                context = context,
+                nowMillis = deliveryAtMillis,
+                owner = deliveryOwner(candidate.kind),
+                identity = candidate.fingerprint,
             ) {
                 if (
                     candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
@@ -950,21 +1341,6 @@ object AdaptiveDayNotifier {
                 ) {
                     manager.notify(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY, notification)
                 }
-                if (
-                    posted &&
-                    candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
-                    !plannedWorkoutDeliveryCurrent(context, candidate)
-                ) {
-                    calendarConsentLost = true
-                    NotificationLifecycleLedger.cancelled(
-                        context,
-                        NotificationLifecycleId.ADAPTIVE_DAY,
-                        NotificationLifecycleCategory.RECOMMENDATION,
-                    ) {
-                        manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
-                    }
-                    return@postIfAllowed false
-                }
                 posted
             }
             if (plannedWorkoutExpired) {
@@ -977,12 +1353,14 @@ object AdaptiveDayNotifier {
                 suppress(context)
                 return
             }
-            if (postResult != ContextualPromptPostResult.POSTED) {
-                if (postResult == ContextualPromptPostResult.GLOBAL_COOLDOWN) {
+            if (postResult.status != ContextualPromptPostStatus.ACCEPTED) {
+                if (postResult.status == ContextualPromptPostStatus.GLOBAL_COOLDOWN) {
                     if (candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
                         ContextualPromptDeliveryLedger.nextAllowedAtMillis(
-                            context,
-                            deliveryAtMillis,
+                            context = context,
+                            nowMillis = deliveryAtMillis,
+                            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                            identity = candidate.fingerprint,
                         )?.let { retryAtMillis ->
                             schedulePlannedWorkoutRetry(
                                 context = context,
@@ -996,21 +1374,27 @@ object AdaptiveDayNotifier {
                 }
                 return
             }
+            val acceptedReceipt = postResult.receipt ?: return
             if (
                 candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
                 !plannedWorkoutDeliveryCurrent(context, candidate)
             ) {
-                ContextualPromptDeliveryLedger.reconcileIfOwned(
+                val released = ContextualPromptDeliveryLedger.reconcileIfOwned(
                     context,
                     ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
-                    expectedAtMillis = deliveryAtMillis,
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    onNotificationSlotOwnerRemoved = {
+                        cancelAdaptiveDayNotification(context)
+                    },
                 )
-                NotificationLifecycleLedger.cancelled(
-                    context,
-                    NotificationLifecycleId.ADAPTIVE_DAY,
-                    NotificationLifecycleCategory.RECOMMENDATION,
-                ) {
-                    manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+                if (!released) {
+                    AppDiagnosticsRecorder.record(
+                        "contextual_prompt.shared_state",
+                        fields = mapOf(
+                            "owner" to ContextualPromptDeliveryOwner.PLANNED_WORKOUT.storageKey,
+                            "outcome" to "reconcile_failed_closed",
+                        ),
+                    )
                 }
                 AdaptivePlannedWorkoutScheduler.cancel(context)
                 suppress(context)
@@ -1025,6 +1409,7 @@ object AdaptiveDayNotifier {
                 observedAtMillis = candidate.observedAtMillis,
                 maximumAgeMillis = candidate.maximumAgeMillis,
                 route = route,
+                source = ContextualActionSource.ADAPTIVE_DAY,
             )
             if (
                 candidate.kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT &&
@@ -1035,24 +1420,66 @@ object AdaptiveDayNotifier {
                     route = NoopNotificationRoute.WORKOUTS,
                     keepingFingerprint = null,
                 )
-                ContextualPromptDeliveryLedger.reconcileIfOwned(
+                val released = ContextualPromptDeliveryLedger.reconcileIfOwned(
                     context,
                     ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
-                    expectedAtMillis = deliveryAtMillis,
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    onNotificationSlotOwnerRemoved = {
+                        cancelAdaptiveDayNotification(context)
+                    },
                 )
-                NotificationLifecycleLedger.cancelled(
-                    context,
-                    NotificationLifecycleId.ADAPTIVE_DAY,
-                    NotificationLifecycleCategory.RECOMMENDATION,
-                ) {
-                    manager.cancel(NotificationPlatformIdentity.NotificationId.ADAPTIVE_DAY)
+                if (!released) {
+                    AppDiagnosticsRecorder.record(
+                        "contextual_prompt.shared_state",
+                        fields = mapOf(
+                            "owner" to ContextualPromptDeliveryOwner.PLANNED_WORKOUT.storageKey,
+                            "outcome" to "reconcile_failed_closed",
+                        ),
+                    )
                 }
                 AdaptivePlannedWorkoutScheduler.cancel(context)
                 suppress(context)
                 return
             }
-            saveState(context, decision.nextState)
-            onPosted()
+            val privateStateStored = saveState(
+                context,
+                acceptedDeliveryState(
+                    state = deliveryState,
+                    candidate = candidate,
+                    acceptedAtMillis = acceptedReceipt.atMillis,
+                ),
+            )
+            if (!privateStateStored) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.private_state",
+                    fields = mapOf(
+                        "owner" to deliveryOwner(candidate.kind).storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            }
+            val ownershipConfirmed = if (privateStateStored && acceptedReceipt.pending) {
+                ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                    context = context,
+                    owner = deliveryOwner(candidate.kind),
+                    expectedAtMillis = acceptedReceipt.atMillis,
+                    expectedIdentity = acceptedReceipt.identity,
+                )
+            } else {
+                privateStateStored
+            }
+            if (!ownershipConfirmed && privateStateStored) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.shared_state",
+                    fields = mapOf(
+                        "owner" to deliveryOwner(candidate.kind).storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+            }
+            if (ownershipConfirmed) {
+                onPosted()
+            }
         }.onFailure {
             NotificationLifecycleLedger.unknown(
                 context,
@@ -1084,6 +1511,43 @@ object AdaptiveDayNotifier {
         )
     }
 
+    private fun deliveryOwner(
+        kind: AdaptiveDayDeliveryKind,
+    ): ContextualPromptDeliveryOwner =
+        if (kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+            ContextualPromptDeliveryOwner.PLANNED_WORKOUT
+        } else {
+            ContextualPromptDeliveryOwner.ADAPTIVE_DAY
+        }
+
+    private fun deliveryIdentitiesMatch(
+        kind: AdaptiveDayDeliveryKind,
+        first: String?,
+        second: String?,
+    ): Boolean =
+        if (kind == AdaptiveDayDeliveryKind.PLANNED_WORKOUT) {
+            plannedWorkoutFingerprintsMatch(first, second)
+        } else {
+            first != null && first == second
+        }
+
+    internal fun acceptedDeliveryState(
+        state: AdaptiveDayDeliveryState,
+        candidate: AdaptiveDayDeliveryCandidate,
+        acceptedAtMillis: Long,
+    ): AdaptiveDayDeliveryState {
+        val deliveries = state.deliveries + (
+            candidate.kind to AdaptiveDayDelivery(
+                atMillis = acceptedAtMillis,
+                fingerprint = candidate.fingerprint,
+            )
+        )
+        return state.copy(
+            lastGlobalDeliveryMillis = deliveries.values.maxOfOrNull { it.atMillis },
+            deliveries = deliveries,
+        )
+    }
+
     private fun plannedWorkoutDeliveryCurrent(
         context: Context,
         candidate: AdaptiveDayDeliveryCandidate,
@@ -1091,8 +1555,8 @@ object AdaptiveDayNotifier {
         if (candidate.kind != AdaptiveDayDeliveryKind.PLANNED_WORKOUT) return true
         val evaluationToken = candidate.evaluationToken ?: return false
         val calendarRevision = candidate.calendarRevision ?: return false
-        return NoopPrefs.adaptiveDayGuidance(context) &&
-            NoopPrefs.plannedWorkoutCalendar(context) &&
+        return AdaptiveDayConsentGate.guidance(context) &&
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(context) &&
             AdaptiveDayEvaluationGate.isCurrent(evaluationToken) &&
             PlannedWorkoutCalendarStore.isCurrentRevision(calendarRevision) &&
             ContextCompat.checkSelfPermission(
@@ -1112,8 +1576,14 @@ object AdaptiveDayNotifier {
         if (!ManagedRuntimeGate.isAuthorized(context.applicationContext)) return
         val nowSec = now.toEpochSecond()
         val change = AdaptiveDayTimeZoneStore.observe(context, now.offset.totalSeconds, nowSec)
-        if (!NoopPrefs.adaptiveDayGuidance(context)) {
+        if (!AdaptiveDayConsentGate.guidance(context)) {
             AdaptiveDayTimeZoneStore.discardPending(context)
+            AdaptivePlannedWorkoutScheduler.cancel(context)
+            reconcilePlannedWorkoutArtifacts(
+                context = context,
+                currentFingerprint = null,
+                forceCancelSharedNotification = true,
+            )
             return
         }
         AdaptiveDayGuidance.recommendation(
@@ -1189,8 +1659,10 @@ object AdaptiveDayNotifier {
                 context.getString(R.string.appwide_adaptive_day_guidance_sleep_body)
     }
 
-    private fun loadState(context: Context): AdaptiveDayDeliveryState {
-        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+    private fun loadState(context: Context): AdaptiveDayDeliveryState =
+        loadState(context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE))
+
+    internal fun loadState(prefs: SharedPreferences): AdaptiveDayDeliveryState {
         val deliveries = AdaptiveDayDeliveryKind.entries.mapNotNull { kind ->
             val atKey = "${kind.name}.at"
             val fingerprint = prefs.getString("${kind.name}.fingerprint", null)
@@ -1225,10 +1697,15 @@ object AdaptiveDayNotifier {
         )
         if (
             prior != null &&
-            plannedWorkoutFingerprintsMatch(prior.fingerprint, fingerprint) &&
-            state.lastGlobalDeliveryMillis == prior.atMillis
+            plannedWorkoutFingerprintsMatch(prior.fingerprint, fingerprint)
         ) {
-            cancelAdaptiveDayNotification(app)
+            ContextualPromptDeliveryLedger.cancelNotificationSlotIfOwned(
+                context = app,
+                owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                expectedAtMillis = prior.atMillis,
+            ) {
+                cancelAdaptiveDayNotification(app)
+            }
         }
     }
 
@@ -1254,10 +1731,62 @@ object AdaptiveDayNotifier {
         context: Context,
         currentFingerprint: String?,
         forceCancelSharedNotification: Boolean = false,
+        requirePlannedWorkoutCalendarDisabled: Boolean = false,
     ) {
         val app = context.applicationContext
+        if (
+            forceCancelSharedNotification &&
+            AdaptiveDayConsentGate.guidance(app)
+        ) {
+            AppDiagnosticsRecorder.record(
+                "contextual_prompt.shared_state",
+                fields = mapOf(
+                    "owner" to ContextualPromptDeliveryOwner.ADAPTIVE_DAY.storageKey,
+                    "outcome" to "force_superseded",
+                ),
+            )
+            return
+        }
+        if (
+            requirePlannedWorkoutCalendarDisabled &&
+            AdaptiveDayConsentGate.plannedWorkoutCalendar(app)
+        ) {
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.planned_workout_state",
+                fields = mapOf("outcome" to "calendar_cleanup_superseded"),
+            )
+            return
+        }
+        if (forceCancelSharedNotification) {
+            if (
+                completeGuidanceCleanup(app) &&
+                AdaptiveDayConsentGate.guidanceCleanupPending(app) &&
+                !AdaptiveDayConsentGate.clearGuidanceCleanupPending(app)
+            ) {
+                recordConsentCleanupMarkerFailure("guidance")
+            }
+            return
+        }
+        if (requirePlannedWorkoutCalendarDisabled) {
+            if (
+                completePlannedWorkoutCleanup(app) &&
+                AdaptiveDayConsentGate.plannedWorkoutCleanupPending(app) &&
+                !AdaptiveDayConsentGate.clearPlannedWorkoutCleanupPending(app)
+            ) {
+                recordConsentCleanupMarkerFailure("calendar")
+            }
+            return
+        }
         val state = loadState(app)
         val prior = state.deliveries[AdaptiveDayDeliveryKind.PLANNED_WORKOUT]
+        val deliveredReceipt = ContextualPromptDeliveryLedger.deliveryReceipt(
+            context = app,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
+        val pendingReceipt = ContextualPromptDeliveryLedger.pendingReceipt(
+            context = app,
+            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+        )
         if (currentFingerprint != null) {
             ContextualActionCenter.migrateRecoveryAction(
                 context = app,
@@ -1267,61 +1796,185 @@ object AdaptiveDayNotifier {
                 plannedWorkoutFingerprintsMatch(it, currentFingerprint)
             }
         }
-        if (prior == null) {
-            ContextualActionCenter.reconcileRecoveryActions(
-                context = app,
-                route = NoopNotificationRoute.WORKOUTS,
-                keepingFingerprint = currentFingerprint,
-            )
-            val orphanedOwner = if (
-                currentFingerprint == null || forceCancelSharedNotification
-            ) {
-                ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(
-                    context = app,
-                    owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
-                    onNotificationSlotOwnerRemoved = {
-                        cancelAdaptiveDayNotification(app)
-                    },
-                )
-            } else {
-                null
-            }
-            if (
-                forceCancelSharedNotification &&
-                orphanedOwner?.ownedNotificationSlot != true
-            ) {
-                cancelAdaptiveDayNotification(app)
-            }
-            return
-        }
-        val remainsCurrent =
-            currentFingerprint != null &&
-                plannedWorkoutFingerprintsMatch(prior.fingerprint, currentFingerprint)
         ContextualActionCenter.reconcileRecoveryActions(
             context = app,
             route = NoopNotificationRoute.WORKOUTS,
             keepingFingerprint = currentFingerprint,
         )
-        if (remainsCurrent) {
-            val migrated = reconciledPlannedWorkoutState(state, currentFingerprint)
-            if (migrated != state) saveState(app, migrated)
+
+        val pendingOwnerIsCurrent =
+            currentFingerprint != null &&
+                pendingReceipt != null &&
+                plannedWorkoutFingerprintsMatch(pendingReceipt.identity, currentFingerprint)
+        if (pendingOwnerIsCurrent) {
+            val privateOwnerProvesPostCompleted =
+                prior != null &&
+                    prior.atMillis == pendingReceipt.atMillis &&
+                    plannedWorkoutFingerprintsMatch(prior.fingerprint, currentFingerprint)
+            if (
+                !pendingReceipt.notificationPosted &&
+                !privateOwnerProvesPostCompleted
+            ) {
+                val cleared = reconciledPlannedWorkoutState(state, currentFingerprint = null)
+                if (cleared != state && !saveState(app, cleared)) {
+                    recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.PLANNED_WORKOUT)
+                }
+                return
+            }
+
+            val restored = checkNotNull(
+                restoredPlannedWorkoutState(
+                    state = state,
+                    currentFingerprint = checkNotNull(currentFingerprint),
+                    receipt = pendingReceipt,
+                ),
+            )
+            if (restored != state && !saveState(app, restored)) {
+                recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.PLANNED_WORKOUT)
+                return
+            }
+            val confirmed = ContextualPromptDeliveryLedger.confirmPendingIfOwned(
+                context = app,
+                owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                expectedAtMillis = pendingReceipt.atMillis,
+                expectedIdentity = pendingReceipt.identity,
+            )
+            if (!confirmed) {
+                AppDiagnosticsRecorder.record(
+                    "contextual_prompt.shared_state",
+                    fields = mapOf(
+                        "owner" to ContextualPromptDeliveryOwner.PLANNED_WORKOUT.storageKey,
+                        "outcome" to "commit_failed",
+                    ),
+                )
+                return
+            }
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.planned_workout_state",
+                fields = mapOf("outcome" to "restored_from_pending_owner"),
+            )
             return
         }
 
-        ContextualPromptDeliveryLedger.reconcileIfOwned(
-            context = app,
-            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
-            expectedAtMillis = prior.atMillis,
-        )
-        saveState(app, reconciledPlannedWorkoutState(state, currentFingerprint))
-        if (forceCancelSharedNotification || state.lastGlobalDeliveryMillis == prior.atMillis) {
-            cancelAdaptiveDayNotification(app)
+        val deliveredOwnerIsCurrent =
+            pendingReceipt == null &&
+                currentFingerprint != null &&
+                deliveredReceipt != null &&
+                plannedWorkoutFingerprintsMatch(
+                    deliveredReceipt.identity,
+                    currentFingerprint,
+                )
+        if (deliveredOwnerIsCurrent) {
+            val restored = checkNotNull(
+                restoredPlannedWorkoutState(
+                    state = state,
+                    currentFingerprint = checkNotNull(currentFingerprint),
+                    receipt = deliveredReceipt,
+                ),
+            )
+            if (restored != state && !saveState(app, restored)) {
+                recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.PLANNED_WORKOUT)
+                return
+            }
+            AppDiagnosticsRecorder.record(
+                "adaptive_day.planned_workout_state",
+                fields = mapOf("outcome" to "restored_from_delivery_owner"),
+            )
+            return
+        }
+
+        var sharedStateCommitted = true
+        var cancellationRetryRequired = false
+        if (deliveredReceipt != null || pendingReceipt != null) {
+            val outcome = ContextualPromptDeliveryLedger.reconcileOwnerWithOutcome(
+                context = app,
+                owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                onNotificationSlotOwnerRemoved = {
+                    cancelAdaptiveDayNotification(app)
+                },
+            )
+            sharedStateCommitted = outcome.ownerRemoved
+            cancellationRetryRequired =
+                outcome.ownedNotificationSlot &&
+                    ContextualPromptNotificationSlot.ADAPTIVE_DAY in
+                    outcome.nextState.pendingCancellationSlots
+            if (!outcome.ownerRemoved) {
+                listOfNotNull(deliveredReceipt, pendingReceipt)
+                    .maxByOrNull { it.atMillis }
+                    ?.let { receipt ->
+                        ContextualPromptDeliveryLedger.cancelNotificationSlotIfOwned(
+                            context = app,
+                            owner = ContextualPromptDeliveryOwner.PLANNED_WORKOUT,
+                            expectedAtMillis = receipt.atMillis,
+                        ) {
+                            cancelAdaptiveDayNotification(app)
+                        }
+                    }
+            }
+        }
+        val privateOwnerWasCurrent =
+            prior != null &&
+                currentFingerprint != null &&
+                plannedWorkoutFingerprintsMatch(prior.fingerprint, currentFingerprint)
+        val legacyNotificationMayBeStale =
+            prior != null &&
+                state.lastGlobalDeliveryMillis == prior.atMillis &&
+                !privateOwnerWasCurrent
+        val notificationHandled = when {
+            legacyNotificationMayBeStale -> {
+                ContextualPromptDeliveryLedger.cancelNotificationSlotThroughCutoff(
+                    context = app,
+                    slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+                    cutoffMillis = checkNotNull(prior).atMillis,
+                ) {
+                    cancelAdaptiveDayNotification(app)
+                }
+            }
+            cancellationRetryRequired ||
+            ContextualPromptDeliveryLedger.hasPendingCancellation(
+                context = app,
+                slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+            ) -> {
+                ContextualPromptDeliveryLedger.cancelNotificationSlotIfUnowned(
+                    context = app,
+                    slot = ContextualPromptNotificationSlot.ADAPTIVE_DAY,
+                ) {
+                    cancelAdaptiveDayNotification(app)
+                }
+            }
+            else -> true
+        }
+        val cleared = plannedWorkoutStateAfterReconciliation(
+            state = state,
+            currentFingerprint = null,
+            sharedStateCommitted = sharedStateCommitted,
+            notificationHandled = notificationHandled,
+        ) ?: return
+        if (cleared != state && !saveState(app, cleared)) {
+            recordPrivateStateCommitFailure(ContextualPromptDeliveryOwner.PLANNED_WORKOUT)
         }
     }
 
-    private fun cancelAdaptiveDayNotification(context: Context) {
+    internal fun restoredPlannedWorkoutState(
+        state: AdaptiveDayDeliveryState,
+        currentFingerprint: String,
+        receipt: ContextualPromptDeliveryReceipt,
+    ): AdaptiveDayDeliveryState? {
+        if (!plannedWorkoutFingerprintsMatch(receipt.identity, currentFingerprint)) return null
+        val deliveries = (state.deliveries - AdaptiveDayDeliveryKind.PLANNED_WORKOUT) +
+            (
+                AdaptiveDayDeliveryKind.PLANNED_WORKOUT to
+                    AdaptiveDayDelivery(receipt.atMillis, currentFingerprint)
+            )
+        return state.copy(
+            lastGlobalDeliveryMillis = deliveries.values.maxOfOrNull { it.atMillis },
+            deliveries = deliveries,
+        )
+    }
+
+    private fun cancelAdaptiveDayNotification(context: Context): Boolean {
         val manager = NotificationManagerCompat.from(context)
-        NotificationLifecycleLedger.cancelled(
+        return NotificationLifecycleLedger.cancelled(
             context,
             NotificationLifecycleId.ADAPTIVE_DAY,
             NotificationLifecycleCategory.RECOMMENDATION,
@@ -1354,16 +2007,43 @@ object AdaptiveDayNotifier {
         )
     }
 
-    private fun saveState(context: Context, state: AdaptiveDayDeliveryState) {
-        val editor = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-            .edit()
-            .clear()
+    internal fun plannedWorkoutStateAfterReconciliation(
+        state: AdaptiveDayDeliveryState,
+        currentFingerprint: String?,
+        sharedStateCommitted: Boolean,
+        notificationHandled: Boolean,
+    ): AdaptiveDayDeliveryState? {
+        if (!sharedStateCommitted || !notificationHandled) return null
+        return reconciledPlannedWorkoutState(state, currentFingerprint)
+    }
+
+    private fun saveState(context: Context, state: AdaptiveDayDeliveryState): Boolean =
+        saveState(
+            context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE),
+            state,
+        )
+
+    internal fun saveState(
+        prefs: SharedPreferences,
+        state: AdaptiveDayDeliveryState,
+    ): Boolean {
+        val editor = prefs.edit().clear()
         state.lastGlobalDeliveryMillis?.let { editor.putLong(KEY_GLOBAL_AT, it) }
         for ((kind, delivery) in state.deliveries) {
             editor.putLong("${kind.name}.at", delivery.atMillis)
             editor.putString("${kind.name}.fingerprint", delivery.fingerprint)
         }
-        editor.apply()
+        return editor.commit()
+    }
+
+    private fun recordPrivateStateCommitFailure(owner: ContextualPromptDeliveryOwner) {
+        AppDiagnosticsRecorder.record(
+            "contextual_prompt.private_state",
+            fields = mapOf(
+                "owner" to owner.storageKey,
+                "outcome" to "commit_failed",
+            ),
+        )
     }
 
     private fun suppress(context: Context) {
