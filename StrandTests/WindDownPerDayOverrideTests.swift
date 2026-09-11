@@ -102,6 +102,32 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         XCTAssertFalse(WindDownNudge.hasPerDayOverrides)
     }
 
+    func testNotificationContentIsGenericAndUsesPrivatePreviewCategory() {
+        WindDownNudge.setWakeMinutes(7 * 60)
+        WindDownNudge.setSleepNeedMinutes(8 * 60)
+        WindDownNudge.setRecoveryMinutes(45)
+
+        let content = WindDownNudge.notificationContent()
+        XCTAssertEqual(content.title, "Wind down for tonight")
+        XCTAssertEqual(
+            content.body,
+            "Your planned bedtime is coming up. Start settling down when it works for you."
+        )
+        XCTAssertTrue(content.subtitle.isEmpty)
+        XCTAssertEqual(
+            content.categoryIdentifier,
+            DailyReviewNotifications.privacyCategoryID
+        )
+
+        let exposed = "\(content.title) \(content.subtitle) \(content.body)".lowercased()
+        for forbidden in [
+            "7:00", "10:00", "8 hr", "45 min", "apple health",
+            "wearable", "nights", "sleep target",
+        ] {
+            XCTAssertFalse(exposed.contains(forbidden), "Exposed private detail: \(forbidden)")
+        }
+    }
+
     func testReminderPolicyUsesHealthFallbackWithoutDoubleCountingOverlap() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))

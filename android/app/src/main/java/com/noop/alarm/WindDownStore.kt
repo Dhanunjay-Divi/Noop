@@ -3,6 +3,71 @@ package com.noop.alarm
 import android.content.Context
 import android.content.SharedPreferences
 import com.noop.analytics.SleepGoalMode
+import com.noop.data.DeviceRegistry
+import com.noop.data.SleepSession
+import com.noop.data.WhoopDatabase
+import com.noop.data.WhoopRepository
+import org.json.JSONArray
+
+internal object WindDownSleepStatePolicy {
+    private const val MAX_SESSION_AGE_SECONDS = 18L * 60L * 60L
+    private const val MAX_OBSERVATION_LAG_SECONDS = 30L * 60L
+    private const val MAX_OBSERVATION_LEAD_SECONDS = 5L * 60L
+    private val asleepStages = setOf("light", "deep", "rem")
+    private val knownStages = asleepStages + setOf("wake", "awake")
+
+    internal data class Evidence(
+        val sessionStartSec: Long,
+        val observedThroughSec: Long,
+        val lastStage: String,
+    )
+
+    fun shouldSuppress(sessions: List<SleepSession>, nowSec: Long): Boolean =
+        sessions.asSequence()
+            .mapNotNull(::evidence)
+            .any { item ->
+                item.lastStage in asleepStages &&
+                    item.sessionStartSec <= nowSec &&
+                    nowSec - item.sessionStartSec <= MAX_SESSION_AGE_SECONDS &&
+                    item.observedThroughSec <= nowSec + MAX_OBSERVATION_LEAD_SECONDS &&
+                    nowSec - item.observedThroughSec <= MAX_OBSERVATION_LAG_SECONDS
+            }
+
+    internal fun evidence(session: SleepSession): Evidence? {
+        if (session.userEdited) return null
+        val raw = session.stagesJSON ?: return null
+        val stages = runCatching { JSONArray(raw) }.getOrNull() ?: return null
+        if (stages.length() == 0) return null
+
+        var previousEnd = Long.MIN_VALUE
+        var observedThrough = Long.MIN_VALUE
+        var lastStage: String? = null
+        for (index in 0 until stages.length()) {
+            val segment = stages.optJSONObject(index) ?: return null
+            val start = segment.optLong("start", Long.MIN_VALUE)
+            val end = segment.optLong("end", Long.MIN_VALUE)
+            val stage = segment.optString("stage", "").lowercase()
+            if (
+                start == Long.MIN_VALUE ||
+                end <= start ||
+                start < session.effectiveStartTs - 60L ||
+                end > session.endTs + 60L ||
+                start < previousEnd ||
+                stage !in knownStages
+            ) return null
+            previousEnd = end
+            observedThrough = end
+            lastStage = stage
+        }
+        val resolvedStage = lastStage ?: return null
+        if (observedThrough <= session.effectiveStartTs) return null
+        return Evidence(
+            sessionStartSec = session.effectiveStartTs,
+            observedThroughSec = observedThrough,
+            lastStage = resolvedStage,
+        )
+    }
+}
 
 /**
  * Persisted state for the wind-down nudge (#207) — a gentle evening local notification suggesting
@@ -71,5 +136,25 @@ class WindDownStore(private val prefs: SharedPreferences) {
 
         fun from(context: Context): WindDownStore =
             WindDownStore(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
+
+        /**
+         * Reads only fresh, locally computed stage-rich sessions. Missing, stale, imported-only, edited,
+         * malformed, or unavailable data is not treated as sleep, so this best-effort check fails open.
+         */
+        suspend fun hasFreshActiveSleepEvidence(
+            context: Context,
+            nowSec: Long = System.currentTimeMillis() / 1_000L,
+        ): Boolean {
+            val database = WhoopDatabase.get(context.applicationContext)
+            val activeDeviceId = DeviceRegistry(database).activeDeviceId() ?: "my-whoop"
+            val sessions = WhoopRepository.from(context.applicationContext)
+                .computedSleepSessionsUnion(
+                    deviceId = activeDeviceId,
+                    from = nowSec - 18L * 60L * 60L,
+                    to = nowSec + 5L * 60L,
+                    limit = 128,
+                )
+            return WindDownSleepStatePolicy.shouldSuppress(sessions, nowSec)
+        }
     }
 }

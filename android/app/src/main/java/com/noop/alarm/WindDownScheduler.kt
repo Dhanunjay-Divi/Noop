@@ -19,6 +19,12 @@ import com.noop.ui.ContextualActionCenter
 import com.noop.ui.appLaunchIntent
 import java.util.Calendar
 import java.util.TimeZone
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The wind-down nudge (#207) — a gentle, NON-safety-critical evening local notification.
@@ -38,6 +44,7 @@ object WindDownScheduler {
     private const val REQUEST_CODE = 7311
     const val ACTION_NUDGE = "com.noop.alarm.action.WIND_DOWN_NUDGE"
     const val CHANNEL_ID = "noop_wind_down"
+    internal const val NOTIFICATION_VISIBILITY = NotificationCompat.VISIBILITY_PRIVATE
 
     /**
      * Schedule (or reschedule) the daily nudge at the minute derived from [wakeMinutes]. Cancels any
@@ -94,7 +101,7 @@ object WindDownScheduler {
                 .setContentIntent(open)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setVisibility(NOTIFICATION_VISIBILITY)
                 .setAutoCancel(true)
                 .build()
             val posted = NotificationLifecycleLedger.posted(
@@ -172,15 +179,41 @@ object WindDownScheduler {
 class WindDownReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != WindDownScheduler.ACTION_NUDGE) return
-        WindDownScheduler.fireNotification(context)
-        runCatching {
-            val wind = WindDownStore.from(context)
-            if (wind.enabled) {
-                WindDownScheduler.schedule(
-                    context,
-                    wind,
-                    SmartAlarmStore.from(context).targetMinutes,
-                )
+        val pendingResult = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val appContext = context.applicationContext
+                val wind = WindDownStore.from(appContext)
+                if (!wind.enabled) return@launch
+
+                val alreadyAsleep = withTimeoutOrNull(1_500L) {
+                    try {
+                        WindDownStore.hasFreshActiveSleepEvidence(appContext)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        false
+                    }
+                } ?: false
+                if (alreadyAsleep) {
+                    NotificationLifecycleLedger.suppressed(
+                        appContext,
+                        NotificationLifecycleId.WIND_DOWN,
+                        NotificationLifecycleCategory.REMINDER,
+                    )
+                } else {
+                    WindDownScheduler.fireNotification(appContext)
+                }
+
+                if (wind.enabled) {
+                    WindDownScheduler.schedule(
+                        appContext,
+                        wind,
+                        SmartAlarmStore.from(appContext).targetMinutes,
+                    )
+                }
+            } finally {
+                pendingResult.finish()
             }
         }
     }

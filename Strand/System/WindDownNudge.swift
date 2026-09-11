@@ -73,6 +73,11 @@ enum ReminderDataPolicy {
     }
 }
 
+struct WindDownNotificationCopy: Equatable, Sendable {
+    let title: String
+    let body: String
+}
+
 /// The wind-down nudge (#207) — a gentle, NON-critical evening local notification suggesting it's
 /// time to start winding down so the user can reach their usual wake time well-rested.
 ///
@@ -404,6 +409,25 @@ enum WindDownNudge {
     /// a stale trigger behind.
     private static var perDayRequestIds: [String] { (1...7).map { "\(requestId)-wd\($0)" } }
 
+    static var notificationCopy: WindDownNotificationCopy {
+        WindDownNotificationCopy(
+            title: String(localized: "Wind down for tonight"),
+            body: String(localized: "Your planned bedtime is coming up. Start settling down when it works for you.")
+        )
+    }
+
+    static func notificationContent() -> UNMutableNotificationContent {
+        let copy = notificationCopy
+        let content = UNMutableNotificationContent()
+        content.title = copy.title
+        content.body = copy.body
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.sleep"
+        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.sleep.rawValue]
+        return content
+    }
+
     private static func schedule() {
         let center = UNUserNotificationCenter.current()
         // Clear BOTH the single trigger and any per-day triggers so switching between the two modes (or
@@ -412,14 +436,9 @@ enum WindDownNudge {
             identifiers: [requestId] + perDayRequestIds,
             on: center
         )
+        DailyReviewNotifications.registerPrivacyCategory(on: center)
 
-        let content = UNMutableNotificationContent()
-        content.title = String(localized: "Wind down for tonight")
-        content.subtitle = notificationSubtitle()
-        content.body = notificationBody()
-        content.sound = .default
-        content.threadIdentifier = "noop.sleep"
-        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.sleep.rawValue]
+        let content = notificationContent()
 
         // PR#554 — with per-day overrides set, fan out to seven weekday-pinned triggers each at that day's
         // own nudge time; with none, keep the single daily trigger (identical to the pre-#554 behaviour).
@@ -458,47 +477,5 @@ enum WindDownNudge {
             ),
             on: center
         )
-    }
-
-    private static func notificationSubtitle() -> String {
-        let bedtime = SleepPlanner.wrappedMinute(wakeMinutes - targetSleepMinutes)
-        return String(localized: "Start \(clockText(nudgeMinuteOfDay())) · In bed \(clockText(bedtime))")
-    }
-
-    private static func notificationBody() -> String {
-        let duration = durationText(targetSleepMinutes)
-        let context = personalization
-        guard context.isCurrent,
-              context.historyNights >= SleepPlanner.minimumDebtNights else {
-            return String(localized: "Protect your \(duration) sleep target with a calm wind-down.")
-        }
-
-        let basis: String
-        switch context.source {
-        case .wearable:
-            basis = String(localized: "recent wearable sleep")
-        case .appleHealth:
-            basis = String(localized: "recent Apple Health sleep")
-        case .mixed:
-            basis = String(localized: "recent wearable and Apple Health sleep")
-        case .none:
-            basis = String(localized: "your sleep target")
-        }
-        return String(localized: "Based on \(basis) across \(context.historyNights) nights, allow \(duration) for sleep tonight.")
-    }
-
-    private static func clockText(_ minute: Int) -> String {
-        var components = DateComponents()
-        components.hour = minute / 60
-        components.minute = minute % 60
-        return (Calendar.current.date(from: components) ?? Date())
-            .formatted(date: .omitted, time: .shortened)
-    }
-
-    private static func durationText(_ minutes: Int) -> String {
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if remainder == 0 { return String(localized: "\(hours) hr") }
-        return String(localized: "\(hours) hr \(remainder) min")
     }
 }
