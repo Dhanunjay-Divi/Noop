@@ -22,6 +22,25 @@ notifications, exercise media, or Safety/SOS.
   inside the opened app unless a separately reviewed design explicitly allows
   them.
 
+### Owner Visual And Guidance Direction
+
+- Treat the current NOOP desktop Today reference as the owner-preferred visual
+  direction: quiet black shell, restrained sidebar, compact metric hierarchy,
+  visible calibration/status, thin separators, and focused action rows. Preserve
+  native phone ergonomics rather than shrinking the desktop layout onto mobile.
+- Third-party Bevel, Lucie, WHOOP, and other screenshots are product references,
+  not assets or specifications. Reuse the interaction lesson, not their logo,
+  trademark, copy, emoji treatment, illustration, or unsupported algorithm.
+- Actionable notifications should be concise and contextual when the user has
+  allowed visible previews, while hidden-preview content remains generic. Never
+  expose raw health values, journal answers, event names, precise location, or
+  sensitive interpretations on a protected lock screen.
+- Adaptive-day guidance may connect fresh sleep/recovery evidence with a
+  locally classified planned workout or availability window. Phrase it as an
+  optional adjustment such as keeping the session lighter, and expose the
+  evidence behind it; do not imply that calendar access or one short night is a
+  medical instruction.
+
 ## Metric Truth
 
 - Missing input stays `nil`/not logged. Zero is a measured value only when zero

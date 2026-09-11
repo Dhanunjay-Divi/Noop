@@ -20,6 +20,33 @@ Last updated: **2026-09-11**
 
 ## Active work
 
+### Current audited state
+
+The supplier-independent product, safety, and quality audit is complete locally
+on `codex/product-safety-quality-audit-20260911`. Commits `99a51b80` and
+`e35d1d37` add schema-v55 atomic hydration entries, matched missing/error and
+accessibility semantics, one routine-notification budget per completed sync,
+private and sleep-aware wind-down behavior, uncapped Today Dynamic Type, and
+terminal-state Safety location deletion in memory and PostgreSQL. The exact
+current tree passes 450 WhoopStore tests, 1,777 Apple app tests with one
+external-fixture skip, 4,313 tests in each Android variant with seven
+evidence-dependent skips plus lint and both APK assemblies, 340 server tests
+with 94 environment/provider skips plus Ruff, the complete unsigned
+app/widget/Watch graph, and a directly inspected 42-capture iPhone visual
+matrix. The exact-tree terminology, claims, privacy, CI, calibration, legal,
+operations, i18n, secret-pattern, schema, diff, and tool policy wall passes;
+the project/user `noop-ops` skill copies are validated and byte-identical. The
+single protected push, exact-SHA hosted checks, normal merge, and round-owned
+cleanup remain in this round. Physical phones, band/firmware,
+BLE/background/notification/haptic/
+battery/sensor behavior, configured PostgreSQL, real providers/carriers,
+public traffic, production health transfer, legal/terms, 24/7 operations,
+signing, stores, participants, and media licensing remain external gates.
+
+The detailed paragraphs below are chronological progress notes. Where they
+describe an earlier dirty-tree total or a pending source correction, the
+current audited state above and the active round record supersede them.
+
 The product, safety, and quality audit is active on
 `codex/product-safety-quality-audit-20260911`. Its verified body slice makes
 BMI adult-only and dependent on confirmed age, height, and weight; prevents

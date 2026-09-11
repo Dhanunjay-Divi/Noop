@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `in progress`
+- State: `supplier-independent implementation and local verification complete; protected integration pending`
 - Owner: project team
 - Branch: `codex/product-safety-quality-audit-20260911`
 - Start commit: `2efd5e89999bd54b3fd6e316322b39d7e953ee8f`
-- End implementation commit: pending
+- End implementation commits: `99a51b80`, `e35d1d37`
 - Record commit or PR: pending
 
 ## Objective
@@ -84,8 +84,6 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 - Created an isolated audit worktree and branch from protected-main source so
   broad review cannot overwrite the active calendar-aware branch.
-- Completed independent read-only tracks for private-reference extraction,
-  product/health/Safety review, and cross-platform UX/accessibility review.
 - Added one shared Apple/Android body-profile policy. BMI is shown only for an
   adult with confirmed age, height, and weight; seeded editor defaults cannot
   become personal BMI or Health Connect-derived BMI history.
@@ -100,15 +98,35 @@ records. Concurrent development must remain isolated by worktree and branch.
   consent. Detection can remain in Ask mode for quiet Today review while Lock
   Screen suggestions are separately default-off, permission-aware, and cleared
   when disabled or when OS authorization is revoked.
-- Integrated the reviewed calendar-aware daily-guidance source. Calendar access
-  remains a separate default-off local permission; event content is discarded
-  during the query and only a generic future workout window can contribute to
-  Today's Plan or one private, cooldown-ranked Workouts prompt. Sleep and
-  readiness evidence must independently support any lighter-day suggestion.
-- Closed the merged Xcode target-membership defect, refreshed both localization
-  ratchets to 645 app-wide entries across nine locales, and reviewed the
-  terminology inventory after merge-only line movement. The active
-  customer/core terminology allowlist did not change.
+- Integrated the reviewed calendar-aware daily-guidance source with separate
+  default-off consent, content-discarding local classification, evidence-gated
+  adjustments, stale-plan cleanup, and private cooldown-ranked prompts.
+- Replaced scalar-only Apple hydration persistence with schema-v55 editable
+  rows and an atomic scalar projection. Legacy preferences migrate once; rapid
+  adds, edits, and deletes serialize; missing imported totals remain missing;
+  failed writes do not advance reminder state. Android now matches the same
+  source-merge, failure, and accessibility contract.
+- Added a shared one-notification budget for each completed wearable or
+  external-health sync. Workout review, post-workout summary, adaptive-day
+  guidance, and morning recap cannot burst from one late sync, and skipped
+  lanes retain their durable frontier for later reconsideration.
+- Hardened wind-down delivery with generic private-preview copy, suppression
+  when fresh computed sleep evidence shows the user is already asleep, and
+  conservative fail-open handling for stale, edited, sparse, malformed, or
+  future sleep evidence.
+- Removed Today text-size caps, made the workout-coach row adapt vertically at
+  accessibility sizes, and added explicit expanded/collapsed state semantics
+  on Apple and Android. App-wide localization now contains 653 generated keys
+  across nine locales.
+- Made Safety precise-location retention terminal-state complete. Preview
+  expiry, cancellation, acknowledgement, exhaustion, closure, and deletion
+  cancel pending delivery and delete latest precise location in both memory and
+  PostgreSQL implementations; direct lifecycle tests cover the durable state.
+- Classified Apple `hydrationEntry` as a client-encrypted managed hydration
+  target without enabling upload or changing core NOOP's local-first behavior.
+- Made the deterministic visual harness reliable from temporary worktrees by
+  staging synthetic simulator logs outside `/private/tmp`; added an
+  accessibility-size Today scenario and validated 42 unique captures.
 - Classified supplied exercise media as deferred: the reviewed downloads do
   not currently establish redistribution rights or clinical/instructional
   review, so none was copied into source or a shipping bundle.
@@ -126,21 +144,23 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 ## Data, privacy, and medical truth
 
-- Schema or migration impact: no health-history migration. Body-input
-  confirmation, activity-alert consent, adaptive-day consent, and calendar
-  access are local preferences with fail-closed defaults; the calendar branch's
-  bounded local action-state migration is covered by cross-platform tests.
-- Existing-data retention impact: none. No local biometric history was removed,
-  rewritten, or uploaded.
+- Schema or migration impact: local database schema `54` to `55` adds
+  `hydrationEntry`. Existing scalar hydration history migrates once into an
+  editable row and the scalar projection remains transactionally aligned.
+- Existing-data retention impact: no biometric history was removed or
+  uploaded. Safety location now has stricter deletion at preview expiry and
+  every incident terminal state.
 - Source/provenance or formula impact: BMI remains the conventional
   weight/height screening calculation, but now requires confirmed adult inputs.
   Body-composition values remain imported measurements with source/date
-  context. No band-derived body-composition formula was added.
+  context. Hydration preserves manual and imported provenance instead of
+  manufacturing a total when a source is missing. No band-derived
+  body-composition formula was added.
 - Permissions/network disclosure impact: Android requests notification
   permission only after the user explicitly enables activity suggestions.
   Calendar data is read only after separate user opt-in and platform
-  authorization, event content is not persisted in guidance state, and no
-  endpoint, cloud traffic, or new background entitlement was added.
+  authorization, event content is not persisted in guidance state, and no new
+  endpoint, public traffic, health upload, or background entitlement was added.
 - Health/medical claim impact and limitations: BMI is optional adult screening
   context, not diagnosis or body composition. Target weight is not a NOOP
   recommendation. NOOP does not prescribe weight-loss pace, calories, or
@@ -149,26 +169,25 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 ## Observability
 
-- Evidence that diagnoses success, stall/rejection, and failure: the existing
-  bounded notification lifecycle ledger records posted, suppressed, cancelled,
-  and unknown outcomes for activity suggestions. Existing diagnostics expose
-  only fixed categories/counts, not candidate times, heart rate, weight, BMI,
-  or notification text.
-- Why existing evidence is sufficient, or why new evidence is required:
-  delivery uses the established notification path and ledger; body-profile
-  availability is deterministic UI policy covered by focused tests and does
-  not need a new high-frequency event.
-- Existing evidence reused: `AppDiagnosticsRecorder`, server request
-  observability, current operations records, bounded notification and
-  background-work ledgers.
-- New bounded events or operation spans: none; existing lifecycle outcomes are
-  reused to avoid duplicate telemetry and health-value collection.
+- Evidence that diagnoses success, stall/rejection, and failure: hydration
+  mutation results are explicit success/failure values; existing bounded
+  notification ledgers retain posted, suppressed, cancelled, and unknown
+  outcomes; one new `post_sync.notification_budget` event records only the
+  fixed winning lane and source class. Safety lifecycle tests inspect durable
+  delivery cancellation and location deletion directly.
+- Existing evidence reused: both mobile `AppDiagnosticsRecorder`
+  implementations, server request observability, notification lifecycle
+  ledgers, and the user-initiated redacted diagnostic report.
+- New bounded events or operation spans: one per completed sync only, with
+  categorical `lane`, `outcome`, and `source`; no health value, time, text,
+  account, device, contact, or payload is logged.
 - Redaction, retention, and high-frequency controls: private review inputs must
   never be copied into Git; accepted diagnostics may use only fixed outcomes,
-  bounded counts, and duration/status families.
-- Cross-platform/backend correlation: body availability is covered by matched
-  Swift/Kotlin policy tests; activity alerts remain entirely on-device and do
-  not require backend correlation.
+  bounded counts, and duration/status families. Visual-QA stderr is
+  debug-only, synthetic, and removed with the temporary evidence directory.
+- Cross-platform/backend correlation: matched Swift/Kotlin tests cover body,
+  hydration, routine-notification, Today, and accessibility semantics; direct
+  memory/PostgreSQL tests cover Safety terminal deletion.
 - Remaining blind spots: physical devices, band/firmware, production
   credentials, real providers, participants, licensing, clinical evidence, and
   store review.
@@ -180,27 +199,26 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Worktree isolation | Audit branch created at `2efd5e89` while calendar work remains in a separate dirty worktree | Concurrent review can proceed without overwriting active implementation | Merge compatibility or production readiness |
 | Private reference inventory preflight | Private session export and reference-image/PDF sets were reviewed in place and excluded from Git | Inputs can inform the audit without redistributing private material | Accuracy, rights, clinical review, or physical behavior |
 | Local source and round preflight | `CLAUDE.md`, operations contract, active handoff, and current release ledger reviewed | Audit is bounded by current repository rules | Any feature or external gate is complete |
-| Shared body-profile policy tests | Swift `BodyProfilePolicyTests` passed 3 cases; Android full and demo policy/profile/import suites passed | Adult/confirmed-input gating and target suppression agree across platforms | Imported-device accuracy or clinical suitability |
-| Apple profile regression tests | `ProfileExternalWeightTests` passed 11 cases | Existing external-weight behavior and new confirmation rules coexist | Physical HealthKit delivery |
-| Android activity-alert tests | Full-variant `AutoWorkoutCandidateNotificationPolicyTest` and `AutoWorkoutSuggestionPolicyTest` passed | Posting now requires detection, separate interruption opt-in, OS authorization, and a new candidate token | OEM delivery timing or terminated-process execution |
-| Shared analytics suite | 1,464 tests passed with seven evidence-dependent skips and zero failures | Body policy, daily planning, workout-title classification, scoring, and related shared analytics remain coherent after integration | Sensor accuracy or physical collection |
-| Complete Apple app suite | 1,755 tests passed with one external-fixture skip and zero failures | Apple body, notification, calendar, privacy, lifecycle, and app contracts pass together | iOS background delivery or physical BLE behavior |
-| Android full matrix | Full and Demo each passed 4,296 tests with seven skips and zero failures; both debug APKs assembled | Both Android variants compile and pass the merged body, notification, calendar, lifecycle, localization, and storage contracts | Signed install, OEM delivery timing, or physical-device behavior |
-| Complete Apple simulator graph | Unsigned `NOOPiOS` generic iOS Simulator build succeeded after regenerating target membership, including app, widget, and watch dependencies | The merged Apple source graph compiles and links | Signing, App Store acceptance, or physical-device behavior |
-| Calendar-aware guidance contracts | Focused Apple/Android suites plus the complete matrices passed; stale consent, moved/removed plans, cooldown ownership, privacy, and evidence attribution are covered | Guidance is local, opt-in, bounded, and fails closed when supporting evidence or permission disappears | Calendar-provider behavior on a real phone or OS notification timing |
-| Localization, terminology, claims, and CI gates | 645 app-wide keys and 68 daily-plan keys generated for nine locales; localization audit, terminology ratchet, health-claims scan of 1,202 files, required-CI configuration, and diff checks pass | Merged copy is generated consistently, active legacy terminology did not expand, prohibited claims were not detected, and local release-gate wiring is valid | Professional translation, hosted exact-SHA checks, or clinical review |
+| Hydration store and schema | Full `WhoopStore` suite passed 450 tests; seven schema-oracle checks passed; Apple/Android oracles are byte-identical | Schema-v55 migration, atomic row/scalar projection, deletion, and parity contracts hold | Physical import-provider accuracy |
+| Focused current-delta suites | 42 focused Apple tests, 31 focused Android tests, and 13 focused Safety lifecycle tests passed | Changed hydration, notification, wind-down, accessibility, and Safety boundaries have direct regressions | Whole-app interaction or physical delivery |
+| Complete Apple app suite | 1,777 tests passed with one external-fixture skip and zero failures | Apple app, persistence, notification, calendar, privacy, accessibility, and lifecycle contracts pass together | iOS background delivery or physical BLE behavior |
+| Android full matrix | Full and Demo each passed 4,313 tests with seven evidence-dependent skips and zero failures; lint passed and both debug APKs assembled | Both Android variants compile and pass the current cross-platform contracts | Signed install, OEM delivery timing, or physical-device behavior |
+| Complete Apple simulator graph | Unsigned generic iOS Simulator build succeeded for app, widget, and Watch dependencies | Current Apple source compiles and links | Signing, store acceptance, or physical-device behavior |
+| Deterministic visual matrix | 42 unique captures passed on iPhone 17 Pro Max and iPhone 17e; Today accessibility, Nutrition, keyboard, Safety, light/dark, and contrast states were inspected | Required screens are nonblank and show no incoherent clipping or overlap in these simulator states | VoiceOver focus, haptics, notification presentation, or hardware behavior |
+| Complete server suite | 340 tests passed, 94 environment/provider cases skipped, and Ruff passed | Current in-memory and configured server contracts remain coherent, including Safety lifecycle | PostgreSQL integration where `NOOP_TEST_DATABASE_URL` is absent, provider delivery, or public runtime |
+| Localization and repository policy | 653 app-wide keys generated for nine locales; terminology, required CI, calibration, release controls, trusted-main controls, legal provenance, private-data, health-claims, i18n, operations, schema, diff, 227 tool tests, and 49 i18n tests passed | Exact local source and release-control wiring pass the repository policy wall | Professional translation, hosted exact-SHA checks, or clinical review |
 | Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
 
-The complete app and policy totals above cover the last clean verification wall
-before the current uncommitted notification, hydration, Safety, Today, and
-accessibility delta. Focused checks for parts of that delta are recorded in the
-working notes, but a new complete exact-tree wall is still required.
+The app, package, server, simulator-build, visual, and policy totals above cover
+commits `99a51b80` and `e35d1d37` plus the current record/policy delta.
+Protected exact-SHA checks remain required before integration.
 
 ## Physical device and deployment
 
-- Install/update action: not run
+- Install/update action: simulator-only unsigned build and visual matrix
 - Generalized device and OS class: not run
-- Data-preservation result: no product data changed
+- Data-preservation result: synthetic simulator data only; no participant or
+  owner health data changed
 - BLE/background/haptic/battery scenarios exercised: not run
 - Unrun hardware gates: all physical-device, wearable, terminated-process,
   notification-presentation, background-runtime, haptic, battery, and sensor
@@ -208,43 +226,31 @@ working notes, but a new complete exact-tree wall is still required.
 
 ## Git and release state
 
-- Changed paths: root `AGENTS.md`; project-local
-  `.agents/skills/noop-ops` operating contract;
-  shared body-profile policy/tests; Apple and Android profile,
-  onboarding, Health/body-composition, notification consent/policy,
-  calendar-aware daily guidance, generated localization, broad regression
-  tests, privacy documentation, physical-device runbook, and this operations
-  record.
-- Commits: body/notification slice `9547c394`; calendar merge `4f8682a6`;
-  wind-down privacy `83ec8598`; current handoff and later audit slices pending
+- Changed paths: shared Apple/Android hydration, notification, wind-down,
+  Today/accessibility, generated localization and tests; WhoopStore schema and
+  migration; Safety repository lifecycle and tests; visual QA harness; durable
+  skill and operations records.
+- Commits: body/notification `9547c394`; calendar integration `4f8682a6`;
+  wind-down privacy `83ec8598`; durable handoff `6b78df33`; current mobile
+  reliability/accessibility `99a51b80`; Safety lifecycle `e35d1d37`
 - Branch and remote state: isolated local branch; no push or hosted CI
 - Repository visibility verified: inherited from current repository record
-- Version/build impact: none yet
+- Version/build impact: local database schema `54` to `55`; no marketing
+  version change
 - Release or distribution impact: none
 
 ## Concurrent ownership
 
-- Current audit worktree owns `AGENTS.md`, `.agents/skills/noop-ops`, the
-  notification-budget/adaptive-delivery delta, the uncommitted hydration and
-  Today/accessibility review, generated localization affected by those screens,
-  and this round's operations records.
+- Current audit worktree owns the project skill update, terminology/required-CI
+  refresh, and this round's operations records.
 - The calendar source is committed in `4f8682a6`. Its dedicated worktree is
   clean at `8cfe570e` and must not be edited as part of this remaining audit.
 - The wind-down privacy source is committed in `83ec8598`. Its dedicated
   worktree is clean at `21946fd3`; further already-asleep suppression belongs
   in the audit worktree only after current notification ownership is reviewed.
-- `/private/tmp/noop-safety-location-20260911` is the authoritative unfinished
-  Safety-location lifecycle workspace. The audit worktree contains only a
-  partial copy of that delta and must not stage or discard those server files
-  until it is reconciled with the dedicated worktree, including
-  `server/tests/test_postgres_integration.py`.
-- `/private/tmp/noop-hydration-missing-data-20260911` contains no implementation
-  delta, only an untracked draft round. Hydration code currently exists only in
-  the audit worktree and requires local review before staging.
-- Prior delegated UI and hydration rehearsals produced no scoped commit.
-  Therefore every uncommitted Today, accessibility, hydration, and localization
-  path remains owned by the current audit reviewer rather than by an assumed
-  external worker.
+- The Safety and hydration delegated worktrees have been reconciled into
+  `e35d1d37` and `99a51b80`; they may be removed only after confirming each is
+  clean. No concurrent worktree may be deleted while dirty.
 
 ## Decisions
 
@@ -274,22 +280,27 @@ working notes, but a new complete exact-tree wall is still required.
   and lean-mass values inherit the limitations of their source devices.
 - The target-weight guard does not replace clinician review for pregnancy,
   eating disorders, medications, illness, or other clinical contexts.
-- Physical devices are unavailable on this laptop; a separate reproducible
-  handoff is required for another agent.
-- Broad scope must be converted into small, independently reviewable rounds
-  rather than one unsafe cross-product patch.
+- Physical devices are unavailable on this laptop. BLE collection, background
+  wake, force-quit behavior, notification presentation, haptics, battery,
+  firmware gestures, and sensor accuracy remain external evidence gates.
+- PostgreSQL integration cases remain skipped unless
+  `NOOP_TEST_DATABASE_URL` points to the isolated test database; real Safety
+  provider, carrier, contact, and location delivery was not enabled.
+- Public traffic, production health transfer, legal/terms approval, carrier
+  registration, 24/7 operations, signing, store review, participant validation,
+  and exercise-media redistribution remain external gates.
 
 ## Next round
 
-1. Commit the verified calendar integration locally without triggering hosted
-   Actions.
-2. Address the remaining highest-severity accessibility and notification
-   findings in bounded cross-platform slices.
-3. Run the remaining simulator UI and local policy checks that add independent
-   evidence, then prepare the physical-device handoff using the checked-in
-   `noop-ops` skill and current operations record.
-4. Clean temporary resources and consolidate the final push so hosted Actions
-   run once for the finished source rather than once per audit slice.
+1. Commit the validated record, terminology inventory, and byte-identical
+   project/user `noop-ops` skill state.
+2. Push once, allow all protected exact-SHA checks to complete, and merge
+   normally without bypassing branch protection.
+3. Run the checked-in physical-device handoff on representative iOS and Android
+   phones plus supported band firmware; record failures and logs rather than
+   treating simulator evidence as hardware evidence.
+4. Complete legal, carrier, provider, signing, store, participant, licensing,
+   and operational-readiness gates before any production launch claim.
 
 ## Privacy check
 

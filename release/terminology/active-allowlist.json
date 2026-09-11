@@ -1069,7 +1069,7 @@
       "path": "Strand/Data/HydrationStore.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "a3c3a14f8ea5645d957854ca0abfaaa652c1a550de7860025cbc655612cd087e"
+      "sha256": "506bf47156ae7a5170a837115d55b1a9ab67e692f0d1544a3b933343af3e61f2"
     },
     {
       "category": "core",
@@ -2009,12 +2009,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 1,
+      "occurrenceCount": 2,
       "owner": "project team",
       "path": "Strand/System/WindDownNudge.swift",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "d9b95b6619e60ec6594d0ed546aec27f533c095aff8430463dfd1d5cd487f171"
+      "sha256": "14db8524909c0617704e87ae6d3a61948413a25c20f8c2240852c03c348cc8e0"
     },
     {
       "category": "core",
@@ -2405,6 +2405,15 @@
     },
     {
       "category": "core",
+      "occurrenceCount": 6,
+      "owner": "project team",
+      "path": "android/app/src/main/java/com/noop/alarm/WindDownStore.kt",
+      "reason": "Existing active symbol retained behind the additive compatibility migration.",
+      "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
+      "sha256": "8613f6ffc8411aa22ce67897566094f7a2fa122555e7d1149d404df009385cef"
+    },
+    {
+      "category": "core",
       "occurrenceCount": 1,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/analytics/ActivityCostEngine.kt",
@@ -2500,7 +2509,7 @@
       "path": "android/app/src/main/java/com/noop/analytics/HydrationStore.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "bb5232247642bb95c79f979723c335d106651464eb11481707a992e1a24363bc"
+      "sha256": "66d06971e93e68114e22576de5f2a7e33dc8d297ae6a24a3d6427dc1ee4ec55e"
     },
     {
       "category": "core",
@@ -3188,12 +3197,12 @@
     },
     {
       "category": "core",
-      "occurrenceCount": 4,
+      "occurrenceCount": 5,
       "owner": "project team",
       "path": "android/app/src/main/java/com/noop/ingest/HealthConnectAutoSync.kt",
       "reason": "Existing active symbol retained behind the additive compatibility migration.",
       "removalCondition": "Remove or neutralize the occurrence without changing persisted provenance, then regenerate this ratchet.",
-      "sha256": "30aca788fce784e5d1251d1497c798515f1dabbc20295c6818f456863301eeee"
+      "sha256": "ad35ed113476e2291eef572e4ae6e82a2ebbb9a4c3464a161de391aac777332b"
     },
     {
       "category": "core",
