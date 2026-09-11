@@ -112,6 +112,17 @@ records. Concurrent development must remain isolated by worktree and branch.
 - Classified supplied exercise media as deferred: the reviewed downloads do
   not currently establish redistribution rights or clinical/instructional
   review, so none was copied into source or a shipping bundle.
+- Added a small root `AGENTS.md` and the project-scoped `noop-ops` Codex skill
+  under `.agents/skills/noop-ops`. The root file makes the handoff contract
+  deterministic for a new repository session; the skill routes future agents
+  to focused product/health-safety, repository-map, and verification/handoff
+  references. Its bounded context snapshot restores the live branch, worktrees,
+  recent commits, active operations record, round inventory, and toolchain
+  without treating old chat as source of truth.
+- Kept current implementation state out of the skill itself. Ephemeral status,
+  dirty-path ownership, exact verification, deployment state, and next commands
+  remain in this round and `docs/ops/ACTIVE.md`, so the reusable skill cannot
+  silently become a stale completion claim.
 
 ## Data, privacy, and medical truth
 
@@ -178,6 +189,12 @@ records. Concurrent development must remain isolated by worktree and branch.
 | Complete Apple simulator graph | Unsigned `NOOPiOS` generic iOS Simulator build succeeded after regenerating target membership, including app, widget, and watch dependencies | The merged Apple source graph compiles and links | Signing, App Store acceptance, or physical-device behavior |
 | Calendar-aware guidance contracts | Focused Apple/Android suites plus the complete matrices passed; stale consent, moved/removed plans, cooldown ownership, privacy, and evidence attribution are covered | Guidance is local, opt-in, bounded, and fails closed when supporting evidence or permission disappears | Calendar-provider behavior on a real phone or OS notification timing |
 | Localization, terminology, claims, and CI gates | 645 app-wide keys and 68 daily-plan keys generated for nine locales; localization audit, terminology ratchet, health-claims scan of 1,202 files, required-CI configuration, and diff checks pass | Merged copy is generated consistently, active legacy terminology did not expand, prohibited claims were not detected, and local release-gate wiring is valid | Professional translation, hosted exact-SHA checks, or clinical review |
+| Project agent handoff | Root `AGENTS.md` points to the checked-in skill; `quick_validate.py` reports `Skill is valid!`; `bash -n` passes; the repository-local context snapshot runs against this dirty worktree; project and user-level skill copies are byte-identical; a read-only fresh-agent rehearsal recovered the branch, risks, invariants, verified/open split, and next command | A future agent entering the repository can discover the same stable engineering, medical-truth, privacy, parity, verification, and handoff contract and recover live context without the oversized chat | That any current feature, deployment, physical-device path, or external release gate is complete |
+
+The complete app and policy totals above cover the last clean verification wall
+before the current uncommitted notification, hydration, Safety, Today, and
+accessibility delta. Focused checks for parts of that delta are recorded in the
+working notes, but a new complete exact-tree wall is still required.
 
 ## Physical device and deployment
 
@@ -191,16 +208,43 @@ records. Concurrent development must remain isolated by worktree and branch.
 
 ## Git and release state
 
-- Changed paths: shared body-profile policy/tests; Apple and Android profile,
+- Changed paths: root `AGENTS.md`; project-local
+  `.agents/skills/noop-ops` operating contract;
+  shared body-profile policy/tests; Apple and Android profile,
   onboarding, Health/body-composition, notification consent/policy,
   calendar-aware daily guidance, generated localization, broad regression
   tests, privacy documentation, physical-device runbook, and this operations
   record.
-- Commits: body/notification slice `9547c394`; calendar merge commit pending
+- Commits: body/notification slice `9547c394`; calendar merge `4f8682a6`;
+  wind-down privacy `83ec8598`; current handoff and later audit slices pending
 - Branch and remote state: isolated local branch; no push or hosted CI
 - Repository visibility verified: inherited from current repository record
 - Version/build impact: none yet
 - Release or distribution impact: none
+
+## Concurrent ownership
+
+- Current audit worktree owns `AGENTS.md`, `.agents/skills/noop-ops`, the
+  notification-budget/adaptive-delivery delta, the uncommitted hydration and
+  Today/accessibility review, generated localization affected by those screens,
+  and this round's operations records.
+- The calendar source is committed in `4f8682a6`. Its dedicated worktree is
+  clean at `8cfe570e` and must not be edited as part of this remaining audit.
+- The wind-down privacy source is committed in `83ec8598`. Its dedicated
+  worktree is clean at `21946fd3`; further already-asleep suppression belongs
+  in the audit worktree only after current notification ownership is reviewed.
+- `/private/tmp/noop-safety-location-20260911` is the authoritative unfinished
+  Safety-location lifecycle workspace. The audit worktree contains only a
+  partial copy of that delta and must not stage or discard those server files
+  until it is reconciled with the dedicated worktree, including
+  `server/tests/test_postgres_integration.py`.
+- `/private/tmp/noop-hydration-missing-data-20260911` contains no implementation
+  delta, only an untracked draft round. Hydration code currently exists only in
+  the audit worktree and requires local review before staging.
+- Prior delegated UI and hydration rehearsals produced no scoped commit.
+  Therefore every uncommitted Today, accessibility, hydration, and localization
+  path remains owned by the current audit reviewer rather than by an assumed
+  external worker.
 
 ## Decisions
 
@@ -242,8 +286,8 @@ records. Concurrent development must remain isolated by worktree and branch.
 2. Address the remaining highest-severity accessibility and notification
    findings in bounded cross-platform slices.
 3. Run the remaining simulator UI and local policy checks that add independent
-   evidence, then prepare the physical-device handoff and shareable
-   `noop-ops` bundle.
+   evidence, then prepare the physical-device handoff using the checked-in
+   `noop-ops` skill and current operations record.
 4. Clean temporary resources and consolidate the final push so hosted Actions
    run once for the finished source rather than once per audit slice.
 

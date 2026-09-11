@@ -5,7 +5,9 @@ Last updated: **2026-09-11**
 ## Repository
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
-- Branch: `main`
+- Canonical protected branch: `main`
+- Active audit worktree: `/private/tmp/noop-product-audit-20260911`
+- Active audit branch: `codex/product-safety-quality-audit-20260911`
 - Remote branches: `origin/main`
 - GitHub repository relationship: standalone, with no parent reported at the
   last authenticated check
@@ -30,12 +32,18 @@ rights and instructional-safety evidence exists. The reviewed calendar-aware
 daily-guidance source is now integrated locally with separate consent, local
 event classification, content-discarding queries, sleep/readiness evidence
 gates, private prompt copy, stale-plan cleanup, and cooldown ownership.
-Exact-current verification passes 1,464 shared analytics tests, 1,755 Apple app
-tests, 4,296 tests in each Android variant, both APK assemblies, the complete
-unsigned iOS simulator graph, 645-key app-wide localization, terminology,
-claims, required-CI configuration, and diff checks. Broader accessibility,
-notification, simulator UI, physical-device, cleanup, and protected
-integration work remains. Details are in
+The last clean verification wall before the current uncommitted
+notification/hydration/Safety/UI delta passed 1,464 shared analytics tests,
+1,755 Apple app tests, 4,296 tests in each Android variant, both APK assemblies,
+the complete unsigned iOS simulator graph, 645-key app-wide localization,
+terminology, claims, required-CI configuration, and diff checks. Those totals
+must not be presented as coverage of the present dirty tree. Broader
+accessibility, notification, simulator UI, physical-device, cleanup, and
+protected integration work remains. Root `AGENTS.md` now routes every new Codex
+repository session to a project-scoped `noop-ops` skill carrying the stable
+product, health-safety, privacy, parity, observability, verification, and
+handoff contracts; live implementation state remains in this record and the
+active round rather than being frozen into the skill. Details are in
 [Product, safety, and quality audit](rounds/2026-09-11-product-safety-quality-audit.md).
 
 The final local calendar-aware source has completed its clean verification
